@@ -51,7 +51,9 @@ describe('MirageService', () => {
         '/scratch': { vfs: 'ram', mode: 'write' },
         '/live': [new RAMVFS(), MountMode.WRITE],
       },
-      machines: { py: { provider: 'worker', captures: ['python', 'python3'] } },
+      machines: {
+        py: { provider: 'in_process', runtime: 'monty', captures: ['python', 'python3'] },
+      },
     })
     await fiber.await()
     expect(() => ctx.mirage.workspace).toThrow('not ready')
@@ -95,7 +97,10 @@ describe('MirageService', () => {
     const mounts = { '/x': new RAMVFS() }
     await expect(
       ctx
-        .plugin(MirageService, { mounts, machines: { py: { provider: 'worker', nope: 1 } } })
+        .plugin(MirageService, {
+          mounts,
+          machines: { py: { provider: 'in_process', runtime: 'monty', nope: 1 } },
+        })
         .await(),
     ).rejects.toThrow(/nope/)
   })
@@ -126,8 +131,8 @@ describe('MirageService', () => {
       ctx
         .plugin(MirageService, {
           mounts: { '/x': new RAMVFS() },
-          machines: { py: { provider: 'worker' } },
-          workspaceOptions: { machines: { py: { provider: 'worker' } } },
+          machines: { py: { provider: 'in_process', runtime: 'monty' } },
+          workspaceOptions: { machines: { py: { provider: 'in_process', runtime: 'monty' } } },
         })
         .await(),
     ).rejects.toThrow('not both')
@@ -208,7 +213,10 @@ describe('MirageService', () => {
     const ctx = new Context()
     await expect(
       ctx
-        .plugin(MirageService, { workspace: ws, machines: { py: { provider: 'worker' } } })
+        .plugin(MirageService, {
+          workspace: ws,
+          machines: { py: { provider: 'in_process', runtime: 'monty' } },
+        })
         .await(),
     ).rejects.toThrow(/adopted workspace/)
     await expect(

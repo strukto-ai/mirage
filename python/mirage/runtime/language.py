@@ -37,7 +37,7 @@ class LanguageRuntime(Runtime[E]):
 
     The language it interprets is declared once, on its language tier
     (PythonRuntime, JsRuntime), and a script CLI finds its interpreter
-    by it (runtime_for_language).
+    by it (runtime_for_script).
 
     run() resolves the program from the operands the way a real
     interpreter does (``-c`` in ``ctx.flags``, else the script operand

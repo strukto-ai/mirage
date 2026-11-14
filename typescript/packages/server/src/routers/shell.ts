@@ -21,7 +21,6 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { machineBindingsFor } from '@struktoai/mirage-core/runtime/table'
-import { WorkspaceRuntime } from '@struktoai/mirage-core/runtime/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { errorResponse, HttpError, INTERNAL_MESSAGE, validationError } from '../errors.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
@@ -77,10 +76,7 @@ function checkPlacement(ws: Workspace, req: ShellRequest): void {
   try {
     machineBindingsFor(ws.engines(), req.machine)
   } catch (err) {
-    const names = ws
-      .engines()
-      .filter((runtime) => !(runtime instanceof WorkspaceRuntime))
-      .map((runtime) => runtime.name)
+    const names = ws.engines().map((runtime) => runtime.name)
     let message =
       names.length > 0
         ? `machine must be one of ${names.join(', ')}`

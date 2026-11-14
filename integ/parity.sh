@@ -73,7 +73,8 @@ cat > "$EXEC_YAML" <<'YML'
 mode: WRITE
 machines:
   monty:
-    provider: worker
+    provider: in_process
+    runtime: monty
 mounts:
   /data:
     vfs: ram

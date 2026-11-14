@@ -144,7 +144,7 @@ EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_USERNAME = "integ@example.com"
 # The target corpus runs python3 cases (audit, storage, path, env) on Monty.
-TARGET_MACHINES = {"monty": {"provider": "worker"}}
+TARGET_MACHINES = {"monty": {"provider": "in_process", "runtime": "monty"}}
 # The repository the `gh` install defaults to, standing in for the current
 # git remote real gh reads. Seeded by the fake alongside the mounted one.
 GH_CLI_REPO = "integ/repo-cli"
@@ -1722,6 +1722,7 @@ class MCPService:
                         "clis": {
                             name: {
                                 "cli": "mcp",
+                                "machine": "in_process",
                                 "config": {"url": url, "auth": auth},
                             }
                             for name in names

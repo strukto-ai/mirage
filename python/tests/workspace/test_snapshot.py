@@ -759,6 +759,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
         script=ScriptSource(
             "import os\nprint(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"
         ),
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     path = tmp_path / "snap.tar"
@@ -786,10 +787,12 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
-        machines={"monty": {"provider": "worker"}},
+        machines={"monty": {"provider": "in_process", "runtime": "monty"}},
     )
     spec = CLI(
-        spec=CommandSpec(name="pager"), script=ScriptSource("print('hi')")
+        spec=CommandSpec(name="pager"),
+        script=ScriptSource("print('hi')"),
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     state = await to_state_dict(ws)
@@ -804,21 +807,23 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
 
 
 @pytest.mark.asyncio
-async def test_script_cli_machine_pin_and_module_bit_round_trip():
+async def test_script_cli_machine_runtime_and_module_bit_round_trip():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("x", language="js", module=True),
-        machine="quickjs",
+        runtime="quickjs",
     )
     ws.register_cli("pager", spec, config=None)
     state = await to_state_dict(ws)
     entry = state[StateKey.CLIS][0]
-    assert entry[CLIKey.MACHINE] == "quickjs"
+    assert entry[CLIKey.MACHINE] == "in_process"
+    assert entry[CLIKey.RUNTIME] == "quickjs"
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is True
     restored = await Workspace.from_state(state)
     install = restored.clis()["pager"]
-    assert install.cli.machine == "quickjs"
+    assert install.cli.machine == "in_process"
+    assert install.cli.runtime == "quickjs"
     assert install.cli.script.module is True
     assert install.cli.script.language == "js"
     await ws.close()
@@ -930,7 +935,13 @@ async def test_copy_rebuilds_the_machines_built_from_an_entry():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"py": {"provider": "worker", "captures": ["@python"]}},
+        machines={
+            "py": {
+                "provider": "in_process",
+                "runtime": "monty",
+                "captures": ["@python"],
+            }
+        },
     )
     clone = await ws.copy()
     try:

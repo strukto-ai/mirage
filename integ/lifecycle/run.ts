@@ -125,6 +125,7 @@ type Step = (
       name: string
       script: ScriptDocument
       machine?: string
+      runtime?: string
       config?: Record<string, unknown>
     }
   | { op: 'register_command'; path: string; name: string; write?: boolean; stdout?: string }
@@ -584,6 +585,7 @@ async function action(
           spec: new CommandSpec({ name: step.name }),
           script: new ScriptSource(step.script.source, step.script.language),
           ...(step.machine !== undefined ? { machine: step.machine } : {}),
+          ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
         }),
         step.config ?? null,
       )

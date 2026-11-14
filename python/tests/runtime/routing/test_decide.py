@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime import table
 from mirage.runtime.base import Runtime
 from mirage.runtime.js.base import JsRuntime
+from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
-from mirage.runtime.routing import runtime_for_language
+from mirage.runtime.routing import runtime_for_script
 from mirage.runtime.types import Program, RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 
@@ -37,20 +39,47 @@ class NodeRuntime(JsRuntime):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
-def test_runtime_for_language_is_first_match_wins():
-    monty, local, js = MontyRuntime(), LocalRuntime(), NodeRuntime()
-    assert runtime_for_language([monty, local, js], "python") is monty
-    assert runtime_for_language([local, monty, js], "python") is local
-    assert runtime_for_language([monty, js], "js") is js
+class OtherNodeRuntime(NodeRuntime):
+    name = "other-node"
 
 
-def test_runtime_for_language_has_no_cross_language_fallback():
+class InProcessPy(PythonRuntime):
+    name = "in-process-py"
+
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+def test_runtime_for_script_picks_by_machine_and_language():
+    monty, local, py = MontyRuntime(), LocalRuntime(), InProcessPy()
+    world = [local, py, monty]
+    assert runtime_for_script(world, "in_process", None, "python") is py
+    assert runtime_for_script(world, "in_process", "monty", "python") is monty
+    assert runtime_for_script(world, "host", None, "python") is local
+
+
+def test_runtime_for_script_is_first_match_or_the_named_runtime(monkeypatch):
+    monkeypatch.setitem(table.NAMED, "other-node", OtherNodeRuntime)
+    node, other = NodeRuntime(), OtherNodeRuntime()
+    world = [node, other]
+    assert runtime_for_script(world, "in_process", None, "js") is node
+    assert runtime_for_script(world, "in_process", "other-node", "js") is other
+    assert runtime_for_script(world, "in_process", "quickjs", "js") is None
+
+
+def test_runtime_for_script_has_no_cross_language_fallback():
     # A python program cannot run on a js engine. Captures do not count
     # either (alpha captures python3 but declares no language), and an
     # empty world selects nothing.
-    assert runtime_for_language([NodeRuntime()], "python") is None
     assert (
-        runtime_for_language([AlphaRuntime(), WorkspaceRuntime()], "python")
+        runtime_for_script([NodeRuntime()], "in_process", None, "python")
         is None
     )
-    assert runtime_for_language([], "js") is None
+    assert (
+        runtime_for_script(
+            [AlphaRuntime(), WorkspaceRuntime()], "in_process", None, "python"
+        )
+        is None
+    )
+    assert runtime_for_script([], "in_process", None, "js") is None
+    assert runtime_for_script([MontyRuntime()], "host", None, "python") is None

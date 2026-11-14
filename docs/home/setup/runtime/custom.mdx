@@ -4,8 +4,9 @@ description: Run programs somewhere Mirage does not ship, such as your own execu
 icon: code
 ---
 
-A runtime decides where a program runs. Write one when the agent's programs
-should run somewhere Mirage does not ship: your team's job runner, a GPU
+A custom runtime is code you write that runs the programs an `in_process`
+machine captures. Write one for a language Mirage does not ship, or to hand
+programs to somewhere Mirage does not reach: your team's job runner, a GPU
 machine or a build farm. A runtime is a class that extends `Runtime`, names
 the programs it captures and implements one entry point. You ship it as a file
 next to your workspace YAML and name it by file and class as an `in_process`
@@ -33,10 +34,10 @@ code you trust.
 A [CLI](/python/cli/custom) is a command Mirage implements: its spec, help and
 exit codes live in Mirage, and its handler calls a service through an accessor.
 A runtime is where Mirage hands off programs it does not implement: code the
-agent writes, or any binary. It answers "where does this run", not "what does
-this command do". To give the agent one command with a known interface, such as
-`deploy` or `tickets`, write a CLI. To choose where `python3`, `node` or any
-other program runs, write a runtime.
+agent writes, or any binary. It answers "what runs this program", not "what
+does this command do". To give the agent one command with a known interface,
+such as `deploy` or `tickets`, write a CLI. To run `python3`, `node` or any
+other program your own way, write a runtime.
 
 ## Choose an entry point
 
@@ -284,6 +285,6 @@ declare its reach claims no promise. Embedders read it to decide whether
 
 ## Next
 
-[Routing](/home/setup/runtime/overview#routing) orders your runtime's machine
+[Routing](/home/setup/machine/overview#routing) orders your runtime's machine
 among the others, and [Route Machine](/home/policy/route-machine) picks one per
 command line.

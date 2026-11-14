@@ -22,6 +22,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import (
     EXTERNAL_COMMANDS,
     HOST,
+    IN_PROCESS,
     JS_GROUP,
     LANGUAGE_COMMANDS,
     PYTHON_GROUP,
@@ -94,21 +95,18 @@ def known_runtimes() -> list[str]:
 RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
         "runtime 'pyodide' is TypeScript-only (a WASM CPython for "
-        "hosts without a Python); Python runs 'quickjs' and 'wasi' in "
-        "process and 'monty' on a worker"
+        "hosts without a Python); Python runs 'monty', 'wasi' and "
+        "'quickjs' in process"
     ),
 }
 
 # The providers a ``machines:`` entry names for an engine of Mirage's
-# own rather than a machine it reaches: in its process, in worker
-# processes it spawns, or as native programs on its host.
-IN_PROCESS = "in_process"
-WORKER = "worker"
-ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, WORKER, HOST)
+# own rather than a machine it reaches: in its process, or as native
+# programs on its host.
+ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST)
 
 # The runtimes a builtin provider runs no other way.
 _PLACED: dict[str, str] = {
-    MontyRuntime.name: WORKER,
     LocalRuntime.name: HOST,
     SandlockRuntime.name: HOST,
     RemoteRuntime.name: "a machine provider",
@@ -135,8 +133,7 @@ def build_entry(
     A machine provider (docker, ssh, ...) builds its handle and the
     remote runtime that runs its ``captures`` through it. An engine
     provider builds the engine alone: ``in_process`` the one its
-    ``runtime`` names (none for the shell, which only ``workspace`` may
-    be), ``worker`` monty, ``host`` the host's own programs, confined by
+    ``runtime`` names, ``host`` the host's own programs, confined by
     sandlock when a ``sandbox`` block grants paths. The entry's other
     keys are the engine's config.
 
@@ -146,20 +143,26 @@ def build_entry(
             spells it.
 
     Raises:
-        ValueError: ``workspace`` for anything but the shell, an engine
-            its provider does not run, a ``sandbox`` that is not a
-            mapping, or what ``build_machine`` refuses.
+        ValueError: the reserved name ``workspace`` or the workspace's
+            own runtime, an engine its provider does not run, an
+            ``in_process`` entry with no ``runtime``, a ``sandbox`` that
+            is not a mapping, or what ``build_machine`` refuses.
     """
+    if name == WorkspaceRuntime.name:
+        raise ValueError(
+            f"machine name {name!r} is reserved for the workspace"
+        )
+    if isinstance(spec, WorkspaceRuntime):
+        raise ValueError(
+            f"machine {name!r}: the workspace's runtime is not a machine"
+        )
     if isinstance(spec, Runtime):
         runtime = spec
     elif isinstance(spec, MachineHandle) or spec.get("provider") not in (
         ENGINE_PROVIDERS
     ):
         handle = build_machine(name, spec)
-        runtime = RemoteRuntime(name, handle.config.captures)
-        if name == WorkspaceRuntime.name:
-            raise ValueError(f"{name!r} is the shell's machine name")
-        return handle, runtime
+        return handle, RemoteRuntime(name, handle.config.captures)
     else:
         fields = dict(spec)
         provider = fields.pop("provider")
@@ -172,16 +175,16 @@ def build_entry(
         )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
+        if isinstance(runtime, WorkspaceRuntime):
+            raise ValueError(
+                f"machine {name!r}: the workspace's runtime is not a machine"
+            )
         key = id(runtime)
 
         def forget(_gone: weakref.ref[Runtime[Any]]) -> None:
             _BUILT_FROM.pop(key, None)
 
         _BUILT_FROM[key] = (weakref.ref(runtime, forget), dict(spec))
-    if (name == WorkspaceRuntime.name) != isinstance(
-        runtime, WorkspaceRuntime
-    ):
-        raise ValueError(f"{name!r} is the shell's machine name")
     runtime.name = name
     return None, runtime
 
@@ -196,7 +199,7 @@ def _runtime_for(
 
     Args:
         name (str): the entry's name, for the message.
-        provider (str): ``in_process``, ``worker`` or ``host``.
+        provider (str): ``in_process`` or ``host``.
         runtime (str | type[Runtime] | None): the entry's ``runtime``: a
             registered name, a ``source:Class`` reference, or the class.
         sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
@@ -213,15 +216,14 @@ def _runtime_for(
                 f"machine {name!r}: a host runs its own programs, not a runtime"
             )
         return SandlockRuntime if sandbox is not None else LocalRuntime
-    if provider == WORKER:
-        if runtime not in (None, MontyRuntime.name):
-            raise ValueError(
-                f"machine {name!r}: a worker runs {MontyRuntime.name!r},"
-                f" not {runtime!r}"
-            )
-        return MontyRuntime
     if runtime is None:
-        return WorkspaceRuntime
+        raise ValueError(
+            f"machine {name!r}: an {IN_PROCESS} machine names its runtime"
+        )
+    if runtime == WorkspaceRuntime.name:
+        raise ValueError(
+            f"machine {name!r}: the workspace's runtime is not a machine"
+        )
     if isinstance(runtime, type):
         if not issubclass(runtime, Runtime):
             raise ValueError(
@@ -244,6 +246,30 @@ def _runtime_for(
 def in_process_runtimes() -> list[str]:
     """Every runtime an ``in_process`` machine may name."""
     return [name for name in known_runtimes() if name not in _PLACED]
+
+
+def placement(runtime: Runtime[Any]) -> tuple[str, str | None]:
+    """The provider an engine runs on and the name it is registered
+    under. An entry built from a ``machines:`` spec keeps the provider
+    and the runtime name it was built with; any other engine is looked
+    up by its class. An engine registered under no name, such as a
+    class a ``source:Class`` reference loaded, runs in process.
+
+    Args:
+        runtime (Runtime): a workspace entry.
+    """
+    spec = built_from(runtime)
+    named = None if spec is None else spec.get("runtime")
+    if spec is not None and isinstance(named, str) and ":" not in named:
+        return spec["provider"], named
+    name = next(
+        (key for key, cls in NAMED.items() if type(runtime) is cls), None
+    )
+    if spec is not None:
+        return spec["provider"], name
+    if name is None:
+        return IN_PROCESS, None
+    return _PLACED.get(name, IN_PROCESS), name
 
 
 def split_machines(
@@ -508,14 +534,13 @@ def routed(
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:
     """The runtime that serves commands no entry captures, if any.
 
-    That is the world's WorkspaceRuntime, unless it declares captures (then
-    it is an ordinary capturer and nothing is catch-all) or it is not
-    among the given entries.
+    That is the world's WorkspaceRuntime, unless it is not among the
+    given entries.
 
     Args:
         entries (list[Runtime]): runtime instances to search.
     """
     for entry in entries:
-        if isinstance(entry, WorkspaceRuntime) and not entry.restricted:
+        if isinstance(entry, WorkspaceRuntime):
             return entry
     return None

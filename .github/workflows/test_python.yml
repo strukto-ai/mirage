@@ -383,7 +383,8 @@ jobs:
               assert io2.stdout.strip() == b"42", io2.stdout
               try:
                   Workspace({"/d": RAMVFS()},
-                            machines={"py": {"provider": "worker"}})
+                            machines={"py": {"provider": "in_process",
+                                             "runtime": "monty"}})
               except ImportError:
                   pass
               else:

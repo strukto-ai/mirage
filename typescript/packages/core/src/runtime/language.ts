@@ -27,7 +27,7 @@ import type { Language, OutputFn, Program, RunResult } from './types.ts'
  *
  * The language it interprets is declared once, on its language tier
  * (PythonRuntime, JsRuntime), and a script CLI finds its interpreter by
- * it (runtimeForLanguage).
+ * it (runtimeForScript).
  *
  * run() resolves the program from the operands the way a real
  * interpreter does (`-c` in `ctx.flags`, else the script operand read

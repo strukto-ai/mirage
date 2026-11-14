@@ -181,7 +181,7 @@ type MountMap = ConstructorParameters<typeof Workspace>[0]
 const WORKSPACE_OPTIONS = {
   mode: MountMode.WRITE,
   maxMemory: null,
-  machines: { monty: { provider: 'worker' } },
+  machines: { monty: { provider: 'in_process', runtime: 'monty' } },
 }
 
 interface OpenedWorkspaces {
@@ -312,7 +312,10 @@ async function installMcpClis(ws: Workspace, target: Target): Promise<void> {
   if (target.cli_door === 'yaml') {
     const auth = { type: 'header', name: 'X-Api-Key', token: 'integ-token' }
     const clis = Object.fromEntries(
-      (target.clis ?? []).map((name) => [name, { cli: 'mcp', config: { url, auth } }]),
+      (target.clis ?? []).map((name) => [
+        name,
+        { cli: 'mcp', machine: 'in_process', config: { url, auth } },
+      ]),
     )
     const { options } = await configToWorkspaceArgs(loadWorkspaceConfig({ mounts: {}, clis }))
     for (const [name, [cli, config]] of Object.entries(options.clis ?? {})) {

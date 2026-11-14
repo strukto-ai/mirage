@@ -12,34 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
 from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.types import RuntimeReach
 
 
 class WorkspaceRuntime(Runtime[Any]):
     """The workspace's built-in command engine as a routing marker.
 
-    By default it captures nothing and serves every command no other
-    runtime captures (cat, ls, echo, and anything unknown): it is the
-    catch-all. Passing explicit captures flips it into an ordinary
-    capturer: the workspace serves exactly those commands and anything
-    unclaimed exits 126. Required: every workspace world contains
-    exactly one, appended automatically when its machines omit it;
-    pass your own instance as the ``workspace`` machine to customize it.
+    It captures nothing and serves every command no other runtime
+    captures (cat, ls, echo, and anything unknown): it is the catch-all.
+    Every workspace world contains exactly one, appended when its
+    machines are wired; it is never a machine entry, and a session's
+    ``commands.allow`` is what narrows the commands it serves.
 
     It is a pure routing marker, so it carries no capability mixin: a
     line resolved to workspace runs on the workspace executor inline, the
     path the line takes anyway, so there is no interpreter entry point (run)
     and no delegate entry point (run_line) to implement.
 
-    Constructed like every runtime (captures, config), with
-    two workspace readings: captures None (the default) keeps the catch-all
-    behavior, an empty sequence serves nothing (full lockdown); and
-    the config has no fields today, the slot exists for uniformity.
     """
 
     name = "workspace"
@@ -47,13 +39,3 @@ class WorkspaceRuntime(Runtime[Any]):
     # the gate, so there is no entry point around it.
     reach: RuntimeReach = "workspace"
     captures: tuple[str, ...] = ()
-
-    def __init__(
-        self,
-        captures: Sequence[str] | None = None,
-        config: RuntimeConfig | dict[str, Any] | None = None,
-    ) -> None:
-        # Declaring captures (even empty) turns the catch-all off; the
-        # dispatcher reads this bit, not the tuple's length.
-        self.restricted = captures is not None
-        super().__init__(captures, config)

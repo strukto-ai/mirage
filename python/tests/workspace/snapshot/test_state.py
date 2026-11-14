@@ -680,7 +680,7 @@ async def test_a_load_takes_the_callers_profiles_and_runtimes():
         machines=[],
     )
     try:
-        assert [r.name for r in loaded.engines()] == ["workspace"]
+        assert [r.name for r in loaded.engines()] == []
         assert (await loaded.shell("cat /f.txt")).exit_code == 126
         assert (await loaded.shell("rm /f.txt")).exit_code == 0
     finally:

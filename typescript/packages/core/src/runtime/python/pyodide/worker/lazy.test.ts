@@ -231,7 +231,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         new CLI({
           spec: new CommandSpec({ name: 'spin' }),
           script: new ScriptSource('while True: pass'),
-          machine: 'pyodide',
+          runtime: 'pyodide',
         }),
       )
       ws.createSession('short', { profile: 'short' })

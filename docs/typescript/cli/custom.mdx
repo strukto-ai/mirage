@@ -88,7 +88,7 @@ so a read of an undeclared option fails rather than looking like an omitted flag
 | --- | --- | --- |
 | Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Paths and text as arguments, parsed flags on `ctx` |
 | Group | `subcommands`, optional inherited options | Dispatches to a leaf |
-| Script CLI | `CLI.script`, optional machine | Raw argv, stdin and environment |
+| Script CLI | `CLI.script`, a machine and optional runtime | Raw argv, stdin and environment |
 
 A typed node is a leaf or a group. Names and aliases are single words;
 child names and aliases share one namespace. Options cannot collide across
@@ -135,6 +135,7 @@ registerCliSpec(PAGER)
 clis:
   pager-eng:
     cli: pager
+    machine: in_process
     config:
       account: engineering
 ```
@@ -159,7 +160,7 @@ that with policy; shell functions can otherwise shadow it like they do in bash.
 
 Registered on a mount, a typed CLI serves its verbs there as a command
 tree. Its leaves get the mount's accessor, so the tree declares no
-`configModel`, `accessor`, `script` or `machine`:
+`configModel`, `accessor` or `script`:
 
 ```typescript
 import { MountMode, RAMVFS } from '@struktoai/mirage-node'
@@ -312,10 +313,15 @@ imports:
 clis:
   pager:
     script: ./cli/pager.py
-    machine: py
+    machine: in_process
     config:
       width: 80
 ```
+
+Every `clis` entry names its `machine`. A script runs on `in_process` or
+`host`; the workspace needs a `machines` entry of that type that runs the
+script's language, and the first one serves. `runtime` picks a runtime on
+`in_process` instead, such as `quickjs`; a `host` takes none.
 
 The file is embedded at load. Words after the head arrive as argv, piped input
 arrives on stdin, and config arrives as JSON in `MIRAGE_CLI_CONFIG`. The
@@ -356,7 +362,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
 | `CLI.configModel` | Zod schema or normalizer for per-install account validation. |
 | `CLI.accessor` | Builds the install's accessor from its validated config, once per install; closed when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.machine` | Embedded script and the machine that runs it, if pinned; used instead of typed handlers. |
+| `CLI.script`, `CLI.machine`, `CLI.runtime` | Embedded script, the machine type that runs it (`in_process`, the default in code, or `host`) and the runtime there, if named; used instead of typed handlers. A CLI without a script runs on `in_process` only. |
 | `CLIHandler.fn` | Leaf handler, called as `fn(accessor, paths, texts, ctx)`. |
 | `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
 

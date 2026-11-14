@@ -44,6 +44,7 @@ mounts:
 clis:
   tally:
     cli: ../tools/tally.py:TALLY
+    machine: in_process
 """
 
 

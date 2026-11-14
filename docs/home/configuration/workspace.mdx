@@ -63,7 +63,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Service Credentials](/home/service-credentials#set-environment-variables). |
 | `secrets` | Declare named [credential sources](/home/service-credentials). |
-| `machines` | Name the machines commands run on, in capture order: Mirage's own [runtimes](/home/setup/runtime/overview) and the [machines](/home/setup/machine/overview) you reach. |
+| `machines` | Name the [machines](/home/setup/machine/overview) programs run on, in capture order: `in_process` with a [runtime](/home/setup/runtime/overview), `host`, or a provider you reach. |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#workspace-state-and-caches). |
 | `store` | Configure workspace state, background jobs included, described [below](#workspace-state-and-caches). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
@@ -166,7 +166,7 @@ where a redirect goes.
 
 ### Host machines
 
-A [`host`](/home/setup/runtime/host) machine runs real programs on the host,
+A [`host`](/home/setup/machine/host) machine runs real programs on the host,
 the computer or server where Mirage runs, sandboxed or not. Those programs
 open their own connections, so Mirage cannot see or block them. While
 `network` limits anything, or a policy checks connections, a host machine
@@ -213,24 +213,26 @@ and the machine's clock without it.
 ## CLI entries
 
 Each `clis` key is the command name the CLI installs under. An entry takes
-exactly one of `cli` or `script`:
+exactly one of `cli` or `script`, and always a `machine`:
 
 | Key | Purpose |
 | --- | --- |
 | `cli` | A registered CLI, such as `slack`. See [CLIs](/home/setup/clis) for the twelve bundled ones. |
 | `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. See custom CLIs in [Python](/python/cli/custom) and [TypeScript](/typescript/cli/custom). |
-| `machine` | The machine that runs `script`. Unset runs it on the machine that would run `python3`, or `node` for JavaScript, on the same line, including a `route_policy` choice. Only valid with `script`. |
+| `machine` | Required. The machine type it runs on: `in_process` for a `cli` entry; `in_process` or `host` for a `script`. The workspace needs a `machines` entry of that type that runs the script's language. |
+| `runtime` | The runtime that runs `script` on `in_process`, such as `monty` or `quickjs`. Unset uses the first one for the script's language. A `host` takes none. Only valid with `script`. |
 | `config` | Fields the CLI validates at install time. |
 
 ```yaml
 clis:
   slack:
     cli: slack
+    machine: in_process
     config:
       token: {from: env, key: SLACK_TOKEN}
   pager:
     script: pager.py
-    machine: py
+    machine: in_process
 ```
 
 A `script` entry's `config` cannot hold a credential pointer. Read the

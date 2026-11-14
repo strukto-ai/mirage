@@ -78,9 +78,9 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # python은 워커의 monty에서, 또는 e2b 샌드박스에서 실행된다
+    # python은 프로세스 안의 monty에서, 또는 e2b 샌드박스에서 실행된다
     machines={
-        "py": {"provider": "worker"},
+        "py": {"provider": "in_process", "runtime": "monty"},
         "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
     },
     # 연산을 라우팅한다: numpy 줄은 머신에서, 나머지는 monty에서 실행된다
@@ -272,7 +272,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
 )
 const app = express()
 app.use(express.json())

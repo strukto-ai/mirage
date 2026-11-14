@@ -26,6 +26,7 @@ import {
   builtFrom,
   knownRuntimes,
   machineBindingsFor,
+  placement,
   registerRuntime,
   shadowedCaptures,
 } from './table.ts'
@@ -132,8 +133,6 @@ describe('runtime table', () => {
 
   it('buildRuntime builds the workspace runtime by name', () => {
     expect(buildRuntime('workspace')).toBeInstanceOf(WorkspaceRuntime)
-    const restricted = buildRuntime('workspace', { captures: ['grep', 'cat'] })
-    expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 })
 
@@ -308,7 +307,7 @@ describe('machineBindingsFor', () => {
 
 describe('buildEntry', () => {
   it.each<[Record<string, unknown>, string]>([
-    [{ provider: 'worker' }, 'MontyRuntime'],
+    [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
@@ -318,13 +317,16 @@ describe('buildEntry', () => {
   })
 
   it.each<[string, Record<string, unknown>, RegExp]>([
-    ['py', { provider: 'worker', runtime: 'quickjs' }, /runs 'monty'/],
-    ['py', { provider: 'in_process', runtime: 'monty' }, /on worker/],
+    ['py', { provider: 'worker' }, /unknown machine provider/],
+    ['py', { provider: 'in_process', runtime: 'local' }, /runs on host/],
     ['py', { provider: 'host', runtime: 'monty' }, /not a runtime/],
-    ['py', { provider: 'worker', sandbox: {} }, /only a host/],
+    ['py', { provider: 'in_process', runtime: 'monty', sandbox: {} }, /only a host/],
     ['py', { provider: 'host', sandbox: null }, /must be a mapping/],
-    ['workspace', { provider: 'worker' }, /the shell's machine name/],
-    ['py', { provider: 'in_process' }, /the shell's machine name/],
+    ['workspace', { provider: 'in_process', runtime: 'monty' }, /reserved for the workspace/],
+    ['workspace', { provider: 'docker' }, /reserved for the workspace/],
+    ['py', { provider: 'in_process' }, /names its runtime/],
+    ['py', { provider: 'in_process', runtime: WorkspaceRuntime }, /not a machine/],
+    ['py', { provider: 'in_process', runtime: 'workspace' }, /not a machine/],
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
@@ -332,10 +334,8 @@ describe('buildEntry', () => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })
 
-  it('names the shell workspace alone', () => {
-    const [, shell] = buildEntry('workspace', { provider: 'in_process' })
-    expect(shell).toBeInstanceOf(WorkspaceRuntime)
-    expect(builtFrom(shell)).toEqual({ provider: 'in_process' })
+  it('refuses the workspace runtime as a machine', () => {
+    expect(() => buildEntry('x', new WorkspaceRuntime())).toThrow(/not a machine/)
   })
 })
 
@@ -377,6 +377,15 @@ describe('registerRuntime', () => {
     registerRuntime('fake-replaced', FakeRuntime)
     registerRuntime('fake-replaced', Other)
     expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
+  })
+
+  it('keeps the name an entry was built with', () => {
+    registerRuntime('fake-first', FakeRuntime)
+    registerRuntime('fake-second', FakeRuntime)
+    const [, built] = buildEntry('py', { provider: 'in_process', runtime: 'fake-second' })
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
+    registerRuntime('fake-second', Other)
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
   })
 })
 

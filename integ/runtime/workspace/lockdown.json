@@ -5,7 +5,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": []
           }
         },
@@ -32,6 +33,57 @@
           "expect": {
             "exit": 126,
             "stderr_contains": "Permission denied"
+          }
+        }
+      ]
+    },
+    {
+      "id": "allow_list_narrows_what_the_workspace_runs",
+      "world": {
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "narrow": {
+            "commands": {
+              "allow": [
+                "echo",
+                "cat",
+                "python3"
+              ]
+            }
+          }
+        },
+        "profile": "narrow"
+      },
+      "steps": [
+        {
+          "command": "echo allowed",
+          "expect": {
+            "exit": 0,
+            "stdout": "allowed\n"
+          }
+        },
+        {
+          "command": "ls /ram",
+          "expect": {
+            "exit": 126,
+            "stderr": "ls: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
           }
         }
       ]

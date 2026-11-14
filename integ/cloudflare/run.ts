@@ -149,7 +149,9 @@ function localClis(target: Target): Config {
   const names = (target.clis ?? []).filter((name) => name === 'git' || name === 'search')
   return names.length === 0
     ? {}
-    : { clis: Object.fromEntries(names.map((name) => [name, { cli: name }])) }
+    : {
+        clis: Object.fromEntries(names.map((name) => [name, { cli: name, machine: 'in_process' }])),
+      }
 }
 
 /** A fake's base scoped to a run of its own, through its `/_run/<id>` segment. */
@@ -173,7 +175,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
         ...(m.prefix !== undefined ? { key_prefix: m.prefix } : {}),
       })),
       ...(target.clis?.includes('hf') === true
-        ? { clis: { hf: { cli: 'hf', config: { token, endpoint } } } }
+        ? { clis: { hf: { cli: 'hf', machine: 'in_process', config: { token, endpoint } } } }
         : {}),
     }
   },
@@ -209,7 +211,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
         (target.clis ?? []).map((name) => {
           const user = installs[name]
           if (user === undefined) throw new Error(`email target: unknown cli ${name}`)
-          return [name, { cli: 'himalaya', config: account(user) }]
+          return [name, { cli: 'himalaya', machine: 'in_process', config: account(user) }]
         }),
       ),
     }
@@ -226,7 +228,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return {
       mounts: mounts(target, (m) => ({ ...(m.config ?? {}), ...auth })),
       ...(target.clis?.includes('slack') === true
-        ? { clis: { slack: { cli: 'slack', config: auth } } }
+        ? { clis: { slack: { cli: 'slack', config: auth, machine: 'in_process' } } }
         : {}),
     }
   },
@@ -251,6 +253,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
             clis: {
               gh: {
                 cli: 'gh',
+                machine: 'in_process',
                 config: {
                   token: 'ghp-integ',
                   base_url: base,
@@ -272,7 +275,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return {
       mounts: mounts(target, (m) => ({ ...(m.config ?? {}), ...auth })),
       ...(target.clis?.includes('discord') === true
-        ? { clis: { discord: { cli: 'discord', config: auth } } }
+        ? { clis: { discord: { cli: 'discord', config: auth, machine: 'in_process' } } }
         : {}),
     }
   },
@@ -285,7 +288,11 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return {
       mounts: mounts(target, (m) => ({ ...auth, ...(m.config ?? {}) })),
       ...(target.clis?.includes('trello') === true
-        ? { clis: { trello: { cli: 'trello', config: { ...auth, ...scope } } } }
+        ? {
+            clis: {
+              trello: { cli: 'trello', machine: 'in_process', config: { ...auth, ...scope } },
+            },
+          }
         : {}),
     }
   },
@@ -306,6 +313,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
             clis: {
               airtable: {
                 cli: 'airtable',
+                machine: 'in_process',
                 config: {
                   token,
                   base_url: base,
@@ -326,7 +334,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return {
       mounts: mounts(target, () => auth),
       ...(target.clis?.includes('ntn') === true
-        ? { clis: { ntn: { cli: 'ntn', config: auth } } }
+        ? { clis: { ntn: { cli: 'ntn', config: auth, machine: 'in_process' } } }
         : {}),
     }
   },
@@ -339,7 +347,10 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return Promise.resolve({
       mounts: mounts(target, () => ({})),
       clis: Object.fromEntries(
-        (target.clis ?? []).map((name) => [name, { cli: 'mcp', config: { url, auth } }]),
+        (target.clis ?? []).map((name) => [
+          name,
+          { cli: 'mcp', machine: 'in_process', config: { url, auth } },
+        ]),
       ),
     })
   },
@@ -391,6 +402,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
             clis: {
               gws: {
                 cli: 'gws',
+                machine: 'in_process',
                 config: {
                   ...auth,
                   ...(scope !== undefined ? { folder_id: folderIds[scope] } : {}),
@@ -408,7 +420,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     return {
       mounts: mounts(target, () => auth),
       ...(target.clis?.includes('linear') === true
-        ? { clis: { linear: { cli: 'linear', config: auth } } }
+        ? { clis: { linear: { cli: 'linear', config: auth, machine: 'in_process' } } }
         : {}),
     }
   },

@@ -21,13 +21,14 @@ import { Argument, CommandSpec, UsageStyle } from '../../../commands/spec/types.
 import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { Runtime } from '../../../runtime/base.ts'
+import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
 import type { Language, Program, RunResult } from '../../../runtime/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
-import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
+import { HOST, IN_PROCESS } from '../../../runtime/constants.ts'
+import { registerRuntime } from '../../../runtime/table.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Activity } from '../../../utils/activity.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -301,10 +302,6 @@ class TierPyRuntime extends PythonRuntime {
   }
 }
 
-class LineBox extends Runtime {
-  readonly name = 'box'
-}
-
 class GonePyRuntime extends FakePyRuntime {
   override interpret(): Promise<RunResult> {
     return Promise.reject(noWorker())
@@ -315,10 +312,20 @@ class OtherPyRuntime extends FakePyRuntime {
   override readonly name = 'otherpy'
 }
 
+// Registered as the host's own runtime name, which the table places on a
+// host machine.
+class HostPyRuntime extends FakePyRuntime {
+  override readonly name = 'local'
+}
+
 class FakeJsRuntime extends FakePyRuntime {
   override readonly name = 'fakejs'
   override readonly language: Language = 'js'
 }
+
+registerRuntime('otherpy', OtherPyRuntime)
+registerRuntime('local', HostPyRuntime)
+registerRuntime('fakejs', FakeJsRuntime)
 
 class CrashingRuntime extends FakePyRuntime {
   override readonly name = 'crashpy'
@@ -348,7 +355,8 @@ class SleepingRuntime extends FakePyRuntime {
 
 function scriptInstall(
   opts: {
-    machine?: string | null
+    machine?: string
+    runtime?: string | null
     config?: Record<string, unknown> | null
     language?: Language
     options?: Argument[]
@@ -357,7 +365,8 @@ function scriptInstall(
   const spec = new CLI({
     spec: new CommandSpec({ name: 'pager', arguments: [...(opts.options ?? [])] }),
     script: new ScriptSource("print('hi')", opts.language ?? 'python'),
-    machine: opts.machine ?? null,
+    machine: opts.machine ?? IN_PROCESS,
+    runtime: opts.runtime ?? null,
   })
   return installOf('pager', spec, opts.config ?? null)
 }
@@ -557,12 +566,12 @@ describe('handleCli script arm', () => {
   })
 
   it('the runtime pin is honored', async () => {
-    // The pin overrides first-match: the named entry runs the script
-    // even when an earlier entry speaks the same language.
+    // The named runtime runs the script even when an earlier entry on the
+    // same machine speaks the same language.
     const first = new FakePyRuntime()
     const pinned = new OtherPyRuntime()
     const [, io] = await drained(
-      scriptInstall({ machine: 'otherpy' }),
+      scriptInstall({ runtime: 'otherpy' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -573,30 +582,25 @@ describe('handleCli script arm', () => {
     expect(pinned.seen).toHaveLength(1)
   })
 
-  // A route policy or a runtime's script that places this line's python3
-  // on the second entry places the script there too.
-  it('runs where the line runs its interpreter', async () => {
-    const first = new TierPyRuntime('first')
-    const second = new TierPyRuntime('second')
+  it('the machine pin is honored', async () => {
+    // A host script skips the in-process entry that speaks python.
+    const first = new FakePyRuntime()
+    const pinned = new HostPyRuntime()
     const [, io] = await drained(
-      scriptInstall(),
+      scriptInstall({ machine: HOST }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
-      {
-        entries: [first, second],
-        routing: { bindings: { python3: second, python: second }, fallback: null },
-      },
+      { entries: [first, pinned] },
     )
     expect(io.exitCode).toBe(0)
     expect(first.seen).toEqual([])
-    expect(second.seen).toHaveLength(1)
+    expect(pinned.seen).toHaveLength(1)
   })
 
-  // No policy places the line, so the static bindings do: python3 binds
-  // to the second entry, which runs the script, not the first entry
-  // speaking python.
-  it('runs where python3 is bound with no route policy', async () => {
+  // python3 binds to the second entry, but the script names its own
+  // machine, so the first in-process entry speaking python runs it.
+  it('runs on its machine, not where python3 is bound', async () => {
     const first = new TierPyRuntime('first', [])
     const second = new TierPyRuntime('second')
     const ws = new Workspace(
@@ -607,44 +611,11 @@ describe('handleCli script arm', () => {
       ws.registerCli('pager', scriptInstall().cli)
       const result = await ws.shell('pager')
       expect(result.exitCode).toBe(0)
-      expect(first.seen).toEqual([])
-      expect(second.seen).toHaveLength(1)
+      expect(first.seen).toHaveLength(1)
+      expect(second.seen).toEqual([])
     } finally {
       await ws.close()
     }
-  })
-
-  it('is refused when the line refused its interpreter', async () => {
-    const py = new TierPyRuntime('first')
-    const [, io, node] = await drained(
-      scriptInstall(),
-      ['pager'],
-      new SessionState({ sessionId: 't' }),
-      null,
-      { entries: [py], routing: { bindings: { python3: null }, fallback: null } },
-    )
-    expect(io.exitCode).toBe(126)
-    expect(dec.decode(await materialize(io.stderr))).toBe('pager: no runtime accepted this line\n')
-    expect(node.exitCode).toBe(126)
-    expect(py.seen).toEqual([])
-  })
-
-  // A line whose python3 runs inside a sandbox runs no script there, and
-  // the entry the line passed over does not run it either.
-  it('is refused where the line runs python3 on a runtime without python', async () => {
-    const py = new TierPyRuntime('first')
-    const [, io] = await drained(
-      scriptInstall(),
-      ['pager'],
-      new SessionState({ sessionId: 't' }),
-      null,
-      { entries: [py], routing: { bindings: { python3: new LineBox() }, fallback: null } },
-    )
-    expect(io.exitCode).toBe(127)
-    expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: machine 'box' does not run python scripts\n",
-    )
-    expect(py.seen).toEqual([])
   })
 
   // The interpreter is missing, not the program: 127, as python3 answers.
@@ -661,23 +632,10 @@ describe('handleCli script arm', () => {
     expect(node.exitCode).toBe(127)
   })
 
-  it('runs on the first entry where the workspace serves python3', async () => {
-    const py = new TierPyRuntime('first')
-    const [, io] = await drained(
-      scriptInstall(),
-      ['pager'],
-      new SessionState({ sessionId: 't' }),
-      null,
-      { entries: [py], routing: { bindings: {}, fallback: new WorkspaceRuntime() } },
-    )
-    expect(io.exitCode).toBe(0)
-    expect(py.seen).toHaveLength(1)
-  })
-
-  it('an unknown pin exits 127', async () => {
+  it('exits 127 with no entry on its machine', async () => {
     const py = new FakePyRuntime()
     const [, io, node] = await drained(
-      scriptInstall({ machine: 'local' }),
+      scriptInstall({ machine: HOST }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -685,16 +643,16 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: unknown machine: 'local' (workspace machines: 'fakepy')\n",
+      "pager: no host machine runs python scripts (workspace machines: 'fakepy')\n",
     )
     expect(node.exitCode).toBe(127)
     expect(py.seen).toEqual([])
   })
 
-  it('a pin language mismatch exits 127', async () => {
+  it('a runtime language mismatch exits 127', async () => {
     const js = new FakeJsRuntime()
     const [, io] = await drained(
-      scriptInstall({ machine: 'fakejs' }),
+      scriptInstall({ runtime: 'fakejs' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -702,7 +660,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: machine 'fakejs' does not run python scripts\n",
+      "pager: no in_process machine runs python scripts on 'fakejs' (workspace machines: 'fakejs')\n",
     )
     expect(js.seen).toEqual([])
   })
@@ -718,7 +676,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: no workspace machine runs js scripts (workspace machines: 'fakepy')\n",
+      "pager: no in_process machine runs js scripts (workspace machines: 'fakepy')\n",
     )
   })
 
@@ -726,7 +684,7 @@ describe('handleCli script arm', () => {
     const [, io] = await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      'pager: no workspace machine runs python scripts (workspace machines: none)\n',
+      'pager: no in_process machine runs python scripts (workspace machines: none)\n',
     )
   })
 

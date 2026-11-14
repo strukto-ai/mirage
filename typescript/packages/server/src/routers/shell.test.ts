@@ -414,7 +414,7 @@ describe('execute router', () => {
 
   it('refuses a machine the workspace lacks', async () => {
     const app = buildApp()
-    await createWs(app, 'ert', { monty: { provider: 'worker' } })
+    await createWs(app, 'ert', { monty: { provider: 'in_process', runtime: 'monty' } })
     const unknown = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',

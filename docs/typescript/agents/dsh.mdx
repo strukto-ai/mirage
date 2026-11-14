@@ -33,7 +33,7 @@ const ws = new Workspace(
     '/redis': [new RedisVFS({ url: redisUrl }), MountMode.WRITE],
     '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.EXEC],
   },
-  { machines: { py: { provider: 'worker', captures: ['python', 'python3'] } } },
+  { machines: { py: { provider: 'in_process', runtime: 'monty', captures: ['python', 'python3'] } } },
 )
 
 const ctx = new Context()
@@ -110,7 +110,7 @@ The bundle's default world is one RAM scratch mount at `/tmp`. Mount real source
         mode: read
         config: { token: !!js process.env.SLACK_BOT_TOKEN }
     machines:
-      py: { provider: worker, captures: [python, python3] }
+      py: { provider: in_process, runtime: monty, captures: [python, python3] }
 ```
 
 A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A machine entry also takes its runtime's own settings, as a workspace file's does, and refuses a key the runtime does not have.

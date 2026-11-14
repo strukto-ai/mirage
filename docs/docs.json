@@ -305,33 +305,35 @@
             ]
           },
           {
-            "group": "Runtimes",
-            "pages": [
-              "home/setup/runtime/overview",
-              {
-                "group": "Python",
-                "icon": "python",
-                "pages": [
-                  "home/setup/runtime/monty",
-                  "home/setup/runtime/wasi",
-                  "home/setup/runtime/pyodide"
-                ]
-              },
-              {
-                "group": "JavaScript",
-                "icon": "js",
-                "pages": [
-                  "home/setup/runtime/quickjs"
-                ]
-              },
-              "home/setup/runtime/host",
-              "home/setup/runtime/custom"
-            ]
-          },
-          {
             "group": "Machines",
             "pages": [
               "home/setup/machine/overview",
+              "home/setup/machine/in_process",
+              {
+                "group": "Runtimes",
+                "icon": "microchip",
+                "pages": [
+                  "home/setup/runtime/overview",
+                  {
+                    "group": "Python",
+                    "icon": "python",
+                    "pages": [
+                      "home/setup/runtime/monty",
+                      "home/setup/runtime/wasi",
+                      "home/setup/runtime/pyodide"
+                    ]
+                  },
+                  {
+                    "group": "JavaScript",
+                    "icon": "js",
+                    "pages": [
+                      "home/setup/runtime/quickjs"
+                    ]
+                  },
+                  "home/setup/runtime/custom"
+                ]
+              },
+              "home/setup/machine/host",
               "home/setup/machine/docker",
               "home/setup/machine/kubernetes",
               "home/setup/machine/apple_container",

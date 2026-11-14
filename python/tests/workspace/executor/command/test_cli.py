@@ -30,16 +30,10 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.rs.errors import StreamRefusal
-from mirage.runtime.base import Runtime
+from mirage.runtime import table
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import (
-    Program,
-    RouteDecision,
-    RunResult,
-    ScriptSource,
-)
-from mirage.runtime.workspace import WorkspaceRuntime
+from mirage.runtime.types import Program, RunResult, ScriptSource
 from mirage.shell.variable import VarAttr
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
@@ -442,7 +436,8 @@ async def drained(*args, **kwargs):
 
 
 def script_install(
-    machine: str | None = None,
+    machine: str = "in_process",
+    runtime: str | None = None,
     config: dict | None = None,
     language: str = "python",
     options: tuple[Argument, ...] = (),
@@ -451,6 +446,7 @@ def script_install(
         spec=CommandSpec(name="pager", arguments=(*options,)),
         script=ScriptSource("print('hi')", language=language),
         machine=machine,
+        runtime=runtime,
     )
     return CLIInstall(name="pager", cli=spec, config=config)
 
@@ -656,13 +652,30 @@ async def test_script_with_a_grammar_refuses_an_undeclared_flag():
 
 
 @pytest.mark.asyncio
-async def test_script_runtime_pin_is_honored():
-    # The pin overrides first-match: the named entry runs the script
-    # even when an earlier entry speaks the same language.
+async def test_script_runtime_pin_is_honored(monkeypatch):
+    # The named runtime runs the script even when an earlier entry on
+    # the same machine speaks the same language.
+    monkeypatch.setitem(table.NAMED, "otherpy", OtherPyRuntime)
     first, pinned = FakePyRuntime(), OtherPyRuntime()
-    install = script_install(machine="otherpy")
     _, io, _ = await drained(
-        install,
+        script_install(runtime="otherpy"),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(entries=[first, pinned]),
+    )
+    assert io.exit_code == 0
+    assert first.seen == []
+    assert len(pinned.seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_script_machine_pin_is_honored(monkeypatch):
+    # A host script skips the in-process entry that speaks python.
+    monkeypatch.setitem(table.NAMED, "otherpy", OtherPyRuntime)
+    monkeypatch.setitem(table._PLACED, "otherpy", "host")
+    first, pinned = FakePyRuntime(), OtherPyRuntime()
+    _, io, _ = await drained(
+        script_install(machine="host"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[first, pinned]),
@@ -685,32 +698,10 @@ class TierPyRuntime(PythonRuntime):
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
 
-class LineBox(Runtime):
-    name = "box"
-
-
 @pytest.mark.asyncio
-async def test_script_runs_where_the_line_runs_its_interpreter():
-    # A route policy or a runtime's script that places this line's
-    # python3 on the second entry places the script there too.
-    first, second = TierPyRuntime("first"), TierPyRuntime("second")
-    routing = RouteDecision(bindings={"python3": second, "python": second})
-    _, io, _ = await drained(
-        script_install(),
-        ["pager"],
-        SessionState("t"),
-        context=CLIContext(entries=[first, second], routing=routing),
-    )
-    assert io.exit_code == 0
-    assert first.seen == []
-    assert len(second.seen) == 1
-
-
-@pytest.mark.asyncio
-async def test_script_runs_where_python3_is_bound_with_no_route_policy():
-    # No policy places the line, so the static bindings do: python3
-    # binds to the second entry, which runs the script, not the first
-    # entry speaking python.
+async def test_script_runs_on_its_machine_not_where_python3_is_bound():
+    # python3 binds to the second entry, but the script names its own
+    # machine, so the first in-process entry speaking python runs it.
     first, second = TierPyRuntime("first"), TierPyRuntime("second")
     first.captures = ()
     ws = Workspace(
@@ -719,91 +710,43 @@ async def test_script_runs_where_python3_is_bound_with_no_route_policy():
     ws.register_cli("pager", script_install().cli)
     result = await ws.shell("pager")
     assert result.exit_code == 0
-    assert first.seen == []
-    assert len(second.seen) == 1
+    assert len(first.seen) == 1
+    assert second.seen == []
     await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_script_is_refused_when_the_line_refused_its_interpreter():
-    py = TierPyRuntime("first")
-    _, io, node = await handle_cli(
-        script_install(),
-        ["pager"],
-        SessionState("t"),
-        context=CLIContext(
-            entries=[py], routing=RouteDecision(bindings={"python3": None})
-        ),
-    )
-    assert io.exit_code == 126
-    assert io.stderr == b"pager: no runtime accepted this line\n"
-    assert node.exit_code == 126
-    assert py.seen == []
-
-
-@pytest.mark.asyncio
-async def test_script_is_refused_where_the_line_runs_python3_without_python():
-    # A line whose python3 runs inside a sandbox runs no script there, and
-    # the entry the line passed over does not run it either.
-    py = TierPyRuntime("first")
-    _, io, _ = await handle_cli(
-        script_install(),
-        ["pager"],
-        SessionState("t"),
-        context=CLIContext(
-            entries=[py],
-            routing=RouteDecision(bindings={"python3": LineBox()}),
-        ),
-    )
-    assert io.exit_code == 127
-    assert io.stderr == b"pager: machine 'box' does not run python scripts\n"
-    assert py.seen == []
-
-
-@pytest.mark.asyncio
-async def test_script_runs_on_the_first_entry_where_the_workspace_serves_python3():
-    py = TierPyRuntime("first")
-    _, io, _ = await drained(
-        script_install(),
-        ["pager"],
-        SessionState("t"),
-        context=CLIContext(
-            entries=[py], routing=RouteDecision(fallback=WorkspaceRuntime())
-        ),
-    )
-    assert io.exit_code == 0
-    assert len(py.seen) == 1
-
-
-@pytest.mark.asyncio
-async def test_script_unknown_pin_exits_127():
+async def test_script_with_no_entry_on_its_machine_exits_127():
     py = FakePyRuntime()
     _, io, node = await handle_cli(
-        script_install(machine="local"),
+        script_install(machine="host"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[py]),
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: unknown machine: 'local' (workspace machines: 'fakepy')\n"
+        b"pager: no host machine runs python scripts "
+        b"(workspace machines: 'fakepy')\n"
     )
     assert node.exit_code == 127
     assert py.seen == []
 
 
 @pytest.mark.asyncio
-async def test_script_pin_language_mismatch_exits_127():
+async def test_script_runtime_language_mismatch_exits_127(monkeypatch):
+    monkeypatch.setitem(table.NAMED, "fakejs", FakeJsRuntime)
     js = FakeJsRuntime()
     _, io, _ = await handle_cli(
-        script_install(machine="fakejs"),
+        script_install(runtime="fakejs"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[js]),
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: machine 'fakejs' does not run python scripts\n"
+        b"pager: no in_process machine runs python scripts on 'fakejs' "
+        b"(workspace machines: 'fakejs')\n"
     )
     assert js.seen == []
 
@@ -819,7 +762,7 @@ async def test_script_no_language_match_exits_127():
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: no workspace machine runs js scripts "
+        b"pager: no in_process machine runs js scripts "
         b"(workspace machines: 'fakepy')\n"
     )
 
@@ -829,7 +772,7 @@ async def test_script_outside_a_workspace_exits_127():
     _, io, _ = await handle_cli(script_install(), ["pager"], SessionState("t"))
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: no workspace machine runs python scripts "
+        b"pager: no in_process machine runs python scripts "
         b"(workspace machines: none)\n"
     )
 

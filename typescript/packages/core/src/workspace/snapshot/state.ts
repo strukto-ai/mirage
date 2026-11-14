@@ -31,6 +31,7 @@ import type { OpRecord } from '../../observe/record.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
 import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
+import { IN_PROCESS } from '../../runtime/constants.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import {
   Channel,
@@ -299,7 +300,8 @@ function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   return new CLI({
     spec: new CommandSpec({ name: entry.spec }),
     script: new ScriptSource(entry.script.source, language, entry.script.module),
-    machine: entry.machine ?? null,
+    machine: entry.machine ?? IN_PROCESS,
+    runtime: entry.runtime ?? null,
   })
 }
 
@@ -336,6 +338,7 @@ function cliSnapshot(name: string, install: CLIInstall): CLISnapshot {
       module: script.module,
     }
     entry.machine = install.cli.machine
+    entry.runtime = install.cli.runtime
   }
   // An MCP install's tool list rides along, so load rebuilds it with no request.
   const source = install.cli.mcp

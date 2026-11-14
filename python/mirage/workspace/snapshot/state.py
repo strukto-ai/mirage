@@ -60,6 +60,7 @@ from mirage.policy.profile import (
     profile_from_dict,
     profile_to_dict,
 )
+from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     Channel,
@@ -257,6 +258,7 @@ def cli_snapshot(name: str, install: CLIInstall) -> dict[str, Any]:
             ScriptKey.MODULE: script.module,
         }
         entry[CLIKey.MACHINE] = install.cli.machine
+        entry[CLIKey.RUNTIME] = install.cli.runtime
     source = install.cli.mcp
     if source is not None:
         entry[CLIKey.MCP] = {
@@ -318,7 +320,8 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLI:
             language=cast(Language, language),
             module=bool(script.get(ScriptKey.MODULE)),
         ),
-        machine=entry.get(CLIKey.MACHINE),
+        machine=entry.get(CLIKey.MACHINE, IN_PROCESS),
+        runtime=entry.get(CLIKey.RUNTIME),
     )
 
 

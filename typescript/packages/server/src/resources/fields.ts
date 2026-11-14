@@ -19,13 +19,11 @@ import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
 import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { HOST, SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
+import { HOST, IN_PROCESS, SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
 import {
-  IN_PROCESS,
   inProcessRuntimes,
   knownRuntimes,
   runtimeClass,
-  WORKER,
 } from '@struktoai/mirage-core/runtime/table'
 import { normalizedKey } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -183,8 +181,8 @@ function configTypes(configFields: ConfigFields): Field[] {
 /**
  * Every machine provider and engine provider, with its fields: an
  * `in_process` machine's are those of each runtime it may run, none
- * required, a worker's where monty runs on one, and a host's where this
- * host registers its own programs, its `sandbox` block's as
+ * required, and a host's where this host registers its own programs, its
+ * `sandbox` block's as
  * `sandbox.<field>` in that group.
  */
 function machineTypes(): TypeTable {
@@ -203,8 +201,6 @@ function machineTypes(): TypeTable {
       captures,
     ],
   }
-  if (!inProcess.includes('monty'))
-    out[WORKER] = [...configTypes(runtimeClass('monty').configFields), captures]
   if (knownRuntimes().includes('local')) {
     const sandbox = knownRuntimes().includes('sandlock')
       ? configTypes(

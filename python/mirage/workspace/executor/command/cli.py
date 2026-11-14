@@ -47,15 +47,8 @@ from mirage.io.types import ByteSource, CommandOutput
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.routing import runtime_for_language
-from mirage.runtime.types import (
-    OutputFn,
-    RouteDecision,
-    RunResult,
-    RuntimeIdentity,
-    ScriptSource,
-    ShellFn,
-)
+from mirage.runtime.routing import runtime_for_script
+from mirage.runtime.types import OutputFn, RunResult, ScriptSource, ShellFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
@@ -70,10 +63,7 @@ from mirage.workspace.executor.command.handler import (
     cli_voice,
     run_handler,
 )
-from mirage.workspace.executor.command.run import (
-    admission_denial,
-    exec_node,
-)
+from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.files import Files
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace.probe import miss_condition, path_stat
@@ -119,74 +109,44 @@ def _select_runtime(
     prog: str,
     leaf: CLI,
     entries: list[Runtime[Any]],
-    routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[LanguageRuntime[Any] | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
-    A ``machine:`` pin names the machine, and its engine must speak the
-    script's language, so a monty machine pinned for a ``.mjs`` fails loud
-    instead of feeding JS to a python interpreter. Without a pin the
-    program runs where this line runs its language's own interpreter
-    (the tier's head word, ``python3`` or ``node``), so the runtime
-    capturing that command, or a route policy, places it, and a line
-    every capturer refused is refused here too (126). The first entry
-    speaking the language serves when the workspace serves that
-    interpreter itself (runtime_for_language); a placement on a runtime
-    that does not run the script's language is refused like such a
-    pin. Every other refusal names the world so the fix (add or rename
-    an entry) is visible (127).
+    The leaf names the machine it runs on and, optionally, the runtime
+    there; the first entry on that machine speaking the script's
+    language serves (runtime_for_script). A miss names the world so the
+    fix (add an entry, or place the script elsewhere) is visible (127).
 
     Args:
         prog (str): display path for message attribution.
         leaf (CLI): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
-        routing (RouteDecision[Runtime] | None): the line's placement;
-            None outside a workspace line, where the first entry
-            speaking the language serves.
     """
     script = leaf.script
     if script is None:
         raise RuntimeError(
             f"selecting a runtime for {prog!r} without a script"
         )
-    known = ", ".join(repr(entry.name) for entry in entries) or "none"
-    chosen: RuntimeIdentity | None
-    if leaf.machine is not None:
-        chosen = next(
-            (entry for entry in entries if entry.name == leaf.machine), None
+    chosen = runtime_for_script(
+        entries, leaf.machine, leaf.runtime, script.language
+    )
+    if chosen is not None:
+        return chosen, None
+    known = (
+        ", ".join(
+            repr(entry.name)
+            for entry in entries
+            if not isinstance(entry, WorkspaceRuntime)
         )
-        if chosen is None:
-            return None, _missing(
-                f"{prog}: unknown machine: {leaf.machine!r} "
-                f"(workspace machines: {known})"
-            )
-    else:
-        entry = runtime_for_language(entries, script.language)
-        if entry is None:
-            return None, _missing(
-                f"{prog}: no workspace machine runs "
-                f"{script.language} scripts "
-                f"(workspace machines: {known})"
-            )
-        heads = type(entry).commands
-        chosen = (
-            routing.bindings.get(heads[0], routing.fallback)
-            if routing is not None and heads
-            else entry
-        )
-        if chosen is None:
-            return None, admission_denial(prog)
-        if isinstance(chosen, WorkspaceRuntime):
-            chosen = entry
-    if (
-        not isinstance(chosen, LanguageRuntime)
-        or chosen.language != script.language
-    ):
-        return None, _missing(
-            f"{prog}: machine {chosen.name!r} does not run "
-            f"{script.language} scripts"
-        )
-    return chosen, None
+        or "none"
+    )
+    what = f"{script.language} scripts"
+    if leaf.runtime is not None:
+        what += f" on {leaf.runtime!r}"
+    return None, _missing(
+        f"{prog}: no {leaf.machine} machine runs {what} "
+        f"(workspace machines: {known})"
+    )
 
 
 def _missing(message: str) -> IOResult:
@@ -279,8 +239,6 @@ class CLIContext:
             files rather than an API.
         session (SessionView | None): the session plane's live, gated
             handle; ``ctx.env`` stays the frozen process view.
-        routing (RouteDecision[Runtime] | None): the line's placement, which a
-            script leaf runs its program under; None outside a line.
         settle (Callable | None): lands what a script leaf's runtime
             holds and drops the caches its program may have gone past;
             None outside a workspace.
@@ -294,7 +252,6 @@ class CLIContext:
     vfs: Files | None = None
     session: SessionView | None = None
     processes: SessionProcesses | None = None
-    routing: RouteDecision[RuntimeIdentity] | None = None
     settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
     ids: IdSource = field(default_factory=SystemIdSource)
 
@@ -708,12 +665,11 @@ async def _run_cli(
     runtime: LanguageRuntime[Any] | None = None
     if install.cli.script is not None:
         runtime, refused = _select_runtime(
-            prog, install.cli, context.entries or [], context.routing
+            prog, install.cli, context.entries or []
         )
         if runtime is None:
             # The interpreter is missing, not the command: 127 like an
-            # interpreter command no runtime entry captures (run_code),
-            # or 126 when this line's capturers all refused it.
+            # interpreter command no runtime entry captures (run_code).
             assert refused is not None
             return (
                 None,

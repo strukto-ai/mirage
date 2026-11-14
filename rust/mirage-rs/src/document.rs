@@ -558,7 +558,7 @@ fn workspace_fields(raw: &Doc, kind: &str, at: &str) -> Answer {
             ],
             at,
         )?,
-        "cli" => config_fields(raw, &["cli", "script", "machine", "config"], at)?,
+        "cli" => config_fields(raw, &["cli", "script", "machine", "runtime", "config"], at)?,
         "source" => config_fields(raw, &["source", "config"], at)?,
         "io" => config_fields(raw, &["buffer_bytes"], at)?,
         _ => return Err(format!("unknown workspace block: {kind}")),

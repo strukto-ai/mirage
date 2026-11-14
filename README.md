@@ -79,9 +79,9 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # python runs on monty in a worker, or on the e2b sandbox
+    # python runs in process on monty, or on the e2b sandbox
     machines={
-        "py": {"provider": "worker"},
+        "py": {"provider": "in_process", "runtime": "monty"},
         "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
     },
     # route the underlying computation: numpy lines run on the machine, the rest on monty
@@ -308,7 +308,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
 )
 const app = express()
 app.use(express.json())

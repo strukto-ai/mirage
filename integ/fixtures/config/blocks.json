@@ -11,12 +11,14 @@
         },
         "clis": {
           "sl": {
-            "cli": "slack"
+            "cli": "slack",
+            "machine": "in_process"
           }
         },
         "machines": {
           "py": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "@python"
             ]
@@ -323,7 +325,7 @@
       }
     },
     {
-      "name": "clis entry: the script form takes a machine and a config",
+      "name": "clis entry: the script form takes a machine, a runtime and a config",
       "config": {
         "mounts": {
           "/d": {
@@ -333,7 +335,8 @@
         "clis": {
           "tool": {
             "script": "tool.py",
-            "machine": "py",
+            "machine": "in_process",
+            "runtime": "monty",
             "config": {
               "token": "t"
             }
@@ -352,6 +355,7 @@
         "clis": {
           "tally": {
             "cli": "./cli/tally.py:TALLY",
+            "machine": "in_process",
             "config": {
               "unit": "kg"
             }
@@ -369,7 +373,8 @@
         },
         "clis": {
           "jira": {
-            "cli": "my_clis:JIRA"
+            "cli": "my_clis:JIRA",
+            "machine": "in_process"
           }
         }
       }

@@ -12,7 +12,8 @@
             ]
           },
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": []
           }
         },
@@ -282,7 +283,8 @@
             ]
           },
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": []
           }
         },

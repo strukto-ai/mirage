@@ -20,7 +20,7 @@ uses `MIRAGE_LOCAL_HOME`, then the interpreter running Mirage (Python) or
 ## Usage
 
 `captures` defaults to `@python` (`python3` and `python`). Add names such as `node` or `tsx`, or
-[`@external`](/home/setup/runtime/overview#captures) for every program
+[`@external`](/home/setup/machine/overview#captures) for every program
 Mirage does not have itself. Mirage's own commands, pipes and redirects stay
 in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
 
@@ -73,7 +73,7 @@ A `sandbox` block confines each program through
 seccomp: it reads only the paths you grant and writes only the ones you
 allow. Linux only. Install the `sandlock` CLI on `PATH`; the full ruleset
 needs Linux 6.12 or later. With a sandbox, `captures` defaults to
-[`@external`](/home/setup/runtime/overview#captures); name `@python` to run
+[`@external`](/home/setup/machine/overview#captures); name `@python` to run
 the host's `python3` under it too.
 
 ```yaml
@@ -140,7 +140,7 @@ machines:
 ```
 
 After the folder is mounted, run the shared
-[workspace file check](/home/setup/runtime/overview#verify-workspace-file-access).
+[workspace file check](/home/setup/machine/overview#verify-workspace-file-access).
 
 - Put the folder at the mount's own path when you can, so a path typed in
   the shell names the same file in the program.

@@ -22,7 +22,7 @@ async function stdout(ws: Workspace, cmd: string): Promise<string> {
 async function main(): Promise<void> {
   const ws = new Workspace(
     { '/ram': new RAMVFS() },
-    { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
+    { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
   )
 
   console.log('=== python3 -c (basic) ===')

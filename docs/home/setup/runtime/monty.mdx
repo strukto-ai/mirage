@@ -26,7 +26,8 @@ cannot access host files, host environment variables or the network.
 
 ## Usage
 
-Declare a `worker` machine to run `python3` on Monty, in worker processes Mirage starts:
+Declare an [`in_process`](/home/setup/machine/in_process) machine with
+`runtime: monty` to run `python3` on Monty:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -36,7 +37,7 @@ Declare a `worker` machine to run `python3` on Monty, in worker processes Mirage
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"py": {"provider": "worker"}},
+        machines={"py": {"provider": "in_process", "runtime": "monty"}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
@@ -47,7 +48,7 @@ Declare a `worker` machine to run `python3` on Monty, in worker processes Mirage
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
+      { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
@@ -57,7 +58,8 @@ Declare a `worker` machine to run `python3` on Monty, in worker processes Mirage
     mode: exec
     machines:
       py:
-        provider: worker
+        provider: in_process
+        runtime: monty
     mounts:
       /data:
         vfs: ram
@@ -73,13 +75,24 @@ such as `64M`:
 ```yaml
 machines:
   py:
-    provider: worker
+    provider: in_process
+    runtime: monty
     max_memory: 64M
 ```
 
 A run that needs more raises `MemoryError`. A run also holds no more than its
 workspace's [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory)
 has left, 96 MB by default.
+
+## How runs execute
+
+- Mirage runs each program in one of four worker processes that every
+  workspace in the process shares, so an idle workspace holds none. A run
+  past four waits for a free one. On Cloudflare Workers, which start no
+  processes, Monty runs inside the isolate.
+- A timeout or `kill` stops the worker running the program, and
+  `kill -STOP` pauses it.
+- `ps` lists its runs under `mirage`, as it lists Mirage's own commands.
 
 ## Python compatibility
 

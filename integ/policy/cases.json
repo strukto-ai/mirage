@@ -337,7 +337,7 @@
   },
   {
    "id": "placement_routes_the_line_and_a_deny_outranks_it",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}},
    "steps": [
     {"op": "register_policy", "id": "route", "pre_execute": {"heavy": {"route": "monty"}}},
     {"op": "register_policy", "id": "deny", "pre_execute": {"secret": {"deny": "secrets stay put"}}},
@@ -349,7 +349,7 @@
   },
   {
    "id": "a_profile_policys_ask_and_route_both_hold",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}, "local": {"provider": "host"}}},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}, "local": {"provider": "host"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"ask\", \"reason\": \"line needs a nod\"}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\"}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "decision": "line needs a nod"}}},
@@ -360,7 +360,7 @@
   },
   {
    "id": "a_policy_programs_route_says_why_and_explain_shows_it",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}, "local": {"provider": "host"}}},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}, "local": {"provider": "host"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\", \"reason\": \"monty has no sqlite3\"}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "explain", "session": "agent", "command": "python3 -c \"import sqlite3\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "ScriptPolicy", "reason": "monty has no sqlite3", "machine": "local"}], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "machine": "local"}]}}},
@@ -369,7 +369,7 @@
   },
   {
    "id": "a_profile_policy_answers_at_each_pre_method",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    name = ctx['command']\n    if name == 'touch':\n        return {'kind': 'deny', 'reason': 'script says no'}\n    if name == 'mkdir':\n        return {'kind': 'ask', 'reason': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['env'].get('MODE') == 'safe':\n        return {'kind': 'deny', 'reason': 'safe mode'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['path'] == '/data/s':\n        return {'kind': 'deny', 'reason': 'script guards s'}\n    if ctx['path'] == '/data/held':\n        return {'kind': 'ask', 'reason': 'held needs a nod'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
@@ -393,7 +393,7 @@
   },
   {
    "id": "a_profile_policy_runs_each_program_with_the_session",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    names = [c['command'] for c in ctx['commands']]\n    if 'false' in names and ctx['cwd'] == '/data':\n        reason = 'no false in /data: ' + ' '.join(names)\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}], "pre_command": [{"script": {"source": "import os\n\ndef pre_command(ctx):\n    if ctx['command'] == 'hostname':\n        reason = 'cwd ' + os.getcwd() + ' team ' + str(ctx['env'].get('TEAM')) + ' env ' + ','.join(sorted(os.environ))\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('hostname', 'whoami'):\n        return {'kind': 'ask', 'reason': ctx['command'] + ' needs a nod'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['call']['name'] == 'read' and 'secret' in open(ctx['path']).read():\n        return {'kind': 'deny', 'reason': 'secret text'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo secret > /data/x; echo plain > /data/y", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
@@ -475,9 +475,9 @@
   },
   {
    "id": "a_cli_that_reaches_a_service_runs_under_hides_only_where_the_allow_list_names_it",
-   "settings": {"mode": "write", "machines": {"monty": {"provider": "worker"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "machine": "monty"},
+    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "machine": "in_process"},
     {"op": "session", "id": "hides", "profile": {"paths": {"hide": ["/data/secret.txt"]}}},
     {"op": "session", "id": "wildcard", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*"]}}},
     {"op": "session", "id": "named", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*", "probe"]}}},
@@ -489,7 +489,7 @@
   },
   {
    "id": "a_post_command_program_refuses_a_command_after_it_ran",
-   "settings": {"mode": "write", "machines": {"monty": {"provider": "worker"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"post_command": [{"script": {"source": "def post_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'no echo after ' + str(ctx['exit_code'])}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 126, "stdout": "hi\n", "stderr": "echo: Permission denied\n", "decision": "no echo after 0"}}},
@@ -509,7 +509,8 @@
     },
     "machines": {
      "monty": {
-      "provider": "worker"
+      "provider": "in_process",
+      "runtime": "monty"
      }
     }
    },
@@ -597,7 +598,7 @@
   },
   {
    "id": "a_policy_sees_whether_a_line_writes_and_what_it_moves",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('mv', 'rm'):\n        return {'kind': 'deny', 'reason': 'subtree ' + str(ctx['subtree']) + ' into ' + str(ctx['move_target'])}\n    if ctx['write']:\n        return {'kind': 'deny', 'reason': 'writes'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "mkdir /data/sub && printf 'b\\na\\n' > /data/a && cd /data && tar -cf t.tar a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},

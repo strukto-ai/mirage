@@ -6546,10 +6546,13 @@ components:
             - type: 'null'
           title: Script
         machine:
+          type: string
+          title: Machine
+        runtime:
           anyOf:
             - type: string
             - type: 'null'
-          title: Machine
+          title: Runtime
         config:
           additionalProperties: true
           type: object
@@ -6558,10 +6561,14 @@ components:
             lists each type's fields.
       additionalProperties: false
       type: object
+      required:
+        - machine
       title: CLIBlock
       description: Install named commands in the workspace. Set `cli` to a registered CLI type or `script`
-        to a program file. Use `config` for settings and credentials. For scripts, `machine` selects the
-        machine that runs it; when omitted, Mirage selects one for the script language.
+        to a program file. Use `config` for settings and credentials. `machine` is the machine type it
+        runs on, `in_process` for `cli`; a script can also run on `host`. `runtime` selects the runtime
+        that runs a script on `in_process`; when omitted, Mirage uses the first one for the script
+        language.
     CancelLinesResponse:
       properties:
         canceled:
@@ -8369,9 +8376,8 @@ components:
       properties:
         provider:
           type: string
-          description: The provider. `in_process` runs a runtime inside Mirage, `worker` runs
-            Monty in worker processes, `host` runs the host's own programs; docker, ssh and the
-            other providers reach a machine of their own.
+          description: The provider. `in_process` runs a runtime inside Mirage, `host` runs the
+            host's own programs; docker, ssh and the other providers reach a machine of their own.
         captures:
           type:
             - array
@@ -8382,7 +8388,7 @@ components:
             `null` keeps the default.
         runtime:
           type: string
-          description: The runtime an `in_process` machine runs, such as quickjs, or a
+          description: The runtime an `in_process` machine runs, such as monty or quickjs, or a
             `source:Class` reference.
         sandbox:
           type:

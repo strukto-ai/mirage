@@ -683,7 +683,7 @@ describe('the server API in workerd', () => {
           '/pg': { vfs: 'postgres', config: { dsn: 'postgres://u:p@db.test:5432/x' } },
           '/mail': { vfs: 'email', config: account },
         },
-        clis: { himalaya: { cli: 'himalaya', config: account } },
+        clis: { himalaya: { cli: 'himalaya', config: account, machine: 'in_process' } },
         network: { denied_domains: ['db.test', 'mail.test'] },
       },
     })
@@ -767,6 +767,7 @@ describe('the server API in workerd', () => {
           clis: {
             wiki: {
               cli: 'mcp',
+              machine: 'in_process',
               config: { url: base, auth: { type: 'bearer', token: 'mcp-cloudflare' } },
             },
           },

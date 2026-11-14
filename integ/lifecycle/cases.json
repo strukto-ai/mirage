@@ -762,7 +762,8 @@
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "value": "monty"
@@ -775,7 +776,7 @@
             "source": "print('python', argv[0], argv[1])",
             "language": "python"
           },
-          "machine": "monty"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -867,7 +868,7 @@
             "source": "console.log('js', scriptArgs[0], scriptArgs[1]);",
             "language": "js"
           },
-          "machine": "quickjs"
+          "runtime": "quickjs"
         },
         {
           "op": "exec",
@@ -875,7 +876,7 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "unknown machine"
+              "stderr_contains": "no in_process machine runs js scripts on 'quickjs'"
             }
           }
         },
@@ -934,7 +935,7 @@
             "source": "print('back', argv[1])",
             "language": "python"
           },
-          "machine": "monty"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -958,7 +959,7 @@
             "source": "console.log('wrong')",
             "language": "js"
           },
-          "machine": "monty"
+          "machine": "host"
         },
         {
           "op": "exec",
@@ -966,7 +967,7 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "does not run js scripts"
+              "stderr_contains": "no host machine runs js scripts"
             }
           }
         },
@@ -1001,7 +1002,6 @@
           "op": "machines",
           "expect": {
             "value": [
-              "workspace",
               "monty",
               "quickjs"
             ]
@@ -1014,7 +1014,7 @@
             "source": "print('kept', argv[1])",
             "language": "python"
           },
-          "machine": "monty"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -1035,7 +1035,6 @@
           "op": "machines",
           "expect": {
             "value": [
-              "workspace",
               "quickjs"
             ]
           }
@@ -1057,7 +1056,7 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "unknown machine"
+              "stderr_contains": "no in_process machine runs python scripts"
             }
           }
         },
@@ -1072,14 +1071,15 @@
           "op": "remove_machine",
           "name": "workspace",
           "expect": {
-            "error": "cannot remove the workspace machine"
+            "error": "no machine: 'workspace'"
           }
         },
         {
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "value": "monty"
@@ -1588,7 +1588,8 @@
       "settings": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mode": "write",
@@ -2204,7 +2205,7 @@
             "source": "print('installed')",
             "language": "python"
           },
-          "machine": "monty"
+          "machine": "in_process"
         },
         {
           "op": "close"
@@ -2231,7 +2232,8 @@
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "error": "Workspace is closed"
@@ -7172,7 +7174,8 @@
         },
         "clis": {
           "git": {
-            "cli": "git"
+            "cli": "git",
+            "machine": "in_process"
           }
         }
       },

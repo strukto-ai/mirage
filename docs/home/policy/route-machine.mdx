@@ -4,10 +4,10 @@ description: Choose which machine runs each command line.
 icon: route
 ---
 
-Your agent types into one shell. A machine is what runs a command: a
-`worker` machine runs Python on Monty, a `docker` machine runs programs in a
-container, and `workspace` is Mirage itself. A route policy looks at each
-line and picks the machine for it.
+Your agent types into one shell. A machine is what runs a program: an
+`in_process` machine runs Python on Monty inside Mirage, and a `docker` machine
+runs programs in a container. A route policy looks at each line and picks the
+machine for it, or names `workspace` to keep the line in Mirage itself.
 
 ## Example
 
@@ -18,7 +18,8 @@ CPU container, and the GPU jobs on a GPU container:
 mode: exec
 machines:
   py:
-    provider: worker
+    provider: in_process
+    runtime: monty
   box:
     provider: docker
     container: my-box

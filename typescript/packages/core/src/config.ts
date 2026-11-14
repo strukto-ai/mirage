@@ -16,7 +16,7 @@ import type { CacheConfig } from './cache/file/config.ts'
 import type { IndexConfig, RedisIndexConfig } from './cache/index/config.ts'
 import { mcpCli } from './commands/cli/mcp/build.ts'
 import { NAME as MCP_CLI } from './commands/cli/mcp/constants.ts'
-import { CLI } from './commands/cli/types.ts'
+import { CLI, placementError } from './commands/cli/types.ts'
 import { CommandSpec } from './commands/spec/types.ts'
 import { IOConfig } from './io/config.ts'
 import {
@@ -35,7 +35,8 @@ import type { MachineHandle } from './machine/handle.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
-import { buildEntry, IN_PROCESS } from './runtime/table.ts'
+import { IN_PROCESS } from './runtime/constants.ts'
+import { buildEntry } from './runtime/table.ts'
 import { ScriptSource } from './runtime/types.ts'
 import { EnvVar, SecretSource, type EnvEntries, type SecretEntries } from './secrets/config.ts'
 import {
@@ -257,6 +258,16 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     for (const [name, block] of Object.entries(raw.clis)) {
       if (!isPlainObject(block)) throw new Error(`cli \`${name}\` must be a mapping`)
       validateDocument('config', block, `cli \`${name}\``, { names: 'cli' })
+      if (block.machine === undefined || block.machine === null)
+        throw new Error(`clis entry '${name}': machine is required`)
+      if (typeof block.machine !== 'string')
+        throw new Error(`clis entry '${name}': machine must be a string`)
+      const refused = placementError(
+        block.machine,
+        typeof block.runtime === 'string' ? block.runtime : null,
+        typeof block.script === 'string',
+      )
+      if (refused !== null) throw new Error(`clis entry '${name}': ${refused}`)
       // A pointer may only fill a config that a model validates, because
       // the model is what a snapshot redacts by. A script's config is
       // opaque: nothing declares which key is a credential, so the
@@ -584,8 +595,9 @@ export interface StoreBlock {
  * section key is the installed head word. Exactly one handler source:
  * `cli` names a registered spec tree; `script` references a program
  * file whose content is embedded at load (the docker build-context
- * model). `machine` optionally pins the machine whose runtime runs
- * the script; unset picks the first one speaking the script's
+ * model). `machine`, required, is the machine it runs on: `in_process`,
+ * the only one for a `cli` entry, or for a script also `host`; `runtime`
+ * names the runtime that runs a script there, else the first speaking its
  * language. `config` validates through the spec's configModel at
  * install time (fail loud). A CLI never takes a mode and never shares
  * a mount's credentials: a binary has no mode, the credential does.
@@ -593,7 +605,8 @@ export interface StoreBlock {
 interface CLIBlock {
   cli?: string
   script?: string
-  machine?: string
+  machine: string
+  runtime?: string | null
   config?: Record<string, unknown>
 }
 
@@ -935,7 +948,8 @@ async function cliEntry(
     return new CLI({
       spec: new CommandSpec({ name }),
       script: loadScriptSource(block.script, host),
-      machine: (block.machine as string | undefined) ?? null,
+      machine: block.machine as string,
+      runtime: (block.runtime as string | null | undefined) ?? null,
     })
   }
   const ref = block.cli as string
@@ -964,7 +978,7 @@ async function buildCliEntries(
       throw new Error(`clis entry '${name}' must be a mapping`)
     }
     const unknown = Object.keys(block).filter(
-      (k) => !['cli', 'script', 'machine', 'config'].includes(k),
+      (k) => !['cli', 'script', 'machine', 'runtime', 'config'].includes(k),
     )
     if (unknown.length > 0) {
       throw new Error(
@@ -976,11 +990,15 @@ async function buildCliEntries(
     if (hasCli === hasScript) {
       throw new Error(`clis entry '${name}' takes exactly one of cli or script`)
     }
-    if (block.machine !== undefined && !hasScript) {
-      throw new Error(`clis entry '${name}': machine pins where the script runs; it takes script`)
+    if (typeof block.machine !== 'string') {
+      throw new Error(`clis entry '${name}': machine is required`)
     }
-    if (block.machine !== undefined && typeof block.machine !== 'string') {
-      throw new Error(`clis entry '${name}': machine must be a string`)
+    if (
+      block.runtime !== undefined &&
+      block.runtime !== null &&
+      typeof block.runtime !== 'string'
+    ) {
+      throw new Error(`clis entry '${name}': runtime must be a string`)
     }
     if (block.config !== undefined && !isPlainObject(block.config)) {
       throw new Error(`clis entry '${name}': config must be a mapping`)

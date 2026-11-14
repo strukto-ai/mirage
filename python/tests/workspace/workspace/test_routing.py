@@ -370,7 +370,7 @@ async def test_each_machine_runs_what_it_captures():
         machines={"a": _box("a", "python3"), "b": _box("b", "node")},
     )
     try:
-        assert [r.name for r in ws.engines()] == ["a", "b", "workspace"]
+        assert [r.name for r in ws.engines()] == ["a", "b"]
         said = await ws.shell("python3 x.py; node x.js; python3 x.py | node")
         assert said.stdout == b"a\nb\nb\n"
         said = await ws.shell("node x.js", machine="b")

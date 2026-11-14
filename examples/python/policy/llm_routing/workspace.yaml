@@ -6,7 +6,8 @@ mounts:
 
 machines:
   monty:
-    provider: worker
+    provider: in_process
+    runtime: monty
   local:
     provider: host
 

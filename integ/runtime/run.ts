@@ -175,6 +175,7 @@ interface CliSpecJson {
   script: string
   language?: Language
   machine?: string
+  runtime?: string
   config?: Record<string, unknown>
 }
 
@@ -987,6 +988,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
       spec: new CommandSpec({ name }),
       script: new ScriptSource(entry.script, entry.language ?? 'python'),
       ...(entry.machine !== undefined ? { machine: entry.machine } : {}),
+      ...(entry.runtime !== undefined ? { runtime: entry.runtime } : {}),
     })
     ws.registerCli(name, spec, entry.config ?? null)
   }
@@ -1473,7 +1475,7 @@ const OPTIONAL_RUNTIMES = new Set([
 // `MACHINE_PROVIDERS`.
 // The machine provider each of Mirage's own runtimes runs on, when it is
 // not in process. Mirrors run.py ENGINE_PROVIDERS.
-const ENGINE_PROVIDERS: Record<string, string> = { monty: 'worker', local: 'host' }
+const ENGINE_PROVIDERS: Record<string, string> = { local: 'host' }
 const MACHINE_PROVIDERS = new Set([
   'docker',
   'ssh',

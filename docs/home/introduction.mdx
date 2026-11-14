@@ -26,8 +26,8 @@ virtual CLIs and a router that picks where each command runs.
 - **[Mirage Shell](/home/core/shell).** Compose files, CLIs and machines with pipes, redirects, variables and jobs.
 - **[Session profiles](/home/configuration/session).** Choose what each agent can run and which files and folders it can see.
 - **[Policy engine](/home/policy/policies).** Apply rules to commands, file operations and connections before they run.
-- **[Machines](/home/setup/machine/overview).** Run programs on a container, microVM, cloud sandbox or SSH host.
-- **[Runtimes](/home/setup/runtime/overview).** Run code in the workspace or on your host.
+- **[Machines](/home/setup/machine/overview).** Run programs in the workspace, on your host, or on a container, microVM, cloud sandbox or SSH host.
+- **[Runtimes](/home/setup/runtime/overview).** Run Python and JavaScript on an interpreter inside a machine.
 - **[Service credentials](/home/service-credentials).** Connect credentials from environment variables, dotenv, AWS Secrets Manager or 1Password.
 - **[Notifications](/home/notifications).** Notify agents about external file or directory changes in the virtual filesystem.
 
@@ -124,7 +124,7 @@ to use the same commands on your own data. Continue with the
     Mirage provides a Bash-compatible shell in your application. It supports common commands, pipes, redirects, variables and jobs. See the <a href="/home/core/shell">shell guide</a> for supported behavior and differences from Bash.
   </Accordion>
   <Accordion title="Is it sandboxed?">
-    The shell sees the files you mount. The Monty and QuickJS runtimes cannot access host files or the network. Other runtimes have different access; see <a href="/home/setup/runtime/overview#files">runtime file and network access</a> before choosing one.
+    The shell sees the files you mount. The Monty and QuickJS runtimes cannot access host files or the network. Other machines have different access; see <a href="/home/setup/machine/overview#files">machine file and network access</a> before choosing one.
   </Accordion>
   <Accordion title="What about latency and cost?">
     Operations use the APIs of the services you connect, so their latency and usage charges apply.

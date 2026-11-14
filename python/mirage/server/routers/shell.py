@@ -78,9 +78,7 @@ def _check_placement(ws: Workspace, req: ShellRequest) -> None:
     try:
         machine_bindings_for(ws.engines(), req.machine)
     except ValueError as exc:
-        names = [
-            e.name for e in ws.engines() if e.name != WorkspaceRuntime.name
-        ]
+        names = [e.name for e in ws.engines()]
         message = (
             f"machine must be one of {', '.join(names)}"
             if names

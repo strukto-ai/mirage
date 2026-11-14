@@ -82,8 +82,6 @@ def _machine(runtime: str) -> dict[str, dict[str, str]]:
     Args:
         runtime (str): registry name of the guest runtime.
     """
-    if runtime == "monty":
-        return {runtime: {"provider": "worker"}}
     return {runtime: {"provider": "in_process", "runtime": runtime}}
 
 

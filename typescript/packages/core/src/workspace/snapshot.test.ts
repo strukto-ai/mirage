@@ -319,7 +319,10 @@ describe('Workspace.snapshot / Workspace.load', () => {
 it('a copy rebuilds the machines built from an entry', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, machines: { py: { provider: 'worker', captures: ['@python'] } } },
+    {
+      mode: MountMode.EXEC,
+      machines: { py: { provider: 'in_process', runtime: 'monty', captures: ['@python'] } },
+    },
   )
   const copied = await ws.copy()
   try {
@@ -815,28 +818,31 @@ describe('cli registry snapshot', () => {
     const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
     expect(install?.cli.script?.source).toBe("print('hi')")
-    expect(install?.cli.machine).toBeNull()
+    expect(install?.cli.machine).toBe('in_process')
+    expect(install?.cli.runtime).toBeNull()
     await ws.close()
     await restored.close()
   })
 
-  it('carries the machine pin and the module bit through a snapshot', async () => {
+  it('carries the machine, the runtime and the module bit through a snapshot', async () => {
     const ws = buildWorkspace()
     ws.registerCli(
       'pager',
       new CLI({
         spec: new CommandSpec({ name: 'pager' }),
         script: new ScriptSource('export const x = 1', 'js', true),
-        machine: 'quickjs',
+        runtime: 'quickjs',
       }),
       null,
     )
     const state = await toStateDict(ws)
-    expect(state.clis?.[0]?.machine).toBe('quickjs')
+    expect(state.clis?.[0]?.machine).toBe('in_process')
+    expect(state.clis?.[0]?.runtime).toBe('quickjs')
     expect(state.clis?.[0]?.script?.module).toBe(true)
     const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
-    expect(install?.cli.machine).toBe('quickjs')
+    expect(install?.cli.machine).toBe('in_process')
+    expect(install?.cli.runtime).toBe('quickjs')
     expect(install?.cli.script?.module).toBe(true)
     expect(install?.cli.script?.language).toBe('js')
     await ws.close()

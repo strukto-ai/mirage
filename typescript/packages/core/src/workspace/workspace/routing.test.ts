@@ -382,7 +382,7 @@ describe('routing on machines', () => {
       { mode: MountMode.EXEC, machines: { a: box('a', 'python3'), b: box('b', 'node') } },
     )
     try {
-      expect(ws.engines().map((r) => r.name)).toEqual(['a', 'b', 'workspace'])
+      expect(ws.engines().map((r) => r.name)).toEqual(['a', 'b'])
       const said = await ws.shell('python3 x.py; node x.js; python3 x.py | node')
       expect(DEC.decode(said.stdout)).toBe('a\nb\nb\n')
       const named = await ws.shell('node x.js', { machine: 'b' })

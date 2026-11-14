@@ -16,7 +16,6 @@ import {
   provideMontyModule,
   type MontyModuleLike,
 } from '@struktoai/mirage-core/runtime/python/monty/loader'
-import { IN_PROCESS, placeRuntime } from '@struktoai/mirage-core/runtime/table'
 import * as monty from './generated/monty.js'
 import core2 from './generated/monty.component.core2.wasm'
 import core3 from './generated/monty.component.core3.wasm'
@@ -82,5 +81,3 @@ const MONTY: MontyModuleLike = {
 }
 
 provideMontyModule(() => Promise.resolve(MONTY))
-// Monty runs in this isolate, so here it is an `in_process` machine's runtime.
-placeRuntime('monty', IN_PROCESS)

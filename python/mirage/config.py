@@ -32,7 +32,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli import mcp
 from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
-from mirage.commands.cli.types import CLI
+from mirage.commands.cli.types import CLI, placement_error
 from mirage.commands.spec.types import CommandSpec
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
@@ -336,9 +336,11 @@ class CLIBlock(BaseModel):
     The section key is the installed head word. Exactly one handler
     source: ``cli`` names a registered spec tree; ``script`` references
     a program file whose content is embedded at load (the docker
-    build-context model). ``machine`` optionally pins the machine whose
-    engine runs the script; unset picks the first one speaking the
-    script's language. ``config`` validates through the spec's
+    build-context model). ``machine``, required, is the machine it runs
+    on: ``in_process``, the only one for a ``cli`` entry, or for a
+    script also ``host``; ``runtime`` names the runtime that runs a
+    script there, else the first speaking its language.
+    ``config`` validates through the spec's
     ``config_model`` at install time (fail loud). A CLI never takes a
     mode and never shares a mount's credentials: a binary has no mode,
     the credential does.
@@ -348,17 +350,19 @@ class CLIBlock(BaseModel):
 
     cli: str | None = None
     script: str | None = None
-    machine: str | None = None
+    machine: str
+    runtime: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _v_handler(self) -> "CLIBlock":
         if (self.cli is None) == (self.script is None):
             raise ValueError("a clis entry takes exactly one of cli or script")
-        if self.machine is not None and self.script is None:
-            raise ValueError(
-                "machine pins where the script runs; it takes script"
-            )
+        refused = placement_error(
+            self.machine, self.runtime, self.script is not None
+        )
+        if refused is not None:
+            raise ValueError(refused)
         # A pointer may only fill a config that a model validates,
         # because the model is what a snapshot redacts by. A script's
         # config is opaque: nothing declares which key is a credential,
@@ -673,6 +677,7 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
             spec=CommandSpec(name=name),
             script=_load_script_source(block.script),
             machine=block.machine,
+            runtime=block.runtime,
         )
     if block.cli is None:
         raise ValueError(f"clis entry {name!r} takes cli or script")
@@ -703,8 +708,8 @@ class WorkspaceConfig(BaseModel):
     clis: dict[str, CLIBlock] | None = None
     # The machines commands run on, by name, in capture order: each a
     # provider, what it captures and how to reach it ({provider: docker,
-    # container: tools, captures: ["@external"]}, {provider: worker,
-    # captures: ["@python"]}). Unset = none: the workspace runs every
+    # container: tools, captures: ["@external"]}, {provider: in_process,
+    # runtime: monty}). Unset = none: the workspace runs every
     # command itself.
     machines: dict[str, dict[str, Any]] | None = None
     # Per machine, the values `resolve_secrets` read into its entry,

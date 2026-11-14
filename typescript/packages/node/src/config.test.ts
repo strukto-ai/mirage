@@ -79,11 +79,11 @@ describe('absolutizeScripts', () => {
         '/pkg': { vfs: 'my-pkg/backends:WikiVFS' },
         '/ram': { vfs: 'ram' },
       },
-      clis: { tally: { cli: '../tools/tally.mjs:TALLY' } },
+      clis: { tally: { cli: '../tools/tally.mjs:TALLY', machine: 'in_process' } },
     }
     absolutizeScripts(raw, '/srv/deploy')
     const mounts = raw.mounts as Record<string, { vfs: string }>
-    const clis = raw.clis as Record<string, { cli: string }>
+    const clis = raw.clis as Record<string, { cli: string; machine: 'in_process' }>
     expect(mounts['/wiki']?.vfs).toBe('/srv/deploy/backends/wiki.mjs:WikiVFS')
     expect(mounts['/pkg']?.vfs).toBe('my-pkg/backends:WikiVFS')
     expect(mounts['/ram']?.vfs).toBe('ram')
@@ -127,7 +127,7 @@ describe('configToWorkspaceArgs', () => {
       loadWorkspaceConfig({
         mounts: { '/': { vfs: 'ram', mode: 'exec' } },
         mode: 'exec',
-        machines: { py: { provider: 'worker' } },
+        machines: { py: { provider: 'in_process', runtime: 'monty' } },
       }),
     )
     const ws = new Workspace(args.mounts, args.options)
@@ -334,12 +334,18 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
-  it('rejects a config key on the workspace machine', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { vfs: 'ram' } },
-      machines: { workspace: { provider: 'in_process', home: '/x' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime config key 'home'/)
+  it('refuses a workspace entry and an in_process entry with no runtime', async () => {
+    const mounts = { '/': { vfs: 'ram' } }
+    await expect(
+      configToWorkspaceArgs(
+        loadWorkspaceConfig({ mounts, machines: { workspace: { provider: 'in_process' } } }),
+      ),
+    ).rejects.toThrow(/reserved for the workspace/)
+    await expect(
+      configToWorkspaceArgs(
+        loadWorkspaceConfig({ mounts, machines: { py: { provider: 'in_process' } } }),
+      ),
+    ).rejects.toThrow(/names its runtime/)
   })
 
   it('resolves script paths against the config file dir', async () => {
@@ -358,27 +364,17 @@ describe('configToWorkspaceArgs', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('carries workspace captures through', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { vfs: 'ram' } },
-      machines: { workspace: { provider: 'in_process', captures: ['grep', 'cat'] } },
-    })
-    const args = await configToWorkspaceArgs(cfg)
-    const entry = machinesOf(args).workspace as { captures: readonly string[] }
-    expect([...entry.captures]).toEqual(['grep', 'cat'])
-  })
-
   it('takes max_memory as a size or a count of bytes', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      machines: { monty: { provider: 'worker', max_memory: 1048576 } },
+      machines: { monty: { provider: 'in_process', runtime: 'monty', max_memory: 1048576 } },
     })
     const args = await configToWorkspaceArgs(cfg)
     const monty = machinesOf(args).monty as { config: { maxMemory?: unknown } }
     expect(monty.config.maxMemory).toBe(1048576)
     const bad = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      machines: { monty: { provider: 'worker', max_memory: 'lots' } },
+      machines: { monty: { provider: 'in_process', runtime: 'monty', max_memory: 'lots' } },
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
   })
@@ -1154,8 +1150,8 @@ describe('clis section', () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       clis: {
-        sl: { cli: 'slack', config: { token: 'x' } },
-        bare: { cli: 'gws' },
+        sl: { cli: 'slack', machine: 'in_process', config: { token: 'x' } },
+        bare: { cli: 'gws', machine: 'in_process' },
       },
     })
     const args = await configToWorkspaceArgs(cfg)
@@ -1169,7 +1165,7 @@ describe('clis section', () => {
     expect(() =>
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
-        clis: { sl: { cli: 'slack', mode: 'write' } },
+        clis: { sl: { cli: 'slack', mode: 'write', machine: 'in_process' } },
       }),
     ).toThrow(/unknown cli `sl` key `mode`/)
   })
@@ -1180,7 +1176,7 @@ describe('clis section', () => {
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'clis:\n  pager:\n    script: pager.py\n    machine: monty\n' +
+        'clis:\n  pager:\n    script: pager.py\n    machine: in_process\n' +
         '    config:\n      page_size: 20\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
@@ -1189,7 +1185,8 @@ describe('clis section', () => {
     expect(spec).toBeInstanceOf(CLI)
     expect((spec as CLI).spec.name).toBe('pager')
     expect((spec as CLI).script).toEqual(new ScriptSource("print('page')"))
-    expect((spec as CLI).machine).toBe('monty')
+    expect((spec as CLI).machine).toBe('in_process')
+    expect((spec as CLI).runtime).toBeNull()
     expect(config).toEqual({ page_size: 20 })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1199,7 +1196,7 @@ describe('clis section', () => {
     writeFileSync(join(dir, 'pager.mjs'), "console.log('page')")
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nclis:\n  pager:\n    script: pager.mjs\n',
+      'mounts:\n  /data:\n    vfs: ram\nclis:\n  pager:\n    script: pager.mjs\n    machine: in_process\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
@@ -1216,7 +1213,7 @@ describe('clis section', () => {
     writeFileSync(join(dir, 'pager.js'), "console.log('page')")
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nclis:\n  pager:\n    script: pager.js\n',
+      'mounts:\n  /data:\n    vfs: ram\nclis:\n  pager:\n    script: pager.js\n    machine: in_process\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
@@ -1229,22 +1226,49 @@ describe('clis section', () => {
   it('a clis entry takes exactly one of cli or script', async () => {
     const both = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { cli: 'slack', script: 'pager.py' } },
+      clis: { sl: { cli: 'slack', script: 'pager.py', machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(both)).rejects.toThrow(/exactly one of cli or script/)
     const neither = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { config: { token: 'x' } } },
+      clis: { sl: { machine: 'in_process', config: { token: 'x' } } },
     })
     await expect(configToWorkspaceArgs(neither)).rejects.toThrow(/exactly one of cli or script/)
   })
 
-  it('machine takes script', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { cli: 'slack', machine: 'monty' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
+  it('a cli entry runs in process only', async () => {
+    const mounts = { '/data': { vfs: 'ram' } }
+    await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', machine: 'in_process' } } }),
+    )
+    expect(() =>
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', machine: 'host' } } }),
+    ).toThrow(/runs on in_process only/)
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts,
+        clis: { sl: { cli: 'slack', runtime: 'monty', machine: 'in_process' } },
+      }),
+    ).toThrow(/it takes script/)
+    await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts,
+        clis: { sl: { cli: 'slack', machine: 'in_process', runtime: null } },
+      }),
+    )
+  })
+
+  it('a clis entry names its machine', () => {
+    const mounts = { '/data': { vfs: 'ram' } }
+    expect(() => loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack' } } })).toThrow(
+      /machine is required/,
+    )
+    expect(() =>
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', machine: null } } }),
+    ).toThrow(/machine is required/)
+    expect(() => loadWorkspaceConfig({ mounts, clis: { pager: { script: 'pager.py' } } })).toThrow(
+      /machine is required/,
+    )
   })
 
   it('a script entry refuses a secrets pointer', () => {
@@ -1256,14 +1280,18 @@ describe('clis section', () => {
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
         clis: {
-          pager: { script: 'pager.py', config: { token: { from: 'env', key: 'PAGER_TOKEN' } } },
+          pager: {
+            script: 'pager.py',
+            machine: 'in_process',
+            config: { token: { from: 'env', key: 'PAGER_TOKEN' } },
+          },
         },
       }),
     ).toThrow(/clis entry 'pager'.*opaque/)
     // A literal in a script's config is the script's own business.
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { pager: { script: 'pager.py', config: { verbose: true } } },
+      clis: { pager: { script: 'pager.py', machine: 'in_process', config: { verbose: true } } },
     })
     expect(cfg.clis?.pager?.config).toEqual({ verbose: true })
   })
@@ -1320,7 +1348,7 @@ describe('machines runtime: reference', () => {
     const ws = new Workspace(args.mounts, args.options)
     const copied = await ws.copy()
     try {
-      expect(copied.engines().map((r) => r.name)).toEqual(['gpu', 'workspace'])
+      expect(copied.engines().map((r) => r.name)).toEqual(['gpu'])
       const run = await copied.shell('nvidia-smi -L')
       expect(new TextDecoder().decode(run.stdout)).toMatch(/^box:/)
     } finally {
@@ -1451,7 +1479,7 @@ describe('clis cli: reference', () => {
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'clis:\n  tally:\n    cli: ./tally.mjs:TALLY\n    config:\n      unit: kg\n',
+        'clis:\n  tally:\n    cli: ./tally.mjs:TALLY\n    machine: in_process\n    config:\n      unit: kg\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
@@ -1471,7 +1499,13 @@ describe('clis cli: reference', () => {
     )
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: `${join(dir, 'foreign.mjs')}:TALLY`, config: { unit: 'kg' } } },
+      clis: {
+        tally: {
+          cli: `${join(dir, 'foreign.mjs')}:TALLY`,
+          machine: 'in_process',
+          config: { unit: 'kg' },
+        },
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
     const [cli, config] = args.options.clis?.tally ?? []
@@ -1492,7 +1526,7 @@ describe('clis cli: reference', () => {
     writeFileSync(join(dir, 'tally.mjs'), SPEC)
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nclis:\n  tally:\n    cli: ./tally.mjs:TALLY\n',
+      'mounts:\n  /data:\n    vfs: ram\nclis:\n  tally:\n    cli: ./tally.mjs:TALLY\n    machine: in_process\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     expect(cfg.clis?.tally?.cli).toBe(`${join(dir, 'tally.mjs')}:TALLY`)
@@ -1505,7 +1539,7 @@ describe('clis cli: reference', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nclis:\n  jira:\n    cli: my-clis:JIRA\n',
+      'mounts:\n  /data:\n    vfs: ram\nclis:\n  jira:\n    cli: my-clis:JIRA\n    machine: in_process\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     expect(cfg.clis?.jira?.cli).toBe('my-clis:JIRA')
@@ -1515,7 +1549,7 @@ describe('clis cli: reference', () => {
   it('a bare name still travels as a name', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { cli: 'slack' } },
+      clis: { sl: { cli: 'slack', machine: 'in_process' } },
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.clis?.sl?.[0]).toBe('slack')
@@ -1526,7 +1560,7 @@ describe('clis cli: reference', () => {
     writeFileSync(join(dir, 'nope.mjs'), 'export const TALLY = {name: "tally"}\n')
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: `${join(dir, 'nope.mjs')}:TALLY` } },
+      clis: { tally: { cli: `${join(dir, 'nope.mjs')}:TALLY`, machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
@@ -1543,7 +1577,7 @@ describe('clis cli: reference', () => {
     )
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: `${join(dir, 'impostor.mjs')}:TALLY` } },
+      clis: { tally: { cli: `${join(dir, 'impostor.mjs')}:TALLY`, machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
@@ -1558,7 +1592,7 @@ describe('clis cli: reference', () => {
     )
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: `${join(dir, 'deep.mjs')}:TALLY` } },
+      clis: { tally: { cli: `${join(dir, 'deep.mjs')}:TALLY`, machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLI/)
     rmSync(dir, { recursive: true, force: true })
@@ -1572,8 +1606,8 @@ describe('clis cli: reference', () => {
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\nclis:\n' +
-        '  a:\n    cli: "@scope/my-clis:JIRA"\n' +
-        '  b:\n    cli: my-clis/specs:JIRA\n',
+        '  a:\n    cli: "@scope/my-clis:JIRA"\n    machine: in_process\n' +
+        '  b:\n    cli: my-clis/specs:JIRA\n    machine: in_process\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     expect(cfg.clis?.a?.cli).toBe('@scope/my-clis:JIRA')
@@ -1584,7 +1618,7 @@ describe('clis cli: reference', () => {
   it('reports a ref whose file is missing', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: '/nonexistent/tally.mjs:TALLY' } },
+      clis: { tally: { cli: '/nonexistent/tally.mjs:TALLY', machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/cannot load script/)
   })
@@ -1594,7 +1628,7 @@ describe('clis cli: reference', () => {
     writeFileSync(join(dir, 'other.mjs'), 'export const OTHER = 1\n')
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { tally: { cli: `${join(dir, 'other.mjs')}:TALLY` } },
+      clis: { tally: { cli: `${join(dir, 'other.mjs')}:TALLY`, machine: 'in_process' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/"TALLY" not found in/)
     rmSync(dir, { recursive: true, force: true })
@@ -1996,6 +2030,7 @@ describe('a mount or CLI credential from the secrets plane', () => {
         clis: {
           sl: {
             cli: 'slack',
+            machine: 'in_process',
             config: { token: { from: 'ambient', key: 'CONFIG_LOADER_CLI_PROBE' } },
           },
         },
@@ -2011,7 +2046,11 @@ describe('a mount or CLI credential from the secrets plane', () => {
       loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
         clis: {
-          sl: { cli: 'slack', config: { token: { from: 'env', key: 'CONFIG_LOADER_BARE_PROBE' } } },
+          sl: {
+            cli: 'slack',
+            machine: 'in_process',
+            config: { token: { from: 'env', key: 'CONFIG_LOADER_BARE_PROBE' } },
+          },
         },
       }),
     )
@@ -2191,7 +2230,11 @@ describe('clis cli: mcp', () => {
         {
           mounts: {},
           clis: {
-            fx: { cli: 'mcp', config: { url: fake.url, auth: { type: 'bearer', token } } },
+            fx: {
+              cli: 'mcp',
+              machine: 'in_process',
+              config: { url: fake.url, auth: { type: 'bearer', token } },
+            },
           },
         },
         { FX_TOKEN: TOKEN },
@@ -2218,7 +2261,11 @@ describe('clis cli: mcp', () => {
         mounts: {},
         network: false,
         clis: {
-          fx: { cli: 'mcp', config: { url: fake.url, auth: { type: 'bearer', token: TOKEN } } },
+          fx: {
+            cli: 'mcp',
+            machine: 'in_process',
+            config: { url: fake.url, auth: { type: 'bearer', token: TOKEN } },
+          },
         },
       })
       await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/cannot list/)

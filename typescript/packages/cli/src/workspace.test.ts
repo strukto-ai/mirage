@@ -57,7 +57,7 @@ describe('mirage workspace create', () => {
     writeFileSync(
       config,
       'mounts:\n  /:\n    vfs: ram\n' +
-        'clis:\n  tally:\n    script: ./tally.py\n' +
+        'clis:\n  tally:\n    script: ./tally.py\n    machine: in_process\n' +
         'profiles:\n  reviewer:\n    policy:\n      pre_command:\n' +
         '        - script: guard.py\n        - script: ./local.py\n',
     )
@@ -67,7 +67,7 @@ describe('mirage workspace create', () => {
       const body = JSON.parse(seen[0]?.body ?? '') as { config: unknown }
       expect(body.config).toEqual({
         mounts: { '/': { vfs: 'ram' } },
-        clis: { tally: { script: join(dir, 'tally.py') } },
+        clis: { tally: { script: join(dir, 'tally.py'), machine: 'in_process' } },
         profiles: {
           reviewer: {
             policy: { pre_command: [{ script: 'guard.py' }, { script: join(dir, 'local.py') }] },

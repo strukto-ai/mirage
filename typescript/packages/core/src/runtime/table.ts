@@ -22,6 +22,7 @@ import type { RouteDecision } from './types.ts'
 import {
   EXTERNAL_COMMANDS,
   HOST,
+  IN_PROCESS,
   JS_GROUP,
   LANGUAGE_COMMANDS,
   PYTHON_GROUP,
@@ -64,46 +65,32 @@ const RUNTIME_HINTS: Record<string, string> = {
     NODE_RUNTIMES.map((name) => [
       name,
       "a host machine's programs run through @struktoai/mirage-node; import that package " +
-        "to register them. Browser worlds run 'quickjs' and 'pyodide' in process and " +
-        "'monty' on a worker",
+        "to register them. Browser worlds run 'monty', 'pyodide' and 'quickjs' in process",
     ]),
   ),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript runs " +
-    "'quickjs' and 'pyodide' in process and 'monty' on a worker",
+    "'monty', 'pyodide' and 'quickjs' in process",
 }
 
 /**
  * The providers a `machines:` entry names for a runtime of Mirage's own
- * rather than a machine it reaches: in its process, in worker processes it
- * spawns, or as native programs on its host.
+ * rather than a machine it reaches: in its process, or as native programs
+ * on its host.
  */
-export const IN_PROCESS = 'in_process'
-export const WORKER = 'worker'
-const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, WORKER, HOST]
+const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST]
 
 // Where each builtin runtime runs, when that is not in process. Null
 // prototype: names come from config.
 const PLACED: Record<string, string> = Object.assign(
   Object.create(null) as Record<string, string>,
   {
-    monty: WORKER,
     local: HOST,
     sandlock: HOST,
     remote: 'a machine provider',
     workspace: IN_PROCESS,
   },
 )
-
-/**
- * Say where a runtime runs on this host. A host package calls it when it
- * swaps a runtime's engine: Cloudflare runs Monty in its isolate, so there
- * monty is an `in_process` runtime, not a worker's.
- */
-export function placeRuntime(name: string, provider: string): void {
-  if (provider === IN_PROCESS) Reflect.deleteProperty(PLACED, name)
-  else PLACED[name] = provider
-}
 
 /** A runtime class, as the registry holds one. */
 type RuntimeClass = (new (options?: RuntimeOptions<never>) => Runtime) &
@@ -175,23 +162,25 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * handle and the remote runtime that runs its `captures` through it. An
  * engine provider builds the runtime alone: `in_process` the one its
  * `runtime` names (a registered name, or a class a `source:Class` reference
- * loaded; none for the shell, which only `workspace` may be),
- * `worker` monty, `host` the host's own programs, confined by sandlock when a
+ * loaded), `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
  * config. Mirrors Python's `build_entry`.
  *
  * Throws:
- *   Error: `workspace` for anything but the shell, a runtime its provider
- *   does not run, a `sandbox` that is not a mapping, or what `buildMachine`
+ *   Error: the reserved name `workspace` or the workspace's own runtime, a
+ *   runtime its provider does not run, an `in_process` entry with no
+ *   `runtime`, a `sandbox` that is not a mapping, or what `buildMachine`
  *   refuses.
  */
 export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
+  if (name === 'workspace') throw new Error(`machine name '${name}' is reserved for the workspace`)
+  if (spec instanceof WorkspaceRuntime)
+    throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
   let runtime: Runtime
   if (spec instanceof Runtime) {
     runtime = spec
   } else if (spec instanceof MachineHandle || !ENGINE_PROVIDERS.includes(spec.provider as string)) {
     const handle = buildMachine(name, spec)
-    if (name === 'workspace') throw new Error(`'${name}' is the shell's machine name`)
     const captures = (handle.config as { captures?: readonly string[] }).captures
     return [handle, new RemoteRuntime(name, captures === undefined ? {} : { captures })]
   } else {
@@ -209,10 +198,10 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       ...(captures === undefined ? {} : { captures: captures as string[] }),
       ...(Object.keys(config).length > 0 ? { config: config as never } : {}),
     })
+    if (runtime instanceof WorkspaceRuntime)
+      throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
     BUILT_FROM.set(runtime, { ...spec })
   }
-  if ((name === 'workspace') !== runtime instanceof WorkspaceRuntime)
-    throw new Error(`'${name}' is the shell's machine name`)
   runtime.name = name
   return [null, runtime]
 }
@@ -230,16 +219,10 @@ function runtimeFor(
       throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
   }
-  if (provider === WORKER) {
-    if (runtime !== undefined && runtime !== 'monty') {
-      const named = typeof runtime === 'function' ? runtime.name : runtime
-      throw new Error(`machine '${name}': a worker runs 'monty', not '${named}'`)
-    }
-    if (PLACED.monty !== WORKER)
-      throw new Error(`machine '${name}': monty runs in process here, not on a worker`)
-    return runtimeClass('monty')
-  }
-  if (runtime === undefined) return WorkspaceRuntime
+  if (runtime === undefined)
+    throw new Error(`machine '${name}': an ${IN_PROCESS} machine names its runtime`)
+  if (runtime === 'workspace')
+    throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
   if (typeof runtime === 'function') {
     if (!(runtime.prototype instanceof Runtime))
       throw new Error(`machine '${name}': its runtime is not a Runtime subclass`)
@@ -254,6 +237,24 @@ function runtimeFor(
 /** Every runtime an `in_process` machine may name. */
 export function inProcessRuntimes(): string[] {
   return knownRuntimes().filter((name) => !(name in PLACED))
+}
+
+/**
+ * The provider a runtime runs on and the name it is registered under. An
+ * entry built from a `machines:` spec keeps the provider and the runtime
+ * name it was built with; any other runtime is looked up by its class. A
+ * runtime registered under no name, such as a class a `source:Class`
+ * reference loaded, runs in process. Mirrors Python's `placement`.
+ */
+export function placement(runtime: Runtime): [string, string | null] {
+  const spec = builtFrom(runtime)
+  const named = spec?.runtime
+  if (spec !== undefined && typeof named === 'string' && !named.includes(':'))
+    return [String(spec.provider), named]
+  const name = Object.keys(NAMED).find((key) => runtime.constructor === NAMED[key]) ?? null
+  if (spec !== undefined) return [String(spec.provider), name]
+  if (name === null) return [IN_PROCESS, null]
+  return [PLACED[name] ?? IN_PROCESS, name]
 }
 
 /**
@@ -464,13 +465,12 @@ export function routed(
 /**
  * The runtime that serves commands no entry captures, if any.
  *
- * That is the world's WorkspaceRuntime, unless it declares captures (then it
- * is an ordinary capturer and nothing is catch-all) or it is not among
- * the given entries.
+ * That is the world's WorkspaceRuntime, unless it is not among the given
+ * entries.
  */
 export function catchAll(entries: readonly Runtime[]): Runtime | null {
   for (const entry of entries) {
-    if (entry instanceof WorkspaceRuntime && !entry.restricted) return entry
+    if (entry instanceof WorkspaceRuntime) return entry
   }
   return null
 }

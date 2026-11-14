@@ -119,13 +119,9 @@ def test_duplicate_entries_fail_loud():
 
 
 def test_config_entries_build_instances():
-    entries = _build_machines(
-        {"box": {"provider": "host"}, "workspace": {"provider": "in_process"}},
-        {},
-    )
+    entries = _build_machines({"box": {"provider": "host"}}, {})
     assert isinstance(entries["box"], LocalRuntime)
     assert entries["box"].name == "box"
-    assert isinstance(entries["workspace"], WorkspaceRuntime)
 
 
 def test_config_entry_needs_a_provider():
@@ -133,11 +129,27 @@ def test_config_entry_needs_a_provider():
         _build_machines({"box": {"home": "/x"}}, {})
 
 
-def test_config_workspace_entry_takes_no_options():
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _build_machines(
-            {"workspace": {"provider": "in_process", "home": "/x"}}, {}
-        )
+@pytest.mark.parametrize(
+    ("machines", "refusal"),
+    [
+        (
+            {"workspace": {"provider": "in_process"}},
+            "reserved for the workspace",
+        ),
+        ({"workspace": {"provider": "host"}}, "reserved for the workspace"),
+        ({"py": {"provider": "in_process"}}, "names its runtime"),
+    ],
+)
+def test_config_refuses_a_workspace_entry(machines, refusal):
+    with pytest.raises(ValueError, match=refusal):
+        Workspace({"/": RAMVFS()}, machines=machines)
+
+
+def test_the_workspace_runtime_is_not_a_machine():
+    with pytest.raises(ValueError, match="not a machine"):
+        Workspace({"/": RAMVFS()}, machines={"x": WorkspaceRuntime()})
+    with pytest.raises(ValueError, match="reserved for the workspace"):
+        Workspace({"/": RAMVFS()}, machines=[WorkspaceRuntime()])
 
 
 class AlphaRuntime(PythonRuntime):
@@ -243,63 +255,22 @@ async def test_runtime_arg_beats_the_route(routed_ws):
 
 
 @pytest.mark.asyncio
-async def test_workspace_explicit_captures_restrict_the_workspace():
+async def test_an_allow_list_narrows_what_the_workspace_runs():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
+        machines=[AlphaRuntime()],
+        profiles={"narrow": {"commands": {"allow": ["echo", "python3"]}}},
+        profile="narrow",
     )
     try:
         io = await ws.shell("echo listed")
         assert await materialize(io.stdout) == b"listed\n"
         io = await ws.shell("ls /")
         assert io.exit_code == 126
-        err = await materialize(io.stderr)
-        assert err == b"ls: no runtime accepted this line\n"
+        assert await materialize(io.stderr) == b"ls: Permission denied\n"
         io = await ws.shell("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
-    finally:
-        await ws.close()
-
-
-def test_config_workspace_entry_carries_captures():
-    entries = _build_machines(
-        {"workspace": {"provider": "in_process", "captures": ["grep", "cat"]}},
-        {},
-    )
-    assert isinstance(entries["workspace"], WorkspaceRuntime)
-    assert entries["workspace"].captures == ("grep", "cat")
-
-
-@pytest.mark.asyncio
-async def test_empty_captures_serve_nothing():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        machines=[AlphaRuntime(), WorkspaceRuntime(captures=())],
-    )
-    try:
-        io = await ws.shell("ls /")
-        assert io.exit_code == 126
-        io = await ws.shell("python3 -c 'x'")
-        assert await materialize(io.stdout) == b"ran-alpha\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_workspace_explicit_captures_restrict_under_routing():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        machines=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
-        route_policy=lambda ctx: None,
-    )
-    try:
-        io = await ws.shell("echo routed-ok")
-        assert await materialize(io.stdout) == b"routed-ok\n"
-        io = await ws.shell("ls /")
-        assert io.exit_code == 126
     finally:
         await ws.close()
 

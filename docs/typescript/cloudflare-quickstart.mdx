@@ -116,7 +116,7 @@ MIRAGE_AUTH_MODE = "token"
 npx wrangler secret put MIRAGE_AUTH_TOKEN
 curl -s localhost:8787/v1/workspaces -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram"}}, "runtimes": ["workspace", "monty"]}}'
+  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram"}}, "machines": {"py": {"provider": "in_process", "runtime": "monty"}}}}'
 curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' -d '{"command": "python3 -c \"print(6 * 7)\""}'
 ```

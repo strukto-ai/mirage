@@ -162,8 +162,8 @@ export interface WorkspaceOptions {
   /**
    * The machines commands run on, by name, in capture order: each a handle,
    * a runtime, or the entry as config spells it (`{ provider: 'docker',
-   * container: 'tools', captures: ['@external'] }`, `{ provider: 'worker',
-   * captures: ['@python'] }`); or handles and runtimes named by their own
+   * container: 'tools', captures: ['@external'] }`, `{ provider: 'in_process',
+   * runtime: 'monty' }`); or handles and runtimes named by their own
    * `name`. Unset = none: the workspace runs every command itself. Mirrors
    * Python's `machines`.
    */

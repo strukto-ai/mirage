@@ -149,6 +149,7 @@ async def test_a_yaml_mcp_entry_builds_its_cli(tmp_path, monkeypatch):
             "clis:\n"
             "  fx:\n"
             "    cli: mcp\n"
+            "    machine: in_process\n"
             "    config:\n"
             f"      url: {fake.url}\n"
             "      auth: {type: bearer, token: {from: env, key: FX_TOKEN}}\n"

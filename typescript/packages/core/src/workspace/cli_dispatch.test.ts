@@ -205,6 +205,7 @@ function pagerSpec(source: string, language: Language = 'python'): CLI {
   return new CLI({
     spec: new CommandSpec({ name: 'pager' }),
     script: new ScriptSource(source, language),
+    machine: 'in_process',
   })
 }
 

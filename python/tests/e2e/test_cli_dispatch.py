@@ -215,7 +215,11 @@ async def test_yaml_clis_section_installs_through_load_config():
             {
                 "mounts": {"/data": {"vfs": "ram"}},
                 "clis": {
-                    "sl": {"cli": "slackish", "config": {"token": "yaml"}}
+                    "sl": {
+                        "cli": "slackish",
+                        "machine": "in_process",
+                        "config": {"token": "yaml"},
+                    }
                 },
             }
         )
@@ -251,7 +255,11 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "sl": {"cli": f"{script}:TREE", "config": {"token": "ref"}}
+                "sl": {
+                    "cli": f"{script}:TREE",
+                    "machine": "in_process",
+                    "config": {"token": "ref"},
+                }
             },
         }
     )
@@ -266,7 +274,7 @@ async def test_yaml_unknown_cli_key_fails_loud():
     cfg = load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "clis": {"x": {"cli": "nope"}},
+            "clis": {"x": {"cli": "nope", "machine": "in_process"}},
         }
     )
     with pytest.raises(ValueError, match="unknown cli 'nope'"):
@@ -486,6 +494,7 @@ def pager_spec(source: str, language: str = "python") -> CLI:
     return CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource(source, language=language),
+        machine="in_process",
     )
 
 
@@ -556,7 +565,7 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("import sys\nprint('local', sys.argv[1])"),
-        machine="local",
+        machine="host",
     )
     ws.register_cli("pager", spec)
     code, out, _ = await run(ws, "pager report.txt")
@@ -615,9 +624,15 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "pager": {"script": str(script), "config": {"width": 80}}
+                "pager": {
+                    "script": str(script),
+                    "machine": "in_process",
+                    "config": {"width": 80},
+                }
             },
-            "machines": {"monty": {"provider": "worker"}},
+            "machines": {
+                "monty": {"provider": "in_process", "runtime": "monty"}
+            },
         }
     )
     ws = Workspace(**cfg.to_workspace_kwargs())
