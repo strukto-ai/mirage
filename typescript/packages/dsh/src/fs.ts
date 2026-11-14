@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { realpathSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
+import { posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
@@ -31,11 +30,8 @@ import type {
 } from '@deepseek-ai/dsh-fs'
 import { applyHunks } from '@deepseek-ai/dsh-fs-patch'
 import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
-import { DiskVFS } from '@struktoai/mirage-node'
-import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
-import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
@@ -43,6 +39,7 @@ import { makeStorageKey } from '@struktoai/mirage-core/workspace/mount/storage'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
+import type { RemoteFiles } from './remote/client.ts'
 import {
   applyLiteralEdit,
   decodeStrictText,
@@ -170,97 +167,6 @@ function tooLarge(displayPath: string, maxBytes: number, size?: number): FsError
 }
 
 /**
- * Whether a `relative()` result leaves the directory it was taken from.
- *
- * Only a bare `..` or a leading `..` SEGMENT escapes: a name may itself
- * begin with two dots (`..draft`), and testing the prefix alone reads
- * that ordinary file as an escape.
- *
- * @param rel the result of `relative(root, target)`.
- * @returns true when the target lies outside the root.
- */
-function escapesRoot(rel: string): boolean {
-  // An absolute answer means there was no relative route at all, which on
-  // win32 is a different drive.
-  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)
-}
-
-/**
- * A host path with its symlinks resolved, as a disk mount's root is.
- *
- * A disk mount keeps the real path of its root, so a host path spelled
- * through a link (`/tmp` and `/var` on macOS) would otherwise never fall
- * under it. Every link is followed, the last component's too: a disk
- * mount neither lists nor opens a link below its root, so only the
- * file a link points at has a usable workspace path. The deepest
- * ancestor that resolves is resolved, so a path that names nothing yet,
- * or loops, keeps the rest as written.
- *
- * @param hostPath an absolute host path.
- * @returns the path to compare against a disk mount's root.
- */
-function physicalPath(hostPath: string): string {
-  const lexical = resolve(hostPath)
-  const rest: string[] = []
-  let head = lexical
-  for (;;) {
-    try {
-      return join(realpathSync(head), ...rest)
-    } catch (err) {
-      const code = (err as { code?: unknown }).code
-      if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') throw err
-    }
-    const parent = dirname(head)
-    if (parent === head) return lexical
-    rest.unshift(basename(head))
-    head = parent
-  }
-}
-
-/**
- * The prefix of the mount a virtual path actually dispatches to.
- *
- * The deepest mount whose prefix covers the path wins, which is the rule
- * dispatch itself follows; a mount nested inside another's tree owns its
- * subtree outright.
- *
- * @param virtual an absolute virtual path.
- * @param mounts the workspace's mount table.
- * @returns the winning mount's prefix, or undefined when none covers it.
- */
-function ownerPrefixOf(virtual: string, mounts: readonly MountEntry[]): string | undefined {
-  const probe = virtual.endsWith('/') ? virtual : `${virtual}/`
-  let winner: string | undefined
-  for (const mount of mounts) {
-    if (!probe.startsWith(mount.prefix)) continue
-    if (winner === undefined || mount.prefix.length > winner.length) winner = mount.prefix
-  }
-  return winner
-}
-
-/**
- * Whether a namespace symlink stands between a virtual path and the backend.
- *
- * `follow` resolves link components including the final one, so a path it
- * rewrites is one an ordinary read would send somewhere else. A chain it
- * refuses to resolve (a cycle) is not mappable either, and is declined
- * rather than raised: this is a lookup, and the honest answer to "does
- * this host file have a virtual path" is then no.
- *
- * @param links the namespace link table, or null when none is wired.
- * @param virtual the candidate virtual path.
- * @returns true when the path must not be offered.
- */
-function shadowedByLink(links: NamespaceLinks | null, virtual: string): boolean {
-  if (links === null) return false
-  try {
-    return links.follow(virtual) !== virtual
-  } catch {
-    return true
-  }
-}
-
-/**
  * Mirage-backed implementation of `ctx.fs`. Targets are canonical virtual
  * paths (namespace symlinks followed), every operation walks the workspace
  * dispatcher — session grants, admission policies, cache read-through and
@@ -274,10 +180,60 @@ function shadowedByLink(links: NamespaceLinks | null, virtual: string): boolean 
  * read from a remote backend therefore runs to completion after the
  * signal fires, and the caller learns of the abort when it returns.
  */
+/**
+ * The file calls this adapter makes: a workspace's own `Files` here, or the
+ * same calls made over a Mirage server's API.
+ */
+const MAX_LINK_HOPS = 40
+
+/**
+ * A path on a remote world with every link in it resolved, one component at
+ * a time, through the server's `readlink`. A component that is not a link,
+ * or does not exist yet, is kept as written.
+ *
+ * @param files the remote file calls.
+ * @param path an absolute workspace path.
+ * @returns the path with its links resolved.
+ */
+async function remoteRealpath(files: RemoteFiles, path: string): Promise<string> {
+  let resolved = '/'
+  let rest = path.split('/').filter((part) => part !== '')
+  let hops = 0
+  for (let name = rest.shift(); name !== undefined; name = rest.shift()) {
+    const candidate = posix.join(resolved, name)
+    const target = await files.readlink(candidate)
+    if (target === null) {
+      resolved = candidate
+      continue
+    }
+    hops += 1
+    if (hops > MAX_LINK_HOPS) {
+      throw new FsError(
+        `cannot resolve "${path}": too many levels of symbolic links`,
+        'FS_IO_ERROR',
+      )
+    }
+    rest = [
+      ...posix
+        .resolve(resolved, target)
+        .split('/')
+        .filter((part) => part !== ''),
+      ...rest,
+    ]
+    resolved = '/'
+  }
+  return resolved
+}
+
+type FsOps = Pick<Files, 'stat' | 'read' | 'write' | 'unlink' | 'isDir' | 'readdir'> | RemoteFiles
+
 export class MirageFileSystem extends FileSystem {
   static readonly inject = ['mirage']
 
-  private fsOps: Files | null = null
+  private fsOps: FsOps | null = null
+  // The local `Files` behind `fsOps`, whose reader follows namespace links;
+  // null for a remote world, where the server follows them on every call.
+  private localFiles: Files | null = null
   private readonly cwd: string
   private readonly sessionId: string | undefined
   private readonly diffBasisMaxBytes: number
@@ -356,12 +312,20 @@ export class MirageFileSystem extends FileSystem {
   // until its first op loads both. This adapter reads the links off the
   // dispatcher's reader outside a dispatch, so it hydrates before they are
   // consulted, or a persisted hide would be judged by the wrong session.
-  private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
+  private async files(signal?: AbortSignal, operation = 'ready'): Promise<FsOps> {
     if (this.fsOps === null) {
-      const host = await this.ctx.mirage.ready
-      await host.ensureSessionsLoaded()
-      await host.namespace.ensureLoaded()
-      this.fsOps = this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
+      const remote = this.ctx.mirage.remote
+      if (remote !== null) {
+        this.fsOps = remote.files(this.sessionId)
+      } else {
+        const host = await this.ctx.mirage.ready
+        await host.ensureSessionsLoaded()
+        await host.namespace.ensureLoaded()
+        const files =
+          this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
+        this.localFiles = files
+        this.fsOps = files
+      }
     }
     assertNotAborted(signal, operation)
     return this.fsOps
@@ -373,11 +337,25 @@ export class MirageFileSystem extends FileSystem {
    * (the typed path reaches the dispatcher and is refused as absent, not
    * resolved to the visible target it points at), and never listed.
    */
-  private get reader(): ReturnType<typeof readerOf> {
+  private get reader(): ReturnType<typeof readerOf> | null {
     if (this.fsOps === null) {
       throw new Error('mirage: filesystem used before the workspace is ready')
     }
-    return readerOf(this.fsOps)
+    return this.localFiles === null ? null : readerOf(this.localFiles)
+  }
+
+  /**
+   * The target of a link at `path`, read as this adapter's session sees it,
+   * or null when no link is there.
+   *
+   * @param path a path whose parent is already followed.
+   * @returns the link's target, or null.
+   */
+  private async readlink(path: string): Promise<string | null> {
+    const reader = this.reader
+    if (reader !== null) return reader.readlink(path)
+    const ops = this.fsOps as RemoteFiles
+    return ops.readlink(path)
   }
 
   /**
@@ -442,9 +420,13 @@ export class MirageFileSystem extends FileSystem {
     return posix.resolve(base, path)
   }
 
+  // A remote world's links are followed by the server on every call, so a
+  // path is its own target here.
   private follow(path: string): string {
+    const reader = this.reader
+    if (reader === null) return posixNormpath(path)
     try {
-      return posixNormpath(this.reader.follow(path))
+      return posixNormpath(reader.follow(path))
     } catch (err) {
       throw mapMirageError(err, 'resolve', path)
     }
@@ -494,34 +476,7 @@ export class MirageFileSystem extends FileSystem {
    *   mount maps it.
    */
   override processPathFromHostPath(hostPath: string): string | undefined {
-    if (!isAbsolute(hostPath)) return undefined
-    const workspace = this.ctx.mirage.workspaceIfReady
-    if (workspace === null) return undefined
-    const host = physicalPath(hostPath)
-    const mounts = workspace.mounts()
-    for (const entry of mounts) {
-      const { vfs } = entry
-      if (!(vfs instanceof DiskVFS)) continue
-      const rel = relative(vfs.root, host)
-      if (escapesRoot(rel)) continue
-      // `prefix` always carries a trailing slash, and `rel` is empty for
-      // the root itself, so the join is a concatenation and the slash is
-      // trimmed back off unless the mount is the workspace root.
-      const joined = `${entry.prefix}${rel.split(sep).join('/')}`
-      const virtual = joined.length > 1 && joined.endsWith('/') ? joined.slice(0, -1) : joined
-      // A mount nested under this one owns its own subtree, and dispatch
-      // routes the path there, so the disk file at this host location is
-      // not what the virtual path reads. Keep looking rather than name a
-      // path that answers with another VFS's bytes.
-      if (ownerPrefixOf(virtual, mounts) !== entry.prefix) continue
-      // A namespace symlink at or above this path is followed before
-      // dispatch, so a read would land on the link's target rather than
-      // the disk file the caller named. Links are namespace state, so the
-      // disk mount cannot see one and only this table can say.
-      if (shadowedByLink(workspace.namespace, virtual)) continue
-      return virtual
-    }
-    return undefined
+    return this.ctx.mirage.hostPathToVirtual(hostPath)
   }
 
   fileUrl(target: FsTarget): string {
@@ -570,7 +525,7 @@ export class MirageFileSystem extends FileSystem {
         : posix.join(this.follow(posix.dirname(normalized)), posix.basename(normalized))
     // The leaf is read off the dispatcher's reader: a link the session cannot
     // see is not a link here, and the stat below reports it absent.
-    const linkTarget = this.reader.readlink(parentFollowed)
+    const linkTarget = await this.readlink(parentFollowed)
     if (linkTarget !== null) {
       return {
         version: FsVersion(`link:${linkTarget}`),
@@ -710,7 +665,7 @@ export class MirageFileSystem extends FileSystem {
     }
     // Namespace symlinks live above every backend, so a listing merges
     // them in here exactly as mirage's own ls does.
-    for (const name of this.reader.linkNamesUnder(key)) names.add(name)
+    for (const name of this.reader?.linkNamesUnder(key) ?? []) names.add(name)
     const entries: FsDirEntry[] = []
     for (const name of [...names].sort(compareCodePoints)) {
       // Per entry, not just at the entry point: a listing is one classification
@@ -893,9 +848,7 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxPolicy,
   ): Promise<FsMoveOutcome> {
-    const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
-    const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
-    if (sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))) {
+    if (await this.sameStored(source, destination, signal)) {
       throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
     }
     return this.withLocks([source.targetKey, destination.targetKey], async () => {
@@ -946,6 +899,35 @@ export class MirageFileSystem extends FileSystem {
       }
       return { sourceBefore, destination: published, sourceDeleted: true }
     })
+  }
+
+  /**
+   * Whether two targets reach the same stored file, so moving one onto the
+   * other would write the file and then delete it.
+   *
+   * Here the registry's storage keys say so. On a server, whose storage is
+   * not visible, both paths are resolved through its links first: a target
+   * that reaches the source through a link, at its leaf or above it, is the
+   * source.
+   *
+   * @param source the file being moved.
+   * @param destination where it is going.
+   * @param signal aborts the resolution.
+   * @returns true when both reach one file.
+   */
+  private async sameStored(
+    source: FsTarget,
+    destination: FsTarget,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (this.ctx.mirage.remote === null) {
+      const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
+      const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
+      return sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))
+    }
+    const ops = (await this.files(signal, 'move')) as RemoteFiles
+    const from = await remoteRealpath(ops, String(source.targetKey))
+    return from === (await remoteRealpath(ops, String(destination.targetKey)))
   }
 
   /**

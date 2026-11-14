@@ -24,6 +24,7 @@ export default defineConfig({
     'src/plugin/shell.ts',
     'src/plugin/subprocess.ts',
     'src/plugin/spill-store.ts',
+    'src/remote/index.ts',
   ],
   external: [
     '@deepseek-ai/cordis',

@@ -67,6 +67,34 @@ console.log((await run.result()).stdout.text)
 
 [`examples/typescript/agents/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/dsh.ts) is a longer runnable version, with Python and permissions.
 
+## Use a workspace on a Mirage server
+
+Give `MirageService` a `remote` instead of a workspace and the plugins call the workspace a [Mirage server](/typescript/access/server) holds: each `bash` line goes to its shell, each file call to its VFS API. dsh can then run where nothing is mounted, such as a Cloudflare Worker. Import from `@struktoai/mirage-dsh/remote` there, which leaves out `@struktoai/mirage-node`:
+
+```ts
+import { Context } from '@deepseek-ai/cordis'
+import {
+  MirageFileSystem,
+  MirageService,
+  MirageShellExecutor,
+  MirageSpillStore,
+} from '@struktoai/mirage-dsh/remote'
+
+const ctx = new Context()
+await ctx.plugin(MirageService, {
+  remote: { url: 'https://mirage.example.com', workspace: 'ws_123', token: process.env.MIRAGE_TOKEN },
+}).await()
+await ctx.plugin(MirageFileSystem).await()
+await ctx.plugin(MirageShellExecutor, { sessionId: 'agent' }).await()
+await ctx.plugin(MirageSpillStore).await()
+```
+
+- The server owns the mounts, machines and profiles. `sessionId` names a session on the server, created on first use.
+- The plugins make no sandbox claim, so `DSH_PERMISSION_MODE=read-only` does not narrow a remote workspace. Give the session a read-only profile on the server instead.
+- Asks are answered on the server, at `/v1/workspaces/{id}/asks`.
+- `MirageSubprocess` needs a workspace in the same process.
+- `ctx.mirage.explain` asks the server's `?explain=true`, so it works only where the server serves it.
+
 ## Use with the dsh CLI
 
 The package is also a dsh bundle. Added to a profile, it replaces dsh's filesystem, shell, subprocess and spill providers with the Mirage ones:
