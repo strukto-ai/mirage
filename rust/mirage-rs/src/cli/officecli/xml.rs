@@ -5,6 +5,8 @@
 //! where each starts and ends, so an edit replaces those bytes and copies
 //! every other byte as it stands.
 
+use std::borrow::Cow;
+
 /// What a tag is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Kind {
@@ -81,7 +83,7 @@ impl<'a> Tag<'a> {
         self.attrs()
             .into_iter()
             .find(|(key, _)| local(key) == name.as_bytes())
-            .map(|(_, value)| unescape(value))
+            .map(|(_, value)| unescape_attribute(value))
     }
 }
 
@@ -211,14 +213,42 @@ pub(super) fn runs_text(data: &[u8]) -> String {
     out
 }
 
-/// Text with XML's five entities and its character references resolved.
+/// Text as XML's end-of-line handling reads it: `\r\n` and a lone `\r`
+/// become `\n`.
+pub(super) fn line_ends(text: &str) -> Cow<'_, str> {
+    if !text.contains('\r') {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
+/// An attribute value as XML normalizes it: each line end and tab it
+/// holds as written reads as a space.
+pub(super) fn attribute_spaces(text: &str) -> Cow<'_, str> {
+    match line_ends(text) {
+        held if held.contains(['\n', '\t']) => Cow::Owned(held.replace(['\n', '\t'], " ")),
+        held => held,
+    }
+}
+
+/// Character data with its line ends read as `\n`, XML's five entities
+/// and its character references resolved.
 pub(super) fn unescape(raw: &[u8]) -> String {
-    let text = String::from_utf8_lossy(raw);
+    resolve(&line_ends(&String::from_utf8_lossy(raw)))
+}
+
+/// An attribute value normalized as XML reads it, its entities and
+/// character references resolved.
+pub(super) fn unescape_attribute(raw: &[u8]) -> String {
+    resolve(&attribute_spaces(&String::from_utf8_lossy(raw)))
+}
+
+fn resolve(text: &str) -> String {
     if !text.contains('&') {
-        return text.into_owned();
+        return text.to_owned();
     }
     let mut out = String::with_capacity(text.len());
-    let mut rest = &text[..];
+    let mut rest = text;
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];

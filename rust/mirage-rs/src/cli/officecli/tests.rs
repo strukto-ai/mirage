@@ -292,3 +292,26 @@ fn a_part_parses_as_the_open_xml_sdk_writes_it() {
     );
     assert!(super::tree::parse(b"<!DOCTYPE x><x/>").is_err());
 }
+
+#[test]
+fn line_ends_and_attribute_spaces_read_as_xml_reads_them() {
+    assert_eq!(super::xml::unescape(b"a\r\nb\rc&#13;d\n"), "a\nb\nc\rd\n");
+    assert_eq!(
+        super::xml::unescape_attribute(b"a\r\nb\tc&#9;d&#10;"),
+        "a b c\td\n"
+    );
+    let tree = super::tree::parse(
+        b"<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:rPr><w:rStyle w:val=\"a\r\nb\tc\"/></w:rPr><w:t>x\r\ny\rz&#13;<![CDATA[p\r\nq]]></w:t></w:r>",
+    )
+    .ok()
+    .unwrap();
+    let style = tree.root().child(super::tree::W, "rPr").unwrap();
+    assert_eq!(
+        style.child(super::tree::W, "rStyle").unwrap().w("val"),
+        Some("a b c")
+    );
+    assert_eq!(
+        tree.root().child(super::tree::W, "t").unwrap().text(),
+        "x\ny\nz\rp\nq"
+    );
+}

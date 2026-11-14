@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use super::xml::{attribute_spaces, line_ends};
+
 pub(super) const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 pub(super) const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
 pub(super) const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -485,7 +487,7 @@ impl<'a> Parser<'a> {
             self.at += 1;
             let r = self.rest();
             let end = r.find(quote).ok_or(Malformed)?;
-            let value = decode(&r[..end])?;
+            let value = decode(&attribute_spaces(&r[..end]))?;
             self.at += end + 1;
             raw_attrs.push((key, value));
         }
@@ -572,7 +574,7 @@ impl<'a> Parser<'a> {
             }
             if r.starts_with("<![CDATA[") {
                 let end = r.find("]]>").ok_or(Malformed)?;
-                text.push_str(&r[9..end]);
+                text.push_str(&line_ends(&r[9..end]));
                 self.at += end + 3;
                 continue;
             }
@@ -593,7 +595,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let end = r.find('<').unwrap_or(r.len());
-            text.push_str(&decode(&r[..end])?);
+            text.push_str(&decode(&line_ends(&r[..end]))?);
             self.at += end;
         }
         if !text.is_empty() {

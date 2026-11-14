@@ -311,6 +311,19 @@
         "stdout": "",
         "stderr": "Error: Unsupported combinator '+' in selector 'shape + table'. `+` (adjacent sibling) and `~` (general sibling) are not supported.\n"
       }
+    },
+    {
+      "id": "officecli_xlsx_line_ends",
+      "seq": 13600024,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli query /docs/lines.xlsx cell",
+      "expect": {
+        "exit": 0,
+        "stdout": "/Sheet1/A1 (cell) \"a\\nb\" type=SharedString value=a\nb\n/Sheet1/B1 (cell) \"c\\nde\" type=SharedString richtext=true value=c\nd\re\n/Sheet1/C1 (cell) \"e\\nf\" type=InlineString value=e\nf\n",
+        "stderr": ""
+      }
     }
   ]
 }

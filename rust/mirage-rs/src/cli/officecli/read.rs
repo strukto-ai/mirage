@@ -11,7 +11,7 @@ use super::book::{Book, relationships, rels_of};
 use super::node::{Json, Node, Value, number_text};
 use super::sheet::{cell_ref, col_name};
 use super::style::{self, hex, theme_name};
-use super::xml::{Kind, Tag, element_end, runs_text, tags, unescape};
+use super::xml::{Kind, Tag, element_end, runs_text, tags, unescape, unescape_attribute};
 
 /// A sheet as the workbook lists it.
 #[derive(Clone, Debug)]
@@ -321,7 +321,7 @@ fn attrs_of(tag: &Tag<'_>) -> Vec<(String, String)> {
             let key = String::from_utf8_lossy(k);
             (
                 key.rsplit(':').next().unwrap_or(&key).to_string(),
-                unescape(v),
+                unescape_attribute(v),
             )
         })
         .collect()
@@ -451,7 +451,7 @@ impl Grid {
                         .attrs()
                         .iter()
                         .find(|(k, _)| *k == b"r:id" || k.ends_with(b":id"))
-                        .map(|(_, v)| unescape(v)),
+                        .map(|(_, v)| unescape_attribute(v)),
                     location: tag.attr("location"),
                     tooltip: tag.attr("tooltip"),
                     display: tag.attr("display"),

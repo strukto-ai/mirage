@@ -165,7 +165,7 @@ fn attrs_of(tag: &Tag<'_>) -> Vec<(String, String)> {
         .map(|(k, v)| {
             let key = String::from_utf8_lossy(k);
             let local = key.rsplit(':').next().unwrap_or(&key).to_string();
-            (local, super::xml::unescape(v))
+            (local, super::xml::unescape_attribute(v))
         })
         .collect()
 }
