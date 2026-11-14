@@ -151,6 +151,20 @@ describe('MirageFileSystem on a remote workspace', () => {
     expect(await fs.readText(await fs.resolve('/data/link.txt'))).toBe('linked')
   })
 
+  it('refuses a move onto a link that reaches the source, leaf or parent', async () => {
+    const { fs, client } = await remoteWorld({ 'a.txt': 'only copy' })
+    await client.shell('ln -s /data/a.txt /data/alias.txt && ln -s /data /linked')
+    const version = await versionAt(fs, '/data/a.txt')
+    for (const onto of ['/data/alias.txt', '/linked/a.txt']) {
+      const move = fs.moveFile(await fs.resolve('/data/a.txt'), await fs.resolve(onto), {
+        expectedSource: { version },
+        expectedDestination: { kind: 'replaceIfVersion', version },
+      })
+      expect(await errorCode(move)).toBe('FS_SAME_TARGET')
+    }
+    expect(DEC.decode(await client.read('/data/a.txt'))).toBe('only copy')
+  })
+
   it('maps no host path into a remote world', async () => {
     const { fs } = await remoteWorld()
     expect(fs.processPathFromHostPath('/Users/somebody/project/a.txt')).toBeUndefined()

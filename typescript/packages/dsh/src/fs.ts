@@ -184,6 +184,47 @@ function tooLarge(displayPath: string, maxBytes: number, size?: number): FsError
  * The file calls this adapter makes: a workspace's own `Files` here, or the
  * same calls made over a Mirage server's API.
  */
+const MAX_LINK_HOPS = 40
+
+/**
+ * A path on a remote world with every link in it resolved, one component at
+ * a time, through the server's `readlink`. A component that is not a link,
+ * or does not exist yet, is kept as written.
+ *
+ * @param files the remote file calls.
+ * @param path an absolute workspace path.
+ * @returns the path with its links resolved.
+ */
+async function remoteRealpath(files: RemoteFiles, path: string): Promise<string> {
+  let resolved = '/'
+  let rest = path.split('/').filter((part) => part !== '')
+  let hops = 0
+  for (let name = rest.shift(); name !== undefined; name = rest.shift()) {
+    const candidate = posix.join(resolved, name)
+    const target = await files.readlink(candidate)
+    if (target === null) {
+      resolved = candidate
+      continue
+    }
+    hops += 1
+    if (hops > MAX_LINK_HOPS) {
+      throw new FsError(
+        `cannot resolve "${path}": too many levels of symbolic links`,
+        'FS_IO_ERROR',
+      )
+    }
+    rest = [
+      ...posix
+        .resolve(resolved, target)
+        .split('/')
+        .filter((part) => part !== ''),
+      ...rest,
+    ]
+    resolved = '/'
+  }
+  return resolved
+}
+
 type FsOps = Pick<Files, 'stat' | 'read' | 'write' | 'unlink' | 'isDir' | 'readdir'> | RemoteFiles
 
 export class MirageFileSystem extends FileSystem {
@@ -807,14 +848,7 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxPolicy,
   ): Promise<FsMoveOutcome> {
-    // A remote world's storage table is the server's, so two paths are the
-    // same target when they are the same path.
-    const storageKey =
-      this.ctx.mirage.remote !== null
-        ? (path: PathSpec): string => path.virtual
-        : makeStorageKey((await this.ctx.mirage.ready).registry)
-    const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
-    if (sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))) {
+    if (await this.sameStored(source, destination, signal)) {
       throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
     }
     return this.withLocks([source.targetKey, destination.targetKey], async () => {
@@ -865,6 +899,35 @@ export class MirageFileSystem extends FileSystem {
       }
       return { sourceBefore, destination: published, sourceDeleted: true }
     })
+  }
+
+  /**
+   * Whether two targets reach the same stored file, so moving one onto the
+   * other would write the file and then delete it.
+   *
+   * Here the registry's storage keys say so. On a server, whose storage is
+   * not visible, both paths are resolved through its links first: a target
+   * that reaches the source through a link, at its leaf or above it, is the
+   * source.
+   *
+   * @param source the file being moved.
+   * @param destination where it is going.
+   * @param signal aborts the resolution.
+   * @returns true when both reach one file.
+   */
+  private async sameStored(
+    source: FsTarget,
+    destination: FsTarget,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (this.ctx.mirage.remote === null) {
+      const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
+      const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
+      return sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))
+    }
+    const ops = (await this.files(signal, 'move')) as RemoteFiles
+    const from = await remoteRealpath(ops, String(source.targetKey))
+    return from === (await remoteRealpath(ops, String(destination.targetKey)))
   }
 
   /**

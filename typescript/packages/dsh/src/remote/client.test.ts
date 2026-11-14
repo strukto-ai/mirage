@@ -61,10 +61,35 @@ describe('MirageClient', () => {
       },
     })
     expect(result.exitCode).toBe(3)
-    expect(result.stdoutText).toBe('out\n')
-    expect(result.stderrText).toBe('err\n')
     expect(result.decision).toBeNull()
     expect(seen).toEqual(expect.arrayContaining(['stdout:out\n', 'stderr:err\n']))
+  })
+
+  it('returns the whole output when nothing streams it', async () => {
+    const result = await client.shell('echo out; echo err >&2; exit 3')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([3, 'out\n', 'err\n'])
+  })
+
+  it('keeps no output it hands to onOutput', async () => {
+    let streamed = 0
+    const result = await client.shell('echo kept elsewhere', {
+      onOutput: (_channel, data) => {
+        streamed += data.byteLength
+        return Promise.resolve()
+      },
+    })
+    expect(streamed).toBe(15)
+    expect(result.stdoutText).toBe('')
+  })
+
+  it('ends a line whose output handler fails', async () => {
+    const started = Date.now()
+    const failing = client.shell('echo first; sleep 30', {
+      onOutput: () => Promise.reject(new Error('handler failed')),
+    })
+    await expect(failing).rejects.toThrow('handler failed')
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect((await client.shell('echo after')).stdoutText).toBe('after\n')
   })
 
   it('feeds stdin and runs in a cwd', async () => {

@@ -134,6 +134,44 @@ describe('MirageShellExecutor on a remote workspace', () => {
     expect(scripted.stderr.text).toContain('line 2')
   })
 
+  it('refuses an environment name the shell would read as a command', async () => {
+    const shell = await remoteShell(await workspace())
+    const bad = run(shell, { command: 'true', env: { 'X=1; touch /pwned; #': 'v' } })
+    await expect(bad).rejects.toThrow('is not a shell variable name')
+  })
+
+  it('runs a call beside a busy bound session without waiting, carrying its snapshot', async () => {
+    const shell = await remoteShell(await workspace(), { sessionId: 'agent' })
+    const busy = await shell.execute(shell.resolve({ command: 'sleep 5', dshEnv: { DSH_N: '1' } }))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const started = Date.now()
+    const quick = await run(shell, {
+      command: 'echo $DSH_N',
+      dshEnv: { DSH_N: '2' },
+      timeoutMs: 3000,
+    })
+    expect(Date.now() - started).toBeLessThan(2500)
+    expect(quick.timedOut).toBe(false)
+    expect(quick.stdout.text).toBe('2\n')
+    busy.kill()
+    await busy.done
+  })
+
+  it('adopts a session another client created after the listing', async () => {
+    const remote = await workspace()
+    await new MirageClient(remote).createSession('agent')
+    const stale: typeof fetch = (input, init) => {
+      const target = String(input instanceof Request ? input.url : input)
+      if ((init?.method ?? 'GET') === 'GET' && new URL(target).pathname.endsWith('/sessions')) {
+        return Promise.resolve(Response.json({ items: [] }))
+      }
+      return fetch(input, init)
+    }
+    const shell = await remoteShell({ ...remote, fetch: stale }, { sessionId: 'agent' })
+    const result = await run(shell, { command: 'echo adopted' })
+    expect(result.stdout.text).toBe('adopted\n')
+  })
+
   it('feeds stdin', async () => {
     const shell = await remoteShell(await workspace())
     const result = await run(shell, { command: 'cat', stdin: 'fed through\n' })

@@ -54,7 +54,10 @@ export interface RemoteShellCall {
   /** Keep the line out of the session's history. */
   record?: boolean
   signal?: AbortSignal
-  /** Receives each output chunk as the server streams it. */
+  /**
+   * Receives each output chunk as the server streams it. Given, the chunks
+   * are handed on and not kept, so the result's stdout and stderr are empty.
+   */
   onOutput?: (channel: 'stdout' | 'stderr', data: Uint8Array) => Promise<void>
 }
 
@@ -137,6 +140,12 @@ function camelKeys(value: JsonValue): JsonValue {
   )
 }
 
+function trimTrailingSlashes(url: string): string {
+  let end = url.length
+  while (end > 0 && url.charCodeAt(end - 1) === 47) end -= 1
+  return url.slice(0, end)
+}
+
 function concat(chunks: Uint8Array[]): Uint8Array {
   const [only] = chunks
   return chunks.length === 1 && only !== undefined ? only : Buffer.concat(chunks)
@@ -146,19 +155,32 @@ async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<
   const decoder = new TextDecoder()
   const reader = body.getReader()
   let pending = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    pending += done ? decoder.decode() : decoder.decode(value, { stream: true })
-    let newline = pending.indexOf('\n')
-    while (newline >= 0) {
-      const line = pending.slice(0, newline).trim()
-      pending = pending.slice(newline + 1)
-      if (line !== '') yield JSON.parse(line) as Record<string, unknown>
-      newline = pending.indexOf('\n')
-    }
-    if (done) break
+  let finished = false
+  try {
+    yield* records()
+    finished = true
+  } finally {
+    // A consumer that stops early (a failed `onOutput`, a record that does
+    // not parse) closes the response, so the server hears the line is gone.
+    if (!finished) await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
-  if (pending.trim() !== '') yield JSON.parse(pending) as Record<string, unknown>
+
+  async function* records(): AsyncGenerator<Record<string, unknown>> {
+    for (;;) {
+      const { done, value } = await reader.read()
+      pending += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      let newline = pending.indexOf('\n')
+      while (newline >= 0) {
+        const line = pending.slice(0, newline).trim()
+        pending = pending.slice(newline + 1)
+        if (line !== '') yield JSON.parse(line) as Record<string, unknown>
+        newline = pending.indexOf('\n')
+      }
+      if (done) break
+    }
+    if (pending.trim() !== '') yield JSON.parse(pending) as Record<string, unknown>
+  }
 }
 
 /**
@@ -178,7 +200,7 @@ export class MirageClient {
 
   /** @param remote where the workspace lives and how to reach it. */
   constructor(remote: MirageRemote) {
-    this.base = `${remote.url.replace(/\/+$/u, '')}/v1/workspaces/${encodeURIComponent(remote.workspace)}`
+    this.base = `${trimTrailingSlashes(remote.url)}/v1/workspaces/${encodeURIComponent(remote.workspace)}`
     this.headers = {
       ...(remote.token !== undefined ? { authorization: `Bearer ${remote.token}` } : {}),
       ...(remote.headers ?? {}),
@@ -257,10 +279,11 @@ export class MirageClient {
   /**
    * Run one command line and stream its output.
    *
-   * The output arrives through `onOutput` as the server produces it; the
-   * returned result carries the exit code and decision, its own stdout and
-   * stderr being what was streamed. Aborting `signal` closes the request,
-   * which cancels the line on the server.
+   * The output arrives through `onOutput` as the server produces it, and is
+   * then not kept: the caller bounds it, so the result carries the exit code
+   * and decision with empty stdout and stderr. Without `onOutput` the result
+   * carries the whole output. Aborting `signal` closes the request, which
+   * cancels the line on the server.
    *
    * @param command the command line.
    * @param call where and how it runs.
@@ -296,8 +319,8 @@ export class MirageClient {
       if (typeof record.stream === 'string' && typeof record.data === 'string') {
         const channel = record.stream === 'stderr' ? 'stderr' : 'stdout'
         const data = new Uint8Array(Buffer.from(record.data, 'base64'))
-        ;(channel === 'stderr' ? stderr : stdout).push(data)
         if (call.onOutput !== undefined) await call.onOutput(channel, data)
+        else (channel === 'stderr' ? stderr : stdout).push(data)
         continue
       }
       if (typeof record.status !== 'string') continue

@@ -44,7 +44,7 @@ import type {
   ExecuteResult,
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { MirageClient } from './remote/client.ts'
+import { type MirageClient, MirageRemoteError } from './remote/client.ts'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 
@@ -233,8 +233,25 @@ function shellWord(value: string): string {
 function withEnv(command: string, env: Record<string, string> | undefined): string {
   const entries = Object.entries(env ?? {})
   if (entries.length === 0) return command
-  const exports = entries.map(([key, value]) => `${key}=${shellWord(value)}`).join(' ')
+  const exports = entries.map(([key, value]) => `${shellName(key)}=${shellWord(value)}`).join(' ')
   return `export ${exports}; ${command}`
+}
+
+const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+/**
+ * A variable name, refused unless the shell reads it as one: a remote line
+ * spells its environment as shell text, so a name carrying `=`, `;` or a
+ * space would run as a command of its own.
+ *
+ * @param key the name as the caller gave it.
+ * @returns the name, unchanged.
+ */
+function shellName(key: string): string {
+  if (!SHELL_NAME.test(key)) {
+    throw new Error(`mirage: environment name \`${key}\` is not a shell variable name`)
+  }
+  return key
 }
 
 /** How a settled execution ended, read once it has: the first cause wins. */
@@ -818,8 +835,10 @@ export class MirageShellExecutor extends ShellExecutor {
     const before = this.remoteManaged.get(sessionId) ?? new Set<string>()
     const stale = [...before].filter((key) => !(key in managed))
     const lines: string[] = []
-    if (stale.length > 0) lines.push(`unset ${stale.join(' ')}`)
-    const set = Object.entries(managed).map(([key, value]) => `${key}=${shellWord(value)}`)
+    if (stale.length > 0) lines.push(`unset ${stale.map(shellName).join(' ')}`)
+    const set = Object.entries(managed).map(
+      ([key, value]) => `${shellName(key)}=${shellWord(value)}`,
+    )
     if (set.length > 0) lines.push(`export ${set.join(' ')}`)
     if (lines.length > 0) await this.remoteSilently(remote, lines.join('\n'), sessionId)
     this.remoteManaged.set(sessionId, new Set(Object.keys(managed)))
@@ -832,13 +851,16 @@ export class MirageShellExecutor extends ShellExecutor {
    * @param remote the server's client.
    * @param command the line.
    * @param sessionId the session to run it in.
+   * @param signal aborts the request, as the command it prepares is aborted.
    */
   private async remoteSilently(
     remote: MirageClient,
     command: string,
     sessionId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const result = await remote.shell(command, { sessionId, record: false })
+    const call = { sessionId, record: false, ...(signal !== undefined ? { signal } : {}) }
+    const result = await remote.shell(command, call)
     if (result.exitCode !== 0) {
       throw new Error(
         `mirage: \`${command}\` failed in session ${sessionId}: ${result.stderrText.trim()}`,
@@ -911,7 +933,14 @@ export class MirageShellExecutor extends ShellExecutor {
     const remote = this.ctx.mirage.remote
     if (remote !== null) {
       if ((await remote.sessions()).some((s) => s.sessionId === sessionId)) return
-      await remote.createSession(sessionId)
+      try {
+        await remote.createSession(sessionId)
+      } catch (err) {
+        // Another client made it between the listing and this create: adopt
+        // it, as an existing session is adopted, and leave it where it is.
+        if (err instanceof MirageRemoteError && err.status === 409) return
+        throw err
+      }
       await this.remoteSilently(remote, `cd -- ${shellWord(this.workdir)}`, sessionId)
       return
     }
@@ -954,8 +983,13 @@ export class MirageShellExecutor extends ShellExecutor {
       } else {
         const seed = running.then(async () => {
           if (ticket < (this.seeded.get(sessionId) ?? 0)) return
-          if (remote !== null) await this.applyRemoteManagedEnv(remote, sessionId, managed)
-          else if (ws !== null) await this.applyManagedEnv(ws, sessionId, managed)
+          if (remote !== null) {
+            // A line of this process still runs in the session, so this call
+            // runs on a fork beside it and carries the snapshot itself: an
+            // export sent to the session now would queue behind that line.
+            if ((runningIn(remote).get(sessionId) ?? 0) > 0) return
+            await this.applyRemoteManagedEnv(remote, sessionId, managed)
+          } else if (ws !== null) await this.applyManagedEnv(ws, sessionId, managed)
           this.seeded.set(sessionId, ticket)
         })
         this.seeding.set(
@@ -1096,7 +1130,7 @@ export class MirageShellExecutor extends ShellExecutor {
   ): Promise<ExecuteResult> {
     const { sessionId, bound, workdir } = prepared
     const managed = (spec.dshEnv as Record<string, string> | undefined) ?? {}
-    const env = bound ? { ...(spec.env ?? {}) } : { ...(spec.env ?? {}), ...managed }
+    const perCall = { ...(spec.env ?? {}) }
     const call = {
       signal,
       ...(spec.stdin !== undefined ? { stdin: new TextEncoder().encode(spec.stdin) } : {}),
@@ -1105,8 +1139,8 @@ export class MirageShellExecutor extends ShellExecutor {
           .emit(channel === 'stderr' ? Channel.STDERR : Channel.STDOUT, data)
           .then(() => undefined),
     }
-    const command = withEnv(spec.command, env)
     if (!bound || sessionId === undefined) {
+      const command = withEnv(spec.command, { ...perCall, ...managed })
       const cwd = workdir !== '' ? workdir : this.workdir
       return remote.shell(command, {
         ...call,
@@ -1116,15 +1150,19 @@ export class MirageShellExecutor extends ShellExecutor {
     }
     const running = runningIn(remote)
     const ours = running.get(sessionId) ?? 0
-    if (Object.keys(env).length > 0 || ours > 0) {
-      const cwd = workdir !== '' ? workdir : (await remote.session(sessionId)).cwd
+    // The managed snapshot is seeded into the session and so never decides a
+    // fork, or every call would fork; a fork carries it, since a busy session
+    // was not seeded for this call.
+    if (Object.keys(perCall).length > 0 || ours > 0) {
+      const cwd = workdir !== '' ? workdir : (await remote.session(sessionId, signal)).cwd
+      const command = withEnv(spec.command, { ...perCall, ...managed })
       return remote.shell(command, { ...call, sessionId, cwd })
     }
     running.set(sessionId, ours + 1)
     try {
       if (workdir !== '')
-        await this.remoteSilently(remote, `cd -- ${shellWord(workdir)}`, sessionId)
-      return await remote.shell(command, { ...call, sessionId })
+        await this.remoteSilently(remote, `cd -- ${shellWord(workdir)}`, sessionId, signal)
+      return await remote.shell(spec.command, { ...call, sessionId })
     } finally {
       running.set(sessionId, (running.get(sessionId) ?? 1) - 1)
     }
