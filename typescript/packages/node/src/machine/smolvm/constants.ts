@@ -28,10 +28,7 @@ export const SMOLVM_HINT =
 export const RUNNING_STATE = 'running'
 export const PAUSED_STATE = 'paused'
 
-/**
- * What `onPause` takes for a machine: save its memory and disks durably,
- * then stop its VM (smolvm 1.18 or later, on a machine started `--branchable`).
- */
+/** What `onPause` takes for a machine: save its memory and disks durably, then stop its VM (smolvm 1.18 or later). */
 export const ON_PAUSE: readonly PauseAction[] = ['pause']
 
 /** What `smolvm machine pause` says of a machine already gone. */

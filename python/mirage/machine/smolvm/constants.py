@@ -30,8 +30,7 @@ RUNNING_STATE = "running"
 PAUSED_STATE = "paused"
 
 # What ``on_pause`` takes for a machine: save its memory and disks durably,
-# then stop its VM (smolvm 1.18 or later, on a machine started
-# ``--branchable``).
+# then stop its VM (smolvm 1.18 or later).
 ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
 
 # What `smolvm machine pause` says of a machine already gone.

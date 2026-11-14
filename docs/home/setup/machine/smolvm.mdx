@@ -93,10 +93,10 @@ machines:
 `workspace.pause()` closes the workspace, then runs `smolvm machine pause`,
 which saves the machine's memory and disks to its data directory and stops
 its VM. The next line resumes it with `smolvm machine resume`, running
-processes included. This needs smolvm 1.18 or later and a machine that
-supports smolvm's portable checkpoints, such as one started with
-`smolvm machine start --branchable`; otherwise `workspace.pause()` raises
-smolvm's error and the machine keeps running. Without `on_pause`,
+processes included. This needs smolvm 1.18 or later, and a host that can
+take smolvm's portable checkpoints; where smolvm refuses the pause,
+`workspace.pause()` raises smolvm's error and the machine keeps running.
+Without `on_pause`,
 `workspace.pause()` leaves the machine running unless the call names it. See
 [Pause](/home/setup/machine/overview#pause).
 
