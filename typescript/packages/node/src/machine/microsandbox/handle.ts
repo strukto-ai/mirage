@@ -58,11 +58,18 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
   }
 
   private closing = false
+  // Every exec probes outside the connect latch; close waits for these.
+  private readonly probes = new Set<Promise<void>>()
 
-  /** Close as any machine does; the cleanup's probes never resume a sandbox paused meanwhile. */
+  /**
+   * Close as any machine does, once the probes under way have settled, so a
+   * resume they started is paused after; the cleanup's probes never resume a
+   * sandbox paused meanwhile.
+   */
   override async close(): Promise<void> {
     this.closing = true
     try {
+      await Promise.allSettled([...this.probes])
       await super.close()
     } finally {
       this.closing = false
@@ -81,6 +88,16 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
 
   /** Require a running sandbox before executing any commands, resuming a paused one unless the workspace is closing. */
   async connect(signal?: AbortSignal): Promise<void> {
+    const probe = this.probe(signal)
+    this.probes.add(probe)
+    try {
+      await probe
+    } finally {
+      this.probes.delete(probe)
+    }
+  }
+
+  private async probe(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     const sandbox = this.config.sandbox
     const deadline = AbortSignal.timeout(INSPECT_TIMEOUT_SECONDS * 1000)

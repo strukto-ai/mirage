@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 import os
 from types import SimpleNamespace
@@ -334,6 +335,8 @@ class FakeMsb:
         self.state = state
         self.refusals: dict[str, bytes] = {}
         self.calls: list[list[str]] = []
+        self.resuming = asyncio.Event()
+        self.resumed: asyncio.Event | None = None
 
     async def __call__(
         self, executable, hint, args, stdin, output=None, errors=None, **_
@@ -343,6 +346,9 @@ class FakeMsb:
             return RunResult(
                 json.dumps({"status": self.state}).encode(), b"", 0
             )
+        if args[0] == "resume" and self.resumed is not None:
+            self.resuming.set()
+            await self.resumed.wait()
         if (said := self.refusals.get(args[0])) is not None:
             return RunResult(b"", said, 1)
         return RunResult(b"", b"", 0)
@@ -422,6 +428,24 @@ async def test_a_later_workspace_that_never_ran_leaves_the_sandbox_alone(
     await machine.close()
     await machine.pause()
     assert ["pause", "sb", "--quiet"] not in msb.calls
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_a_sandbox_a_resume_under_way_at_close_reached(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch, "Paused")
+    msb.resumed = asyncio.Event()
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    connecting = asyncio.ensure_future(machine.connect())
+    await msb.resuming.wait()
+    closing = asyncio.ensure_future(machine.close())
+    await asyncio.sleep(0)
+    msb.resumed.set()
+    await connecting
+    await closing
+    await machine.pause()
+    assert msb.calls[-1] == ["pause", "sb", "--quiet"]
 
 
 @pytest.mark.asyncio

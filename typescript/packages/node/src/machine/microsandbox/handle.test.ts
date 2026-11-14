@@ -37,17 +37,20 @@ function fakeMsb(state = 'Running'): {
   calls: string[][]
   signals: (AbortSignal | undefined)[]
   refusals: Map<string, string>
+  resumed: Promise<void> | null
 } {
   const msb = {
     state,
     calls: [] as string[][],
     signals: [] as (AbortSignal | undefined)[],
     refusals: new Map<string, string>(),
+    resumed: null as Promise<void> | null,
   }
-  vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args, _stdin, options) => {
+  vi.spyOn(program, 'runProgram').mockImplementation(async (_exe, _hint, args, _stdin, options) => {
     msb.calls.push(args.slice())
     msb.signals.push(options?.signal)
     const verb = args[0] ?? ''
+    if (verb === 'resume' && msb.resumed !== null) await msb.resumed
     const refusal = msb.refusals.get(verb)
     return Promise.resolve({
       stdout:
@@ -116,6 +119,24 @@ describe('MicrosandboxMachine pause', () => {
     await machine.close()
     await machine.pause()
     expect(msb.calls).not.toContainEqual(['pause', 'sb', '--quiet'])
+  })
+  it('pauses a sandbox a resume under way at close reached', async () => {
+    const msb = fakeMsb('Paused')
+    let resume = (): void => undefined
+    msb.resumed = new Promise((resolve) => {
+      resume = resolve
+    })
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    const connecting = machine.connect()
+    await vi.waitFor(() => {
+      expect(msb.calls).toContainEqual(['resume', 'sb', '--quiet'])
+    })
+    const closing = machine.close()
+    resume()
+    await connecting
+    await closing
+    await machine.pause()
+    expect(msb.calls.at(-1)).toEqual(['pause', 'sb', '--quiet'])
   })
   it('never resumes on close a sandbox paused meanwhile', async () => {
     const msb = fakeMsb()

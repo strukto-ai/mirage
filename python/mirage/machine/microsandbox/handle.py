@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 from mirage.io.types import ByteSource
 from mirage.machine.constants import EXEC_PRELUDE, not_running_hint
@@ -66,11 +67,22 @@ class MicrosandboxMachine(ProgramMachine):
 
     _closing = False
 
+    def __init__(
+        self,
+        name: str,
+        config: MicrosandboxConfig | dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(name, config)
+        # Every exec probes outside the connect latch; close waits for these.
+        self._probes: set[asyncio.Task[None]] = set()
+
     async def close(self) -> None:
-        """Close as any machine does; the cleanup's probes never resume a
-        sandbox paused meanwhile."""
+        """Close as any machine does, once the probes under way have
+        settled, so a resume they started is paused after; the cleanup's
+        probes never resume a sandbox paused meanwhile."""
         self._closing = True
         try:
+            await asyncio.gather(*self._probes, return_exceptions=True)
             await super().close()
         finally:
             self._closing = False
@@ -81,6 +93,12 @@ class MicrosandboxMachine(ProgramMachine):
     async def connect(self) -> None:
         """Require a running sandbox before executing any commands,
         resuming a paused one unless the workspace is closing."""
+        probe = asyncio.ensure_future(self._probe())
+        self._probes.add(probe)
+        probe.add_done_callback(self._probes.discard)
+        await probe
+
+    async def _probe(self) -> None:
         sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
