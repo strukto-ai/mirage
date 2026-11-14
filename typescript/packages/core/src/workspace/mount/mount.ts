@@ -381,7 +381,6 @@ function treeCommand(cli: CLI): Command {
     ['configModel', cli.configModel !== null],
     ['accessor', cli.accessor !== noopAccessor],
     ['script', cli.script !== null],
-    ['machine', cli.machine !== null],
   ] as const) {
     if (own) {
       throw new Error(

@@ -486,6 +486,7 @@ def pager_spec(source: str, language: str = "python") -> CLI:
     return CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource(source, language=language),
+        machine="worker" if language == "python" else "in_process",
     )
 
 
@@ -556,7 +557,7 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("import sys\nprint('local', sys.argv[1])"),
-        machine="local",
+        machine="host",
     )
     ws.register_cli("pager", spec)
     code, out, _ = await run(ws, "pager report.txt")
@@ -615,7 +616,11 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "pager": {"script": str(script), "config": {"width": 80}}
+                "pager": {
+                    "script": str(script),
+                    "machine": "worker",
+                    "config": {"width": 80},
+                }
             },
             "machines": {"monty": {"provider": "worker"}},
         }

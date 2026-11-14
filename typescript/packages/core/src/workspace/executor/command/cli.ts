@@ -47,14 +47,12 @@ import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
-import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
-import type { RouteDecision } from '../../../runtime/types.ts'
-import { admissionDenial, execNode } from './run.ts'
+import { runtimeForScript } from '../../../runtime/routing/decide.ts'
+import { execNode } from './run.ts'
 import { answered, cliVoice, runHandler } from './handler.ts'
 import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
-import { LanguageRuntime } from '../../../runtime/language.ts'
-import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
+import type { LanguageRuntime } from '../../../runtime/language.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -104,67 +102,32 @@ function parseSpecFor(
 /**
  * Pick the workspace entry that runs a script leaf.
  *
- * A `machine:` pin names the machine, and its runtime must speak the
- * script's language, so a monty machine pinned for a `.mjs` fails loud
- * instead of feeding JS to a python interpreter. Without a pin the
- * program runs where this line runs its language's own interpreter
- * (the tier's head word, `python3` or `node`), so the runtime capturing
- * that command, or a route policy, places it, and a line every capturer
- * refused is refused here too (126). The first entry speaking the
- * language serves when the workspace serves that interpreter itself, or
- * outside a workspace line, where `routing` is absent
- * (runtimeForLanguage); a placement on a runtime that does not run the
- * script's language is refused like such a pin. Every other refusal names
- * the world so the fix (add or rename an entry) is visible (127). Mirrors
+ * The leaf names the machine it runs on and, optionally, the runtime
+ * there; the first entry on that machine speaking the script's language
+ * serves (runtimeForScript). A miss names the world so the fix (add an
+ * entry, or place the script elsewhere) is visible (127). Mirrors
  * Python's `_select_runtime`.
  */
 function selectRuntime(
   prog: string,
   leaf: CLI,
   entries: readonly Runtime[],
-  routing?: RouteDecision<Runtime>,
 ): [LanguageRuntime, null] | [null, IOResult] {
   const script = leaf.script
   if (script === null) {
     throw new Error(`selecting a runtime for '${prog}' without a script`)
   }
+  const chosen = runtimeForScript(entries, leaf.machine, leaf.runtime, script.language)
+  if (chosen !== null) return [chosen, null]
   const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
-  let chosen: Runtime | null | undefined
-  if (leaf.machine !== null) {
-    chosen = entries.find((entry) => entry.name === leaf.machine) ?? null
-    if (chosen === null) {
-      return [
-        null,
-        missing(`${prog}: unknown machine: '${leaf.machine}' (workspace machines: ${known})`),
-      ]
-    }
-  } else {
-    const entry = runtimeForLanguage(entries, script.language)
-    if (entry === null) {
-      return [
-        null,
-        missing(
-          `${prog}: no workspace machine runs ${script.language} scripts (workspace machines: ${known})`,
-        ),
-      ]
-    }
-    const head = (entry.constructor as { commands?: readonly string[] }).commands?.[0]
-    chosen =
-      routing === undefined || head === undefined
-        ? entry
-        : head in routing.bindings
-          ? routing.bindings[head]
-          : routing.fallback
-    if (chosen === null || chosen === undefined) return [null, admissionDenial(prog)]
-    if (chosen instanceof WorkspaceRuntime) chosen = entry
-  }
-  if (!(chosen instanceof LanguageRuntime) || chosen.language !== script.language) {
-    return [
-      null,
-      missing(`${prog}: machine '${chosen.name}' does not run ${script.language} scripts`),
-    ]
-  }
-  return [chosen, null]
+  const what =
+    leaf.runtime === null
+      ? `${script.language} scripts`
+      : `${script.language} scripts on '${leaf.runtime}'`
+  return [
+    null,
+    missing(`${prog}: no ${leaf.machine} machine runs ${what} (workspace machines: ${known})`),
+  ]
 }
 
 /** The 127 a script CLI answers when no entry can run its program. */
@@ -262,8 +225,6 @@ export interface CLIContext {
   vfs?: Files
   session?: SessionView
   processes?: SessionProcesses
-  /** The line's placement, which a script leaf runs its program under. */
-  routing?: RouteDecision<Runtime>
   /**
    * Lands what a script leaf's runtime holds and drops the caches its
    * program may have gone past; absent outside a workspace.
@@ -578,16 +539,10 @@ async function runCli(
   const script = install.cli.script
   let start: (ctx: Context) => Promise<CommandOutput>
   if (script !== null) {
-    const [runtime, refused] = selectRuntime(
-      prog,
-      install.cli,
-      context.entries ?? [],
-      context.routing,
-    )
+    const [runtime, refused] = selectRuntime(prog, install.cli, context.entries ?? [])
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
-      // interpreter command no runtime entry captures, or 126 when this
-      // line's capturers all refused it.
+      // interpreter command no runtime entry captures.
       const stderr = await materialize(refused.stderr)
       return [
         null,

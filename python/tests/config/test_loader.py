@@ -726,8 +726,8 @@ mounts:
   /data:
     vfs: ram
 clis:
-  pager: {script: pager.js, machine: quickjs}
-  modpager: {script: pager.mjs, machine: quickjs}
+  pager: {script: pager.js, runtime: quickjs}
+  modpager: {script: pager.mjs, runtime: quickjs}
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
@@ -966,7 +966,7 @@ mounts:
 clis:
   pager:
     script: pager.py
-    machine: monty
+    machine: worker
     config:
       page_size: 20
 """)
@@ -975,7 +975,8 @@ clis:
     spec, config = kwargs["clis"]["pager"]
     assert spec.spec.name == "pager"
     assert spec.script == ScriptSource("print('page')")
-    assert spec.machine == "monty"
+    assert spec.machine == "worker"
+    assert spec.runtime is None
     assert config == {"page_size": 20}
 
 
@@ -1248,12 +1249,52 @@ def test_clis_entry_takes_exactly_one_of_cli_or_script():
         )
 
 
-def test_clis_runtime_takes_script():
+def test_a_clis_cli_entry_runs_in_process_only():
+    mounts = {"/data": {"vfs": "ram"}}
+    load_config(
+        {
+            "mounts": mounts,
+            "clis": {"sl": {"cli": "slack", "machine": "in_process"}},
+        }
+    )
+    with pytest.raises(ValueError, match="runs on in_process only"):
+        load_config(
+            {
+                "mounts": mounts,
+                "clis": {"sl": {"cli": "slack", "machine": "host"}},
+            }
+        )
     with pytest.raises(ValueError, match="it takes script"):
         load_config(
             {
-                "mounts": {"/data": {"vfs": "ram"}},
-                "clis": {"sl": {"cli": "slack", "machine": "monty"}},
+                "mounts": mounts,
+                "clis": {"sl": {"cli": "slack", "runtime": "monty"}},
+            }
+        )
+
+
+def test_a_clis_script_entry_refuses_a_machine_it_cannot_run_on(tmp_path):
+    (tmp_path / "pager.py").write_text("print(1)")
+    mounts = {"/data": {"vfs": "ram"}}
+    script = str(tmp_path / "pager.py")
+    with pytest.raises(ValueError, match="a script runs on in_process"):
+        load_config(
+            {
+                "mounts": mounts,
+                "clis": {"p": {"script": script, "machine": "py"}},
+            }
+        )
+    with pytest.raises(ValueError, match="a host runs its own programs"):
+        load_config(
+            {
+                "mounts": mounts,
+                "clis": {
+                    "p": {
+                        "script": script,
+                        "machine": "host",
+                        "runtime": "wasi",
+                    }
+                },
             }
         )
 

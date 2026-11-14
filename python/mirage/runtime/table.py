@@ -22,10 +22,12 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import (
     EXTERNAL_COMMANDS,
     HOST,
+    IN_PROCESS,
     JS_GROUP,
     LANGUAGE_COMMANDS,
     PYTHON_GROUP,
     WHOLE_LINE,
+    WORKER,
 )
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -102,8 +104,6 @@ RUNTIME_HINTS: dict[str, str] = {
 # The providers a ``machines:`` entry names for an engine of Mirage's
 # own rather than a machine it reaches: in its process, in worker
 # processes it spawns, or as native programs on its host.
-IN_PROCESS = "in_process"
-WORKER = "worker"
 ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, WORKER, HOST)
 
 # The runtimes a builtin provider runs no other way.
@@ -244,6 +244,22 @@ def _runtime_for(
 def in_process_runtimes() -> list[str]:
     """Every runtime an ``in_process`` machine may name."""
     return [name for name in known_runtimes() if name not in _PLACED]
+
+
+def placement(runtime: Runtime[Any]) -> tuple[str, str | None]:
+    """The provider an engine runs on and the name it is registered
+    under. An engine registered under no name, such as a class a
+    ``source:Class`` reference loaded, runs in process.
+
+    Args:
+        runtime (Runtime): a workspace entry.
+    """
+    name = next(
+        (key for key, cls in NAMED.items() if type(runtime) is cls), None
+    )
+    if name is None:
+        return IN_PROCESS, None
+    return _PLACED.get(name, IN_PROCESS), name
 
 
 def split_machines(

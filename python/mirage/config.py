@@ -32,7 +32,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli import mcp
 from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
-from mirage.commands.cli.types import CLI
+from mirage.commands.cli.types import CLI, placement_error
 from mirage.commands.spec.types import CommandSpec
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
@@ -55,6 +55,7 @@ from mirage.policy.profile import (
 from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.table import build_entry
 from mirage.runtime.types import Language, ScriptSource
 from mirage.secrets.config import EnvVar, SecretSource
@@ -336,9 +337,11 @@ class CLIBlock(BaseModel):
     The section key is the installed head word. Exactly one handler
     source: ``cli`` names a registered spec tree; ``script`` references
     a program file whose content is embedded at load (the docker
-    build-context model). ``machine`` optionally pins the machine whose
-    engine runs the script; unset picks the first one speaking the
-    script's language. ``config`` validates through the spec's
+    build-context model). ``machine`` is the machine it runs on,
+    ``in_process`` when unset and for a ``cli`` entry the only one; a
+    script may name ``worker`` or ``host``, and ``runtime`` the runtime
+    that runs it there, else the first speaking its language.
+    ``config`` validates through the spec's
     ``config_model`` at install time (fail loud). A CLI never takes a
     mode and never shares a mount's credentials: a binary has no mode,
     the credential does.
@@ -349,16 +352,20 @@ class CLIBlock(BaseModel):
     cli: str | None = None
     script: str | None = None
     machine: str | None = None
+    runtime: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _v_handler(self) -> "CLIBlock":
         if (self.cli is None) == (self.script is None):
             raise ValueError("a clis entry takes exactly one of cli or script")
-        if self.machine is not None and self.script is None:
-            raise ValueError(
-                "machine pins where the script runs; it takes script"
-            )
+        refused = placement_error(
+            IN_PROCESS if self.machine is None else self.machine,
+            self.runtime,
+            self.script is not None,
+        )
+        if refused is not None:
+            raise ValueError(refused)
         # A pointer may only fill a config that a model validates,
         # because the model is what a snapshot redacts by. A script's
         # config is opaque: nothing declares which key is a credential,
@@ -672,7 +679,8 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
         return CLI(
             spec=CommandSpec(name=name),
             script=_load_script_source(block.script),
-            machine=block.machine,
+            machine=IN_PROCESS if block.machine is None else block.machine,
+            runtime=block.runtime,
         )
     if block.cli is None:
         raise ValueError(f"clis entry {name!r} takes cli or script")

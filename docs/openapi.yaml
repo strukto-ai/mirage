@@ -6550,6 +6550,11 @@ components:
             - type: string
             - type: 'null'
           title: Machine
+        runtime:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Runtime
         config:
           additionalProperties: true
           type: object
@@ -6560,8 +6565,10 @@ components:
       type: object
       title: CLIBlock
       description: Install named commands in the workspace. Set `cli` to a registered CLI type or `script`
-        to a program file. Use `config` for settings and credentials. For scripts, `machine` selects the
-        machine that runs it; when omitted, Mirage selects one for the script language.
+        to a program file. Use `config` for settings and credentials. `machine` is the machine type it
+        runs on, `in_process` by default and the only one for `cli`; a script can also run on `worker`
+        or `host`. `runtime` selects the runtime that runs a script there; when omitted, Mirage uses the
+        first one for the script language.
     CancelLinesResponse:
       properties:
         canceled:

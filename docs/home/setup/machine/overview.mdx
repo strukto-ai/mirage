@@ -1,28 +1,48 @@
 ---
-title: Overview
+title: Machines
+sidebarTitle: Overview
 icon: server
-description: Run captured programs on a container, VM, cloud sandbox or remote machine you already have.
+description: Choose where programs run, in Mirage, in worker processes, on the host, or on a container, VM, cloud sandbox or remote machine.
 ---
 
-A machine is somewhere you already have: a container, a microVM, a cloud
-sandbox or a host over SSH. You create and stop it; Mirage only runs programs
-on it.
+A machine is a Unix-like computer that runs programs as processes. Mirage's
+own commands (`grep`, `cat`, pipes, redirects) run on the workspace's own
+machine, the Mirage process; `python3`, `node` and every other program run on
+the machine that captures them.
 
-Declare each machine under `machines:` with the `provider` that reaches it
-and the programs it `captures`. `captures` defaults to
-[`@external`](/home/setup/runtime/overview#captures), every program Mirage
-does not have itself.
+| Machine | Runs | SDK |
+| --- | --- | --- |
+| [In Process](/home/setup/machine/in_process) | Mirage's own commands, and Python or JavaScript on a [runtime](/home/setup/runtime/overview) | both |
+| [Worker](/home/setup/machine/worker) | `python3` on Monty, in worker processes Mirage starts | both |
+| [Host](/home/setup/machine/host) | programs installed on the host, confined by a `sandbox` on Linux | Python, Node |
+| A [provider](#providers) | programs installed on a container, VM, cloud sandbox or SSH host you already have | Python, Node; E2B also in the browser |
+
+A [runtime](/home/setup/runtime/overview) is an interpreter that runs inside a
+machine: Monty on a worker, and WASI, Pyodide or QuickJS in process. A host or
+a provider takes no runtime; it runs the programs installed on it.
+
+## Routing
+
+`machines` is ordered: the first machine whose `captures` name a program runs
+it, and Mirage runs the rest itself. Without the key, `python3`, `node` and
+`js` answer `command not found` (exit 127) until a machine captures them.
 
 ```yaml
 machines:
+  py:
+    provider: worker
   box:
     provider: docker
     container: my-sandbox
+    mount_type: ssh
 ```
 
-A program goes to the first machine listed that captures it, so with two
-`@external` machines the first one runs every program, and the second runs
-what it names on its own:
+Each entry names its `provider`: `in_process`, `worker`, `host` or a
+[provider](#providers). The entry's other keys are its settings, snake_case in
+YAML for both SDKs; a key it does not take is refused.
+
+With two `@external` machines the first one runs every program, and the
+second runs what it names on its own:
 
 ```yaml
 machines:
@@ -41,6 +61,134 @@ A line or a command can also name its machine: `execute(machine=)`, a
 [Route Machine](/home/policy/route-machine). A named machine runs what it
 captures; everything else stays where it would run.
 
+## Captures
+
+`captures` lists the programs a machine takes:
+
+| Entry | Takes |
+| --- | --- |
+| A name, such as `python3` or `ffmpeg` | That program |
+| `@python`, `@js` | `python3` and `python`, or `node` and `js` |
+| `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `perl` or a vendor CLI |
+| `@line` | The whole line, Mirage's own commands included (any machine that runs a shell line) |
+
+| Machine | Default `captures` |
+| --- | --- |
+| `worker`, `in_process` with WASI or Pyodide, `host` | `@python` |
+| `in_process` with QuickJS | `@js` |
+| `host` with a `sandbox`, a provider | `@external` |
+
+- Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
+  in Mirage. Name `cat`, `grep`, `ps` or `kill` to run it on a machine
+  instead; `cd`, `export`, `echo`, `ln`, functions and installed CLIs stay
+  in Mirage even when named.
+- `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
+  those itself and gives them to the Python or JavaScript machine in the list.
+  Name them, or `@python` or `@js`, to send them somewhere else. A tool such
+  as `pip` is an ordinary program: capture it on the same machine when
+  packages must land there, as in `captures: ["@python", "pip", "pip3"]`.
+- Monty, WASI, Pyodide and QuickJS take only their own interpreter's
+  names; naming another program on one is refused when the workspace is
+  built. A `host` machine and a provider take any name.
+- Mirage matches the program each command really runs, after expanding its
+  words, so `python3` is captured in `$P x`, `env python3 x`,
+  `timeout 5 python3 x`, `sh -c 'python3 x'` and `xargs python3`. Each command
+  on a line matches on its own, so `cat a.txt | python3 x` sends only `python3`.
+- `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
+  it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
+  On a machine the wrapper goes with it, and permission rules and a
+  `pre_command` route answer for the program.
+- An absolute path Mirage has no file for, such as `/usr/bin/ffmpeg`, goes to
+  the `@external` machine. A profile's `commands.allow` refuses it, since the
+  list can only name what it can read.
+- On a `host` machine or a provider, a program a captured program
+  starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
+  launcher on the same machine as the tool. A Pyodide script's `subprocess`
+  calls go back through Mirage's routing like any other command.
+- An alias is captured as the word it expands to, once `shopt -s
+  expand_aliases` is on and the alias was defined on an earlier line.
+- If two machines take the same name or group, the first wins and Mirage
+  logs a warning.
+- A program no machine takes exits 127, `command not found`.
+- An `in_process` entry with no `runtime` runs only the mount commands it
+  captures; see [In Process](/home/setup/machine/in_process#without-a-runtime).
+- A name only `@external` takes has no file, so `which`, `command -v` and
+  `type` report it missing; running it still works.
+- Globs expand against the workspace first (`python3 job.py *.csv` runs
+  `python3 job.py a.csv b.csv`), and permission rules judge that argv.
+
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+    captures: ["@python", "@external"]
+```
+
+Here `python3 job.py | grep error` runs `python3` in the container and
+`grep` in Mirage, and `ffmpeg -i a.mp4 b.webm` runs in the container.
+
+## Files
+
+<div className="my-6">
+  <img noZoom src="/images/runtime-light.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="block dark:hidden w-full" />
+  <img noZoom src="/images/runtime-dark.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="hidden dark:block w-full" />
+</div>
+
+| Where | Reaches the workspace through | Outside the workspace |
+| --- | --- | --- |
+| Monty, WASI, QuickJS | directly | no host files or network |
+| Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
+| `host` | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under a `sandbox`, only the paths you grant |
+| A provider | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `cloudflare_container`, `ssh`, `kubernetes`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
+
+Mount modes, profiles and policies apply to every file call that reaches the
+workspace. A program on a `host` machine or a provider also has that machine's
+own files and network, which they do not cover. Pyodide has its own
+containment limits; use a machine with a process and kernel boundary for
+hostile code.
+
+If a `host` machine or a provider cannot enforce the session's file
+restrictions, Mirage refuses to launch the program as a policy refuses a
+command: `<provider>: Permission denied`, exit 126, naming a `host` machine by
+its own name. See [ssh](#ssh) for the restrictions a provider cannot enforce.
+
+### Verify workspace file access
+
+Run these lines inside Mirage's shell after configuring a writable `/data`
+mount visible to the machine capturing `python3`. They check that Python can
+read a workspace file and write one back:
+
+```bash
+(
+  scratch=$(mktemp /data/mirage-check.XXXXXX) || exit
+  trap 'rm -f -- "$scratch"' EXIT
+  printf 'hello\n' > "$scratch" &&
+  MIRAGE_CHECK_FILE="$scratch" python3 -c 'import os; from pathlib import Path; path = Path(os.environ["MIRAGE_CHECK_FILE"]); text = path.read_text(); path.write_text(text.upper()); print(text, end="")' &&
+  cat "$scratch"
+)
+# hello
+# HELLO
+```
+
+Monty, WASI, Pyodide and QuickJS access workspace files automatically.
+For a `host` machine, first mount a [FUSE folder](/home/setup/fuse).
+For a provider, finish its page's **Connecting the workspace** steps first.
+
+## Providers
+
+A provider reaches a machine you already have: a container, a microVM, a
+cloud sandbox or a host over SSH. You create and stop it; Mirage only runs
+programs on it. Its `captures` default to [`@external`](#captures), every
+program Mirage does not have itself.
+
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+```
+
 | Provider | Runs programs in |
 | --- | --- |
 | [Docker](/home/setup/machine/docker) | A Docker container |
@@ -52,10 +200,6 @@ captures; everything else stays where it would run.
 | [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel |
 | [Apple Container](/home/setup/machine/apple_container) | A container on macOS, a VM of its own |
 | [SSH](/home/setup/machine/ssh) | Any machine running `sshd` |
-
-Mirage's own runtimes are machines too: `in_process`, `worker` and `host`
-run Python, JavaScript or the host's own programs. See
-[Runtimes](/home/setup/runtime/overview).
 
 To try one, start with [Docker](/home/setup/machine/docker).
 
@@ -73,7 +217,7 @@ so the machine must see the mounts. `mount_type` picks how:
 
 Daytona takes no `mount_type`: run a Mirage on the machine, as `fuse` does,
 or put the files there yourself. Once connected, run the shared
-[workspace file check](/home/setup/runtime/overview#verify-workspace-file-access).
+[workspace file check](#verify-workspace-file-access).
 
 ### ssh
 
@@ -213,7 +357,7 @@ machine's full output, and any other option goes to the default machine's own
 Inside `$( )` they answer for the machine programs run on by default, so
 `make -j$(nproc)` gets one number. `--machine` picks another:
 `workers=$(nproc --machine cloud)`. `--machine mirage` picks the workspace. The
-host counts as a machine only while a runtime runs programs on it, and prints
+host counts as a machine only while a `host` entry runs programs on it, and prints
 `-` for figures it has no such thing for. `uptime`, `top` and `lscpu` exist only
 in a workspace that runs programs on a machine or the host; there `top` needs
 `-b`, as it does without a terminal.
@@ -293,13 +437,20 @@ captures need, such as Node.js for `node`.
 
 ## Timeouts
 
-`command_limits` apply to a program on a machine as to any command: a line
-past its `timeout_seconds` exits 124, and `max_bytes` and `max_lines` cap its
-output.
+`command_limits` apply to every machine's programs as to any command: a line
+past its `@line` entry's `timeout_seconds` exits 124 (`line: timed out after
+Ns`), and `max_bytes` and `max_lines` cap a program's output.
 
-A timeout sends TERM, then KILL a second later, to every process of that run,
-and gives up after 5 seconds if the machine stops answering. That needs
-`/bin/sh`, `tr`, `grep` and `/proc` on the machine.
+```yaml
+command_limits:
+  "@line":
+    timeout_seconds: 30
+```
+
+The deadline stops the run on every machine. On a provider, a timeout sends
+TERM, then KILL a second later, to every process of that run, and gives up
+after 5 seconds if the machine stops answering. That needs `/bin/sh`, `tr`,
+`grep` and `/proc` on the machine.
 
 <Warning>
   In TypeScript, a Daytona command keeps running after a timeout, and a

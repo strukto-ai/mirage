@@ -323,7 +323,7 @@
       }
     },
     {
-      "name": "clis entry: the script form takes a machine and a config",
+      "name": "clis entry: the script form takes a machine, a runtime and a config",
       "config": {
         "mounts": {
           "/d": {
@@ -333,7 +333,8 @@
         "clis": {
           "tool": {
             "script": "tool.py",
-            "machine": "py",
+            "machine": "worker",
+            "runtime": "monty",
             "config": {
               "token": "t"
             }

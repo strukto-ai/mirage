@@ -24,7 +24,7 @@ import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { isLineExecutor, LINE_EXECUTOR, type LineExecutorMixin } from '../runtime/mixin.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
-import { runtimeForLanguage } from '../runtime/routing/index.ts'
+import { runtimeForScript } from '../runtime/routing/index.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { WorkspaceRuntime } from '../runtime/workspace.ts'
@@ -217,11 +217,16 @@ describe('routing ladder', () => {
     }
   })
 
-  it('runtimeForLanguage is first-match with no cross-language fallback', () => {
+  it('runtimeForScript picks by machine and language, first match', () => {
     const monty = new MontyRuntime()
     const quickjs = new QuickJsRuntime()
-    expect(runtimeForLanguage([monty, quickjs], 'python')).toBe(monty)
-    expect(runtimeForLanguage([monty, quickjs], 'js')).toBe(quickjs)
+    const fake = new NamedFakeRuntime('fake')
+    expect(runtimeForScript([monty, quickjs, fake], 'worker', null, 'python')).toBe(monty)
+    expect(runtimeForScript([monty, quickjs, fake], 'in_process', null, 'python')).toBe(fake)
+    expect(runtimeForScript([monty, quickjs], 'in_process', null, 'js')).toBe(quickjs)
+    expect(runtimeForScript([monty, quickjs], 'in_process', 'quickjs', 'js')).toBe(quickjs)
+    expect(runtimeForScript([monty, quickjs], 'in_process', 'pyodide', 'js')).toBeNull()
+    expect(runtimeForScript([monty], 'host', null, 'python')).toBeNull()
     // Captures do not count (the marker captures python3 but is no
     // LanguageRuntime), and there is no any-language
     // fallback: a python program cannot run on a js engine.
@@ -231,9 +236,9 @@ describe('routing ladder', () => {
         super({ captures: ['python3', 'python'] })
       }
     }
-    expect(runtimeForLanguage([new CapturingMarker()], 'python')).toBeNull()
-    expect(runtimeForLanguage([quickjs], 'python')).toBeNull()
-    expect(runtimeForLanguage([], 'js')).toBeNull()
+    expect(runtimeForScript([new CapturingMarker()], 'in_process', null, 'python')).toBeNull()
+    expect(runtimeForScript([quickjs], 'in_process', null, 'python')).toBeNull()
+    expect(runtimeForScript([], 'in_process', null, 'js')).toBeNull()
   })
 
   it('a route program reads mounted content as the session', async () => {

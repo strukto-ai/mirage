@@ -1,0 +1,41 @@
+---
+title: Worker
+icon: gears
+description: Run Python on Monty in worker processes Mirage starts, in both SDKs.
+---
+
+A `worker` machine runs `python3` on [Monty](/home/setup/runtime/monty) in
+worker processes Mirage starts and stops. Monty is the only runtime a worker
+runs, so the entry needs no `runtime`.
+
+```yaml
+machines:
+  py:
+    provider: worker
+    max_memory: 64M
+```
+
+`max_memory` caps one run's memory; see [Monty](/home/setup/runtime/monty#memory).
+
+- Every workspace in the process shares one pool of four workers, so an idle
+  workspace holds none. A run past four waits for a free worker.
+- A program reaches the workspace's mounts directly, under the same mount
+  modes, permissions and policies as `cat`. It has no host files, host
+  environment or network.
+- A timeout or `kill` stops the worker running the program, and `kill -STOP`
+  pauses it.
+- Its runs belong to the workspace's own machine: `ps` lists them under
+  `mirage`, and `hostname` and `nproc` answer for the workspace.
+- Cloudflare Workers start no processes, so Monty runs
+  [`in_process`](/home/setup/machine/in_process) there and a `worker` entry is
+  refused.
+
+A [script CLI](/home/configuration/workspace#cli-entries) runs on Monty with
+`machine: worker`:
+
+```yaml
+clis:
+  pager:
+    script: pager.py
+    machine: worker
+```

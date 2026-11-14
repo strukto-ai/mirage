@@ -14,6 +14,7 @@
 
 import type { ZodObject, ZodRawShape } from 'zod'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
+import { HOST, IN_PROCESS, SCRIPT_MACHINES, WORKER } from '../../runtime/constants.ts'
 import { type ScriptSource } from '../../runtime/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -76,7 +77,10 @@ export class CLI {
   /** Builds an install's accessor from its validated config. */
   readonly accessor: (config: unknown) => Accessor
   readonly script: ScriptSource | null
-  readonly machine: string | null
+  /** The machine it runs on: `in_process`, or for a script `worker` or `host`. */
+  readonly machine: string
+  /** The runtime that runs the script on that machine; null for the first that speaks its language. */
+  readonly runtime: string | null
   /** The MCP tool list the tree was built from, so a snapshot rebuilds it without the server. */
   readonly mcp: MCPSource | null
 
@@ -87,12 +91,14 @@ export class CLI {
     /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
     accessor?: CLI['accessor']
     script?: ScriptSource | null
-    machine?: string | null
+    machine?: string
+    runtime?: string | null
     mcp?: MCPSource | null
   }) {
     this.spec = init.spec
     this.script = init.script ?? null
-    this.machine = init.machine ?? null
+    this.machine = init.machine ?? IN_PROCESS
+    this.runtime = init.runtime ?? null
     this.mcp = init.mcp ?? null
     this.configModel = init.configModel ?? null
     this.accessor = init.accessor ?? noopAccessor
@@ -108,6 +114,30 @@ export class CLI {
     validateCli(this)
     Object.freeze(this)
   }
+}
+
+/**
+ * Why a CLI cannot run where it is placed; null when it can. A handler or
+ * MCP CLI runs in Mirage's own process. A script runs on a machine whose
+ * runtime Mirage hands it to, under the rules a `machines:` entry of that
+ * provider follows. Mirrors Python's `placement_error`.
+ */
+export function placementError(
+  machine: string,
+  runtime: string | null,
+  script: boolean,
+): string | null {
+  if (!script) {
+    if (machine !== IN_PROCESS) return `runs on ${IN_PROCESS} only, not '${machine}'`
+    if (runtime !== null) return 'runtime names what runs a script; it takes script'
+    return null
+  }
+  if (!SCRIPT_MACHINES.includes(machine))
+    return `a script runs on ${SCRIPT_MACHINES.join(', ')}, not '${machine}'`
+  if (machine === HOST && runtime !== null) return 'a host runs its own programs, not a runtime'
+  if (machine === WORKER && runtime !== null && runtime !== 'monty')
+    return `a worker runs 'monty', not '${runtime}'`
+  return null
 }
 
 function validateCli(cli: CLI): void {
@@ -130,9 +160,9 @@ function validateCli(cli: CLI): void {
     if (Object.values(cli.handlers).some((handler) => handler.fn !== null)) {
       throw new Error(`cli '${name}': a node takes fn or script, not both`)
     }
-  } else if (cli.machine !== null) {
-    throw new Error(`cli '${name}': machine names where script runs; it takes script`)
   }
+  const refused = placementError(cli.machine, cli.runtime, cli.script !== null)
+  if (refused !== null) throw new Error(`cli '${name}': ${refused}`)
   const leaves = validateTree(cli.spec, [], new Map())
   const missing = [...leaves].filter((path) => !Object.hasOwn(cli.handlers, path))
   const extra = Object.keys(cli.handlers).filter((path) => !leaves.has(path))

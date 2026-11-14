@@ -22,10 +22,12 @@ import type { RouteDecision } from './types.ts'
 import {
   EXTERNAL_COMMANDS,
   HOST,
+  IN_PROCESS,
   JS_GROUP,
   LANGUAGE_COMMANDS,
   PYTHON_GROUP,
   WHOLE_LINE,
+  WORKER,
 } from './constants.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { LanguageRuntime } from './language.ts'
@@ -78,8 +80,6 @@ const RUNTIME_HINTS: Record<string, string> = {
  * rather than a machine it reaches: in its process, in worker processes it
  * spawns, or as native programs on its host.
  */
-export const IN_PROCESS = 'in_process'
-export const WORKER = 'worker'
 const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, WORKER, HOST]
 
 // Where each builtin runtime runs, when that is not in process. Null
@@ -254,6 +254,17 @@ function runtimeFor(
 /** Every runtime an `in_process` machine may name. */
 export function inProcessRuntimes(): string[] {
   return knownRuntimes().filter((name) => !(name in PLACED))
+}
+
+/**
+ * The provider a runtime runs on and the name it is registered under. A
+ * runtime registered under no name, such as a class a `source:Class`
+ * reference loaded, runs in process. Mirrors Python's `placement`.
+ */
+export function placement(runtime: Runtime): [string, string | null] {
+  const name = Object.keys(NAMED).find((key) => runtime.constructor === NAMED[key]) ?? null
+  if (name === null) return [IN_PROCESS, null]
+  return [PLACED[name] ?? IN_PROCESS, name]
 }
 
 /**

@@ -43,6 +43,17 @@ EXTERNAL_COMMANDS: Final = "@external"
 # runs on; every such machine is that one host.
 HOST: Final = "host"
 
+# The provider of the machine that is Mirage's own process.
+IN_PROCESS: Final = "in_process"
+
+# The provider of a machine whose programs run in worker processes Mirage
+# starts.
+WORKER: Final = "worker"
+
+# The machines a script CLI may run on: those whose runtime Mirage hands
+# the script to.
+SCRIPT_MACHINES: Final = (IN_PROCESS, WORKER, HOST)
+
 # Capture the whole line, Mirage's own commands included (a line executor).
 WHOLE_LINE: Final = "@line"
 

@@ -10,7 +10,8 @@
         },
         "clis": {
           "pager": {
-            "script": "import os\nif '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('prog', argv[0])\n    print('args', argv[1:])\n    print('config', os.getenv('MIRAGE_CLI_CONFIG'))\n    if stdin:\n        print('stdin', stdin.decode())\n"
+            "script": "import os\nif '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('prog', argv[0])\n    print('args', argv[1:])\n    print('config', os.getenv('MIRAGE_CLI_CONFIG'))\n    if stdin:\n        print('stdin', stdin.decode())\n",
+            "machine": "worker"
           }
         }
       },
@@ -35,7 +36,8 @@
         },
         "clis": {
           "pager": {
-            "script": "print('args', argv[1:])\n"
+            "script": "print('args', argv[1:])\n",
+            "machine": "worker"
           }
         }
       },
@@ -60,7 +62,8 @@
         },
         "clis": {
           "pager": {
-            "script": "if '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('ran')\n"
+            "script": "if '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('ran')\n",
+            "machine": "worker"
           }
         }
       },
@@ -88,7 +91,8 @@
             "script": "import os\nprint('config', os.getenv('MIRAGE_CLI_CONFIG'))\n",
             "config": {
               "width": 80
-            }
+            },
+            "machine": "worker"
           }
         }
       },
@@ -116,7 +120,8 @@
             "script": "import os\ncfg = os.getenv('MIRAGE_CLI_CONFIG')\nprint('same', os.environ.get('MIRAGE_CLI_CONFIG') == cfg)\nprint('in', 'MIRAGE_CLI_CONFIG' in os.environ)\nprint('getitem', os.environ['MIRAGE_CLI_CONFIG'] == cfg)\n",
             "config": {
               "width": 80
-            }
+            },
+            "machine": "worker"
           }
         }
       },
@@ -141,7 +146,8 @@
         },
         "clis": {
           "pager": {
-            "script": "if stdin:\n    print('stdin', stdin.decode())\nelse:\n    print('no stdin')\n"
+            "script": "if stdin:\n    print('stdin', stdin.decode())\nelse:\n    print('no stdin')\n",
+            "machine": "worker"
           }
         }
       },
@@ -167,10 +173,12 @@
         },
         "clis": {
           "pager": {
-            "script": "print('prog', argv[0])\n"
+            "script": "print('prog', argv[0])\n",
+            "machine": "worker"
           },
           "less": {
-            "script": "print('prog', argv[0])\n"
+            "script": "print('prog', argv[0])\n",
+            "machine": "worker"
           }
         }
       },
@@ -204,7 +212,8 @@
         "clis": {
           "pager": {
             "script": "print('pinned', argv[0])\n",
-            "machine": "monty"
+            "machine": "worker",
+            "runtime": "monty"
           }
         }
       },
@@ -220,7 +229,7 @@
       ]
     },
     {
-      "id": "runs_where_the_line_places_its_interpreter",
+      "id": "runs_on_its_machine_wherever_the_line_is_routed",
       "hosts": [
         "python",
         "typescript"
@@ -236,7 +245,8 @@
         },
         "clis": {
           "pager": {
-            "script": "import sys\nprint('monty', sys.platform == 'monty')\n"
+            "script": "import sys\nprint('monty', sys.platform == 'monty')\n",
+            "machine": "worker"
           }
         },
         "route_policy": {
@@ -257,7 +267,7 @@
           "command": "pager on-local",
           "expect": {
             "exit": 0,
-            "stdout": "monty False\n",
+            "stdout": "monty True\n",
             "stderr": ""
           }
         }
@@ -279,7 +289,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr_contains": "no workspace machine runs python scripts"
+            "stderr_contains": "no in_process machine runs python scripts"
           }
         }
       ]
@@ -299,7 +309,8 @@
         "clis": {
           "pager": {
             "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n",
-            "machine": "pyodide"
+            "machine": "in_process",
+            "runtime": "pyodide"
           }
         }
       },
@@ -355,7 +366,7 @@
         "clis": {
           "pager": {
             "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n",
-            "machine": "local"
+            "machine": "host"
           }
         }
       },

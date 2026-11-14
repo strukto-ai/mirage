@@ -34,7 +34,7 @@
       ]
     },
     {
-      "id": "js_pin_to_a_python_runtime_exits_127",
+      "id": "js_on_a_worker_exits_127",
       "world": {
         "machines": {
           "monty": {
@@ -49,7 +49,7 @@
           "pager": {
             "script": "console.log('unreachable');\n",
             "language": "js",
-            "machine": "monty"
+            "machine": "worker"
           }
         }
       },
@@ -59,7 +59,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr_contains": "does not run js scripts"
+            "stderr_contains": "no worker machine runs js scripts"
           }
         }
       ]

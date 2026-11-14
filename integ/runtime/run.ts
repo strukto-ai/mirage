@@ -175,6 +175,7 @@ interface CliSpecJson {
   script: string
   language?: Language
   machine?: string
+  runtime?: string
   config?: Record<string, unknown>
 }
 
@@ -987,6 +988,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
       spec: new CommandSpec({ name }),
       script: new ScriptSource(entry.script, entry.language ?? 'python'),
       ...(entry.machine !== undefined ? { machine: entry.machine } : {}),
+      ...(entry.runtime !== undefined ? { runtime: entry.runtime } : {}),
     })
     ws.registerCli(name, spec, entry.config ?? null)
   }

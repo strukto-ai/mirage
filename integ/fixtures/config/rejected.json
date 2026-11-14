@@ -277,6 +277,71 @@
       }
     },
     {
+      "name": "clis entry: a cli runs on in_process only",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "sl": {
+            "cli": "slack",
+            "machine": "host"
+          }
+        }
+      }
+    },
+    {
+      "name": "clis entry: a cli takes no runtime",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "sl": {
+            "cli": "slack",
+            "runtime": "monty"
+          }
+        }
+      }
+    },
+    {
+      "name": "clis entry: a script runs on in_process, worker or host",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "tool": {
+            "script": "tool.py",
+            "machine": "docker"
+          }
+        }
+      }
+    },
+    {
+      "name": "clis entry: a script on a host takes no runtime",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "tool": {
+            "script": "tool.py",
+            "machine": "host",
+            "runtime": "monty"
+          }
+        }
+      }
+    },
+    {
       "name": "store block: key_prefixx for key_prefix",
       "config": {
         "mounts": {

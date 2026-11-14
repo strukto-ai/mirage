@@ -16,7 +16,8 @@ import {
   provideMontyModule,
   type MontyModuleLike,
 } from '@struktoai/mirage-core/runtime/python/monty/loader'
-import { IN_PROCESS, placeRuntime } from '@struktoai/mirage-core/runtime/table'
+import { IN_PROCESS } from '@struktoai/mirage-core/runtime/constants'
+import { placeRuntime } from '@struktoai/mirage-core/runtime/table'
 import * as monty from './generated/monty.js'
 import core2 from './generated/monty.component.core2.wasm'
 import core3 from './generated/monty.component.core3.wasm'

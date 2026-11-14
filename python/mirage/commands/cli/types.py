@@ -24,6 +24,12 @@ from mirage.commands.cli.mcp.types import MCPSource
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
+from mirage.runtime.constants import (
+    HOST,
+    IN_PROCESS,
+    SCRIPT_MACHINES,
+    WORKER,
+)
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
 
@@ -73,7 +79,10 @@ class CLI:
             accessor from its validated config, once per install; a CLI
             that reaches no service keeps ``NOOPAccessor``.
         script (ScriptSource | None): program owning the whole installation.
-        machine (str | None): the machine whose engine runs that script.
+        machine (str): the machine it runs on: ``in_process``, or for a
+            script ``worker`` or ``host``.
+        runtime (str | None): the runtime that runs the script on that
+            machine; None for the first that speaks its language.
         mcp (MCPSource | None): the MCP tool list the tree was built
             from, so a snapshot rebuilds it without the server.
     """
@@ -83,7 +92,8 @@ class CLI:
     config_model: type[BaseModel] | None = None
     accessor: Callable[..., Accessor] = NOOPAccessor
     script: ScriptSource | None = None
-    machine: str | None = None
+    machine: str = IN_PROCESS
+    runtime: str | None = None
     mcp: MCPSource | None = None
 
     def __post_init__(self) -> None:
@@ -96,6 +106,37 @@ class CLI:
                 )
         object.__setattr__(self, "handlers", MappingProxyType(handlers))
         _validate_cli(self)
+
+
+def placement_error(
+    machine: str, runtime: str | None, script: bool
+) -> str | None:
+    """Why a CLI cannot run where it is placed; None when it can.
+
+    A handler or MCP CLI runs in Mirage's own process. A script runs on
+    a machine whose runtime Mirage hands it to, under the rules a
+    ``machines:`` entry of that provider follows.
+
+    Args:
+        machine (str): the machine it runs on.
+        runtime (str | None): the runtime it names there.
+        script (bool): whether a script serves the CLI.
+    """
+    if not script:
+        if machine != IN_PROCESS:
+            return f"runs on {IN_PROCESS} only, not {machine!r}"
+        if runtime is not None:
+            return "runtime names what runs a script; it takes script"
+        return None
+    if machine not in SCRIPT_MACHINES:
+        return (
+            f"a script runs on {', '.join(SCRIPT_MACHINES)}, not {machine!r}"
+        )
+    if machine == HOST and runtime is not None:
+        return "a host runs its own programs, not a runtime"
+    if machine == WORKER and runtime not in (None, "monty"):
+        return f"a worker runs 'monty', not {runtime!r}"
+    return None
 
 
 def _validate_cli(cli: CLI) -> None:
@@ -125,10 +166,9 @@ def _validate_cli(cli: CLI) -> None:
             raise ValueError(
                 f"cli {name!r}: a node takes fn or script, not both"
             )
-    elif cli.machine is not None:
-        raise ValueError(
-            f"cli {name!r}: machine names where script runs; it takes script"
-        )
+    refused = placement_error(cli.machine, cli.runtime, cli.script is not None)
+    if refused is not None:
+        raise ValueError(f"cli {name!r}: {refused}")
     leaves = _validate_tree(cli.spec, (), {})
     missing = leaves - cli.handlers.keys()
     extra = cli.handlers.keys() - leaves

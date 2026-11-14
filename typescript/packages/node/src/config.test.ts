@@ -1180,7 +1180,7 @@ describe('clis section', () => {
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'clis:\n  pager:\n    script: pager.py\n    machine: monty\n' +
+        'clis:\n  pager:\n    script: pager.py\n    machine: worker\n' +
         '    config:\n      page_size: 20\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
@@ -1189,7 +1189,8 @@ describe('clis section', () => {
     expect(spec).toBeInstanceOf(CLI)
     expect((spec as CLI).spec.name).toBe('pager')
     expect((spec as CLI).script).toEqual(new ScriptSource("print('page')"))
-    expect((spec as CLI).machine).toBe('monty')
+    expect((spec as CLI).machine).toBe('worker')
+    expect((spec as CLI).runtime).toBeNull()
     expect(config).toEqual({ page_size: 20 })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1239,12 +1240,17 @@ describe('clis section', () => {
     await expect(configToWorkspaceArgs(neither)).rejects.toThrow(/exactly one of cli or script/)
   })
 
-  it('machine takes script', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { cli: 'slack', machine: 'monty' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
+  it('a cli entry runs in process only', async () => {
+    const mounts = { '/data': { vfs: 'ram' } }
+    await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', machine: 'in_process' } } }),
+    )
+    expect(() =>
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', machine: 'host' } } }),
+    ).toThrow(/runs on in_process only/)
+    expect(() =>
+      loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', runtime: 'monty' } } }),
+    ).toThrow(/it takes script/)
   })
 
   it('a script entry refuses a secrets pointer', () => {

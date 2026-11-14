@@ -29,16 +29,16 @@ from mirage.core.mcp.config import MCPConfig
 from mirage.machine.config import MachineConfig
 from mirage.machine.registry import known_providers, machine_class
 from mirage.resources.types import EntryKind
-from mirage.runtime.constants import HOST, SECRET_CONFIG_FIELDS
+from mirage.runtime.constants import (
+    HOST,
+    IN_PROCESS,
+    SECRET_CONFIG_FIELDS,
+    WORKER,
+)
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.sandlock import SandlockRuntime
-from mirage.runtime.table import (
-    IN_PROCESS,
-    WORKER,
-    in_process_runtimes,
-    runtime_class,
-)
+from mirage.runtime.table import in_process_runtimes, runtime_class
 from mirage.server.resources.types import Field, FieldType, TypeTable
 from mirage.vfs.registry import known_vfs_names, resolve_class, resolve_entry
 from mirage.vfs.secrets import secret_field_names

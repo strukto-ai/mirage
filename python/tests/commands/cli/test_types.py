@@ -95,17 +95,54 @@ def test_script_excludes_config_model():
         )
 
 
-def test_machine_requires_a_script():
+def test_a_handler_cli_runs_in_process_only():
+    handlers = {"": CLIHandler(_verb)}
+    cli = CLI(CommandSpec(name="pager"), handlers=handlers)
+    assert cli.machine == "in_process"
+    with pytest.raises(ValueError, match="runs on in_process only"):
+        CLI(CommandSpec(name="pager"), handlers=handlers, machine="host")
     with pytest.raises(ValueError, match="it takes script"):
+        CLI(CommandSpec(name="pager"), handlers=handlers, runtime="monty")
+
+
+@pytest.mark.parametrize(
+    ("machine", "runtime"),
+    [
+        ("in_process", None),
+        ("in_process", "quickjs"),
+        ("worker", None),
+        ("worker", "monty"),
+        ("host", None),
+    ],
+)
+def test_a_script_runs_on_in_process_worker_or_host(machine, runtime):
+    cli = CLI(
+        CommandSpec(name="pager"),
+        script=ScriptSource("1"),
+        machine=machine,
+        runtime=runtime,
+    )
+    assert (cli.machine, cli.runtime) == (machine, runtime)
+
+
+@pytest.mark.parametrize(
+    ("machine", "runtime", "refusal"),
+    [
+        ("docker", None, "a script runs on in_process, worker, host"),
+        ("host", "monty", "a host runs its own programs"),
+        ("worker", "quickjs", "a worker runs 'monty', not 'quickjs'"),
+    ],
+)
+def test_a_script_refuses_a_placement_its_machine_cannot_run(
+    machine, runtime, refusal
+):
+    with pytest.raises(ValueError, match=refusal):
         CLI(
             CommandSpec(name="pager"),
-            handlers={"": CLIHandler(_verb)},
-            machine="monty",
+            script=ScriptSource("1"),
+            machine=machine,
+            runtime=runtime,
         )
-    cli = CLI(
-        CommandSpec(name="pager"), script=ScriptSource("1"), machine="monty"
-    )
-    assert cli.machine == "monty"
 
 
 @pytest.mark.parametrize(

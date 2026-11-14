@@ -61,6 +61,7 @@ from mirage.policy.types import (  # noqa: E402
     VfsResultContext,
 )
 from mirage.runtime.base import Runtime  # noqa: E402
+from mirage.runtime.constants import IN_PROCESS  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
 from mirage.runtime.python.host.fs import HostFs  # noqa: E402
 from mirage.runtime.table import register_runtime  # noqa: E402
@@ -907,7 +908,7 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
     Args:
         ws (Workspace): the workspace being built.
         clis (dict[str, Any]): head word -> {script, language, machine,
-            config}.
+            runtime, config}.
     """
     for name, entry in clis.items():
         spec = CLI(
@@ -915,7 +916,8 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
             script=ScriptSource(
                 entry["script"], language=entry.get("language", "python")
             ),
-            machine=entry.get("machine"),
+            machine=entry.get("machine", IN_PROCESS),
+            runtime=entry.get("runtime"),
         )
         ws.register_cli(name, spec, entry.get("config"))
 
