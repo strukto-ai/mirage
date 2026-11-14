@@ -248,15 +248,23 @@ def in_process_runtimes() -> list[str]:
 
 def placement(runtime: Runtime[Any]) -> tuple[str, str | None]:
     """The provider an engine runs on and the name it is registered
-    under. An engine registered under no name, such as a class a
-    ``source:Class`` reference loaded, runs in process.
+    under. An entry built from a ``machines:`` spec keeps the provider
+    and the runtime name it was built with; any other engine is looked
+    up by its class. An engine registered under no name, such as a
+    class a ``source:Class`` reference loaded, runs in process.
 
     Args:
         runtime (Runtime): a workspace entry.
     """
+    spec = built_from(runtime)
+    named = None if spec is None else spec.get("runtime")
+    if spec is not None and isinstance(named, str) and ":" not in named:
+        return spec["provider"], named
     name = next(
         (key for key, cls in NAMED.items() if type(runtime) is cls), None
     )
+    if spec is not None:
+        return spec["provider"], name
     if name is None:
         return IN_PROCESS, None
     return _PLACED.get(name, IN_PROCESS), name

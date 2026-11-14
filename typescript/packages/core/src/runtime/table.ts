@@ -257,12 +257,19 @@ export function inProcessRuntimes(): string[] {
 }
 
 /**
- * The provider a runtime runs on and the name it is registered under. A
+ * The provider a runtime runs on and the name it is registered under. An
+ * entry built from a `machines:` spec keeps the provider and the runtime
+ * name it was built with; any other runtime is looked up by its class. A
  * runtime registered under no name, such as a class a `source:Class`
  * reference loaded, runs in process. Mirrors Python's `placement`.
  */
 export function placement(runtime: Runtime): [string, string | null] {
+  const spec = builtFrom(runtime)
+  const named = spec?.runtime
+  if (spec !== undefined && typeof named === 'string' && !named.includes(':'))
+    return [String(spec.provider), named]
   const name = Object.keys(NAMED).find((key) => runtime.constructor === NAMED[key]) ?? null
+  if (spec !== undefined) return [String(spec.provider), name]
   if (name === null) return [IN_PROCESS, null]
   return [PLACED[name] ?? IN_PROCESS, name]
 }

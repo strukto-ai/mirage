@@ -601,8 +601,8 @@ export interface StoreBlock {
 interface CLIBlock {
   cli?: string
   script?: string
-  machine?: string
-  runtime?: string
+  machine?: string | null
+  runtime?: string | null
   config?: Record<string, unknown>
 }
 
@@ -944,8 +944,8 @@ async function cliEntry(
     return new CLI({
       spec: new CommandSpec({ name }),
       script: loadScriptSource(block.script, host),
-      machine: (block.machine as string | undefined) ?? IN_PROCESS,
-      runtime: (block.runtime as string | undefined) ?? null,
+      machine: (block.machine as string | null | undefined) ?? IN_PROCESS,
+      runtime: (block.runtime as string | null | undefined) ?? null,
     })
   }
   const ref = block.cli as string
@@ -986,10 +986,18 @@ async function buildCliEntries(
     if (hasCli === hasScript) {
       throw new Error(`clis entry '${name}' takes exactly one of cli or script`)
     }
-    if (block.machine !== undefined && typeof block.machine !== 'string') {
+    if (
+      block.machine !== undefined &&
+      block.machine !== null &&
+      typeof block.machine !== 'string'
+    ) {
       throw new Error(`clis entry '${name}': machine must be a string`)
     }
-    if (block.runtime !== undefined && typeof block.runtime !== 'string') {
+    if (
+      block.runtime !== undefined &&
+      block.runtime !== null &&
+      typeof block.runtime !== 'string'
+    ) {
       throw new Error(`clis entry '${name}': runtime must be a string`)
     }
     if (block.config !== undefined && !isPlainObject(block.config)) {

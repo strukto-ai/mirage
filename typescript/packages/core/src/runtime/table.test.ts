@@ -26,6 +26,7 @@ import {
   builtFrom,
   knownRuntimes,
   machineBindingsFor,
+  placement,
   registerRuntime,
   shadowedCaptures,
 } from './table.ts'
@@ -377,6 +378,15 @@ describe('registerRuntime', () => {
     registerRuntime('fake-replaced', FakeRuntime)
     registerRuntime('fake-replaced', Other)
     expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
+  })
+
+  it('keeps the name an entry was built with', () => {
+    registerRuntime('fake-first', FakeRuntime)
+    registerRuntime('fake-second', FakeRuntime)
+    const [, built] = buildEntry('py', { provider: 'in_process', runtime: 'fake-second' })
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
+    registerRuntime('fake-second', Other)
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
   })
 })
 

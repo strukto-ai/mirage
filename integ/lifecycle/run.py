@@ -57,6 +57,7 @@ from mirage.policy.types import (
     VfsExplanation,
     VfsResultContext,
 )
+from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.types import ScriptSource
 from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
@@ -452,7 +453,8 @@ async def action(
             CLI(
                 spec=CommandSpec(name=step["name"]),
                 script=ScriptSource(**step["script"]),
-                machine=step.get("machine"),
+                machine=step.get("machine", IN_PROCESS),
+                runtime=step.get("runtime"),
             ),
             step.get("config"),
         )

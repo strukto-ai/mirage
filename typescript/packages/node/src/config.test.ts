@@ -1251,6 +1251,12 @@ describe('clis section', () => {
     expect(() =>
       loadWorkspaceConfig({ mounts, clis: { sl: { cli: 'slack', runtime: 'monty' } } }),
     ).toThrow(/it takes script/)
+    await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts,
+        clis: { sl: { cli: 'slack', machine: null, runtime: null } },
+      }),
+    )
   })
 
   it('a script entry refuses a secrets pointer', () => {

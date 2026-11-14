@@ -34,6 +34,7 @@ from mirage.runtime.table import (
     built_from,
     known_runtimes,
     machine_bindings_for,
+    placement,
     register_runtime,
     shadowed_captures,
     whole_line_runtime,
@@ -344,6 +345,21 @@ def test_register_runtime_replaces_a_custom_name():
         assert isinstance(build_runtime("fake"), Other)
     finally:
         NAMED.pop("fake", None)
+
+
+def test_placement_keeps_the_name_an_entry_was_built_with():
+    try:
+        register_runtime("fake-first", FakeRuntime)
+        register_runtime("fake-second", FakeRuntime)
+        _, built = build_entry(
+            "py", {"provider": "in_process", "runtime": "fake-second"}
+        )
+        assert placement(built) == ("in_process", "fake-second")
+        NAMED.pop("fake-second")
+        assert placement(built) == ("in_process", "fake-second")
+    finally:
+        NAMED.pop("fake-first", None)
+        NAMED.pop("fake-second", None)
 
 
 class Named(Runtime):
