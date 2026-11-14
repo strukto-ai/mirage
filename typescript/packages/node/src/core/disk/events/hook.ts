@@ -59,11 +59,14 @@ export class DiskEventHook {
    * directory is not this mount's to report.
    */
   private async relative(hostPath: string): Promise<string | null> {
-    const [root, resolved] = await Promise.all([
+    const [root, resolved, whole] = await Promise.all([
       this.physical(this.accessor.root, false),
       this.physical(hostPath, true),
+      this.physical(hostPath, false),
     ])
-    if (resolved === root) return '/'
+    // A link to the root itself is the root: kept as written it would name
+    // the link's own directory, outside the mount.
+    if (resolved === root || whole === root) return '/'
     if (!resolved.startsWith(root + path.sep)) return null
     return (
       '/' +

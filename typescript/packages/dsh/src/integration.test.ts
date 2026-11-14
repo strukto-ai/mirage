@@ -249,6 +249,19 @@ describe("dsh's working directory", () => {
     expect(ctx.workingDirectory.get(agent.session)).toBe('/')
   })
 
+  it('recovers when a parent of the directory becomes a file', async () => {
+    const { ctx, ws, agent } = await directoryWorld('/Users/somebody/host-project')
+    await ws.vfs.mkdir('/data/build')
+    await ws.vfs.mkdir('/data/build/src')
+    await ctx.workingDirectory.set(agent, '/data/build/src')
+    await runOn(
+      ctx.shell,
+      ctx.shell.resolve({ command: 'rm -r /data/build; echo x > /data/build' }),
+    )
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/')
+    expect(await ctx.workingDirectory.set(agent, '/notes')).toBe('/notes')
+  })
+
   it('recovers when the directory is removed under it', async () => {
     const { ctx, ws, agent } = await directoryWorld('/Users/somebody/host-project')
     await ws.vfs.mkdir('/data/sub')

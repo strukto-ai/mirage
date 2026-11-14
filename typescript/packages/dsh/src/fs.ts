@@ -36,9 +36,10 @@ import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
-import { FileType } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { makeStorageKey } from '@struktoai/mirage-core/workspace/mount/storage'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
@@ -62,13 +63,13 @@ type SandboxPolicy = Parameters<FileSystem['writeText']>[4]
  * session and working-directory packages stay out of this one's
  * dependencies, and any composition's Session satisfies it.
  */
-export interface WorkingDirectorySession {
+interface WorkingDirectorySession {
   readonly header: { readonly cwd?: string | null }
   append(type: 'working-directory/change', data: { cwd: string }): unknown
 }
 
 /** What dsh's working-directory service asks its access listeners. */
-export interface WorkingDirectoryAccess {
+interface WorkingDirectoryAccess {
   agent: { session: WorkingDirectorySession }
   path: string | null
   signal: AbortSignal
@@ -189,19 +190,20 @@ function escapesRoot(rel: string): boolean {
  *
  * A disk mount keeps the real path of its root, so a host path spelled
  * through a link (`/tmp` and `/var` on macOS) would otherwise never fall
- * under it. Only the directories above the entry are resolved, as the
- * disk event hook does, so a link inside the mount maps to itself; and
- * the deepest ancestor that exists is resolved, so a path that names
+ * under it. For an entry only the directories above it are resolved, as
+ * the disk event hook does, so a link inside the mount maps to itself;
+ * and the deepest ancestor that exists is resolved, so a path that names
  * nothing yet keeps the rest as written.
  *
  * @param hostPath an absolute host path.
+ * @param entry whether the last component is kept as written.
  * @returns the path to compare against a disk mount's root.
  */
-function physicalPath(hostPath: string): string {
+function physicalPath(hostPath: string, entry: boolean): string {
   const lexical = resolve(hostPath)
   const rest: string[] = []
   let head = lexical
-  if (dirname(lexical) !== lexical) {
+  if (entry && dirname(lexical) !== lexical) {
     rest.push(basename(lexical))
     head = dirname(lexical)
   }
@@ -326,10 +328,25 @@ export class MirageFileSystem extends FileSystem {
     if (place !== recorded) session.append('working-directory/change', { cwd: place })
   }
 
+  /**
+   * Whether a path is a directory this world can enter. A path that
+   * cannot be resolved or entered (a parent replaced by a file, a link
+   * cycle) is not one; only the caller's own cancellation is raised.
+   *
+   * @param path the candidate absolute path.
+   * @param signal the access's cancellation.
+   * @returns true for a directory.
+   */
   private async isWorldDirectory(path: string, signal: AbortSignal): Promise<boolean> {
     if (!posix.isAbsolute(path)) return false
-    const info = await this.stat(await this.resolve(path, { signal }), signal)
-    return info?.type === 'directory'
+    let target: FsTarget
+    try {
+      target = await this.resolve(path, { signal })
+    } catch (err) {
+      if (err instanceof FsError && err.code !== 'FS_ABORTED') return false
+      throw err
+    }
+    return (await this.files(signal, 'stat')).isDir(String(target.targetKey))
   }
 
   // The workspace may still be building (declarative mounts resolve
@@ -484,12 +501,15 @@ export class MirageFileSystem extends FileSystem {
     if (!isAbsolute(hostPath)) return undefined
     const workspace = this.ctx.mirage.workspaceIfReady
     if (workspace === null) return undefined
-    const host = physicalPath(hostPath)
+    const host = physicalPath(hostPath, true)
+    const whole = physicalPath(hostPath, false)
     const mounts = workspace.mounts()
     for (const entry of mounts) {
       const { vfs } = entry
       if (!(vfs instanceof DiskVFS)) continue
-      const rel = relative(vfs.root, host)
+      // A link to the root itself is the root: kept as written it would
+      // name the link's own directory, outside the mount.
+      const rel = whole === vfs.root ? '' : relative(vfs.root, host)
       if (escapesRoot(rel)) continue
       // `prefix` always carries a trailing slash, and `rel` is empty for
       // the root itself, so the join is a concatenation and the slash is
@@ -854,9 +874,12 @@ export class MirageFileSystem extends FileSystem {
    * Two workspace ops rather than one rename, because the destination
    * may sit on another mount (a rename there is EXDEV) and the contract
    * is a text move: the hunks apply to the normalized text and the
-   * source's line endings carry over. Past the last abort check both
-   * effects run, and a source the unlink could not remove is reported
-   * as retained rather than raised, since the destination is published.
+   * source's line endings carry over. Two paths that address one stored
+   * file (mounts over nested roots) are the same target, as for `mv`,
+   * or the unlink would delete the only copy. Past the last abort check
+   * both effects run, and a source the unlink could not remove, or one
+   * that changed while the destination was written, is reported as
+   * retained rather than raised, since the destination is published.
    *
    * @param source the resolved regular file to move.
    * @param destination where its text is published.
@@ -877,13 +900,15 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxPolicy,
   ): Promise<FsMoveOutcome> {
-    if (String(source.targetKey) === String(destination.targetKey)) {
+    const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
+    const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
+    if (sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))) {
       throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
     }
     return this.withLocks([source.targetKey, destination.targetKey], async () => {
       assertNotAborted(signal, 'move')
       this.assertMutable(sandboxPolicy, source.displayPath)
-      await this.requireFile(source, options.expectedSource, 'move', signal)
+      const read = await this.requireFile(source, options.expectedSource, 'move', signal)
       const existing = await this.writeTarget(destination, options.expectedDestination, signal)
       const raw = await this.readEditable(source, 'move', signal)
       const original = normalizeLineEndings(raw)
@@ -901,16 +926,24 @@ export class MirageFileSystem extends FileSystem {
         after,
       }
       const sourceBefore = this.overBasis(original) ? null : original
+      const retained = (failure: FsError): FsMoveOutcome => ({
+        sourceBefore,
+        destination: published,
+        sourceDeleted: false,
+        sourceFailure: { code: failure.code, message: failure.message },
+      })
+      if ((await this.stat(source))?.version !== read.version) {
+        return retained(
+          new FsError(
+            `cannot delete "${source.displayPath}": file changed since it was read`,
+            'FS_STALE_VERSION',
+          ),
+        )
+      }
       try {
         await (await this.files()).unlink(String(source.targetKey))
       } catch (err) {
-        const failure = mapMirageError(err, 'delete', source.displayPath)
-        return {
-          sourceBefore,
-          destination: published,
-          sourceDeleted: false,
-          sourceFailure: { code: failure.code, message: failure.message },
-        }
+        return retained(mapMirageError(err, 'delete', source.displayPath))
       }
       return { sourceBefore, destination: published, sourceDeleted: true }
     })
@@ -939,13 +972,14 @@ export class MirageFileSystem extends FileSystem {
    * @param expected the version guard; omitted for an unconditional change.
    * @param verb the operation named in a refusal.
    * @param signal aborts the stat.
+   * @returns the file's row as observed.
    */
   private async requireFile(
     target: FsTarget,
     expected: { version: FsVersion } | undefined,
     verb: string,
     signal: AbortSignal | undefined,
-  ): Promise<void> {
+  ): Promise<FsInfo> {
     const existing = await this.stat(target, signal)
     if (existing === undefined) {
       throw new FsError(
@@ -965,6 +999,7 @@ export class MirageFileSystem extends FileSystem {
         'FS_STALE_VERSION',
       )
     }
+    return existing
   }
 
   /**
@@ -1035,11 +1070,16 @@ export class MirageFileSystem extends FileSystem {
 
   // The diff basis of a file about to change: its prior content when it
   // is text under the exclusive limit, else null (dsh renders a
-  // whole-file diff then). Never fails the mutation itself.
+  // whole-file diff then). Only the limit's window is read, so a large
+  // file costs no more than that. Never fails the mutation itself.
   private async diffBasis(target: FsTarget): Promise<string | null> {
     let bytes: Uint8Array
     try {
-      bytes = await (await this.files()).read(String(target.targetKey))
+      bytes = await (
+        await this.files()
+      ).read(String(target.targetKey), {
+        size: this.diffBasisMaxBytes,
+      })
     } catch {
       return null
     }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Context } from '@deepseek-ai/cordis'
-import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
+import type { FsErrorCode, FsTarget } from '@deepseek-ai/dsh-fs'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -27,7 +27,7 @@ import {
   SessionProfile,
   Workspace,
 } from '@struktoai/mirage-node'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -689,6 +689,50 @@ describe('moveFile', () => {
     expect(outcome.destination.before).toBe('old\n')
   })
 
+  it('refuses a move between two paths of one stored file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mirage-dsh-alias-'))
+    tempRoots.push(root)
+    await mkdir(join(root, 'sub'))
+    await writeFile(join(root, 'sub', 'x.txt'), 'only copy')
+    const ws = new Workspace({
+      '/a': [new DiskVFS({ root }), MountMode.WRITE],
+      '/b': [new DiskVFS({ root: join(root, 'sub') }), MountMode.WRITE],
+    })
+    workspaces.push(ws)
+    const ctx = new Context()
+    await ctx.plugin(MirageService, { workspace: ws }).await()
+    await ctx.plugin(MirageFileSystem, {}).await()
+    const fs = ctx.fs as MirageFileSystem
+    expect(
+      await errorCode(
+        fs.moveFile(await fs.resolve('/a/sub/x.txt'), await fs.resolve('/b/x.txt'), {}),
+      ),
+    ).toBe('FS_SAME_TARGET')
+    expect(await textAt(ws, '/b/x.txt')).toBe('only copy')
+  })
+
+  it('keeps a source that changed while the destination was written', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'first' })
+    const seam = fs as unknown as {
+      store: (target: FsTarget, content: string, verb: string) => Promise<void>
+    }
+    const store = seam.store.bind(fs)
+    seam.store = async (target, content, verb) => {
+      await store(target, content, verb)
+      await ws.vfs.write('/data/a.txt', 'written meanwhile, longer')
+    }
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/data/b.txt'),
+      {},
+    )
+    expect(outcome.sourceDeleted).toBe(false)
+    if (outcome.sourceDeleted) throw new Error('expected the source to be retained')
+    expect(outcome.sourceFailure.code).toBe('FS_STALE_VERSION')
+    expect(await textAt(ws, '/data/a.txt')).toBe('written meanwhile, longer')
+    expect(await textAt(ws, '/data/b.txt')).toBe('first')
+  })
+
   it('refuses a move onto itself', async () => {
     const { fs } = await makeFs({ 'a.txt': 'x' })
     const target = await fs.resolve('/data/a.txt')
@@ -1078,6 +1122,15 @@ describe('processPathFromHostPath', () => {
     expect(fs.processPathFromHostPath(join(root, 'cache', 'x.txt'))).toBeUndefined()
     // The rest of the disk mount still maps.
     expect(fs.processPathFromHostPath(join(root, 'kept.txt'))).toBe('/work/kept.txt')
+  })
+
+  it('maps a link to the mount root onto the root', async () => {
+    const { fs, root } = await makeDiskFs()
+    const alias = `${root}-alias`
+    tempRoots.push(alias)
+    await symlink(root, alias)
+    expect(fs.processPathFromHostPath(alias)).toBe('/work')
+    expect(fs.processPathFromHostPath(join(alias, 'a.txt'))).toBe('/work/a.txt')
   })
 
   it('maps an in-root name that merely begins with two dots', async () => {

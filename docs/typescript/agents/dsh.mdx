@@ -79,6 +79,8 @@ const result = await run({ command: 'pwd; echo $TOKEN', workdir: '/redis' })
 dsh records the directory it was launched in, a path on the host, and checks it through `ctx.fs` before every bash, file and search call. `MirageFileSystem` puts that directory in the workspace: when a disk mount holds the launch directory, the agent starts in its mount, otherwise in the filesystem's `cwd` (`/` by default). From there dsh's `working_directory` tool moves between mounts, and the file tools resolve relative paths against it.
 
 ```ts
+import { DiskVFS, MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
+
 const ws = new Workspace({
   '/project': [new DiskVFS({ root: process.cwd() }), MountMode.WRITE],
   '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.READ],

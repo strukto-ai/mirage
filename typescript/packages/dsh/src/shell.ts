@@ -60,6 +60,20 @@ const STDERR_MARKER = new TextEncoder().encode('\n--- stderr ---\n')
 // collide on a spill filename. Not reset, so it needs no time or randomness.
 let spillCounter = 0
 
+// The lines every mirage executor in this process runs in a session, by
+// workspace. A line run with a sink is not listed in the workspace's own
+// line table, so two executors bound to one session see each other here.
+const RUNNING = new WeakMap<Workspace, Map<string, number>>()
+
+function runningIn(ws: Workspace): Map<string, number> {
+  let running = RUNNING.get(ws)
+  if (running === undefined) {
+    running = new Map()
+    RUNNING.set(ws, running)
+  }
+  return running
+}
+
 // The mount whose writability a `read-only` policy keeps, because dsh's
 // own definition of that mode keeps it: "permits only required sinks such
 // as /dev/null". Narrowing it too would make `cmd > /dev/null` fail, which
@@ -509,7 +523,6 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly seeding = new Map<string, Promise<unknown>>()
   private issued = 0
   private readonly seeded = new Map<string, number>()
-  private readonly inSession = new Map<string, number>()
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
@@ -921,12 +934,21 @@ export class MirageShellExecutor extends ShellExecutor {
       // The command runs in the bound session itself, where a session runs
       // one line at a time. While another still runs there, it runs on a
       // copy of the session instead, beside that one.
-      const running = this.inSession.get(sessionId) ?? 0
-      if (running > 0) return ws.shell(spec.command, { ...options, cwd: place })
-      if (session.cwd !== place) setCwd(session, place)
-      this.inSession.set(sessionId, running + 1)
+      const running = runningIn(ws)
+      const ours = running.get(sessionId) ?? 0
+      if (ours > 0) return ws.shell(spec.command, { ...options, cwd: place })
+      // Moving the session changes the directory of any line already in
+      // it, so a line run outside these executors (listed in the line
+      // table until it ends) keeps it where it is and this one runs on a
+      // copy beside it.
+      if (session.cwd !== place) {
+        const busy = ws.lineTable.lines(sessionId).some((line) => line.endedAt === null)
+        if (busy) return ws.shell(spec.command, { ...options, cwd: place })
+        setCwd(session, place)
+      }
+      running.set(sessionId, ours + 1)
       return ws.shell(spec.command, options).finally(() => {
-        this.inSession.set(sessionId, (this.inSession.get(sessionId) ?? 1) - 1)
+        running.set(sessionId, (running.get(sessionId) ?? 1) - 1)
       })
     }, parts)
   }

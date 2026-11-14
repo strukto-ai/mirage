@@ -120,6 +120,8 @@ describe('DiskEventHook', () => {
       src_path: path.join(alias, 'data', 'gone', 'b.txt'),
     })
     expect(gone[0]?.path.virtual).toBe('/d/data/gone/b.txt')
+    const top = await hook.toEvents(spec('/d/data', 'data'), 'modified', { src_path: alias })
+    expect(top[0]?.path.virtual).toBe('/d')
   })
 
   it('reports a link made in the mount as itself', async () => {

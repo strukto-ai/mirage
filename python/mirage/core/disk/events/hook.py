@@ -61,7 +61,11 @@ class DiskEventHook:
         Args:
             host_path (str): Absolute path on the local filesystem.
         """
-        entry, root = await asyncio.to_thread(self._physical, host_path)
+        entry, whole, root = await asyncio.to_thread(self._physical, host_path)
+        # A link to the root itself is the root: kept as written it would
+        # name the link's own directory, outside the mount.
+        if whole == root:
+            return "/"
         try:
             relative = entry.relative_to(root).as_posix()
         except ValueError:
@@ -70,23 +74,23 @@ class DiskEventHook:
         # render as a fabricated "<mount>/." entry.
         return "/" if relative == "." else "/" + relative
 
-    def _physical(self, host_path: str) -> tuple[Path, Path]:
+    def _physical(self, host_path: str) -> tuple[Path, Path, Path]:
         """A host path and the mount root, with their symlinks resolved.
 
         The mount keeps the real path of its root, while a watcher
         reports paths as it was asked to watch them, so a root spelled
         through a link (``/tmp`` on macOS) would otherwise drop every
-        event. The directories above the entry are resolved and the
-        entry itself is not, so a link created in the mount reports as
-        itself, and a path already gone keeps the part that no longer
-        exists.
+        event. For the entry only the directories above it are
+        resolved, so a link created in the mount reports as itself; the
+        whole path is resolved too, to know a link to the root. A path
+        already gone keeps the part that no longer exists.
 
         Args:
             host_path (str): Absolute path on the local filesystem.
         """
-        entry = Path(os.path.normpath(host_path))
+        path = Path(os.path.normpath(host_path))
         root = Path(self._accessor.root).resolve()
-        return entry.parent.resolve() / entry.name, root
+        return path.parent.resolve() / path.name, path.resolve(), root
 
     async def to_events(
         self, root: PathSpec, event_type: str, payload: JsonValue

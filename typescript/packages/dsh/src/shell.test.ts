@@ -689,6 +689,16 @@ describe('session binding', () => {
     expect(out.stdout.text).toBe('/data\n/data\n')
   })
 
+  it('leaves a line already in the session where it is', async () => {
+    const { shell, ws } = await makeShell({}, { sessionId: 's5' })
+    await runOn(shell, shell.resolve({ command: 'true' }))
+    const other = ws.shell('sleep 0.2; pwd', { sessionId: 's5' })
+    const moved = await runOn(shell, shell.resolve({ command: 'pwd', workdir: '/data' }))
+    expect(moved.stdout.text).toBe('/data\n')
+    expect((await other).stdoutText).toBe('/\n')
+    expect(ws.getSession('s5').cwd).toBe('/')
+  })
+
   it('moves the session to the workdir dsh sends and keeps its exports', async () => {
     const { shell } = await makeShell({}, { sessionId: 's2' })
     await runOn(shell, shell.resolve({ command: 'export KEPT=yes; cd /data' }))

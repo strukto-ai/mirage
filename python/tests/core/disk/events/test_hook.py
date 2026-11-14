@@ -148,6 +148,10 @@ def test_event_hook_maps_a_watcher_that_spells_the_root_through_a_link(
         )
     )
     assert gone[0].path.virtual == "/d/data/gone/b.txt"
+    top = asyncio.run(
+        hook.to_events(root, "modified", {"src_path": str(alias)})
+    )
+    assert top[0].path.virtual == "/d"
 
 
 def test_event_hook_reports_a_link_made_in_the_mount_as_itself(tmp_path):
