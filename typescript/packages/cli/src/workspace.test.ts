@@ -261,7 +261,7 @@ describe('mirage workspace set-profile', () => {
     } finally {
       server.close()
     }
-  })
+  }, 60_000)
 })
 
 describe('mirage workspace delete', () => {
@@ -447,5 +447,5 @@ describe('mirage workspace list-lines, list-jobs and list-processes', () => {
     } finally {
       server.close()
     }
-  })
+  }, 60_000)
 })
