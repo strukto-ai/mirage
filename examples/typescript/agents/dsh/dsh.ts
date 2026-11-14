@@ -207,7 +207,7 @@ async function main(): Promise<void> {
       '/slack': [new SlackVFS({ token }), MountMode.EXEC],
     },
     {
-      machines: { py: { provider: 'worker', captures: ['python', 'python3'] } },
+      machines: { py: { provider: 'in_process', runtime: 'monty', captures: ['python', 'python3'] } },
       profiles: { agent: ROLE },
       profile: 'agent',
       // No `onAsk` on purpose: this example composes no approval channel,

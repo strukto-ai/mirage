@@ -8,7 +8,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "workspace": {
             "provider": "in_process",

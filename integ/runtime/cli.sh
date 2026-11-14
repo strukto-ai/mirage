@@ -88,7 +88,7 @@ RUNTIMES='{
     "apple_container": {"captures": ["@line"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}},
     "kubernetes": {"captures": ["@line"], "config": {"pod": "${MIRAGE_INTEG_KUBERNETES_POD}"}}
   },
-  "engine": {"monty": "worker", "local": "host"},
+  "engine": {"local": "host"},
   "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container", "kubernetes"],
   "machines": ["docker", "ssh", "e2b", "smolvm", "microsandbox", "apple_container", "kubernetes"]
 }'

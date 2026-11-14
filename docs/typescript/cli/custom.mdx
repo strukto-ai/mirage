@@ -135,6 +135,7 @@ registerCliSpec(PAGER)
 clis:
   pager-eng:
     cli: pager
+    machine: in_process
     config:
       account: engineering
 ```
@@ -312,15 +313,15 @@ imports:
 clis:
   pager:
     script: ./cli/pager.py
-    machine: worker
+    machine: in_process
     config:
       width: 80
 ```
 
-`machine` is the machine type the script runs on: `in_process` (the default),
-`worker` or `host`. The workspace needs a `machines` entry of that type that
-runs the script's language, and the first one serves. `runtime` picks a
-runtime on that machine instead, such as `quickjs`; a `host` takes none.
+Every `clis` entry names its `machine`. A script runs on `in_process` or
+`host`; the workspace needs a `machines` entry of that type that runs the
+script's language, and the first one serves. `runtime` picks a runtime on
+`in_process` instead, such as `quickjs`; a `host` takes none.
 
 The file is embedded at load. Words after the head arrive as argv, piped input
 arrives on stdin, and config arrives as JSON in `MIRAGE_CLI_CONFIG`. The
@@ -361,7 +362,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
 | `CLI.configModel` | Zod schema or normalizer for per-install account validation. |
 | `CLI.accessor` | Builds the install's accessor from its validated config, once per install; closed when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.machine`, `CLI.runtime` | Embedded script, the machine type that runs it (`in_process` by default, `worker` or `host`) and the runtime there, if named; used instead of typed handlers. A CLI without a script runs on `in_process` only. |
+| `CLI.script`, `CLI.machine`, `CLI.runtime` | Embedded script, the machine type that runs it (`in_process`, the default in code, or `host`) and the runtime there, if named; used instead of typed handlers. A CLI without a script runs on `in_process` only. |
 | `CLIHandler.fn` | Leaf handler, called as `fn(accessor, paths, texts, ctx)`. |
 | `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
 

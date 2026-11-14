@@ -478,7 +478,9 @@ async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
         transport=transport, base_url="http://test"
     ) as client:
         refused = _minimal_config()
-        refused["config"]["machines"] = {"py": {"provider": "worker"}}
+        refused["config"]["machines"] = {
+            "py": {"provider": "in_process", "runtime": "monty"}
+        }
         r = await client.post("/v1/workspaces", json=refused)
         assert r.status_code == 403
         assert r.json()["error"]["message"] == "machines are the server's"
@@ -2280,6 +2282,7 @@ def _cancelled(*args, **kwargs):
 def _mcp_entry(url: str, token: JsonValue = TOKEN) -> dict[str, JsonValue]:
     return {
         "cli": "mcp",
+        "machine": "in_process",
         "config": {"url": url, "auth": {"type": "bearer", "token": token}},
     }
 
@@ -2354,6 +2357,7 @@ async def test_a_saved_mcp_cli_installs_through_a_create(tmp_path):
         body["config"]["clis"] = {
             "fx": {
                 "cli": "mcp",
+                "machine": "in_process",
                 "config": {
                     "url": _saved("url"),
                     "auth": {

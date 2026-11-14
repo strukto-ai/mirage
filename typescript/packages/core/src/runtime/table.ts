@@ -27,7 +27,6 @@ import {
   LANGUAGE_COMMANDS,
   PYTHON_GROUP,
   WHOLE_LINE,
-  WORKER,
 } from './constants.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { LanguageRuntime } from './language.ts'
@@ -66,44 +65,32 @@ const RUNTIME_HINTS: Record<string, string> = {
     NODE_RUNTIMES.map((name) => [
       name,
       "a host machine's programs run through @struktoai/mirage-node; import that package " +
-        "to register them. Browser worlds run 'quickjs' and 'pyodide' in process and " +
-        "'monty' on a worker",
+        "to register them. Browser worlds run 'monty', 'pyodide' and 'quickjs' in process",
     ]),
   ),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript runs " +
-    "'quickjs' and 'pyodide' in process and 'monty' on a worker",
+    "'monty', 'pyodide' and 'quickjs' in process",
 }
 
 /**
  * The providers a `machines:` entry names for a runtime of Mirage's own
- * rather than a machine it reaches: in its process, in worker processes it
- * spawns, or as native programs on its host.
+ * rather than a machine it reaches: in its process, or as native programs
+ * on its host.
  */
-const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, WORKER, HOST]
+const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST]
 
 // Where each builtin runtime runs, when that is not in process. Null
 // prototype: names come from config.
 const PLACED: Record<string, string> = Object.assign(
   Object.create(null) as Record<string, string>,
   {
-    monty: WORKER,
     local: HOST,
     sandlock: HOST,
     remote: 'a machine provider',
     workspace: IN_PROCESS,
   },
 )
-
-/**
- * Say where a runtime runs on this host. A host package calls it when it
- * swaps a runtime's engine: Cloudflare runs Monty in its isolate, so there
- * monty is an `in_process` runtime, not a worker's.
- */
-export function placeRuntime(name: string, provider: string): void {
-  if (provider === IN_PROCESS) Reflect.deleteProperty(PLACED, name)
-  else PLACED[name] = provider
-}
 
 /** A runtime class, as the registry holds one. */
 type RuntimeClass = (new (options?: RuntimeOptions<never>) => Runtime) &
@@ -176,7 +163,7 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * engine provider builds the runtime alone: `in_process` the one its
  * `runtime` names (a registered name, or a class a `source:Class` reference
  * loaded; none for the shell, which only `workspace` may be),
- * `worker` monty, `host` the host's own programs, confined by sandlock when a
+ * `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
  * config. Mirrors Python's `build_entry`.
  *
@@ -229,15 +216,6 @@ function runtimeFor(
     if (runtime !== undefined)
       throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
-  }
-  if (provider === WORKER) {
-    if (runtime !== undefined && runtime !== 'monty') {
-      const named = typeof runtime === 'function' ? runtime.name : runtime
-      throw new Error(`machine '${name}': a worker runs 'monty', not '${named}'`)
-    }
-    if (PLACED.monty !== WORKER)
-      throw new Error(`machine '${name}': monty runs in process here, not on a worker`)
-    return runtimeClass('monty')
   }
   if (runtime === undefined) return WorkspaceRuntime
   if (typeof runtime === 'function') {

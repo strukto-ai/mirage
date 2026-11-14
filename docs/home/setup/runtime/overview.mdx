@@ -1,71 +1,61 @@
 ---
 title: Runtimes
 sidebarTitle: Overview
-description: The interpreters that run Python and JavaScript inside a machine, and the machines each runs on.
+description: The interpreters that run Python and JavaScript inside the In Process machine.
 icon: microchip
 ---
 
-A runtime is an interpreter Mirage runs inside a [machine](/home/setup/machine/overview).
-It gives a program a process: its arguments, stdin, environment and working
-directory, and file calls that reach the workspace's mounts directly, under
-the same mount modes, permissions and policies as `cat`. The machine is where
-the program runs; the runtime is what runs it there.
+A runtime is an interpreter Mirage runs inside the
+[In Process](/home/setup/machine/in_process) machine. It gives a program a
+process: its arguments, stdin, environment and working directory, and file
+calls that reach the workspace's mounts directly, under the same mount modes,
+permissions and policies as `cat`. The machine is where the program runs; the
+runtime is what runs it there.
 
 | Runtime | Runs | SDK |
 | --- | --- | --- |
 | [Monty](/home/setup/runtime/monty) | `python3`, a Python subset | both |
 | [WASI](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Python |
 | [Pyodide](/home/setup/runtime/pyodide) | `python3`, CPython with packages such as numpy | TypeScript |
-| [QuickJS](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | both |
+| [QuickJS](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | both, not on Cloudflare Workers |
 | [Custom](/home/setup/runtime/custom) | what you write | both |
 
-## Machines
-
-Each runtime runs on one machine:
-
-| Runtime | [In Process](/home/setup/machine/in_process) | [Worker](/home/setup/machine/worker) |
-| --- | --- | --- |
-| Monty | Cloudflare Workers only | ✓ |
-| WASI | ✓ | |
-| Pyodide | ✓ | |
-| QuickJS | ✓, not on Cloudflare Workers | |
-| Custom | ✓ | |
-
-A [`host`](/home/setup/machine/host) or a
-[provider](/home/setup/machine/overview#providers) takes no runtime: it runs
-the `python3` or `node` installed on it.
-
-A `worker` entry runs Monty; an `in_process` entry names its `runtime`:
+Name the runtime on an `in_process` entry:
 
 ```yaml
 machines:
   py:
-    provider: worker
+    provider: in_process
+    runtime: monty
   js:
     provider: in_process
     runtime: quickjs
 ```
 
 A runtime takes only its own interpreter's names (`@python` or `@js` by
-default); see [Captures](/home/setup/machine/overview#captures).
+default); see [Captures](/home/setup/machine/overview#captures). A
+[`host`](/home/setup/machine/host) or a
+[provider](/home/setup/machine/overview#providers) takes no runtime: it runs
+the `python3` or `node` installed on it.
 
 ## Script CLIs
 
-A [script CLI](/home/configuration/workspace#cli-entries) names its machine
-type, `in_process` by default, and may name a runtime on it. It runs on the
-first entry of that type that runs its language, or on the runtime it names,
-whichever machine a line's `python3` goes to.
+A [script CLI](/home/configuration/workspace#cli-entries) names its
+`machine`, `in_process` or `host`, and may name a runtime there. It runs on
+the first entry of that machine that runs its language, or on the runtime it
+names, whichever machine a line's `python3` goes to.
 
 ```yaml
 clis:
   pager:
     script: pager.py
-    machine: worker
+    machine: in_process
   report:
     script: report.js
+    machine: in_process
     runtime: quickjs
 ```
 
 A script whose machine has no entry for its language exits 127 and names the
-workspace's machines: `pager: no worker machine runs python scripts
+workspace's machines: `pager: no in_process machine runs python scripts
 (workspace machines: 'js', 'workspace')`.

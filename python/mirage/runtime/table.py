@@ -27,7 +27,6 @@ from mirage.runtime.constants import (
     LANGUAGE_COMMANDS,
     PYTHON_GROUP,
     WHOLE_LINE,
-    WORKER,
 )
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -96,19 +95,18 @@ def known_runtimes() -> list[str]:
 RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
         "runtime 'pyodide' is TypeScript-only (a WASM CPython for "
-        "hosts without a Python); Python runs 'quickjs' and 'wasi' in "
-        "process and 'monty' on a worker"
+        "hosts without a Python); Python runs 'monty', 'wasi' and "
+        "'quickjs' in process"
     ),
 }
 
 # The providers a ``machines:`` entry names for an engine of Mirage's
-# own rather than a machine it reaches: in its process, in worker
-# processes it spawns, or as native programs on its host.
-ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, WORKER, HOST)
+# own rather than a machine it reaches: in its process, or as native
+# programs on its host.
+ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST)
 
 # The runtimes a builtin provider runs no other way.
 _PLACED: dict[str, str] = {
-    MontyRuntime.name: WORKER,
     LocalRuntime.name: HOST,
     SandlockRuntime.name: HOST,
     RemoteRuntime.name: "a machine provider",
@@ -136,7 +134,7 @@ def build_entry(
     remote runtime that runs its ``captures`` through it. An engine
     provider builds the engine alone: ``in_process`` the one its
     ``runtime`` names (none for the shell, which only ``workspace`` may
-    be), ``worker`` monty, ``host`` the host's own programs, confined by
+    be), ``host`` the host's own programs, confined by
     sandlock when a ``sandbox`` block grants paths. The entry's other
     keys are the engine's config.
 
@@ -196,7 +194,7 @@ def _runtime_for(
 
     Args:
         name (str): the entry's name, for the message.
-        provider (str): ``in_process``, ``worker`` or ``host``.
+        provider (str): ``in_process`` or ``host``.
         runtime (str | type[Runtime] | None): the entry's ``runtime``: a
             registered name, a ``source:Class`` reference, or the class.
         sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
@@ -213,13 +211,6 @@ def _runtime_for(
                 f"machine {name!r}: a host runs its own programs, not a runtime"
             )
         return SandlockRuntime if sandbox is not None else LocalRuntime
-    if provider == WORKER:
-        if runtime not in (None, MontyRuntime.name):
-            raise ValueError(
-                f"machine {name!r}: a worker runs {MontyRuntime.name!r},"
-                f" not {runtime!r}"
-            )
-        return MontyRuntime
     if runtime is None:
         return WorkspaceRuntime
     if isinstance(runtime, type):

@@ -57,7 +57,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "register_runtimes": {

@@ -303,7 +303,9 @@ async def test_shell_refuses_a_machine_the_workspace_lacks():
         transport=transport, base_url="http://test"
     ) as client:
         config = _minimal_config()
-        config["config"]["machines"] = {"monty": {"provider": "worker"}}
+        config["config"]["machines"] = {
+            "monty": {"provider": "in_process", "runtime": "monty"}
+        }
         r = await client.post("/v1/workspaces", json=config)
         assert r.status_code == 201
         route = f"/v1/workspaces/{r.json()['id']}/shell"

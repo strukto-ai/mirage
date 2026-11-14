@@ -31,6 +31,7 @@ from mcp_to_cli import check_names, fetch_tools, fill, parser, server_from_args
 #   clis:
 #     grafana:
 #       cli: ./grafana_cli.py:GRAFANA
+#       machine: in_process
 #       config:
 #         env: {GRAFANA_URL: "${GRAFANA_URL}"}
 

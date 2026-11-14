@@ -1724,7 +1724,7 @@ class Workspace:
         Args:
             name (str): the machine's name.
             spec (MachineSpec): an engine, or the entry as YAML spells
-                it (``{provider: worker}``).
+                it (``{provider: in_process, runtime: monty}``).
 
         Raises:
             ValueError: an entry ``build_entry`` refuses, a machine

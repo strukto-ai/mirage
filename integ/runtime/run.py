@@ -187,7 +187,7 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
 }
 # The machine provider each of Mirage's own runtimes runs on, when it is
 # not in process. Mirrors run.ts ENGINE_PROVIDERS.
-ENGINE_PROVIDERS = {"monty": "worker", "local": "host"}
+ENGINE_PROVIDERS = {"local": "host"}
 MACHINE_PROVIDERS = frozenset(
     {
         "docker",

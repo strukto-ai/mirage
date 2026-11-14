@@ -55,7 +55,6 @@ from mirage.policy.profile import (
 from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.table import build_entry
 from mirage.runtime.types import Language, ScriptSource
 from mirage.secrets.config import EnvVar, SecretSource
@@ -337,10 +336,10 @@ class CLIBlock(BaseModel):
     The section key is the installed head word. Exactly one handler
     source: ``cli`` names a registered spec tree; ``script`` references
     a program file whose content is embedded at load (the docker
-    build-context model). ``machine`` is the machine it runs on,
-    ``in_process`` when unset and for a ``cli`` entry the only one; a
-    script may name ``worker`` or ``host``, and ``runtime`` the runtime
-    that runs it there, else the first speaking its language.
+    build-context model). ``machine``, required, is the machine it runs
+    on: ``in_process``, the only one for a ``cli`` entry, or for a
+    script also ``host``; ``runtime`` names the runtime that runs a
+    script there, else the first speaking its language.
     ``config`` validates through the spec's
     ``config_model`` at install time (fail loud). A CLI never takes a
     mode and never shares a mount's credentials: a binary has no mode,
@@ -351,7 +350,7 @@ class CLIBlock(BaseModel):
 
     cli: str | None = None
     script: str | None = None
-    machine: str | None = None
+    machine: str
     runtime: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -360,9 +359,7 @@ class CLIBlock(BaseModel):
         if (self.cli is None) == (self.script is None):
             raise ValueError("a clis entry takes exactly one of cli or script")
         refused = placement_error(
-            IN_PROCESS if self.machine is None else self.machine,
-            self.runtime,
-            self.script is not None,
+            self.machine, self.runtime, self.script is not None
         )
         if refused is not None:
             raise ValueError(refused)
@@ -679,7 +676,7 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
         return CLI(
             spec=CommandSpec(name=name),
             script=_load_script_source(block.script),
-            machine=IN_PROCESS if block.machine is None else block.machine,
+            machine=block.machine,
             runtime=block.runtime,
         )
     if block.cli is None:
@@ -711,8 +708,8 @@ class WorkspaceConfig(BaseModel):
     clis: dict[str, CLIBlock] | None = None
     # The machines commands run on, by name, in capture order: each a
     # provider, what it captures and how to reach it ({provider: docker,
-    # container: tools, captures: ["@external"]}, {provider: worker,
-    # captures: ["@python"]}). Unset = none: the workspace runs every
+    # container: tools, captures: ["@external"]}, {provider: in_process,
+    # runtime: monty}). Unset = none: the workspace runs every
     # command itself.
     machines: dict[str, dict[str, Any]] | None = None
     # Per machine, the values `resolve_secrets` read into its entry,

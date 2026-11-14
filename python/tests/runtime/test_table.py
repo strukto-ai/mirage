@@ -232,7 +232,7 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
 @pytest.mark.parametrize(
     ("spec", "cls"),
     [
-        ({"provider": "worker"}, "MontyRuntime"),
+        ({"provider": "in_process", "runtime": "monty"}, "MontyRuntime"),
         ({"provider": "host"}, "LocalRuntime"),
         ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
         ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
@@ -252,12 +252,20 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
 @pytest.mark.parametrize(
     ("name", "spec", "refusal"),
     [
-        ("py", {"provider": "worker", "runtime": "quickjs"}, "runs 'monty'"),
-        ("py", {"provider": "in_process", "runtime": "monty"}, "on worker"),
+        ("py", {"provider": "worker"}, "unknown machine provider"),
+        ("py", {"provider": "in_process", "runtime": "local"}, "runs on host"),
         ("py", {"provider": "host", "runtime": "monty"}, "not a runtime"),
-        ("py", {"provider": "worker", "sandbox": {}}, "only a host"),
+        (
+            "py",
+            {"provider": "in_process", "runtime": "monty", "sandbox": {}},
+            "only a host",
+        ),
         ("py", {"provider": "host", "sandbox": None}, "must be a mapping"),
-        ("workspace", {"provider": "worker"}, "the shell's machine name"),
+        (
+            "workspace",
+            {"provider": "in_process", "runtime": "monty"},
+            "the shell's machine name",
+        ),
         ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
         ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
         ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),

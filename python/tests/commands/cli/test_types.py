@@ -109,13 +109,12 @@ def test_a_handler_cli_runs_in_process_only():
     ("machine", "runtime"),
     [
         ("in_process", None),
+        ("in_process", "monty"),
         ("in_process", "quickjs"),
-        ("worker", None),
-        ("worker", "monty"),
         ("host", None),
     ],
 )
-def test_a_script_runs_on_in_process_worker_or_host(machine, runtime):
+def test_a_script_runs_on_in_process_or_host(machine, runtime):
     cli = CLI(
         CommandSpec(name="pager"),
         script=ScriptSource("1"),
@@ -128,9 +127,9 @@ def test_a_script_runs_on_in_process_worker_or_host(machine, runtime):
 @pytest.mark.parametrize(
     ("machine", "runtime", "refusal"),
     [
-        ("docker", None, "a script runs on in_process, worker, host"),
+        ("docker", None, "a script runs on in_process, host"),
+        ("worker", None, "a script runs on in_process, host"),
         ("host", "monty", "a host runs its own programs"),
-        ("worker", "quickjs", "a worker runs 'monty', not 'quickjs'"),
     ],
 )
 def test_a_script_refuses_a_placement_its_machine_cannot_run(

@@ -11,12 +11,14 @@
         },
         "clis": {
           "sl": {
-            "cli": "slack"
+            "cli": "slack",
+            "machine": "in_process"
           }
         },
         "machines": {
           "py": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "@python"
             ]
@@ -333,7 +335,7 @@
         "clis": {
           "tool": {
             "script": "tool.py",
-            "machine": "worker",
+            "machine": "in_process",
             "runtime": "monty",
             "config": {
               "token": "t"
@@ -353,6 +355,7 @@
         "clis": {
           "tally": {
             "cli": "./cli/tally.py:TALLY",
+            "machine": "in_process",
             "config": {
               "unit": "kg"
             }
@@ -370,7 +373,8 @@
         },
         "clis": {
           "jira": {
-            "cli": "my_clis:JIRA"
+            "cli": "my_clis:JIRA",
+            "machine": "in_process"
           }
         }
       }

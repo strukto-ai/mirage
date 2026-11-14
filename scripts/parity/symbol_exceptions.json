@@ -1710,11 +1710,6 @@
     "isRoute": "A type guard for the Route answer; Python asks isinstance."
    }
   },
-  "runtime/table": {
-   "typescript_only": {
-    "placeRuntime": "Cloudflare runs Monty inside its isolate, so its package moves monty from a worker to an in_process machine; Python's Monty always runs on a worker."
-   }
-  },
   "server/routers/machines": {
    "python_only": {
     "list_machines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes.",

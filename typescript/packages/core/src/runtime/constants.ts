@@ -26,11 +26,8 @@ export const HOST = 'host'
 /** The provider of the machine that is Mirage's own process. Mirrors Python's IN_PROCESS. */
 export const IN_PROCESS = 'in_process'
 
-/** The provider of a machine whose programs run in worker processes Mirage starts. Mirrors Python's WORKER. */
-export const WORKER = 'worker'
-
 /** The machines a script CLI may run on: those whose runtime Mirage hands the script to. */
-export const SCRIPT_MACHINES: readonly string[] = [IN_PROCESS, WORKER, HOST]
+export const SCRIPT_MACHINES: readonly string[] = [IN_PROCESS, HOST]
 
 /** Capture the whole line, Mirage's own commands included (a line executor). Mirrors Python's WHOLE_LINE. */
 export const WHOLE_LINE = '@line'

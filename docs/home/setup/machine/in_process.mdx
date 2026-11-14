@@ -11,17 +11,17 @@ commands (`cat`, `grep`, pipes, redirects) always run here, and `ps` and
 
 ```yaml
 machines:
-  js:
+  py:
     provider: in_process
-    runtime: quickjs
+    runtime: monty
 ```
 
 | `runtime` | Runs | SDK |
 | --- | --- | --- |
+| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | both |
 | [`wasi`](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Python |
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython with packages such as numpy | TypeScript |
 | [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js` | both, not on Cloudflare Workers |
-| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | Cloudflare Workers only; elsewhere Monty runs on a [worker](/home/setup/machine/worker) |
 | A [custom runtime](/home/setup/runtime/custom) | what you write | both |
 
 `runtime` also takes a runtime you registered in code, or a
@@ -31,37 +31,43 @@ entry's other keys are the runtime's settings.
 ## Files
 
 A runtime here reaches the workspace's mounts directly, under the same mount
-modes, permissions and policies as `cat`. WASI and QuickJS have no host files
-or network; Pyodide's access depends on where it runs, see its
+modes, permissions and policies as `cat`. Monty, WASI and QuickJS have no host
+files or network; Pyodide's access depends on where it runs, see its
 [containment](/typescript/runtime/python#containment); a custom runtime reaches
-what its code reaches. There is no process or kernel boundary between a
-program and Mirage, so run hostile code on a [`host`](/home/setup/machine/host)
-with a `sandbox` or on a [machine provider](/home/setup/machine/overview#providers).
+what its code reaches. For hostile code, prefer a machine with a kernel
+boundary: a [`host`](/home/setup/machine/host) with a `sandbox`, or a
+[machine provider](/home/setup/machine/overview#providers).
 
 ## Without a runtime
 
-An entry with no `runtime` and with `captures` runs only those of Mirage's own
-commands: another mount command, such as `ls`, exits 126, `no runtime accepted this
-line`, and an unknown program exits 127. The shell's own words (`cd`,
-`export`, `echo`) still run.
+An entry named `workspace` with no `runtime` limits Mirage's own commands to
+its `captures`: another mount command, such as `ls`, exits 126, `no runtime
+accepted this line`, and an unknown program exits 127. The shell's own words
+(`cd`, `export`, `echo`) still run.
 
 ```yaml
 machines:
-  mirage:
+  workspace:
     provider: in_process
     captures: [cat, grep, wc]
 ```
 
 ## CLIs
 
-Every registered [CLI](/home/setup/clis), and every CLI made from an MCP
-server, runs here. A [script CLI](/home/configuration/workspace#cli-entries)
-runs here too unless it names another `machine`: on the first `in_process`
-entry that runs its language, or on the `runtime` it names.
+Every [`clis` entry](/home/configuration/workspace#cli-entries) names its
+`machine`. A registered CLI, such as `slack`, or one made from an MCP server
+runs only here. A script runs here on the first entry that runs its
+language, or on the `runtime` it names:
 
 ```yaml
 clis:
+  slack:
+    cli: slack
+    machine: in_process
+    config:
+      token: {from: env, key: SLACK_TOKEN}
   report:
-    script: report.js
-    runtime: quickjs
+    script: report.py
+    machine: in_process
+    runtime: monty
 ```

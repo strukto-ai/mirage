@@ -51,6 +51,7 @@ mounts:
 clis:
   tally:
     cli: $ref
+    machine: in_process
     config:
       unit: kg
 YML

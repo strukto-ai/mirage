@@ -762,7 +762,8 @@
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "value": "monty"
@@ -775,7 +776,7 @@
             "source": "print('python', argv[0], argv[1])",
             "language": "python"
           },
-          "machine": "worker"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -934,7 +935,7 @@
             "source": "print('back', argv[1])",
             "language": "python"
           },
-          "machine": "worker"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -958,7 +959,7 @@
             "source": "console.log('wrong')",
             "language": "js"
           },
-          "machine": "worker"
+          "machine": "host"
         },
         {
           "op": "exec",
@@ -966,7 +967,7 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "no worker machine runs js scripts"
+              "stderr_contains": "no host machine runs js scripts"
             }
           }
         },
@@ -1014,7 +1015,7 @@
             "source": "print('kept', argv[1])",
             "language": "python"
           },
-          "machine": "worker"
+          "machine": "in_process"
         },
         {
           "op": "exec",
@@ -1057,7 +1058,7 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "no worker machine runs python scripts"
+              "stderr_contains": "no in_process machine runs python scripts"
             }
           }
         },
@@ -1079,7 +1080,8 @@
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "value": "monty"
@@ -1588,7 +1590,8 @@
       "settings": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mode": "write",
@@ -2204,7 +2207,7 @@
             "source": "print('installed')",
             "language": "python"
           },
-          "machine": "worker"
+          "machine": "in_process"
         },
         {
           "op": "close"
@@ -2231,7 +2234,8 @@
           "op": "add_machine",
           "name": "monty",
           "machine": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "expect": {
             "error": "Workspace is closed"
@@ -7172,7 +7176,8 @@
         },
         "clis": {
           "git": {
-            "cli": "git"
+            "cli": "git",
+            "machine": "in_process"
           }
         }
       },

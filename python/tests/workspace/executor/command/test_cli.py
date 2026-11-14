@@ -670,12 +670,12 @@ async def test_script_runtime_pin_is_honored(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_script_machine_pin_is_honored(monkeypatch):
-    # A worker script skips the in-process entry that speaks python.
+    # A host script skips the in-process entry that speaks python.
     monkeypatch.setitem(table.NAMED, "otherpy", OtherPyRuntime)
-    monkeypatch.setitem(table._PLACED, "otherpy", "worker")
+    monkeypatch.setitem(table._PLACED, "otherpy", "host")
     first, pinned = FakePyRuntime(), OtherPyRuntime()
     _, io, _ = await drained(
-        script_install(machine="worker"),
+        script_install(machine="host"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[first, pinned]),
@@ -719,14 +719,14 @@ async def test_script_runs_on_its_machine_not_where_python3_is_bound():
 async def test_script_with_no_entry_on_its_machine_exits_127():
     py = FakePyRuntime()
     _, io, node = await handle_cli(
-        script_install(machine="worker"),
+        script_install(machine="host"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[py]),
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: no worker machine runs python scripts "
+        b"pager: no host machine runs python scripts "
         b"(workspace machines: 'fakepy')\n"
     )
     assert node.exit_code == 127

@@ -33,10 +33,8 @@ from mirage.runtime.constants import (
     HOST,
     IN_PROCESS,
     SECRET_CONFIG_FIELDS,
-    WORKER,
 )
 from mirage.runtime.python.local import LocalRuntime
-from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.sandlock import SandlockRuntime
 from mirage.runtime.table import in_process_runtimes, runtime_class
 from mirage.server.resources.types import Field, FieldType, TypeTable
@@ -280,7 +278,6 @@ def machine_types() -> TypeTable:
             *engine.values(),
             captures,
         ],
-        WORKER: [*dataclass_fields(MontyRuntime.config_cls), captures],
         HOST: [*dataclass_fields(LocalRuntime.config_cls), *sandbox, captures],
     }
     for provider in known_providers():

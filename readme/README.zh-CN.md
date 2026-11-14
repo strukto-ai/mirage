@@ -78,9 +78,9 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # python 在 worker 中的 monty 上运行，或在 e2b 沙箱中运行
+    # python 在进程内的 monty 上运行，或在 e2b 沙箱中运行
     machines={
-        "py": {"provider": "worker"},
+        "py": {"provider": "in_process", "runtime": "monty"},
         "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
     },
     # 路由底层计算：含 numpy 的命令行在机器上运行，其余在 monty 上
@@ -272,7 +272,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
 )
 const app = express()
 app.use(express.json())

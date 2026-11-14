@@ -258,8 +258,12 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     for (const [name, block] of Object.entries(raw.clis)) {
       if (!isPlainObject(block)) throw new Error(`cli \`${name}\` must be a mapping`)
       validateDocument('config', block, `cli \`${name}\``, { names: 'cli' })
+      if (block.machine === undefined || block.machine === null)
+        throw new Error(`clis entry '${name}': machine is required`)
+      if (typeof block.machine !== 'string')
+        throw new Error(`clis entry '${name}': machine must be a string`)
       const refused = placementError(
-        typeof block.machine === 'string' ? block.machine : IN_PROCESS,
+        block.machine,
         typeof block.runtime === 'string' ? block.runtime : null,
         typeof block.script === 'string',
       )
@@ -591,17 +595,17 @@ export interface StoreBlock {
  * section key is the installed head word. Exactly one handler source:
  * `cli` names a registered spec tree; `script` references a program
  * file whose content is embedded at load (the docker build-context
- * model). `machine` is the machine it runs on, `in_process` when unset
- * and for a `cli` entry the only one; a script may name `worker` or
- * `host`, and `runtime` the runtime that runs it there, else the first
- * speaking its language. `config` validates through the spec's configModel at
+ * model). `machine`, required, is the machine it runs on: `in_process`,
+ * the only one for a `cli` entry, or for a script also `host`; `runtime`
+ * names the runtime that runs a script there, else the first speaking its
+ * language. `config` validates through the spec's configModel at
  * install time (fail loud). A CLI never takes a mode and never shares
  * a mount's credentials: a binary has no mode, the credential does.
  */
 interface CLIBlock {
   cli?: string
   script?: string
-  machine?: string | null
+  machine: string
   runtime?: string | null
   config?: Record<string, unknown>
 }
@@ -944,7 +948,7 @@ async function cliEntry(
     return new CLI({
       spec: new CommandSpec({ name }),
       script: loadScriptSource(block.script, host),
-      machine: (block.machine as string | null | undefined) ?? IN_PROCESS,
+      machine: block.machine as string,
       runtime: (block.runtime as string | null | undefined) ?? null,
     })
   }
@@ -986,12 +990,8 @@ async function buildCliEntries(
     if (hasCli === hasScript) {
       throw new Error(`clis entry '${name}' takes exactly one of cli or script`)
     }
-    if (
-      block.machine !== undefined &&
-      block.machine !== null &&
-      typeof block.machine !== 'string'
-    ) {
-      throw new Error(`clis entry '${name}': machine must be a string`)
+    if (typeof block.machine !== 'string') {
+      throw new Error(`clis entry '${name}': machine is required`)
     }
     if (
       block.runtime !== undefined &&

@@ -1475,7 +1475,7 @@ const OPTIONAL_RUNTIMES = new Set([
 // `MACHINE_PROVIDERS`.
 // The machine provider each of Mirage's own runtimes runs on, when it is
 // not in process. Mirrors run.py ENGINE_PROVIDERS.
-const ENGINE_PROVIDERS: Record<string, string> = { monty: 'worker', local: 'host' }
+const ENGINE_PROVIDERS: Record<string, string> = { local: 'host' }
 const MACHINE_PROVIDERS = new Set([
   'docker',
   'ssh',

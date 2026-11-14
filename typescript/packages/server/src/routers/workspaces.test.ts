@@ -475,7 +475,7 @@ describe('workspaces router', () => {
     const post = (url: string, payload: object) => app.inject({ method: 'POST', url, payload })
     try {
       const refused = await post('/v1/workspaces', {
-        config: { ...RAM, machines: { py: { provider: 'worker' } } },
+        config: { ...RAM, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
       })
       expect([refused.statusCode, refused.json()]).toEqual([
         403,
@@ -718,8 +718,8 @@ describe('workspaces router', () => {
           id: 'cli-ws',
           config: {
             mounts: { '/': { vfs: 'ram', mode: 'write' } },
-            machines: { monty: { provider: 'worker' } },
-            clis: { pager: { script, machine: 'worker' } },
+            machines: { monty: { provider: 'in_process', runtime: 'monty' } },
+            clis: { pager: { script, machine: 'in_process' } },
           },
         },
       })
@@ -1881,7 +1881,7 @@ async function fixture(): Promise<Fixture> {
 }
 
 function mcpEntry(url: string, token: unknown): Record<string, unknown> {
-  return { cli: 'mcp', config: { url, auth: { type: 'bearer', token } } }
+  return { cli: 'mcp', machine: 'in_process', config: { url, auth: { type: 'bearer', token } } }
 }
 
 function saved(key: string): Record<string, string> {
@@ -1949,7 +1949,9 @@ describe('MCP CLIs in a create', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { config: { ...RAM, clis: { fx: { cli: 'mcp', config } } } },
+        payload: {
+          config: { ...RAM, clis: { fx: { cli: 'mcp', config, machine: 'in_process' } } },
+        },
       })
       expect(res.statusCode, res.body).toBe(201)
       const listed = await run(app, res.json<{ id: string }>().id, 'fx list-items')

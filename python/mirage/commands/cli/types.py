@@ -24,12 +24,7 @@ from mirage.commands.cli.mcp.types import MCPSource
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
-from mirage.runtime.constants import (
-    HOST,
-    IN_PROCESS,
-    SCRIPT_MACHINES,
-    WORKER,
-)
+from mirage.runtime.constants import HOST, IN_PROCESS, SCRIPT_MACHINES
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
 
@@ -80,7 +75,7 @@ class CLI:
             that reaches no service keeps ``NOOPAccessor``.
         script (ScriptSource | None): program owning the whole installation.
         machine (str): the machine it runs on: ``in_process``, or for a
-            script ``worker`` or ``host``.
+            script also ``host``.
         runtime (str | None): the runtime that runs the script on that
             machine; None for the first that speaks its language.
         mcp (MCPSource | None): the MCP tool list the tree was built
@@ -134,8 +129,6 @@ def placement_error(
         )
     if machine == HOST and runtime is not None:
         return "a host runs its own programs, not a runtime"
-    if machine == WORKER and runtime not in (None, "monty"):
-        return f"a worker runs 'monty', not {runtime!r}"
     return None
 
 

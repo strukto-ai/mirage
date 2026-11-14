@@ -52,10 +52,10 @@ class InProcessPy(PythonRuntime):
 
 def test_runtime_for_script_picks_by_machine_and_language():
     monty, local, py = MontyRuntime(), LocalRuntime(), InProcessPy()
-    world = [monty, local, py]
-    assert runtime_for_script(world, "worker", None, "python") is monty
-    assert runtime_for_script(world, "host", None, "python") is local
+    world = [local, py, monty]
     assert runtime_for_script(world, "in_process", None, "python") is py
+    assert runtime_for_script(world, "in_process", "monty", "python") is monty
+    assert runtime_for_script(world, "host", None, "python") is local
 
 
 def test_runtime_for_script_is_first_match_or_the_named_runtime(monkeypatch):

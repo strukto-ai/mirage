@@ -6,7 +6,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "python3",
               "node"
@@ -23,7 +24,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "python3",
               "gcc"
@@ -40,7 +42,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "@js"
             ]
@@ -56,7 +59,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "@pyton"
             ]

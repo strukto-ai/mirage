@@ -14,7 +14,7 @@
 
 import type { ZodObject, ZodRawShape } from 'zod'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
-import { HOST, IN_PROCESS, SCRIPT_MACHINES, WORKER } from '../../runtime/constants.ts'
+import { HOST, IN_PROCESS, SCRIPT_MACHINES } from '../../runtime/constants.ts'
 import { type ScriptSource } from '../../runtime/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -77,7 +77,7 @@ export class CLI {
   /** Builds an install's accessor from its validated config. */
   readonly accessor: (config: unknown) => Accessor
   readonly script: ScriptSource | null
-  /** The machine it runs on: `in_process`, or for a script `worker` or `host`. */
+  /** The machine it runs on: `in_process`, or for a script also `host`. */
   readonly machine: string
   /** The runtime that runs the script on that machine; null for the first that speaks its language. */
   readonly runtime: string | null
@@ -135,8 +135,6 @@ export function placementError(
   if (!SCRIPT_MACHINES.includes(machine))
     return `a script runs on ${SCRIPT_MACHINES.join(', ')}, not '${machine}'`
   if (machine === HOST && runtime !== null) return 'a host runs its own programs, not a runtime'
-  if (machine === WORKER && runtime !== null && runtime !== 'monty')
-    return `a worker runs 'monty', not '${runtime}'`
   return null
 }
 

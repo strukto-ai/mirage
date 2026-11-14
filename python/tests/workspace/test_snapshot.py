@@ -759,7 +759,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
         script=ScriptSource(
             "import os\nprint(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"
         ),
-        machine="worker",
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     path = tmp_path / "snap.tar"
@@ -787,12 +787,12 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
-        machines={"monty": {"provider": "worker"}},
+        machines={"monty": {"provider": "in_process", "runtime": "monty"}},
     )
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("print('hi')"),
-        machine="worker",
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     state = await to_state_dict(ws)
@@ -935,7 +935,13 @@ async def test_copy_rebuilds_the_machines_built_from_an_entry():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"py": {"provider": "worker", "captures": ["@python"]}},
+        machines={
+            "py": {
+                "provider": "in_process",
+                "runtime": "monty",
+                "captures": ["@python"],
+            }
+        },
     )
     clone = await ws.copy()
     try:

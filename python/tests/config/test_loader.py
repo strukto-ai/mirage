@@ -574,7 +574,11 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "machines": {
-                "monty": {"provider": "worker", "max_memory": 1048576}
+                "monty": {
+                    "provider": "in_process",
+                    "runtime": "monty",
+                    "max_memory": 1048576,
+                }
             },
         }
     )
@@ -584,7 +588,11 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "machines": {
-                "monty": {"provider": "worker", "max_memory": "lots"}
+                "monty": {
+                    "provider": "in_process",
+                    "runtime": "monty",
+                    "max_memory": "lots",
+                }
             },
         }
     )
@@ -726,8 +734,8 @@ mounts:
   /data:
     vfs: ram
 clis:
-  pager: {script: pager.js, runtime: quickjs}
-  modpager: {script: pager.mjs, runtime: quickjs}
+  pager: {script: pager.js, machine: in_process, runtime: quickjs}
+  modpager: {script: pager.mjs, machine: in_process, runtime: quickjs}
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
@@ -910,8 +918,12 @@ async def test_clis_section_parses_and_maps_to_kwargs():
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "sl": {"cli": "slack", "config": {"token": "x"}},
-                "bare": {"cli": "gws"},
+                "sl": {
+                    "cli": "slack",
+                    "machine": "in_process",
+                    "config": {"token": "x"},
+                },
+                "bare": {"cli": "gws", "machine": "in_process"},
             },
         }
     )
@@ -934,6 +946,7 @@ def test_clis_script_entry_refuses_a_secrets_pointer():
                 "clis": {
                     "pager": {
                         "script": "pager.py",
+                        "machine": "in_process",
                         "config": {
                             "token": {"from": "env", "key": "PAGER_TOKEN"}
                         },
@@ -946,7 +959,11 @@ def test_clis_script_entry_refuses_a_secrets_pointer():
         {
             "mounts": {},
             "clis": {
-                "pager": {"script": "pager.py", "config": {"verbose": True}}
+                "pager": {
+                    "script": "pager.py",
+                    "machine": "in_process",
+                    "config": {"verbose": True},
+                }
             },
         }
     )
@@ -966,7 +983,7 @@ mounts:
 clis:
   pager:
     script: pager.py
-    machine: worker
+    machine: in_process
     config:
       page_size: 20
 """)
@@ -975,7 +992,7 @@ clis:
     spec, config = kwargs["clis"]["pager"]
     assert spec.spec.name == "pager"
     assert spec.script == ScriptSource("print('page')")
-    assert spec.machine == "worker"
+    assert spec.machine == "in_process"
     assert spec.runtime is None
     assert config == {"page_size": 20}
 
@@ -991,6 +1008,7 @@ mounts:
 clis:
   pager:
     script: pager.mjs
+    machine: in_process
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
@@ -1014,6 +1032,7 @@ mounts:
 clis:
   pager:
     script: pager.js
+    machine: in_process
 """)
     spec, _ = load_config(cfg_file).to_workspace_kwargs()["clis"]["pager"]
     assert spec.script.language == "js"
@@ -1045,6 +1064,7 @@ mounts:
 clis:
   tool:
     cli: ./tool.py:TREE
+    machine: in_process
 """)
     monkeypatch.chdir(tmp_path.parent)
     cfg = load_config(cfg_file)
@@ -1193,6 +1213,7 @@ mounts:
 clis:
   tool:
     cli: mypkg.clis:TREE
+    machine: in_process
 """)
     cfg = load_config(cfg_file)
     ref, _ = cfg.to_workspace_kwargs()["clis"]["tool"]
@@ -1209,6 +1230,7 @@ mounts:
 clis:
   sl:
     cli: slack
+    machine: in_process
 """)
     cfg = load_config(cfg_file)
     ref, _ = cfg.to_workspace_kwargs()["clis"]["sl"]
@@ -1225,6 +1247,7 @@ mounts:
 clis:
   pager:
     script: pager.py
+    machine: in_process
 """)
     cfg = load_config(cfg_file)
     with pytest.raises(FileNotFoundError):
@@ -1237,14 +1260,22 @@ def test_clis_entry_takes_exactly_one_of_cli_or_script():
         load_config(
             {
                 "mounts": mounts,
-                "clis": {"sl": {"cli": "slack", "script": "pager.py"}},
+                "clis": {
+                    "sl": {
+                        "cli": "slack",
+                        "script": "pager.py",
+                        "machine": "in_process",
+                    }
+                },
             }
         )
     with pytest.raises(ValueError, match="exactly one of cli or script"):
         load_config(
             {
                 "mounts": mounts,
-                "clis": {"sl": {"config": {"token": "x"}}},
+                "clis": {
+                    "sl": {"machine": "in_process", "config": {"token": "x"}}
+                },
             }
         )
 
@@ -1268,8 +1299,29 @@ def test_a_clis_cli_entry_runs_in_process_only():
         load_config(
             {
                 "mounts": mounts,
-                "clis": {"sl": {"cli": "slack", "runtime": "monty"}},
+                "clis": {
+                    "sl": {
+                        "cli": "slack",
+                        "runtime": "monty",
+                        "machine": "in_process",
+                    }
+                },
             }
+        )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"cli": "slack"},
+        {"cli": "slack", "machine": None},
+        {"script": "pager.py"},
+    ],
+)
+def test_a_clis_entry_names_its_machine(entry):
+    with pytest.raises(ValueError, match="clis.sl.machine"):
+        load_config(
+            {"mounts": {"/data": {"vfs": "ram"}}, "clis": {"sl": entry}}
         )
 
 
@@ -1304,7 +1356,13 @@ def test_clis_block_refuses_unknown_keys():
         load_config(
             {
                 "mounts": {"/data": {"vfs": "ram"}},
-                "clis": {"sl": {"cli": "slack", "mode": "write"}},
+                "clis": {
+                    "sl": {
+                        "cli": "slack",
+                        "mode": "write",
+                        "machine": "in_process",
+                    }
+                },
             }
         )
 
@@ -1913,7 +1971,13 @@ def test_an_mcp_entry_needs_its_cli_built_first():
     cfg = load_config(
         {
             "mounts": {},
-            "clis": {"fx": {"cli": "mcp", "config": {"url": "http://x/mcp"}}},
+            "clis": {
+                "fx": {
+                    "cli": "mcp",
+                    "machine": "in_process",
+                    "config": {"url": "http://x/mcp"},
+                }
+            },
         }
     )
     with pytest.raises(ValueError, match="build_mcp_clis"):
@@ -1934,6 +1998,7 @@ async def test_an_mcp_entry_builds_from_its_server_with_an_env_token(
                     "clis": {
                         "fx": {
                             "cli": "mcp",
+                            "machine": "in_process",
                             "config": {
                                 "url": fake.url,
                                 "auth": {"type": "bearer", "token": token},
@@ -1959,7 +2024,13 @@ async def test_an_mcp_entry_is_listed_only_where_its_network_lets_it():
             {
                 "mounts": {},
                 "network": False,
-                "clis": {"fx": {"cli": "mcp", "config": fake.bearer_config()}},
+                "clis": {
+                    "fx": {
+                        "cli": "mcp",
+                        "config": fake.bearer_config(),
+                        "machine": "in_process",
+                    }
+                },
             }
         )
         with pytest.raises(MCPToolsError):

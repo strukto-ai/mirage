@@ -18,6 +18,7 @@
         "clis": {
           "pager": {
             "script": "console.log('prog', scriptArgs[0]);\nconsole.log('args', JSON.stringify(scriptArgs.slice(1)));\n",
+            "machine": "in_process",
             "language": "js"
           }
         }
@@ -34,11 +35,12 @@
       ]
     },
     {
-      "id": "js_on_a_worker_exits_127",
+      "id": "js_pinned_to_a_python_runtime_exits_127",
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "quickjs": {
             "provider": "in_process",
@@ -49,7 +51,8 @@
           "pager": {
             "script": "console.log('unreachable');\n",
             "language": "js",
-            "machine": "worker"
+            "machine": "in_process",
+            "runtime": "monty"
           }
         }
       },
@@ -59,7 +62,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr_contains": "no worker machine runs js scripts"
+            "stderr_contains": "no in_process machine runs js scripts on 'monty'"
           }
         }
       ]

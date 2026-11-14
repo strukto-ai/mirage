@@ -261,6 +261,36 @@
       }
     },
     {
+      "name": "clis entry: a cli names its machine",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "sl": {
+            "cli": "slack"
+          }
+        }
+      }
+    },
+    {
+      "name": "clis entry: a script names its machine",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "clis": {
+          "sl": {
+            "script": "tool.py"
+          }
+        }
+      }
+    },
+    {
       "name": "clis entry: a cli takes no mode",
       "config": {
         "mounts": {
@@ -271,6 +301,7 @@
         "clis": {
           "sl": {
             "cli": "slack",
+            "machine": "in_process",
             "mode": "write"
           }
         }
@@ -303,6 +334,7 @@
         "clis": {
           "sl": {
             "cli": "slack",
+            "machine": "in_process",
             "runtime": "monty"
           }
         }

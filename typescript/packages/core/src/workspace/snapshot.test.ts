@@ -319,7 +319,10 @@ describe('Workspace.snapshot / Workspace.load', () => {
 it('a copy rebuilds the machines built from an entry', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, machines: { py: { provider: 'worker', captures: ['@python'] } } },
+    {
+      mode: MountMode.EXEC,
+      machines: { py: { provider: 'in_process', runtime: 'monty', captures: ['@python'] } },
+    },
   )
   const copied = await ws.copy()
   try {

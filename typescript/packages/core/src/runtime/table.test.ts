@@ -309,7 +309,7 @@ describe('machineBindingsFor', () => {
 
 describe('buildEntry', () => {
   it.each<[Record<string, unknown>, string]>([
-    [{ provider: 'worker' }, 'MontyRuntime'],
+    [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
@@ -319,12 +319,12 @@ describe('buildEntry', () => {
   })
 
   it.each<[string, Record<string, unknown>, RegExp]>([
-    ['py', { provider: 'worker', runtime: 'quickjs' }, /runs 'monty'/],
-    ['py', { provider: 'in_process', runtime: 'monty' }, /on worker/],
+    ['py', { provider: 'worker' }, /unknown machine provider/],
+    ['py', { provider: 'in_process', runtime: 'local' }, /runs on host/],
     ['py', { provider: 'host', runtime: 'monty' }, /not a runtime/],
-    ['py', { provider: 'worker', sandbox: {} }, /only a host/],
+    ['py', { provider: 'in_process', runtime: 'monty', sandbox: {} }, /only a host/],
     ['py', { provider: 'host', sandbox: null }, /must be a mapping/],
-    ['workspace', { provider: 'worker' }, /the shell's machine name/],
+    ['workspace', { provider: 'in_process', runtime: 'monty' }, /the shell's machine name/],
     ['py', { provider: 'in_process' }, /the shell's machine name/],
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],

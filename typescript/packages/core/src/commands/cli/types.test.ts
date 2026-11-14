@@ -138,10 +138,10 @@ describe('CLI registration', () => {
     const cli = new CLI({
       spec: new CommandSpec({ name: 'pager' }),
       script: new ScriptSource('1'),
-      machine: 'worker',
+      machine: 'in_process',
     })
     expect(cli.spec.addHelp).toBe(false)
-    expect(cli.machine).toBe('worker')
+    expect(cli.machine).toBe('in_process')
     expect(cli.handlers['']?.fn).toBeNull()
   })
 
@@ -157,13 +157,13 @@ describe('CLI registration', () => {
     expect(() => new CLI({ spec, machine: 'host', handlers })).toThrow(/runs on in_process only/)
     expect(() => new CLI({ spec, runtime: 'monty', handlers })).toThrow(/it takes script/)
     expect(() => new CLI({ spec, script, machine: 'docker' })).toThrow(
-      /a script runs on in_process, worker, host/,
+      /a script runs on in_process, host/,
+    )
+    expect(() => new CLI({ spec, script, machine: 'worker' })).toThrow(
+      /a script runs on in_process, host/,
     )
     expect(() => new CLI({ spec, script, machine: 'host', runtime: 'monty' })).toThrow(
       /a host runs its own programs/,
-    )
-    expect(() => new CLI({ spec, script, machine: 'worker', runtime: 'quickjs' })).toThrow(
-      /a worker runs 'monty', not 'quickjs'/,
     )
     expect(new CLI({ spec, script, runtime: 'quickjs' }).runtime).toBe('quickjs')
     expect(

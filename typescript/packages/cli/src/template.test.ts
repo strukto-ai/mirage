@@ -128,7 +128,7 @@ describe('mirage template', () => {
     const file = join(dir, 't.yaml')
     writeFileSync(
       file,
-      'clis:\n  tally:\n    script: ./tally.py\n' +
+      'clis:\n  tally:\n    script: ./tally.py\n    machine: in_process\n' +
         'profiles:\n  reviewer:\n    policy:\n      pre_command:\n        - script: guard.py\n',
     )
     expect((await template(url, 'create', 't', '-f', file)).code).toBe(0)
@@ -137,7 +137,7 @@ describe('mirage template', () => {
         name: 't',
         description: null,
         config: {
-          clis: { tally: { script: join(dir, 'tally.py') } },
+          clis: { tally: { script: join(dir, 'tally.py'), machine: 'in_process' } },
           profiles: { reviewer: { policy: { pre_command: [{ script: 'guard.py' }] } } },
         },
       },

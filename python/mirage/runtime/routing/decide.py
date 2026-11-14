@@ -37,8 +37,8 @@ def runtime_for_script(
 
     Args:
         entries (Sequence[Runtime]): the workspace's ordered world.
-        machine (str): the machine the script runs on: ``in_process``,
-            ``worker`` or ``host``.
+        machine (str): the machine the script runs on: ``in_process``
+            or ``host``.
         runtime (str | None): the runtime's registered name, such as
             ``quickjs``; None for the first that speaks the language.
         language (Language): the script's language ("python" or "js").

@@ -27,8 +27,8 @@ ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
 
 ## The workspace
 
-Two machines capture `python3`: `monty` first, a `worker` that runs it on
-Monty, then `gpu`, the Daytona sandbox. The route policy is a script that
+Two machines capture `python3`: `monty` first, an `in_process` machine that
+runs it on Monty, then `gpu`, the Daytona sandbox. The route policy is a script that
 runs on Monty, read from `route.py`:
 
 ```yaml workspace.yaml
@@ -40,7 +40,8 @@ mounts:
 
 machines:
   monty:
-    provider: worker
+    provider: in_process
+    runtime: monty
   gpu:
     provider: daytona
     sandbox_id: ${DAYTONA_GPU_SANDBOX_ID}

@@ -5,7 +5,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -47,7 +48,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -85,7 +87,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -148,7 +151,8 @@
         {
           "add_machine": {
             "monty": {
-              "provider": "worker"
+              "provider": "in_process",
+              "runtime": "monty"
             }
           }
         },
@@ -167,7 +171,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -198,7 +203,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -250,7 +256,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         }
       },
@@ -269,7 +276,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -296,7 +304,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "python3"
             ]
@@ -323,7 +332,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -361,7 +371,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker",
+            "provider": "in_process",
+            "runtime": "monty",
             "captures": [
               "python3"
             ]
@@ -388,7 +399,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -426,7 +438,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -454,7 +467,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "mounts": {
@@ -482,7 +496,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -524,7 +539,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -570,7 +586,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -616,7 +633,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -673,7 +691,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -708,7 +727,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -753,7 +773,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "route_policy": {

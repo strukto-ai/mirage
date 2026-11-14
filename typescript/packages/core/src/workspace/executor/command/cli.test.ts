@@ -27,8 +27,8 @@ import { PythonRuntime } from '../../../runtime/python/base.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
 import type { Language, Program, RunResult } from '../../../runtime/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
-import { IN_PROCESS, WORKER } from '../../../runtime/constants.ts'
-import { placeRuntime, registerRuntime } from '../../../runtime/table.ts'
+import { HOST, IN_PROCESS } from '../../../runtime/constants.ts'
+import { registerRuntime } from '../../../runtime/table.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Activity } from '../../../utils/activity.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -312,8 +312,10 @@ class OtherPyRuntime extends FakePyRuntime {
   override readonly name = 'otherpy'
 }
 
-class WorkerPyRuntime extends FakePyRuntime {
-  override readonly name = 'workerpy'
+// Registered as the host's own runtime name, which the table places on a
+// host machine.
+class HostPyRuntime extends FakePyRuntime {
+  override readonly name = 'local'
 }
 
 class FakeJsRuntime extends FakePyRuntime {
@@ -322,8 +324,7 @@ class FakeJsRuntime extends FakePyRuntime {
 }
 
 registerRuntime('otherpy', OtherPyRuntime)
-registerRuntime('workerpy', WorkerPyRuntime)
-placeRuntime('workerpy', WORKER)
+registerRuntime('local', HostPyRuntime)
 registerRuntime('fakejs', FakeJsRuntime)
 
 class CrashingRuntime extends FakePyRuntime {
@@ -582,11 +583,11 @@ describe('handleCli script arm', () => {
   })
 
   it('the machine pin is honored', async () => {
-    // A worker script skips the in-process entry that speaks python.
+    // A host script skips the in-process entry that speaks python.
     const first = new FakePyRuntime()
-    const pinned = new WorkerPyRuntime()
+    const pinned = new HostPyRuntime()
     const [, io] = await drained(
-      scriptInstall({ machine: WORKER }),
+      scriptInstall({ machine: HOST }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -634,7 +635,7 @@ describe('handleCli script arm', () => {
   it('exits 127 with no entry on its machine', async () => {
     const py = new FakePyRuntime()
     const [, io, node] = await drained(
-      scriptInstall({ machine: WORKER }),
+      scriptInstall({ machine: HOST }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -642,7 +643,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: no worker machine runs python scripts (workspace machines: 'fakepy')\n",
+      "pager: no host machine runs python scripts (workspace machines: 'fakepy')\n",
     )
     expect(node.exitCode).toBe(127)
     expect(py.seen).toEqual([])

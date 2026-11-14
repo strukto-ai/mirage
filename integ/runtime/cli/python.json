@@ -5,13 +5,14 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "import os\nif '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('prog', argv[0])\n    print('args', argv[1:])\n    print('config', os.getenv('MIRAGE_CLI_CONFIG'))\n    if stdin:\n        print('stdin', stdin.decode())\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -31,13 +32,14 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "print('args', argv[1:])\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -57,13 +59,14 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "if '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('ran')\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -83,7 +86,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
@@ -92,7 +96,7 @@
             "config": {
               "width": 80
             },
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -112,7 +116,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
@@ -121,7 +126,7 @@
             "config": {
               "width": 80
             },
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -141,13 +146,14 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "if stdin:\n    print('stdin', stdin.decode())\nelse:\n    print('no stdin')\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -168,17 +174,18 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "print('prog', argv[0])\n",
-            "machine": "worker"
+            "machine": "in_process"
           },
           "less": {
             "script": "print('prog', argv[0])\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         }
       },
@@ -206,13 +213,14 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           }
         },
         "clis": {
           "pager": {
             "script": "print('pinned', argv[0])\n",
-            "machine": "worker",
+            "machine": "in_process",
             "runtime": "monty"
           }
         }
@@ -237,7 +245,8 @@
       "world": {
         "machines": {
           "monty": {
-            "provider": "worker"
+            "provider": "in_process",
+            "runtime": "monty"
           },
           "local": {
             "provider": "host"
@@ -246,7 +255,7 @@
         "clis": {
           "pager": {
             "script": "import sys\nprint('monty', sys.platform == 'monty')\n",
-            "machine": "worker"
+            "machine": "in_process"
           }
         },
         "route_policy": {
@@ -279,7 +288,8 @@
         "machines": {},
         "clis": {
           "pager": {
-            "script": "print('unreachable')\n"
+            "script": "print('unreachable')\n",
+            "machine": "in_process"
           }
         }
       },

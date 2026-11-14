@@ -67,8 +67,8 @@ export interface MirageConfig {
   mounts?: Record<string, MirageMount>
   /**
    * Machines for a service-owned workspace, by name, each a `machines:`
-   * entry as a workspace file spells it (`{ provider: 'worker', captures:
-   * ['@python'] }`). The YAML-friendly twin of `workspaceOptions.machines`;
+   * entry as a workspace file spells it (`{ provider: 'in_process', runtime:
+   * 'monty' }`). The YAML-friendly twin of `workspaceOptions.machines`;
    * pass one or the other, not both.
    */
   machines?: Record<string, Record<string, unknown>>

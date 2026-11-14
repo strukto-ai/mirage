@@ -2,7 +2,7 @@
 title: Machines
 sidebarTitle: Overview
 icon: server
-description: Choose where programs run, in Mirage, in worker processes, on the host, or on a container, VM, cloud sandbox or remote machine.
+description: Choose where programs run, in Mirage, on the host, or on a container, VM, cloud sandbox or remote machine.
 ---
 
 A machine is a Unix-like computer that runs programs as processes. Mirage's
@@ -13,13 +13,12 @@ the machine that captures them.
 | Machine | Runs | SDK |
 | --- | --- | --- |
 | [In Process](/home/setup/machine/in_process) | Mirage's own commands, and Python or JavaScript on a [runtime](/home/setup/runtime/overview) | both |
-| [Worker](/home/setup/machine/worker) | `python3` on Monty, in worker processes Mirage starts | both |
 | [Host](/home/setup/machine/host) | programs installed on the host, confined by a `sandbox` on Linux | Python, Node |
 | A [provider](#providers) | programs installed on a container, VM, cloud sandbox or SSH host you already have | Python, Node; E2B also in the browser |
 
-A [runtime](/home/setup/runtime/overview) is an interpreter that runs inside a
-machine: Monty on a worker, and WASI, Pyodide or QuickJS in process. A host or
-a provider takes no runtime; it runs the programs installed on it.
+A [runtime](/home/setup/runtime/overview) is an interpreter that runs inside
+the In Process machine: Monty, WASI, Pyodide or QuickJS. A host or a provider
+takes no runtime; it runs the programs installed on it.
 
 ## Routing
 
@@ -30,14 +29,15 @@ it, and Mirage runs the rest itself. Without the key, `python3`, `node` and
 ```yaml
 machines:
   py:
-    provider: worker
+    provider: in_process
+    runtime: monty
   box:
     provider: docker
     container: my-sandbox
     mount_type: ssh
 ```
 
-Each entry names its `provider`: `in_process`, `worker`, `host` or a
+Each entry names its `provider`: `in_process`, `host` or a
 [provider](#providers). The entry's other keys are its settings, snake_case in
 YAML for both SDKs; a key it does not take is refused.
 
@@ -74,7 +74,7 @@ captures; everything else stays where it would run.
 
 | Machine | Default `captures` |
 | --- | --- |
-| `worker`, `in_process` with WASI or Pyodide, `host` | `@python` |
+| `in_process` with Monty, WASI or Pyodide, `host` | `@python` |
 | `in_process` with QuickJS | `@js` |
 | `host` with a `sandbox`, a provider | `@external` |
 
