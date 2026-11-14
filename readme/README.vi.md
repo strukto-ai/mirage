@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # sandbox e2b là một máy; runtime remote chạy chương trình trên đó
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python chạy trên monty trong một worker, hoặc trong sandbox e2b
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # định tuyến phần tính toán: dòng có numpy chạy trên máy, phần còn lại trên monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # thêm một agent dùng profile analyst
@@ -155,7 +154,7 @@ Các công cụ dòng lệnh này được ảo hóa: [Mirage](https://www.struk
 
 ## Runtime ảo
 
-Runtime được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ lập trình. Bất kỳ lệnh nào trên dòng đều có thể được chuyển hướng tới một runtime đã cấu hình, nên Python có thể chạy trong tiến trình với [Monty](https://pydantic.dev/articles/pydantic-monty) trong khi một lệnh khác, chẳng hạn `kubectl`, được gửi tới máy từ xa qua SSH. Runtime nào phục vụ một dòng lệnh có thể do một [bộ định tuyến runtime viết bằng script](https://docs.mirage.strukto.ai/home/policy/route-runtime) quyết định.
+Runtime được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ lập trình. Bất kỳ lệnh nào trên dòng đều có thể được chuyển hướng tới một runtime đã cấu hình, nên Python có thể chạy trong tiến trình với [Monty](https://pydantic.dev/articles/pydantic-monty) trong khi một lệnh khác, chẳng hạn `kubectl`, được gửi tới máy từ xa qua SSH. Runtime nào phục vụ một dòng lệnh có thể do một [bộ định tuyến runtime viết bằng script](https://docs.mirage.strukto.ai/home/policy/route-machine) quyết định.
 
 |                | Runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -261,7 +260,7 @@ Xem [script chính sách](https://docs.mirage.strukto.ai/home/policy/scripts) đ
 
 ## Terminal nhúng
 
-Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

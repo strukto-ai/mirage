@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { fsStrerror } from '../../../../errors/fs.ts'
+import { enoent, fsStrerror, isMissingPath } from '../../../../errors/fs.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -24,7 +24,7 @@ import type { PathSpec } from '../../../../types.ts'
 import { wordText } from '../../../../types.ts'
 import { argsBytes, checkEnv, framesBytes } from '../../../session/budget.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { positionalParams, setPositionalParams } from '../../../session/state.ts'
+import { positionalParams, setPositionalParams, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ended, returning } from '../../control.ts'
 import { scopePath } from '../scope.ts'
@@ -34,13 +34,43 @@ import type { ExecuteFn } from '../../../expand/types.ts'
 import { readScriptText, scriptError } from './script.ts'
 
 /**
+ * The file `source` reads, as `BASH_SOURCE` names it, and its text: a name
+ * with no slash is looked up on PATH first under `sourcepath`, then, outside
+ * posix mode, in the working directory. Mirrors Python's `_source_file`.
+ */
+async function sourceFile(
+  dispatch: DispatchFn,
+  session: SessionState,
+  path: string | PathSpec,
+): Promise<[string, string]> {
+  const name = wordText(path)
+  if (!name.includes('/') && (session.shopts.sourcepath ?? true)) {
+    const search = visibleEnv(session).PATH
+    if (search !== undefined) {
+      for (const directory of search.split(':')) {
+        const candidate = directory ? directory.replace(/\/+$/, '') + '/' + name : name
+        try {
+          return [candidate, await readScriptText(dispatch, candidate, session.cwd)]
+        } catch (error) {
+          const code = (error as { code?: string }).code
+          if (!isMissingPath(error) && code !== 'ENOTDIR' && code !== 'EISDIR') throw error
+        }
+      }
+      if (session.shellOptions.posix) throw enoent(name)
+    }
+  }
+  return [name, await readScriptText(dispatch, scopePath(path), session.cwd)]
+}
+
+/**
  * Read a script file and execute it in the calling shell, `name` (`source`
  * or `.`) as typed. A sourced file is the caller, so whatever it sets stays
- * set; only the positional parameters come back, which `args` replaces
- * while it runs. It runs in a frame of its own, which `return` ends,
- * `FUNCNAME` names `source` and the RETURN action runs in as it returns; a
- * `break` in it ends a caller's loop. An empty name fails as a missing file
- * does, and bash blames a file it cannot read on itself, not the builtin.
+ * set; arguments replace `$1..$#` while it runs, and a `set --` in it outside
+ * a function replaces the caller's too. It runs in a frame of its own, which
+ * `return` ends, `FUNCNAME` names `source` and the RETURN action runs in as it
+ * returns; a `break` in it ends a caller's loop. An empty name fails as a
+ * missing file does, and bash blames a file it cannot read on itself, not the
+ * builtin.
  */
 export async function handleSource(
   dispatch: DispatchFn,
@@ -57,9 +87,10 @@ export async function handleSource(
   if (wordText(path) === '') {
     return scriptError(shellVoice(), 'No such file or directory', 1, 'source ')
   }
+  let origin: string
   let script: string
   try {
-    script = await readScriptText(dispatch, raw, session.cwd)
+    ;[origin, script] = await sourceFile(dispatch, session, path)
   } catch (err) {
     const strerror = fsStrerror(err)
     if (strerror === null) throw err
@@ -80,7 +111,9 @@ export async function handleSource(
   // Its diagnostics name the file, as spelled, and count its own lines.
   const outerName = session.parseName
   const outerHead = session.parseHead
-  session.parseName = wordText(path)
+  const outerSources = session.sourceFiles
+  session.sourceFiles = [origin, ...outerSources]
+  session.parseName = origin
   session.parseHead = `${session.parseName}: `
   session.parseFrom = 0
   let io: IOResult
@@ -110,7 +143,13 @@ export async function handleSource(
     const frame = cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     session.callLines = outerLines
-    if (args.length === 0) setPositionalParams(session, cs, frame.positional)
+    session.sourceFiles = outerSources
+    // A file sourced with no arguments shares its caller's, so a `set --` in
+    // it is the caller's own; one given arguments hands back what a `set --`
+    // made of them, outside a function only.
+    if (args.length === 0) cs.current.replacedArgs ||= frame.replacedArgs
+    if (args.length === 0 || (frame.replacedArgs && cs.functionDepth === 0))
+      setPositionalParams(session, cs, frame.positional)
   }
   return [stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
 }

@@ -292,6 +292,33 @@ async def test_a_machine_is_checked_against_its_field_types(client):
 
 
 @pytest.mark.asyncio
+async def test_a_machine_saves_its_runtime_and_sandbox_settings(client):
+    engine = await client.post(
+        "/v1/machines",
+        json={
+            "name": "js",
+            "type": "in_process",
+            "fields": {"runtime": "quickjs", "home": "/opt/qjs"},
+        },
+    )
+    assert engine.status_code == 201, engine.text
+    assert engine.json()["config"] == {
+        "runtime": "quickjs",
+        "home": "/opt/qjs",
+    }
+    host = await client.post(
+        "/v1/machines",
+        json={
+            "name": "box",
+            "type": "host",
+            "fields": {"sandbox.fs_writable": ["/tmp/w"]},
+        },
+    )
+    assert host.status_code == 201, host.text
+    assert host.json()["config"] == {"sandbox.fs_writable": ["/tmp/w"]}
+
+
+@pytest.mark.asyncio
 async def test_a_machine_keeps_its_credential_sealed(client):
     r = await client.post(
         "/v1/machines",
@@ -303,13 +330,3 @@ async def test_a_machine_keeps_its_credential_sealed(client):
     )
     assert r.status_code == 201, r.text
     assert r.json()["config"] == {"sandbox_id": "s1"}
-
-
-@pytest.mark.asyncio
-async def test_a_runtime_answers_with_captures(client):
-    r = await client.post(
-        "/v1/runtimes",
-        json={"name": "py", "type": "monty", "fields": {}},
-    )
-    assert r.status_code == 201, r.text
-    assert r.json()["captures"] == []

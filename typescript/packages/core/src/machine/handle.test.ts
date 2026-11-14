@@ -153,7 +153,7 @@ function sandboxWorkspace(box: RecordingMachine): Workspace {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      ...on(box, 'workspace'),
+      ...on(box),
     },
   )
 }
@@ -204,7 +204,7 @@ describe('MachineHandle', () => {
         { '/data': new RAMVFS() },
         {
           mode: MountMode.EXEC,
-          ...on(box, 'workspace'),
+          ...on(box),
           ...(systemTime === null ? {} : { systemTime }),
         },
       )
@@ -256,7 +256,7 @@ describe('MachineHandle', () => {
     const box = new CountedBox()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, ...on(box, 'workspace'), systemTime: '2026-03-02T09:00:00Z' },
+      { mode: MountMode.EXEC, ...on(box), systemTime: '2026-03-02T09:00:00Z' },
     )
     try {
       await ws.shell('python3 a')
@@ -302,7 +302,7 @@ describe('MachineHandle', () => {
     const box = new StalledBox()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, ...on(box, 'workspace'), systemTime: '2026-03-02T09:00:00Z' },
+      { mode: MountMode.EXEC, ...on(box), systemTime: '2026-03-02T09:00:00Z' },
     )
     try {
       await ws.shell('python3 a')
@@ -513,7 +513,7 @@ describe('MachineHandle', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        ...on(box, 'workspace'),
+        ...on(box),
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.05 }) },
       },
     )
@@ -741,7 +741,7 @@ describe('MachineHandle', () => {
     const guards = { python3: new Limit({ maxLines: 2 }) }
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, ...on(box, 'workspace') },
+      { mode: MountMode.EXEC, ...on(box) },
     )
     try {
       const io = await ws.shell('python3 train.py')
@@ -865,7 +865,7 @@ it.each([
   try {
     const io = await ws.shell('train')
     expect(DEC.decode(await materialize(io.stdout))).toBe(stdout)
-    const [program] = (await ws.processes()).filter((p) => p.runtime !== null)
+    const [program] = (await ws.processes()).filter((p) => p.program)
     expect([program?.machinePid?.pid, program?.machineInstance]).toEqual([812, 'box'])
   } finally {
     await ws.close()

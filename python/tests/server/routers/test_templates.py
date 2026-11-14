@@ -140,7 +140,7 @@ async def test_a_template_builds_from_a_saved_connection(
     assert r.status_code == 400
     assert (
         r.json()["error"]["message"]
-        == "gone is not saved as a VFS, CLI, runtime or machine"
+        == "gone is not saved as a VFS, CLI or machine"
     )
 
 

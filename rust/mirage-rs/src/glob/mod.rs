@@ -28,7 +28,7 @@ pub(crate) struct CompiledGlob {
 
 impl CompiledGlob {
     pub(crate) fn new(pattern: Vec<u32>) -> Self {
-        let mut compiler = Compiler::new(pattern, Dialect::Shell, false);
+        let mut compiler = Compiler::new(pattern, Dialect::Shell, false, false);
         while !compiler.done() {
             compiler.step();
         }
@@ -146,6 +146,8 @@ struct Config {
     extglob: bool,
     #[serde(default)]
     period: bool,
+    #[serde(default)]
+    nocase: bool,
     operation: Operation,
 }
 
@@ -189,6 +191,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             config.pattern,
             config.dialect,
             config.extglob,
+            config.nocase,
         )),
         program: None,
         flat: None,
@@ -273,8 +276,12 @@ impl Glob {
                 let program = self.program.as_ref().expect("compiled pattern");
                 if reverse.step(program) {
                     let units = std::mem::take(&mut reverse.units);
-                    self.reversed_compiler =
-                        Some(Compiler::new(units, program.dialect, program.extglob));
+                    self.reversed_compiler = Some(Compiler::new(
+                        units,
+                        program.dialect,
+                        program.extglob,
+                        program.nocase,
+                    ));
                     self.reverse = None;
                 }
             }

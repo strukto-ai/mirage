@@ -22,6 +22,7 @@ from mirage.commands.spec import Argument, CommandSpec
 from mirage.context import reset_caller
 from mirage.errors.types import ReadOnlyError
 from mirage.io.types import IOResult
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -484,9 +485,7 @@ def test_implicit_root_keeps_pathless_commands_working():
 
 def test_exec_gate_is_per_session():
     a = _seed("x.txt", b"hi")
-    ws = Workspace(
-        {"/e": (a, MountMode.EXEC)}, runtimes=["monty", "workspace"]
-    )
+    ws = Workspace({"/e": (a, MountMode.EXEC)}, machines=[MontyRuntime()])
     ws.create_session("no_exec", mounts={"/e": "write"})
     ws.create_session("with_exec", mounts={"/e": "exec"})
 

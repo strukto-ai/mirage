@@ -3,6 +3,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { inRequest } from '../../io/web/request.ts'
 
 function barrier(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -129,6 +130,17 @@ it.each([
     'exec 3< <(printf a); echo st:$?',
     [0, 'st:2\n', 'bash: line 1: exec: a process substitution as a descriptor: not supported\n'],
   ],
+  [': <(sleep .05; echo late >&2) | cat; sleep .3; echo end', [0, 'end\n', 'late\n']],
+  ['x=$( { : <(sleep .05; echo cap >&2); } 2>&1 ); echo "[$x]"', [0, '[cap]\n', '']],
+  ['{ : <(sleep .05; echo piped >&2); } 2>&1 | cat; echo end', [0, 'piped\nend\n', '']],
+  [
+    ': <(sleep .05; echo kept >&2); exec 2>/data/log; sleep .2; exec 2>&1; echo "log=[$(cat /data/log)]"',
+    [0, 'log=[]\n', 'kept\n'],
+  ],
+  [
+    'x=$( { : <(exec 2>/dev/null; sleep .3; touch /data/held); } 2>&1 ); [ -e /data/held ] && echo waited || echo closed; sleep .5',
+    [0, 'closed\n', ''],
+  ],
 ])('releases its descriptors: %s', async (command, expected) => {
   const ws = workspace()
   try {
@@ -138,4 +150,16 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+it("joins an unread producer once its line has run, a child shell's too, on an edge runtime", async () => {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await inRequest(() =>
+    ws.shell(
+      ': <(until [ -e /ready ]; do sleep .01; done; echo late > /done); touch /ready; (: <(sleep .05; echo late); wait "$!"; echo closed:$?); (: <(sleep .1; echo nested > /nested))',
+    ),
+  )
+  expect(new TextDecoder().decode(io.stdout)).toBe('closed:141\n')
+  const done = await ws.shell('cat /done /nested')
+  expect(new TextDecoder().decode(done.stdout)).toBe('late\nnested\n')
 })

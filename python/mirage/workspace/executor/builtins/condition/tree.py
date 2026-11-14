@@ -126,7 +126,12 @@ async def _regex_status(ctx: CondContext, node: CondBinary) -> int:
     # bash hands the pattern to regcomp(REG_EXTENDED): glibc's
     # POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
     try:
-        regex = posix_regex(byte_view(node.right, utf8), True, utf8=utf8)
+        regex = posix_regex(
+            byte_view(node.right, utf8),
+            True,
+            utf8=utf8,
+            ignore_case=ctx.session.shopts.get("nocasematch", False),
+        )
         found = await regex.search(left)
     except RegexError:
         return 2
@@ -153,10 +158,14 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     # == and != always fnmatch: the builder already rendered the right
     # side into the glob dialect, quoted segments escaped, so a
     # wholly-literal pattern matches exactly itself.
-    if node.op in ("=", "=="):
-        return fnmatch(node.left, node.right, extglob=True)
-    if node.op == "!=":
-        return not fnmatch(node.left, node.right, extglob=True)
+    if node.op in ("=", "==", "!="):
+        matched = fnmatch(
+            node.left,
+            node.right,
+            extglob=True,
+            nocase=ctx.session.shopts.get("nocasematch", False),
+        )
+        return matched != (node.op == "!=")
     if node.op == "<":
         return node.left < node.right
     if node.op == ">":

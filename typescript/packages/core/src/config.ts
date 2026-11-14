@@ -32,11 +32,10 @@ import { parseCommandLimits } from './policy/builtin/output_cap.ts'
 import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
 import { statedProcesses } from './execution/process/config.ts'
 import type { MachineHandle } from './machine/handle.ts'
-import { buildMachine } from './machine/registry.ts'
 import { validateDocument } from './rs/document.ts'
-import { Runtime, type RuntimeEntry } from './runtime/base.ts'
+import { Runtime } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
-import { buildRuntime, checkRuntimeOptions } from './runtime/table.ts'
+import { buildEntry, IN_PROCESS } from './runtime/table.ts'
 import { ScriptSource } from './runtime/types.ts'
 import { EnvVar, SecretSource, type EnvEntries, type SecretEntries } from './secrets/config.ts'
 import {
@@ -99,8 +98,8 @@ export function loadScriptSource(value: string, host: ConfigHost): ScriptSource 
  * deployment ships a runtime as a file and names it from yaml with no
  * host program calling `registerRuntime`. The class is constructed with
  * the uniform `(captures, config)` options like a builtin, so the entry's
- * other keys reach it unchanged. Mirrors `_load_runtime_class` in
- * `mirage/config.py`.
+ * other keys reach it unchanged. Mirrors the reference branch of
+ * `_runtime_for` in `mirage/runtime/table.py`.
  */
 async function loadRuntimeClass(
   ref: string,
@@ -114,91 +113,35 @@ async function loadRuntimeClass(
 }
 
 /**
- * The config mapping of one `runtimes:` entry, if it has one. A name, or
- * an entry whose config is not a mapping, has none: it is left as given
- * for `buildRuntimeEntries` to build or refuse. Mirrors `_runtime_config`
- * in `mirage/config.py`.
- */
-function runtimeConfig(entry: unknown): Record<string, unknown> | undefined {
-  if (!isPlainObject(entry)) return undefined
-  return isPlainObject(entry.config) ? entry.config : undefined
-}
-
-/**
- * Turn config runtime entries into workspace runtime entries: names, or
- * mappings carrying a name plus the uniform runtime options. A name is a
- * registered runtime or a `source:Class` reference to a `Runtime`
- * subclass.
- */
-async function buildRuntimeEntries(
-  entries: unknown[],
-  sources: Readonly<Record<string, ResolvedSource>> | undefined,
-  host: ConfigHost,
-): Promise<RuntimeEntry[]> {
-  const out: RuntimeEntry[] = []
-  for (const entry of entries) {
-    if (typeof entry === 'string') {
-      out.push(
-        entry.includes(':') ? new (await loadRuntimeClass(entry, host))() : buildRuntime(entry),
-      )
-      continue
-    }
-    if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
-    const { name, ...options } = entry
-    if (typeof name !== 'string' || name === '') {
-      throw new Error("runtime entry needs a non-empty 'name'")
-    }
-    // A runtime credential reads a pointer the way a mount's does: E2B's
-    // `api_key` reaches the runtime's config as the key, not the pointer.
-    const config = runtimeConfig(entry)
-    let secrets: string[] = []
-    if (config !== undefined) {
-      options.config = await resolveConfigSecrets(config, sources, `runtimes.${name}.config`)
-      secrets = fetchedValues(config, options.config)
-    }
-    try {
-      if (name.includes(':')) {
-        // The key check `buildRuntime` runs for a name: the base
-        // constructor ignores a key it does not read, so without it a typo
-        // would leave the runtime on its defaults where Python's
-        // `**options` refuses the entry.
-        const cls = await loadRuntimeClass(name, host)
-        checkRuntimeOptions(name, options)
-        out.push(new cls(options as RuntimeOptions<never>))
-        continue
-      }
-      out.push(buildRuntime(name, options))
-    } catch (err) {
-      // A check that quotes the value it refused would hand back a secret
-      // the config read, and the create route answers this message as its
-      // detail. No cause, for the same reason: it carries the original.
-      const message = err instanceof Error ? err.message : String(err)
-      const masked = maskValues(message, secrets)
-      if (masked === message) throw err
-      throw new Error(masked)
-    }
-  }
-  return out
-}
-
-/**
- * Turn the `machines:` block into each machine's handle. Mirrors
- * `_build_machines` in `mirage/config.py`.
+ * Turn the `machines:` block into each machine: its handle, or the
+ * runtime an engine provider runs. An `in_process` entry's `runtime` may
+ * be a `source:Class` reference, loaded here, since loading is async, and
+ * handed to `buildEntry` as its class.
+ * Mirrors `_build_machines` in `mirage/config.py`.
  *
- * @param machines each entry by name: its `provider` and how to reach it.
+ * @param machines each entry by name: its `provider`, what it captures and how to reach it.
  * @param sources the sources a pointer in an entry reads from.
  */
 async function buildMachines(
   machines: Record<string, Record<string, unknown>>,
   sources: Readonly<Record<string, ResolvedSource>> | undefined,
-): Promise<Record<string, MachineHandle>> {
-  const out = Object.create(null) as Record<string, MachineHandle>
+  host: ConfigHost,
+): Promise<Record<string, MachineHandle | Runtime>> {
+  const out = Object.create(null) as Record<string, MachineHandle | Runtime>
   for (const [name, entry] of Object.entries(machines)) {
     const read = await resolveConfigSecrets(entry, sources, `machines.${name}`)
     try {
-      out[name] = buildMachine(name, read)
+      const ref = read.runtime
+      const spec =
+        read.provider === IN_PROCESS && typeof ref === 'string' && ref.includes(':')
+          ? { ...read, runtime: await loadRuntimeClass(ref, host) }
+          : read
+      const [handle, runtime] = buildEntry(name, spec)
+      out[name] = handle ?? runtime
     } catch (err) {
-      // As a runtime entry's: the message must not quote a secret.
+      // A check that quotes the value it refused would hand back a secret
+      // the config read, and the create route answers this message as its
+      // detail. No cause, for the same reason: it carries the original.
       const message = err instanceof Error ? err.message : String(err)
       const masked = maskValues(message, fetchedValues(entry, read))
       if (masked === message) throw err
@@ -441,29 +384,18 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
     }
     out.store = store
   }
-  if (Array.isArray(out.runtimes)) {
-    // A runtime entry's config block carries the runtime's own knobs
-    // (sandbox_id, api_key, home, ...), snake_case in yaml like every
-    // Python-shaped key; the TS runtime config classes are camelCase,
-    // so camelize the block's keys too. Only the keys: values such as
-    // the env map pass through untouched.
-    out.runtimes = out.runtimes.map((entry): unknown => {
-      if (!isPlainObject(entry)) return entry
-      const normalized = camelizeKeys(entry)
-      if (isPlainObject(normalized.config)) {
-        normalized.config = camelizeKeys(normalized.config)
-      }
-      return normalized
-    })
-  }
   if (isPlainObject(out.machines)) {
-    // A machine entry is its handle's config plus `provider`, so its
-    // keys camelize as a runtime's config block does.
+    // A machine entry is its handle's or its runtime's config plus
+    // `provider`, snake_case in yaml like every Python-shaped key; the TS
+    // config classes are camelCase, so camelize its keys and its sandbox
+    // block's. Only the keys: values such as the env map pass through.
     out.machines = Object.fromEntries(
-      Object.entries(out.machines).map(([name, entry]) => [
-        name,
-        isPlainObject(entry) ? camelizeKeys(entry) : entry,
-      ]),
+      Object.entries(out.machines).map(([name, entry]) => {
+        if (!isPlainObject(entry)) return [name, entry]
+        const normalized = camelizeKeys(entry)
+        if (isPlainObject(normalized.sandbox)) normalized.sandbox = camelizeKeys(normalized.sandbox)
+        return [name, normalized]
+      }),
     )
   }
   return out
@@ -652,8 +584,8 @@ export interface StoreBlock {
  * section key is the installed head word. Exactly one handler source:
  * `cli` names a registered spec tree; `script` references a program
  * file whose content is embedded at load (the docker build-context
- * model). `runtime` optionally pins the world runtime entry that runs
- * the script; unset picks the first entry speaking the script's
+ * model). `machine` optionally pins the machine whose runtime runs
+ * the script; unset picks the first one speaking the script's
  * language. `config` validates through the spec's configModel at
  * install time (fail loud). A CLI never takes a mode and never shares
  * a mount's credentials: a binary has no mode, the credential does.
@@ -661,7 +593,7 @@ export interface StoreBlock {
 interface CLIBlock {
   cli?: string
   script?: string
-  runtime?: string
+  machine?: string
   config?: Record<string, unknown>
 }
 
@@ -700,8 +632,7 @@ export interface WorkspaceConfig {
   systemTime?: string | null
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
-  runtimes?: (string | Record<string, unknown>)[] | null
-  /** The machines programs run on, by name: a `provider` plus how to reach it. */
+  /** The machines commands run on, by name, in capture order: a `provider`, what it captures and how to reach it. */
   machines?: Record<string, Record<string, unknown>> | null
   /** The route policy program, `{script, runtime}`; validated by parseProgram. */
   routePolicy?: unknown
@@ -829,10 +760,8 @@ export async function configToWorkspaceArgs(
   // Built before the mounts, because a mount's config may point at one:
   // `resolveConfigSecrets` inside `buildVfs` fetches through these.
   const blocks = [...Object.values(cfg.mounts), ...Object.values(cfg.clis ?? {})]
-  const runtimes = (cfg.runtimes ?? []).map(runtimeConfig).filter((c) => c !== undefined)
   const sources = await resolveSourcesFor(cfg.secrets, [
     ...blocks.map((block) => block.config ?? {}),
-    ...runtimes,
     ...Object.values(cfg.machines ?? {}),
   ])
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
@@ -878,11 +807,7 @@ export async function configToWorkspaceArgs(
   }
   const machines =
     cfg.machines !== undefined && cfg.machines !== null
-      ? await buildMachines(cfg.machines, sources)
-      : undefined
-  const runtimeEntries =
-    cfg.runtimes !== undefined && cfg.runtimes !== null
-      ? await buildRuntimeEntries(cfg.runtimes, sources, host)
+      ? await buildMachines(cfg.machines, sources, host)
       : undefined
   return {
     mounts,
@@ -907,7 +832,6 @@ export async function configToWorkspaceArgs(
       // sets beside the same store.
       ...(stateStore !== undefined ? { store: stateStore, ownsStore: true } : {}),
       ...(machines !== undefined ? { machines } : {}),
-      ...(runtimeEntries !== undefined ? { runtimes: runtimeEntries } : {}),
       ...(cfg.routePolicy !== undefined && cfg.routePolicy !== null
         ? { routePolicy: loadProgram(parseProgram(cfg.routePolicy, 'route_policy'), host) }
         : {}),
@@ -1011,7 +935,7 @@ async function cliEntry(
     return new CLI({
       spec: new CommandSpec({ name }),
       script: loadScriptSource(block.script, host),
-      runtime: (block.runtime as string | undefined) ?? null,
+      machine: (block.machine as string | undefined) ?? null,
     })
   }
   const ref = block.cli as string
@@ -1040,7 +964,7 @@ async function buildCliEntries(
       throw new Error(`clis entry '${name}' must be a mapping`)
     }
     const unknown = Object.keys(block).filter(
-      (k) => !['cli', 'script', 'runtime', 'config'].includes(k),
+      (k) => !['cli', 'script', 'machine', 'config'].includes(k),
     )
     if (unknown.length > 0) {
       throw new Error(
@@ -1052,11 +976,11 @@ async function buildCliEntries(
     if (hasCli === hasScript) {
       throw new Error(`clis entry '${name}' takes exactly one of cli or script`)
     }
-    if (block.runtime !== undefined && !hasScript) {
-      throw new Error(`clis entry '${name}': runtime pins the script's runtime; it takes script`)
+    if (block.machine !== undefined && !hasScript) {
+      throw new Error(`clis entry '${name}': machine pins where the script runs; it takes script`)
     }
-    if (block.runtime !== undefined && typeof block.runtime !== 'string') {
-      throw new Error(`clis entry '${name}': runtime must be a string`)
+    if (block.machine !== undefined && typeof block.machine !== 'string') {
+      throw new Error(`clis entry '${name}': machine must be a string`)
     }
     if (block.config !== undefined && !isPlainObject(block.config)) {
       throw new Error(`clis entry '${name}': config must be a mapping`)

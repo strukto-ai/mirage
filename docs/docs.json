@@ -82,7 +82,16 @@
           {
             "group": "Examples",
             "pages": [
-              "home/examples/embedded-terminal",
+              {
+                "group": "Lightweight Terminal",
+                "icon": "terminal",
+                "pages": [
+                  "home/examples/lightweight-terminal",
+                  "home/examples/lightweight-terminal/code-review",
+                  "home/examples/lightweight-terminal/co-work",
+                  "home/examples/lightweight-terminal/release-notes"
+                ]
+              },
               "home/examples/policy-security",
               "home/examples/runtime-routing"
             ]
@@ -291,7 +300,6 @@
               "home/policy/policies",
               "home/policy/scripts",
               "home/policy/explain",
-              "home/policy/route-runtime",
               "home/policy/route-machine",
               "home/policy/route-network"
             ]
@@ -316,8 +324,7 @@
                   "home/setup/runtime/quickjs"
                 ]
               },
-              "home/setup/runtime/local",
-              "home/setup/runtime/sandlock",
+              "home/setup/runtime/host",
               "home/setup/runtime/custom"
             ]
           },
@@ -904,17 +911,6 @@
                   "GET /v1/clis/{ref}",
                   "PUT /v1/clis/{ref}",
                   "DELETE /v1/clis/{ref}"
-                ]
-              },
-              {
-                "group": "Runtime",
-                "pages": [
-                  "GET /v1/runtimes",
-                  "POST /v1/runtimes",
-                  "GET /v1/runtimes/types",
-                  "GET /v1/runtimes/{ref}",
-                  "PUT /v1/runtimes/{ref}",
-                  "DELETE /v1/runtimes/{ref}"
                 ]
               },
               {

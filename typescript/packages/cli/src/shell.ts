@@ -40,7 +40,7 @@ interface ExplainedNode {
   exit_code?: number
   reason?: string
   source?: string
-  runtime?: string
+  machine?: string
   children: ExplainedNode[]
 }
 
@@ -48,7 +48,7 @@ export interface ExplanationRecord {
   line: string
   outcome: string
   reason: string
-  answers: { kind: string; runtime?: string; reason?: string | null }[]
+  answers: { kind: string; machine?: string; reason?: string | null }[]
   exit_code: number
   node: ExplainedNode
 }
@@ -60,7 +60,7 @@ export function formatExplanation(data: ExplanationRecord): string {
   const out = [`${data.line}  [${verdict}]`]
   for (const answer of data.answers) {
     if (answer.kind === 'route' && answer.reason) {
-      out.push(`  on ${answer.runtime ?? ''}: ${answer.reason}`)
+      out.push(`  on ${answer.machine ?? ''}: ${answer.reason}`)
     }
   }
   for (const child of data.node.children) explainedLines(child, 1, out)
@@ -78,7 +78,7 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
       line += `, exit ${String(node.exit_code)}`
     line += node.reason !== undefined && node.reason !== '' ? `: ${node.reason}]` : ']'
     if (node.source !== undefined && node.source !== '') line += `  ${node.source}`
-    if (node.runtime !== undefined && node.runtime !== '') line += `  on ${node.runtime}`
+    if (node.machine !== undefined && node.machine !== '') line += `  on ${node.machine}`
     out.push(line)
   }
   for (const child of node.children) explainedLines(child, depth + 1, out)
@@ -99,10 +99,9 @@ export function registerShellCommand(parent: Command): void {
     .requiredOption('-c, --command <command>', 'Shell line to run')
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
-    .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
     .option(
       '--machine <name>',
-      "Machine to run this line's captured stages on, by its name under machines:",
+      "Machine to place this line's captured stages on, by its name under machines:",
     )
     .option('--no-record', "Keep this line out of the session's history")
     .option('--json', 'Collect output and print the final result as JSON')
@@ -113,7 +112,6 @@ export function registerShellCommand(parent: Command): void {
         command: string
         session?: string
         cwd?: string
-        runtime?: string
         machine?: string
         record: boolean
         explain?: boolean
@@ -122,7 +120,6 @@ export function registerShellCommand(parent: Command): void {
         const workspace = resolveWorkspace(opts.workspace)
         const body: Record<string, unknown> = { command: opts.command }
         if (opts.cwd !== undefined) body.cwd = opts.cwd
-        if (opts.runtime !== undefined) body.runtime = opts.runtime
         if (opts.machine !== undefined) body.machine = opts.machine
         if (!opts.record) body.record = false
         if (opts.explain === true) {

@@ -25,6 +25,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import Program, RouteDecision, RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -73,7 +74,7 @@ class _HostTools(_HostPython):
 def _fixture() -> tuple[SessionState, Workspace]:
     ws = Workspace(
         mounts={"/ram": (RAMVFS(), MountMode.WRITE)},
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     return SessionState(session_id="t"), ws
 
@@ -293,7 +294,7 @@ def test_a_wrapper_is_a_program_where_what_it_runs_is():
 # finds it.
 def test_program_has_no_file_for_an_interpreter_no_language_runtime_runs():
     session = SessionState(session_id="t")
-    ws = Workspace({"/": RAMVFS()}, runtimes=["workspace"])
+    ws = Workspace({"/": RAMVFS()}, machines=[])
     for name in ("python3", "python", "node"):
         assert program(name, session, ws._registry) is None
         assert name not in programs(session, ws._registry)
@@ -319,7 +320,7 @@ def test_program_has_no_file_for_a_shell_word_a_mount_also_registers():
 def test_a_language_runtime_that_runs_processes_keeps_its_own_names():
     session = SessionState(session_id="t")
     ws = Workspace(
-        {"/": RAMVFS()}, runtimes=[_HostPython(captures=["python3", "gcc"])]
+        {"/": RAMVFS()}, machines=[_HostPython(captures=["python3", "gcc"])]
     )
     assert lookup("python3", session, ws._registry) is Consumer.SESSION
     assert lookup("gcc", session, ws._registry) is Consumer.EXTERNAL
@@ -327,14 +328,14 @@ def test_a_language_runtime_that_runs_processes_keeps_its_own_names():
 
 def test_a_class_capture_beside_the_language_names_runs_natively():
     session = SessionState(session_id="t")
-    ws = Workspace({"/": RAMVFS()}, runtimes=[_HostTools()])
+    ws = Workspace({"/": RAMVFS()}, machines=[_HostTools()])
     assert lookup("python3", session, ws._registry) is Consumer.SESSION
     assert lookup("gcc", session, ws._registry) is Consumer.EXTERNAL
 
 
 def test_program_is_no_file_for_a_name_only_the_fallback_takes():
     session = SessionState(session_id="t")
-    ws = Workspace({"/": RAMVFS()}, runtimes=[_Sandbox()])
+    ws = Workspace({"/": RAMVFS()}, machines=[_Sandbox()])
     assert lookup("native-tool", session, ws._registry) is Consumer.EXTERNAL
     assert program("native-tool", session, ws._registry) is None
     assert program("gcc", session, ws._registry) is Consumer.EXTERNAL
@@ -365,7 +366,7 @@ def test_program_note_says_what_runs_the_name():
 
 def test_program_note_names_the_runtime_a_capture_runs_on():
     session = SessionState(session_id="t")
-    ws = Workspace({"/": RAMVFS()}, runtimes=[_Sandbox()])
+    ws = Workspace({"/": RAMVFS()}, machines=[_Sandbox()])
     assert program_note("gcc", session, ws._registry) == (
         "gcc runs on the workspace's sandbox runtime."
     )
@@ -395,7 +396,7 @@ class _Monty(PythonRuntime):
 
 
 def _commands(node) -> list[str]:
-    found = [node.runtime] if isinstance(node, CommandExplanation) else []
+    found = [node.machine] if isinstance(node, CommandExplanation) else []
     for child in getattr(node, "children", ()) or ():
         found += _commands(child)
     return found
@@ -423,10 +424,10 @@ def _commands(node) -> list[str]:
 async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
     external, line, runs
 ):
-    entries = [_Box("docker", "gcc"), _Monty(), "workspace"]
+    entries = [_Box("docker", "gcc"), _Monty()]
     if external:
         entries.insert(0, _Box("e2b", "@external"))
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=entries)
     try:
         io = await ws.shell(line)
         assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
@@ -441,7 +442,7 @@ async def test_a_wrapper_around_a_mirage_command_is_explained_as_mirage_runs_it(
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[_Box("e2b", "@external"), "workspace"],
+        machines=[_Box("e2b", "@external")],
     )
     try:
         await ws.shell("echo hit > /data/f")
@@ -459,7 +460,7 @@ async def test_a_script_path_is_explained_as_mirage_runs_it():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[_Box("e2b", "@external"), "workspace"],
+        machines=[_Box("e2b", "@external")],
     )
     try:
         await ws.shell(
@@ -478,7 +479,7 @@ async def test_a_wrapper_a_runtime_captures_runs_there():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[_Box("niced", "nice"), _Box("docker", "gcc"), "workspace"],
+        machines=[_Box("niced", "nice"), _Box("docker", "gcc")],
     )
     try:
         io = await ws.shell("nice gcc x.c")
@@ -499,10 +500,10 @@ class _Echo(_Box):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("external", [False, True])
 async def test_a_wrapped_programs_globs_expand_as_the_programs_do(external):
-    entries = [_Echo("docker", "gcc"), "workspace"]
+    entries = [_Echo("docker", "gcc")]
     if external:
         entries.insert(0, _Box("e2b", "@external"))
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=entries)
     try:
         await ws.vfs.write("/data/a.c", b"")
         await ws.vfs.write("/data/b.c", b"")
@@ -517,10 +518,10 @@ async def test_a_wrapped_programs_globs_expand_as_the_programs_do(external):
 async def test_a_function_named_like_a_wrapper_is_explained_as_it_runs(
     external,
 ):
-    entries = [_Box("docker", "gcc"), "workspace"]
+    entries = [_Box("docker", "gcc")]
     if external:
         entries.insert(0, _Box("e2b", "@external"))
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=entries)
     try:
         await ws.shell("nice() { echo local; }")
         io = await ws.shell("nice gcc x.c")
@@ -536,7 +537,7 @@ async def test_command_past_a_wrapper_function_is_explained_as_it_runs():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[_Box("docker", "gcc"), "workspace"],
+        machines=[_Box("docker", "gcc")],
     )
     try:
         await ws.shell("nice() { echo local; }")
@@ -553,7 +554,7 @@ def _mirage_workspace(*entries) -> Workspace:
     return Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[*entries, "workspace"],
+        machines=[*entries],
         profiles={"tight": {"commands": {"allow": ["cd", "grep"]}}},
     )
 
@@ -608,7 +609,7 @@ async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[_Box("e2b", "@external"), "workspace"],
+        machines=[_Box("e2b", "@external")],
     )
     try:
         io = await ws.shell(line)

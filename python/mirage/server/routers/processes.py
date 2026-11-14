@@ -47,7 +47,6 @@ class ProcessResponse(BaseModel):
     command: str
     cwd: str
     machine: ProcessMachineResponse
-    runtime: str | None
     machine_pid: MachinePidResponse | None
     state: str
     started_at: Instant
@@ -87,7 +86,6 @@ def to_response(record: Process, ws: Workspace) -> ProcessResponse:
         command=record.command,
         cwd=record.cwd.virtual,
         machine=machine_response(ws, record),
-        runtime=record.runtime,
         machine_pid=(
             MachinePidResponse(
                 pid=record.machine_pid.pid,

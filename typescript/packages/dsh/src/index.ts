@@ -17,7 +17,6 @@ export {
   type MirageConfig,
   type MirageMount,
   type MirageMountBlock,
-  type MirageRuntimeBlock,
 } from './service.ts'
 export { MirageFileSystem, type MirageFsConfig } from './fs.ts'
 export { MirageSubprocess, type MirageSubprocessConfig } from './subprocess.ts'

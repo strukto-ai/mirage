@@ -119,6 +119,7 @@ async def handle_wait(
     """
     cmd_str = " ".join(parts)
     sid = session_of(session)
+    shell = None if session is None else session.process_id
     next_job = False
     var: str | None = None
     machine: str | None = None
@@ -217,6 +218,8 @@ async def handle_wait(
             continue
         if spec.isdigit() and not refusal.endswith(AMBIGUOUS_SPEC):
             answered_pid = int(spec)
+            if not next_job:
+                await job_table.wait_substitution(sid, shell, answered_pid)
             answered, ambiguous = saved_on_machine(
                 job_table.saved_statuses(sid, answered_pid), machine
             )
@@ -253,6 +256,9 @@ async def handle_wait(
         told = _wait_reports(session, job_table)
         await job_table.pop_completed(sid, keep)
         job_table.forget_statuses(sid)
+        await job_table.wait_substitution(sid, shell)
+        if visible:
+            job_table.forget_statuses(sid)
         return (
             None,
             IOResult(stderr=told or None),

@@ -164,7 +164,7 @@ export async function drive(
         case 'process': {
           const path = await host.process(ask[1], ask[2])
           answer = () => {
-            task.answerPath(path)
+            task.answerPath(path, host.session.lastBgJobId)
           }
           break
         }

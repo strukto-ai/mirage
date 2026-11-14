@@ -52,8 +52,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `mode` | Default mount access: `read`, `write` or `exec`. |
 | `read`, `write` | Defaults for every mount, described in [read and write behavior](/home/setup/vfs#read-and-write-behavior). Reads default to `bounded` with a 600-second bound; writes to `unconditional`. |
 | `clis` | Install [virtual CLIs](/home/setup/clis) by command name, described [below](#cli-entries). |
-| `runtimes` | Ordered [runtimes](/home/setup/runtime/overview) for programs. |
-| `route_policy` | Choose [runtimes](/home/policy/route-runtime) and [machines](/home/policy/route-machine) with a routing policy. |
+| `route_policy` | Choose [machines](/home/policy/route-machine) with a routing policy. |
 | `profiles`, `profile` | Define [session profiles](/home/configuration/session) and select the default. |
 | `processes` | Whose processes a session can list and stop, and how many it can run at once: 128 by default. See [profiles](/home/configuration/session). |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
@@ -64,14 +63,14 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Service Credentials](/home/service-credentials#set-environment-variables). |
 | `secrets` | Declare named [credential sources](/home/service-credentials). |
-| `machines` | Name the [machines](/home/setup/machine/overview) programs can run on. |
+| `machines` | Name the machines commands run on, in capture order: Mirage's own [runtimes](/home/setup/runtime/overview) and the [machines](/home/setup/machine/overview) you reach. |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#workspace-state-and-caches). |
 | `store` | Configure workspace state, background jobs included, described [below](#workspace-state-and-caches). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
 | `default_session_id`, `workspace_id` | Set explicit identifiers instead of generated ones. |
 
 Unknown keys are errors. Provider fields belong under `mounts.<prefix>.config`,
-CLI fields under `clis.<name>.config`, and runtime fields under `runtimes[].config`.
+CLI fields under `clis.<name>.config`, and a machine's fields beside its `provider` under `machines.<name>`.
 
 ## Mount settings
 
@@ -165,14 +164,13 @@ On an edge runtime, a limited workspace checks each redirect under the same
 rules. In a browser, it follows no redirects, because a page cannot see
 where a redirect goes.
 
-### Local runtimes
+### Host machines
 
-The [`local`](/home/setup/runtime/local) and
-[Sandlock](/home/setup/runtime/sandlock) runtimes run real programs on the
-host, the computer or server where Mirage runs. Those programs open their own
-connections, so Mirage cannot see or block them. While `network` limits
-anything, or a policy checks connections, these runtimes refuse to run:
-`Permission denied`, exit 126.
+A [`host`](/home/setup/runtime/host) machine runs real programs on the host,
+the computer or server where Mirage runs, sandboxed or not. Those programs
+open their own connections, so Mirage cannot see or block them. While
+`network` limits anything, or a policy checks connections, a host machine
+refuses to run them: `Permission denied`, exit 126.
 
 ## System time
 
@@ -204,7 +202,7 @@ Each workspace keeps its own time, so workspaces on one server can each
 start at a different date. Snapshots keep the setting, and `GET
 /v1/workspaces/{id}` returns it.
 
-Programs that `local` or Sandlock run on the host see the time through
+Programs a `host` machine runs, sandboxed or not, see the time through
 [libfaketime](https://github.com/wolfcw/libfaketime) when it is installed,
 on Linux (`apt install libfaketime`). Without it, or on macOS, they run on
 the host's clock. A statically linked program, as many Go tools are,
@@ -221,7 +219,7 @@ exactly one of `cli` or `script`:
 | --- | --- |
 | `cli` | A registered CLI, such as `slack`. See [CLIs](/home/setup/clis) for the twelve bundled ones. |
 | `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. See custom CLIs in [Python](/python/cli/custom) and [TypeScript](/typescript/cli/custom). |
-| `runtime` | The runtime entry that runs `script`. Unset runs it on the runtime that would run `python3`, or `node` for JavaScript, on the same line, including a `route_policy` choice. Only valid with `script`. |
+| `machine` | The machine that runs `script`. Unset runs it on the machine that would run `python3`, or `node` for JavaScript, on the same line, including a `route_policy` choice. Only valid with `script`. |
 | `config` | Fields the CLI validates at install time. |
 
 ```yaml
@@ -232,7 +230,7 @@ clis:
       token: {from: env, key: SLACK_TOKEN}
   pager:
     script: pager.py
-    runtime: monty
+    machine: py
 ```
 
 A `script` entry's `config` cannot hold a credential pointer. Read the

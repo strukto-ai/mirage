@@ -421,6 +421,9 @@ class AsyncLineIterator:
                     self._pos += len(delim)
                     self._trim()
                     return bytes(out), True
+                if self._buf[self._pos] == 0:
+                    self._pos += 1
+                    continue
                 width = char_width(self._buf, self._pos)
                 if room is not None and len(out) + width > room:
                     raise MemoryExhausted()

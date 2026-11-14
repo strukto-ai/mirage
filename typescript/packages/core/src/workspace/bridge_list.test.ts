@@ -122,7 +122,7 @@ describe('a guest sees the marks the workspace wired', () => {
       { '/data': vfs },
       {
         mode: MountMode.EXEC,
-        runtimes: [new MontyRuntime()],
+        machines: [new MontyRuntime()],
       },
     )
     await ws.shell('echo hi > /data/a.txt')

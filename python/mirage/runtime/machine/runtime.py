@@ -114,20 +114,17 @@ class RemoteRuntime(
     """Run a machine's own programs through that machine's exec.
 
     The runtime is the same whatever the provider: the machine handle a
-    workspace declares under ``machines:`` is the transport. A run goes
-    to the machine its route names (``execute(machine=)``, a policy's
-    Route), else to this entry's ``machine``. Captures default to
-    ``@external``, the programs nothing in Mirage resolves; an explicit
-    ``@line`` sends whole lines, run as ``/bin/sh -c``. An entry with a
-    ``machine`` is named for it, ``remote:<machine>``, so a workspace can
-    hold one per machine.
+    workspace declares under ``machines:`` is the transport. Each machine
+    entry builds one, named for the machine, capturing what the entry's
+    ``captures`` lists: ``@external`` by default, the programs nothing in
+    Mirage resolves; an explicit ``@line`` sends whole lines, run as
+    ``/bin/sh -c``.
 
     Args:
+        machine (str): the machine every run goes to.
         captures (Sequence[str] | None): commands routed to this runtime.
         config (RuntimeConfig | dict[str, Any] | None): no knobs; a
             machine's settings live in its ``machines:`` entry.
-        machine (str | None): the machine a run goes to when its route
-            names none.
     """
 
     name = "remote"
@@ -139,13 +136,12 @@ class RemoteRuntime(
 
     def __init__(
         self,
+        machine: str,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        machine: str | None = None,
     ) -> None:
         super().__init__(captures, config)
-        if machine is not None:
-            self.name = f"{self.name}:{machine}"
+        self.name = machine
         self.default_machine = machine
         self._machines: MachineTable | None = None
 
@@ -158,59 +154,42 @@ class RemoteRuntime(
         Raises:
             ValueError: the entry's ``machine`` is none of them.
         """
-        if self.default_machine is not None:
-            machines.get(self.default_machine)
+        machines.get(self.default_machine)
         self._machines = machines
 
-    def handle(self, ctx: Context) -> MachineHandle:
-        """The machine one run goes to.
-
-        Args:
-            ctx (Context): the run's context, whose ``machine`` its route
-                set.
+    def handle(self) -> MachineHandle:
+        """The machine every run goes to.
 
         Raises:
-            ValueError: no machine is named, or the workspace has none
-                by that name.
+            ValueError: the runtime is not in a workspace.
         """
-        name = ctx.machine or self.default_machine
-        if name is None:
-            raise ValueError(
-                f"{self.name}: no machine to run on; name one with the "
-                "entry's machine or the line's route"
-            )
         if self._machines is None:
             raise ValueError(f"{self.name}: runtime is not in a workspace")
-        return self._machines.get(name)
+        return self._machines.get(self.default_machine)
 
     @property
     def machine(self) -> MachineName | None:
-        if self._machines is None or self.default_machine is None:
+        if self._machines is None:
             return None
         return self._machines.get(self.default_machine).machine
 
-    def machine_for(self, ctx: Context) -> MachineName | None:
-        return self.handle(ctx).machine
-
-    def refusal_name(self, ctx: Context) -> str:
-        """The provider of the machine the run goes to, as a refusal of
-        its mounts names it; the runtime's name when it names none."""
-        name = ctx.machine or self.default_machine
-        if self._machines is None or name not in self._machines.names():
+    @property
+    def refusal_name(self) -> str:
+        """The provider of the machine its runs go to, as a refusal of
+        its mounts names it; the runtime's name before it is bound."""
+        if self._machines is None:
             return self.name
-        return self._machines.get(name).provider
+        return self._machines.get(self.default_machine).provider
 
     @property
     def file_effects_dispatched(self) -> bool:
-        handles = self._machines.handles() if self._machines else []
-        return bool(handles) and all(
-            h.file_effects_dispatched(self._binding) for h in handles
+        return (
+            self._machines is not None
+            and self.handle().file_effects_dispatched(self._binding)
         )
 
-    def _serves_session(
-        self, restricted_mounts: tuple[str, ...], ctx: Context
-    ) -> bool:
-        return self.handle(ctx).serves_session(restricted_mounts)
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+        return self.handle().serves_session(restricted_mounts)
 
     async def run_line(
         self,
@@ -238,7 +217,7 @@ class RemoteRuntime(
             errors (OutputFn | None): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
-        return await self.handle(ctx).run(
+        return await self.handle().run(
             ("/bin/sh", "-c", line if isinstance(line, str) else ""),
             ctx,
             self._binding,
@@ -268,7 +247,7 @@ class RemoteRuntime(
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        handle = self.handle(ctx)
+        handle = self.handle()
         env = dict(handle.config.env)
         evaluation = current_caller().evaluation
         reads = (

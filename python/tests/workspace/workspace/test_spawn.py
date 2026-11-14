@@ -11,7 +11,7 @@ from mirage.vfs.ram import RAMVFS
 
 @pytest.mark.asyncio
 async def test_spawn_preserves_literal_argv_and_uses_admission():
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[])
+    ws = Workspace({"/data": RAMVFS()}, machines=[])
     try:
         argv = ("printf", "%s|", "a b", "$(echo bad)", "*", "a'b", "", "`")
         result = await ws.spawn(SpawnRequest(argv)).communicate()
@@ -28,7 +28,7 @@ async def test_spawn_preserves_literal_argv_and_uses_admission():
 
 @pytest.mark.asyncio
 async def test_spawn_drains_pipes_and_isolates_session_state():
-    ws = Workspace({}, runtimes=[])
+    ws = Workspace({}, machines=[])
     try:
         data = b"x" * 300000
         result = await asyncio.wait_for(
@@ -46,7 +46,7 @@ async def test_spawn_drains_pipes_and_isolates_session_state():
 
 @pytest.mark.asyncio
 async def test_profile_session_processes_and_revocation():
-    ws = Workspace({}, runtimes=[])
+    ws = Workspace({}, machines=[])
     try:
         a = ws.create_session("a")
         ws.create_session("b")
@@ -71,7 +71,7 @@ async def test_profile_session_processes_and_revocation():
 
 @pytest.mark.asyncio
 async def test_terminate_stops_a_child_with_the_signal_it_names():
-    ws = Workspace({}, runtimes=[])
+    ws = Workspace({}, machines=[])
     try:
         child = ws.spawn(SpawnRequest(("sleep", "30")))
         child.terminate(15)
@@ -84,7 +84,7 @@ async def test_terminate_stops_a_child_with_the_signal_it_names():
 
 @pytest.mark.asyncio
 async def test_monty_keeps_unsupported_subprocess_import():
-    ws = Workspace({}, runtimes=[MontyRuntime()], mode=MountMode.EXEC)
+    ws = Workspace({}, machines=[MontyRuntime()], mode=MountMode.EXEC)
     try:
         result = await asyncio.wait_for(
             ws.spawn(
@@ -105,7 +105,7 @@ async def test_monty_keeps_unsupported_subprocess_import():
 
 @pytest.mark.asyncio
 async def test_spawn_uses_programs_and_exported_environment():
-    ws = Workspace({}, runtimes=[])
+    ws = Workspace({}, machines=[])
     try:
         await ws.shell(
             "LOCAL=private; export PARENT=outer; "
@@ -144,7 +144,7 @@ async def test_spawn_uses_programs_and_exported_environment():
 
 @pytest.mark.asyncio
 async def test_spawn_output_obeys_the_command_limit_wherever_the_parent_writes():
-    ws = Workspace({}, runtimes=[])
+    ws = Workspace({}, machines=[])
     try:
         session = ws.create_session(
             "capped", profile={"command_limits": {"cat": {"max_bytes": 4}}}
@@ -161,7 +161,7 @@ async def test_spawn_output_obeys_the_command_limit_wherever_the_parent_writes()
 
 @pytest.mark.asyncio
 async def test_top_level_line_cannot_bypass_spawn_process_cap():
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[])
+    ws = Workspace({"/data": RAMVFS()}, machines=[])
     session = ws.create_session("capped", profile={"processes": {"max": 1}})
     child = ws.spawn(SpawnRequest(("sleep", "30")), "capped")
     try:
@@ -187,7 +187,7 @@ async def test_top_level_line_cannot_bypass_spawn_process_cap():
 async def test_a_spawned_command_records_under_its_own_process():
     # The child's file calls carry the process id its handle bound, not
     # the spawning caller's.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, runtimes=[])
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, machines=[])
     try:
         await ws.vfs.write("/data/f", b"x\n")
         del ws.vfs.records[:]
@@ -205,7 +205,7 @@ async def test_a_spawned_command_records_under_its_own_process():
 async def test_the_workspace_processes_block_caps_each_session_under_a_profile():
     ws = Workspace(
         {"/data": RAMVFS()},
-        runtimes=[],
+        machines=[],
         processes={"max": 1},
         profiles={"batch": {"processes": {"max": 4}}},
     )
@@ -224,7 +224,7 @@ async def test_the_workspace_processes_block_caps_each_session_under_a_profile()
 
 @pytest.mark.asyncio
 async def test_a_fork_bomb_meets_the_default_cap():
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[])
+    ws = Workspace({"/data": RAMVFS()}, machines=[])
     try:
         result = await ws.shell("b() { b | b; }; b")
         assert result.exit_code == 254

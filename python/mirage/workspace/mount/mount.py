@@ -384,7 +384,7 @@ def _tree_command(cli: CLI) -> Command:
         ("config_model", cli.config_model is not None),
         ("accessor", cli.accessor is not NOOPAccessor),
         ("script", cli.script is not None),
-        ("runtime", cli.runtime is not None),
+        ("machine", cli.machine is not None),
     ):
         if own:
             raise ValueError(

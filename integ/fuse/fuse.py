@@ -545,7 +545,7 @@ async def _local_program_probe(result: dict[str, ProbeValue]) -> None:
     data._store.files["/a.txt"] = b"alpha\n"
     ws = Workspace(
         {folder: (data, MountMode.EXEC)},
-        runtimes=[LocalRuntime(captures=["@external"])],
+        machines=[LocalRuntime(captures=["@external"])],
     )
     await ws.shell("true")
     ws.add_fuse_mount(folder, folder)

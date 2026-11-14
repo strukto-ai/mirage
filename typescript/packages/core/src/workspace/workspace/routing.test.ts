@@ -24,7 +24,7 @@ import {
   type Route,
   type ShellNode,
 } from '../../policy/types.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
+import { MontyRuntime } from '../../runtime/python/monty/index.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -46,13 +46,16 @@ class Box extends MachineHandle {
   }
 }
 
+function box(name: string, ...captures: string[]): Box {
+  return new Box(name, { captures })
+}
+
 function workspace(...policies: Policy[]): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+      machines: { a: box('a', 'hostname'), b: box('b', 'hostname') },
       policies,
     },
   )
@@ -63,8 +66,7 @@ function whole(...policies: Policy[]): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'a' })],
+      machines: { a: box('a', '@line'), b: box('b', '@line') },
       policies,
     },
   )
@@ -112,33 +114,15 @@ class OnA implements Policy {
   }
 }
 
-class MontyOnB implements Policy {
+class OnC implements Policy {
   preExecute(): Route {
-    return { kind: 'route', runtime: 'monty', machine: 'b' }
-  }
-}
-
-function withMonty(...policies: Policy[]): Workspace {
-  return new Workspace(
-    { '/': new RAMVFS() },
-    {
-      mode: MountMode.EXEC,
-      machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'monty', 'workspace'],
-      policies,
-    },
-  )
-}
-
-class HostnameOnMontyOnB implements Policy {
-  preCommand(ctx: CommandContext): Route | null {
-    return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty', machine: 'b' } : null
+    return { kind: 'route', machine: 'c' }
   }
 }
 
 class HostnameOnMonty implements Policy {
   preCommand(ctx: CommandContext): Route | null {
-    return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty' } : null
+    return ctx.command === 'hostname' ? { kind: 'route', machine: 'monty' } : null
   }
 }
 
@@ -229,8 +213,7 @@ describe('routing on machines', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { a: new Box('a') },
-        runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'a' }), 'monty'],
+        machines: { a: box('a', '@line'), monty: new MontyRuntime() },
         policies: [new HostnameOnMonty()],
       },
     )
@@ -255,8 +238,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.shell('hostname -s')
       expect(said.exitCode).toBe(126)
-      expect(said.decision?.reason).toContain('ShortOnB on machine b')
-      expect(said.decision?.reason).toContain('OnA on machine a')
+      expect(said.decision?.reason).toContain('ShortOnB on b')
+      expect(said.decision?.reason).toContain('OnA on a')
     } finally {
       await ws.close()
     }
@@ -266,10 +249,10 @@ describe('routing on machines', () => {
     const ws = workspace(new ShortOnB())
     try {
       const said = await ws.explain('hostname; hostname -s; ls')
-      expect([...commands(said.node)].map((c) => [c.command, c.runtime, c.machine])).toEqual([
-        ['hostname', 'remote:a', 'box:a'],
-        ['hostname', 'remote:a', 'box:b'],
-        ['ls', '', ''],
+      expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
+        ['hostname', 'a'],
+        ['hostname', 'b'],
+        ['ls', ''],
       ])
     } finally {
       await ws.close()
@@ -281,8 +264,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.explain('nohup hostname')
       expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
-        ['nohup', 'box:b'],
-        ['hostname', 'box:b'],
+        ['nohup', 'b'],
+        ['hostname', 'b'],
       ])
     } finally {
       await ws.close()
@@ -294,15 +277,14 @@ describe('routing on machines', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { a: new Box('a'), b: new Box('b') },
-        runtimes: [new RemoteRuntime({ captures: ['nohup', 'hostname'], machine: 'a' })],
+        machines: { a: box('a', 'nohup', 'hostname'), b: box('b', 'nohup', 'hostname') },
         policies: [new ProgramOnB()],
       },
     )
     try {
       const said = await ws.explain('nohup sh -c hostname')
       const [first] = [...commands(said.node)]
-      expect([first?.command, first?.machine]).toEqual(['nohup', 'box:a'])
+      expect([first?.command, first?.machine]).toEqual(['nohup', 'a'])
       expect(DEC.decode((await ws.shell('nohup sh -c hostname')).stdout)).toBe('a\n')
     } finally {
       await ws.close()
@@ -373,120 +355,55 @@ describe('routing on machines', () => {
     try {
       const said = await ws.explain('hostname; eval hostname')
       expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
-        ['hostname', 'box:a'],
+        ['hostname', 'a'],
         ['eval', ''],
-        ['hostname', 'box:b'],
+        ['hostname', 'b'],
       ])
     } finally {
       await ws.close()
     }
   })
 
-  it('refuses a route to a machine its runtime does not run on', async () => {
-    const refusal = "runtime 'monty' runs on the workspace's machine"
-    let ws = withMonty(new MontyOnB())
+  it('refuses a route to a machine the workspace lacks as a RouteError', async () => {
+    const ws = workspace(new OnC())
     try {
       await expect(ws.shell('hostname')).rejects.toThrow(RouteError)
-      await expect(ws.shell('hostname')).rejects.toThrow(refusal)
-    } finally {
-      await ws.close()
-    }
-    ws = withMonty()
-    try {
-      await expect(ws.shell('hostname', { runtime: 'monty', machine: 'b' })).rejects.toThrow(
-        refusal,
-      )
+      await expect(ws.shell('hostname')).rejects.toThrow("unknown machine: 'c'")
     } finally {
       await ws.close()
     }
   })
 
-  it('refuses a route to a machine when no remote runtime runs on one', async () => {
+  // Each machine runs what it captures, so a program goes to the machine
+  // that captures it, and a line can name one.
+  it('runs on each machine what it captures', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        machines: { b: new Box('b') },
-        runtimes: ['monty', 'workspace'],
-        policies: [new OnB()],
-      },
+      { mode: MountMode.EXEC, machines: { a: box('a', 'python3'), b: box('b', 'node') } },
     )
     try {
-      await expect(ws.shell('echo hi')).rejects.toThrow("machine 'b' takes the remote runtime")
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it("keeps the line's machine for a command routed to a local runtime", async () => {
-    const ws = withMonty(new HostnameOnMonty())
-    try {
-      const said = await ws.shell('hostname', { machine: 'b' })
-      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'b\n'])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('explains a command route to a machine its runtime does not run on as a RouteError', async () => {
-    const ws = withMonty(new HostnameOnMontyOnB())
-    try {
-      await expect(ws.explain('hostname')).rejects.toThrow(RouteError)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // Each remote entry is named for its machine, so a workspace holds one per
-  // machine and each program goes to the entry that captures it.
-  it('gives each machine a remote entry of its own', async () => {
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        machines: { a: new Box('a'), b: new Box('b') },
-        runtimes: [
-          new RemoteRuntime({ captures: ['python3'], machine: 'a' }),
-          new RemoteRuntime({ captures: ['node'], machine: 'b' }),
-        ],
-      },
-    )
-    try {
-      expect(ws.runtimes().map((r) => r.name)).toEqual(['remote:a', 'remote:b', 'workspace'])
+      expect(ws.engines().map((r) => r.name)).toEqual(['a', 'b', 'workspace'])
       const said = await ws.shell('python3 x.py; node x.js; python3 x.py | node')
       expect(DEC.decode(said.stdout)).toBe('a\nb\nb\n')
-      const named = await ws.shell('node x.js', { runtime: 'remote:b' })
+      const named = await ws.shell('node x.js', { machine: 'b' })
       expect(DEC.decode(named.stdout)).toBe('b\n')
-      await expect(ws.shell('node x.js', { runtime: 'remote' })).rejects.toThrow(
-        /ambiguous runtime: 'remote'/,
-      )
     } finally {
       await ws.close()
     }
   })
 
-  // A program two remote entries both capture goes to the first listed, on
-  // every line, after an entry is added, and to the next once it is removed.
-  it('keeps what two remote entries capture on the first', async () => {
+  // A program two machines both capture goes to the first listed, on every
+  // line, and to the next once the first is removed. A machine provider's
+  // handle is the workspace's from the start.
+  it('keeps what two machines capture on the first', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        machines: { a: new Box('a'), b: new Box('b'), c: new Box('c') },
-        runtimes: [new RemoteRuntime({ machine: 'a' }), new RemoteRuntime({ machine: 'b' })],
-      },
+      { mode: MountMode.EXEC, machines: { a: new Box('a'), b: new Box('b') } },
     )
     try {
       expect(DEC.decode((await ws.shell('train; train')).stdout)).toBe('a\na\n')
-      ws.addRuntime(new RemoteRuntime({ machine: 'c' }))
-      expect(ws.runtimes().map((r) => r.name)).toEqual([
-        'remote:a',
-        'remote:b',
-        'remote:c',
-        'workspace',
-      ])
-      expect(DEC.decode((await ws.shell('train')).stdout)).toBe('a\n')
-      await ws.removeRuntime('remote:a')
+      expect(() => ws.addMachine('c', new Box('c'))).toThrow(/declared when the workspace/)
+      await ws.removeMachine('a')
       expect(DEC.decode((await ws.shell('train')).stdout)).toBe('b\n')
     } finally {
       await ws.close()
@@ -527,9 +444,7 @@ describe('routing on machines', () => {
       ] as const) {
         expect(DEC.decode((await ws.shell(line)).stdout)).toBe('a\n')
         const ran = new Map((await ws.processes()).map((p) => [p.id.pid, p]))
-        const program = [...ran.values()]
-          .filter((p) => p.command === reader && p.runtime !== null)
-          .at(-1)
+        const program = [...ran.values()].filter((p) => p.command === reader && p.program).at(-1)
         const named = (pid: number) => ran.get(pid)?.command
         read.set(line, [
           program?.stdin == null ? null : named(program.stdin),
@@ -561,7 +476,7 @@ describe('routing on machines', () => {
       for (const line of ['(true; hostname); true', 'x=$(hostname); echo $x'])
         expect(DEC.decode((await ws.shell(line)).stdout)).toBe('a\n')
       const shell = Number(DEC.decode((await ws.shell('echo $$')).stdout))
-      const programs = (await ws.processes()).filter((p) => p.runtime !== null && p.line !== null)
+      const programs = (await ws.processes()).filter((p) => p.program && p.line !== null)
       expect(programs.map((p) => [p.command, p.parent])).toEqual([
         ['hostname', shell],
         ['hostname', shell],

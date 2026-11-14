@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # le bac à sable e2b est une machine ; le runtime remote y exécute les programmes
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python tourne sur monty dans un worker, ou dans le bac à sable e2b
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # route le calcul sous-jacent : les lignes numpy tournent sur la machine, le reste sur monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # ajoute un agent qui utilise le profil analyst
@@ -155,7 +154,7 @@ Ces outils en ligne de commande sont virtualisés : [Mirage](https://www.strukto
 
 ## Runtime virtuel
 
-Les runtimes sont virtualisés de la même façon, et pas seulement pour les langages de programmation. N'importe quelle commande de la ligne peut être redirigée vers un runtime configuré : Python peut ainsi s'exécuter en processus avec [Monty](https://pydantic.dev/articles/pydantic-monty) tandis qu'une autre commande, disons `kubectl`, est envoyée à une machine distante via SSH. Le runtime qui sert une ligne donnée peut être choisi par un [routeur de runtimes scripté](https://docs.mirage.strukto.ai/home/policy/route-runtime).
+Les runtimes sont virtualisés de la même façon, et pas seulement pour les langages de programmation. N'importe quelle commande de la ligne peut être redirigée vers un runtime configuré : Python peut ainsi s'exécuter en processus avec [Monty](https://pydantic.dev/articles/pydantic-monty) tandis qu'une autre commande, disons `kubectl`, est envoyée à une machine distante via SSH. Le runtime qui sert une ligne donnée peut être choisi par un [routeur de runtimes scripté](https://docs.mirage.strukto.ai/home/policy/route-machine).
 
 |                | Runtimes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -261,7 +260,7 @@ Voir les [scripts de politique](https://docs.mirage.strukto.ai/home/policy/scrip
 
 ## Terminal embarqué
 
-La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

@@ -177,11 +177,11 @@ type MountMap = ConstructorParameters<typeof Workspace>[0]
 // What a target's workspace opens with. The corpus pins what the real tools
 // print, and they run under no workspace cap, so max_memory is lifted; the
 // cap has its own cases in runtime/policy/limits. Its python3 cases run on
-// Monty, named since no runtime is a default.
+// Monty, named since no machine runs it by default.
 const WORKSPACE_OPTIONS = {
   mode: MountMode.WRITE,
   maxMemory: null,
-  runtimes: ['monty', 'workspace'],
+  machines: { monty: { provider: 'worker' } },
 }
 
 interface OpenedWorkspaces {

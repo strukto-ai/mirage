@@ -15,7 +15,3 @@
 // The sessions each workspace holds when the app names no cap: every
 // workspace shares the isolate's 128 MB.
 export const CLOUDFLARE_MAX_SESSIONS = 4
-
-// What a workspace runs when its options name no runtimes: the shell alone,
-// the default world; Monty stays bundled for policies and named entries.
-export const CLOUDFLARE_RUNTIMES: readonly string[] = ['workspace']

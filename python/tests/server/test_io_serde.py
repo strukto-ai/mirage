@@ -3,6 +3,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io import IOResult
 from mirage.policy import Policy, Route, RouteContext
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
@@ -85,7 +86,7 @@ async def test_an_explained_route_carries_its_reason():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
         policies=[_OnMonty()],
     )
     try:
@@ -95,8 +96,7 @@ async def test_an_explained_route_carries_its_reason():
     assert said["answers"] == [
         {
             "kind": "route",
-            "runtime": "monty",
-            "machine": None,
+            "machine": "monty",
             "reason": "plain arithmetic",
             "policy": "_OnMonty",
         }

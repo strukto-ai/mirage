@@ -33,7 +33,7 @@ for r in records[:3]:
 
 async function main(): Promise<void> {
   const disk = new RAMVFS()
-  const ws = new Workspace({ '/disk': disk }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+  const ws = new Workspace({ '/disk': disk }, { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } })
 
   console.log('python3 script file (read from mount) + piped stdin\n')
 

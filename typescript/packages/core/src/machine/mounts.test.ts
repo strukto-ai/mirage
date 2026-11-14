@@ -307,7 +307,7 @@ function workspace(
     {
       mode: MountMode.WRITE,
       profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
-      ...on(sandbox, 'workspace'),
+      ...on(sandbox),
       ...(commandLimits === undefined ? {} : { commandLimits }),
       ...(workspaceId === undefined ? {} : { workspaceId }),
     },
@@ -493,7 +493,7 @@ describe('MachineMounts', () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
       { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
-      { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+      { mode: MountMode.WRITE, ...on(sandbox) },
     )
     expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
@@ -512,7 +512,7 @@ describe('MachineMounts', () => {
       {
         mode: MountMode.WRITE,
         profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
-        ...on(sandbox, 'workspace'),
+        ...on(sandbox),
       },
     )
     const agent = await ws.session('agent', { profile: 'agent' })
@@ -754,6 +754,7 @@ describe('MachineMounts', () => {
         mode: MountMode.WRITE,
         workspaceId: 'w1',
         ...on(first),
+        ...on(second),
         machines: { box: first, box2: second },
       },
     )
@@ -1367,7 +1368,7 @@ describe('MachineMounts', () => {
       const sandbox = new FakeMachine(mountType, ['/tmp'])
       const ws = new Workspace(
         { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
-        { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+        { mode: MountMode.WRITE, ...on(sandbox) },
       )
       expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
       sandbox.table.delete('/tmp')

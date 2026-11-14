@@ -310,28 +310,17 @@ describe('scriptAction', () => {
   })
 
   it('places a line or a command only', () => {
-    const printed = bytes(answer({ kind: 'route', runtime: 'docker' }))
-    expect(scriptAction(printed, 'preExecute')).toEqual({ kind: 'route', runtime: 'docker' })
-    expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', runtime: 'docker' })
+    const printed = bytes(answer({ kind: 'route', machine: 'docker' }))
+    expect(scriptAction(printed, 'preExecute')).toEqual({ kind: 'route', machine: 'docker' })
+    expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', machine: 'docker' })
     expect(() => scriptAction(printed, 'preVfs')).toThrow('cannot answer route at pre_vfs')
   })
 
-  it('may name a machine alone', () => {
-    const printed = bytes(answer({ kind: 'route', machine: 'gpu' }))
-    expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', machine: 'gpu' })
-    const both = bytes(answer({ kind: 'route', runtime: 'remote', machine: 'gpu' }))
-    expect(scriptAction(both, 'preExecute')).toEqual({
-      kind: 'route',
-      runtime: 'remote',
-      machine: 'gpu',
-    })
-  })
-
   it('carries the reason a route gives', () => {
-    const printed = bytes(answer({ kind: 'route', runtime: 'docker', reason: 'needs a GPU' }))
+    const printed = bytes(answer({ kind: 'route', machine: 'docker', reason: 'needs a GPU' }))
     expect(scriptAction(printed, 'preExecute')).toEqual({
       kind: 'route',
-      runtime: 'docker',
+      machine: 'docker',
       reason: 'needs a GPU',
     })
   })
@@ -343,7 +332,8 @@ describe('scriptAction', () => {
     '{"kind": "allow"}',
     '{"kind": "route"}',
     '{"kind": "ask", "machine": "gpu"}',
-    '{"kind": "deny", "runtime": "docker"}',
+    '{"kind": "deny", "machine": "docker"}',
+    '{"kind": "route", "runtime": "docker"}',
     '{"kind": "deny", "reason": "x", "policy": "Mine"}',
     '{"kind": "deny"}\n{"kind": "ask"}',
   ])('refuses anything else: %s', (printed) => {
@@ -517,7 +507,7 @@ describe('ScriptPolicy', () => {
   it('cannot route after the action', async () => {
     const policy = policyWith(
       'postExecute',
-      new FakeProgram(answer({ kind: 'route', runtime: 'x' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'x' })),
     )
     const done = { ...line(), exitCode: 0, output: bytes('out') } as ExecuteResultContext
     expect(await policy.postExecute(done)).toEqual([
@@ -587,33 +577,33 @@ describe('ScriptPolicy', () => {
     const policy = policyWith(
       'preExecute',
       new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
-      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'docker' })),
     )
     const [said, route] = await new Policies([policy]).preExecute(line())
     expect(said).toMatchObject({ kind: 'ask', reason: 'nod' })
-    expect(route).toMatchObject({ kind: 'route', runtime: 'docker' })
+    expect(route).toMatchObject({ kind: 'route', machine: 'docker' })
   })
 
   it('needs every route to agree', async () => {
     const agree = policyWith(
       'preExecute',
-      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
-      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'docker' })),
     )
     const [none, route] = await new Policies([agree]).preExecute(line())
     expect(none).toBeNull()
-    expect(route).toMatchObject({ kind: 'route', runtime: 'docker' })
+    expect(route).toMatchObject({ kind: 'route', machine: 'docker' })
     const differ = policyWith(
       'preExecute',
-      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
-      new FakeProgram(answer({ kind: 'route', runtime: 'monty' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'monty' })),
     )
     const [refused, unplaced] = await new Policies([differ]).preExecute(line())
     expect(unplaced).toBeNull()
     expect(refused).toMatchObject({
       kind: 'deny',
       reason:
-        'policies place the line on different runtimes: ScriptPolicy on docker, ScriptPolicy on monty',
+        'policies place the line on different machines: ScriptPolicy on docker, ScriptPolicy on monty',
     })
   })
 
@@ -710,11 +700,11 @@ describe('ScriptPolicy', () => {
     const program = entry('monty', `${SOURCE}# 0\n`, { slot: 0 })
     const routing = policyWith(
       'preExecute',
-      new FakeProgram(answer({ kind: 'route', runtime: 'x' })),
+      new FakeProgram(answer({ kind: 'route', machine: 'x' })),
     )
     expect(await routing.run(program, 'preExecute', line())).toEqual({
       kind: 'route',
-      runtime: 'x',
+      machine: 'x',
     })
     const failing = policyWith('preExecute', new FakeProgram('', 3))
     await expect(failing.run(program, 'preExecute', line())).rejects.toThrow(/^exited 3$/)

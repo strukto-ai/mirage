@@ -261,6 +261,24 @@ describe('entries router', () => {
     expect(hostless.status).toBe(400)
   })
 
+  it("saves a machine's runtime and sandbox settings", async () => {
+    const { app } = setup()
+    const engine = await call(app, 'POST', '/v1/machines', {
+      name: 'js',
+      type: 'in_process',
+      fields: { runtime: 'quickjs', home: '/opt/qjs' },
+    })
+    expect(engine.status).toBe(201)
+    expect(engine.body.config).toEqual({ runtime: 'quickjs', home: '/opt/qjs' })
+    const host = await call(app, 'POST', '/v1/machines', {
+      name: 'box',
+      type: 'host',
+      fields: { 'sandbox.fs_writable': ['/tmp/w'] },
+    })
+    expect(host.status).toBe(201)
+    expect(host.body.config).toEqual({ 'sandbox.fs_writable': ['/tmp/w'] })
+  })
+
   it('keeps a machine credential sealed', async () => {
     const { app } = setup()
     const r = await call(app, 'POST', '/v1/machines', {
@@ -270,12 +288,5 @@ describe('entries router', () => {
     })
     expect(r.status).toBe(201)
     expect(r.body.config).toEqual({ sandbox_id: 's1' })
-  })
-
-  it('answers a runtime with its captures', async () => {
-    const { app } = setup()
-    const r = await call(app, 'POST', '/v1/runtimes', { name: 'py', type: 'monty', fields: {} })
-    expect(r.status).toBe(201)
-    expect(r.body.captures).toEqual([])
   })
 })

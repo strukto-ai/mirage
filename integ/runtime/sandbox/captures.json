@@ -41,6 +41,14 @@
       "also_machines": [
         "second"
       ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "dash"
+          ]
+        }
+      ],
       "entry": {
         "captures": [
           "dash"

@@ -3,10 +3,11 @@
     {
       "id": "argv_global",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -21,10 +22,11 @@
     {
       "id": "script_argv",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -48,10 +50,11 @@
     {
       "id": "program_argv_is_typed_and_names_no_mount",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/w": {
             "vfs": "ram",
@@ -138,10 +141,11 @@
     {
       "id": "script_operand_flags_and_argv",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

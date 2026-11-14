@@ -259,6 +259,7 @@ describe('Shell', () => {
       pipeStatus: [],
       functionNames: null,
       callLines: [],
+      sourceFiles: [],
       paren: false,
       memoryRoom: null,
       line: 1,

@@ -1,0 +1,547 @@
+---
+title: Code Review
+icon: code-pull-request
+description: An agent reviews a pull request and a dependency bump using gh, git, a GitHub mount and an MCP server, with no sandbox.
+---
+
+import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
+
+<UseCaseTerminal
+  services={[
+    { cli: "gh", name: "GitHub", text: "reads the pull request, its diff and CI" },
+    { cli: "/repo", name: "Mirage's repository", text: "mounted read-only as files, never cloned" },
+    { cli: "git", name: "Pydantic Monty", text: "Mirage's Python runtime, history cloned into /work" },
+    { cli: "deepwiki", name: "DeepWiki", text: "an MCP server, installed as a CLI" },
+  ]}
+  steps={[
+    { cmd: "gh pr view 2240 --json title,state,changedFiles …", cli: "gh", out: "MERGED: 13 files, +86 -37" },
+    { cmd: "gh pr diff 2240 | awk …", cli: "gh", out: "the Python handler's diff" },
+    { cmd: "grep -rn get_secret_value /repo/python/…", cli: "/repo", out: "3 matches, none prints a secret" },
+    { cmd: "gh pr checks 2240 --json bucket …", cli: "gh", out: "89 pass, 5 skipping" },
+    { cmd: "git clone -q -n https://github.com/pydantic/monty.git /work/monty", cli: "git", out: "85 commits from 1.4.0 to 1.6.0" },
+    { cmd: "python3 /work/api.py", cli: "python3", out: "removed: none" },
+    { cmd: "deepwiki ask-wiki-question '{…}' > /work/context.md", cli: "deepwiki", out: "background, kept in a file" },
+  ]}
+  extras={[
+    { text: "/work in memory" },
+    { text: "python3 on Monty", cli: "python3" },
+  ]}
+/>
+
+An agent reviews code the way a developer does: it reads what changed, looks
+at the code around it, checks the tests and CI, and looks things up. A
+webhook can start it for each new pull request.
+
+A job this small needs no VM or sandbox. It runs in a
+[lightweight terminal](/home/examples/lightweight-terminal) inside one
+FastAPI or Express server:
+
+- **Files:** `/work`, mounted in [memory](/home/setup/ram) for scratch files
+  and clones, and `/repo`, Mirage's repository mounted read-only with the
+  [GitHub VFS](/python/vfs/github), with no clone. To keep `/work`, mount a
+  [disk folder](/home/setup/disk), an [S3 bucket](/home/setup/s3) or another
+  [VFS](/home/setup/vfs) there instead.
+- **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
+- **CLIs:** [`gh`](/python/cli/gh) calls GitHub's API with a token the
+  server holds, and [`git`](/python/cli/git) clones a repository into
+  `/work` with no `git` program on the host. DeepWiki, an MCP server, is
+  installed as a CLI named `deepwiki`, with one subcommand for each tool.
+
+The commands below are what the agent runs in its terminal, in two reviews
+that read a repository in two ways:
+
+- **Mount, for a large repository:** a pull request in Mirage's own
+  repository, [number 2240](https://github.com/strukto-ai/mirage/pull/2240),
+  which stops the `ntn` CLI printing its token. Mirage's repository is over
+  100 MB, more than a terminal should hold, so the agent reads the few files
+  it needs through `gh` and `/repo`, and nothing is cloned.
+- **Clone, for a small one:** a dependency bump of
+  [Pydantic Monty](https://github.com/pydantic/monty), the runtime Mirage
+  runs `python3` on, from 1.4.0 to 1.6.0. Comparing two releases needs the
+  history but not the files, so the agent clones only the history, 24 MB,
+  with `git clone -n`.
+
+## Server
+
+This is the server from the
+[Overview](/home/examples/lightweight-terminal#server) with three additions:
+it registers `gh` and [`git`](/python/cli/git), it mounts Mirage's
+repository read-only at `/repo`, and at start it installs the DeepWiki MCP
+server as a CLI. The mount is pinned to the commit the pull request merged
+as, so `/repo` holds the code as merged. To review your own repository,
+change `owner`, `repo` and `ref`, and the `repo` of `gh`.
+
+Before you start the server, set `GITHUB_TOKEN` to a token that can read
+public repositories. [GitHub](/home/setup/github) says how to create one.
+The server uses it for `gh` and for the mount, and the agent cannot read it
+from the terminal.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    import os
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace, mcp_cli
+    from mirage.commands.cli.builtin.gh import GH
+    from mirage.commands.cli.builtin.git import GIT
+    from mirage.core.github.config import GhConfig
+    from mirage.runtime.python.monty import MontyRuntime
+    from mirage.vfs.github import GitHubConfig, GitHubVFS
+
+    token = os.environ["GITHUB_TOKEN"]
+    repo = GitHubVFS(
+        config=GitHubConfig(token=token),
+        owner="strukto-ai",
+        repo="mirage",
+        ref="f260be475efbebd860a25dd28c5ab84047d353c6",
+    )
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC), "/repo": (repo, MountMode.READ)},
+        machines=[MontyRuntime(captures=["python", "python3"])],
+    )
+    ws.register_cli("git", GIT)
+    ws.register_cli("gh", GH, GhConfig(token=token, repo="strukto-ai/mirage"))
+
+    MCP_SERVERS = {
+        "deepwiki": "https://mcp.deepwiki.com/mcp",
+    }
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        for name, url in MCP_SERVERS.items():
+            config = {"url": url}
+            ws.register_cli(name, await mcp_cli(config), config)
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { GH, GIT, GitHubVFS, MontyRuntime, MountMode, RAMVFS, Workspace, mcpCli } from '@struktoai/mirage-node'
+
+    const token = process.env.GITHUB_TOKEN
+    const repo = await GitHubVFS.create({
+      token,
+      owner: 'strukto-ai',
+      repo: 'mirage',
+      ref: 'f260be475efbebd860a25dd28c5ab84047d353c6',
+    })
+    const ws = new Workspace(
+      { '/work': [new RAMVFS(), MountMode.EXEC], '/repo': [repo, MountMode.READ] },
+      { machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    ws.registerCli('git', GIT)
+    ws.registerCli('gh', GH, { token, repo: 'strukto-ai/mirage' })
+
+    const mcpServers = {
+      deepwiki: 'https://mcp.deepwiki.com/mcp',
+    }
+    for (const [name, url] of Object.entries(mcpServers)) {
+      const config = { url }
+      ws.registerCli(name, await mcpCli(config), config)
+    }
+
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+Create a terminal, and define `run`, which sends commands to it and prints
+what they print. It needs [`jq`](https://jqlang.org):
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+```
+
+The commands between `SH` and `SH` in the blocks below run in the terminal
+on the server, not in the shell that calls `run`.
+
+## An MCP server as a CLI
+
+The server installed DeepWiki at start, so every terminal has a `deepwiki`
+CLI. Each tool of an
+[MCP server](/python/cli/mcp) is a subcommand that takes its arguments as one
+JSON object, and `--help` prints the tool's schema. For example:
+
+```bash
+run <<'SH'
+deepwiki --help
+deepwiki read-wiki-structure '{"repoName": "pydantic/monty"}' | head -15
+SH
+```
+
+A large answer goes to a file, and the caller reads only what it asks for:
+
+```bash
+run <<'SH'
+deepwiki read-wiki-contents '{"repoName": "pydantic/monty"}' > /work/monty-wiki.md
+wc -c /work/monty-wiki.md
+grep -n -i "abstractos" /work/monty-wiki.md | head -5
+SH
+```
+
+The whole Monty wiki is about 570 KB, roughly 140,000 tokens; the caller
+sees a byte count and a few lines.
+
+- The tool list is read once, at registration, and no schema reaches the
+  model until it runs `--help`.
+- The server needs DeepWiki to start; `mcp_cli` raises when an MCP server
+  cannot be reached. Add an entry to `MCP_SERVERS` to install another one.
+- A profile can deny a tool, and a `network:` rule can limit the hosts a
+  terminal reaches. See [From MCP](/python/cli/mcp).
+- DeepWiki is a third-party service with rate limits. An MCP server that
+  needs an API key takes it in its config, as
+  `auth: {"type": "header", ...}`.
+
+## Review a pull request
+
+First the agent reads what the pull request is and which files it touches.
+`--json` with `--jq` prints only the fields it asks for:
+
+```bash
+run <<'SH'
+gh pr view 2240 --json title,state,changedFiles,additions,deletions \
+  --jq '"\(.title)\n\(.state): \(.changedFiles) files, +\(.additions) -\(.deletions)"'
+gh pr diff 2240 --name-only
+SH
+```
+
+```text
+fix(cli): ntn auth token refuses to print the token
+MERGED: 13 files, +86 -37
+docs/python/cli/ntn.mdx
+docs/typescript/cli/ntn.mdx
+integ/cli/ntn.json
+integ/cloudflare/run.ts
+integ/runners/python/adapters/__init__.py
+integ/runners/typescript/adapters/index.ts
+integ/server/kit/selftest/run.ts
+python/mirage/commands/cli/builtin/ntn/__init__.py
+python/mirage/commands/cli/builtin/ntn/auth/token.py
+python/tests/commands/cli/builtin/ntn/test_verbs.py
+typescript/packages/core/src/commands/cli/builtin/ntn/auth/token.ts
+typescript/packages/core/src/commands/cli/builtin/ntn/index.ts
+typescript/packages/core/src/commands/cli/builtin/ntn/ntn.test.ts
+```
+
+Thirteen files: the command's handler in Python and in TypeScript, its help
+text in both, tests for both, the test cases the two share under `integ/`,
+and two reference pages. The agent reads the Python handler's part of the
+diff. `awk` prints from that file's `diff --git` line to the next one:
+
+```bash
+run <<'SH'
+gh pr diff 2240 | awk '/^diff --git/ {show = /ntn\/auth\/token.py/} show'
+SH
+```
+
+```text
+diff --git a/python/mirage/commands/cli/builtin/ntn/auth/token.py b/python/mirage/commands/cli/builtin/ntn/auth/token.py
+index 16b34a4ad5..a1adb0502f 100644
+--- a/python/mirage/commands/cli/builtin/ntn/auth/token.py
++++ b/python/mirage/commands/cli/builtin/ntn/auth/token.py
+@@ -17,6 +17,12 @@
+ from mirage.io.types import ByteSource, IOResult
+ from mirage.types import PathSpec
+
++REFUSED = (
++    "error: The authentication token stays in Mirage configuration and is "
++    "never printed.\n"
++    "  hint: ntn commands use it directly.\n"
++)
++
+
+ async def token(
+     accessor: NotionAccessor,
+@@ -24,5 +30,4 @@ async def token(
+     texts: list[str],
+     ctx: Context,
+ ) -> tuple[ByteSource | None, IOResult]:
+-    secret = accessor.config.api_key.get_secret_value()
+-    return f"{secret}\n".encode(), IOResult()
++    return None, IOResult(stderr=REFUSED.encode(), exit_code=1)
+```
+
+The handler used to read the token and print it. Now it reads nothing and
+answers with an error. That raises a second question: was `ntn` the only CLI
+that did this? `/repo` holds the code as merged, so the agent searches every
+bundled CLI for the call that reads a secret:
+
+```bash
+run <<'SH'
+grep -rn "get_secret_value" /repo/python/mirage/commands/cli/builtin
+SH
+```
+
+```text
+/repo/python/mirage/commands/cli/builtin/gh/host.py:317:            "token_mask": masked_token(config.token.get_secret_value()),
+/repo/python/mirage/commands/cli/builtin/gh/repo.py:43:    secret = f"x-access-token:{accessor.config.token.get_secret_value()}"
+/repo/python/mirage/commands/cli/builtin/himalaya/smtp.py:53:        password=config.password.get_secret_value(),
+```
+
+The search reads 207 files through GitHub's API, so the first one takes
+around half a minute; files already read come from the cache. Three places
+remain, and none of them prints: `gh` builds a masked copy for
+`gh auth status`, `gh` builds the header it sends to GitHub for a clone, and
+`himalaya` logs in to the mail server. Last, the agent counts the test files
+in the change and reads the result of CI:
+
+```bash
+run <<'SH'
+gh pr diff 2240 --name-only | grep -c -E 'tests/|\.test\.|integ/cli/'
+gh pr checks 2240 --json bucket \
+  --jq 'map(.bucket) | group_by(.) | map("\(length) \(.[0])") | join(", ")'
+SH
+```
+
+```text
+3
+89 pass, 5 skipping
+```
+
+For background, the agent asks DeepWiki how a CLI gets its token, and sends
+the answer to a file:
+
+```bash
+run <<'SH'
+deepwiki ask-wiki-question '{"repoName": "strukto-ai/mirage", "question": "How does an account CLI such as gh or ntn get its token, and which commands can show it?"}' > /work/context.md
+wc -l < /work/context.md
+grep -n -i "token" /work/context.md | head -3
+SH
+```
+
+DeepWiki answers from its own index of the repository, which can be older
+than the pull request. The agent treats its answer as background and takes
+its findings from the diff and the code.
+
+The review ends with four findings the agent can report:
+
+- The pull request does one thing: `ntn auth token` no longer reads or
+  prints the token. It answers with an error and exit code 1.
+- The change is made in Python and in TypeScript, and it comes with tests:
+  one test file for each, and the test cases the two share.
+- No other bundled CLI prints its secret. The three calls that still read
+  one mask it or send it to the service it belongs to.
+- CI passed: 89 checks, with 5 skipped.
+
+To get there the agent read about 2 KB of output, and the repository was
+never cloned.
+
+## Review a dependency bump
+
+Mirage pins its Python runtime exactly, and a pull request moves
+`pydantic-monty` from 1.4.0 to 1.6.0. Before it merges, a reviewer checks
+whether anything Mirage uses has changed. The agent starts on Mirage's side:
+`/repo`, still on 1.4.0, shows the pin and every name Mirage imports from
+Monty:
+
+```bash
+run <<'SH'
+grep pydantic-monty /repo/python/pyproject.toml
+grep -rhoE "pydantic_monty\.[A-Z][A-Za-z]+|from pydantic_monty import [A-Za-z]+" /repo/python/mirage/runtime/python/monty |
+  sed 's/^from pydantic_monty import //; s/^pydantic_monty\.//' | sort -u
+SH
+```
+
+```text
+monty    = ["pydantic-monty==1.4.0"]
+AbstractOS
+AsyncMonty
+MontyCrashedError
+MontyFileHandle
+MontyRuntimeError
+MontySyntaxError
+StatResult
+```
+
+Seven names. `AbstractOS` matters most: Mirage subclasses it, as `MontyFs`,
+to give Monty its files.
+
+Next the agent clones Monty. `-n` skips the checkout, so the terminal holds
+24 MB of history instead of 41 MB of history and files:
+
+```bash
+run <<'SH'
+git clone -q -n https://github.com/pydantic/monty.git /work/monty
+cd /work/monty
+git log --oneline 1.4.0..v1.6.0 | wc -l
+git diff --name-only 1.4.0 v1.6.0 -- crates/monty-python/python
+SH
+```
+
+```text
+85
+crates/monty-python/python/pydantic_monty/__init__.py
+crates/monty-python/python/pydantic_monty/_monty.pyi
+crates/monty-python/python/pydantic_monty/class_instance.py
+crates/monty-python/python/pydantic_monty/os_access.py
+```
+
+Eighty-five commits, and four files of Monty's Python API changed. The
+agent saves that part of the diff, about 50 KB, to a file, and a short
+Python file on Monty lists the public names the release adds and removes:
+
+```bash
+run <<'SH'
+git diff 1.4.0 v1.6.0 -- crates/monty-python/python > /work/monty-api.patch
+cat > /work/api.py <<'PY'
+import re
+
+added = {}
+removed = set()
+path = None
+for line in open("/work/monty-api.patch"):
+    if line.startswith("+++ b/"):
+        path = line[6:].strip().rsplit("/", 1)[-1]
+    m = re.match(r"^([+-])\s*(?:async )?(?:def|class) ([A-Za-z]\w*)\s*[(:\[]", line)
+    if m and path:
+        sign, name = m.groups()
+        if sign == "+":
+            added.setdefault(path, set()).add(name)
+        else:
+            removed.add((path, name))
+for path, names in sorted(added.items()):
+    new = sorted(names - {n for p, n in removed if p == path})
+    if new:
+        print(path + ": " + ", ".join(new))
+gone = sorted(n for p, n in removed if n not in added.get(p, set()))
+print("removed: " + (", ".join(gone) or "none"))
+PY
+python3 /work/api.py
+SH
+```
+
+```text
+_monty.pyi: AsyncMontyRemote, MontyConfigurationError, MontyConnectError, MontyRefusedError, cause, get_session_id, retry_after, retryable, status_code, status_message, transport_error
+class_instance.py: get_type_hints
+os_access.py: path_create_exclusive
+removed: none
+```
+
+The release removes nothing. Most of what it adds is a remote client and its
+errors, which Mirage does not use. One addition is in the file protocol
+Mirage implements, `path_create_exclusive`. The agent looks for it in
+Mirage, then reads it in 1.6.0:
+
+```bash
+run <<'SH'
+grep -c path_create_exclusive /repo/python/mirage/runtime/python/monty/fs.py
+git show v1.6.0:crates/monty-python/python/pydantic_monty/os_access.py | grep -A6 "def path_create_exclusive" | head -7
+SH
+```
+
+```text
+0
+    def path_create_exclusive(self, path: PurePosixPath, mode: str, *, permissions: int) -> MontyFileHandle:
+        """Create a new empty file without replacing any existing entry.
+
+        Return a handle in `mode`. Disk handlers apply `permissions` at creation,
+        subject to host policy; unsupported handlers must not fall back to `path_open`.
+        """
+        raise NotImplementedError
+```
+
+`MontyFs` does not define the method, and the method is not abstract: by
+default it raises `NotImplementedError`, and Monty answers `open(path, "x")`
+with `exclusive creation mode is not supported`, as 1.4.0 already did. So
+nothing breaks, and exclusive creation stays unsupported until `MontyFs`
+adds the method. Last, the agent looks for commits that change errors or
+rename things:
+
+```bash
+run <<'SH'
+git log --oneline 1.4.0..v1.6.0 | grep -i -E "MontyRuntimeError|rename"
+SH
+```
+
+```text
+404a8d08 Rename the protocol roles from parent/child to client/worker (#1300)
+7851a670 Rename Full Monty to Commercial Support in docs (#1294)
+b084befe Raise MontyRuntimeError when a result cannot be converted to Python (#1191)
+```
+
+Mirage already catches `MontyRuntimeError`, and its code uses neither of the
+renamed names. For background, the agent asks DeepWiki about the new method,
+into a file:
+
+```bash
+run <<'SH'
+deepwiki ask-wiki-question '{"repoName": "pydantic/monty", "question": "How does a host implement AbstractOS, and what happens when a program opens a file in exclusive mode (x) and the host has not implemented path_create_exclusive?"}' > /work/context.md
+wc -l < /work/context.md
+grep -n -i "exclusive" /work/context.md | head -3
+SH
+```
+
+DeepWiki's answer agrees with the code: the default refuses, and exclusive
+mode reports that it is not supported instead of falling back to an
+ordinary open.
+
+The review ends with three findings the agent can report:
+
+- The bump is safe to merge: 85 commits, and Monty's Python API removes
+  nothing.
+- The file protocol gains `path_create_exclusive`, with a default that
+  refuses. `MontyFs` does not implement it, so `open(path, "x")` stays
+  unsupported, as on 1.4.0. Adding it is a follow-up.
+- `MontyRuntimeError`, which Mirage catches, now also covers a result that
+  cannot be converted to Python.
+
+To get there the agent read about 2 KB of output. Monty's history and the
+50 KB patch stayed in the terminal.
+
+For the commands and flags each supports, see [gh](/python/cli/gh) and
+[git](/python/cli/git). For the mount, see the
+[GitHub VFS](/python/vfs/github).

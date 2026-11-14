@@ -2,6 +2,7 @@ import type { ByteSource, IOResult } from '../io/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
+import type { SessionState } from './session/session.ts'
 
 export type ProcessSubLine = (
   text: string,
@@ -9,7 +10,7 @@ export type ProcessSubLine = (
     stdin?: ByteSource | null
     sink?: JobConsole
     signal?: AbortSignal
-    started?: (process: ProcessHandle) => void
+    started?: (process: ProcessHandle, session: SessionState) => void
   },
 ) => Promise<IOResult>
 
@@ -45,6 +46,10 @@ export class ExecutionFrame {
   // The pipe a pipeline stage reads, which a program the stage starts reads
   // too while its standard input is still that pipe.
   stdin: ByteSource | null = null
+  // The id of the command a job runs as a whole, whose redirects its shell
+  // never puts back: it ends with the command, so bash keeps no copy of what
+  // they replace.
+  ending: number | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()

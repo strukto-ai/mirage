@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
     from mirage.runtime.types import RouteDecision, RuntimeIdentity
     from mirage.shell.console import JobConsole
+    from mirage.workspace.session.session import SessionState
 
 
 class ProcessSubLine(Protocol):
@@ -20,7 +21,7 @@ class ProcessSubLine(Protocol):
         *,
         stdin: ByteSource | None = None,
         sink: JobConsole | None = None,
-        started: Callable[[ProcessHandle], None] | None = None,
+        started: Callable[[ProcessHandle, SessionState], None] | None = None,
     ) -> IOResult: ...
 
 
@@ -43,6 +44,9 @@ class ExecutionFrame:
     bash's inherit the descriptor.
     ``stdin`` is the pipe a pipeline stage reads, which a program the
     stage starts reads too while its standard input is still that pipe.
+    ``ending`` is the id of the command a job runs as a whole, whose
+    redirects its shell never puts back: it ends with the command, so
+    bash keeps no copy of what they replace.
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
@@ -59,6 +63,7 @@ class ExecutionFrame:
     substitution: bool = False
     writers: list[tuple[str | None, int]] = field(default_factory=list)
     stdin: ByteSource | None = None
+    ending: int | None = None
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the

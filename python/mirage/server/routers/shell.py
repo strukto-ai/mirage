@@ -27,7 +27,7 @@ from mirage.execution.line.handle import LineHandle
 from mirage.execution.types import LineId
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
-from mirage.runtime.table import runtime_bindings_for
+from mirage.runtime.table import machine_bindings_for
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.server.errors import (
     INTERNAL_MESSAGE,
@@ -57,54 +57,40 @@ class ShellRequest(BaseModel):
 
     command: str
     cwd: str | None = None
-    runtime: str | None = None
     machine: str | None = None
     record: bool | None = None
     open_stdin: bool | None = None
 
 
 def _check_placement(ws: Workspace, req: ShellRequest) -> None:
-    """Refuse a runtime or machine the workspace does not have, before
-    the line is submitted.
+    """Refuse a machine the workspace does not have, before the line is
+    submitted.
 
     Args:
         ws (Workspace): the workspace the line runs in.
-        req (ShellRequest): the request naming them.
+        req (ShellRequest): the request naming it.
 
     Raises:
         HttpError: ``invalid_value`` naming the workspace's own choices.
     """
-    if req.runtime == WorkspaceRuntime.name:
-        raise HttpError(
-            ErrorCode.INVALID_VALUE,
-            "'workspace' is the default executor, not a runtime you can select",
-            param="runtime",
-        )
-    runtimes = ws.runtimes()
-    named = (
-        (
-            "runtime",
-            req.runtime,
-            [r.name for r in runtimes if r.name != WorkspaceRuntime.name],
-        ),
-        ("machine", req.machine, ws.machine_table.names()),
-    )
-    for param, given, names in named:
-        if given is None or given in names:
-            continue
+    if req.machine is None:
+        return
+    try:
+        machine_bindings_for(ws.engines(), req.machine)
+    except ValueError as exc:
+        names = [
+            e.name for e in ws.engines() if e.name != WorkspaceRuntime.name
+        ]
         message = (
-            f"{param} must be one of {', '.join(names)}"
+            f"machine must be one of {', '.join(names)}"
             if names
-            else f"{param} must be unset: the workspace has no {param}s"
+            else "machine must be unset: the workspace has no machines"
         )
-        if param != "runtime":
-            raise HttpError(ErrorCode.INVALID_VALUE, message, param=param)
-        try:
-            runtime_bindings_for(runtimes, given)
-        except ValueError as exc:
-            raise HttpError(
-                ErrorCode.INVALID_VALUE, message, param=param
-            ) from exc
+        if req.machine == WorkspaceRuntime.name:
+            message = str(exc)
+        raise HttpError(
+            ErrorCode.INVALID_VALUE, message, param="machine"
+        ) from exc
 
 
 @router.post("")
@@ -169,7 +155,6 @@ async def shell(
         "stdin": stdin,
         "cwd": req_obj.cwd,
         "record": req_obj.record is not False,
-        "runtime": req_obj.runtime,
         "machine": req_obj.machine,
     }
     loop = asyncio.get_running_loop()
@@ -261,7 +246,7 @@ async def _explained(
 ) -> Response:
     """What a line would do as a session, without running any of it
     (``session.explain.shell``). Only the line is read: stdin, a working
-    directory, a runtime or a machine would change what runs, which an
+    directory or a machine would change what runs, which an
     explanation cannot follow, so each is refused.
 
     Args:
@@ -278,16 +263,12 @@ async def _explained(
     if (
         req_obj is None
         or req_obj.cwd is not None
-        or req_obj.runtime is not None
         or req_obj.machine is not None
         or req_obj.open_stdin
     ):
         raise HttpError(
             ErrorCode.INVALID_REQUEST,
-            (
-                "explain takes the line alone: no stdin, cwd, runtime or"
-                " machine"
-            ),
+            ("explain takes the line alone: no stdin, cwd or machine"),
         )
     session = await session_of(entry, session_id)
     said = await entry.runner.call(session.explain.shell(req_obj.command))

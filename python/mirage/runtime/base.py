@@ -137,22 +137,10 @@ class Runtime(ABC, Generic[E]):
         process records name; None for the workspace's own."""
         return None
 
-    def refusal_name(self, ctx: Context) -> str:
-        """The name a refusal of one run speaks in: the runtime's.
-
-        Args:
-            ctx (Context): the run's context.
-        """
+    @property
+    def refusal_name(self) -> str:
+        """The name a refusal of its runs speaks in: the runtime's."""
         return self.name
-
-    def machine_for(self, ctx: Context) -> MachineName | None:
-        """The machine one run of this runtime goes to: its own
-        (``machine``), whatever the run's route names.
-
-        Args:
-            ctx (Context): the run's context.
-        """
-        return self.machine
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -217,10 +205,10 @@ class Runtime(ABC, Generic[E]):
                 capture is not None
                 and self.reach != "workspace"
                 and capture.restricted_mounts
-                and not self._serves_session(capture.restricted_mounts, ctx)
+                and not self._serves_session(capture.restricted_mounts)
             ):
                 return refused_run(
-                    self.refusal_name(ctx),
+                    self.refusal_name,
                     "runtime cannot enforce this session's file restrictions",
                 )
             # A process on this machine opens its connections around the
@@ -231,7 +219,7 @@ class Runtime(ABC, Generic[E]):
                 for egress in live_egress()
             ):
                 return refused_run(
-                    self.refusal_name(ctx),
+                    self.refusal_name,
                     "runtime cannot enforce this workspace's network",
                 )
             engine = await self.engine()
@@ -315,7 +303,7 @@ class Runtime(ABC, Generic[E]):
             or session is None
         ):
             return await run()
-        machine = self.machine_for(ctx)
+        machine = self.machine
         instance = (
             None
             if machine is None or processes.machine_instance is None
@@ -366,7 +354,7 @@ class Runtime(ABC, Generic[E]):
             and ends_line(node)
         ):
             shell.one_command = True
-        if shell.take(machine, self.name, instance, command, fd, argv):
+        if shell.take(machine, instance, command, fd, argv):
             return await run()
         done: list[RunResult] = []
 
@@ -383,7 +371,7 @@ class Runtime(ABC, Generic[E]):
                 parent=shell.record.pid,
                 limit=session.processes.max,
                 machine=machine,
-                runtime=self.name,
+                program=True,
                 stdin=stdin,
                 fd=fd,
                 argv=argv,
@@ -539,15 +527,12 @@ class Runtime(ABC, Generic[E]):
                 self._engine_task = None
             raise
 
-    def _serves_session(
-        self, restricted_mounts: tuple[str, ...], ctx: Context
-    ) -> bool:
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
         """Whether every restricted mount is served through this caller's gate.
 
         Args:
             restricted_mounts (tuple[str, ...]): the mounts the session
                 restricts.
-            ctx (Context): the run's context.
         """
         return False
 

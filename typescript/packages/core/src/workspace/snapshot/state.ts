@@ -275,8 +275,8 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
  *
  * Throws when the captured script names a language no runtime can
  * speak. The value comes from a file, so it is checked here rather than
- * carried to the selector, which would report the world's runtimes for
- * a language that never existed.
+ * carried to the selector, which would report the workspace's machines
+ * for a language that never existed.
  */
 function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   const source = entry.mcp
@@ -299,7 +299,7 @@ function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   return new CLI({
     spec: new CommandSpec({ name: entry.spec }),
     script: new ScriptSource(entry.script.source, language, entry.script.module),
-    runtime: entry.runtime ?? null,
+    machine: entry.machine ?? null,
   })
 }
 
@@ -335,7 +335,7 @@ function cliSnapshot(name: string, install: CLIInstall): CLISnapshot {
       language: script.language,
       module: script.module,
     }
-    entry.runtime = install.cli.runtime
+    entry.machine = install.cli.machine
   }
   // An MCP install's tool list rides along, so load rebuilds it with no request.
   const source = install.cli.mcp

@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineTable } from '../../execution/machine/table.ts'
-import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
+import { Runtime } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import {
   bindCommands,
-  buildRuntime,
+  buildEntry,
   builtFrom,
-  DEFAULT_ENTRIES,
   isSandbox,
   shadowedCaptures,
+  type MachineSpec,
 } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -32,17 +32,14 @@ import type { MountRegistry } from '../mount/registry.ts'
 export const logger: { warn?: (message: string) => void } = {}
 
 /**
- * The workspace's ordered runtime world; the first capturer binds each
- * command. Mirrors the Python `Runtimes` in `workspace/runtimes.py`.
+ * The runtime each of the workspace's machines runs, in capture order; the
+ * first capturer binds each command. Mirrors the Python `Runtimes` in
+ * `workspace/runtimes.py`.
  *
- * Owns the entry list and everything that reads or changes it: building
- * it from config, adding and removing entries and closing them.
- *
- * The TypeScript engines construct lazily (missing wasm surfaces at run
- * time), so defaults and explicit entries build the same way. The
- * workspace runtime is required: every world names an executor for
- * unclaimed commands, so an omitted entry appends the default
- * unconditional one.
+ * Owns the entry list and everything that reads or changes it: wiring it,
+ * adding and removing machines and closing them. The shell is required:
+ * every world names an executor for unclaimed commands, so an omitted one
+ * appends the default unconditional one.
  */
 export class Runtimes {
   entries: readonly Runtime[] = []
@@ -54,8 +51,8 @@ export class Runtimes {
 
   constructor(init: {
     registry: MountRegistry
-    /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
-    entries: RuntimeEntry[] | undefined
+    /** The runtime of each machine, in capture order. */
+    entries: readonly Runtime[]
     binding: WorkspaceBinding
     /** The machines a machine entry runs on. */
     machines: MachineTable
@@ -63,9 +60,7 @@ export class Runtimes {
     this.registry = init.registry
     this.binding = init.binding
     this.machines = init.machines
-    const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((entry) =>
-      typeof entry === 'string' ? buildRuntime(entry) : entry,
-    )
+    const entries: Runtime[] = [...init.entries]
     if (!entries.some((entry) => entry.name === 'workspace')) {
       entries.push(new WorkspaceRuntime())
     }
@@ -75,35 +70,53 @@ export class Runtimes {
   }
 
   /**
-   * Add a runtime entry to the ordered world.
+   * Add a machine's runtime to the ordered world.
    *
    * A sandbox (`isSandbox`) lands after the last sandbox listed, else before
    * the first language runtime, else last; any other entry lands last. A
-   * name builds like a config entry and fails loud; a duplicate name is
-   * rejected before any state changes.
+   * duplicate name is rejected before any state changes, and a runtime
+   * refused keeps the name it had; a machine provider's handle is the
+   * workspace's to hold from the start.
    */
-  add(runtime: RuntimeEntry): Runtime {
-    const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
-    let at = this.entries.length
-    if (isSandbox(entry)) {
-      const lastSandbox = this.entries.reduce((last, e, i) => (isSandbox(e) ? i : last), -1)
-      const firstLanguage = this.entries.findIndex((e) => e instanceof LanguageRuntime)
-      if (lastSandbox >= 0) at = lastSandbox + 1
-      else if (firstLanguage >= 0) at = firstLanguage
+  add(name: string, spec: MachineSpec): Runtime {
+    const named = spec instanceof Runtime ? spec.name : null
+    let entry: Runtime
+    let candidate: Runtime[]
+    let bindings: Record<string, Runtime>
+    try {
+      const [handle, built] = buildEntry(name, spec)
+      if (handle !== null)
+        throw new Error(
+          `machine '${name}': a ${handle.provider} machine is declared when the workspace is built`,
+        )
+      entry = built
+      let at = this.entries.length
+      if (isSandbox(entry)) {
+        const lastSandbox = this.entries.reduce((last, e, i) => (isSandbox(e) ? i : last), -1)
+        const firstLanguage = this.entries.findIndex((e) => e instanceof LanguageRuntime)
+        if (lastSandbox >= 0) at = lastSandbox + 1
+        else if (firstLanguage >= 0) at = firstLanguage
+      }
+      candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
+      bindings = bindCommands(candidate)
+      this.bindEntry(entry)
+    } catch (err) {
+      if (spec instanceof Runtime && named !== null) spec.name = named
+      throw err
     }
-    const candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
-    const bindings = bindCommands(candidate)
-    this.bindEntry(entry)
     this.install(candidate, bindings)
     return entry
   }
 
-  /** The registry names of the entries built from one, in list order; a copy rebuilds these. */
-  named(): string[] {
-    return this.entries.flatMap((entry) => {
-      const name = builtFrom(entry)
-      return name === undefined ? [] : [name]
-    })
+  /** The `machines:` entries of the runtimes built from one, by name, in list order; a copy rebuilds these. */
+  specs(): Record<string, Record<string, unknown>> {
+    // Null prototype: machine names come from config.
+    const out = Object.create(null) as Record<string, Record<string, unknown>>
+    for (const entry of this.entries) {
+      const spec = builtFrom(entry)
+      if (spec !== undefined) out[entry.name] = spec
+    }
+    return out
   }
 
   /**
@@ -116,7 +129,7 @@ export class Runtimes {
    */
   private bindEntry(entry: Runtime): void {
     const onMachine = entry instanceof RemoteRuntime
-    if (onMachine && entry.defaultMachine !== null) this.machines.get(entry.defaultMachine)
+    if (onMachine) this.machines.get(entry.defaultMachine)
     entry.bind(this.binding)
     if (onMachine) entry.bindMachines(this.machines)
   }
@@ -125,11 +138,11 @@ export class Runtimes {
   async remove(name: string): Promise<void> {
     if (name === 'workspace') {
       throw new Error(
-        'cannot remove the workspace runtime: it serves every command no other runtime captures',
+        'cannot remove the workspace machine: it serves every command no other machine captures',
       )
     }
     const entry = this.entries.find((candidate) => candidate.name === name)
-    if (entry === undefined) throw new Error(`no runtime entry: '${name}'`)
+    if (entry === undefined) throw new Error(`no machine: '${name}'`)
     const remaining = this.entries.filter((candidate) => candidate !== entry)
     this.install(remaining, bindCommands(remaining))
     const closing = retire(entry).finally(() => {
@@ -156,7 +169,7 @@ export class Runtimes {
     const routed = this.registry.policies.hasPlacement()
     for (const [capture, winner, shadowed] of routed ? [] : shadowedCaptures(entries)) {
       logger.warn?.(
-        `runtime '${shadowed}' runs '${capture}' only when a route names it: '${winner}', listed before it, takes it`,
+        `machine '${shadowed}' runs '${capture}' only when a route names it: '${winner}', listed before it, takes it`,
       )
     }
     this.entries = entries

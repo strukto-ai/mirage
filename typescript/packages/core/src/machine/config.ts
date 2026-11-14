@@ -22,8 +22,8 @@ import { MOUNT_TYPES } from './constants.ts'
  * This base carries only what all providers support; each provider
  * extends it with its own fields (DockerConfig, DaytonaConfig,
  * E2BConfig) and its own key list, so an option a provider cannot
- * honor fails loud at construction. In yaml this is the runtime
- * entry's `config` block, mirroring a mount's.
+ * honor fails loud at construction. In yaml these are a `machines:`
+ * entry's fields beside its `provider`.
  */
 export interface MachineConfig extends RuntimeConfig {
   /** Environment set in the machine. */
@@ -35,11 +35,17 @@ export interface MachineConfig extends RuntimeConfig {
    * what the machine does not mount itself. Unset serves nothing.
    */
   mountType?: MountType
+  /**
+   * The commands the machine runs, `@external` and `@line` among them;
+   * unset for `@external`, the programs nothing in Mirage resolves.
+   */
+  captures?: readonly string[]
 }
 
 export const BASE_CONFIG_FIELDS: ConfigFields = {
   env: { type: 'map' },
   mountType: { type: 'string', options: MOUNT_TYPES },
+  captures: { type: 'list' },
 }
 
 /** Fail loud on a `mountType` other than ssh, fuse or both; unset serves nothing. */

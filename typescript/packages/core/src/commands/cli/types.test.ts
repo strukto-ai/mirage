@@ -138,10 +138,10 @@ describe('CLI registration', () => {
     const cli = new CLI({
       spec: new CommandSpec({ name: 'pager' }),
       script: new ScriptSource('1'),
-      runtime: 'monty',
+      machine: 'monty',
     })
     expect(cli.spec.addHelp).toBe(false)
-    expect(cli.runtime).toBe('monty')
+    expect(cli.machine).toBe('monty')
     expect(cli.handlers['']?.fn).toBeNull()
   })
 
@@ -153,7 +153,7 @@ describe('CLI registration', () => {
       /fn or script, not both/,
     )
     expect(
-      () => new CLI({ spec, runtime: 'monty', handlers: { '': new CLIHandler({ fn: verb }) } }),
+      () => new CLI({ spec, machine: 'monty', handlers: { '': new CLIHandler({ fn: verb }) } }),
     ).toThrow(/it takes script/)
     expect(
       () =>

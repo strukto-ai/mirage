@@ -246,7 +246,7 @@ async def test_a_session_restriction_refuses_every_line(profile):
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"agent": profile},
-        **on(runtime, "workspace"),
+        **on(runtime),
     )
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")

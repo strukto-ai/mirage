@@ -1077,7 +1077,7 @@ describe('runtime-visible mounts', () => {
     // The history view is a shell surface, not a place to put files;
     // announcing it would make a WASI guest preopen /.bash_history.
     const probe = new ResolverProbe()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [probe] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [probe] })
     expect(probe.resolver).not.toBeNull()
     const prefixes = probe.resolver?.prefixes() ?? []
     expect(prefixes).toContain('/data/')
@@ -1089,7 +1089,7 @@ describe('runtime-visible mounts', () => {
     // Nobody mounted the anchor; forwarding it would make every
     // runtime claim a VFS the embedder never asked for.
     const probe = new ResolverProbe()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [probe] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [probe] })
     expect(probe.resolver?.prefixes() ?? []).not.toContain('/')
     await ws.close()
   })
@@ -1098,7 +1098,7 @@ describe('runtime-visible mounts', () => {
     // Withheld for being synthetic, never for being `/`: a runtime
     // that cannot serve the root refuses on its own (pyodide does).
     const probe = new ResolverProbe()
-    const ws = new Workspace({ '/': new RAMVFS() }, { runtimes: [probe] })
+    const ws = new Workspace({ '/': new RAMVFS() }, { machines: [probe] })
     expect(probe.resolver?.prefixes() ?? []).toContain('/')
     await ws.close()
   })
@@ -1199,6 +1199,25 @@ it('setProfile keeps any name as an entry through a copy', async () => {
     }
   } finally {
     for (const each of copies) await each.close()
+    await ws.close()
+  }
+})
+
+it('a copy keeps a machine of any name', async () => {
+  const machines = Object.fromEntries([
+    ['__proto__', { provider: 'in_process', runtime: 'quickjs', captures: ['js'] }],
+  ])
+  const ws = new Workspace({ '/data': new RAMVFS() }, { machines })
+  const copy = await ws.copy()
+  try {
+    for (const each of [ws, copy]) {
+      expect(each.engines().map((e) => [e.name, [...e.captures]])).toEqual([
+        ['__proto__', ['js']],
+        ['workspace', []],
+      ])
+    }
+  } finally {
+    await copy.close()
     await ws.close()
   }
 })

@@ -23,6 +23,7 @@ from mirage.context.session_context import (
 )
 from mirage.execution.job import JobTable
 from mirage.io import IOResult
+from mirage.io.pipe import BytePipe
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import active_records
@@ -82,14 +83,23 @@ class StatementRecorder(Recorder):
         self._session = session
         self._sink = sink
 
-    async def emit(self, channel: Channel, data: bytes) -> None:
+    def _forward(self) -> JobConsole | None:
         if (
-            self._sink is not None
-            and not self.chunks
+            not self.chunks
             and self._session.exec_stdout is None
             and self._session.exec_stderr is None
         ):
-            await self._sink.emit(channel, data)
+            return self._sink
+        return None
+
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        sink = self._forward()
+        return sink.pipe_for(channel) if sink is not None else None
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        sink = self._forward()
+        if sink is not None:
+            await sink.emit(channel, data)
         else:
             await super().emit(channel, data)
 

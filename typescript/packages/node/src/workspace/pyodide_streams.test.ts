@@ -6,6 +6,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
+import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 
 interface StreamCase {
   id: string
@@ -32,7 +33,7 @@ describe('Pyodide captured streams', { timeout: 120_000 }, () => {
     const vfs = kind === 'disk' ? new DiskVFS({ root }) : new RAMVFS()
     const ws = new Workspace(
       { '/ram': vfs },
-      { mode: MountMode.EXEC, runtimes: ['pyodide', 'workspace'], maxMemory: null },
+      { mode: MountMode.EXEC, machines: [buildRuntime('pyodide')], maxMemory: null },
     )
     try {
       for (const [name, content] of Object.entries(fixture.world.mounts['/ram'].files ?? {})) {

@@ -268,7 +268,7 @@ it.each(RESTRICTIONS)(
     const runtime = makeRuntime({ machine: 'vm' })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+      { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime) },
     )
     try {
       const agent = await ws.session('agent', { profile: 'agent' })

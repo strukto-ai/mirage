@@ -5,7 +5,7 @@ import { MirageService } from './service.ts'
 import { MirageSubprocess } from './subprocess.ts'
 
 async function attach() {
-  const ws = new Workspace({}, { runtimes: [] })
+  const ws = new Workspace({}, { machines: [] })
   const ctx = new Context()
   await ctx.plugin(MirageService, { workspace: ws }).await()
   await ctx.plugin(MirageSubprocess).await()
@@ -14,7 +14,7 @@ async function attach() {
 
 describe('workspace subprocess', () => {
   it('uses the configured session profile for child admission', async () => {
-    const ws = new Workspace({}, { runtimes: [] })
+    const ws = new Workspace({}, { machines: [] })
     ws.createSession('limited', {
       profile: { commands: { deny: [{ commands: ['printf'], reason: 'restricted' }] } },
     })

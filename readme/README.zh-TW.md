@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # e2b 沙箱是一台機器；remote 執行環境在其上執行程式
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python 在 worker 中的 monty 上執行，或在 e2b 沙箱中執行
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # 路由底層運算：含 numpy 的命令列在機器上執行，其餘在 monty 上
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # 新增一個使用 analyst Profile 的 Agent
@@ -155,7 +154,7 @@ Agent 可以透過 Python 和 TypeScript SDK、`mirage` CLI，或基於 FUSE 和
 
 ## 虛擬執行環境
 
-執行環境以同樣的方式虛擬化，而且不只針對程式語言。命令列上的任何命令都可以被重新導向到所設定的執行環境，例如 Python 可以藉助 [Monty](https://pydantic.dev/articles/pydantic-monty) 在行程內執行，而另一個命令（比如 `kubectl`）則透過 SSH 送到遠端機器。某一行由哪個執行環境處理，可以交給[腳本化的執行環境路由器](https://docs.mirage.strukto.ai/home/policy/route-runtime)決定。
+執行環境以同樣的方式虛擬化，而且不只針對程式語言。命令列上的任何命令都可以被重新導向到所設定的執行環境，例如 Python 可以藉助 [Monty](https://pydantic.dev/articles/pydantic-monty) 在行程內執行，而另一個命令（比如 `kubectl`）則透過 SSH 送到遠端機器。某一行由哪個執行環境處理，可以交給[腳本化的執行環境路由器](https://docs.mirage.strukto.ai/home/policy/route-machine)決定。
 
 |                | 執行環境                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -261,7 +260,7 @@ python3: Permission denied
 
 ## 嵌入式終端機
 
-大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/embedded-terminal)。
+大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)。
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

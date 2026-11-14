@@ -9,19 +9,19 @@
     {
       "id": "quickjs_cannot_take_python3",
       "world": {
-        "runtimes": [
-          {
-            "name": "quickjs",
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs",
             "captures": [
               "node",
               "python3"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "build_error": {
-        "contains": "runtime 'quickjs' does not run 'python3'"
+        "contains": "machine 'quickjs' does not run 'python3'"
       }
     }
   ]

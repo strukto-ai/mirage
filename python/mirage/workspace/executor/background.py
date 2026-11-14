@@ -35,11 +35,12 @@ from mirage.context import (
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.execution.job import JobHandle, JobState, JobTable, JobWaits
 from mirage.execution.job.constants import (
     ENDING_SIGNALS,
     STOP_WAIT_SECONDS,
 )
+from mirage.execution.job.waits import Hold
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -62,7 +63,6 @@ from mirage.shell.console import (
     OwnedStream,
     Tee,
 )
-from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -91,6 +91,15 @@ from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, PolicyDecision
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.builtins.exec import (
+    ForkRoute,
+    descriptor_name,
+)
+from mirage.workspace.executor.builtins.exec.constants import (
+    CLOSED,
+    TO_STDERR,
+    TO_STDOUT,
+)
 from mirage.workspace.executor.builtins.jobspec import session_of
 from mirage.workspace.executor.statement import (
     answer_closed,
@@ -166,14 +175,12 @@ async def pump(
             async for part_channel, chunk in parts:
                 if chunk:
                     await console.emit(part_channel, chunk)
-                if part_channel != channel or not isinstance(
-                    console, PipeConsole
-                ):
-                    continue
-                if not eager:
-                    await console.drain()
-                if console.closed_reader:
-                    return
+                pipe = console.pipe_for(part_channel)
+                if pipe is not None:
+                    if not eager:
+                        await pipe.drain()
+                    if pipe.closed_reader:
+                        return
     finally:
         await close_quietly(stream)
 
@@ -228,35 +235,68 @@ async def _send_stderr(sink: JobConsole, io: IOResult) -> None:
         io.stderr = None
 
 
-def _job_streams(
+def job_streams(
     node: TSNodeLike, session: SessionState
-) -> set[Channel | OwnedStream]:
-    """The streams a job started from ``node`` writes, as its shell hands
-    them on: stdout, stderr and the copies the shell holds (``3>&1``),
-    after the job's own redirects (``sleep 9 >/dev/null &``). A stream
-    sent to a file or closed is gone.
+) -> dict[int, tuple[str, Channel | OwnedStream]]:
+    """The streams a job started from ``node`` writes, by descriptor, as
+    its shell hands them on, each with what its descriptor names
+    (``descriptor_name``): its stdout and stderr where an ``exec`` left
+    them (``exec 2>&1`` crosses stderr over) and the copies the shell
+    holds (``3>&1``), after the job's own redirects (``sleep 9 >/dev/null
+    &``), a copy naming what it copies. A stream sent to a file or closed
+    is gone.
 
     Args:
         node (TSNodeLike): the backgrounded command.
         session (SessionState): the shell that starts it.
     """
-    fds: dict[int, Channel | OwnedStream | None] = {
-        1: Channel.STDOUT,
-        2: Channel.STDERR,
-    }
+    terminal = {TO_STDOUT: Channel.STDOUT, TO_STDERR: Channel.STDERR}
+    fds: dict[int, tuple[str, Channel | OwnedStream | None]] = {}
+    for fd in (1, 2):
+        name = descriptor_name(session, fd)
+        fds[fd] = (name, terminal.get(name))
     for fd, descriptor in session.descriptors.items():
         if fd > 2:
-            fds[fd] = descriptor.stream
+            fds[fd] = (descriptor.identity, descriptor.stream)
     if node_kind(node) == NodeKind.REDIRECT:
         for r in get_redirects(node)[1]:
             if r.target == FD_CLOSE:
                 fds.pop(r.fd, None)
             elif isinstance(r.target, int):
-                fds[r.fd] = fds.get(r.target)
+                fds[r.fd] = fds.get(r.target, (CLOSED, None))
             else:
                 for fd in (1, 2) if r.fd == FD_BOTH else (r.fd,):
-                    fds[fd] = None
-    return {stream for stream in fds.values() if stream is not None}
+                    fds[fd] = (CLOSED, None)
+    return {
+        fd: (name, stream)
+        for fd, (name, stream) in fds.items()
+        if stream is not None
+    }
+
+
+def capture_hold(
+    waits: JobWaits,
+    start: JobConsole,
+    streams: dict[int, tuple[str, Channel | OwnedStream]],
+    ended: Callable[[], Awaitable[None]],
+) -> Hold | None:
+    """Count a child in the capture one of its streams leads into, held
+    by what those descriptors named as it started; None when none leads
+    there.
+
+    Args:
+        waits (JobWaits): the capture's waits.
+        start (JobConsole): where the child writes.
+        streams (dict[int, tuple[str, Channel | OwnedStream]]): what it
+            writes, by descriptor, with what each names (``job_streams``).
+        ended (Callable[[], Awaitable[None]]): returns once it has ended.
+    """
+    named = frozenset(
+        name
+        for name, stream in streams.values()
+        if waits.reaches(start, {stream})
+    )
+    return waits.add(ended, named) if named else None
 
 
 def one_program(left: TSNodeLike, session: SessionState) -> bool:
@@ -694,7 +734,7 @@ async def handle_background(
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
-    output = session.job_output or session.tty.jobs
+    output = ForkRoute(session.job_output or session.tty.jobs, session)
     # A job is a shell of its own: what jobs it starts write into the
     # statement it runs, then where it writes.
     bg_session.job_output = JobOutput(output)
@@ -919,10 +959,18 @@ async def handle_background(
         await job.process.stages[-1].placed(RUN_START_WAIT_SECONDS)
     session.last_bg_job_id = job.last_pid
     waits = session.job_waits
-    if waits is not None and waits.reaches(
-        output, _job_streams(left, session)
-    ):
-        waits.add(job)
+    hold = (
+        None
+        if waits is None
+        else capture_hold(
+            waits,
+            output,
+            job_streams(left, session),
+            job.console.wait_finished,
+        )
+    )
+    if hold is not None:
+        bg_session.holds.append(hold)
 
     if right is None:
         return (

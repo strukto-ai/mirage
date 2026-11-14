@@ -20,7 +20,6 @@ from mirage.resources.types import EntryKind, ResourceKind
 ENTRY_KINDS: tuple[EntryKind, ...] = (
     "vfs",
     "cli",
-    "runtime",
     "machine",
     "store",
 )
@@ -40,7 +39,6 @@ STRUKTO = "strukto"
 NOUN: dict[ResourceKind, str] = {
     "vfs": "VFS",
     "cli": "CLI",
-    "runtime": "runtime",
     "machine": "machine",
     "store": "secret store",
     "policy": "policy",

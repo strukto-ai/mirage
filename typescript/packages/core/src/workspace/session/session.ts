@@ -29,6 +29,7 @@ import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../execution/job/index.ts'
+import type { Hold } from '../../execution/job/waits.ts'
 import { lineRow, sourceRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
@@ -452,6 +453,7 @@ export class SessionState {
   // from, innermost first (`CallStack.callLines`), written beside
   // `functionNames`; `unset` cannot end it.
   callLines: readonly number[] = []
+  sourceFiles: readonly string[] = []
   // A pipeline's per-segment statuses, parked by `handlePipe` for the
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null
@@ -489,6 +491,13 @@ export class SessionState {
   tty = new Terminal()
   jobOutput: JobOutput | null = null
   jobWaits: JobWaits | null = null
+  // The captures this shell holds open as a child of the shell that started
+  // it, which its `exec` lets go of; a fork starts with none.
+  holds: Hold[] = []
+  // What the descriptors a running redirect of this shell shadows point at,
+  // which it puts back when it ends: they stay open meanwhile, as bash keeps
+  // a copy of each, so a capture they lead into stays held.
+  shadowed: string[] = []
   // A per-call line's jobs, which a callback in it reaches; null otherwise.
   jobTable: JobTable | null = null
   shellOptions: Record<string, boolean>
@@ -795,6 +804,7 @@ export class SessionState {
     forked.pipeStatus = [...this.pipeStatus]
     forked.functionNames = this.functionNames
     forked.callLines = this.callLines
+    forked.sourceFiles = this.sourceFiles
     forked.exitTrap = this.exitTrap
     forked.exitTrapInherited = this.exitTrapInherited
     forked.errTrap = this.errTrap
@@ -908,6 +918,7 @@ export class SessionState {
     child.lastBgJobId = null
     child.functionNames = []
     child.callLines = []
+    child.sourceFiles = []
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
@@ -1114,12 +1125,19 @@ export class SessionState {
     return data
   }
 
+  /** Apply the `dotglob` setting the last write to GLOBIGNORE made. */
+  syncShopts(): void {
+    const dotglob = this.vars.shell.takeDotglob()
+    if (dotglob !== null) this.shopts.dotglob = dotglob
+  }
+
   /**
    * The session's record; `variables` false leaves out the keys the variables
    * fill, for a flush that compares their store's version instead of reading
    * them.
    */
   toDict(variables = true): Record<string, unknown> {
+    this.syncShopts()
     const data: Record<string, unknown> = {
       session_id: this.sessionId,
       cwd: this.cwd,
@@ -1139,11 +1157,15 @@ export class SessionState {
     // Each function's body runs the aliases its definition saw, not the
     // ones defined since, so the view goes with it.
     const views = ownRecord<Record<string, string>>()
+    const files = ownRecord<string>()
     for (const [name, source] of Object.entries(this.functions)) {
       const site = this.functionSites.get(name)
-      if (site?.aliases != null && site.source === source) views[name] = { ...site.aliases }
+      if (site?.source !== source) continue
+      if (site.aliases != null) views[name] = { ...site.aliases }
+      if (site.name !== undefined && site.name !== 'environment') files[name] = site.name
     }
     if (Object.keys(views).length > 0) data.function_aliases = views
+    if (Object.keys(files).length > 0) data.function_files = files
     if (Object.keys(this.shellOptions).length > 0) data.shell_options = { ...this.shellOptions }
     if (Object.keys(this.shopts).length > 0) data.shopts = { ...this.shopts }
     if (this.umask !== FRESH_UMASK) data.umask = this.umask
@@ -1220,6 +1242,7 @@ export class SessionState {
     exported_functions?: string[]
     aliases?: Record<string, string>
     function_aliases?: Record<string, Record<string, string>>
+    function_files?: Record<string, string>
     shell_options?: Record<string, boolean>
     shopts?: Record<string, boolean>
     umask?: number
@@ -1303,12 +1326,17 @@ export class SessionState {
       }
     }
     if (data.aliases != null) session.aliases = { ...data.aliases }
-    // A function's alias view comes back as its site; where on its line the
-    // definition stood went with the line.
-    for (const [name, view] of Object.entries(data.function_aliases ?? {})) {
-      const source = Object.hasOwn(session.functions, name) ? session.functions[name] : undefined
-      if (source === undefined) continue
-      session.functionSites.set(name, { source, mark: [0, 0], origin: null, aliases: { ...view } })
+    const views = data.function_aliases ?? {}
+    const files = functionSources(data.function_files ?? {})
+    for (const [name, source] of Object.entries(session.functions)) {
+      if (!Object.hasOwn(views, name) && !Object.hasOwn(files, name)) continue
+      session.functionSites.set(name, {
+        source,
+        mark: [0, 0],
+        origin: null,
+        aliases: Object.hasOwn(views, name) ? { ...views[name] } : null,
+        name: files[name] ?? 'environment',
+      })
     }
     if (data.shopts != null) session.shopts = { ...data.shopts }
     if (data.umask != null) session.umask = data.umask

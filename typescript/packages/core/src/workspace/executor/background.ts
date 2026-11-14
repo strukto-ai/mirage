@@ -32,7 +32,6 @@ import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import { PipeConsole } from '../../shell/console/pipe.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -50,7 +49,8 @@ import {
   REDIRECT_NODE_TYPES,
 } from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
-import type { JobHandle, JobTable } from '../../execution/job/index.ts'
+import type { JobHandle, JobTable, JobWaits } from '../../execution/job/index.ts'
+import type { Hold } from '../../execution/job/waits.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandArgs, commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
@@ -79,6 +79,8 @@ import {
   statementStdin,
 } from './statement.ts'
 import { inheritTraps } from './traps.ts'
+import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
+import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
@@ -114,9 +116,10 @@ export async function pump(
     io !== null ? interleaved(stream, io) : tagged(channel, stream)
   for await (const [partChannel, chunk] of parts) {
     if (chunk.byteLength > 0) await console_.emit(partChannel, chunk)
-    if (partChannel !== channel || !(console_ instanceof PipeConsole)) continue
-    if (!eager) await console_.drain()
-    if (console_.closedReader) return
+    const pipe = console_.pipeFor(partChannel)
+    if (pipe === null) continue
+    if (!eager) await pipe.drain()
+    if (pipe.closedReader) return
   }
 }
 
@@ -192,27 +195,54 @@ class JobCopy extends JobConsole {
 }
 
 /**
- * The streams a job started from `node` writes, as its shell hands them
- * on: stdout, stderr and the copies the shell holds (`3>&1`), after the
- * job's own redirects (`sleep 9 >/dev/null &`). A stream sent to a file
- * or closed is gone.
+ * The streams a job started from `node` writes, by descriptor, as its shell
+ * hands them on, each with what its descriptor names (`descriptorName`): its
+ * stdout and stderr where an `exec` left them (`exec 2>&1` crosses stderr
+ * over) and the copies the shell holds (`3>&1`), after the job's own
+ * redirects (`sleep 9 >/dev/null &`), a copy naming what it copies. A stream
+ * sent to a file or closed is gone.
  */
-function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | OwnedStream> {
-  const fds = new Map<number, Channel | OwnedStream | null>([
-    [1, Channel.STDOUT],
-    [2, Channel.STDERR],
+export function jobStreams(
+  node: TSNodeLike,
+  session: SessionState,
+): Map<number, [string, Channel | OwnedStream]> {
+  const terminal = new Map<string, Channel>([
+    [TO_STDOUT, Channel.STDOUT],
+    [TO_STDERR, Channel.STDERR],
   ])
+  const fds = new Map<number, [string, Channel | OwnedStream | null]>()
+  for (const fd of [1, 2]) {
+    const name = descriptorName(session, fd)
+    fds.set(fd, [name, terminal.get(name) ?? null])
+  }
   for (const [fd, descriptor] of session.descriptors)
-    if (fd > 2) fds.set(fd, descriptor.stream ?? null)
+    if (fd > 2) fds.set(fd, [descriptor.identity, descriptor.stream ?? null])
   if (nodeKind(node) === NodeKind.REDIRECT)
     for (const r of getRedirects(node)[1]) {
       if (r.target === FD_CLOSE) fds.delete(r.fd)
-      else if (typeof r.target === 'number') fds.set(r.fd, fds.get(r.target) ?? null)
-      else for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) fds.set(fd, null)
+      else if (typeof r.target === 'number') fds.set(r.fd, fds.get(r.target) ?? [CLOSED, null])
+      else for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) fds.set(fd, [CLOSED, null])
     }
-  const streams = new Set<Channel | OwnedStream>()
-  for (const stream of fds.values()) if (stream !== null) streams.add(stream)
+  const streams = new Map<number, [string, Channel | OwnedStream]>()
+  for (const [fd, [name, stream]] of fds) if (stream !== null) streams.set(fd, [name, stream])
   return streams
+}
+
+/**
+ * Count a child in the capture one of its streams leads into, held by what
+ * those descriptors named as it started; null when none leads there.
+ * Mirrors Python's capture_hold.
+ */
+export function captureHold(
+  waits: JobWaits,
+  start: JobConsole,
+  streams: ReadonlyMap<number, [string, Channel | OwnedStream]>,
+  ended: () => Promise<void>,
+): Hold | null {
+  const named = new Set<string>()
+  for (const [name, stream] of streams.values())
+    if (waits.reaches(start, new Set([stream]))) named.add(name)
+  return named.size === 0 ? null : waits.add(ended, named)
 }
 
 /**
@@ -562,7 +592,7 @@ export async function handleBackground(
     if (failure !== undefined) throw failure.error
   }
   inheritTraps(bgSession)
-  const output = session.jobOutput ?? session.tty.jobs
+  const output = new ForkRoute(session.jobOutput ?? session.tty.jobs, session)
   // A job is a shell of its own: what jobs it starts write into the
   // statement it runs, then where it writes.
   bgSession.jobOutput = new JobOutput(output)
@@ -794,8 +824,13 @@ export async function handleBackground(
   if (lastStage !== undefined && lastCommand !== undefined && onAMachine(lastCommand, context))
     await lastStage.placed(RUN_START_WAIT_SECONDS)
   session.lastBgJobId = job.lastPid
-  if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
-    session.jobWaits.add(job)
+  const hold =
+    session.jobWaits === null
+      ? null
+      : captureHold(session.jobWaits, output, jobStreams(left, session), () =>
+          job.console.waitFinished(),
+        )
+  if (hold !== null) bgSession.holds.push(hold)
 
   if (right === null) {
     const tree = new ExecutionNode({

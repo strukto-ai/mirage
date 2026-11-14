@@ -43,14 +43,14 @@ async function ended(app: ReturnType<typeof buildApp>, id: string, lineId: LineI
 async function createWs(
   app: ReturnType<typeof buildApp>,
   id: string,
-  runtimes?: string[],
+  machines?: Record<string, Record<string, unknown>>,
 ): Promise<void> {
   await app.inject({
     method: 'POST',
     url: '/v1/workspaces',
     payload: {
       id,
-      config: { mounts: { '/': { vfs: 'ram', mode: 'write' } }, ...(runtimes ? { runtimes } : {}) },
+      config: { mounts: { '/': { vfs: 'ram', mode: 'write' } }, ...(machines ? { machines } : {}) },
     },
   })
 }
@@ -343,7 +343,7 @@ describe('execute router', () => {
   it('reads null as unset', async () => {
     const app = buildApp()
     await createWs(app, 'ew-null')
-    const unset = { cwd: null, runtime: null, machine: null, record: null, open_stdin: null }
+    const unset = { cwd: null, machine: null, record: null, open_stdin: null }
     for (const explain of ['false', 'true']) {
       const res = await app.inject({
         method: 'POST',
@@ -355,7 +355,7 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it.each(['cwd', 'runtime', 'machine'])('explain refuses an empty %s as set', async (field) => {
+  it.each(['cwd', 'machine'])('explain refuses an empty %s as set', async (field) => {
     const app = buildApp()
     await createWs(app, 'ew-empty')
     const res = await app.inject({
@@ -412,42 +412,43 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it('refuses a runtime or machine the workspace lacks', async () => {
+  it('refuses a machine the workspace lacks', async () => {
     const app = buildApp()
-    await createWs(app, 'ert', ['monty', 'quickjs', 'workspace'])
-    const runtime = await app.inject({
+    await createWs(app, 'ert', { monty: { provider: 'worker' } })
+    const unknown = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',
-      payload: { command: 'echo hi', runtime: 'no-such-runtime' },
+      payload: { command: 'echo hi', machine: 'no-such-machine' },
     })
-    expect([runtime.statusCode, runtime.json()]).toEqual([
+    expect([unknown.statusCode, unknown.json()]).toEqual([
       400,
       {
         error: {
           code: 'invalid_value',
-          message: 'runtime must be one of monty, quickjs',
-          param: 'runtime',
+          message: 'machine must be one of monty',
+          param: 'machine',
         },
       },
     ])
     const fallback = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',
-      payload: { command: 'echo hi', runtime: 'workspace' },
+      payload: { command: 'echo hi', machine: 'workspace' },
     })
     expect([fallback.statusCode, fallback.json()]).toEqual([
       400,
       {
         error: {
           code: 'invalid_value',
-          message: "'workspace' is the default executor, not a runtime you can select",
-          param: 'runtime',
+          message: "'workspace' is the default executor, not a machine you can select",
+          param: 'machine',
         },
       },
     ])
+    await createWs(app, 'ert-bare')
     const machine = await app.inject({
       method: 'POST',
-      url: '/v1/workspaces/ert/shell',
+      url: '/v1/workspaces/ert-bare/shell',
       payload: { command: 'echo hi', machine: '' },
     })
     expect([machine.statusCode, machine.json()]).toEqual([

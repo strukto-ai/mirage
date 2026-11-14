@@ -52,6 +52,7 @@ import {
   FileInput,
   Inherited,
   Recorder,
+  redirectOperations,
   unreadableStdin,
   unsupportedDescriptor,
   type Descriptor,
@@ -78,7 +79,7 @@ import {
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
 } from './builtins/exec/constants.ts'
-import { routeRebound } from './builtins/exec/index.ts'
+import { descriptorName, routeRebound } from './builtins/exec/index.ts'
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
@@ -1177,12 +1178,14 @@ async function runRedirects(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
-    expanded.push(r)
+    expanded.push(...redirectOperations(r))
     const refused = unusable(r)
     if (refused !== null) return opened.failed(refused)
     if (typeof r.target === 'number') {
-      const bad = duplicate(opened, r, r.target)
-      if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      for (const operation of redirectOperations(r)) {
+        const bad = duplicate(opened, operation, operation.target as number)
+        if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      }
       continue
     }
     if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
@@ -1224,6 +1227,12 @@ async function runRedirects(
   let io = new IOResult()
   const saved = session.descriptors
   const claimed = new Set(redirects.flatMap((r) => (r.fd === FD_BOTH ? [1, 2] : [r.fd])))
+  // What the claimed descriptors pointed at stays open under the redirect,
+  // unless the shell ends with the command (a job's own).
+  const shadowed =
+    command !== null && context.frame.ending === command.id
+      ? []
+      : [...claimed].map((fd) => descriptorName(session, fd))
   recorder.session = session
   recorder.claimed = new Set(
     [...claimed].flatMap((fd) => (fd === 1 ? [Channel.STDOUT] : fd === 2 ? [Channel.STDERR] : [])),
@@ -1252,6 +1261,8 @@ async function runRedirects(
     Object.keys(unbound).map((field) => [field, session[field as keyof typeof unbound]]),
   )
   Object.assign(session, unbound)
+  const depth = session.shadowed.length
+  session.shadowed.push(...shadowed)
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -1310,6 +1321,7 @@ async function runRedirects(
   } finally {
     if (cancelled === null) await recorder.abort()
     Object.assign(session, held)
+    session.shadowed.length = depth
     leave()
     session.jobOutput = jobOutput
     for (const file of files) file.emit = null

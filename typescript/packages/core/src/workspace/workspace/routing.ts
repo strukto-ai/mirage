@@ -28,14 +28,7 @@ import { opQuestion, sameOccurrence } from '../../policy/decisions.ts'
 import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
-import {
-  catchAll,
-  checkRouteMachine,
-  routed,
-  runtimeBindingsFor,
-  wholeLineRuntime,
-} from '../../runtime/table.ts'
-import { PathSpec } from '../../types.ts'
+import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
 import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
@@ -56,10 +49,10 @@ import { makeAbortError } from '../../utils/abort.ts'
  * Python `Router` in `workspace/routing.py`.
  *
  * `decide` returns the static bindings as the decision when nothing
- * decides (no runtime argument, nothing to consult), the stage's Deny when
+ * decides (no machine argument, nothing to consult), the stage's Deny when
  * a policy refuses the line, and the ledger's answer to its Ask when the
  * host refuses the line or has not answered yet; a nested eval inherits
- * the typed line's decision and never re-routes. The runtime argument is
+ * the typed line's decision and never re-routes. The machine argument is
  * the caller's own placement, so a Route is not asked for, but a coded
  * policy's Deny or Ask still holds the line. Admission comes first: a line
  * `held` reports refused or waiting on a question is left unplaced, for
@@ -84,23 +77,6 @@ declare module '../frame.ts' {
       routing: RouteDecision<Runtime>,
     ) => boolean
   }
-}
-
-/** The machine a runtime would run a command on under a decision, as its id; empty for the workspace's own. */
-function machineOf(runtime: Runtime, decision: RouteDecision<Runtime>): string {
-  let machine
-  try {
-    machine = runtime.machineFor({
-      stdin: null,
-      flags: {},
-      cwd: PathSpec.fromStrPath('/'),
-      ...(decision.machine !== undefined ? { machine: decision.machine } : {}),
-    })
-  } catch (caught) {
-    console.debug(`${runtime.name}: no machine to explain:`, caught)
-    return ''
-  }
-  return machine === null ? '' : machine.toString()
 }
 
 /** A decision as it places each command on its own, its whole-line runtime left out. Mirrors Python's `_apart`. */
@@ -166,10 +142,7 @@ export class Router {
     if (options.routingDecision !== undefined) return options.routingDecision
     const policies = this.registry.policies
     const placing = await policies.wantsFor('preExecute', session.sessionId)
-    const placed =
-      options.runtime === undefined && options.machine === undefined
-        ? null
-        : this.placed(options.runtime, options.machine)
+    const placed = options.machine === undefined ? null : this.placed(options.machine)
     if (!placing || (held !== undefined && (await held()))) return placed ?? this.unplaced()
     const ctx = this.context(command, session, await judged())
     const [said, route] = await policies.preExecute(ctx, placed !== null)
@@ -216,35 +189,11 @@ export class Router {
    * Python's `Router._routed`.
    *
    * Throws:
-   *   RouteError: no entry or machine has the name, or the runtime does not
-   *   run on the machine.
-   */
-  private routed(route: Route): RouteDecision<Runtime> {
-    this.knownMachine(route.machine)
-    try {
-      return routed(
-        this.runtimes.entries,
-        this.registry.runtimeBindings,
-        route.runtime,
-        route.machine,
-      )
-    } catch (caught) {
-      throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-        cause: caught,
-      })
-    }
-  }
-
-  /**
-   * Refuse a machine the workspace does not have.
-   *
-   * Throws:
    *   RouteError: no machine has the name.
    */
-  private knownMachine(machine: string | undefined): void {
-    if (machine === undefined) return
+  private routed(route: Route): RouteDecision<Runtime> {
     try {
-      this.runtimes.machines.get(machine)
+      return routed(this.runtimes.entries, this.registry.runtimeBindings, route.machine)
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,
@@ -268,10 +217,10 @@ export class Router {
   }
 
   /**
-   * The runtime entry that serves a command under a decision, as its run
-   * places it, and the machine it runs there on: the `@external` runtime
-   * for a program no name binds (a path runs through the workspace's exec
-   * path first); both empty when the workspace runs it itself. A
+   * The machine that serves a command under a decision, as its run places
+   * it: the `@external` one for a program no name binds (a path runs
+   * through the workspace's exec path first); empty when the workspace
+   * runs it itself. A
    * `preCommand` route of the command places it over the line's decision,
    * as its run does, and so does the route of a program a wrapper takes
    * along to a runtime (`programs`, the commands its run answers for,
@@ -282,9 +231,9 @@ export class Router {
     one: Judged,
     line: RouteDecision<Runtime>,
     programs: readonly Judged[] = [],
-  ): [string, string] {
+  ): string {
     const whole = wholeLineRuntime(line.bindings)
-    if (whole !== null) return [whole.name, machineOf(whole, line)]
+    if (whole !== null) return whole.name
     const placed = this.ownPlaced(one, line)
     const answer = this.wrapperAnswer(one, placed, programs)
     if (answer?.kind !== 'route') return this.serving(one, placed)
@@ -303,18 +252,11 @@ export class Router {
    * (`routed`). Mirrors Python's `Router._overlaid`.
    *
    * Throws:
-   *   RouteError: the route names no runtime entry, or a machine its runtime
-   *   does not run on.
+   *   RouteError: the route names no machine.
    */
   private overlaid(decision: RouteDecision<Runtime>, route: Route): RouteDecision<Runtime> {
     try {
-      return routed(
-        this.runtimes.entries,
-        decision.bindings,
-        route.runtime,
-        route.machine,
-        decision.machine,
-      )
+      return routed(this.runtimes.entries, decision.bindings, route.machine)
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,
@@ -389,20 +331,16 @@ export class Router {
    * turn (`eval`) under the placement a `preCommand` route gave the command
    * running it, as its run keeps it. Mirrors Python's `Router.placements`.
    */
-  placements(
-    judged: readonly Judged[],
-    decision: RouteDecision<Runtime>,
-  ): (one: Judged) => [string, string] {
+  placements(judged: readonly Judged[], decision: RouteDecision<Runtime>): (one: Judged) => string {
     return (one) =>
       this.placementFor(one, this.outerPlaced(one, judged, decision), programsOf(one, judged))
   }
 
   /**
-   * Whether a command's `preCommand` route places it off the runtime or
-   * machine its line runs whole on, which that one run cannot honor: a
-   * route that leaves the command where it stands (a runtime that does not
-   * capture it) holds. Throws a `RouteError` for a route that names no
-   * runtime entry, or a machine its runtime does not run on. Mirrors
+   * Whether a command's `preCommand` route places it off the machine its
+   * line runs whole on, which that one run cannot honor: a route that
+   * leaves the command where it stands (a runtime that does not capture it)
+   * holds. Throws a `RouteError` for a route that names no machine. Mirrors
    * Python's `Router.off_line`.
    */
   offLine(one: Judged, decision: RouteDecision<Runtime>): boolean {
@@ -410,28 +348,24 @@ export class Router {
     const whole = wholeLineRuntime(decision.bindings)
     if (route === null || whole === null) return false
     const placed = this.overlaid(decision, route)
-    const [runtime, machine] = this.serving(one, apart(placed))
-    const [lineRuntime, lineMachine] = this.serving(one, apart(decision))
     return (
       wholeLineRuntime(placed.bindings) !== whole ||
-      machineOf(whole, placed) !== machineOf(whole, decision) ||
-      runtime !== lineRuntime ||
-      machine !== lineMachine
+      this.serving(one, apart(placed)) !== this.serving(one, apart(decision))
     )
   }
 
   /**
-   * The runtime entry and machine that serve a command under a decision
-   * that places each command on its own, as `placementFor` answers them.
-   * Mirrors Python's `Router._serving`.
+   * The machine that serves a command under a decision that places each
+   * command on its own, as `placementFor` answers it. Mirrors Python's
+   * `Router._serving`.
    */
-  private serving(one: Judged, placed: RouteDecision<Runtime>): [string, string] {
+  private serving(one: Judged, placed: RouteDecision<Runtime>): string {
     const command = one.judgment.command
     let decision = placed
     let fallback = placed.fallback
     if (one.ctx !== undefined && one.session !== undefined) {
       if (mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed) !== null) {
-        return ['', '']
+        return ''
       }
       const [consumer, rerouted] = routedConsumer(
         command,
@@ -450,25 +384,21 @@ export class Router {
     const serving = Object.hasOwn(decision.bindings, command)
       ? (decision.bindings[command] ?? null)
       : fallback
-    if (serving === null || serving instanceof WorkspaceRuntime) return ['', '']
-    return [serving.name, machineOf(serving, decision)]
+    if (serving === null || serving instanceof WorkspaceRuntime) return ''
+    return serving.name
   }
 
   /**
-   * The decision that serves a line on one named runtime, its captures over
-   * the static bindings, on one named machine; no runtime leaves each
-   * command on its first capturer.
+   * The decision that serves a line on one named machine, its captures over
+   * the static bindings.
    *
    * Throws:
-   *   RouteError: no entry or machine has the name, the runtime cannot be
-   *   selected, or it does not run on the machine.
+   *   RouteError: no machine has the name, or it cannot be selected.
    */
-  private placed(name: string | undefined, machine: string | undefined): RouteDecision<Runtime> {
-    this.knownMachine(machine)
+  private placed(machine: string): RouteDecision<Runtime> {
     let overlay: Record<string, Runtime>
     try {
-      overlay = name === undefined ? {} : runtimeBindingsFor(this.runtimes.entries, name)
-      checkRouteMachine(this.runtimes.entries, name, machine)
+      overlay = machineBindingsFor(this.runtimes.entries, machine)
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,
@@ -481,7 +411,6 @@ export class Router {
         overlay,
       ),
       fallback: catchAll(this.runtimes.entries),
-      ...(machine !== undefined ? { machine } : {}),
     }
   }
 

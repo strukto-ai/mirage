@@ -172,7 +172,7 @@ def _command(
         "exit_code": exit_code,
         "reason": reason,
         "source": "top" if reason else "",
-        "runtime": "",
+        "machine": "",
         "children": [],
     }
 
@@ -225,7 +225,7 @@ def test_explain_prints_the_line_as_its_tree():
 
 def test_explain_prints_why_a_route_places_the_line():
     python3 = _command("python3 -c 'import sqlite3'", "allow")
-    python3["runtime"] = "local"
+    python3["machine"] = "local"
     said = {
         "line": "python3 -c 'import sqlite3'",
         "outcome": "allow",
@@ -233,7 +233,7 @@ def test_explain_prints_why_a_route_places_the_line():
         "answers": [
             {
                 "kind": "route",
-                "runtime": "local",
+                "machine": "local",
                 "reason": "monty has no sqlite3",
                 "policy": "RoutePolicy",
             }

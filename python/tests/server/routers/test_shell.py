@@ -185,9 +185,7 @@ async def test_shell_reads_null_as_unset():
         transport=transport, base_url="http://test"
     ) as client:
         wid = await _create_workspace(client)
-        unset = dict.fromkeys(
-            ["cwd", "runtime", "machine", "record", "open_stdin"]
-        )
+        unset = dict.fromkeys(["cwd", "machine", "record", "open_stdin"])
         route = f"/v1/workspaces/{wid}/shell"
         r = await client.post(route, json={"command": "echo hi", **unset})
         assert r.status_code == 200, r.text
@@ -201,7 +199,7 @@ async def test_shell_reads_null_as_unset():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field", ["cwd", "runtime", "machine"])
+@pytest.mark.parametrize("field", ["cwd", "machine"])
 async def test_explain_refuses_an_empty_string_as_set(field):
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
@@ -298,32 +296,32 @@ async def test_shell_honors_cwd():
 
 
 @pytest.mark.asyncio
-async def test_shell_refuses_a_runtime_or_machine_the_workspace_lacks():
+async def test_shell_refuses_a_machine_the_workspace_lacks():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
         config = _minimal_config()
-        config["config"]["runtimes"] = ["monty", "workspace"]
+        config["config"]["machines"] = {"monty": {"provider": "worker"}}
         r = await client.post("/v1/workspaces", json=config)
         assert r.status_code == 201
         route = f"/v1/workspaces/{r.json()['id']}/shell"
-        runtime = await client.post(
-            route, json={"command": "echo hi", "runtime": "no-such-runtime"}
+        unknown = await client.post(
+            route, json={"command": "echo hi", "machine": "no-such-machine"}
         )
-        assert (runtime.status_code, runtime.json()) == (
+        assert (unknown.status_code, unknown.json()) == (
             400,
             {
                 "error": {
                     "code": "invalid_value",
-                    "message": "runtime must be one of monty",
-                    "param": "runtime",
+                    "message": "machine must be one of monty",
+                    "param": "machine",
                 }
             },
         )
         default = await client.post(
-            route, json={"command": "echo hi", "runtime": "workspace"}
+            route, json={"command": "echo hi", "machine": "workspace"}
         )
         assert (default.status_code, default.json()) == (
             400,
@@ -331,13 +329,15 @@ async def test_shell_refuses_a_runtime_or_machine_the_workspace_lacks():
                 "error": {
                     "code": "invalid_value",
                     "message": "'workspace' is the default executor, "
-                    "not a runtime you can select",
-                    "param": "runtime",
+                    "not a machine you can select",
+                    "param": "machine",
                 }
             },
         )
+        bare = await _create_workspace(client)
         machine = await client.post(
-            route, json={"command": "echo hi", "machine": ""}
+            f"/v1/workspaces/{bare}/shell",
+            json={"command": "echo hi", "machine": ""},
         )
         assert (machine.status_code, machine.json()) == (
             400,

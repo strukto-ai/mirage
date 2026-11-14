@@ -194,7 +194,7 @@ it.each(RESTRICTIONS)('refuses every line under a session restriction', async (p
   const runtime = makeRuntime({ sandboxId: 'sb-77' })
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime) },
   )
   try {
     const agent = await ws.session('agent', { profile: 'agent' })

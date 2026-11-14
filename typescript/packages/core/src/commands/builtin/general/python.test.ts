@@ -23,8 +23,14 @@ import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { buildRuntime } from '../../../runtime/table.ts'
 
-const PYODIDE = { runtimes: ['pyodide', 'workspace'] }
+// A getter, so each workspace binds a runtime of its own.
+const PYODIDE = {
+  get machines() {
+    return [buildRuntime('pyodide')]
+  },
+}
 
 const GUARDED = SessionProfile({
   commands: { deny: [{ reason: 'protected', commands: { python3: ['/secret.py'] } }] },
@@ -35,7 +41,7 @@ function guarded(): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new MontyRuntime(), 'workspace'],
+      machines: [new MontyRuntime()],
       profiles: { default: GUARDED },
     },
   )
@@ -369,7 +375,7 @@ it('an endless printer stops once its reader has enough', async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new MontyRuntime(), 'workspace'],
+      machines: [new MontyRuntime()],
     },
   )
   try {

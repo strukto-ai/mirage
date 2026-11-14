@@ -39,6 +39,10 @@ def sdk_install_hint(
 # Capture unresolved program names without taking over the workspace shell.
 EXTERNAL_COMMANDS: Final = "@external"
 
+# The provider of a machine whose programs run natively on the host Mirage
+# runs on; every such machine is that one host.
+HOST: Final = "host"
+
 # Capture the whole line, Mirage's own commands included (a line executor).
 WHOLE_LINE: Final = "@line"
 

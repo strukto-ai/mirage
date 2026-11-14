@@ -43,7 +43,6 @@ from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import ExecuteResultContext, Policy
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.utils.clock import ManualClock
@@ -752,8 +751,7 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a")},
-        runtimes=[RemoteRuntime(["train"], machine="a")],
+        machines={"a": _Box("a", {"captures": ["train"]})},
     )
     try:
         await ws.shell("train 1 & wait")
@@ -848,7 +846,7 @@ async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
         cwd,
         MachineName("box", "a"),
         2.0,
-        runtime="remote",
+        program=True,
         state=ProcessState.EXITED,
         ended_at=3.0,
         exit=143,
@@ -892,8 +890,7 @@ async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a")},
-        runtimes=[RemoteRuntime(["train"], machine="a")],
+        machines={"a": _Box("a", {"captures": ["train"]})},
     )
     try:
         await ws.shell("(train 1 & wait) & wait")
@@ -924,8 +921,7 @@ async def test_a_process_links_to_each_it_read_from(monkeypatch):
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a")},
-        runtimes=[RemoteRuntime(["train"], machine="a")],
+        machines={"a": _Box("a", {"captures": ["train"]})},
     )
     try:
         await ws.shell("train 1 | train 2")

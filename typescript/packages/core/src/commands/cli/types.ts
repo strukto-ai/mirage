@@ -76,7 +76,7 @@ export class CLI {
   /** Builds an install's accessor from its validated config. */
   readonly accessor: (config: unknown) => Accessor
   readonly script: ScriptSource | null
-  readonly runtime: string | null
+  readonly machine: string | null
   /** The MCP tool list the tree was built from, so a snapshot rebuilds it without the server. */
   readonly mcp: MCPSource | null
 
@@ -87,12 +87,12 @@ export class CLI {
     /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
     accessor?: CLI['accessor']
     script?: ScriptSource | null
-    runtime?: string | null
+    machine?: string | null
     mcp?: MCPSource | null
   }) {
     this.spec = init.spec
     this.script = init.script ?? null
-    this.runtime = init.runtime ?? null
+    this.machine = init.machine ?? null
     this.mcp = init.mcp ?? null
     this.configModel = init.configModel ?? null
     this.accessor = init.accessor ?? noopAccessor
@@ -130,8 +130,8 @@ function validateCli(cli: CLI): void {
     if (Object.values(cli.handlers).some((handler) => handler.fn !== null)) {
       throw new Error(`cli '${name}': a node takes fn or script, not both`)
     }
-  } else if (cli.runtime !== null) {
-    throw new Error(`cli '${name}': runtime names the entry that runs script; it takes script`)
+  } else if (cli.machine !== null) {
+    throw new Error(`cli '${name}': machine names where script runs; it takes script`)
   }
   const leaves = validateTree(cli.spec, [], new Map())
   const missing = [...leaves].filter((path) => !Object.hasOwn(cli.handlers, path))

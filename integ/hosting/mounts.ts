@@ -84,7 +84,7 @@ export async function startMounts(tenants: string[]) {
     config(tenant: string) {
       return {
         mode: 'exec',
-        runtimes: ['monty', 'workspace'],
+        machines: { py: { provider: 'worker' } },
         mounts: {
           '/work': { vfs: 'ram', mode: 'exec' },
           '/s3': {

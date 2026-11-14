@@ -33,6 +33,7 @@ import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -56,7 +57,7 @@ function runtimeArgWorkspace(): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+      machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
     },
   )
 }
@@ -65,7 +66,7 @@ describe('per-line runtime argument', () => {
   it('rebinds captured stages for the routed line only', async () => {
     const ws = runtimeArgWorkspace()
     try {
-      const routed = await ws.shell('python3 -c "x"', { runtime: 'beta' })
+      const routed = await ws.shell('python3 -c "x"', { machine: 'beta' })
       expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
       const after = await ws.shell('python3 -c "x"')
       expect(DEC.decode(after.stdout)).toBe('ran-alpha\n')
@@ -77,7 +78,7 @@ describe('per-line runtime argument', () => {
   it('nested evals inherit the runtime argument', async () => {
     const ws = runtimeArgWorkspace()
     try {
-      const io = await ws.shell('echo $(python3 -c "x")', { runtime: 'beta' })
+      const io = await ws.shell('echo $(python3 -c "x")', { machine: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
     } finally {
       await ws.close()
@@ -98,7 +99,7 @@ describe('per-line runtime argument', () => {
           },
         }),
       )
-      const io = await ws.shell('nested; python3 -c "x"', { runtime: 'beta' })
+      const io = await ws.shell('nested; python3 -c "x"', { machine: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
     } finally {
       await ws.close()
@@ -108,7 +109,7 @@ describe('per-line runtime argument', () => {
   it('never touches uncaptured stages', async () => {
     const ws = runtimeArgWorkspace()
     try {
-      const io = await ws.shell('echo plain-workspace', { runtime: 'beta' })
+      const io = await ws.shell('echo plain-workspace', { machine: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('plain-workspace\n')
     } finally {
       await ws.close()
@@ -118,11 +119,11 @@ describe('per-line runtime argument', () => {
   it('fails loud on unknown runtimes and the workspace name', async () => {
     const ws = runtimeArgWorkspace()
     try {
-      await expect(ws.shell('python3 -c "x"', { runtime: 'nope' })).rejects.toThrow(
-        /unknown runtime:/,
+      await expect(ws.shell('python3 -c "x"', { machine: 'nope' })).rejects.toThrow(
+        /unknown machine:/,
       )
-      await expect(ws.shell('python3 -c "x"', { runtime: 'workspace' })).rejects.toThrow(
-        /not a runtime you can select/,
+      await expect(ws.shell('python3 -c "x"', { machine: 'workspace' })).rejects.toThrow(
+        /not a machine you can select/,
       )
     } finally {
       await ws.close()
@@ -135,7 +136,7 @@ function routedWorkspace(): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+      machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
       routePolicy: (ctx) => (ctx.line.includes('big') ? 'beta' : null),
     },
   )
@@ -145,7 +146,7 @@ const ROUTE_NODE = [
   'def pre_execute(ctx):',
   '    if any(c["command"] == "node" for c in ctx["commands"]):',
   '        name = open("/route.txt").read().strip()',
-  '        return {"kind": "route", "runtime": name}',
+  '        return {"kind": "route", "machine": name}',
   '',
 ].join('\n')
 
@@ -165,7 +166,7 @@ describe('routing ladder', () => {
   it('runtime argument beats the route', async () => {
     const ws = routedWorkspace()
     try {
-      const io = await ws.shell('python3 -c "big job"', { runtime: 'alpha' })
+      const io = await ws.shell('python3 -c "big job"', { machine: 'alpha' })
       expect(DEC.decode(io.stdout)).toBe('ran-alpha\n')
     } finally {
       await ws.close()
@@ -177,7 +178,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
         routePolicy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       },
     )
@@ -198,7 +199,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha')],
         routePolicy: {
           script: new ScriptSource(
             'def pre_execute(ctx):\n    while True:\n        pass\n',
@@ -240,7 +241,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new MontyRuntime({ captures: [] }), new QuickJsRuntime(), 'workspace'],
+        machines: [new MontyRuntime({ captures: [] }), new QuickJsRuntime()],
         // The runtime name comes from a mounted file; a read that missed
         // would fail the program and the line.
         routePolicy: { script: new ScriptSource(ROUTE_NODE, 'python'), runtime: 'monty' },
@@ -264,7 +265,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha')],
         policies: [
           {
             preExecute: (ctx) =>
@@ -301,7 +302,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
         routePolicy: () => 'beta',
       },
     )
@@ -319,7 +320,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha')],
         routePolicy: (ctx) => {
           calls.push(ctx.line)
           return null
@@ -341,7 +342,7 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
         routePolicy: () => 'beta',
         policies: [
           {
@@ -378,16 +379,16 @@ describe('routing ladder', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
+        machines: [new NamedFakeRuntime('alpha')],
       },
     )
     try {
-      ws.addRuntime(new NamedFakeRuntime('beta'))
+      ws.addMachine('beta', new NamedFakeRuntime('beta'))
       const first = await ws.shell('python3 -c "x"')
       expect(DEC.decode(first.stdout)).toBe('ran-alpha\n')
-      const routed = await ws.shell('python3 -c "x"', { runtime: 'beta' })
+      const routed = await ws.shell('python3 -c "x"', { machine: 'beta' })
       expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
-      expect(() => ws.addRuntime(new NamedFakeRuntime('beta'))).toThrow(/duplicate runtime entry/)
+      expect(() => ws.addMachine('beta', new NamedFakeRuntime('beta'))).toThrow(/duplicate machine/)
     } finally {
       await ws.close()
     }
@@ -396,7 +397,7 @@ describe('routing ladder', () => {
 
 class HeavyOnBeta implements Policy {
   preExecute(ctx: RouteContext): Route | null {
-    return ctx.line.includes('heavy') ? { kind: 'route', runtime: 'beta' } : null
+    return ctx.line.includes('heavy') ? { kind: 'route', machine: 'beta' } : null
   }
 }
 
@@ -406,9 +407,9 @@ class NoSecrets implements Policy {
   }
 }
 
-/** The runtime each top-level command of an explained line would run on. */
-function runtimes(said: ShellExplanation): string[] {
-  return said.node.children.flatMap((node) => ('command' in node ? [node.runtime] : []))
+/** The machine each top-level command of an explained line would run on. */
+function machinesOf(said: ShellExplanation): string[] {
+  return said.node.children.flatMap((node) => ('command' in node ? [node.machine] : []))
 }
 
 function placed(options: Partial<WorkspaceOptions>): Workspace {
@@ -416,7 +417,7 @@ function placed(options: Partial<WorkspaceOptions>): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+      machines: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta')],
       ...options,
     },
   )
@@ -429,7 +430,7 @@ describe('the placement stage', () => {
       expect(DEC.decode((await ws.shell('python3 -c "heavy"')).stdout)).toBe('ran-beta\n')
       expect(DEC.decode((await ws.shell('python3 -c "light"')).stdout)).toBe('ran-alpha\n')
       // The caller's runtime argument is its own placement.
-      const own = await ws.shell('python3 -c "heavy"', { runtime: 'alpha' })
+      const own = await ws.shell('python3 -c "heavy"', { machine: 'alpha' })
       expect(DEC.decode(own.stdout)).toBe('ran-alpha\n')
     } finally {
       await ws.close()
@@ -449,7 +450,7 @@ describe('the placement stage', () => {
         'NoSecrets',
       ])
       // A deny holds whoever placed the line, the caller included.
-      expect((await ws.shell('python3 -c "secret"', { runtime: 'beta' })).exitCode).toBe(126)
+      expect((await ws.shell('python3 -c "secret"', { machine: 'beta' })).exitCode).toBe(126)
       expect(DEC.decode((await ws.shell('python3 -c "x"')).stdout)).toBe('ran-beta\n')
     } finally {
       await ws.close()
@@ -462,7 +463,7 @@ describe('the placement stage', () => {
       const refused = await ws.shell('python3 -c "heavy"')
       expect(refused.exitCode).toBe(126)
       expect(refused.decision?.reason).toBe(
-        'policies place the line on different runtimes: ' +
+        'policies place the line on different machines: ' +
           'RoutePolicy on alpha, HeavyOnBeta on beta',
       )
       expect(DEC.decode((await ws.shell('python3 -c "light"')).stdout)).toBe('ran-alpha\n')
@@ -478,10 +479,10 @@ describe('the placement stage', () => {
     })
     try {
       const heavy = await ws.explain('python3 -c "heavy"')
-      expect(heavy.answers).toEqual([{ kind: 'route', runtime: 'beta', policy: 'RoutePolicy' }])
-      expect([runtimes(heavy), heavy.exitCode]).toEqual([['beta'], 0])
+      expect(heavy.answers).toEqual([{ kind: 'route', machine: 'beta', policy: 'RoutePolicy' }])
+      expect([machinesOf(heavy), heavy.exitCode]).toEqual([['beta'], 0])
       const light = await ws.explain('python3 -c "light"')
-      expect([light.answers, runtimes(light)]).toEqual([[], ['alpha']])
+      expect([light.answers, machinesOf(light)]).toEqual([[], ['alpha']])
       // A placement deny refuses the line in the words the run would
       // print, and places none of it.
       const secret = await ws.explain('python3 -c "secret"; echo x')
@@ -489,7 +490,7 @@ describe('the placement stage', () => {
         { kind: 'deny', reason: 'secrets stay put', policy: 'NoSecrets' },
       ])
       expect([secret.exitCode, secret.stderr]).toEqual([126, 'python3: Permission denied\n'])
-      expect(runtimes(secret)).toEqual(['', ''])
+      expect(machinesOf(secret)).toEqual(['', ''])
     } finally {
       await ws.close()
     }
@@ -526,7 +527,7 @@ describe('workspace runtime overrides', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
+        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
       },
     )
     try {
@@ -547,7 +548,7 @@ describe('workspace runtime overrides', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
+        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
         routePolicy: () => null,
       },
     )
@@ -568,7 +569,7 @@ describe('script context', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: [] })],
+        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: [] })],
       },
     )
     try {
@@ -616,10 +617,7 @@ describe('whole-line runtimes', () => {
     }
     const box = new ReadingBox()
     box.captures = ['@line']
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
     try {
       await ws.vfs.write('/f.txt', 'hi\n')
       const mark = ws.records.length
@@ -658,7 +656,7 @@ describe('whole-line runtimes', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [box, 'workspace'],
+        machines: [box],
         policies: [
           {
             postExecute: (ctx) => {
@@ -709,7 +707,7 @@ describe('whole-line runtimes', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [box, 'workspace'],
+        machines: [box],
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) },
       },
     )
@@ -743,7 +741,7 @@ describe('whole-line runtimes', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new Deaf(), 'workspace'],
+        machines: [new Deaf()],
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) },
       },
     )
@@ -778,10 +776,7 @@ describe('whole-line runtimes', () => {
     }
     const box = new StallingBox()
     box.captures = ['@line']
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
     try {
       await ws.vfs.write('/f.txt', 'hi\n')
       const mark = ws.records.length
@@ -803,10 +798,7 @@ describe('whole-line runtimes', () => {
 
   it('a named capture keeps the pipeline and redirect in Mirage', async () => {
     const box = new LineBox()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
     try {
       const result = await ws.shell('nvidia-smi -L | grep box > /out.txt')
       expect(result.exitCode).toBe(0)
@@ -822,10 +814,7 @@ describe('whole-line runtimes', () => {
   it('an "@line" capture claims any line and stdin arrives', async () => {
     const box = new LineBox()
     box.captures = ['@line']
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
     try {
       const result = await ws.shell('ls / && echo done', { stdin: ENC.encode('fed') })
       expect(DEC.decode(result.stdout)).toBe('box:ls / && echo done')
@@ -842,7 +831,7 @@ describe('whole-line runtimes', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [box, 'workspace'],
+        machines: [box],
         routePolicy: (ctx) => (ctx.line.includes('keep-out') ? 'workspace' : null),
       },
     )
@@ -864,13 +853,13 @@ describe('whole-line runtimes', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [box, 'workspace'],
+        machines: [box],
         routePolicy: () => 'workspace',
       },
     )
     try {
       const refused = await ws.shell('echo hi')
-      const forced = await ws.shell('echo hi', { runtime: 'sandbox' })
+      const forced = await ws.shell('echo hi', { machine: 'sandbox' })
       expect(DEC.decode(refused.stdout)).toBe('hi\n')
       expect(DEC.decode(forced.stdout)).toBe('box:echo hi')
     } finally {
@@ -881,10 +870,7 @@ describe('whole-line runtimes', () => {
   it('a sink receives the line the runtime served', async () => {
     const box = new LineBox()
     box.captures = ['@line']
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
     const console_ = new JobConsole()
     try {
       // The runtime buffers and never touches the sink itself, so
@@ -904,7 +890,7 @@ describe('whole-line runtimes', () => {
     const fallback = new WorkspaceRuntime()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: ['pyodide', fallback] },
+      { mode: MountMode.EXEC, machines: [buildRuntime('pyodide'), fallback] },
     )
     try {
       expect(isLineExecutor(fallback)).toBe(false)

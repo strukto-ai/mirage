@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import pytest
 
 from mirage import Workspace
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode
 from mirage.utils.clock import ManualClock, parse_system_time
 from mirage.vfs.disk.disk import DiskVFS
@@ -31,7 +32,7 @@ def _started(
         mode=MountMode.EXEC,
         clock=clock if clock is not None else ManualClock(1_000_000),
         system_time=system_time,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
 
 

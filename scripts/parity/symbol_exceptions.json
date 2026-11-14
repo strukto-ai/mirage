@@ -1,5 +1,5 @@
 {
- "baseline": 983,
+ "baseline": 981,
  "modules": {
   "secrets/aws": {
    "typescript_only": {
@@ -1715,15 +1715,9 @@
     "isRoute": "A type guard for the Route answer; Python asks isinstance."
    }
   },
-  "runtime/machine/runtime": {
-   "typescript_only": {
-    "MachineOptions": "TypeScript's constructor takes one typed options object; Python takes keyword arguments."
-   }
-  },
   "runtime/table": {
    "typescript_only": {
-    "MACHINE_PROVIDERS": "TypeScript's machine registry fills as packages load, so the hint for a runtimes entry naming a provider lists them here; Python reads the registry's module table.",
-    "MACHINE_KEYS": "A TypeScript object literal swallows a typo key, so the entry options are checked by hand; Python's keyword arguments raise TypeError on one."
+    "placeRuntime": "Cloudflare runs Monty inside its isolate, so its package moves monty from a worker to an in_process machine; Python's Monty always runs on a worker."
    }
   },
   "server/routers/machines": {

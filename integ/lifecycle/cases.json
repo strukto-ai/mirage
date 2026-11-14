@@ -731,16 +731,14 @@
     {
       "id": "cli-registration-runtime-switch-and-removal",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -761,8 +759,11 @@
           }
         },
         {
-          "op": "add_runtime",
+          "op": "add_machine",
           "name": "monty",
+          "machine": {
+            "provider": "worker"
+          },
           "expect": {
             "value": "monty"
           }
@@ -774,7 +775,7 @@
             "source": "print('python', argv[0], argv[1])",
             "language": "python"
           },
-          "runtime": "monty"
+          "machine": "monty"
         },
         {
           "op": "exec",
@@ -866,7 +867,7 @@
             "source": "console.log('js', scriptArgs[0], scriptArgs[1]);",
             "language": "js"
           },
-          "runtime": "quickjs"
+          "machine": "quickjs"
         },
         {
           "op": "exec",
@@ -874,13 +875,17 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "unknown runtime"
+              "stderr_contains": "unknown machine"
             }
           }
         },
         {
-          "op": "add_runtime",
+          "op": "add_machine",
           "name": "quickjs",
+          "machine": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          },
           "expect": {
             "value": "quickjs"
           }
@@ -897,10 +902,14 @@
           }
         },
         {
-          "op": "add_runtime",
+          "op": "add_machine",
           "name": "quickjs",
+          "machine": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          },
           "expect": {
-            "error": "duplicate runtime entry"
+            "error": "duplicate machine"
           }
         },
         {
@@ -925,7 +934,7 @@
             "source": "print('back', argv[1])",
             "language": "python"
           },
-          "runtime": "monty"
+          "machine": "monty"
         },
         {
           "op": "exec",
@@ -949,7 +958,7 @@
             "source": "console.log('wrong')",
             "language": "js"
           },
-          "runtime": "monty"
+          "machine": "monty"
         },
         {
           "op": "exec",
@@ -989,7 +998,7 @@
           "name": "probe"
         },
         {
-          "op": "runtimes",
+          "op": "machines",
           "expect": {
             "value": [
               "workspace",
@@ -1005,7 +1014,7 @@
             "source": "print('kept', argv[1])",
             "language": "python"
           },
-          "runtime": "monty"
+          "machine": "monty"
         },
         {
           "op": "exec",
@@ -1019,11 +1028,11 @@
           }
         },
         {
-          "op": "remove_runtime",
+          "op": "remove_machine",
           "name": "monty"
         },
         {
-          "op": "runtimes",
+          "op": "machines",
           "expect": {
             "value": [
               "workspace",
@@ -1048,27 +1057,30 @@
           "expect": {
             "value": {
               "exit_code": 127,
-              "stderr_contains": "unknown runtime"
+              "stderr_contains": "unknown machine"
             }
           }
         },
         {
-          "op": "remove_runtime",
+          "op": "remove_machine",
           "name": "monty",
           "expect": {
-            "error": "no runtime entry: 'monty'"
+            "error": "no machine: 'monty'"
           }
         },
         {
-          "op": "remove_runtime",
+          "op": "remove_machine",
           "name": "workspace",
           "expect": {
-            "error": "cannot remove the workspace runtime"
+            "error": "cannot remove the workspace machine"
           }
         },
         {
-          "op": "add_runtime",
+          "op": "add_machine",
           "name": "monty",
+          "machine": {
+            "provider": "worker"
+          },
           "expect": {
             "value": "monty"
           }
@@ -1115,16 +1127,14 @@
     {
       "id": "coded-policy-registration-removal-and-warm-reads",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -1306,16 +1316,14 @@
     {
       "id": "profile-policy-runtime-switch-and-cache-invalidation",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -1578,17 +1586,18 @@
     {
       "id": "mount-mode-transitions-preserve-data-and-session-caps",
       "settings": {
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -1787,16 +1796,14 @@
     {
       "id": "test-w-answers-what-a-write-meets",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -1882,16 +1889,14 @@
     {
       "id": "live-hide-patterns-session-isolation-and-state",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -2182,16 +2187,14 @@
     {
       "id": "closed-workspace-rejects-lifecycle-mutations",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/work": {
             "vfs": "ram",
             "config": {}
           }
-        },
-        "runtimes": [
-          "workspace"
-        ]
+        }
       },
       "steps": [
         {
@@ -2201,7 +2204,7 @@
             "source": "print('installed')",
             "language": "python"
           },
-          "runtime": "monty"
+          "machine": "monty"
         },
         {
           "op": "close"
@@ -2225,14 +2228,17 @@
           }
         },
         {
-          "op": "add_runtime",
+          "op": "add_machine",
           "name": "monty",
+          "machine": {
+            "provider": "worker"
+          },
           "expect": {
             "error": "Workspace is closed"
           }
         },
         {
-          "op": "remove_runtime",
+          "op": "remove_machine",
           "name": "monty",
           "expect": {
             "error": "Workspace is closed"
@@ -3269,13 +3275,13 @@
     {
       "id": "top_level_line_respects_host_spawn_process_cap",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3330,14 +3336,14 @@
     {
       "id": "cpu_arithmetic_cancels_before_tail_write",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3373,14 +3379,14 @@
     {
       "id": "cpu_nested_eval_cancels_before_tail_write",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3416,14 +3422,14 @@
     {
       "id": "cpu_pipeline_cancels_before_tail_write",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3459,14 +3465,14 @@
     {
       "id": "background_nested_eval_survives_foreground_abort",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3506,14 +3512,14 @@
     {
       "id": "cpu_work_yields_to_an_independent_session",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3558,14 +3564,14 @@
     {
       "id": "per_call_env_and_cwd_stay_with_the_call",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3668,14 +3674,14 @@
     {
       "id": "concurrent_lines_keep_their_writes_and_failures",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3759,14 +3765,14 @@
     {
       "id": "sessions_meet_and_run_their_own_exit_traps",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3851,14 +3857,14 @@
     {
       "id": "job_output_after_a_line_comes_first_in_the_next",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3899,14 +3905,14 @@
     {
       "id": "aborted_redirect_still_takes_its_jobs_output",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -3947,14 +3953,14 @@
     {
       "id": "noisy_job_does_not_hold_back_a_streamed_line",
       "settings": {
+        "machines": {},
         "mode": "write",
         "mounts": {
           "/data": {
             "vfs": "ram",
             "mode": "write"
           }
-        },
-        "runtimes": []
+        }
       },
       "steps": [
         {
@@ -4099,6 +4105,218 @@
               "exit_code": 127,
               "stdout": "",
               "stderr": "environment: line 1: late: command not found\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sourced_function_keeps_its_file_after_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "echo 'f() { echo \"${BASH_SOURCE[0]}\"; }' >/data/defs; source /data/defs",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "unset -f f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/defs\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/defs\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "globignore_keeps_saved_dotglob_after_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cd /data; touch .dot keep skip; GLOBIGNORE=skip; shopt -u dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "keep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "shopt -s dotglob",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; shopt dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "dotglob        \toff\nkeep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; shopt dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "dotglob        \toff\nkeep\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "globignore_dotglob_from_the_last_line_survives_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cd /data; touch .dot keep skip",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "GLOBIGNORE=skip",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "shopt -u dotglob",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": ".dot keep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": ".dot keep\n",
+              "stderr": ""
             }
           }
         }

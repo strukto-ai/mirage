@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { BytePipe } from '../../io/pipe.ts'
 import { currentCaller, type RedirectResult, runWithCaller } from '../../context/session_context.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
@@ -69,14 +70,21 @@ export class StatementRecorder extends Recorder {
     super()
   }
 
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    if (
-      this.sink !== null &&
-      this.chunks.length === 0 &&
+  private forward(): JobConsole | null {
+    return this.chunks.length === 0 &&
       this.session.execStdout === null &&
       this.session.execStderr === null
-    )
-      await this.sink.emit(channel, data)
+      ? this.sink
+      : null
+  }
+
+  override pipeFor(channel: Channel): BytePipe | null {
+    return this.forward()?.pipeFor(channel) ?? null
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    const sink = this.forward()
+    if (sink !== null) await sink.emit(channel, data)
     else await super.emit(channel, data)
   }
 }

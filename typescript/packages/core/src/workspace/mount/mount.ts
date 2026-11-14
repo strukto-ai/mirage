@@ -372,7 +372,7 @@ function treeRoot(
 /**
  * The command a mount registers for a command tree: its root, under the
  * tree's name. The tree runs on the mount's accessor, so it declares none of
- * an installation's own: no config, no accessor, no script, no runtime.
+ * an installation's own: no config, no accessor, no script, no machine.
  * Mirrors Python's `_tree_command`.
  */
 function treeCommand(cli: CLI): Command {
@@ -381,7 +381,7 @@ function treeCommand(cli: CLI): Command {
     ['configModel', cli.configModel !== null],
     ['accessor', cli.accessor !== noopAccessor],
     ['script', cli.script !== null],
-    ['runtime', cli.runtime !== null],
+    ['machine', cli.machine !== null],
   ] as const) {
     if (own) {
       throw new Error(

@@ -59,7 +59,6 @@ export interface ProcessResponse {
   command: string
   cwd: string
   machine: ProcessMachineResponse
-  runtime: string | null
   machine_pid: MachinePidResponse | null
   state: string
   started_at: Instant
@@ -99,7 +98,6 @@ export function toResponse(record: Process, ws: Workspace): ProcessResponse {
     command: record.command,
     cwd: record.cwd.virtual,
     machine: machineResponse(ws, record),
-    runtime: record.runtime,
     machine_pid:
       record.machinePid === null
         ? null

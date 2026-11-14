@@ -9,10 +9,12 @@
     {
       "id": "exit_status",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -39,10 +41,12 @@
     {
       "id": "exit_wrap",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -69,10 +73,12 @@
     {
       "id": "traceback_source",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -99,10 +105,12 @@
     {
       "id": "sleep_deadline",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -128,10 +136,12 @@
     {
       "id": "rights",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -158,10 +168,12 @@
     {
       "id": "path_spelling",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -196,10 +208,12 @@
     {
       "id": "reader_refresh",
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",

@@ -34,8 +34,8 @@ class Process:
     """One managed runner, as every instance on its store reads it: not
     an OS process or a shell job number. Its machine is where its
     program runs, ``machine_instance`` what its provider called it then,
-    and its runtime what Mirage runs it with; a native program's own pid
-    there is ``machine_pid``, and the letter ``ps``
+    and ``program`` whether a runtime started it there; a native program's
+    own pid there is ``machine_pid``, and the letter ``ps``
     shows for what it is doing, when something knows, is ``shown_state``,
     and what the last scan read of its use of the machine ``usage``.
 
@@ -62,7 +62,7 @@ class Process:
     cwd: PathSpec
     machine: MachineName
     started_at: float
-    runtime: str | None = None
+    program: bool = False
     machine_pid: MachinePid | None = None
     state: ProcessState = ProcessState.RUNNING
     ended_at: float | None = None
@@ -86,7 +86,7 @@ class Process:
     @property
     def is_program(self) -> bool:
         """Whether it is a program on a machine, not Mirage's own."""
-        return self.runtime is not None or self.machine_pid is not None
+        return self.program or self.machine_pid is not None
 
     @property
     def shown_pid(self) -> int:

@@ -259,7 +259,7 @@ def workspace(runtime, hide=(), modes=None, **options):
         },
         mode=MountMode.WRITE,
         profiles={"agent": profile},
-        **on(runtime, "workspace"),
+        **on(runtime),
         **options,
     )
 
@@ -428,7 +428,7 @@ async def test_ssh_leaves_the_machine_its_own_tmp():
     ws = Workspace(
         {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
         mode=MountMode.WRITE,
-        **on(sandbox, "workspace"),
+        **on(sandbox),
     )
     assert (await ws.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data"]
@@ -448,7 +448,7 @@ async def test_ssh_refuses_a_line_while_the_session_restricts_tmp():
         {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
         mode=MountMode.WRITE,
         profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
-        **on(sandbox, "workspace"),
+        **on(sandbox),
     )
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -705,7 +705,7 @@ async def test_another_machine_entrys_live_sshfs_on_the_sandbox_is_refused():
         {"/": RAMVFS(), "/data": RAMVFS()},
         mode=MountMode.WRITE,
         workspace_id="w1",
-        **{**on(first), "machines": {"box": first, "box2": second}},
+        machines={**on(first)["machines"], **on(second)["machines"]},
     )
     assert (await ws.shell("python3 job.py")).exit_code == 0
     mounted = dict(first.table)
@@ -1363,7 +1363,7 @@ async def test_a_line_is_refused_once_the_sandboxs_own_tmp_is_gone(mount_type):
     ws = Workspace(
         {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
         mode=MountMode.WRITE,
-        **on(sandbox, "workspace"),
+        **on(sandbox),
     )
     assert (await ws.shell("python3 job.py")).exit_code == 0
     del sandbox.table["/tmp"]

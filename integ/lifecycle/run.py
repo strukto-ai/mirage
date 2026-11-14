@@ -287,13 +287,13 @@ class RulePolicy(Policy):
 
 def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
     """Each policy answer as a case pins it: its kind, who gave it, its
-    reason and the runtime a route names."""
+    reason and the machine a route names."""
     return [
         {
             "kind": a.kind,
             "policy": a.policy,
             "reason": a.reason,
-            **({"runtime": a.runtime} if isinstance(a, Route) else {}),
+            **({"machine": a.machine} if isinstance(a, Route) else {}),
         }
         for a in answers
     ]
@@ -319,7 +319,7 @@ def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
                 "command": c.command,
                 "outcome": c.outcome.value,
                 "answers": answered(c.answers),
-                "runtime": c.runtime,
+                "machine": c.machine,
             }
             for c in commands_of(expl.node)
         ],
@@ -452,7 +452,7 @@ async def action(
             CLI(
                 spec=CommandSpec(name=step["name"]),
                 script=ScriptSource(**step["script"]),
-                runtime=step.get("runtime"),
+                machine=step.get("machine"),
             ),
             step.get("config"),
         )
@@ -478,12 +478,12 @@ async def action(
         await ws.unregister_cli(step["name"])
     elif op == "clis":
         return sorted(ws.clis())
-    elif op == "add_runtime":
-        return ws.add_runtime(step["name"]).name
-    elif op == "remove_runtime":
-        await ws.remove_runtime(step["name"])
-    elif op == "runtimes":
-        return [entry.name for entry in ws.runtimes()]
+    elif op == "add_machine":
+        return ws.add_machine(step["name"], step["machine"]).name
+    elif op == "remove_machine":
+        await ws.remove_machine(step["name"])
+    elif op == "machines":
+        return [entry.name for entry in ws.engines()]
     elif op == "register_policy":
         if step["id"] in policies:
             raise ValueError("policy already registered")

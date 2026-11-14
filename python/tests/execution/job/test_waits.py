@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage.execution.job import JobTable, JobWaits
+from mirage.execution.job.waits import Hold
 from mirage.io import IOResult
 from mirage.shell.console import Channel, JobConsole, JobOutput
 from mirage.workspace.types import ExecutionNode
@@ -35,11 +36,17 @@ async def test_join_outlasts_every_job_including_ones_added_meanwhile():
         return IOResult(), ExecutionNode(command="late", exit_code=0)
 
     async def first(job):
-        waits.add(await table.submit("late", late, cwd="/"))
+        waits.add(
+            (await table.submit("late", late, cwd="/")).console.wait_finished,
+            frozenset({"&1"}),
+        )
         finished.append("first")
         return IOResult(), ExecutionNode(command="first", exit_code=0)
 
-    waits.add(await table.submit("first", first, cwd="/"))
+    waits.add(
+        (await table.submit("first", first, cwd="/")).console.wait_finished,
+        frozenset({"&1"}),
+    )
     joined = asyncio.create_task(waits.join(JobConsole()))
     await asyncio.sleep(0.01)
     assert not joined.done()
@@ -66,3 +73,34 @@ async def test_what_the_other_jobs_write_goes_to_the_caller_once_it_ends():
     await JobWaits(capture).join(rest)
     await capture.emit(Channel.STDERR, b"late")
     assert await rest.snapshot(Channel.STDERR) == b"late"
+
+
+@pytest.mark.asyncio
+async def test_join_lets_go_of_a_child_that_closed_what_led_into_it():
+    waits = JobWaits(JobOutput(JobConsole()))
+    never = asyncio.Event()
+    hold = waits.add(never.wait, frozenset({"&1"}))
+    joined = asyncio.create_task(waits.join(JobConsole()))
+    hold.settle({"&1", "&2"})
+    await asyncio.sleep(0.01)
+    assert not joined.done()
+    hold.settle({"/dev/null", "&2"})
+    await asyncio.wait_for(joined, 5)
+
+
+def test_a_hold_stays_while_a_copy_still_names_the_stream():
+    hold = Hold(frozenset({"&1"}))
+    hold.settle({"/dev/null", "&2", "&1"})
+    assert not hold.released.is_set()
+
+
+@pytest.mark.asyncio
+async def test_join_fails_when_waiting_for_a_child_fails():
+    waits = JobWaits(JobOutput(JobConsole()))
+
+    async def broken() -> None:
+        raise ConnectionError("store lost")
+
+    waits.add(broken, frozenset({"&1"}))
+    with pytest.raises(ConnectionError):
+        await asyncio.wait_for(waits.join(JobConsole()), 5)

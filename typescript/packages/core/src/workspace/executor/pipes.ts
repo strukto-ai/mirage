@@ -28,7 +28,7 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
-import { SIGPIPE_STATUS } from '../../shell/constants.ts'
+import { FD_STDIN, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import type { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { type JobTable, JobWaits } from '../../execution/job/index.ts'
@@ -45,7 +45,7 @@ import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
 import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { carried, ended, isUnwinding } from './control.ts'
+import { carried, ended, isUnwinding, LoopSignal } from './control.ts'
 import {
   handleBackground,
   oneProgram,
@@ -128,17 +128,29 @@ export async function handlePipe(
   let failed = false
   const tasks: Promise<void>[] = []
   const stages: (ProcessHandle | null)[] = commands.map(() => null)
+  // The `break` or `continue` the last stage, run in this shell, unwound
+  // with: it goes on past the pipeline once the other stages end, with what
+  // they wrote, as bash waits for them; a `return` or `exit` there leaves at
+  // once.
+  const unwinding: LoopSignal[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
     // program it runs right now (`runProgram`).
-    const childEvaluation = childContext(context)
+    const inParent =
+      i === commands.length - 1 &&
+      session.shopts.lastpipe === true &&
+      session.shellOptions.monitor !== true &&
+      currentCaller().process?.pipeline !== true
+    const childEvaluation = inParent ? context : childContext(context)
     const stopped = new AbortController()
     const stops = mergeSignals(abort.signal, stopped.signal) ?? abort.signal
     const child = childEvaluation.session
-    inheritTraps(child)
-    child.terminalOutput = session.terminalOutput && i === commands.length - 1
-    childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
+    if (!inParent) {
+      inheritTraps(child)
+      child.terminalOutput = session.terminalOutput && i === commands.length - 1
+      childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
+    }
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
@@ -147,7 +159,9 @@ export async function handlePipe(
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
-      const stageStack = (callStack ?? new CallStack()).fork(true, simpleCommand(cmd) ? null : true)
+      const stageStack = inParent
+        ? callStack
+        : (callStack ?? new CallStack()).fork(true, simpleCommand(cmd) ? null : true)
       // A job a stage before the last starts writes into the pipe, and
       // the reader sees end of input only once the job has closed it.
       const waits =
@@ -164,21 +178,36 @@ export async function handlePipe(
         child.jobWaits = waits
       }
       const rest = session.jobOutput ?? session.tty.jobs
+      // bash dups the pipe onto its own fd 0 for the stage it runs itself and
+      // puts fd 0 back after, so an `exec <` there ends with the stage; the
+      // input it replaced stays open till then.
+      const fd0 = {
+        execStdin: session.execStdin,
+        execStdinUnreadable: session.execStdinUnreadable,
+        execStdinIdentity: session.execStdinIdentity,
+      }
+      const descriptor = session.descriptors.get(FD_STDIN)
+      const borrowed = session.borrowed
+      if (inParent && session.execStdin !== null)
+        session.borrowed = [...borrowed, session.execStdin]
       try {
-        const [stdout, result, execution] = await endShell(
-          executeFn,
-          child,
-          input,
-          stageStack,
-          runProgram(cmd, childEvaluation, async () => {
-            const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
-              sink: output,
-              signal: stops,
-            })
-            await pump(output, Channel.STDOUT, out, ran)
-            return [null, ran, node]
-          }),
-        )
+        const statement = async (): Promise<RedirectResult> => {
+          const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
+            sink: output,
+            signal: stops,
+          })
+          await pump(output, Channel.STDOUT, out, ran)
+          return [null, ran, node]
+        }
+        const [stdout, result, execution] = inParent
+          ? await statement()
+          : await endShell(
+              executeFn,
+              child,
+              input,
+              stageStack,
+              runProgram(cmd, childEvaluation, statement),
+            )
         io = result
         childExec = execution
         await pump(output, Channel.STDOUT, stdout, io)
@@ -187,6 +216,12 @@ export async function handlePipe(
       } catch (error) {
         if (error instanceof PipeClosed) {
           io.exitCode = SIGPIPE_STATUS
+        } else if (isUnwinding(error) && inParent) {
+          if (!(error instanceof LoopSignal)) {
+            const stderr = await output.snapshot(Channel.STDERR)
+            throw await carried(error, null, new IOResult({ stderr }))
+          }
+          unwinding.push(error)
         } else if (isUnwinding(error)) {
           // A stage is a subshell: whatever unwinds ends it there, a simple
           // command the top shell forked as that shell would.
@@ -209,12 +244,19 @@ export async function handlePipe(
         ios[i] = io
         childNodes[i] = childExec
         if (failed) await discardIo(io)
-        await child.closeInputs()
+        if (inParent) {
+          const left = session.openInputs()
+          Object.assign(session, fd0)
+          if (descriptor === undefined) session.descriptors.delete(FD_STDIN)
+          else session.descriptors.set(FD_STDIN, descriptor)
+          session.borrowed = borrowed
+          await session.releaseInputs(left)
+        } else await child.closeInputs()
       }
     }
     const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
-    if (processes === undefined) return isolated()
+    if (inParent || processes === undefined) return isolated()
     const process = startShell(
       processes,
       session,
@@ -275,6 +317,11 @@ export async function handlePipe(
       // line reads on from it.
       await discardStreams(lastStdout, stdin === session.execStdin ? null : stdin)
     }
+  }
+  const [unwound] = unwinding
+  if (unwound !== undefined) {
+    const stderr = concat(await Promise.all(ios.map((io) => materialize(io.stderr))))
+    throw await carried(unwound, lastStdout, new IOResult({ stderr }))
   }
 
   const lastIo = ios[ios.length - 1] ?? new IOResult()

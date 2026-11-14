@@ -46,7 +46,6 @@ from mirage.io.network import (
     run_with_network,
 )
 from mirage.machine.handle import MachineHandle
-from mirage.machine.registry import build_machine
 from mirage.policy.constants import METHODS
 from mirage.policy.profile import (
     ProfilePolicy,
@@ -56,7 +55,7 @@ from mirage.policy.profile import (
 from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import NAMED, build_runtime
+from mirage.runtime.table import build_entry
 from mirage.runtime.types import Language, ScriptSource
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.sources import (
@@ -76,7 +75,7 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.clock import parse_system_time
-from mirage.utils.loader import load_attr, optional_attr
+from mirage.utils.loader import optional_attr
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
 from mirage.vfs.registry import build_vfs
@@ -337,9 +336,9 @@ class CLIBlock(BaseModel):
     The section key is the installed head word. Exactly one handler
     source: ``cli`` names a registered spec tree; ``script`` references
     a program file whose content is embedded at load (the docker
-    build-context model). ``runtime`` optionally pins the world runtime
-    entry that runs the script; unset picks the first entry speaking
-    the script's language. ``config`` validates through the spec's
+    build-context model). ``machine`` optionally pins the machine whose
+    engine runs the script; unset picks the first one speaking the
+    script's language. ``config`` validates through the spec's
     ``config_model`` at install time (fail loud). A CLI never takes a
     mode and never shares a mount's credentials: a binary has no mode,
     the credential does.
@@ -349,16 +348,16 @@ class CLIBlock(BaseModel):
 
     cli: str | None = None
     script: str | None = None
-    runtime: str | None = None
+    machine: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _v_handler(self) -> "CLIBlock":
         if (self.cli is None) == (self.script is None):
             raise ValueError("a clis entry takes exactly one of cli or script")
-        if self.runtime is not None and self.script is None:
+        if self.machine is not None and self.script is None:
             raise ValueError(
-                "runtime pins the script's runtime; it takes script"
+                "machine pins where the script runs; it takes script"
             )
         # A pointer may only fill a config that a model validates,
         # because the model is what a snapshot redacts by. A script's
@@ -533,13 +532,11 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     route = raw.get("route_policy")
     if isinstance(route, dict):
         _absolutize_script_key(route, base)
-    runtimes = raw.get("runtimes")
-    if isinstance(runtimes, list):
-        for i, entry in enumerate(runtimes):
-            if isinstance(entry, dict):
-                _absolutize_code_ref(entry, "name", base)
-            elif isinstance(entry, str):
-                runtimes[i] = _rebase_code_ref(entry, base)
+    machines = raw.get("machines")
+    if isinstance(machines, dict):
+        for block in machines.values():
+            if isinstance(block, dict):
+                _absolutize_code_ref(block, "runtime", base)
     clis = raw.get("clis")
     if isinstance(clis, dict):
         for block in clis.values():
@@ -587,7 +584,7 @@ def _absolutize_code_ref(entry: dict[str, Any], key: str, base: Path) -> None:
     """Rebase a path-form colon reference under ``key``.
 
     ``cli: ./tool.py:TREE``, ``vfs: ./wiki.py:WikiVFS`` and a
-    runtime entry's ``name: ./box.py:EchoBox`` all mean "next to the
+    machine's ``runtime: ./box.py:EchoBox`` all mean "next to the
     config file", the same build-context rule ``script:`` follows;
     without this the pointer reaches ``load_attr`` relative and resolves
     against the server process's cwd. A module dotpath (``pkg.mod:TREE``)
@@ -596,10 +593,10 @@ def _absolutize_code_ref(entry: dict[str, Any], key: str, base: Path) -> None:
     what a path is.
 
     Args:
-        entry (dict[str, Any]): a ``clis``, ``mounts`` or ``runtimes``
+        entry (dict[str, Any]): a ``clis``, ``mounts`` or ``machines``
             mapping entry, mutated in place.
         key (str): the field holding the reference, ``cli``,
-            ``vfs`` or ``name``.
+            ``vfs`` or ``runtime``.
         base (Path): directory containing the config file.
     """
     ref = entry.get(key)
@@ -611,9 +608,7 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
     """``ref`` with a relative path-form source rebased onto ``base``.
 
     Anything that is not a relative path-form reference (a bare name, a
-    module dotpath, an absolute path) comes back unchanged, so the bare
-    string runtime entry (``- ./box.py:EchoBox`` beside ``- monty``) reads
-    the same way the keyed forms do.
+    module dotpath, an absolute path) comes back unchanged.
 
     Args:
         ref (str): a config value that may be a ``source:attr`` reference.
@@ -629,100 +624,31 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
     return f"{base / source}:{attr}"
 
 
-def _load_runtime_class(ref: str) -> type[Runtime[Any]]:
-    """Load the ``Runtime`` subclass a ``source:Class`` reference names.
-
-    The runtime twin of the ``vfs:`` and ``cli:`` reference forms:
-    a deployment ships a runtime as a file and names it from yaml with no
-    host program calling ``register_runtime``. The class is constructed
-    with the uniform ``(captures, config)`` options like a builtin, so
-    the entry's other keys reach it unchanged.
-
-    Args:
-        ref (str): ``./box.py:EchoBox`` or ``pkg.mod:EchoBox``.
-
-    Raises:
-        ValueError: the reference does not load, or names something
-            that is not a ``Runtime`` subclass.
-    """
-    loaded = load_attr(ref)
-    if not (isinstance(loaded, type) and issubclass(loaded, Runtime)):
-        raise ValueError(f"{ref!r} is not a Runtime subclass")
-    return loaded
-
-
-def _build_runtime_entries(
-    entries: list[str | dict[str, Any]],
-    secrets: tuple[tuple[str, ...], ...] = (),
-) -> list["Runtime[Any] | str"]:
-    """Turn config runtime entries into workspace runtime entries.
-
-    Args:
-        entries (list[str | dict[str, Any]]): names, or maps carrying a
-            name plus the uniform runtime options (``captures``,
-            ``config``). A name is a registered runtime or a
-            ``source:Class`` reference to a ``Runtime`` subclass.
-        secrets (tuple[tuple[str, ...], ...]): per entry, the values its
-            config read from a secret, which a refusal of it masks.
-
-    Raises:
-        ValueError: a map entry without a name, or a reference that is
-            not a ``Runtime`` subclass.
-    """
-    out: list[Runtime[Any] | str] = []
-    for i, entry in enumerate(entries):
-        if isinstance(entry, str):
-            out.append(_load_runtime_class(entry)() if ":" in entry else entry)
-            continue
-        options = dict(entry)
-        name = options.pop("name", None)
-        if not isinstance(name, str) or not name:
-            raise ValueError("runtime entry needs a non-empty 'name'")
-        if "machine" in options and name in NAMED and name != "remote":
-            raise ValueError(
-                f"runtime {name!r} runs on the workspace's machine; a"
-                " machine takes the remote runtime"
-            )
-        try:
-            out.append(
-                _load_runtime_class(name)(**options)
-                if ":" in name
-                else build_runtime(name, **options)
-            )
-        except Exception as exc:
-            # A check that quotes the value it refused would hand back a
-            # secret the config read, and the create route answers this
-            # message as its detail. The chain is cut for the same reason.
-            masked = mask_values(
-                str(exc), secrets[i] if i < len(secrets) else ()
-            )
-            if masked == str(exc):
-                raise
-            raise ValueError(masked) from None
-    return out
-
-
 def _build_machines(
     machines: dict[str, dict[str, Any]],
     secrets: dict[str, tuple[str, ...]],
-) -> dict[str, MachineHandle]:
-    """Turn the ``machines:`` block into each machine's handle.
+) -> dict[str, MachineHandle | Runtime[Any]]:
+    """Turn the ``machines:`` block into each machine: its handle, or
+    the engine an engine provider runs.
 
     Args:
         machines (dict[str, dict[str, Any]]): each entry by name: its
-            ``provider`` and how to reach it.
+            ``provider``, what it captures and how to reach it.
         secrets (dict[str, tuple[str, ...]]): per machine, the values
             its entry read from a secret, which a refusal of it masks.
 
     Raises:
-        ValueError: an entry no provider builds.
+        ValueError: an entry ``build_entry`` refuses.
     """
-    out: dict[str, MachineHandle] = {}
+    out: dict[str, MachineHandle | Runtime[Any]] = {}
     for name, entry in machines.items():
         try:
-            out[name] = build_machine(name, entry)
+            handle, runtime = build_entry(name, entry)
+            out[name] = runtime if handle is None else handle
         except Exception as exc:
-            # As a runtime entry's: the message must not quote a secret.
+            # A check that quotes the value it refused would hand back a
+            # secret the config read, and the create route answers this
+            # message as its detail. The chain is cut for the same reason.
             masked = mask_values(str(exc), secrets.get(name, ()))
             if masked == str(exc):
                 raise
@@ -746,7 +672,7 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
         return CLI(
             spec=CommandSpec(name=name),
             script=_load_script_source(block.script),
-            runtime=block.runtime,
+            machine=block.machine,
         )
     if block.cli is None:
         raise ValueError(f"clis entry {name!r} takes cli or script")
@@ -775,17 +701,11 @@ class WorkspaceConfig(BaseModel):
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
-    # The workspace's ordered runtime world: name strings or maps
-    # with a name plus the uniform runtime options ({name: wasi,
-    # config: {home: /opt/...}}). Unset = the default world, the
-    # workspace runtime alone.
-    runtimes: list[str | dict[str, Any]] | None = None
-    # Per runtime entry, the values `resolve_secrets` read into its
-    # config, which a refusal of it masks.
-    _runtime_secrets: tuple[tuple[str, ...], ...] = PrivateAttr(default=())
-    # The machines programs run on, by name: each a provider plus how to
-    # reach it ({provider: docker, container: tools}). A remote runtime
-    # entry's `machine` names one. Unset = none.
+    # The machines commands run on, by name, in capture order: each a
+    # provider, what it captures and how to reach it ({provider: docker,
+    # container: tools, captures: ["@external"]}, {provider: worker,
+    # captures: ["@python"]}). Unset = none: the workspace runs every
+    # command itself.
     machines: dict[str, dict[str, Any]] | None = None
     # Per machine, the values `resolve_secrets` read into its entry,
     # which a refusal of it masks.
@@ -794,7 +714,7 @@ class WorkspaceConfig(BaseModel):
     )
     # The route policy, a program the way a profile's policy names one:
     # {script: route.py, runtime: monty}. The script is embedded at load;
-    # it prints {"kind": "route", "runtime": ...} to place a line, or
+    # it prints {"kind": "route", "machine": ...} to place a line, or
     # nothing to leave each command on its first capturer.
     route_policy: ProfilePolicy | None = None
     # The permission documents: one profile per name. A profile is the whole
@@ -988,10 +908,6 @@ class WorkspaceConfig(BaseModel):
             kwargs["machines"] = _build_machines(
                 self.machines, self._machine_secrets
             )
-        if self.runtimes is not None:
-            kwargs["runtimes"] = _build_runtime_entries(
-                self.runtimes, self._runtime_secrets
-            )
         if self.route_policy is not None:
             kwargs["route_policy"] = _load_program(self.route_policy)
         if self.profiles is not None:
@@ -1142,30 +1058,15 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
     )
 
 
-def _runtime_config(entry: str | dict[str, Any]) -> dict[str, Any] | None:
-    """The config mapping of one ``runtimes:`` entry, if it has one.
-
-    A name, or an entry whose config is not a mapping, has none: it is
-    left as given for :func:`build_runtime` to build or refuse.
-
-    Args:
-        entry (str | dict[str, Any]): the entry as the config holds it.
-    """
-    if isinstance(entry, str):
-        return None
-    config = entry.get("config")
-    return config if isinstance(config, dict) else None
-
-
 async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
-    """A config with every mount, CLI and runtime pointer replaced by its secret.
+    """A config with every mount, CLI and machine pointer replaced by its secret.
 
     The async half of the YAML loader, and the reason
     :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
-    `{from, ref, key}` in `mounts.*.config`, `clis.*.config`, a
-    `runtimes` entry's `config` or a `machines` entry is fetched here, so
-    `build_vfs`, `build_runtime` and `build_machine` receive the
-    credential itself and no VFS config, runtime, machine, client or
+    `{from, ref, key}` in `mounts.*.config`, `clis.*.config` or a
+    `machines` entry is fetched here, so `build_vfs` and `build_entry`
+    receive the credential itself and no VFS config, engine, machine,
+    client or
     backend learns that this plane exists. Mirrors
     the TypeScript `configToWorkspaceArgs`, which does the same thing
     inline because it is async already.
@@ -1185,10 +1086,8 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
         SecretsError: a source could not answer, or answered without
             the wanted field.
     """
-    runtimes = [_runtime_config(entry) for entry in config.runtimes or []]
     configs = [block.config for block in config.mounts.values()]
     configs += [block.config for block in (config.clis or {}).values()]
-    configs += [c for c in runtimes if c is not None]
     configs += list((config.machines or {}).values())
     sources = await resolve_sources_for(config.secrets, configs)
     mounts = {
@@ -1213,20 +1112,6 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             )
             for name, block in config.clis.items()
         }
-    secrets: list[tuple[str, ...]] = []
-    if config.runtimes is not None:
-        entries: list[str | dict[str, Any]] = []
-        for entry, raw in zip(config.runtimes, runtimes, strict=True):
-            if isinstance(entry, str) or raw is None:
-                entries.append(entry)
-                secrets.append(())
-                continue
-            read = await resolve_config_secrets(
-                raw, sources, f"runtimes.{entry.get('name')}.config"
-            )
-            entries.append({**entry, "config": read})
-            secrets.append(tuple(fetched_values(raw, read)))
-        update["runtimes"] = entries
     held: dict[str, tuple[str, ...]] = {}
     if config.machines is not None:
         machines: dict[str, dict[str, Any]] = {}
@@ -1238,8 +1123,6 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             held[name] = tuple(fetched_values(raw, read))
         update["machines"] = machines
     resolved = config.model_copy(update=update)
-    if any(secrets):
-        resolved._runtime_secrets = tuple(secrets)
     if any(held.values()):
         resolved._machine_secrets = held
     return resolved

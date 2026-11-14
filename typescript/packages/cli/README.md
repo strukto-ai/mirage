@@ -77,14 +77,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # The e2b sandbox is a machine; the remote runtime runs programs on it
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python runs on monty in a worker, or on the e2b sandbox
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # route the underlying computation: numpy lines run on the machine, the rest on monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # Add an agent using the analyst profile
@@ -167,7 +166,7 @@ command on the line can be redirected to a configured runtime, so Python might
 run in-process with [Monty](https://pydantic.dev/articles/pydantic-monty) while
 another command, say `kubectl`, is sent to a remote machine over SSH. Which runtime
 serves a given line can be decided by a
-[scripted runtime router](https://docs.mirage.strukto.ai/home/policy/route-runtime).
+[scripted machine router](https://docs.mirage.strukto.ai/home/policy/route-machine).
 
 |                | Runtimes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -295,7 +294,7 @@ interface, and Mirage embeds one in an application server. Each terminal is a
 Mirage session with its own working directory, environment and history, and Python
 runs in-process on Monty, so a terminal starts with no container or VM. Here
 it is in Express; the FastAPI version is in the
-[docs](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+[docs](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express
@@ -303,11 +302,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

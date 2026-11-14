@@ -23,7 +23,9 @@ import {
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
 import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { withinRequest } from '@struktoai/mirage-core/io/web/request'
-import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
+import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import { Runtime } from '@struktoai/mirage-core/runtime/base'
+import { IN_PROCESS, runtimeClass, type MachineSpec } from '@struktoai/mirage-core/runtime/table'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { CONFIG_SCHEMAS } from '@struktoai/mirage-core/vfs/registry'
@@ -47,7 +49,6 @@ import '@struktoai/mirage-core/machine/cloudflare_container/handle'
 import '@struktoai/mirage-core/mount/sftp'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
-import { CLOUDFLARE_RUNTIMES } from './constants.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
 /**
@@ -55,8 +56,14 @@ import { buildVfs, knownVfsNames } from './vfs/registry.ts'
  * never calls the host runs there until Cloudflare's CPU limit ends the
  * request, holding every workspace in the isolate.
  */
-function refuseQuickJs(entry: RuntimeEntry): void {
-  if ((typeof entry === 'string' ? entry : entry.name) === 'quickjs') {
+function refuseQuickJs(spec: MachineSpec): void {
+  const quickjs =
+    spec instanceof Runtime
+      ? spec instanceof runtimeClass('quickjs')
+      : !(spec instanceof MachineHandle) &&
+        spec.provider === IN_PROCESS &&
+        spec.runtime === 'quickjs'
+  if (quickjs) {
     throw new Error(
       "runtime 'quickjs' does not run on Cloudflare Workers: a script that never calls the " +
         'host would hold the isolate',
@@ -76,17 +83,17 @@ export class Workspace extends CoreWorkspace {
     options: WorkspaceOptions = {},
   ) {
     refuseUnseenAddresses(options.network)
-    const runtimes = options.runtimes ?? [...CLOUDFLARE_RUNTIMES]
-    runtimes.forEach(refuseQuickJs)
-    super(mounts, { ...options, runtimes })
+    const machines = options.machines ?? {}
+    ;(Array.isArray(machines) ? machines : Object.values(machines)).forEach(refuseQuickJs)
+    super(mounts, options)
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
     watch()
   }
 
-  override addRuntime(runtime: RuntimeEntry): Runtime {
-    refuseQuickJs(runtime)
-    return super.addRuntime(runtime)
+  override addMachine(name: string, spec: MachineSpec): Runtime {
+    refuseQuickJs(spec)
+    return super.addMachine(name, spec)
   }
 
   /**

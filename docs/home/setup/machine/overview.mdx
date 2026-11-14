@@ -8,43 +8,38 @@ A machine is somewhere you already have: a container, a microVM, a cloud
 sandbox or a host over SSH. You create and stop it; Mirage only runs programs
 on it.
 
-Declare each machine under `machines:` with the `provider` that reaches it,
-and run captured programs there with the `remote` runtime. `captures`
-defaults to [`@external`](/home/setup/runtime/overview#captures), every
-program Mirage does not have itself.
+Declare each machine under `machines:` with the `provider` that reaches it
+and the programs it `captures`. `captures` defaults to
+[`@external`](/home/setup/runtime/overview#captures), every program Mirage
+does not have itself.
 
 ```yaml
 machines:
   box:
     provider: docker
     container: my-sandbox
-runtimes:
-  - name: remote
-    machine: box
+```
+
+A program goes to the first machine listed that captures it, so with two
+`@external` machines the first one runs every program, and the second runs
+what it names on its own:
+
+```yaml
+machines:
+  py:
+    provider: docker
+    container: py-sandbox
+    captures: [python3]
+  js:
+    provider: docker
+    container: js-sandbox
+    captures: [node]
 ```
 
 A line or a command can also name its machine: `execute(machine=)`, a
 `machine` on the shell request, or a policy's `Route(machine=)`: see
-[Route Machine](/home/policy/route-machine).
-
-A `remote` entry with a `machine` is named for it, such as `remote:box`, so
-a workspace takes one entry per machine:
-
-```yaml
-runtimes:
-  - name: remote
-    captures: [python3]
-    machine: py
-  - name: remote
-    captures: [node]
-    machine: js
-```
-
-A program goes to the first entry that captures it, so with two `@external`
-entries the first one listed runs every program. Two entries on one machine
-are refused. `execute(runtime=)` and `Route(runtime=)` take an entry's name,
-such as `remote:js`, or plain `remote` while the workspace has one `remote`
-entry.
+[Route Machine](/home/policy/route-machine). A named machine runs what it
+captures; everything else stays where it would run.
 
 | Provider | Runs programs in |
 | --- | --- |
@@ -58,8 +53,9 @@ entry.
 | [Apple Container](/home/setup/machine/apple_container) | A container on macOS, a VM of its own |
 | [SSH](/home/setup/machine/ssh) | Any machine running `sshd` |
 
-[Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine: it runs
-programs on this Linux host, confined.
+Mirage's own runtimes are machines too: `in_process`, `worker` and `host`
+run Python, JavaScript or the host's own programs. See
+[Runtimes](/home/setup/runtime/overview).
 
 To try one, start with [Docker](/home/setup/machine/docker).
 

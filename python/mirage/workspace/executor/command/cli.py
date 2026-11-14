@@ -123,8 +123,8 @@ def _select_runtime(
 ) -> tuple[LanguageRuntime[Any] | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
-    A ``runtime:`` pin names the entry, and the entry must speak the
-    script's language, so ``runtime: monty`` on a ``.mjs`` fails loud
+    A ``machine:`` pin names the machine, and its engine must speak the
+    script's language, so a monty machine pinned for a ``.mjs`` fails loud
     instead of feeding JS to a python interpreter. Without a pin the
     program runs where this line runs its language's own interpreter
     (the tier's head word, ``python3`` or ``node``), so the runtime
@@ -151,22 +151,22 @@ def _select_runtime(
         )
     known = ", ".join(repr(entry.name) for entry in entries) or "none"
     chosen: RuntimeIdentity | None
-    if leaf.runtime is not None:
+    if leaf.machine is not None:
         chosen = next(
-            (entry for entry in entries if entry.name == leaf.runtime), None
+            (entry for entry in entries if entry.name == leaf.machine), None
         )
         if chosen is None:
             return None, _missing(
-                f"{prog}: unknown runtime: {leaf.runtime!r} "
-                f"(workspace runtimes: {known})"
+                f"{prog}: unknown machine: {leaf.machine!r} "
+                f"(workspace machines: {known})"
             )
     else:
         entry = runtime_for_language(entries, script.language)
         if entry is None:
             return None, _missing(
-                f"{prog}: no workspace runtime runs "
+                f"{prog}: no workspace machine runs "
                 f"{script.language} scripts "
-                f"(workspace runtimes: {known})"
+                f"(workspace machines: {known})"
             )
         heads = type(entry).commands
         chosen = (
@@ -183,7 +183,7 @@ def _select_runtime(
         or chosen.language != script.language
     ):
         return None, _missing(
-            f"{prog}: runtime {chosen.name!r} does not run "
+            f"{prog}: machine {chosen.name!r} does not run "
             f"{script.language} scripts"
         )
     return chosen, None

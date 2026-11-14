@@ -4,8 +4,8 @@ icon: /images/docker-logo.svg
 description: Run captured programs in a Docker container you started.
 ---
 
-The `docker` machine provider reaches a running container, by name, and the
-`remote` runtime runs captured programs in it. You start
+The `docker` machine provider reaches a running container, by name, and
+runs the programs it captures in it. You start
 and stop the container; Mirage only runs programs in it. Python SDK and
 Node.
 
@@ -44,7 +44,6 @@ Python in the container too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -54,23 +53,22 @@ Python in the container too.
                 "provider": "docker",
                 "container": "my-sandbox",
                 "mount_type": "ssh",
+                "captures": ["@python", "@external"],
             }
         },
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'docker', container: 'my-sandbox', mountType: 'ssh' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'docker', container: 'my-sandbox', mountType: 'ssh', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -84,10 +82,7 @@ Python in the container too.
         provider: docker
         container: my-sandbox
         mount_type: ssh
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram

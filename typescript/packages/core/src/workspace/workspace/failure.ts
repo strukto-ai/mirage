@@ -15,7 +15,7 @@
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { UsageError } from '../../commands/errors.ts'
-import { MemoryExhausted } from '../../io/errors.ts'
+import { MemoryExhausted, PipeClosed } from '../../io/errors.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -23,7 +23,7 @@ import { decisionOf, renderDeny } from '../../policy/policies.ts'
 import type { Deny, Pending } from '../../policy/types.ts'
 import { ExecuteResult } from './types.ts'
 import { commandName } from './utils.ts'
-import { INTERRUPTED_STATUS, TIMEOUT_STATUS } from '../../shell/constants.ts'
+import { INTERRUPTED_STATUS, SIGPIPE_STATUS, TIMEOUT_STATUS } from '../../shell/constants.ts'
 
 /**
  * True for the errors that are the caller's problem, not the line's:
@@ -43,6 +43,7 @@ export function isControlFlowError(err: unknown): boolean {
  * `isControlFlowError`) before reaching this.
  */
 export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: number } {
+  if (err instanceof PipeClosed) return { stderr: new Uint8Array(), exitCode: SIGPIPE_STATUS }
   if (err instanceof DOMException && err.name === 'AbortError') {
     return { stderr: encodeText(`${err.message}\n`), exitCode: INTERRUPTED_STATUS }
   }

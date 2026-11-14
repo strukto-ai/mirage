@@ -62,7 +62,7 @@ export function processToFields(record: Process): RecordFields {
     machine: record.machine.toString(),
     machine_instance: record.machineInstance ?? null,
     started_at: record.startedAt,
-    runtime: record.runtime,
+    program: record.program,
     machine_pid:
       found === null
         ? null
@@ -101,7 +101,7 @@ export function processFromFields(fields: RecordFields): Process {
     machine: MachineName.parse(fields.machine as string),
     machineInstance: (fields.machine_instance as string | null | undefined) ?? null,
     startedAt: fields.started_at as number,
-    runtime: (fields.runtime as string | null | undefined) ?? null,
+    program: fields.program === true,
     machinePid:
       found === null || found === undefined
         ? null

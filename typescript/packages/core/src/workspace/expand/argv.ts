@@ -253,6 +253,7 @@ export async function expandArgv(
     !refused &&
     (policy === WordPolicy.SHELL ||
       tree ||
+      Boolean(globOpts.ignore?.length) ||
       globOpts.nullglob ||
       globOpts.failglob ||
       globOpts.globstar ||

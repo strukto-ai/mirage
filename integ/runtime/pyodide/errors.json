@@ -3,10 +3,12 @@
     {
       "id": "user_tracebacks",
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "steps": [
         {
@@ -60,10 +62,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "steps": [
         {

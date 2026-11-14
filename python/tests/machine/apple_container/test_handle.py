@@ -30,7 +30,6 @@ from mirage.machine.constants import (
 )
 from mirage.machine.registry import build_machine
 from mirage.policy import Route
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
@@ -293,7 +292,8 @@ class _OwnBox(Policy):
 async def test_a_route_gives_each_session_a_container_of_its_own():
     boxes = {
         name: FakeAppleContainerMachine(
-            name=name, config={"container": f"box-{name}"}
+            name=name,
+            config={"container": f"box-{name}", "captures": ["uname"]},
         )
         for name in ("agent_a", "agent_b")
     }
@@ -301,7 +301,6 @@ async def test_a_route_gives_each_session_a_container_of_its_own():
         {"/d": RAMVFS()},
         mode=MountMode.EXEC,
         machines=boxes,
-        runtimes=[RemoteRuntime(["uname"]), "workspace"],
         policies=[_OwnBox()],
     )
     try:

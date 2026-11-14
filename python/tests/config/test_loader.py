@@ -30,7 +30,7 @@ from mirage.config import (
     RedisStoreBlock,
     S3StoreBlock,
     WorkspaceConfig,
-    _build_runtime_entries,
+    _build_machines,
     build_mcp_clis,
     load_config,
     resolve_secrets,
@@ -573,18 +573,19 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
     cfg = load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "runtimes": [
-                {"name": "monty", "config": {"max_memory": 1048576}},
-                {"name": "workspace", "config": {}},
-            ],
+            "machines": {
+                "monty": {"provider": "worker", "max_memory": 1048576}
+            },
         }
     )
-    monty = cfg.to_workspace_kwargs()["runtimes"][0]
+    monty = cfg.to_workspace_kwargs()["machines"]["monty"]
     assert monty.config.max_memory == 1048576
     cfg = load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "runtimes": [{"name": "monty", "config": {"max_memory": "lots"}}],
+            "machines": {
+                "monty": {"provider": "worker", "max_memory": "lots"}
+            },
         }
     )
     with pytest.raises(ValueError, match="max_memory must be a size"):
@@ -602,7 +603,6 @@ def e2b_config(api_key, provider="e2b", **extra):
                     "api_key": api_key,
                 }
             },
-            "runtimes": [{"name": "remote", "machine": "box"}, "workspace"],
             **extra,
         },
         env={},
@@ -621,9 +621,7 @@ async def test_a_machine_credential_reads_a_pointer(monkeypatch, provider):
     assert box.provider == provider
     assert box.config.api_key == "key_from_env"
     assert box.config.sandbox_id == "sbx-1"
-    native, workspace = kwargs["runtimes"]
-    assert (native.name, native.default_machine) == ("remote:box", "box")
-    assert workspace == "workspace"
+    assert box.config.captures is None
 
 
 @pytest.mark.asyncio
@@ -728,8 +726,8 @@ mounts:
   /data:
     vfs: ram
 clis:
-  pager: {script: pager.js, runtime: quickjs}
-  modpager: {script: pager.mjs, runtime: quickjs}
+  pager: {script: pager.js, machine: quickjs}
+  modpager: {script: pager.mjs, machine: quickjs}
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
@@ -968,7 +966,7 @@ mounts:
 clis:
   pager:
     script: pager.py
-    runtime: monty
+    machine: monty
     config:
       page_size: 20
 """)
@@ -977,7 +975,7 @@ clis:
     spec, config = kwargs["clis"]["pager"]
     assert spec.spec.name == "pager"
     assert spec.script == ScriptSource("print('page')")
-    assert spec.runtime == "monty"
+    assert spec.machine == "monty"
     assert config == {"page_size": 20}
 
 
@@ -1117,61 +1115,57 @@ NOT_A_RUNTIME = {"name": "nope"}
 """
 
 
-def test_runtimes_path_form_reference_rebases_and_builds(
-    tmp_path, monkeypatch
-):
-    # A runtime entry's `name: ./box.py:EchoBox` reads the way `vfs:`
-    # and `cli:` do: rebased onto the config dir, then constructed with
-    # the entry's uniform options, so a deployment ships a runtime as a
-    # file with no host program calling register_runtime.
+def test_machines_runtime_reference_rebases_and_builds(tmp_path, monkeypatch):
+    # A machine's `runtime: ./box.py:EchoBox` reads the way `vfs:` and
+    # `cli:` do: rebased onto the config dir, then constructed with the
+    # entry's captures, so a deployment ships a runtime as a file with no
+    # host program calling register_runtime.
     (tmp_path / "box.py").write_text(BOX_RUNTIME)
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     vfs: ram
-runtimes:
-  - name: ./box.py:EchoBox
+machines:
+  gpu:
+    provider: in_process
+    runtime: ./box.py:EchoBox
     captures: [nvidia-smi, rocm-smi]
-  - ./box.py:EchoBox
-  - workspace
+  bare: {provider: in_process, runtime: ./box.py:EchoBox}
 """)
     monkeypatch.chdir(tmp_path.parent)
     cfg = load_config(cfg_file)
-    assert cfg.runtimes is not None
-    # Both spellings rebase: the keyed entry and the bare string beside
-    # a bare builtin name.
-    assert cfg.runtimes[0]["name"] == f"{tmp_path / 'box.py'}:EchoBox"
-    assert cfg.runtimes[1] == f"{tmp_path / 'box.py'}:EchoBox"
-    box, bare, fallback = cfg.to_workspace_kwargs()["runtimes"]
+    assert cfg.machines is not None
+    assert cfg.machines["gpu"]["runtime"] == f"{tmp_path / 'box.py'}:EchoBox"
+    machines = cfg.to_workspace_kwargs()["machines"]
+    box, bare = machines["gpu"], machines["bare"]
     assert type(box).__name__ == "EchoBox"
-    assert box.name == "echobox"
+    assert box.name == "gpu"
     assert box.captures == ("nvidia-smi", "rocm-smi")
     assert type(bare).__name__ == "EchoBox"
     assert bare.captures == ("nvidia-smi",)
-    assert fallback == "workspace"
 
 
-def test_runtimes_reference_must_name_a_runtime_subclass(tmp_path):
+def test_machines_runtime_reference_must_name_a_runtime_subclass(tmp_path):
     (tmp_path / "box.py").write_text(BOX_RUNTIME)
     ref = f"{tmp_path / 'box.py'}:NOT_A_RUNTIME"
+    entry = {"provider": "in_process", "runtime": ref}
     with pytest.raises(ValueError, match="is not a Runtime subclass"):
-        _build_runtime_entries([{"name": ref}])
+        _build_machines({"box": entry}, {})
+    missing = {**entry, "runtime": f"{tmp_path / 'missing.py'}:EchoBox"}
     with pytest.raises(ValueError, match="cannot load script"):
-        _build_runtime_entries([f"{tmp_path / 'missing.py'}:EchoBox"])
+        _build_machines({"box": missing}, {})
 
 
-def test_runtimes_reference_refuses_an_unknown_entry_key(tmp_path):
-    # A referenced class is constructed with the entry's keys as kwargs,
-    # so a typo fails the way it does for a builtin name instead of
-    # leaving the runtime on its class defaults; TypeScript's loader runs
-    # the same check by hand (checkRuntimeOptions).
+def test_machines_runtime_reference_refuses_an_unknown_entry_key(tmp_path):
+    # A referenced class takes the entry's other keys as its config, so a
+    # typo fails the way it does for a builtin runtime instead of leaving
+    # it on its class defaults.
     (tmp_path / "box.py").write_text(BOX_RUNTIME)
     ref = f"{tmp_path / 'box.py'}:EchoBox"
-    with pytest.raises(
-        TypeError, match="unexpected keyword argument 'captuers'"
-    ):
-        _build_runtime_entries([{"name": ref, "captuers": ["nvidia-smi"]}])
+    entry = {"provider": "in_process", "runtime": ref, "captuers": ["x"]}
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        _build_machines({"box": entry}, {})
 
 
 @pytest.mark.asyncio
@@ -1259,7 +1253,7 @@ def test_clis_runtime_takes_script():
         load_config(
             {
                 "mounts": {"/data": {"vfs": "ram"}},
-                "clis": {"sl": {"cli": "slack", "runtime": "monty"}},
+                "clis": {"sl": {"cli": "slack", "machine": "monty"}},
             }
         )
 

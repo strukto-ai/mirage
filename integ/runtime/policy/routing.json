@@ -1,13 +1,16 @@
 {
   "cases": [
     {
-      "id": "runtime_arg_per_line",
+      "id": "machine_arg_per_line",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -24,11 +27,11 @@
         },
         {
           "command": "python3 -c \"import sys; print('routed-to-local')\"",
-          "runtime": "local",
           "expect": {
             "exit": 0,
             "stdout": "routed-to-local\n"
-          }
+          },
+          "machine": "local"
         },
         {
           "command": "python3 -c \"print(argv[0])\"",
@@ -42,18 +45,21 @@
     {
       "id": "global_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if 'go-local' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    if 'go-local' in ctx['line']:\n        return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -75,12 +81,13 @@
       ]
     },
     {
-      "id": "add_runtime_local",
+      "id": "add_machine_local",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -90,34 +97,40 @@
       "steps": [
         {
           "command": "python3 -c \"x\"",
-          "runtime": "local",
           "expect": {
-            "throws_contains": "unknown runtime"
-          }
+            "throws_contains": "unknown machine"
+          },
+          "machine": "local"
         },
         {
-          "add_runtime": "local"
+          "add_machine": {
+            "local": {
+              "provider": "host"
+            }
+          }
         },
         {
           "command": "python3 -c \"import sys; print('added-local')\"",
-          "runtime": "local",
           "expect": {
             "exit": 0,
             "stdout": "added-local\n"
-          }
+          },
+          "machine": "local"
         }
       ]
     },
     {
-      "id": "add_runtime_monty",
+      "id": "add_machine_monty",
       "hosts": [
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -127,31 +140,36 @@
       "steps": [
         {
           "command": "python3 -c \"x\"",
-          "runtime": "monty",
           "expect": {
-            "throws_contains": "unknown runtime"
-          }
+            "throws_contains": "unknown machine"
+          },
+          "machine": "monty"
         },
         {
-          "add_runtime": "monty"
+          "add_machine": {
+            "monty": {
+              "provider": "worker"
+            }
+          }
         },
         {
           "command": "python3 -c \"print(40 + 2)\"",
-          "runtime": "monty",
           "expect": {
             "exit": 0,
             "stdout": "42\n"
-          }
+          },
+          "machine": "monty"
         }
       ]
     },
     {
       "id": "ctx_command_pipeline",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -161,7 +179,7 @@
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"runtime\": \"monty\"}\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"machine\": \"monty\"}\n",
           "runtime": "monty"
         }
       },
@@ -176,11 +194,13 @@
       ]
     },
     {
-      "id": "runtime_arg_uncaptured_inert",
+      "id": "machine_arg_uncaptured_inert",
       "world": {
-        "runtimes": [
-          "monty"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -193,68 +213,72 @@
       "steps": [
         {
           "command": "grep -r hello",
-          "runtime": "monty",
           "expect": {
             "exit": 0,
             "stdout": "ram/a.txt:hello\n"
-          }
+          },
+          "machine": "monty"
         },
         {
           "command": "grep -r xxx",
-          "runtime": "monty",
           "expect": {
             "exit": 1,
             "stdout": ""
-          }
+          },
+          "machine": "monty"
         },
         {
           "command": "grep -r xxx /ram",
-          "runtime": "monty",
           "expect": {
             "exit": 1,
             "stdout": ""
-          }
+          },
+          "machine": "monty"
         },
         {
           "command": "grep -r hello /ram",
-          "runtime": "monty",
           "expect": {
             "exit": 0,
             "stdout": "/ram/a.txt:hello\n"
-          }
+          },
+          "machine": "monty"
         }
       ]
     },
     {
-      "id": "runtime_arg_workspace_refused",
+      "id": "machine_arg_workspace_refused",
       "world": {
-        "runtimes": [
-          "monty"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
           "command": "echo hi",
-          "runtime": "workspace",
           "expect": {
-            "throws_contains": "not a runtime you can select"
-          }
+            "throws_contains": "not a machine you can select"
+          },
+          "machine": "workspace"
         }
       ]
     },
     {
       "id": "policy_script_bad_name",
       "world": {
-        "runtimes": [
-          "monty"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"nope\"}\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"nope\"}\n",
           "runtime": "monty"
         }
       },
@@ -262,7 +286,7 @@
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "throws_contains": "unknown runtime"
+            "throws_contains": "unknown machine"
           }
         }
       ]
@@ -270,14 +294,14 @@
     {
       "id": "captures_narrowed_entry",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "python3"
             ]
           }
-        ],
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -297,18 +321,21 @@
     {
       "id": "nested_eval_inherits_routing",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if 'magic' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    if 'magic' in ctx['line']:\n        return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -332,14 +359,14 @@
     {
       "id": "captures_narrowed_miss",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "python3"
             ]
           }
-        ],
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -359,10 +386,11 @@
     {
       "id": "policy_deny_blocks_line",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -394,19 +422,20 @@
       ]
     },
     {
-      "id": "policy_verdict_places_runtime",
+      "id": "policy_verdict_places_machine",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"monty\"}\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"monty\"}\n",
           "runtime": "monty"
         }
       },
@@ -423,10 +452,11 @@
     {
       "id": "policy_script_bad_verdict",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -450,11 +480,14 @@
       "id": "pre_execute_places_the_line",
       "note": "A coded policy answers at pre_execute like the route policy does: a Route places the line on the runtime it names.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -464,7 +497,7 @@
           {
             "name": "place_line",
             "contains": "go-local",
-            "runtime": "local"
+            "machine": "local"
           }
         ]
       },
@@ -489,18 +522,21 @@
       "id": "pre_execute_deny_outranks_a_route",
       "note": "A Deny at pre_execute refuses the line whoever placed it, in bash's words.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         },
         "policies": [
@@ -532,25 +568,28 @@
       "id": "placements_that_disagree_refuse_the_line",
       "note": "Two policies placing one line on different runtimes refuse it: neither choice is the line's.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         },
         "policies": [
           {
             "name": "place_line",
             "contains": "python3",
-            "runtime": "monty"
+            "machine": "monty"
           }
         ]
       },
@@ -575,11 +614,14 @@
       "id": "admission_comes_before_placement",
       "note": "A line a rule refuses is never shown to a pre_execute policy: the rule's refusal arrives in GNU's words, not the policy's deny, which still answers every line the rules admit.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -629,11 +671,14 @@
       "id": "a_route_program_reads_the_workspace",
       "note": "A route program reads the mounts as the session does.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -643,7 +688,7 @@
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        name = open('/ram/route.txt').read().strip()\n        return {\"kind\": \"route\", \"runtime\": name}\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        name = open('/ram/route.txt').read().strip()\n        return {\"kind\": \"route\", \"machine\": name}\n",
           "runtime": "monty"
         }
       },
@@ -661,18 +706,21 @@
       "id": "a_route_program_reads_a_commands_own_prefix",
       "note": "Each command holds the env it runs with, its own NAME=value prefix included; the prefix is that command's alone.",
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' and c['env'].get('PLACE') == 'local' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' and c['env'].get('PLACE') == 'local' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -703,10 +751,11 @@
     {
       "id": "a_route_program_that_fails_is_a_routing_error",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "route_policy": {
           "script": "def pre_execute(ctx):\n    1 / 0\n",
           "runtime": "monty"

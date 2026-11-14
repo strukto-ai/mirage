@@ -72,7 +72,6 @@ export async function runExternal(
     flags: process ? {} : { c: command },
     cwd: PathSpec.fromStrPath(session.cwd),
     env: envSnapshot(session),
-    ...(routing.machine !== undefined ? { machine: routing.machine } : {}),
   }
   const node = new ExecutionNode({ command, exitCode: 0 })
   const said: Uint8Array[] = []

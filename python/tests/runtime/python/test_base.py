@@ -37,7 +37,7 @@ class ProcessRuntime(PythonRuntime):
 async def test_custom_process_version_never_executes_code(mode):
     runtime = ProcessRuntime()
     assert runtime.reach == "process"
-    ws = Workspace({"/": RAMVFS()}, mode=mode, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/": RAMVFS()}, mode=mode, machines=[runtime])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
             io = await ws.shell(line, env={"PYTHONPATH": "/startup"})

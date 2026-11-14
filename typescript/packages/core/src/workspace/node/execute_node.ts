@@ -88,7 +88,6 @@ import {
   handleWhile,
   isUnwinding,
   LoopSignal,
-  trailed,
 } from '../executor/control.ts'
 import { drained, reportJobs, reportReaped, startShell, tell } from '../executor/background.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
@@ -789,6 +788,8 @@ export async function executeNode(
 ): Promise<RedirectResult> {
   const session = context.session
   if (endsShell) {
+    if (node.type === NT.REDIRECTED_STATEMENT)
+      context.frame.ending = getRedirects(node)[0]?.id ?? null
     const { signal, lineHandle } = deps
     const executeFn: ExecuteFn = (cmd, opts) =>
       deps.executeFn(cmd, {
@@ -811,7 +812,7 @@ export async function executeNode(
   await lineHandle.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   // The node's own `<(...)` files go when it ends, so a command still
   // reading one is read out first.
-  const processSubs = new ProcessSubScope(context, deps.registry, deps.sink, deps.signal)
+  const processSubs = new ProcessSubScope(context, deps.registry, deps.jobTable, deps.signal)
   const previous = context.frame.processSub
   context.frame.processSub = processSubs.open
   const writers = context.frame.writers
@@ -832,7 +833,7 @@ export async function executeNode(
           deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
         )
       }
-      return [processSubs.own(stdout, io, execNode), io, execNode]
+      return [processSubs.own(stdout), io, execNode]
     }
     const outer = context.frame.diagnostics
     const outerReports = context.frame.reports
@@ -872,7 +873,7 @@ export async function executeNode(
         const report = concat([...reports, reportJobs(context, deps.jobTable)])
         if (report.length > 0) await tell(report, io, execNode, deps.sink ?? null)
       }
-      return [processSubs.own(stdout, io, execNode), io, execNode]
+      return [processSubs.own(stdout), io, execNode]
     } catch (err) {
       if (err instanceof ExitSignal) {
         const extra = diagnosticStderr(node, context)
@@ -889,8 +890,7 @@ export async function executeNode(
   } catch (err) {
     // `exit`, `return` or `break` ends the node as its last command did:
     // output consumers finish, rather than being cut off.
-    if (isUnwinding(err)) await trailed(err, ...(await processSubs.settle()))
-    else await processSubs.close(true)
+    await processSubs.close(!isUnwinding(err))
     throw err
   } finally {
     context.frame.processSub = previous
@@ -1076,7 +1076,8 @@ async function forkSubshell(
   if (context.frame.shell === null && owner !== null) {
     // The whole of what its runner runs (`( sleep 3; echo x ) &`) is the
     // runner itself, as bash forks a job's subshell once: it keeps the INT
-    // its job ignores.
+    // its job ignores, and the captures it holds.
+    child.session.holds = session.holds
     forked(owner)
     const code = await run()
     return subshellRan ?? result(getText(node), { exitCode: code })

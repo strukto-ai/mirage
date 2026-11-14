@@ -154,7 +154,7 @@ describe('templates router', () => {
     expect(gone.json()).toEqual({
       error: {
         code: 'invalid_request',
-        message: 'gone is not saved as a VFS, CLI, runtime or machine',
+        message: 'gone is not saved as a VFS, CLI or machine',
       },
     })
     await app.close()

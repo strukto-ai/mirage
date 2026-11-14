@@ -37,7 +37,6 @@ TAG_ORDER = (
     "Templates",
     "Saved VFS",
     "Saved CLIs",
-    "Saved runtimes",
     "Saved machines",
     "Policies",
     "Asks",

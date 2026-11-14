@@ -57,16 +57,10 @@ def shell_cmd(
         "--cwd",
         help="Working directory for this line (a workspace path).",
     ),
-    runtime: str | None = typer.Option(
-        None,
-        "--runtime",
-        help="Workspace runtime entry to place this line's captured "
-        "stages on.",
-    ),
     machine: str | None = typer.Option(
         None,
         "--machine",
-        help="Machine to run this line's captured stages on, by its "
+        help="Machine to place this line's captured stages on, by its "
         "name under machines:.",
     ),
     no_record: bool = typer.Option(
@@ -98,8 +92,6 @@ def shell_cmd(
     payload: dict[str, Any] = {"command": command}
     if cwd:
         payload["cwd"] = cwd
-    if runtime:
-        payload["runtime"] = runtime
     if machine:
         payload["machine"] = machine
     if no_record:
@@ -152,7 +144,7 @@ def _format_explanation(data: dict[str, Any]) -> str:
     out = [f"{data['line']}  [{verdict}]"]
     for said in data["answers"]:
         if said["kind"] == "route" and said["reason"]:
-            out.append(f"  on {said['runtime']}: {said['reason']}")
+            out.append(f"  on {said['machine']}: {said['reason']}")
     for child in data["node"]["children"]:
         _explained_lines(child, 1, out)
     return "\n".join(out)
@@ -176,8 +168,8 @@ def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
         line += f": {node['reason']}]" if node["reason"] else "]"
         if node["source"]:
             line += f"  {node['source']}"
-        if node["runtime"]:
-            line += f"  on {node['runtime']}"
+        if node["machine"]:
+            line += f"  on {node['machine']}"
         out.append(line)
     for child in node["children"]:
         _explained_lines(child, depth + 1, out)

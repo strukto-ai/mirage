@@ -732,13 +732,12 @@
         "disk",
         "opfs"
       ],
-      "command": "head -c 1 <(head -c 100000 /dev/zero; echo after >&2) | od -An -c",
+      "command": "head -c 1 <(head -c 100000 /dev/zero; echo after >&2) | od -An -c; sleep .2",
       "expect": {
         "exit": 0,
         "stdout": "  \\0\n",
-        "stderr": ""
-      },
-      "note": "Divergence: GNU bash 5.2.37 also prints \"after\\n\" on stderr: SIGPIPE ends only the substitution's writer and its next command runs. In Mirage the substitution's line ends when its reader closes early."
+        "stderr": "after\n"
+      }
     },
     {
       "id": "procsub_noclobber_allows_streams",

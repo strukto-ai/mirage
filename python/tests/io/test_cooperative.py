@@ -230,9 +230,7 @@ async def test_cancel_reaches_a_whole_line_runtime():
         async def run_line(self, engine, paths, texts, ctx):
             await asyncio.Event().wait()
 
-    ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[Hanging(), "workspace"]
-    )
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines=[Hanging()])
     cancel = asyncio.Event()
     asyncio.get_running_loop().call_later(0.01, cancel.set)
     try:

@@ -37,10 +37,14 @@ class MachineConfig(RuntimeConfig):
             them to a mirage on the machine, ``both`` serves from the
             host what the machine does not mount itself. None serves
             nothing.
+        captures (tuple[str, ...] | None): the commands the machine
+            runs, ``@external`` and ``@line`` among them; None for
+            ``@external``, the programs nothing in Mirage resolves.
     """
 
     env: dict[str, str] = field(default_factory=dict)
     mount_type: MountType | None = None
+    captures: tuple[str, ...] | None = None
 
 
 def check_mount_type(provider: str, mount_type: str | None) -> None:

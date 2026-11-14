@@ -4,10 +4,11 @@ mounts:
   /data:
     vfs: ram
 
-runtimes:
-  - monty
-  - local
-  - workspace
+machines:
+  monty:
+    provider: worker
+  local:
+    provider: host
 
 route_policy:
   script: route.py

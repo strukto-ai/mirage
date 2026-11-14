@@ -947,8 +947,8 @@ export class Policies {
   /**
    * Fire preExecute: a Deny wins, else the first Ask, which holds the
    * line until the host approves it; and the Route every placing policy
-   * agrees on, two placing the line on different runtimes refusing it.
-   * `placed` says the caller placed the line (the runtime argument), so
+   * agrees on, two placing the line on different machines refusing it.
+   * `placed` says the caller placed the line (the machine argument), so
    * the built-in placement is not asked and a Route is moot; a Deny or an
    * Ask still holds the line.
    */

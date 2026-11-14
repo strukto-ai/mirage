@@ -144,7 +144,7 @@ EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_USERNAME = "integ@example.com"
 # The target corpus runs python3 cases (audit, storage, path, env) on Monty.
-TARGET_RUNTIMES = ("monty", "workspace")
+TARGET_MACHINES = {"monty": {"provider": "worker"}}
 # The repository the `gh` install defaults to, standing in for the current
 # git remote real gh reads. Seeded by the fake alongside the mounted one.
 GH_CLI_REPO = "integ/repo-cli"
@@ -3632,7 +3632,7 @@ async def open_target(
             clock=clock,
             system_time=target.get("system_time"),
             max_memory=None,
-            runtimes=list(TARGET_RUNTIMES),
+            machines=dict(TARGET_MACHINES),
         )
     else:
         ws = Workspace(
@@ -3646,7 +3646,7 @@ async def open_target(
             clock=clock,
             system_time=target.get("system_time"),
             max_memory=None,
-            runtimes=list(TARGET_RUNTIMES),
+            machines=dict(TARGET_MACHINES),
         )
     if store is not None:
         cleanups.append(_drop_jobs(store, ws))
@@ -3796,7 +3796,7 @@ async def open_consistency(
             read=read,
             write=write,
             max_memory=None,
-            runtimes=list(TARGET_RUNTIMES),
+            machines=dict(TARGET_MACHINES),
         )
     except Exception:
         await teardown_target([], [*read_cleanups, *shadow_cleanups], service)
@@ -3806,7 +3806,7 @@ async def open_consistency(
         mode=MountMode.WRITE,
         write=write,
         max_memory=None,
-        runtimes=list(TARGET_RUNTIMES),
+        machines=dict(TARGET_MACHINES),
     )
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario

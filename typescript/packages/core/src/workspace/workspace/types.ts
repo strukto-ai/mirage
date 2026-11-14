@@ -23,8 +23,8 @@ import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { ProcessesBlock } from '../../execution/process/config.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { MachineHandle } from '../../machine/handle.ts'
-import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { MachineSpecs } from '../../runtime/table.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
@@ -160,23 +160,19 @@ export interface WorkspaceOptions {
    */
   ownsStore?: boolean
   /**
-   * The workspace's ordered runtime world: instances and name
-   * shorthands including 'workspace'; the first capturer binds each
-   * command. Unset = the default world, `workspace` alone.
-   */
-  runtimes?: RuntimeEntry[]
-  /**
-   * The machines its programs run on, by name: each a handle, or its
-   * provider plus how to reach it (`{ provider: 'docker', container:
-   * 'tools' }`). A remote runtime entry's `machine` names one. Mirrors
+   * The machines commands run on, by name, in capture order: each a handle,
+   * a runtime, or the entry as config spells it (`{ provider: 'docker',
+   * container: 'tools', captures: ['@external'] }`, `{ provider: 'worker',
+   * captures: ['@python'] }`); or handles and runtimes named by their own
+   * `name`. Unset = none: the workspace runs every command itself. Mirrors
    * Python's `machines`.
    */
-  machines?: Record<string, MachineHandle | Record<string, unknown>>
+  machines?: MachineSpecs
   /**
    * The global route policy: a function taking the RouteContext naming
-   * the runtime for a line, or null to leave each command on its first
+   * the machine for a line, or null to leave each command on its first
    * capturer; or a program, `{script, runtime}`, that prints the same
-   * answer. Ladder: the runtime argument > route policy > first capturer.
+   * answer. Ladder: the machine argument > route policy > first capturer.
    */
   routePolicy?: RouteRule
   /**
@@ -337,18 +333,11 @@ export interface ExecuteOptions {
    */
   env?: Record<string, string>
   /**
-   * Explicit runtime for this line, naming a workspace runtime entry.
-   * Stages the named runtime captures rebind to it for this line only
-   * (nested evals inherit it); everything else keeps its normal
-   * binding, so the argument overrides policy, never capability.
-   * Throws for a name that is not a workspace entry.
-   */
-  runtime?: string
-  /**
-   * Explicit machine for this line, by its `machines:` name: the native
-   * runtime runs what it serves on it, over its entry's own machine, for
-   * this line only (nested evals inherit it). Throws for a name that is
-   * not a workspace machine.
+   * Explicit machine for this line, by its `machines:` name. Stages the
+   * machine captures rebind to it for this line only (nested evals inherit
+   * it); everything else keeps its normal binding, so the argument
+   * overrides policy, never capability. Throws for a name that is not a
+   * workspace machine.
    */
   machine?: string
   /**

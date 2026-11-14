@@ -144,7 +144,10 @@ export async function runShellFunction(
   }
   session.lineRow = site?.row ?? 0
   session.lineRows = site === undefined ? null : calledLines(site.lines, body)
-  session.parseName = site?.name ?? 'environment'
+  const parseName = site?.name ?? 'environment'
+  session.parseName = parseName
+  const outerSources = session.sourceFiles
+  session.sourceFiles = [parseName, ...outerSources]
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
   // their own as every re-parse does, so two definitions of one text each
@@ -217,6 +220,7 @@ export async function runShellFunction(
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    session.sourceFiles = outerSources
     session.callLines = outerLines
     restoreFunctionTraps(session, lifted)
     shell.leave(outerScope)
