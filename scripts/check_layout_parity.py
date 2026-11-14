@@ -39,6 +39,7 @@ TS_PACKAGES = {
     "openai-agents": "agents/openai_agents",
     "langchain": "agents/langchain",
     "pi": "agents/pi",
+    "pi-durable": "agents/pi_durable",
     "vercel": "agents/vercel",
     "mastra": "agents/mastra",
     "claude-agent-sdk": "agents/claude_agent_sdk",
