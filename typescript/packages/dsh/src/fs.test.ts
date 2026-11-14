@@ -1165,11 +1165,14 @@ describe('processPathFromHostPath', () => {
     expect(fs.processPathFromHostPath(join(alias, 'a.txt'))).toBe('/work/a.txt')
   })
 
-  it('maps a link inside the mount as itself, one to the root or a loop too', async () => {
+  it('maps a link inside the mount to the file it points at', async () => {
     const { fs, root } = await makeDiskFs()
+    await mkdir(join(root, 'data'))
     await symlink(root, join(root, 'self'))
+    await symlink(join(root, 'data'), join(root, 'shortcut'))
     await symlink('loop', join(root, 'loop'))
-    expect(fs.processPathFromHostPath(join(root, 'self'))).toBe('/work/self')
+    expect(fs.processPathFromHostPath(join(root, 'self'))).toBe('/work')
+    expect(fs.processPathFromHostPath(join(root, 'shortcut'))).toBe('/work/data')
     expect(fs.processPathFromHostPath(join(root, 'loop'))).toBe('/work/loop')
   })
 

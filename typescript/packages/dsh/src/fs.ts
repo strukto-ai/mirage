@@ -190,23 +190,19 @@ function escapesRoot(rel: string): boolean {
  *
  * A disk mount keeps the real path of its root, so a host path spelled
  * through a link (`/tmp` and `/var` on macOS) would otherwise never fall
- * under it. For an entry only the directories above it are resolved, as
- * the disk event hook does, so a link inside the mount maps to itself;
- * and the deepest ancestor that resolves is resolved, so a path that
- * names nothing yet, or loops, keeps the rest as written.
+ * under it. Every link is followed, the last component's too: a disk
+ * mount neither lists nor opens a link below its root, so only the
+ * file a link points at has a usable workspace path. The deepest
+ * ancestor that resolves is resolved, so a path that names nothing yet,
+ * or loops, keeps the rest as written.
  *
  * @param hostPath an absolute host path.
- * @param entry whether the last component is kept as written.
  * @returns the path to compare against a disk mount's root.
  */
-function physicalPath(hostPath: string, entry: boolean): string {
+function physicalPath(hostPath: string): string {
   const lexical = resolve(hostPath)
   const rest: string[] = []
   let head = lexical
-  if (entry && dirname(lexical) !== lexical) {
-    rest.push(basename(lexical))
-    head = dirname(lexical)
-  }
   for (;;) {
     try {
       return join(realpathSync(head), ...rest)
@@ -501,22 +497,13 @@ export class MirageFileSystem extends FileSystem {
     if (!isAbsolute(hostPath)) return undefined
     const workspace = this.ctx.mirage.workspaceIfReady
     if (workspace === null) return undefined
-    const host = physicalPath(hostPath, true)
-    let whole: string | undefined
+    const host = physicalPath(hostPath)
     const mounts = workspace.mounts()
     for (const entry of mounts) {
       const { vfs } = entry
       if (!(vfs instanceof DiskVFS)) continue
-      let rel = relative(vfs.root, host)
-      if (escapesRoot(rel)) {
-        // A link to the root itself is the root: kept as written it names
-        // the link's own directory, outside the mount. A link inside the
-        // mount is never asked, so one pointing back at the root keeps
-        // its own name.
-        whole ??= physicalPath(hostPath, false)
-        if (whole !== vfs.root) continue
-        rel = ''
-      }
+      const rel = relative(vfs.root, host)
+      if (escapesRoot(rel)) continue
       // `prefix` always carries a trailing slash, and `rel` is empty for
       // the root itself, so the join is a concatenation and the slash is
       // trimmed back off unless the mount is the workspace root.
