@@ -719,7 +719,7 @@ describe('workspaces router', () => {
           config: {
             mounts: { '/': { vfs: 'ram', mode: 'write' } },
             machines: { monty: { provider: 'worker' } },
-            clis: { pager: { script } },
+            clis: { pager: { script, machine: 'worker' } },
           },
         },
       })

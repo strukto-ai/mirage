@@ -132,7 +132,7 @@ describe('interpreters at the line deadline', () => {
       new CLI({
         spec: new CommandSpec({ name: 'spin' }),
         script: new ScriptSource('while (true) {}', 'js'),
-        machine: 'quickjs',
+        runtime: 'quickjs',
       }),
     )
     try {
