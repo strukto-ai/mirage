@@ -15,6 +15,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -526,6 +527,214 @@ describe('editText', () => {
   })
 })
 
+function hunk(oldLines: string[], newLines: string[]): PatchHunk {
+  return { lineNumber: 1, oldLines, newLines, isEndOfFile: false }
+}
+
+async function textAt(ws: Workspace, path: string): Promise<string> {
+  return new TextDecoder().decode(await ws.vfs.read(path))
+}
+
+describe('patchText', () => {
+  it('applies hunks with an LF before and after', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'alpha\nbeta\ngamma\n' })
+    const target = await fs.resolve('/data/a.txt')
+    const outcome = await fs.patchText(target, [hunk(['beta'], ['delta'])])
+    expect(outcome.before).toBe('alpha\nbeta\ngamma\n')
+    expect(outcome.after).toBe('alpha\ndelta\ngamma\n')
+    expect(outcome.version).toEqual(await versionAt(fs, '/data/a.txt'))
+    expect(await textAt(ws, '/data/a.txt')).toBe('alpha\ndelta\ngamma\n')
+  })
+
+  it('keeps the stored CRLF line endings', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'one\r\ntwo\r\n' })
+    const target = await fs.resolve('/data/a.txt')
+    const outcome = await fs.patchText(target, [hunk(['two'], ['three'])])
+    expect(outcome.after).toBe('one\nthree\n')
+    expect(await textAt(ws, '/data/a.txt')).toBe('one\r\nthree\r\n')
+  })
+
+  it('reports an unmatched hunk and leaves the file alone', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'alpha\n' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(await errorCode(fs.patchText(target, [hunk(['zeta'], ['eta'])]))).toBe(
+      'FS_PATCH_MISMATCH',
+    )
+    expect(await textAt(ws, '/data/a.txt')).toBe('alpha\n')
+  })
+
+  it('reports a stale or missing target as stale', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'alpha\n' })
+    const target = await fs.resolve('/data/a.txt')
+    const stale = await versionAt(fs, '/data/a.txt')
+    await ws.vfs.write('/data/a.txt', 'changed underneath\n')
+    expect(
+      await errorCode(
+        fs.patchText(target, [hunk(['changed underneath'], ['x'])], { version: stale }),
+      ),
+    ).toBe('FS_STALE_VERSION')
+    const missing = await fs.resolve('/data/nope')
+    expect(await errorCode(fs.patchText(missing, [hunk(['a'], ['b'])]))).toBe('FS_STALE_VERSION')
+  })
+})
+
+describe('deleteFile', () => {
+  it('removes the file and returns its LF text', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'one\r\ntwo\r\n' })
+    const target = await fs.resolve('/data/a.txt')
+    const outcome = await fs.deleteFile(target, { version: await versionAt(fs, '/data/a.txt') })
+    expect(outcome.before).toBe('one\ntwo\n')
+    expect(await ws.vfs.exists('/data/a.txt')).toBe(false)
+  })
+
+  it('returns no basis for a file over the diff limit', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'x'.repeat(64) }, { diffBasisMaxBytes: 16 })
+    const outcome = await fs.deleteFile(await fs.resolve('/data/a.txt'))
+    expect(outcome.before).toBeNull()
+  })
+
+  it('refuses a stale, missing or non-file target', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'one', 'dir/b.txt': 'two' })
+    const target = await fs.resolve('/data/a.txt')
+    const stale = await versionAt(fs, '/data/a.txt')
+    await ws.vfs.write('/data/a.txt', 'one, then more')
+    expect(await errorCode(fs.deleteFile(target, { version: stale }))).toBe('FS_STALE_VERSION')
+    expect(await errorCode(fs.deleteFile(await fs.resolve('/data/nope')))).toBe('FS_STALE_VERSION')
+    expect(await errorCode(fs.deleteFile(await fs.resolve('/data/dir')))).toBe(
+      'FS_NOT_REGULAR_FILE',
+    )
+    expect(await ws.vfs.exists('/data/a.txt')).toBe(true)
+  })
+
+  it('reports a mount that refuses the unlink', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'kept' }, { readOnly: true })
+    expect(await errorCode(fs.deleteFile(await fs.resolve('/data/a.txt')))).toBe(
+      'FS_PERMISSION_DENIED',
+    )
+    expect(await textAt(ws, '/data/a.txt')).toBe('kept')
+  })
+})
+
+/**
+ * A workspace with two writable mounts, for moves that cross mounts.
+ *
+ * @returns the filesystem seam and its workspace.
+ */
+async function makeTwoMountFs(): Promise<{ fs: MirageFileSystem; ws: Workspace }> {
+  const ws = new Workspace({
+    '/data': [new RAMVFS(), MountMode.WRITE],
+    '/other': [new RAMVFS(), MountMode.WRITE],
+  })
+  workspaces.push(ws)
+  const ctx = new Context()
+  await ctx.plugin(MirageService, { workspace: ws }).await()
+  await ctx.plugin(MirageFileSystem, {}).await()
+  return { fs: ctx.fs as MirageFileSystem, ws }
+}
+
+describe('moveFile', () => {
+  it('publishes the text at the destination and removes the source', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'payload\n' })
+    const source = await fs.resolve('/data/a.txt')
+    const destination = await fs.resolve('/data/b.txt')
+    const outcome = await fs.moveFile(source, destination, {
+      expectedSource: { version: await versionAt(fs, '/data/a.txt') },
+      expectedDestination: { kind: 'createIfAbsent' },
+    })
+    expect(outcome.sourceDeleted).toBe(true)
+    expect(outcome.sourceBefore).toBe('payload\n')
+    expect(outcome.destination.operation).toBe('create')
+    expect(outcome.destination.after).toBe('payload\n')
+    expect(await textAt(ws, '/data/b.txt')).toBe('payload\n')
+    expect(await ws.vfs.exists('/data/a.txt')).toBe(false)
+  })
+
+  it('applies hunks on the way and keeps CRLF', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'one\r\ntwo\r\n' })
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/data/b.txt'),
+      { hunks: [hunk(['two'], ['three'])] },
+    )
+    expect(outcome.destination.after).toBe('one\nthree\n')
+    expect(await textAt(ws, '/data/b.txt')).toBe('one\r\nthree\r\n')
+  })
+
+  it('moves across mounts', async () => {
+    const { fs, ws } = await makeTwoMountFs()
+    await ws.vfs.write('/data/a.txt', 'crossing')
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/other/a.txt'),
+      {},
+    )
+    expect(outcome.sourceDeleted).toBe(true)
+    expect(await textAt(ws, '/other/a.txt')).toBe('crossing')
+    expect(await ws.vfs.exists('/data/a.txt')).toBe(false)
+  })
+
+  it('returns the replaced destination text as its before', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'new\n', 'b.txt': 'old\n' })
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/data/b.txt'),
+      {
+        expectedDestination: {
+          kind: 'replaceIfVersion',
+          version: await versionAt(fs, '/data/b.txt'),
+        },
+      },
+    )
+    expect(outcome.destination.operation).toBe('update')
+    expect(outcome.destination.before).toBe('old\n')
+  })
+
+  it('refuses a move onto itself', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'x' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(await errorCode(fs.moveFile(target, target, {}))).toBe('FS_SAME_TARGET')
+  })
+
+  it('refuses a destination the caller has not observed and keeps the source', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'source', 'b.txt': 'taken' })
+    expect(
+      await errorCode(
+        fs.moveFile(await fs.resolve('/data/a.txt'), await fs.resolve('/data/b.txt'), {
+          expectedDestination: { kind: 'createIfAbsent' },
+        }),
+      ),
+    ).toBe('FS_NOT_OBSERVED')
+    expect(await textAt(ws, '/data/a.txt')).toBe('source')
+    expect(await textAt(ws, '/data/b.txt')).toBe('taken')
+  })
+
+  it('reports a source the unlink could not remove as retained', async () => {
+    const pinned = new RAMVFS()
+    const seed = new Workspace({ '/data': [pinned, MountMode.WRITE] })
+    workspaces.push(seed)
+    await seed.vfs.write('/data/a.txt', 'pinned')
+    const ws = new Workspace({
+      '/data': [pinned, MountMode.READ],
+      '/other': [new RAMVFS(), MountMode.WRITE],
+    })
+    workspaces.push(ws)
+    const ctx = new Context()
+    await ctx.plugin(MirageService, { workspace: ws }).await()
+    await ctx.plugin(MirageFileSystem, {}).await()
+    const fs = ctx.fs as MirageFileSystem
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/other/a.txt'),
+      {},
+    )
+    expect(outcome.sourceDeleted).toBe(false)
+    if (outcome.sourceDeleted) throw new Error('expected the source to be retained')
+    expect(outcome.sourceFailure.code).toBe('FS_PERMISSION_DENIED')
+    expect(await textAt(ws, '/other/a.txt')).toBe('pinned')
+    expect(await textAt(ws, '/data/a.txt')).toBe('pinned')
+  })
+})
+
 describe('cancellation across readiness', () => {
   it('refuses to dispatch a write whose signal fired during the ready wait', async () => {
     // The executor runs synchronously, so release is assigned by here.
@@ -591,6 +800,22 @@ describe('sandbox policy', () => {
       'FS_SANDBOX_DENIED',
     )
     expect(new TextDecoder().decode(await ws.vfs.read('/data/a.txt'))).toBe('one')
+  })
+
+  it('refuses a patch, delete and move under a read-only policy', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'one\n' })
+    const target = await fs.resolve('/data/a.txt')
+    const destination = await fs.resolve('/data/b.txt')
+    const hunks = [{ lineNumber: 1, oldLines: ['one'], newLines: ['two'], isEndOfFile: false }]
+    for (const call of [
+      fs.patchText(target, hunks, undefined, undefined, READ_ONLY),
+      fs.deleteFile(target, undefined, undefined, READ_ONLY),
+      fs.moveFile(target, destination, {}, undefined, READ_ONLY),
+    ]) {
+      expect(await errorCode(call)).toBe('FS_SANDBOX_DENIED')
+    }
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/a.txt'))).toBe('one\n')
+    expect(await ws.vfs.exists('/data/b.txt')).toBe(false)
   })
 
   it('reads under a read-only policy, since only mutations are fenced', async () => {

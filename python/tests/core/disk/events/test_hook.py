@@ -123,3 +123,37 @@ def test_event_hook_normalizes_the_mount_root(tmp_path):
     events = _map(tmp_path, "modified", {"src_path": str(tmp_path)})
     assert events[0].path.virtual == "/d"
     assert events[0].path.vfs_path == ""
+
+
+def test_event_hook_maps_a_watcher_that_spells_the_root_through_a_link(
+    tmp_path,
+):
+    real = tmp_path / "real"
+    (real / "data").mkdir(parents=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real)
+    hook = DiskEventHook(_accessor(real.resolve()))
+    root = _root("/d/data", "data")
+    created = asyncio.run(
+        hook.to_events(
+            root, "created", {"src_path": str(alias / "data" / "a.txt")}
+        )
+    )
+    assert created[0].path.virtual == "/d/data/a.txt"
+    gone = asyncio.run(
+        hook.to_events(
+            root,
+            "deleted",
+            {"src_path": str(alias / "data" / "gone" / "b.txt")},
+        )
+    )
+    assert gone[0].path.virtual == "/d/data/gone/b.txt"
+
+
+def test_event_hook_reports_a_link_made_in_the_mount_as_itself(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "shortcut").symlink_to(tmp_path / "data")
+    events = _map(
+        tmp_path, "created", {"src_path": str(tmp_path / "shortcut")}
+    )
+    assert events[0].path.virtual == "/d/shortcut"

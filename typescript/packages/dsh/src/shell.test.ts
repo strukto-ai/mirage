@@ -689,13 +689,16 @@ describe('session binding', () => {
     expect(out.stdout.text).toBe('/data\n/data\n')
   })
 
-  it('treats an explicit workdir as a one-call subshell', async () => {
+  it('moves the session to the workdir dsh sends and keeps its exports', async () => {
     const { shell } = await makeShell({}, { sessionId: 's2' })
-    await runOn(shell, shell.resolve({ command: 'cd /data' }))
-    const sub = await runOn(shell, shell.resolve({ command: 'pwd', workdir: '/' }))
-    expect(sub.stdout.text.trim()).toBe('/')
-    const back = await runOn(shell, shell.resolve({ command: 'pwd' }))
-    expect(back.stdout.text.trim()).toBe('/data')
+    await runOn(shell, shell.resolve({ command: 'export KEPT=yes; cd /data' }))
+    const moved = await runOn(
+      shell,
+      shell.resolve({ command: 'pwd; echo "$KEPT"; export LATER=too', workdir: '/' }),
+    )
+    expect(moved.stdout.text).toBe('/\nyes\n')
+    const after = await runOn(shell, shell.resolve({ command: 'pwd; echo "$LATER"' }))
+    expect(after.stdout.text).toBe('/\ntoo\n')
   })
 
   it('keeps a per-call env override out of the session', async () => {

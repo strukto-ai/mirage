@@ -13,11 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { parsePatch } from '@deepseek-ai/dsh-fs-patch'
+import SessionStore from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import WorkingDirectoryService from '@deepseek-ai/dsh-working-directory'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { Workspace } from '@struktoai/mirage-node'
+import { DiskVFS, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
+import type { MirageFsConfig } from './fs.ts'
 import { MirageService } from './service.ts'
 import { MirageShellExecutor } from './shell.ts'
 import type { SaveTextSpill } from '@deepseek-ai/dsh-spill'
@@ -143,5 +152,150 @@ describe('a spilled result is recoverable from inside the world', () => {
     // And the window reader the hint names: read with offset/limit.
     const window = await ctx.fs.readByteRange(target, { offset: 4990, length: 100 })
     expect(window.byteLength).toBe(10)
+  })
+})
+
+type DirectoryAgent = Parameters<WorkingDirectoryService['ensure']>[0]
+
+/**
+ * A world composed with dsh's own Session store, projections, system
+ * prompt and working-directory service over the mirage seams: the
+ * services every bash, file and search tool asks for a directory.
+ *
+ * @param launched the directory dsh recorded for the Session, none when null.
+ * @param ws the workspace, two RAM mounts when omitted.
+ * @param fs the mirage filesystem's config.
+ * @returns the context and an Agent owning one Session.
+ */
+async function directoryWorld(
+  launched: string | null,
+  ws: Workspace = new Workspace({
+    '/data': [new RAMVFS(), MountMode.WRITE],
+    '/notes': [new RAMVFS(), MountMode.WRITE],
+  }),
+  fs: MirageFsConfig = {},
+): Promise<{ ctx: Context; ws: Workspace; agent: DirectoryAgent }> {
+  workspaces.push(ws)
+  const ctx = new Context()
+  await ctx.plugin(SessionStore).await()
+  await ctx.plugin(SessionProjectionRegistry).await()
+  await ctx.plugin(SystemPrompt, {}).await()
+  await ctx.plugin(MirageService, { workspace: ws }).await()
+  await ctx.plugin(MirageFileSystem, fs).await()
+  await ctx.plugin(MirageShellExecutor, {}).await()
+  await ctx.plugin(WorkingDirectoryService, {}).await()
+  const session = ctx.sessions.create(
+    undefined,
+    launched === null ? {} : { meta: { cwd: launched } },
+  )
+  const agent = {
+    session,
+    ctx: { fiber: { assertActive: () => undefined } },
+    inject: () => undefined,
+  } as unknown as DirectoryAgent
+  return { ctx, ws, agent }
+}
+
+describe("dsh's working directory", () => {
+  it('starts a host-launched Session in the world', async () => {
+    const { ctx, agent } = await directoryWorld('/Users/somebody/host-project')
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/')
+    expect(ctx.workingDirectory.get(agent.session)).toBe('/')
+  })
+
+  it("starts in the filesystem's cwd when it has one", async () => {
+    const { ctx, agent } = await directoryWorld('/Users/somebody/host-project', undefined, {
+      cwd: '/data',
+    })
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/data')
+  })
+
+  it('places a Session that records no directory', async () => {
+    const { ctx, agent } = await directoryWorld(null)
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/')
+  })
+
+  it('keeps a launch directory the world already has', async () => {
+    const { ctx, agent } = await directoryWorld('/notes')
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/notes')
+  })
+
+  it('starts in the disk mount that holds the launch directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mirage-dsh-launch-'))
+    try {
+      await mkdir(join(root, 'src'))
+      const ws = new Workspace({ '/project': [new DiskVFS({ root }), MountMode.WRITE] })
+      const { ctx, agent } = await directoryWorld(join(root, 'src'), ws)
+      expect(await ctx.workingDirectory.ensure(agent)).toBe('/project/src')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('moves between mounts, and a bash call runs where it points', async () => {
+    const { ctx, agent } = await directoryWorld('/Users/somebody/host-project')
+    expect(await ctx.workingDirectory.set(agent, '/data')).toBe('/data')
+    expect(await ctx.workingDirectory.set(agent, '../notes')).toBe('/notes')
+    const workdir = await ctx.workingDirectory.ensure(agent)
+    const result = await runOn(ctx.shell, ctx.shell.resolve({ command: 'pwd', workdir }))
+    expect(result.stdout.text).toBe('/notes\n')
+  })
+
+  it('refuses a directory the world does not have', async () => {
+    const { ctx, agent } = await directoryWorld('/Users/somebody/host-project')
+    await expect(ctx.workingDirectory.set(agent, '/missing')).rejects.toMatchObject({
+      code: 'WORKING_DIRECTORY_NOT_FOUND',
+    })
+    expect(ctx.workingDirectory.get(agent.session)).toBe('/')
+  })
+
+  it('recovers when the directory is removed under it', async () => {
+    const { ctx, ws, agent } = await directoryWorld('/Users/somebody/host-project')
+    await ws.vfs.mkdir('/data/sub')
+    await ctx.workingDirectory.set(agent, '/data/sub')
+    await runOn(ctx.shell, ctx.shell.resolve({ command: 'rmdir /data/sub' }))
+    expect(await ctx.workingDirectory.ensure(agent)).toBe('/')
+  })
+})
+
+describe('apply_patch operations over mounts', () => {
+  it('updates, moves across mounts and deletes from one parsed patch', async () => {
+    const { ctx, ws } = await directoryWorld('/')
+    await ws.vfs.write('/data/a.txt', 'one\ntwo\n')
+    await ws.vfs.write('/data/b.txt', 'keep\nold\n')
+    await ws.vfs.write('/data/c.txt', 'gone\n')
+    const operations = parsePatch(
+      [
+        '*** Begin Patch',
+        '*** Update File: /data/b.txt',
+        '@@',
+        ' keep',
+        '-old',
+        '+new',
+        '*** Update File: /data/a.txt',
+        '*** Move to: /notes/a.txt',
+        '@@',
+        ' one',
+        '-two',
+        '+three',
+        '*** Delete File: /data/c.txt',
+        '*** End Patch',
+      ].join('\n'),
+    )
+    for (const op of operations) {
+      const target = await ctx.fs.resolve(op.path)
+      if (op.kind === 'delete') await ctx.fs.deleteFile(target)
+      else if (op.kind === 'update' && op.moveTo !== undefined) {
+        const moved = await ctx.fs.moveFile(target, await ctx.fs.resolve(op.moveTo), {
+          hunks: op.hunks,
+        })
+        expect(moved.sourceDeleted).toBe(true)
+      } else if (op.kind === 'update') await ctx.fs.patchText(target, op.hunks)
+    }
+    const shown = await runOn(
+      ctx.shell,
+      ctx.shell.resolve({ command: 'cat /data/b.txt /notes/a.txt; ls /data' }),
+    )
+    expect(shown.stdout.text).toBe('keep\nnew\none\nthree\nb.txt\n')
   })
 })

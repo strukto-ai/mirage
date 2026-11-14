@@ -9,7 +9,7 @@ icon: /images/deepseek-logo.svg
 ## Install
 
 ```bash
-npm install @struktoai/mirage-dsh @struktoai/mirage-node @struktoai/mirage-core @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill @deepseek-ai/dsh-subprocess @pydantic/monty redis
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @struktoai/mirage-core @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-fs-patch @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill @deepseek-ai/dsh-subprocess @pydantic/monty redis
 ```
 
 ## Compose
@@ -64,17 +64,26 @@ Each command is a clean slate: `cd`, `export`, and function definitions inside o
 await ctx.plugin(MirageShellExecutor, { sessionId: 'agent-1' }).await()
 ```
 
-A bound session keeps its cwd, exports, and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace. While one command still runs in the session, such as one left in the background, the next runs beside it on a copy of the session instead of waiting for it to end, so that command's `cd` and `export` last for it alone.
+A bound session keeps its exports and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace. While one command still runs in the session, such as one left in the background, the next runs beside it on a copy of the session instead of waiting for it to end, so that command's `export` lasts for it alone.
 
-dsh sends a working directory and a set of managed `DSH_*` variables with every call, and in Mirage a per-call directory or environment forks a subshell. Taken at face value, a bound session would therefore have nothing left to persist, so both are checked first. The workdir dsh computed on its own machine is not a directory in this world, so it is ignored: the executor's own `workdir` when unbound, the session's cwd when bound, and `ctx.fs` resolves relative paths against the same base. The `DSH_*` variables are set in the session once instead of riding along per call. A workdir that does exist here, or any other per-call variable, still forks a subshell, which is what "only this command" should mean.
+dsh decides where a command runs. Its bash tool sends the session's working directory, or the call's own `workdir`, with every call, so a bound session moves there before the command runs and a `cd` lasts until the next call. The `DSH_*` variables dsh also sends are set in the session once. Any other per-call variable runs the command in a subshell, which is what "only this command" should mean.
 
 ```ts
-// dsh sends its own machine's cwd, a path this world does not contain
-const host = '/Users/somebody/host-project'
+await run({ command: 'export TOKEN=abc', workdir: '/tmp' })
+const result = await run({ command: 'pwd; echo $TOKEN', workdir: '/redis' })
+// result.stdout.text === '/redis\nabc\n'
+```
 
-await run({ command: 'cd /tmp && export TOKEN=abc', workdir: host })
-const result = await run({ command: 'pwd; echo $TOKEN', workdir: host })
-// result.stdout.text === '/tmp\nabc\n'
+### Working directory
+
+dsh records the directory it was launched in, a path on the host, and checks it through `ctx.fs` before every bash, file and search call. `MirageFileSystem` puts that directory in the workspace: when a disk mount holds the launch directory, the agent starts in its mount, otherwise in the filesystem's `cwd` (`/` by default). From there dsh's `working_directory` tool moves between mounts, and the file tools resolve relative paths against it.
+
+```ts
+const ws = new Workspace({
+  '/project': [new DiskVFS({ root: process.cwd() }), MountMode.WRITE],
+  '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.READ],
+})
+// dsh launched in the project starts the agent in /project
 ```
 
 ## Run Python with monty
@@ -117,7 +126,7 @@ A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The s
 
 Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as a `host` machine, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
 
-The claim is enforced per call, not merely advertised. dsh resolves a policy for every command and every file edit, and Mirage applies it. Under `read-only` the shell runs in a twin of its own session with every grant narrowed to read, so a session already confined to some mounts stays confined (the twin narrows, it never widens), and `ctx.fs` refuses a write or an edit with `FS_SANDBOX_DENIED`, the same error dsh's own sandboxed backend raises:
+The claim is enforced per call, not merely advertised. dsh resolves a policy for every command and every file edit, and Mirage applies it. Under `read-only` the shell runs in a twin of its own session with every grant narrowed to read, so a session already confined to some mounts stays confined (the twin narrows, it never widens), and `ctx.fs` refuses a write, edit, patch, delete or move with `FS_SANDBOX_DENIED`, the same error dsh's own sandboxed backend raises:
 
 ```ts
 const policy = { mode: 'read-only', workspaceRoot: '/Users/somebody/host-project' } as const

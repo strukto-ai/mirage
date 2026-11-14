@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileChangeKind, PathSpec } from '@struktoai/mirage-core/types'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -104,6 +104,29 @@ describe('DiskEventHook', () => {
     const events = await map('modified', { src_path: root })
     expect(events[0]?.path.virtual).toBe('/d')
     expect(events[0]?.path.vfsPath).toBe('')
+  })
+
+  it('maps a watcher that spells the root through a link', async () => {
+    const real = path.join(root, 'real')
+    const alias = path.join(root, 'alias')
+    await mkdir(path.join(real, 'data'), { recursive: true })
+    await symlink(real, alias)
+    const hook = new DiskEventHook(new DiskAccessor(await realpath(real)))
+    const created = await hook.toEvents(spec('/d/data', 'data'), 'created', {
+      src_path: path.join(alias, 'data', 'a.txt'),
+    })
+    expect(created[0]?.path.virtual).toBe('/d/data/a.txt')
+    const gone = await hook.toEvents(spec('/d/data', 'data'), 'deleted', {
+      src_path: path.join(alias, 'data', 'gone', 'b.txt'),
+    })
+    expect(gone[0]?.path.virtual).toBe('/d/data/gone/b.txt')
+  })
+
+  it('reports a link made in the mount as itself', async () => {
+    await mkdir(path.join(root, 'data'))
+    await symlink(path.join(root, 'data'), path.join(root, 'shortcut'))
+    const events = await map('created', { src_path: path.join(root, 'shortcut') })
+    expect(events[0]?.path.virtual).toBe('/d/shortcut')
   })
 
   it('ignores a payload without a path', async () => {
