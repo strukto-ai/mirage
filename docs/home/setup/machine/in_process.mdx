@@ -1,13 +1,12 @@
 ---
 title: In Process
 icon: cube
-description: Run Mirage's own commands, and Python or JavaScript on a runtime, inside the Mirage process.
+description: Run Python or JavaScript on a runtime inside Mirage.
 ---
 
-`in_process` is the workspace's own machine: the Mirage process. Mirage's own
-commands (`cat`, `grep`, pipes, redirects) always run here, and `ps` and
-`hostname` call it `mirage`. An `in_process` entry adds a
-[runtime](/home/setup/runtime/overview) to run a language here:
+An `in_process` machine runs a [runtime](/home/setup/runtime/overview)
+inside Mirage, so Python or JavaScript runs where Mirage runs, with no
+container or host of its own. Each entry names its `runtime`:
 
 ```yaml
 machines:
@@ -37,20 +36,6 @@ files or network; Pyodide's access depends on where it runs, see its
 what its code reaches. For hostile code, prefer a machine with a kernel
 boundary: a [`host`](/home/setup/machine/host) with a `sandbox`, or a
 [machine provider](/home/setup/machine/overview#providers).
-
-## Without a runtime
-
-An entry named `workspace` with no `runtime` limits Mirage's own commands to
-its `captures`: another mount command, such as `ls`, exits 126, `no runtime
-accepted this line`, and an unknown program exits 127. The shell's own words
-(`cd`, `export`, `echo`) still run.
-
-```yaml
-machines:
-  workspace:
-    provider: in_process
-    captures: [cat, grep, wc]
-```
 
 ## CLIs
 

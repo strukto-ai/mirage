@@ -236,14 +236,9 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
         ({"provider": "host"}, "LocalRuntime"),
         ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
         ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
-        ({"provider": "in_process"}, None),
     ],
 )
 def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
-    if cls is None:
-        with pytest.raises(ValueError, match="the shell's machine name"):
-            build_entry("py", spec)
-        return
     handle, runtime = build_entry("py", spec)
     assert (handle, type(runtime).__name__, runtime.name) == (None, cls, "py")
     assert built_from(runtime) == spec
@@ -264,8 +259,11 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
         (
             "workspace",
             {"provider": "in_process", "runtime": "monty"},
-            "the shell's machine name",
+            "reserved for the workspace",
         ),
+        ("workspace", {"provider": "docker"}, "reserved for the workspace"),
+        ("py", {"provider": "in_process"}, "names its runtime"),
+        ("py", WorkspaceRuntime(), "not a machine"),
         ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
         ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
         ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),
@@ -276,12 +274,6 @@ def test_build_entry_refuses_what_its_provider_does_not_run(
 ):
     with pytest.raises(ValueError, match=refusal):
         build_entry(name, spec)
-
-
-def test_build_entry_names_the_shell_workspace_alone():
-    _, shell = build_entry("workspace", {"provider": "in_process"})
-    assert isinstance(shell, WorkspaceRuntime)
-    assert built_from(shell) == {"provider": "in_process"}
 
 
 class _LineRuntime(Runtime, LineExecutorMixin):
@@ -304,7 +296,7 @@ def test_only_a_line_capture_takes_the_whole_line():
 
 
 def test_whole_line_runtime_skips_stage_engines_and_workspace():
-    vfs = WorkspaceRuntime(captures=["grep"])
+    vfs = WorkspaceRuntime()
     monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
     assert whole_line_runtime(bindings) is None

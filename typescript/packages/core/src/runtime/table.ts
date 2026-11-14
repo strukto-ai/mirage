@@ -162,23 +162,25 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * handle and the remote runtime that runs its `captures` through it. An
  * engine provider builds the runtime alone: `in_process` the one its
  * `runtime` names (a registered name, or a class a `source:Class` reference
- * loaded; none for the shell, which only `workspace` may be),
- * `host` the host's own programs, confined by sandlock when a
+ * loaded), `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
  * config. Mirrors Python's `build_entry`.
  *
  * Throws:
- *   Error: `workspace` for anything but the shell, a runtime its provider
- *   does not run, a `sandbox` that is not a mapping, or what `buildMachine`
+ *   Error: the reserved name `workspace` or the workspace's own runtime, a
+ *   runtime its provider does not run, an `in_process` entry with no
+ *   `runtime`, a `sandbox` that is not a mapping, or what `buildMachine`
  *   refuses.
  */
 export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
+  if (name === 'workspace') throw new Error(`machine name '${name}' is reserved for the workspace`)
+  if (spec instanceof WorkspaceRuntime)
+    throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
   let runtime: Runtime
   if (spec instanceof Runtime) {
     runtime = spec
   } else if (spec instanceof MachineHandle || !ENGINE_PROVIDERS.includes(spec.provider as string)) {
     const handle = buildMachine(name, spec)
-    if (name === 'workspace') throw new Error(`'${name}' is the shell's machine name`)
     const captures = (handle.config as { captures?: readonly string[] }).captures
     return [handle, new RemoteRuntime(name, captures === undefined ? {} : { captures })]
   } else {
@@ -198,8 +200,6 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
     })
     BUILT_FROM.set(runtime, { ...spec })
   }
-  if ((name === 'workspace') !== runtime instanceof WorkspaceRuntime)
-    throw new Error(`'${name}' is the shell's machine name`)
   runtime.name = name
   return [null, runtime]
 }
@@ -217,7 +217,8 @@ function runtimeFor(
       throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
   }
-  if (runtime === undefined) return WorkspaceRuntime
+  if (runtime === undefined)
+    throw new Error(`machine '${name}': an ${IN_PROCESS} machine names its runtime`)
   if (typeof runtime === 'function') {
     if (!(runtime.prototype instanceof Runtime))
       throw new Error(`machine '${name}': its runtime is not a Runtime subclass`)
@@ -460,13 +461,12 @@ export function routed(
 /**
  * The runtime that serves commands no entry captures, if any.
  *
- * That is the world's WorkspaceRuntime, unless it declares captures (then it
- * is an ordinary capturer and nothing is catch-all) or it is not among
- * the given entries.
+ * That is the world's WorkspaceRuntime, unless it is not among the given
+ * entries.
  */
 export function catchAll(entries: readonly Runtime[]): Runtime | null {
   for (const entry of entries) {
-    if (entry instanceof WorkspaceRuntime && !entry.restricted) return entry
+    if (entry instanceof WorkspaceRuntime) return entry
   }
   return null
 }

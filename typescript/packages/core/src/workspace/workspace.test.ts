@@ -1211,10 +1211,7 @@ it('a copy keeps a machine of any name', async () => {
   const copy = await ws.copy()
   try {
     for (const each of [ws, copy]) {
-      expect(each.engines().map((e) => [e.name, [...e.captures]])).toEqual([
-        ['__proto__', ['js']],
-        ['workspace', []],
-      ])
+      expect(each.engines().map((e) => [e.name, [...e.captures]])).toEqual([['__proto__', ['js']]])
     }
   } finally {
     await copy.close()

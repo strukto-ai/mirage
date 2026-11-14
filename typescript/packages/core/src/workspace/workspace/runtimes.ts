@@ -60,10 +60,7 @@ export class Runtimes {
     this.registry = init.registry
     this.binding = init.binding
     this.machines = init.machines
-    const entries: Runtime[] = [...init.entries]
-    if (!entries.some((entry) => entry.name === 'workspace')) {
-      entries.push(new WorkspaceRuntime())
-    }
+    const entries: Runtime[] = [...init.entries, new WorkspaceRuntime()]
     const bindings = bindCommands(entries)
     for (const entry of entries) this.bindEntry(entry)
     this.install(entries, bindings)
@@ -136,12 +133,9 @@ export class Runtimes {
 
   /** Unbind an entry's commands now and close it once it is idle. */
   async remove(name: string): Promise<void> {
-    if (name === 'workspace') {
-      throw new Error(
-        'cannot remove the workspace machine: it serves every command no other machine captures',
-      )
-    }
-    const entry = this.entries.find((candidate) => candidate.name === name)
+    const entry = this.entries.find(
+      (candidate) => candidate.name === name && !(candidate instanceof WorkspaceRuntime),
+    )
     if (entry === undefined) throw new Error(`no machine: '${name}'`)
     const remaining = this.entries.filter((candidate) => candidate !== entry)
     this.install(remaining, bindCommands(remaining))

@@ -526,13 +526,24 @@ describe('the placement stage', () => {
   })
 })
 
-describe('workspace runtime overrides', () => {
-  it('explicit captures restrict the workspace', async () => {
+describe('the workspace itself', () => {
+  it('is never a machine entry', () => {
+    expect(
+      () => new Workspace({ '/': new RAMVFS() }, { machines: [new WorkspaceRuntime()] }),
+    ).toThrow(/reserved for the workspace/)
+    expect(
+      () => new Workspace({ '/': new RAMVFS() }, { machines: { x: new WorkspaceRuntime() } }),
+    ).toThrow(/not a machine/)
+  })
+
+  it('an allow list narrows what it runs', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
+        machines: [new NamedFakeRuntime('alpha')],
+        profiles: { narrow: { commands: { allow: ['echo', 'python3'] } } },
+        profile: 'narrow',
       },
     )
     try {
@@ -540,46 +551,7 @@ describe('workspace runtime overrides', () => {
       expect(DEC.decode(ok.stdout)).toBe('listed\n')
       const denied = await ws.shell('ls /')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('ls: no runtime accepted this line\n')
-      const py = await ws.shell('python3 -c "x"')
-      expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('explicit captures restrict under routing', async () => {
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
-        routePolicy: () => null,
-      },
-    )
-    try {
-      const ok = await ws.shell('echo routed-ok')
-      expect(DEC.decode(ok.stdout)).toBe('routed-ok\n')
-      const denied = await ws.shell('ls /')
-      expect(denied.exitCode).toBe(126)
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
-describe('script context', () => {
-  it('empty declared captures serve nothing', async () => {
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        machines: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: [] })],
-      },
-    )
-    try {
-      const denied = await ws.shell('ls /')
-      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toBe('ls: Permission denied\n')
       const py = await ws.shell('python3 -c "x"')
       expect(DEC.decode(py.stdout)).toBe('ran-alpha\n')
     } finally {
@@ -892,13 +864,13 @@ describe('whole-line runtimes', () => {
   it('the workspace entry is a pure routing marker', async () => {
     // A workspace-resolved line runs on the workspace executor inline; the
     // entry is a marker with no line entry point to call.
-    const fallback = new WorkspaceRuntime()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: [buildRuntime('pyodide'), fallback] },
+      { mode: MountMode.EXEC, machines: [buildRuntime('pyodide')] },
     )
     try {
-      expect(isLineExecutor(fallback)).toBe(false)
+      expect(isLineExecutor(new WorkspaceRuntime())).toBe(false)
+      expect(ws.engines().some((entry) => entry instanceof WorkspaceRuntime)).toBe(false)
       const result = await ws.shell('echo through-workspace')
       expect(DEC.decode(result.stdout)).toBe('through-workspace\n')
       expect(result.exitCode).toBe(0)

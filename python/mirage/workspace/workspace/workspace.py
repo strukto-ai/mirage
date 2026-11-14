@@ -140,6 +140,7 @@ from mirage.runtime.table import (
     whole_line_runtime,
 )
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -1714,8 +1715,13 @@ class Workspace:
 
     def engines(self) -> list[Runtime[Any]]:
         """The engine each machine runs, first capturer first, each
-        named for its machine."""
-        return list(self._runtimes.entries)
+        named for its machine. Mirage's own command engine is no
+        machine, so it is not among them."""
+        return [
+            entry
+            for entry in self._runtimes.entries
+            if not isinstance(entry, WorkspaceRuntime)
+        ]
 
     def add_machine(self, name: str, spec: MachineSpec) -> Runtime[Any]:
         """Add a machine to the workspace's ordered set;

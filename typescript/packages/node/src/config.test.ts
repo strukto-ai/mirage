@@ -334,12 +334,18 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
-  it('rejects a config key on the workspace machine', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { vfs: 'ram' } },
-      machines: { workspace: { provider: 'in_process', home: '/x' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime config key 'home'/)
+  it('refuses a workspace entry and an in_process entry with no runtime', async () => {
+    const mounts = { '/': { vfs: 'ram' } }
+    await expect(
+      configToWorkspaceArgs(
+        loadWorkspaceConfig({ mounts, machines: { workspace: { provider: 'in_process' } } }),
+      ),
+    ).rejects.toThrow(/reserved for the workspace/)
+    await expect(
+      configToWorkspaceArgs(
+        loadWorkspaceConfig({ mounts, machines: { py: { provider: 'in_process' } } }),
+      ),
+    ).rejects.toThrow(/names its runtime/)
   })
 
   it('resolves script paths against the config file dir', async () => {
@@ -356,16 +362,6 @@ describe('configToWorkspaceArgs', () => {
       runtime: 'monty',
     })
     rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('carries workspace captures through', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { vfs: 'ram' } },
-      machines: { workspace: { provider: 'in_process', captures: ['grep', 'cat'] } },
-    })
-    const args = await configToWorkspaceArgs(cfg)
-    const entry = machinesOf(args).workspace as { captures: readonly string[] }
-    expect([...entry.captures]).toEqual(['grep', 'cat'])
   })
 
   it('takes max_memory as a size or a count of bytes', async () => {
@@ -1352,7 +1348,7 @@ describe('machines runtime: reference', () => {
     const ws = new Workspace(args.mounts, args.options)
     const copied = await ws.copy()
     try {
-      expect(copied.engines().map((r) => r.name)).toEqual(['gpu', 'workspace'])
+      expect(copied.engines().map((r) => r.name)).toEqual(['gpu'])
       const run = await copied.shell('nvidia-smi -L')
       expect(new TextDecoder().decode(run.stdout)).toMatch(/^box:/)
     } finally {

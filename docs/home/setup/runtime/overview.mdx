@@ -1,12 +1,12 @@
 ---
 title: Runtimes
 sidebarTitle: Overview
-description: The interpreters that run Python and JavaScript inside the In Process machine.
+description: The interpreters that run Python and JavaScript inside Mirage.
 icon: microchip
 ---
 
-A runtime is an interpreter Mirage runs inside the
-[In Process](/home/setup/machine/in_process) machine. It gives a program a
+A runtime is an interpreter that runs inside Mirage, on an
+[`in_process`](/home/setup/machine/in_process) machine. It gives a program a
 process: its arguments, stdin, environment and working directory, and file
 calls that reach the workspace's mounts directly, under the same mount modes,
 permissions and policies as `cat`. The machine is where the program runs; the
@@ -58,4 +58,4 @@ clis:
 
 A script whose machine has no entry for its language exits 127 and names the
 workspace's machines: `pager: no in_process machine runs python scripts
-(workspace machines: 'js', 'workspace')`.
+(workspace machines: 'js')`.

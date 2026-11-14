@@ -133,8 +133,6 @@ describe('runtime table', () => {
 
   it('buildRuntime builds the workspace runtime by name', () => {
     expect(buildRuntime('workspace')).toBeInstanceOf(WorkspaceRuntime)
-    const restricted = buildRuntime('workspace', { captures: ['grep', 'cat'] })
-    expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 })
 
@@ -324,8 +322,9 @@ describe('buildEntry', () => {
     ['py', { provider: 'host', runtime: 'monty' }, /not a runtime/],
     ['py', { provider: 'in_process', runtime: 'monty', sandbox: {} }, /only a host/],
     ['py', { provider: 'host', sandbox: null }, /must be a mapping/],
-    ['workspace', { provider: 'in_process', runtime: 'monty' }, /the shell's machine name/],
-    ['py', { provider: 'in_process' }, /the shell's machine name/],
+    ['workspace', { provider: 'in_process', runtime: 'monty' }, /reserved for the workspace/],
+    ['workspace', { provider: 'docker' }, /reserved for the workspace/],
+    ['py', { provider: 'in_process' }, /names its runtime/],
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
@@ -333,10 +332,8 @@ describe('buildEntry', () => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })
 
-  it('names the shell workspace alone', () => {
-    const [, shell] = buildEntry('workspace', { provider: 'in_process' })
-    expect(shell).toBeInstanceOf(WorkspaceRuntime)
-    expect(builtFrom(shell)).toEqual({ provider: 'in_process' })
+  it('refuses the workspace runtime as a machine', () => {
+    expect(() => buildEntry('x', new WorkspaceRuntime())).toThrow(/not a machine/)
   })
 })
 

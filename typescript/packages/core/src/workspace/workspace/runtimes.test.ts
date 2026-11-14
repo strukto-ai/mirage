@@ -231,15 +231,11 @@ class Box extends Runtime implements LineExecutorMixin {
 
 describe('addMachine', () => {
   it.each([
-    [() => [new Engine('a')], () => [new Box('b1'), new Box('b2')], ['b1', 'b2', 'a', 'workspace']],
-    [() => [new Engine('a'), new Box('b1')], () => [new Box('b2')], ['a', 'b1', 'b2', 'workspace']],
-    [
-      () => [new Engine('a')],
-      () => [new Engine('b'), new Box('b1')],
-      ['b1', 'a', 'workspace', 'b'],
-    ],
-    [() => [new Gate(), new Engine('a')], () => [new Box('b1')], ['gate', 'b1', 'a', 'workspace']],
-    [() => [new Gate()], () => [new Box('b1')], ['gate', 'workspace', 'b1']],
+    [() => [new Engine('a')], () => [new Box('b1'), new Box('b2')], ['b1', 'b2', 'a']],
+    [() => [new Engine('a'), new Box('b1')], () => [new Box('b2')], ['a', 'b1', 'b2']],
+    [() => [new Engine('a')], () => [new Engine('b'), new Box('b1')], ['b1', 'a', 'b']],
+    [() => [new Gate(), new Engine('a')], () => [new Box('b1')], ['gate', 'b1', 'a']],
+    [() => [new Gate()], () => [new Box('b1')], ['gate', 'b1']],
   ] as [() => Runtime[], () => Runtime[], string[]][])(
     'places an added sandbox after the last sandbox or before the languages (%#)',
     async (listed, added, order) => {

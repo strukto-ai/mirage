@@ -53,6 +53,7 @@ import { answered, cliVoice, runHandler } from './handler.ts'
 import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -119,7 +120,11 @@ function selectRuntime(
   }
   const chosen = runtimeForScript(entries, leaf.machine, leaf.runtime, script.language)
   if (chosen !== null) return [chosen, null]
-  const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
+  const known =
+    entries
+      .filter((entry) => !(entry instanceof WorkspaceRuntime))
+      .map((entry) => `'${entry.name}'`)
+      .join(', ') || 'none'
   const what =
     leaf.runtime === null
       ? `${script.language} scripts`

@@ -208,24 +208,24 @@ class Box(Runtime, LineExecutorMixin):
         (
             [Engine("a")],
             [Box("b1"), Box("b2")],
-            ["b1", "b2", "a", "workspace"],
+            ["b1", "b2", "a"],
         ),
         (
             [Engine("a"), Box("b1")],
             [Box("b2")],
-            ["a", "b1", "b2", "workspace"],
+            ["a", "b1", "b2"],
         ),
         (
             [Engine("a")],
             [Engine("b"), Box("b1")],
-            ["b1", "a", "workspace", "b"],
+            ["b1", "a", "b"],
         ),
         (
             [Gate(), Engine("a")],
             [Box("b1")],
-            ["gate", "b1", "a", "workspace"],
+            ["gate", "b1", "a"],
         ),
-        ([Gate()], [Box("b1")], ["gate", "workspace", "b1"]),
+        ([Gate()], [Box("b1")], ["gate", "b1"]),
     ],
 )
 async def test_an_added_sandbox_goes_after_the_last_sandbox_or_the_languages(

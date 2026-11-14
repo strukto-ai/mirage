@@ -85,17 +85,15 @@ class Runtimes:
     def resolve(self, entries: list[Runtime[Any]]) -> list[Runtime[Any]]:
         """Wire the ordered entries.
 
-        Every entry gets the workspace dispatch attached. The shell is
-        required: when the list omits it, an unconditional one is
-        appended, so there is always an executor for unclaimed commands.
+        Every entry gets the workspace dispatch attached, and the
+        workspace's own runtime is appended, so there is always an
+        executor for unclaimed commands.
 
         Args:
             entries (list[Runtime]): the engine of each machine, in
                 capture order.
         """
-        entries = list(entries)
-        if not any(entry.name == WorkspaceRuntime.name for entry in entries):
-            entries.append(WorkspaceRuntime())
+        entries = [*entries, WorkspaceRuntime()]
         bindings = bind_commands(entries)
         for entry in entries:
             self._bind(entry)
@@ -159,14 +157,16 @@ class Runtimes:
             name (str): the machine's name.
 
         Raises:
-            ValueError: the name is the shell's or no machine's.
+            ValueError: no machine has the name.
         """
-        if name == WorkspaceRuntime.name:
-            raise ValueError(
-                "cannot remove the workspace machine: it serves every "
-                "command no other machine captures"
-            )
-        entry = next((e for e in self._entries if e.name == name), None)
+        entry = next(
+            (
+                e
+                for e in self._entries
+                if e.name == name and not isinstance(e, WorkspaceRuntime)
+            ),
+            None,
+        )
         if entry is None:
             raise ValueError(f"no machine: {name!r}")
         remaining = [e for e in self._entries if e is not entry]

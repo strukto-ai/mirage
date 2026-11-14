@@ -89,6 +89,7 @@ import {
   WorkspaceBinding,
 } from '../../runtime/binding.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineProcess } from '../../execution/machine/types.ts'
 import type { Machine } from '../../execution/machine/types.ts'
@@ -845,9 +846,13 @@ export class Workspace {
     return this.sandboxMounts().filter((prefix) => pathVisible(vis, rstripSlash(prefix) || '/'))
   }
 
-  /** The runtime each machine runs, first capturer first, each named for its machine. */
+  /**
+   * The runtime each machine runs, first capturer first, each named for its
+   * machine. Mirage's own command engine is no machine, so it is not among
+   * them.
+   */
   engines(): readonly Runtime[] {
-    return this.runtimeWorld.entries
+    return this.runtimeWorld.entries.filter((entry) => !(entry instanceof WorkspaceRuntime))
   }
 
   /**

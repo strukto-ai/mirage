@@ -133,8 +133,7 @@ def build_entry(
     A machine provider (docker, ssh, ...) builds its handle and the
     remote runtime that runs its ``captures`` through it. An engine
     provider builds the engine alone: ``in_process`` the one its
-    ``runtime`` names (none for the shell, which only ``workspace`` may
-    be), ``host`` the host's own programs, confined by
+    ``runtime`` names, ``host`` the host's own programs, confined by
     sandlock when a ``sandbox`` block grants paths. The entry's other
     keys are the engine's config.
 
@@ -144,20 +143,26 @@ def build_entry(
             spells it.
 
     Raises:
-        ValueError: ``workspace`` for anything but the shell, an engine
-            its provider does not run, a ``sandbox`` that is not a
-            mapping, or what ``build_machine`` refuses.
+        ValueError: the reserved name ``workspace`` or the workspace's
+            own runtime, an engine its provider does not run, an
+            ``in_process`` entry with no ``runtime``, a ``sandbox`` that
+            is not a mapping, or what ``build_machine`` refuses.
     """
+    if name == WorkspaceRuntime.name:
+        raise ValueError(
+            f"machine name {name!r} is reserved for the workspace"
+        )
+    if isinstance(spec, WorkspaceRuntime):
+        raise ValueError(
+            f"machine {name!r}: the workspace's runtime is not a machine"
+        )
     if isinstance(spec, Runtime):
         runtime = spec
     elif isinstance(spec, MachineHandle) or spec.get("provider") not in (
         ENGINE_PROVIDERS
     ):
         handle = build_machine(name, spec)
-        runtime = RemoteRuntime(name, handle.config.captures)
-        if name == WorkspaceRuntime.name:
-            raise ValueError(f"{name!r} is the shell's machine name")
-        return handle, runtime
+        return handle, RemoteRuntime(name, handle.config.captures)
     else:
         fields = dict(spec)
         provider = fields.pop("provider")
@@ -176,10 +181,6 @@ def build_entry(
             _BUILT_FROM.pop(key, None)
 
         _BUILT_FROM[key] = (weakref.ref(runtime, forget), dict(spec))
-    if (name == WorkspaceRuntime.name) != isinstance(
-        runtime, WorkspaceRuntime
-    ):
-        raise ValueError(f"{name!r} is the shell's machine name")
     runtime.name = name
     return None, runtime
 
@@ -212,7 +213,9 @@ def _runtime_for(
             )
         return SandlockRuntime if sandbox is not None else LocalRuntime
     if runtime is None:
-        return WorkspaceRuntime
+        raise ValueError(
+            f"machine {name!r}: an {IN_PROCESS} machine names its runtime"
+        )
     if isinstance(runtime, type):
         if not issubclass(runtime, Runtime):
             raise ValueError(
@@ -523,14 +526,13 @@ def routed(
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:
     """The runtime that serves commands no entry captures, if any.
 
-    That is the world's WorkspaceRuntime, unless it declares captures (then
-    it is an ordinary capturer and nothing is catch-all) or it is not
-    among the given entries.
+    That is the world's WorkspaceRuntime, unless it is not among the
+    given entries.
 
     Args:
         entries (list[Runtime]): runtime instances to search.
     """
     for entry in entries:
-        if isinstance(entry, WorkspaceRuntime) and not entry.restricted:
+        if isinstance(entry, WorkspaceRuntime):
             return entry
     return None

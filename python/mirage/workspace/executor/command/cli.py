@@ -49,6 +49,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_script
 from mirage.runtime.types import OutputFn, RunResult, ScriptSource, ShellFn
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
@@ -131,7 +132,14 @@ def _select_runtime(
     )
     if chosen is not None:
         return chosen, None
-    known = ", ".join(repr(entry.name) for entry in entries) or "none"
+    known = (
+        ", ".join(
+            repr(entry.name)
+            for entry in entries
+            if not isinstance(entry, WorkspaceRuntime)
+        )
+        or "none"
+    )
     what = f"{script.language} scripts"
     if leaf.runtime is not None:
         what += f" on {leaf.runtime!r}"

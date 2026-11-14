@@ -5,20 +5,19 @@ icon: server
 description: Choose where programs run, in Mirage, on the host, or on a container, VM, cloud sandbox or remote machine.
 ---
 
-A machine is a Unix-like computer that runs programs as processes. Mirage's
-own commands (`grep`, `cat`, pipes, redirects) run on the workspace's own
-machine, the Mirage process; `python3`, `node` and every other program run on
-the machine that captures them.
+A machine is a Unix-like computer that runs programs as processes. Mirage
+runs its own commands (`grep`, `cat`, pipes, redirects) itself; `python3`,
+`node` and every other program run on the machine that captures them.
 
 | Machine | Runs | SDK |
 | --- | --- | --- |
-| [In Process](/home/setup/machine/in_process) | Mirage's own commands, and Python or JavaScript on a [runtime](/home/setup/runtime/overview) | both |
+| [In Process](/home/setup/machine/in_process) | Python or JavaScript on a [runtime](/home/setup/runtime/overview), inside Mirage | both |
 | [Host](/home/setup/machine/host) | programs installed on the host, confined by a `sandbox` on Linux | Python, Node |
 | A [provider](#providers) | programs installed on a container, VM, cloud sandbox or SSH host you already have | Python, Node; E2B also in the browser |
 
 A [runtime](/home/setup/runtime/overview) is an interpreter that runs inside
-the In Process machine: Monty, WASI, Pyodide or QuickJS. A host or a provider
-takes no runtime; it runs the programs installed on it.
+Mirage, on an `in_process` machine: Monty, WASI, Pyodide or QuickJS. A host or
+a provider takes no runtime; it runs the programs installed on it.
 
 ## Routing
 
@@ -110,8 +109,9 @@ captures; everything else stays where it would run.
 - If two machines take the same name or group, the first wins and Mirage
   logs a warning.
 - A program no machine takes exits 127, `command not found`.
-- An `in_process` entry with no `runtime` runs only the mount commands it
-  captures; see [In Process](/home/setup/machine/in_process#without-a-runtime).
+- `captures` only places programs. To limit what a session may run at all,
+  use its profile's `commands.allow`; see
+  [Session Profiles](/home/configuration/session).
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
 - Globs expand against the workspace first (`python3 job.py *.csv` runs
