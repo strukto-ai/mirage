@@ -477,7 +477,7 @@
    "id": "a_cli_that_reaches_a_service_runs_under_hides_only_where_the_allow_list_names_it",
    "settings": {"mode": "write", "machines": {"monty": {"provider": "worker"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "machine": "monty"},
+    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "machine": "worker"},
     {"op": "session", "id": "hides", "profile": {"paths": {"hide": ["/data/secret.txt"]}}},
     {"op": "session", "id": "wildcard", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*"]}}},
     {"op": "session", "id": "named", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*", "probe"]}}},
