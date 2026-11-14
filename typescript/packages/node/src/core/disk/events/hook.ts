@@ -59,15 +59,17 @@ export class DiskEventHook {
    * directory is not this mount's to report.
    */
   private async relative(hostPath: string): Promise<string | null> {
-    const [root, resolved, whole] = await Promise.all([
+    const [root, resolved] = await Promise.all([
       this.physical(this.accessor.root, false),
       this.physical(hostPath, true),
-      this.physical(hostPath, false),
     ])
-    // A link to the root itself is the root: kept as written it would name
-    // the link's own directory, outside the mount.
-    if (resolved === root || whole === root) return '/'
-    if (!resolved.startsWith(root + path.sep)) return null
+    if (resolved === root) return '/'
+    if (!resolved.startsWith(root + path.sep)) {
+      // A link to the root itself is the root: kept as written it names the
+      // link's own directory, outside the mount. A link inside the mount is
+      // never asked, so one pointing back at the root keeps its own name.
+      return (await this.physical(hostPath, false)) === root ? '/' : null
+    }
     return (
       '/' +
       resolved
@@ -84,8 +86,8 @@ export class DiskEventHook {
    * as it was asked to watch them, so a root spelled through a link (`/tmp`
    * on macOS) would otherwise drop every event. For an event's entry only the
    * directories above it are resolved, so a link created in the mount reports
-   * as itself; and the deepest ancestor that exists is resolved, so a path
-   * already gone keeps the part that no longer exists.
+   * as itself; and the deepest ancestor that resolves is resolved, so a path
+   * already gone, or a link that loops, keeps the rest as written.
    *
    * @param hostPath an absolute host path.
    * @param entry whether the last component is kept as written.
@@ -104,7 +106,7 @@ export class DiskEventHook {
         return path.join(await realpath(head), ...rest)
       } catch (err) {
         const code = (err as { code?: unknown }).code
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
+        if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') throw err
       }
       const parent = path.dirname(head)
       if (parent === head) return resolved

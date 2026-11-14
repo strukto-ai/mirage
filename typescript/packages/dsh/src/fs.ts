@@ -192,8 +192,8 @@ function escapesRoot(rel: string): boolean {
  * through a link (`/tmp` and `/var` on macOS) would otherwise never fall
  * under it. For an entry only the directories above it are resolved, as
  * the disk event hook does, so a link inside the mount maps to itself;
- * and the deepest ancestor that exists is resolved, so a path that names
- * nothing yet keeps the rest as written.
+ * and the deepest ancestor that resolves is resolved, so a path that
+ * names nothing yet, or loops, keeps the rest as written.
  *
  * @param hostPath an absolute host path.
  * @param entry whether the last component is kept as written.
@@ -212,7 +212,7 @@ function physicalPath(hostPath: string, entry: boolean): string {
       return join(realpathSync(head), ...rest)
     } catch (err) {
       const code = (err as { code?: unknown }).code
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
+      if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') throw err
     }
     const parent = dirname(head)
     if (parent === head) return lexical
@@ -502,15 +502,21 @@ export class MirageFileSystem extends FileSystem {
     const workspace = this.ctx.mirage.workspaceIfReady
     if (workspace === null) return undefined
     const host = physicalPath(hostPath, true)
-    const whole = physicalPath(hostPath, false)
+    let whole: string | undefined
     const mounts = workspace.mounts()
     for (const entry of mounts) {
       const { vfs } = entry
       if (!(vfs instanceof DiskVFS)) continue
-      // A link to the root itself is the root: kept as written it would
-      // name the link's own directory, outside the mount.
-      const rel = whole === vfs.root ? '' : relative(vfs.root, host)
-      if (escapesRoot(rel)) continue
+      let rel = relative(vfs.root, host)
+      if (escapesRoot(rel)) {
+        // A link to the root itself is the root: kept as written it names
+        // the link's own directory, outside the mount. A link inside the
+        // mount is never asked, so one pointing back at the root keeps
+        // its own name.
+        whole ??= physicalPath(hostPath, false)
+        if (whole !== vfs.root) continue
+        rel = ''
+      }
       // `prefix` always carries a trailing slash, and `rel` is empty for
       // the root itself, so the join is a concatenation and the slash is
       // trimmed back off unless the mount is the workspace root.
@@ -932,7 +938,13 @@ export class MirageFileSystem extends FileSystem {
         sourceDeleted: false,
         sourceFailure: { code: failure.code, message: failure.message },
       })
-      if ((await this.stat(source))?.version !== read.version) {
+      let now: FsInfo | undefined
+      try {
+        now = await this.stat(source)
+      } catch (err) {
+        return retained(mapMirageError(err, 'stat', source.displayPath))
+      }
+      if (now?.version !== read.version) {
         return retained(
           new FsError(
             `cannot delete "${source.displayPath}": file changed since it was read`,

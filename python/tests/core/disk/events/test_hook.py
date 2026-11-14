@@ -157,7 +157,8 @@ def test_event_hook_maps_a_watcher_that_spells_the_root_through_a_link(
 def test_event_hook_reports_a_link_made_in_the_mount_as_itself(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "shortcut").symlink_to(tmp_path / "data")
-    events = _map(
-        tmp_path, "created", {"src_path": str(tmp_path / "shortcut")}
-    )
-    assert events[0].path.virtual == "/d/shortcut"
+    (tmp_path / "self").symlink_to(tmp_path)
+    (tmp_path / "loop").symlink_to("loop")
+    for name in ("shortcut", "self", "loop"):
+        events = _map(tmp_path, "created", {"src_path": str(tmp_path / name)})
+        assert events[0].path.virtual == f"/d/{name}"

@@ -733,6 +733,38 @@ describe('moveFile', () => {
     expect(await textAt(ws, '/data/b.txt')).toBe('first')
   })
 
+  it('reports the published destination when the source cannot be checked', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'first' })
+    const seam = fs as unknown as {
+      store: (target: FsTarget, content: string, verb: string) => Promise<void>
+      stat: (target: FsTarget, signal?: AbortSignal) => Promise<unknown>
+    }
+    const store = seam.store.bind(fs)
+    const stat = seam.stat.bind(fs)
+    let stored = false
+    seam.store = async (target, content, verb) => {
+      await store(target, content, verb)
+      stored = true
+    }
+    seam.stat = (target, signal) => {
+      if (stored && String(target.targetKey) === '/data/a.txt') {
+        return Promise.reject(new FsError('stat timed out', 'FS_IO_ERROR'))
+      }
+      return stat(target, signal)
+    }
+    const outcome = await fs.moveFile(
+      await fs.resolve('/data/a.txt'),
+      await fs.resolve('/data/b.txt'),
+      {},
+    )
+    expect(outcome.sourceDeleted).toBe(false)
+    if (outcome.sourceDeleted) throw new Error('expected the source to be retained')
+    expect(outcome.sourceFailure.code).toBe('FS_IO_ERROR')
+    expect(outcome.destination.operation).toBe('create')
+    expect(await textAt(ws, '/data/b.txt')).toBe('first')
+    expect(await textAt(ws, '/data/a.txt')).toBe('first')
+  })
+
   it('refuses a move onto itself', async () => {
     const { fs } = await makeFs({ 'a.txt': 'x' })
     const target = await fs.resolve('/data/a.txt')
@@ -1131,6 +1163,14 @@ describe('processPathFromHostPath', () => {
     await symlink(root, alias)
     expect(fs.processPathFromHostPath(alias)).toBe('/work')
     expect(fs.processPathFromHostPath(join(alias, 'a.txt'))).toBe('/work/a.txt')
+  })
+
+  it('maps a link inside the mount as itself, one to the root or a loop too', async () => {
+    const { fs, root } = await makeDiskFs()
+    await symlink(root, join(root, 'self'))
+    await symlink('loop', join(root, 'loop'))
+    expect(fs.processPathFromHostPath(join(root, 'self'))).toBe('/work/self')
+    expect(fs.processPathFromHostPath(join(root, 'loop'))).toBe('/work/loop')
   })
 
   it('maps an in-root name that merely begins with two dots', async () => {

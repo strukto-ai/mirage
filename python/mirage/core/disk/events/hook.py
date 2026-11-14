@@ -62,14 +62,14 @@ class DiskEventHook:
             host_path (str): Absolute path on the local filesystem.
         """
         entry, whole, root = await asyncio.to_thread(self._physical, host_path)
-        # A link to the root itself is the root: kept as written it would
-        # name the link's own directory, outside the mount.
-        if whole == root:
-            return "/"
         try:
             relative = entry.relative_to(root).as_posix()
         except ValueError:
-            return None
+            # A link to the root itself is the root: kept as written it
+            # names the link's own directory, outside the mount. A link
+            # inside the mount never gets here, so one pointing back at
+            # the root keeps its own name.
+            return "/" if whole == root else None
         # `relative_to` spells "the root itself" as ".", which would
         # render as a fabricated "<mount>/." entry.
         return "/" if relative == "." else "/" + relative
@@ -83,14 +83,19 @@ class DiskEventHook:
         event. For the entry only the directories above it are
         resolved, so a link created in the mount reports as itself; the
         whole path is resolved too, to know a link to the root. A path
-        already gone keeps the part that no longer exists.
+        already gone, or a link that loops, keeps the rest as written.
 
         Args:
             host_path (str): Absolute path on the local filesystem.
         """
-        path = Path(os.path.normpath(host_path))
-        root = Path(self._accessor.root).resolve()
-        return path.parent.resolve() / path.name, path.resolve(), root
+        path = os.path.normpath(host_path)
+        parent, name = os.path.split(path)
+        root = Path(os.path.realpath(self._accessor.root))
+        return (
+            Path(os.path.realpath(parent)) / name,
+            Path(os.path.realpath(path)),
+            root,
+        )
 
     async def to_events(
         self, root: PathSpec, event_type: str, payload: JsonValue

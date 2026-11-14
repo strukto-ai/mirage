@@ -127,8 +127,12 @@ describe('DiskEventHook', () => {
   it('reports a link made in the mount as itself', async () => {
     await mkdir(path.join(root, 'data'))
     await symlink(path.join(root, 'data'), path.join(root, 'shortcut'))
-    const events = await map('created', { src_path: path.join(root, 'shortcut') })
-    expect(events[0]?.path.virtual).toBe('/d/shortcut')
+    await symlink(root, path.join(root, 'self'))
+    await symlink('loop', path.join(root, 'loop'))
+    for (const name of ['shortcut', 'self', 'loop']) {
+      const events = await map('created', { src_path: path.join(root, name) })
+      expect(events[0]?.path.virtual).toBe(`/d/${name}`)
+    }
   })
 
   it('ignores a payload without a path', async () => {
