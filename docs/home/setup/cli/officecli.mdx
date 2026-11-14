@@ -1,0 +1,32 @@
+---
+title: officecli
+icon: file-excel
+description: Set up the credential-free officecli for Excel workbooks with Python or TypeScript.
+---
+
+Mirage implements the Excel part of [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI):
+`create`, `get`, `query`, `set`, `remove` and `batch` on `.xlsx` workbooks, with
+OfficeCLI's paths, selectors, `--prop` values and `--json` output. An edit
+rewrites only what it changes; charts, styles, named ranges and validations stay
+as they were.
+
+`officecli` needs no account config and reads workbooks through existing mounts.
+Register it on `ws`. Commands: [Python](/python/cli/officecli) ·
+[TypeScript](/typescript/cli/officecli).
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage.commands.cli.builtin.officecli import OFFICECLI
+
+    ws.register_cli("officecli", OFFICECLI)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { OFFICECLI } from '@struktoai/mirage-node'
+
+    ws.registerCli('officecli', OFFICECLI)
+    ```
+  </Tab>
+</Tabs>

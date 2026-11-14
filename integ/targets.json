@@ -2696,6 +2696,23 @@
       ]
     },
     {
+      "id": "cli-officecli",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "officecli"
+      ],
+      "mounts": [
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "cli-airtable",
       "hosts": [
         "python",

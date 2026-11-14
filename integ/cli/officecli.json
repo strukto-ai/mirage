@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "id": "officecli_create_set_get",
+      "seq": 13600000,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o1.xlsx && officecli set /scratch/o1.xlsx /Sheet1/A1 --prop value=42 --prop type=string && officecli get /scratch/o1.xlsx /Sheet1/A1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/o1.xlsx\nUpdated /Sheet1/A1: value=42, type=string (applied: type=String)\n/Sheet1/A1 (cell) \"42\" type=String\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_create_refuses_existing",
+      "seq": 13600001,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o2.xlsx && officecli create /scratch/o2.xlsx",
+      "expect": {
+        "exit": 1,
+        "stdout": "Created: /scratch/o2.xlsx\n",
+        "stderr": "Error: File already exists: /scratch/o2.xlsx. Use --force to overwrite.\n"
+      }
+    },
+    {
+      "id": "officecli_date_shows_its_format",
+      "seq": 13600002,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o3.xlsx >/dev/null && officecli set /scratch/o3.xlsx Sheet1!C1 --prop value=2024-03-15 && officecli get /scratch/o3.xlsx /Sheet1/C1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Updated Sheet1!C1: value=2024-03-15\n/Sheet1/C1 (cell) \"2024-03-15\" type=Number numFmtId=164 numberformat=yyyy-mm-dd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_formula_not_evaluated",
+      "seq": 13600003,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o4.xlsx >/dev/null && officecli set /scratch/o4.xlsx /Sheet1/B1 --prop formula=A1*2 && officecli get /scratch/o4.xlsx /Sheet1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Updated /Sheet1/B1: formula=A1*2\n/Sheet1 (sheet)\n/Sheet1/row[1] (row)\n/Sheet1/B1 (cell) \"#OCLI_NOTEVAL!\" type=Number formula=A1*2 evaluated=false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_workbook_and_depth",
+      "seq": 13600004,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o5.xlsx >/dev/null && officecli set /scratch/o5.xlsx /Sheet1/A1 --prop value=1 >/dev/null && officecli get /scratch/o5.xlsx && officecli get /scratch/o5.xlsx /Sheet1 --depth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ (workbook) calc.fullPrecision=true calc.fullCalcOnLoad=true\n/Sheet1 (sheet) children=1\n/Sheet1 (sheet) children=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_batch_and_query",
+      "seq": 13600005,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o6.xlsx >/dev/null && officecli batch /scratch/o6.xlsx --commands '[{\"command\":\"set\",\"path\":\"/Sheet1/A1\",\"props\":{\"value\":\"Region\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B1\",\"props\":{\"value\":\"Revenue\"}},{\"command\":\"set\",\"path\":\"/Sheet1/A2\",\"props\":{\"value\":\"North\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B2\",\"props\":{\"value\":\"1250.5\"}},{\"command\":\"set\",\"path\":\"/Sheet1/A3\",\"props\":{\"value\":\"South\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B3\",\"props\":{\"value\":\"830\"}}]' && officecli query /scratch/o6.xlsx 'B[value>500]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1] Updated /Sheet1/A1: value=Region\n[2] Updated /Sheet1/B1: value=Revenue\n[3] Updated /Sheet1/A2: value=North\n[4] Updated /Sheet1/B2: value=1250.5\n[5] Updated /Sheet1/A3: value=South\n[6] Updated /Sheet1/B3: value=830\n\nBatch complete: 6 succeeded, 0 failed, 6 total\n/Sheet1/B2 (cell) \"1250.5\" type=Number value=1250.5\n/Sheet1/B3 (cell) \"830\" type=Number value=830\n",
+        "stderr": "Warning: non-numeric 'Revenue' for 'value' at /Sheet1/B1\n"
+      }
+    },
+    {
+      "id": "officecli_query_table_rows",
+      "seq": 13600006,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o7.xlsx >/dev/null && officecli batch /scratch/o7.xlsx --commands '[{\"command\":\"set\",\"path\":\"/Sheet1/A1\",\"props\":{\"value\":\"Region\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B1\",\"props\":{\"value\":\"Revenue\"}},{\"command\":\"set\",\"path\":\"/Sheet1/A2\",\"props\":{\"value\":\"North\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B2\",\"props\":{\"value\":\"1250.5\"}},{\"command\":\"set\",\"path\":\"/Sheet1/A3\",\"props\":{\"value\":\"South\"}},{\"command\":\"set\",\"path\":\"/Sheet1/B3\",\"props\":{\"value\":\"830\"}}]' >/dev/null && officecli query /scratch/o7.xlsx 'row[Revenue>1000]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/Sheet1/row[2] (row) children=2 Revenue=1250.5 matchedTable=A1:B3 tableSource=detected\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_query_unknown_key",
+      "seq": 13600007,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o8.xlsx >/dev/null && officecli set /scratch/o8.xlsx /Sheet1/A1 --prop value=1 >/dev/null && officecli query /scratch/o8.xlsx 'cell[valu=1]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Warning: unknown key 'valu'. Available: text, type, value (did you mean 'value'?)\nNo matches. Run 'officecli help xlsx query' for selector syntax.\n"
+      }
+    },
+    {
+      "id": "officecli_query_malformed",
+      "seq": 13600008,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o9.xlsx >/dev/null && officecli query /scratch/o9.xlsx 'cell[type=Number'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: Malformed selector: unclosed bracket in \"cell[type=Number\"\n"
+      }
+    },
+    {
+      "id": "officecli_batch_atomic",
+      "seq": 13600009,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o10.xlsx >/dev/null && officecli batch /scratch/o10.xlsx --commands '[{\"command\":\"set\",\"path\":\"/Sheet1/A1\",\"props\":{\"value\":\"1\"}},{\"command\":\"set\",\"path\":\"/Nope/A1\",\"props\":{\"value\":\"1\"}}]'; echo \"exit=$?\"; officecli get /scratch/o10.xlsx /Sheet1/A1",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1] Updated /Sheet1/A1: value=1\n[2] ERROR: Sheet not found: \"Nope\". Available sheets: [Sheet1]. Use DOM path \"/Sheet1/A1\" or Excel notation \"Sheet1!A1\".\n\nBatch complete: 1 succeeded, 1 failed, 2 total (atomic: no changes were applied)\nexit=1\n/Sheet1/A1 (cell) \"(empty)\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_batch_best_effort",
+      "seq": 13600010,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o11.xlsx >/dev/null && officecli batch /scratch/o11.xlsx --best-effort --commands '[{\"command\":\"set\",\"path\":\"/Sheet1/A1\",\"props\":{\"value\":\"1\"}},{\"command\":\"set\",\"path\":\"/Nope/A1\",\"props\":{\"value\":\"1\"}}]'; officecli get /scratch/o11.xlsx /Sheet1/A1",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1] Updated /Sheet1/A1: value=1\n[2] ERROR: Sheet not found: \"Nope\". Available sheets: [Sheet1]. Use DOM path \"/Sheet1/A1\" or Excel notation \"Sheet1!A1\".\n\nBatch complete: 1 succeeded, 1 failed, 2 total\n/Sheet1/A1 (cell) \"1\" type=Number\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_unsupported_prop",
+      "seq": 13600011,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o12.xlsx >/dev/null && officecli set /scratch/o12.xlsx /Sheet1/A1 --prop bogus=1",
+      "expect": {
+        "exit": 2,
+        "stdout": "Error: No properties applied to /Sheet1/A1\n",
+        "stderr": "UNSUPPORTED props: bogus (valid cell props: value, formula, type). Run 'officecli help <format> <element>' to see valid props, or raw-set for raw XML.\n"
+      }
+    },
+    {
+      "id": "officecli_missing_file",
+      "seq": 13600012,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli get /scratch/none.xlsx /Sheet1/A1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: File not found: /scratch/none.xlsx\n"
+      }
+    },
+    {
+      "id": "officecli_sheet_not_found",
+      "seq": 13600013,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o13.xlsx >/dev/null && officecli set /scratch/o13.xlsx /Nope/A1 --prop value=1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: Sheet not found: \"Nope\". Available sheets: [Sheet1]. Use DOM path \"/Sheet1/A1\" or Excel notation \"Sheet1!A1\".\n"
+      }
+    },
+    {
+      "id": "officecli_get_json",
+      "seq": 13600014,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o14.xlsx >/dev/null && officecli set /scratch/o14.xlsx /Sheet1/A1 --prop value=7 >/dev/null && officecli get /scratch/o14.xlsx /Sheet1/A1 --json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"matches\": 1,\n    \"results\": [\n      {\n        \"path\": \"/Sheet1/A1\",\n        \"type\": \"cell\",\n        \"text\": \"7\",\n        \"preview\": \"A1\",\n        \"childCount\": 0,\n        \"format\": {\n          \"type\": \"Number\"\n        },\n        \"children\": []\n      }\n    ]\n  }\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_remove_without_comments",
+      "seq": 13600015,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli create /scratch/o15.xlsx >/dev/null && officecli remove /scratch/o15.xlsx /Sheet1/comment[1]",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: No comments found in sheet\n"
+      }
+    }
+  ]
+}

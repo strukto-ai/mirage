@@ -1,0 +1,113 @@
+---
+title: officecli
+description: "Supported OfficeCLI commands for Excel workbooks."
+icon: file-excel
+---
+
+Create, read and edit `.xlsx` workbooks on any mount. Mirage implements the
+Excel commands below with [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)'s
+paths, output and messages.
+
+## Setup
+
+`officecli` has no account config. It reads and writes workbooks through
+existing mounts.
+
+```python
+from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.officecli import OFFICECLI
+from mirage.vfs.ram import RAMVFS
+
+ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+ws.register_cli("officecli", OFFICECLI)
+```
+
+For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
+
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `officecli <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `officecli create` | Create a blank Office document |
+| `officecli get` | Get a document node by path |
+| `officecli query` | Query document elements with CSS-like selectors |
+| `officecli set` | Modify a document node's properties |
+| `officecli remove` | Remove an element from the document |
+| `officecli batch` | Execute multiple commands from a JSON array in a single pass |
+{/* END GENERATED CLI COMMANDS */}
+
+## Edit a workbook
+
+```bash
+officecli create /data/report.xlsx
+officecli set /data/report.xlsx /Sheet1/A1 --prop value=Revenue
+officecli set /data/report.xlsx /Sheet1/B1 --prop value=1250.5
+officecli set /data/report.xlsx Sheet1!C1 --prop value=2024-03-15
+officecli get /data/report.xlsx /Sheet1
+officecli get /data/report.xlsx /Sheet1/A1 --json
+```
+
+A path names the workbook (`/`), a sheet (`/Sheet1`), a cell (`/Sheet1/A1` or
+`Sheet1!A1`), a range (`/Sheet1/A1:C9`), a row (`/Sheet1/row[2]`) or a comment
+by its place on the sheet (`/Sheet1/comment[1]`). `get` shows each cell's
+value, type, font, fill, border, alignment, protection and number format, and
+the workbook's and each sheet's own properties.
+
+| Command | Props |
+| --- | --- |
+| `set` on a cell | `value`, `type` (`string` or `number`), `formula` |
+| `set` on a sheet | `hidden` |
+| `remove` | a comment |
+
+## Batch
+
+```bash
+officecli create /data/sales.xlsx
+officecli batch /data/sales.xlsx --commands '[
+  {"command":"set","path":"/Sheet1/A1","props":{"value":"Region"}},
+  {"command":"set","path":"/Sheet1/B1","props":{"value":"Revenue"}},
+  {"command":"set","path":"/Sheet1/A2","props":{"value":"North"}},
+  {"command":"set","path":"/Sheet1/B2","props":{"value":"1250.5"}},
+  {"command":"set","path":"/Sheet1/A3","props":{"value":"South"}},
+  {"command":"set","path":"/Sheet1/B3","props":{"value":"830"}}
+]'
+```
+
+The items run against one open workbook, saved once. A failure anywhere leaves
+the workbook as it was, unless `--best-effort` keeps what succeeded;
+`--stop-on-error` stops at the first failure. The JSON also comes from
+`--input FILE` or stdin.
+
+## Query
+
+```bash
+officecli query /data/sales.xlsx 'row[Revenue>1000]'
+officecli query /data/sales.xlsx 'B[value>500]'
+officecli query /data/sales.xlsx 'Sheet1!cell:contains(South)'
+officecli query /data/sales.xlsx 'cell[type=Number], comment' --json
+```
+
+A selector names cells (`cell` or a column letter such as `B`), rows, comments
+or sheets, scoped to one sheet with `Sheet1!` or `/Sheet1/`. Predicates in
+brackets compare a property with `=`, `!=`, `~=`, `>`, `<`, `>=` or `<=` and
+join with `and`, `or` and `not(...)`; `:contains(text)`, `:empty` and
+`:has(formula)` filter cells, `[N]` picks a row or comment, `,` joins
+selectors and `>` picks children. A row predicate on a column name reads the
+sheet's table, defined or found from its header row.
+
+## Differences from OfficeCLI
+
+- Only `.xlsx` workbooks.
+- A formula is stored without a computed value, and Excel calculates it on
+  open. A formula cell with no stored value shows `#OCLI_NOTEVAL!` and
+  `evaluated=false`.
+- `set` takes the props above; overwriting the first cell of a shared formula
+  is refused.
+- `query` reads cells, rows, comments and sheets; charts, tables, pivot tables
+  and other elements return no matches.
+- `batch` runs `get`, `query`, `set` and `remove` items.
+- Usage errors and `--help` use Mirage's wording.
