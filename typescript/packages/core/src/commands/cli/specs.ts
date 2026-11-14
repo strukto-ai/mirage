@@ -37,9 +37,21 @@ import { NAME as MCP_CLI } from './mcp/constants.ts'
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GH, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, OFFICECLI, SEARCH, SLACK, TRELLO].map(
-    (spec) => [spec.spec.name, spec],
-  ),
+  [
+    AIRTABLE,
+    DISCORD,
+    GH,
+    GIT,
+    GWS,
+    HF,
+    HIMALAYA,
+    LINEAR,
+    NTN,
+    OFFICECLI,
+    SEARCH,
+    SLACK,
+    TRELLO,
+  ].map((spec) => [spec.spec.name, spec]),
 )
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */
