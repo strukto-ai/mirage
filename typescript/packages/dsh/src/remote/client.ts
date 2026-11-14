@@ -83,8 +83,11 @@ interface WireResult {
   decision: WireDecision | null
 }
 
+// Mirage's server answers `{"error": {...}}`; a host fronting it may answer
+// `{"detail": "..."}` for its own refusals (auth, limits, a stopped world).
 interface WireError {
   error?: { code?: string; message?: string; errno?: string; param?: string }
+  detail?: string
 }
 
 type WireStat = Partial<Record<keyof FileStat, unknown>> & { name: string; type: string }
@@ -202,7 +205,7 @@ export class MirageClient {
       )
     }
     const error = body.error ?? {}
-    const message = error.message ?? response.statusText
+    const message = error.message ?? body.detail ?? response.statusText
     if (error.errno !== undefined && path !== undefined) return fsError(path, error.errno, message)
     return new MirageRemoteError(response.status, error.code ?? 'unknown', message)
   }
@@ -329,15 +332,14 @@ export class MirageClient {
 
   /** The workspace's sessions. */
   async sessions(signal?: AbortSignal): Promise<RemoteSession[]> {
-    const page = await this.json<{ items: { session_id: string; cwd: string }[] }>(
-      '/sessions',
-      undefined,
-      {
-        method: 'GET',
-        ...(signal !== undefined ? { signal } : {}),
-      },
-    )
-    return page.items.map((s) => ({ sessionId: s.session_id, cwd: s.cwd }))
+    type Wire = { session_id: string; cwd: string }[]
+    const page = await this.json<{ items: Wire } | Wire>('/sessions', undefined, {
+      method: 'GET',
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    // Mirage's server pages a list as `{"items": [...]}`; a host may answer the bare array.
+    const items = Array.isArray(page) ? page : page.items
+    return items.map((s) => ({ sessionId: s.session_id, cwd: s.cwd }))
   }
 
   /**

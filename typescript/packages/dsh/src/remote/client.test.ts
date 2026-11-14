@@ -125,6 +125,24 @@ describe('MirageClient', () => {
     await expect(running).rejects.toThrow()
   })
 
+  it('reads a host that answers its own errors as detail and lists as a bare array', async () => {
+    const host: typeof fetch = (input) => {
+      const path = new URL(String(input instanceof Request ? input.url : input)).pathname
+      if (path.endsWith('/sessions')) {
+        return Promise.resolve(Response.json([{ session_id: 'agent', cwd: '/work' }]))
+      }
+      return Promise.resolve(
+        Response.json({ detail: 'explain is not served here' }, { status: 400 }),
+      )
+    }
+    const hosted = new MirageClient({ url: 'https://host.invalid', workspace: 'w', fetch: host })
+    expect(await hosted.sessions()).toEqual([{ sessionId: 'agent', cwd: '/work' }])
+    const err = await hosted.explain('rm -rf /').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(MirageRemoteError)
+    expect((err as MirageRemoteError).message).toBe('explain is not served here')
+    expect((err as MirageRemoteError).status).toBe(400)
+  })
+
   it('names a server failure', async () => {
     const other = new MirageClient({ url, workspace: 'no-such-workspace', token: TOKEN })
     const err = await other.shell('true').catch((e: unknown) => e)

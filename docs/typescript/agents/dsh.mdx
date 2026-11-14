@@ -93,7 +93,7 @@ await ctx.plugin(MirageSpillStore).await()
 - The plugins make no sandbox claim, so `DSH_PERMISSION_MODE=read-only` does not narrow a remote workspace. Give the session a read-only profile on the server instead.
 - Asks are answered on the server, at `/v1/workspaces/{id}/asks`.
 - `MirageSubprocess` needs a workspace in the same process.
-- Symlinks are followed by the server, so a listing does not name the links in a directory.
+- `ctx.mirage.explain` asks the server's `?explain=true`, so it works only where the server serves it.
 
 ## Use with the dsh CLI
 
