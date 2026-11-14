@@ -75,6 +75,8 @@ class MicrosandboxMachine(ProgramMachine):
         super().__init__(name, config)
         # Every exec probes outside the connect latch; close waits for these.
         self._probes: set[asyncio.Task[None]] = set()
+        # Bumped by each close: a probe it could not wait for marks nothing.
+        self._generation = 0
 
     async def close(self) -> None:
         """Close as any machine does, once the probes under way have
@@ -89,6 +91,7 @@ class MicrosandboxMachine(ProgramMachine):
                 *(p for p in self._probes if p.get_loop() is loop),
                 return_exceptions=True,
             )
+            self._generation += 1
             await super().close()
         finally:
             self._closing = False
@@ -105,6 +108,7 @@ class MicrosandboxMachine(ProgramMachine):
         await probe
 
     async def _probe(self) -> None:
+        generation = self._generation
         sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
@@ -124,7 +128,8 @@ class MicrosandboxMachine(ProgramMachine):
                     "sandbox", sandbox, state, {}, "start it with msb start"
                 )
             )
-        self._reached = True
+        if generation == self._generation:
+            self._reached = True
 
     def config_asks_to_pause(self) -> bool:
         """Whether the config says ``on_pause: pause``."""

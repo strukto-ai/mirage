@@ -449,7 +449,7 @@ async def test_pause_pauses_a_sandbox_a_resume_under_way_at_close_reached(
 
 
 @pytest.mark.asyncio
-async def test_close_on_another_loop_leaves_this_loops_probes_running(
+async def test_a_probe_close_on_another_loop_skipped_marks_nothing(
     monkeypatch,
 ):
     msb = _msb(monkeypatch, "Paused")
@@ -460,6 +460,9 @@ async def test_close_on_another_loop_leaves_this_loops_probes_running(
     await asyncio.to_thread(asyncio.run, machine.close())
     msb.resumed.set()
     await connecting
+    await machine.close()
+    await machine.pause()
+    assert ["pause", "sb", "--quiet"] not in msb.calls
 
 
 @pytest.mark.asyncio
