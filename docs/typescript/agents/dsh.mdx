@@ -27,6 +27,14 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 - Mount modes and [session profiles](/home/configuration/session) apply to every tool. `DSH_PERMISSION_MODE=read-only` makes every mount read-only.
 - An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line is refused and the question stays pending: answer it through `ctx.mirage.decisions`, then run the line again.
 
+```ts
+import { Outcome, Scope } from '@struktoai/mirage-core'
+
+for (const waiting of ctx.mirage.decisions.pending('agent')) {
+  await ctx.mirage.decisions.answer(waiting.id, Outcome.ALLOW, Scope.ONCE)
+}
+```
+
 ## Example
 
 ```ts
