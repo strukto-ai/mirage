@@ -39,9 +39,10 @@ import {
 } from '@earendil-works/pi-durable/env'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
+import { PipeClosed } from '@struktoai/mirage-core/io/errors'
+import { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
 import { FileType, type FileStat } from '@struktoai/mirage-core/types'
-import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { posixNormpath, resolvePath } from '@struktoai/mirage-core/utils/path'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
@@ -82,7 +83,7 @@ const KINDS: Partial<Record<FileType, FileKind>> = {
 
 const MAX_SYMLINKS = 40
 
-const SPILL_FLUSH_BYTES = 1024 * 1024
+const SPILL_BUFFER_BYTES = 1024 * 1024
 
 const ids = new WeakMap<Workspace, string>()
 
@@ -300,16 +301,20 @@ async function lstatInfo(files: Files, path: string): Promise<Result<FileInfo, F
 
 /**
  * One command's complete output, held until it passes either bound, then
- * written to a temporary file as it arrives, a batch each time
- * `SPILL_FLUSH_BYTES` are held.
+ * streamed to a temporary file in one write. Until that write reads (it
+ * waits out a workspace capture, as every new top-level call does), the
+ * output stays held, so the command keeps draining and a capture its line
+ * holds up can end; once it reads, at most `SPILL_BUFFER_BYTES` wait for it.
  */
 class OutputSpill {
   path: string | undefined
   error: ExecutionError | undefined
   private held: Uint8Array[] = []
-  private heldBytes = 0
   private seenBytes = 0
   private newlines = 0
+  private pipe: BytePipe | undefined
+  private reading = false
+  private writing: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly files: Files,
@@ -317,41 +322,63 @@ class OutputSpill {
     private readonly create: () => Promise<Result<string, FileError>>,
   ) {}
 
+  /** Take one chunk, waiting only for room in the pipe once the file's write reads. */
   async add(chunk: Uint8Array): Promise<void> {
     if (this.error !== undefined || chunk.length === 0) return
     this.held.push(chunk)
-    this.heldBytes += chunk.length
-    if (this.path === undefined) {
+    if (this.pipe === undefined) {
       this.seenBytes += chunk.length
       for (let at = chunk.indexOf(0x0a); at !== -1; at = chunk.indexOf(0x0a, at + 1))
         this.newlines += 1
       const lines = this.newlines + (chunk[chunk.length - 1] === 0x0a ? 0 : 1)
       if (this.seenBytes <= this.bounds.afterBytes && lines <= this.bounds.afterLines) return
-      const created = await this.create()
-      if (!created.ok) {
-        this.fail(created.error)
-        return
-      }
-      this.path = created.value
+      this.start()
     }
-    if (this.heldBytes >= SPILL_FLUSH_BYTES) await this.flush()
+    if (this.reading) await this.pass()
   }
 
-  async flush(): Promise<void> {
-    if (this.path === undefined || this.error !== undefined || this.held.length === 0) return
-    const bytes = concat(this.held)
-    this.held = []
-    this.heldBytes = 0
-    try {
-      await this.files.append(this.path, bytes)
-    } catch (error) {
+  /** Wait until the file holds every chunk taken, or the write failed. */
+  async finish(): Promise<void> {
+    if (this.pipe === undefined) return
+    await this.pass()
+    this.pipe.end()
+    await this.writing
+  }
+
+  private start(): void {
+    const pipe = new BytePipe(SPILL_BUFFER_BYTES)
+    this.pipe = pipe
+    void pipe.asked().then(() => {
+      this.reading = true
+    })
+    this.writing = (async () => {
+      const created = await this.create()
+      if (!created.ok) throw created.error
+      this.path = created.value
+      await this.files.write(created.value, pipe.stream(true))
+    })().catch((error: unknown) => {
+      pipe.closeReader()
       this.fail(toFileError(error, this.path))
+    })
+  }
+
+  private async pass(): Promise<void> {
+    const pipe = this.pipe
+    if (pipe === undefined) return
+    for (let chunk = this.held.shift(); chunk !== undefined; chunk = this.held.shift()) {
+      if (this.error !== undefined) return
+      try {
+        await pipe.write(chunk)
+      } catch (error) {
+        if (!(error instanceof PipeClosed)) throw error
+        this.held = []
+        return
+      }
     }
   }
 
   private fail(cause: FileError): void {
     this.held = []
-    this.heldBytes = 0
     this.error = new ExecutionError(
       'unknown',
       `Failed to preserve complete shell output: ${cause.message}`,
@@ -789,9 +816,10 @@ export class MirageExecutionEnv implements ExecutionEnv {
     const spill =
       options?.spill === undefined
         ? undefined
-        : new OutputSpill(this.files, options.spill, () =>
-            this.createTempFile({ prefix: 'pi-output-', suffix: '.log' }, preserve),
-          )
+        : new OutputSpill(this.files, options.spill, async () => {
+            const dir = await this.createTempDir('tmp-', preserve)
+            return dir.ok ? ok(`${dir.value}/pi-output-${crypto.randomUUID()}.log`) : dir
+          })
     let failure: ExecutionError | undefined
     const emit = (text: string, stream: StreamName): void => {
       if (text === '' || failure !== undefined || options?.onOutput === undefined) return
@@ -818,7 +846,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     emit(decoders.stdout.decode(), 'stdout')
     emit(decoders.stderr.decode(), 'stderr')
     if (result !== undefined) emit(decisionLine(result.decision), 'stderr')
-    await spill?.flush()
+    await spill?.finish()
     if (failure !== undefined) return err(failure)
     const spillPath = spill?.path
     const interrupted =

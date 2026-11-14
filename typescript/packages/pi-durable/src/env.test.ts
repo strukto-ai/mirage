@@ -92,6 +92,28 @@ describe('MirageExecutionEnv over mounts', () => {
     expect(spilled.endsWith('199999\n200000\n')).toBe(true)
   })
 
+  it('keeps draining a spilling command while a snapshot waits for it', async () => {
+    const ws = mkWs()
+    const env = new MirageExecutionEnv(ws)
+    let snapshot: Promise<Uint8Array> | undefined
+    const result = getOrThrow(
+      await env.exec(
+        'echo start; sleep 0.3; seq 1 300000',
+        {
+          spill: { afterBytes: 1_000_000, afterLines: 10 },
+          onOutput: (text) => {
+            if (snapshot === undefined && text.startsWith('start')) snapshot = ws.snapshot()
+          },
+        },
+        context,
+      ),
+    )
+    expect(result.exitCode).toBe(0)
+    expect((await snapshot)?.byteLength).toBeGreaterThan(0)
+    const spilled = getOrThrow(await env.readTextFile(result.spillPath ?? '', context))
+    expect(spilled.split('\n')).toHaveLength(300002)
+  }, 20_000)
+
   it('keeps the spill of a command aborted after its output passed the bounds', async () => {
     const env = new MirageExecutionEnv(mkWs())
     const controller = new AbortController()
