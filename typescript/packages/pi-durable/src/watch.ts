@@ -71,21 +71,27 @@ async function visitDir(
   for (const path of entries) {
     const name = path.slice(path.lastIndexOf('/') + 1)
     if ((target.hidden && name.startsWith('.')) || target.names.has(name)) continue
-    const stat = await statOrNull(() => files.stat(path, undefined, { nofollow: true }))
+    const stat = await statOrNull(() =>
+      files.stat(path, undefined, { nofollow: true, fresh: true }),
+    )
     if (stat === null) continue
     seen.set(path, signature(stat))
     if (deep && stat.type === FileType.DIRECTORY) await visitDir(files, path, target, seen, true)
   }
 }
 
-/** One snapshot of every watched path: its signature by path, absent paths left out. */
+/**
+ * One snapshot of every watched path: its signature by path, absent paths
+ * left out. Each stat is fresh, asked of the backend past the mount's
+ * cached rows, as `tail -f` asks.
+ */
 async function scan(
   files: Files,
   targets: readonly ResolvedTarget[],
 ): Promise<Map<string, string>> {
   const seen = new Map<string, string>()
   for (const target of targets) {
-    const stat = await statOrNull(() => files.stat(target.path))
+    const stat = await statOrNull(() => files.stat(target.path, undefined, { fresh: true }))
     if (stat === null) continue
     seen.set(target.path, signature(stat))
     if (stat.type === FileType.DIRECTORY)
@@ -115,7 +121,8 @@ function changed(before: Map<string, string>, after: Map<string, string>): strin
  * A watcher that compares snapshots of the watched paths every
  * `intervalMs`. Mirage reaches its files through mounts that do not report
  * every change, so this is Pi's `polling` mode: a change undone between two
- * snapshots can be missed.
+ * snapshots can be missed, and a name new to a folder shows once the mount's
+ * listing of that folder refreshes.
  */
 export class PollingWatcher implements FileWatcher {
   readonly mode = 'polling'

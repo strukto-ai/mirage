@@ -71,8 +71,9 @@ harness.resume()
 
 - **Commands** run in Mirage's shell as one session. Each call starts from its `cwd`, so a `cd` or `export` does not carry over to the next one, as with a new process.
 - **Sessions:** pass `sessionId` to act as a Mirage session, under its profile's mounts, hides and policies. A refused command's output ends with the policy's reason.
-- **Long output** past Pi's bounds is written to a file under `/tmp`, which needs a writable mount there.
-- **Watching** polls: Pi reports changes found by comparing snapshots, every `watch.pollIntervalMs`.
+- **Long output** past Pi's bounds is written to a file under `/tmp` as it arrives, which needs a writable mount there. A command cancelled after that keeps its file.
+- **Mount roots** cannot be removed or renamed, nor can a folder holding one, as in the shell.
+- **Watching** polls: every `watch.pollIntervalMs`, Pi compares snapshots of each watched path, asked of the backend each time. A file new to a remote folder shows once the mount's listing of that folder refreshes.
 - **Binary reads** copy the file when Pi opens it, so a later rename or rewrite of the path does not reach an open reader.
 
 ## Exports

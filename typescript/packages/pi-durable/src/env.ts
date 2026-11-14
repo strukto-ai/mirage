@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Context } from '@earendil-works/chord/context'
+import { withoutAbortSignal, type Context } from '@earendil-works/chord/context'
 import {
   err,
   ExecutionError,
@@ -32,11 +32,13 @@ import {
   type Result,
   type ShellExecOptions,
   type ShellExecResult,
+  type ShellSpillOptions,
   type TextLine,
   type TextLineReader,
   type WatchTarget,
 } from '@earendil-works/pi-durable/env'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
 import { FileType, type FileStat } from '@struktoai/mirage-core/types'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
@@ -79,6 +81,8 @@ const KINDS: Partial<Record<FileType, FileKind>> = {
 }
 
 const MAX_SYMLINKS = 40
+
+const SPILL_FLUSH_BYTES = 1024 * 1024
 
 const ids = new WeakMap<Workspace, string>()
 
@@ -295,6 +299,68 @@ async function lstatInfo(files: Files, path: string): Promise<Result<FileInfo, F
 }
 
 /**
+ * One command's complete output, held until it passes either bound, then
+ * written to a temporary file as it arrives, a batch each time
+ * `SPILL_FLUSH_BYTES` are held.
+ */
+class OutputSpill {
+  path: string | undefined
+  error: ExecutionError | undefined
+  private held: Uint8Array[] = []
+  private heldBytes = 0
+  private seenBytes = 0
+  private newlines = 0
+
+  constructor(
+    private readonly files: Files,
+    private readonly bounds: ShellSpillOptions,
+    private readonly create: () => Promise<Result<string, FileError>>,
+  ) {}
+
+  async add(chunk: Uint8Array): Promise<void> {
+    if (this.error !== undefined || chunk.length === 0) return
+    this.held.push(chunk)
+    this.heldBytes += chunk.length
+    if (this.path === undefined) {
+      this.seenBytes += chunk.length
+      for (let at = chunk.indexOf(0x0a); at !== -1; at = chunk.indexOf(0x0a, at + 1))
+        this.newlines += 1
+      const lines = this.newlines + (chunk[chunk.length - 1] === 0x0a ? 0 : 1)
+      if (this.seenBytes <= this.bounds.afterBytes && lines <= this.bounds.afterLines) return
+      const created = await this.create()
+      if (!created.ok) {
+        this.fail(created.error)
+        return
+      }
+      this.path = created.value
+    }
+    if (this.heldBytes >= SPILL_FLUSH_BYTES) await this.flush()
+  }
+
+  async flush(): Promise<void> {
+    if (this.path === undefined || this.error !== undefined || this.held.length === 0) return
+    const bytes = concat(this.held)
+    this.held = []
+    this.heldBytes = 0
+    try {
+      await this.files.append(this.path, bytes)
+    } catch (error) {
+      this.fail(toFileError(error, this.path))
+    }
+  }
+
+  private fail(cause: FileError): void {
+    this.held = []
+    this.heldBytes = 0
+    this.error = new ExecutionError(
+      'unknown',
+      `Failed to preserve complete shell output: ${cause.message}`,
+      cause,
+    )
+  }
+}
+
+/**
  * Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and
  * write the workspace's mounts through its dispatcher, and run their
  * commands in its shell, as one session.
@@ -467,6 +533,15 @@ export class MirageExecutionEnv implements ExecutionEnv {
     return this.attempt(resolved, context, () => this.regularFile(resolved))
   }
 
+  /**
+   * Refuse a path that is a mount root or holds one, as the shell refuses
+   * `rm` and `mv` of a mountpoint: busy, before anything under it moves.
+   */
+  private refuseMount(path: string): void {
+    if (this.files.isMount(path) || this.files.submounts(path).length > 0)
+      throw new FileError('unknown', `${path}: ${posixPhrase('EBUSY')}`, path)
+  }
+
   async renameFile(
     sourcePath: string,
     destinationPath: string,
@@ -474,7 +549,10 @@ export class MirageExecutionEnv implements ExecutionEnv {
   ): Promise<Result<void, FileError>> {
     const source = this.resolve(sourcePath)
     const destination = this.resolve(destinationPath)
-    return this.attempt(source, context, () => this.files.rename(source, destination))
+    return this.attempt(source, context, async () => {
+      this.refuseMount(source)
+      await this.files.rename(source, destination)
+    })
   }
 
   async fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {
@@ -533,10 +611,13 @@ export class MirageExecutionEnv implements ExecutionEnv {
   async canonicalPath(path: string, context: Context): Promise<Result<string, FileError>> {
     const typed = path.startsWith('/') ? path : `${this.cwd}/${path}`
     return this.attempt(typed, context, async () => {
-      const pending = typed.split('/').filter((part) => part !== '' && part !== '.')
+      const pending = typed.split('/')
       let resolved = '/'
+      let directory = true
       let links = 0
       for (let part = pending.shift(); part !== undefined; part = pending.shift()) {
+        if (!directory) throw new FileError('not_directory', `${typed}: Not a directory`, typed)
+        if (part === '' || part === '.') continue
         if (part === '..') {
           resolved = resolvePath('..', resolved)
           continue
@@ -545,6 +626,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
         const stat = await this.files.stat(next, undefined, { nofollow: true })
         if (stat.type !== FileType.SYMLINK) {
           resolved = next
+          directory = stat.type === FileType.DIRECTORY
           continue
         }
         links += 1
@@ -552,7 +634,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
           throw new FileError('invalid', `${typed}: Too many levels of symbolic links`, typed)
         const target = await this.files.readlink(next)
         if (target.startsWith('/')) resolved = '/'
-        pending.unshift(...target.split('/').filter((piece) => piece !== '' && piece !== '.'))
+        pending.unshift(...target.split('/'))
       }
       return resolved
     })
@@ -615,6 +697,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
       }
       if (options?.recursive !== true)
         throw new FileError('is_directory', `${resolved}: Is a directory`, resolved)
+      this.refuseMount(resolved)
       await this.removeTree(resolved)
     })
   }
@@ -663,35 +746,6 @@ export class MirageExecutionEnv implements ExecutionEnv {
     return ok(argv.map(singleQuote).join(' '))
   }
 
-  /** The complete output, kept in a temporary file once it passes either bound. */
-  private async spill(
-    chunks: readonly Uint8Array[],
-    bounds: ShellExecOptions['spill'],
-    context: Context,
-  ): Promise<Result<string | undefined, ExecutionError>> {
-    if (bounds === undefined) return ok(undefined)
-    const bytes = concat(chunks)
-    let newlines = 0
-    for (let at = bytes.indexOf(0x0a); at !== -1; at = bytes.indexOf(0x0a, at + 1)) newlines += 1
-    const lines = bytes.length === 0 ? 0 : newlines + (bytes[bytes.length - 1] === 0x0a ? 0 : 1)
-    if (bytes.length <= bounds.afterBytes && lines <= bounds.afterLines) return ok(undefined)
-    const created = await this.createTempFile({ prefix: 'pi-output-', suffix: '.log' }, context)
-    const written = created.ok
-      ? await this.attempt(created.value, context, async () => {
-          await this.files.write(created.value, bytes)
-          return created.value
-        })
-      : created
-    if (written.ok) return written
-    return err(
-      new ExecutionError(
-        'unknown',
-        `Failed to preserve complete shell output: ${written.error.message}`,
-        written.error,
-      ),
-    )
-  }
-
   async exec(
     command: string | readonly string[],
     options: ShellExecOptions | undefined,
@@ -731,7 +785,13 @@ export class MirageExecutionEnv implements ExecutionEnv {
     }
     this.running.add(execution)
     const decoders = { stdout: new StreamDecoder(), stderr: new StreamDecoder() }
-    const chunks: Uint8Array[] = []
+    const preserve = withoutAbortSignal(context)
+    const spill =
+      options?.spill === undefined
+        ? undefined
+        : new OutputSpill(this.files, options.spill, () =>
+            this.createTempFile({ prefix: 'pi-output-', suffix: '.log' }, preserve),
+          )
     let failure: ExecutionError | undefined
     const emit = (text: string, stream: StreamName): void => {
       if (text === '' || failure !== undefined || options?.onOutput === undefined) return
@@ -746,8 +806,8 @@ export class MirageExecutionEnv implements ExecutionEnv {
     let thrown: unknown
     try {
       for await (const event of execution.events) {
-        if (options?.spill !== undefined) chunks.push(event.data)
         emit(decoders[event.stream].decode(event.data), event.stream)
+        await spill?.add(event.data)
       }
       result = await execution.wait()
     } catch (error) {
@@ -758,10 +818,9 @@ export class MirageExecutionEnv implements ExecutionEnv {
     emit(decoders.stdout.decode(), 'stdout')
     emit(decoders.stderr.decode(), 'stderr')
     if (result !== undefined) emit(decisionLine(result.decision), 'stderr')
+    await spill?.flush()
     if (failure !== undefined) return err(failure)
-    const spilled = await this.spill(chunks, options?.spill, context)
-    if (!spilled.ok) return spilled
-    const spillPath = spilled.value
+    const spillPath = spill?.path
     const interrupted =
       timer?.aborted === true
         ? new ExecutionError('timeout', `timeout:${String(timeout)}`)
@@ -772,6 +831,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
       if (spillPath !== undefined) interrupted.spillPath = spillPath
       return err(interrupted)
     }
+    if (spill?.error !== undefined) return err(spill.error)
     if (result === undefined)
       return err(new ExecutionError('unknown', toError(thrown).message, toError(thrown)))
     return ok({ exitCode: result.exitCode, ...(spillPath === undefined ? {} : { spillPath }) })

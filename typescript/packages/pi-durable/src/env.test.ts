@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
 import { getOrThrow } from '@earendil-works/pi-durable/env'
 import { registerEnvConformance } from '@earendil-works/pi-durable/testing'
 import type { Action, CommandContext, Policy } from '@struktoai/mirage-core/policy/index'
@@ -80,6 +80,64 @@ describe('MirageExecutionEnv over mounts', () => {
     expect(result.spillPath).toMatch(/^\/tmp\/.*\/pi-output-.*\.log$/)
     const spilled = getOrThrow(await env.readTextFile(result.spillPath ?? '', context))
     expect(spilled.split('\n')).toHaveLength(51)
+  })
+
+  it('spills output that passes the flush size in full', async () => {
+    const env = new MirageExecutionEnv(mkWs())
+    const result = getOrThrow(
+      await env.exec('seq 1 200000', { spill: { afterBytes: 1_000_000, afterLines: 10 } }, context),
+    )
+    const spilled = getOrThrow(await env.readTextFile(result.spillPath ?? '', context))
+    expect(spilled.split('\n')).toHaveLength(200001)
+    expect(spilled.endsWith('199999\n200000\n')).toBe(true)
+  })
+
+  it('keeps the spill of a command aborted after its output passed the bounds', async () => {
+    const env = new MirageExecutionEnv(mkWs())
+    const controller = new AbortController()
+    const result = await env.exec(
+      'seq 1 50; sleep 5',
+      {
+        spill: { afterBytes: 1_000_000, afterLines: 10 },
+        onOutput: (text) => {
+          if (text.includes('50\n')) controller.abort()
+        },
+      },
+      withAbortSignal(controller.signal, context),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('aborted')
+    const spilled = getOrThrow(await env.readTextFile(result.error.spillPath ?? '', context))
+    expect(spilled.split('\n')).toHaveLength(51)
+  })
+
+  it('refuses to remove or rename a mount root, leaving its files', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.vfs.write('/data/a.txt', 'kept')
+    const env = new MirageExecutionEnv(ws)
+    for (const result of [
+      await env.remove('/data', { recursive: true }, context),
+      await env.remove('/', { recursive: true, force: true }, context),
+      await env.renameFile('/data', '/moved', context),
+    ]) {
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.message).toContain('Device or resource busy')
+    }
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/a.txt'))).toBe('kept')
+  })
+
+  it('walks no dot or trailing slash past a file', async () => {
+    const env = new MirageExecutionEnv(mkWs())
+    getOrThrow(await env.writeFile('/file', 'x', context))
+    for (const path of ['/file/..', '/file/.', '/file/', '/file/../file']) {
+      const result = await env.canonicalPath(path, context)
+      expect(result.ok ? result.value : result.error.code).toBe('not_directory')
+    }
+    expect(getOrThrow(await env.canonicalPath('/./file', context))).toBe('/file')
   })
 
   it('names a policy refusal after the shell output', async () => {
