@@ -121,18 +121,27 @@ export class MirageSpillStore extends SpillStore {
   }
 
   async saveText(input: SaveTextSpill): Promise<SpillRef> {
-    const workspace = await this.ctx.mirage.ready
+    const remote = this.ctx.mirage.remote
+    const files =
+      remote !== null
+        ? {
+            exists: (p: string) => remote.exists(p),
+            mkdir: (p: string) => remote.mkdir(p),
+            write: (p: string, text: string) => remote.write(p, new TextEncoder().encode(text)),
+          }
+        : await this.ctx.mirage.ready.then((workspace) => ({
+            exists: (p: string) => workspace.vfs.exists(p),
+            mkdir: (p: string) => workspace.vfs.mkdir(p),
+            write: (p: string, text: string) => workspace.vfs.write(p, text),
+          }))
     const dir = posix.join(this.dir, sessionDirName(input.owner.sessionId))
     // Derived from the suggested name, never equal to it: the random
     // prefix is what keeps two results with one suggested name apart.
     const name = `${randomBytes(NAME_PREFIX_BYTES).toString('hex')}-${encodeSegment(input.suggestedName)}`
     const path = posix.join(dir, name)
     try {
-      await ensureDirPath(
-        { exists: (p) => workspace.vfs.exists(p), mkdir: (p) => workspace.vfs.mkdir(p) },
-        dir,
-      )
-      await workspace.vfs.write(path, input.content)
+      await ensureDirPath(files, dir)
+      await files.write(path, input.content)
     } catch (err) {
       // Rejecting is the contract: the spill policy keeps the inline
       // result on a failure, which is a bounded answer, where a locator

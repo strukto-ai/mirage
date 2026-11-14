@@ -14,7 +14,7 @@ import { PassThrough } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ChildProcess } from '@struktoai/mirage-core/execution/process/child'
-import type { Workspace } from '@struktoai/mirage-node'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import './service.ts'
 import { StreamTail } from './text.ts'
 
@@ -72,8 +72,8 @@ export class MirageSubprocess extends SubprocessRuntime {
     if (command.includes('/') && !command.startsWith('/'))
       throw new Error('relative executable paths are unsupported')
     signal?.throwIfAborted()
-    const ws = await this.ctx.mirage.ready
     this.checkWorld()
+    const ws = await this.ctx.mirage.ready
     const child = ws.spawn(
       { argv: ['which', command], ...(env === undefined ? {} : { env }) },
       this.config.sessionId,
@@ -250,6 +250,10 @@ export class MirageSubprocess extends SubprocessRuntime {
     return Promise.reject(new Error('Mirage has no terminal allocation capability'))
   }
   private checkWorld(): void {
+    if (this.ctx.mirage.remote !== null)
+      throw new Error(
+        'Mirage subprocess supervises a workspace in this process; a remote workspace has no process table here',
+      )
     if (!this.ctx.mirage.vfsOnly)
       throw new Error(
         'Mirage subprocess requires workspace runtimes; native descendant tracking is unavailable',

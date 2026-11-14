@@ -23,15 +23,14 @@ import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { NodeWorkspaceOptions } from '@struktoai/mirage-node'
-import { buildVfs, SessionProfile, Workspace } from '@struktoai/mirage-node'
+import { buildVfs, Workspace } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    mirage: MirageService
-  }
-}
+import { hostPathToVirtual } from './host_path.ts'
+import { MirageClient, type MirageRemote } from './remote/client.ts'
+import { remoteOnly } from './remote/service.ts'
+import type { MirageWorld } from './world.ts'
 
 /**
  * A declarative mount, YAML-friendly: the VFS is named by its
@@ -56,13 +55,20 @@ export type MirageMount = MountSpec | Mount | MirageMountBlock
 
 /**
  * Configuration for the shared mirage execution world. Exactly one of
- * `workspace` (adopt a live workspace the embedder owns and closes) or
+ * `workspace` (adopt a live workspace the embedder owns and closes),
  * `mounts` (construct a workspace here; the service closes it when its
- * plugin unloads) must be given.
+ * plugin unloads) or `remote` (a workspace a Mirage server holds) must be
+ * given.
  */
 export interface MirageConfig {
   /** A live workspace to adopt; its lifecycle stays with the embedder. */
   workspace?: Workspace
+  /**
+   * A workspace on a Mirage server, reached over its HTTP API. The server
+   * owns its mounts, machines and roles, so none of the options that build
+   * a workspace here go with it.
+   */
+  remote?: MirageRemote
   /** Mounts for a service-owned workspace, keyed by mount prefix. */
   mounts?: Record<string, MirageMount>
   /**
@@ -175,19 +181,38 @@ function builtMachines(
  * adapters do) and `workspace` throws until it resolves, mirroring how
  * the E2B service owner exposes its sandbox.
  */
-export class MirageService extends Service {
+export class MirageService extends Service implements MirageWorld {
   static readonly provide = 'mirage'
 
   /** Resolves to the shared workspace once every mount is built. */
   readonly ready: Promise<Workspace>
+
+  /** The server's client when the world is remote; null when it is in this process. */
+  readonly remote: MirageClient | null = null
 
   private built: Workspace | null = null
   private readonly plannedRuntimes: readonly Runtime[] | undefined
 
   constructor(ctx: Context, config: MirageConfig = {}) {
     super(ctx, 'mirage')
-    if (config.workspace !== undefined && config.mounts !== undefined) {
-      throw new Error('mirage: pass either workspace or mounts, not both')
+    const worlds = [config.workspace, config.mounts, config.remote].filter((w) => w !== undefined)
+    if (worlds.length > 1) {
+      throw new Error('mirage: pass one of workspace, mounts or remote')
+    }
+    if (config.remote !== undefined) {
+      if (
+        config.machines !== undefined ||
+        config.workspaceOptions !== undefined ||
+        config.profiles !== undefined ||
+        config.profile !== undefined
+      ) {
+        throw new Error(
+          'mirage: machines, profiles, profile and workspaceOptions configure a service-owned workspace, not a remote one',
+        )
+      }
+      this.remote = new MirageClient(config.remote)
+      this.ready = remoteOnly()
+      return
     }
     if (config.workspace !== undefined) {
       // An adopted workspace is already built, so machines and constructor
@@ -213,7 +238,7 @@ export class MirageService extends Service {
       return
     }
     if (config.mounts === undefined) {
-      throw new Error('mirage: one of workspace or mounts is required')
+      throw new Error('mirage: one of workspace, mounts or remote is required')
     }
     const options = { ...(config.workspaceOptions ?? {}) }
     if (config.machines !== undefined) {
@@ -272,6 +297,7 @@ export class MirageService extends Service {
 
   /** The live workspace; throws until `ready` resolves. */
   get workspace(): Workspace {
+    if (this.remote !== null) throw new Error('mirage: the workspace is on a Mirage server')
     if (this.built === null) {
       throw new Error('mirage: workspace is not ready yet; await ctx.mirage.ready')
     }
@@ -321,8 +347,24 @@ export class MirageService extends Service {
    * @returns the line's explanation.
    */
   async explain(line: string, sessionId = ''): Promise<ShellExplanation> {
+    if (this.remote !== null) return this.remote.explain(line, sessionId)
     const ws = await this.ready
     return ws.explain(line, sessionId)
+  }
+
+  /**
+   * The workspace path naming the same file as a path on this machine.
+   *
+   * A disk mount is the one place the two hold the same file, so only a
+   * workspace in this process can answer; a remote one, and one still
+   * building, decline.
+   *
+   * @param hostPath an absolute path on this machine.
+   * @returns the virtual path, or undefined when no mount maps it.
+   */
+  hostPathToVirtual(hostPath: string): string | undefined {
+    if (this.built === null) return undefined
+    return hostPathToVirtual(this.built, hostPath)
   }
 
   /**
@@ -338,6 +380,7 @@ export class MirageService extends Service {
    * later `addMachine` or `removeMachine` is seen.
    */
   get vfsOnly(): boolean {
+    if (this.remote !== null) return false
     const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.engines()
     return entries.every((entry) => entry.reach === 'workspace')
   }
