@@ -1,306 +1,100 @@
 ---
 title: DeepSeek Harness
-description: Register Mirage as the filesystem and shell of DeepSeek Harness (dsh), so its file tools and bash tool run on mounted data.
+description: Run the file tools and bash tool of DeepSeek Harness (dsh) on a Mirage workspace.
 icon: /images/deepseek-logo.svg
 ---
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis where the filesystem and the shell are swappable capability seams. `@struktoai/mirage-dsh` provides both seams over one Mirage workspace: `ctx.fs` for dsh's read/write/edit tools and `ctx.shell` for its bash tool. Anything Mirage mounts (S3, Gmail, Slack, Notion, Postgres) becomes the world those tools operate in.
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis. `@struktoai/mirage-dsh` gives dsh one Mirage workspace as its filesystem and shell, so its tools work on whatever the workspace mounts: S3, Slack, Gmail, Postgres, disk.
 
 ## Install
 
 ```bash
-npm install @struktoai/mirage-dsh @struktoai/mirage-node @struktoai/mirage-core @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill @deepseek-ai/dsh-subprocess @pydantic/monty redis
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-fs-patch @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill @deepseek-ai/dsh-subprocess
 ```
 
-## Compose
+## What is wired to what
 
-Four Cordis plugins. `MirageService` owns the workspace; the providers inject it. Mix any mounts, such as Slack and Redis beside a scratch RAM mount:
+| Mirage plugin | dsh service | Used by |
+| --- | --- | --- |
+| `MirageService` | `ctx.mirage` | The one workspace the plugins below share |
+| `MirageFileSystem` | `ctx.fs` | `read`, `write`, `edit`, `apply_patch` and the working directory |
+| `MirageShellExecutor` | `ctx.shell` | `bash` |
+| `MirageSubprocess` | `ctx.subprocess` | Tools that start a program by argv |
+| `MirageSpillStore` | `ctx.spillStore` | Large tool results, saved as workspace files the agent can read back |
+
+- The agent starts in the disk mount that holds the directory dsh was launched from, or in `/`. The `working_directory` tool moves between mounts.
+- Each `bash` call is a fresh shell. Give `MirageShellExecutor` a `sessionId` to keep exports and functions between calls.
+- Mount modes and [session profiles](/home/configuration/session) apply to every tool. `DSH_PERMISSION_MODE=read-only` makes every mount read-only.
+- An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line is refused and the question stays pending: answer it through `ctx.mirage.decisions`, then run the line again.
+
+```ts
+import { Outcome, Scope } from '@struktoai/mirage-core'
+
+for (const waiting of ctx.mirage.decisions.pending()) {
+  await ctx.mirage.decisions.answer(waiting.id, Outcome.ALLOW, Scope.ONCE)
+}
+```
+
+## Example
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import type { ShellExecRequest } from '@deepseek-ai/dsh-shell'
-import { MountMode, RAMVFS, RedisVFS, SlackVFS, Workspace } from '@struktoai/mirage-node'
+import { DiskVFS, MountMode, RAMVFS, SlackVFS, Workspace } from '@struktoai/mirage-node'
 import {
   MirageFileSystem,
   MirageService,
   MirageShellExecutor,
   MirageSpillStore,
+  MirageSubprocess,
 } from '@struktoai/mirage-dsh'
 
-const ws = new Workspace(
-  {
-    '/tmp': [new RAMVFS(), MountMode.EXEC],
-    '/redis': [new RedisVFS({ url: redisUrl }), MountMode.WRITE],
-    '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.EXEC],
-  },
-  { machines: { py: { provider: 'worker', captures: ['python', 'python3'] } } },
-)
+const ws = new Workspace({
+  '/project': [new DiskVFS({ root: process.cwd() }), MountMode.WRITE],
+  '/slack': [new SlackVFS({ token: process.env.SLACK_BOT_TOKEN ?? '' }), MountMode.READ],
+  '/tmp': [new RAMVFS(), MountMode.WRITE],
+})
 
 const ctx = new Context()
 await ctx.plugin(MirageService, { workspace: ws }).await()
-await ctx.plugin(MirageFileSystem, {}).await()
-await ctx.plugin(MirageShellExecutor, {}).await()
-await ctx.plugin(MirageSpillStore, {}).await()
+await ctx.plugin(MirageFileSystem).await()
+await ctx.plugin(MirageShellExecutor).await()
+await ctx.plugin(MirageSubprocess).await()
+await ctx.plugin(MirageSpillStore).await()
+
+const run = await ctx.shell.execute(ctx.shell.resolve({ command: 'grep -rl invoice /slack /project' }))
+console.log((await run.result()).stdout.text)
 ```
 
-`MirageSpillStore` is what keeps an oversized tool result recoverable. dsh replaces a result over its inline cap with a preview plus a locator and tells the model to read or grep it; without this plugin that locator names a file on the harness's own disk, which nothing in the workspace can open. Registered, the artifact is written through the same dispatcher as every other effect, so the locator is an ordinary workspace path. It defaults to `/tmp/dsh-spill`, so give it a `dir` on a writable mount if `/tmp` is not one.
+[`examples/typescript/agents/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/dsh.ts) is a longer runnable version, with Python and permissions.
 
-Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where `python3` or `js` may run code. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults, `execute` starts it and hands back the process, and `result()` waits for its outcome, the same calls dsh's own tools make):
+## Use with the dsh CLI
 
-```ts
-const shell = ctx.shell
-const run = async (request: ShellExecRequest) => (await shell.execute(shell.resolve(request))).result()
-
-const sweep = await run({ command: 'grep -rln session /redis /tmp' })
-```
-
-A caller that keeps the process instead of awaiting `result()` runs the command in the background: `readOutput()` drains what it printed so far, and `onExpiry: 'none'` lets it outlive `timeoutMs`.
-
-`MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads.
-
-Each command is a clean slate: `cd`, `export`, and function definitions inside one bash call do not survive into the next, which is the one-shot contract of dsh's bash tool. For a persistent shell instead, bind the executor to a named workspace session:
-
-```ts
-await ctx.plugin(MirageShellExecutor, { sessionId: 'agent-1' }).await()
-```
-
-A bound session keeps its cwd, exports, and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace. While one command still runs in the session, such as one left in the background, the next runs beside it on a copy of the session instead of waiting for it to end, so that command's `cd` and `export` last for it alone.
-
-dsh sends a working directory and a set of managed `DSH_*` variables with every call, and in Mirage a per-call directory or environment forks a subshell. Taken at face value, a bound session would therefore have nothing left to persist, so both are checked first. The workdir dsh computed on its own machine is not a directory in this world, so it is ignored: the executor's own `workdir` when unbound, the session's cwd when bound, and `ctx.fs` resolves relative paths against the same base. The `DSH_*` variables are set in the session once instead of riding along per call. A workdir that does exist here, or any other per-call variable, still forks a subshell, which is what "only this command" should mean.
-
-```ts
-// dsh sends its own machine's cwd, a path this world does not contain
-const host = '/Users/somebody/host-project'
-
-await run({ command: 'cd /tmp && export TOKEN=abc', workdir: host })
-const result = await run({ command: 'pwd; echo $TOKEN', workdir: host })
-// result.stdout.text === '/tmp\nabc\n'
-```
-
-## Run Python with monty
-
-The `machines` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3` on a `worker` machine; the shell commands always run in the workspace itself and need no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
-
-```ts
-const script = await run({
-  command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /redis/report.txt',
-})
-```
-
-[`examples/typescript/agents/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/example.py).
-
-## Install into a dsh profile
-
-The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem, bash and spill providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
+The package is also a dsh bundle. Added to a profile, it replaces dsh's filesystem, shell, subprocess and spill providers with the Mirage ones:
 
 ```bash
 dsh plugin --profile web add @struktoai/mirage-dsh
 dsh --profile web
 ```
 
-The bundle's default world is one RAM scratch mount at `/tmp`. Mount real sources by overriding the `mirage` row in the profile's own `cordis.patch.yml`, in declarative form (the VFS registry name, a mode, and the VFS's config; `!!js` expressions resolve at mount time):
+The bundle mounts one RAM disk at `/tmp`. Set your own mounts, [Python](/typescript/runtime/python) and permissions in the profile's `cordis.patch.yml`. Python runs only on an `exec` mount:
 
 ```yaml
 - id: mirage
   config:
     mounts:
       /tmp: { vfs: ram, mode: exec }
-      /slack:
-        vfs: slack
-        mode: read
-        config: { token: !!js process.env.SLACK_BOT_TOKEN }
+      /project: { vfs: disk, mode: exec, config: { root: . } }
+      /slack: { vfs: slack, mode: read, config: { token: !!js process.env.SLACK_BOT_TOKEN } }
     machines:
       py: { provider: worker, captures: [python, python3] }
-```
-
-A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A machine entry also takes its runtime's own settings, as a workspace file's does, and refuses a key the runtime does not have.
-
-Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as a `host` machine, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
-
-The claim is enforced per call, not merely advertised. dsh resolves a policy for every command and every file edit, and Mirage applies it. Under `read-only` the shell runs in a twin of its own session with every grant narrowed to read, so a session already confined to some mounts stays confined (the twin narrows, it never widens), and `ctx.fs` refuses a write or an edit with `FS_SANDBOX_DENIED`, the same error dsh's own sandboxed backend raises:
-
-```ts
-const policy = { mode: 'read-only', workspaceRoot: '/Users/somebody/host-project' } as const
-
-const denied = await run({ command: 'echo hi > /tmp/out.txt', sandboxPolicy: policy })
-// nonzero exitCode, and denied.sandbox is { mode: 'read-only', denied: true, ... }
-
-await ctx.fs.writeText(await ctx.fs.resolve('/tmp/out.txt'), 'hi', undefined, undefined, policy)
-// throws FsError, code FS_SANDBOX_DENIED
-```
-
-So `DSH_PERMISSION_MODE=read-only` confines a Mirage world, and the result reports the mode the command actually ran under. The `/dev` null sink stays writable, as that mode requires. The policy's `workspaceRoot` is a directory on the host and is deliberately never consulted: here the mounts and their modes are the boundary.
-
-## Permissions: allow, ask, deny
-
-A sandbox mode says where writes may land. It says nothing about which commands a session may run at all, and that is what a Mirage **permission document** is for. A role lists the tools it admits, the lines it refuses, and the lines a human has to sign off on:
-
-```yaml
-- id: mirage
-  config:
     profiles:
       agent:
         commands:
-          allow: [cat, ls, grep, rm]
           ask:
             - { commands: [rm], reason: deletes are reviewed }
           deny:
-            - { commands: [rm -rf], reason: rm -rf is blocked }
+            - { commands: [git push], reason: no publishing }
     profile: agent
 ```
 
-The same block works in code, as `MirageService`'s `profiles` and `profile`. Each role is validated as it loads, so a misspelled field is a startup error rather than a surprise on the first command. A word no `allow` entry covers is not a command here at all — the agent reads bash's own `command not found`, so an unlisted tool never leaks that it exists.
-
-`profiles` configures a workspace `MirageService` builds, so it pairs with `mounts` and is refused beside a live `workspace` — an adopted workspace's roles are the embedder's own, and so is how its asks get answered. Passing both would mean quietly taking over a seam that may already be filled. To adopt a workspace *and* route its asks through dsh, build the handler yourself and hand it to the workspace:
-
-```ts
-import { askThroughApproval } from '@struktoai/mirage-dsh'
-
-const ctx = new Context()
-const ws = new Workspace(mounts, { profiles, profile: 'agent', onAsk: askThroughApproval(ctx) })
-await ctx.plugin(MirageService, { workspace: ws }).await()
-```
-
-Building the handler before the plugins load is fine: it reads `ctx.approval` at ask time, not at construction, so an approval plugin composed later is still found.
-
-A **deny** refuses the line at 126 in bash's voice, and the reason rides on the result as its `decision` record, which is also what dsh reads to tell a policy refusal from a command that failed on its own. Command rules match token prefixes: `rm` covers every `rm` line, while `rm -rf` does not match `rm -r -f` or `rm --recursive --force`. Those forms still match the broader `rm` ask rule.
-
-```
-$ rm -rf /data/build
-rm: Permission denied
-```
-
-```ts
-result.decision
-// { kind: 'deny', reason: 'rm -rf is blocked', policy: 'PermissionsPolicy', askId: null }
-```
-
-An **ask** is put to the human through dsh's own approval channel, `ctx.approval` — the same prompt dsh already shows for its escalations, so nothing new appears in the UI. The bridge maps dsh's answer onto Mirage's ledger:
-
-| dsh answers | the line |
-| --- | --- |
-| `allowed-once` | runs, and only this line — the next `rm` asks again |
-| `rejected` | is refused |
-| `cancelled` (the prompt was dismissed) | is refused |
-| `unavailable` (nobody could answer) | is refused |
-
-The prompt is the rule's reason and the line it is about, quoted word by word as a shell would read it back: the human is authorizing this run, so a name carrying a space or a newline cannot pass itself off as two operands or as two lines. Ordinary names stay bare.
-
-Only `allowed-once` is a yes, and it grants exactly the line that asked; a single nod is never widened into a standing grant. The three refusals match what dsh does with the same vocabulary for its own escalations, where a rejection, a dismissal and an unanswerable ask all fail closed. A refused retry of the same line is answered from the record rather than prompting again, so a human who said no is not asked twice about it.
-
-A question never outlives the run that raised it. The run's abort signal goes to the channel with the request, so a prompt can take itself down, and the ledger stops waiting on the same signal — a line whose approval is still unanswered when its timeout expires (or when the caller kills it) comes back as the kill it was given, not as a refusal:
-
-```ts
-const killed = await run({ command: 'rm /data/notes.txt', timeoutMs: 5000 })
-// killed.timedOut  true
-// killed.exitCode  null
-```
-
-Whatever the human says afterwards is dropped rather than recorded. Banking a late yes would leave a spend-once grant in the ledger for the next identical line to take, with nobody asked; the question stays open instead.
-
-A rule can also be scoped to one mount, so it applies only to a line working inside it. That is how a role asks about deletes in scratch space while leaving its own housekeeping elsewhere alone:
-
-```yaml
-mounts:
-  /tmp:
-    commands:
-      ask:
-        - { commands: [rm], reason: deletes are reviewed }
-```
-
-With **no approval plugin composed** — a headless run, a cron job, CI — an ask has nowhere to go, so it becomes a pending record instead of a refusal:
-
-```
-$ rm /data/notes.txt
-rm: Permission denied
-```
-
-```ts
-result.decision
-// { kind: 'pending', reason: 'deletes are reviewed', policy: '', askId: '0efc4a8f6280' }
-```
-
-This is deliberate: the document says `ask`, and silently rewriting that as `deny` would change what the operator wrote. The question is real and answerable, through `ctx.mirage.decisions`:
-
-```ts
-import { Outcome, Scope } from '@struktoai/mirage-core'
-
-const [waiting] = ctx.mirage.decisions.pending('agent')
-await ctx.mirage.decisions.answer(waiting.id, Outcome.ALLOW, Scope.SESSION)
-```
-
-`ONCE` passes the retry of that one line; `SESSION` passes every line the same rule covers for the rest of the session. Nothing reaches further — an answer is never inherited by another session, and never re-opens a deny rule, which is consulted first.
-
-A refused line is reported as refused, whatever refused it: `result.sandbox.denied` is set for a policy deny and for an unanswered ask, not only for the read-only narrowing, and under `workspace-write` as readily as under `read-only`. A mode describes what the mounts allow and says nothing about whether a rule forbids the line. It holds for a line that redirects its diagnostics too (`rm secrets 2>&1` leaves stderr empty and the refusal on stdout), where the exit code has to agree before words on stdout are read as a ruling, so a command printing the phrase as data is not mistaken for one.
-
-One gap is worth naming: a rule scoped to a path refuses one operand in GNU's own voice (`cat: /data/notes/a.txt: no notes`, exit 1), which carries no fixed marker, so that shape is not flagged — Mirage has no out-of-band denial channel on `ExecuteResult`, and inventing a marker would report ordinary command failures as policy refusals.
-
-Through `ctx.fs`, a rule refusal arrives as `FS_SANDBOX_DENIED` rather than `FS_PERMISSION_DENIED`, which is what makes dsh's tool layer attach its escalation hint. A plain mount-mode refusal keeps `FS_PERMISSION_DENIED`: a mode is the shape of this world, while a rule is a confinement the call may be entitled to escalate past.
-
-### Asking what a line would do
-
-`explain` runs a line through the same gate the dispatcher uses, without running it:
-
-```ts
-const what = await ctx.mirage.explain('rm /data/notes.txt')
-// what.outcome  'ask'
-// what.reason   'deletes are reviewed'
-// what.source   where the rule that spoke is written
-// what.exitCode / what.stderr  exactly what the agent would get
-// what.node     the parsed line, each command with its own verdict
-```
-
-It spends no approval, records no question and never reaches the human, so it is safe to call about a line nobody typed — a pre-execute check, or an operator asking why a command was refused. Because it is the same gate, an explanation of a refused line is byte-identical to the refusal.
-
-## Custom backends
-
-A mount is not limited to the builtin VFS (`ram`, `s3`, `slack`, `redis`, ...). Register your own VFS factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
-
-```ts
-import { registerVfs } from '@struktoai/mirage-node'
-
-registerVfs('acme', (config) => Promise.resolve(new AcmeVFS(config)))
-```
-
-```yaml
-- id: mirage
-  config:
-    mounts:
-      /acme: { vfs: acme, mode: read, config: { token: !!js process.env.ACME_TOKEN } }
-```
-
-The registration must run before the workspace builds, since a `mounts` block only names a VFS, it does not construct one. In a dsh bundle that means a small plugin the profile loads alongside `@struktoai/mirage-dsh` (or a plain import in code, before `MirageService` starts), not the declarative patch. A builtin name cannot be shadowed, so a custom backend needs its own name. Nothing else changes: the shell, the commands, and the sandbox claim treat a custom mount like any other.
-
-## Background commands
-
-A backgrounded command streams its output through a workspace console rather than arriving whole: each statement of a compound line lands as it finishes, and stdout and stderr keep their own channels. The unread backlog is bounded to the stdout budget, so a reader that never drains cannot grow it without limit; output past the budget is flagged lossy, with the freshest kept. Set `spillDir` on `MirageShellExecutor` to a workspace path (for example `/tmp` on a ram mount) and an overrunning command's full stdout and stderr are written there, so the agent can read the complete output back through the same VFS; unset, nothing spills.
-
-A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
-
-| Harness | Startup | Est. concurrent sessions (2 vCPU / 8 GB) |
-| --- | --- | --- |
-| dsh | ~0.5 ms | ~200 |
-| [Codex](/home/agents/codex) | ~20 ms (+ ~150 ms sandbox startup) | ~30 |
-| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | ~40 ms (+ ~150 ms sandbox startup) | ~15 |
-
-Concurrency is estimated as about 6 GB of free memory divided by a session's measured resident footprint (a dsh session with a live Python engine is about 27 MB, idle workspaces 240 KB, a Codex session about 200 MB, a Claude Code CLI session about 430 MB); startup is the measured time to bring one session up, process boot for the CLIs and workspace construction for dsh. The dsh numbers already include isolation, since monty is the sandbox and each engine runs on its own crash-isolated worker process; the CLI sessions run on the host, so isolating them means provisioning a container or remote sandbox per session, measured at about 150 ms even for a warm local container and more for a cold or remote one.
-
-## Subprocess provider
-
-The bundle also replaces `dsh-subprocess-local` with `MirageSubprocess`. Executable
-lookup and argv execution stay in the same workspace as `ctx.fs` and `ctx.shell`.
-It supplies raw pipes or bounded, independently readable output tails.
-`terminate()` requests cancellation of its managed execution group;
-`waitForExit(signal)` waits for that group's tracked runners, or returns false
-if the wait is aborted. Disposal terminates and awaits the provider's groups.
-
-This provider currently requires workspace-only runtimes. It refuses native or
-remote reach, terminal allocation, subprocess spill requests, and environment
-tombstones instead of falling back to host processes. `graceMs` is validated but
-cancellation is immediate, with no simulated TERM/KILL escalation. Use `ctx.spill`
-for separate tool-result artifacts. Native process trees and PTYs need a provider
-that can actually observe and control them.
-
-Set the subprocess provider's `sessionId` to bind it to an existing workspace
-session and its profile. Omit it to use the default session. Configure the same
-session on the shell provider when both should share that authority.
+PowerShell and the `glob` and `grep` tools stay off, since they start programs on the host. The agent searches with `rg`, `grep` and `find` in `bash`.

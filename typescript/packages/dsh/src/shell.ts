@@ -60,6 +60,20 @@ const STDERR_MARKER = new TextEncoder().encode('\n--- stderr ---\n')
 // collide on a spill filename. Not reset, so it needs no time or randomness.
 let spillCounter = 0
 
+// The lines every mirage executor in this process runs in a session, by
+// workspace. A line run with a sink is not listed in the workspace's own
+// line table, so two executors bound to one session see each other here.
+const RUNNING = new WeakMap<Workspace, Map<string, number>>()
+
+function runningIn(ws: Workspace): Map<string, number> {
+  let running = RUNNING.get(ws)
+  if (running === undefined) {
+    running = new Map()
+    RUNNING.set(ws, running)
+  }
+  return running
+}
+
 // The mount whose writability a `read-only` policy keeps, because dsh's
 // own definition of that mode keeps it: "permits only required sinks such
 // as /dev/null". Narrowing it too would make `cmd > /dev/null` fail, which
@@ -93,23 +107,25 @@ export interface MirageShellConfig {
    * Bind every command to this named workspace session. By default each
    * command runs in an ephemeral fork of the workspace's default session,
    * so nothing persists between calls, which is the one-shot contract of
-   * dsh's bash tool. With a session bound, `cd`, `export`, and function
+   * dsh's bash tool. With a session bound, `export` and function
    * definitions persist across calls, the persistent-shell contract. The
    * session is created on first use if the workspace does not have it; an
    * existing session is adopted as is. While one command still runs in the
    * session (one left running in the background), the next runs on a copy
    * of the session beside it rather than waiting for it to end, so its
-   * `cd` and `export` last for that command alone.
+   * `export` lasts for that command alone.
    *
-   * A spec carrying an explicit `env`, or a `workdir` that names a real
-   * directory in this world, still runs as a one-call subshell of the
-   * bound session, per mirage's `ExecuteOptions` semantics: both say
-   * "just for this command". The two things dsh injects on every call
-   * are deliberately not read that way, since neither carries that
-   * intent and either would fork every command and leave the binding
-   * with nothing to persist. A workdir resolved on the harness's own
-   * machine names nothing here and is dropped; the managed `DSH_*`
-   * snapshot is seeded into the session instead.
+   * dsh owns the directory: its bash tool sends the Session's working
+   * directory (or the call's own `workdir`) with every call, so the bound
+   * session moves there before the command runs, and a `cd` lasts until
+   * the next call. The `working_directory` tool is how an agent moves for
+   * good. A workdir is not a one-call subshell here, as it is for
+   * mirage's `ExecuteOptions`: dsh sends one on every call, and reading
+   * it that way would fork every command and leave the binding with
+   * nothing to persist. A workdir that names nothing in this world (one
+   * resolved on the harness's own machine) is dropped. An explicit `env`
+   * still runs as a one-call subshell; the managed `DSH_*` snapshot dsh
+   * injects on every call is seeded into the session instead.
    */
   sessionId?: string
   /**
@@ -147,10 +163,10 @@ function executeOptions(
   // fork: isolation must not hinge on a spec happening to carry a workdir,
   // and a read-only call runs in a *named* twin session, so without a cwd
   // its `cd` and exports would persist into the next nominally one-shot
-  // call. Bound, an absent workdir runs in the session itself, which is
-  // what lets its state persist. Either way the decision is the binding's,
-  // never the session this particular call happens to land in.
-  const cwd = workdir !== '' ? workdir : bound ? undefined : fallbackWorkdir
+  // call. Bound, the command runs in the session itself, which `execute`
+  // moves to the workdir first, so its state persists. Either way the
+  // decision is the binding's, never the session this call lands in.
+  const cwd = bound ? undefined : workdir !== '' ? workdir : fallbackWorkdir
   return {
     signal,
     ...(sessionId !== undefined ? { sessionId } : {}),
@@ -507,7 +523,6 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly seeding = new Map<string, Promise<unknown>>()
   private issued = 0
   private readonly seeded = new Map<string, number>()
-  private readonly inSession = new Map<string, number>()
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
@@ -912,19 +927,28 @@ export class MirageShellExecutor extends ShellExecutor {
         this.workdir,
         sink,
       )
-      if (sessionId === undefined || options.cwd !== undefined || options.env !== undefined) {
-        return ws.shell(spec.command, options)
-      }
+      if (!bound || sessionId === undefined) return ws.shell(spec.command, options)
+      const session = ws.getSession(sessionId)
+      const place = workdir !== '' ? workdir : session.cwd
+      if (options.env !== undefined) return ws.shell(spec.command, { ...options, cwd: place })
       // The command runs in the bound session itself, where a session runs
       // one line at a time. While another still runs there, it runs on a
       // copy of the session instead, beside that one.
-      const running = this.inSession.get(sessionId) ?? 0
-      if (running > 0) {
-        return ws.shell(spec.command, { ...options, cwd: ws.getSession(sessionId).cwd })
+      const running = runningIn(ws)
+      const ours = running.get(sessionId) ?? 0
+      if (ours > 0) return ws.shell(spec.command, { ...options, cwd: place })
+      // Moving the session changes the directory of any line already in
+      // it, so a line run outside these executors (listed in the line
+      // table until it ends) keeps it where it is and this one runs on a
+      // copy beside it.
+      if (session.cwd !== place) {
+        const busy = ws.lineTable.lines(sessionId).some((line) => line.endedAt === null)
+        if (busy) return ws.shell(spec.command, { ...options, cwd: place })
+        setCwd(session, place)
       }
-      this.inSession.set(sessionId, running + 1)
+      running.set(sessionId, ours + 1)
       return ws.shell(spec.command, options).finally(() => {
-        this.inSession.set(sessionId, (this.inSession.get(sessionId) ?? 1) - 1)
+        running.set(sessionId, (running.get(sessionId) ?? 1) - 1)
       })
     }, parts)
   }

@@ -28,6 +28,7 @@ export default defineConfig({
   external: [
     '@deepseek-ai/cordis',
     '@deepseek-ai/dsh-fs',
+    '@deepseek-ai/dsh-fs-patch',
     '@deepseek-ai/dsh-shell',
     '@deepseek-ai/dsh-subprocess',
     '@deepseek-ai/dsh-spill',

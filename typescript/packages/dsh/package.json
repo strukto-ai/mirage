@@ -12,6 +12,7 @@
     "directory": "typescript/packages/dsh"
   },
   "license": "Apache-2.0",
+  "icon": "icon.svg",
   "author": "Zecheng Zhang <zecheng@strukto.ai>",
   "publishConfig": {
     "access": "public"
@@ -46,7 +47,9 @@
     "./subprocess": {
       "types": "./dist/plugin/subprocess.d.ts",
       "import": "./dist/plugin/subprocess.js"
-    }
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
@@ -55,7 +58,9 @@
   },
   "files": [
     "dist",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale"
   ],
   "scripts": {
     "build": "tsup",
@@ -67,20 +72,26 @@
     "@struktoai/mirage-node": "workspace:*"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-shell": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-spill": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2"
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-fs": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-fs-patch": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-shell": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-spill": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-subprocess": "0.2.2-rc.3"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-shell": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-spill": "0.2.0-rc.2",
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-fs": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-fs-patch": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session-projection": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-shell": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-spill": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-subprocess": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-working-directory": "0.2.2-rc.3",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.12",
-    "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2"
+    "vitest": "^4.1.12"
   }
 }

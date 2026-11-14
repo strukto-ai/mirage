@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -50,7 +52,7 @@ class DiskEventHook:
         """
         self._accessor = accessor
 
-    def _relative(self, host_path: str) -> str | None:
+    async def _relative(self, host_path: str) -> str | None:
         """Mount-relative form of a host path, or None if outside.
 
         A watcher may be rooted above the mount, so an event for a
@@ -59,15 +61,41 @@ class DiskEventHook:
         Args:
             host_path (str): Absolute path on the local filesystem.
         """
+        entry, whole, root = await asyncio.to_thread(self._physical, host_path)
         try:
-            relative = (
-                Path(host_path).relative_to(self._accessor.root).as_posix()
-            )
+            relative = entry.relative_to(root).as_posix()
         except ValueError:
-            return None
+            # A link to the root itself is the root: kept as written it
+            # names the link's own directory, outside the mount. A link
+            # inside the mount never gets here, so one pointing back at
+            # the root keeps its own name.
+            return "/" if whole == root else None
         # `relative_to` spells "the root itself" as ".", which would
         # render as a fabricated "<mount>/." entry.
         return "/" if relative == "." else "/" + relative
+
+    def _physical(self, host_path: str) -> tuple[Path, Path, Path]:
+        """A host path and the mount root, with their symlinks resolved.
+
+        The mount keeps the real path of its root, while a watcher
+        reports paths as it was asked to watch them, so a root spelled
+        through a link (``/tmp`` on macOS) would otherwise drop every
+        event. For the entry only the directories above it are
+        resolved, so a link created in the mount reports as itself; the
+        whole path is resolved too, to know a link to the root. A path
+        already gone, or a link that loops, keeps the rest as written.
+
+        Args:
+            host_path (str): Absolute path on the local filesystem.
+        """
+        path = os.path.normpath(host_path)
+        parent, name = os.path.split(path)
+        root = Path(os.path.realpath(self._accessor.root))
+        return (
+            Path(os.path.realpath(parent)) / name,
+            Path(os.path.realpath(path)),
+            root,
+        )
 
     async def to_events(
         self, root: PathSpec, event_type: str, payload: JsonValue
@@ -90,10 +118,10 @@ class DiskEventHook:
         source = text_field(payload, "src_path")
         target = text_field(payload, "dest_path")
         if event_type == "moved":
-            return self._moved(root, source, target)
+            return await self._moved(root, source, target)
         if source is None:
             return ()
-        relative = self._relative(source)
+        relative = await self._relative(source)
         if relative is None:
             return ()
         kind = DISK_KINDS.get(event_type)
@@ -101,7 +129,7 @@ class DiskEventHook:
             return ()
         return (event_at(root, relative, kind),)
 
-    def _moved(
+    async def _moved(
         self, root: PathSpec, source: str | None, target: str | None
     ) -> Sequence[FileEvent]:
         """Map a rename, which may cross the mount boundary either way.
@@ -118,8 +146,10 @@ class DiskEventHook:
             source (str | None): Host path the entry left, if named.
             target (str | None): Host path the entry arrived at, if named.
         """
-        moved_from = self._relative(source) if source is not None else None
-        moved_to = self._relative(target) if target is not None else None
+        moved_from = (
+            await self._relative(source) if source is not None else None
+        )
+        moved_to = await self._relative(target) if target is not None else None
         if moved_to is None:
             if moved_from is None:
                 return ()

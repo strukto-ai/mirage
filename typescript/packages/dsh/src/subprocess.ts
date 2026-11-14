@@ -1,5 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  SubprocessError,
+  SubprocessExecutableNotFoundError,
   SubprocessRuntime,
   type SubprocessSpawnSpec,
   type SubprocessHandle,
@@ -84,7 +86,11 @@ export class MirageSubprocess extends SubprocessRuntime {
       if (signal?.aborted) abort()
       const result = await child.communicate()
       signal?.throwIfAborted()
-      if (result.exitCode !== 0) throw new Error(`executable not found: ${command}`)
+      if (result.exitCode !== 0) {
+        throw new SubprocessExecutableNotFoundError(
+          `command ${JSON.stringify(command)} was not found in the workspace`,
+        )
+      }
       return new TextDecoder().decode(result.stdout).trim()
     } finally {
       signal?.removeEventListener('abort', abort)
@@ -100,7 +106,10 @@ export class MirageSubprocess extends SubprocessRuntime {
       !spec.argv[0] ||
       spec.argv.some((arg) => typeof arg !== 'string' || arg.includes('\0'))
     )
-      throw new Error('invalid argv')
+      throw new SubprocessError(
+        'invalid argv: expected a non-empty program name at argv[0] and no NUL bytes',
+        'SUBPROCESS_INVALID_ARGV',
+      )
     if (!spec.cwd.startsWith('/') || spec.cwd.includes('\0'))
       throw new Error('cwd must be an absolute workspace path')
     if (!Number.isFinite(spec.graceMs) || spec.graceMs <= 0 || spec.graceMs > 2147483647)

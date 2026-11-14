@@ -13,27 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { isAbsolute, posix, relative, resolve, sep } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
+  FsDeleteOutcome,
   FsDirEntry,
   FsEditOutcome,
   FsEditRequest,
   FsInfo,
+  FsMoveOutcome,
   FsPathInfo,
   FsTarget,
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
+import { applyHunks } from '@deepseek-ai/dsh-fs-patch'
+import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { DiskVFS } from '@struktoai/mirage-node'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
-import { FileType } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { makeStorageKey } from '@struktoai/mirage-core/workspace/mount/storage'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
@@ -50,6 +56,54 @@ import {
 // transitive dependency of dsh-fs, and naming a fourth exact-pinned peer to
 // spell one parameter would couple the adapter to a package it never calls.
 type SandboxPolicy = Parameters<FileSystem['writeText']>[4]
+
+/**
+ * The fields of a dsh Session the working-directory bridge reads and
+ * writes. Structural, like the approval channel in `approval.ts`: the
+ * session and working-directory packages stay out of this one's
+ * dependencies, and any composition's Session satisfies it.
+ */
+interface WorkingDirectorySession {
+  readonly header: { readonly cwd?: string | null }
+  append(type: 'working-directory/change', data: { cwd: string }): unknown
+}
+
+/** What dsh's working-directory service asks its access listeners. */
+interface WorkingDirectoryAccess {
+  agent: { session: WorkingDirectorySession }
+  path: string | null
+  signal: AbortSignal
+}
+
+/** dsh's `ctx.workingDirectory`, narrowed to what the bridge reads. */
+interface WorkingDirectoryOwner {
+  readonly defaultDirectory: string
+  get(session: WorkingDirectorySession): string
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'working-directory/access'(
+      request: WorkingDirectoryAccess,
+      next: () => Promise<string>,
+    ): Promise<string>
+  }
+}
+
+/**
+ * dsh's working-directory owner, or null when the composition has none.
+ * Read through `ctx.get` for the reason `approverOf` gives: the bridge
+ * must not make the service a load requirement.
+ *
+ * @param ctx the cordis context to read.
+ * @returns the owner, or null when nothing provides one.
+ */
+function workingDirectoryOf(ctx: Context): WorkingDirectoryOwner | null {
+  const held: unknown = ctx.get('workingDirectory')
+  if (held === null || typeof held !== 'object') return null
+  const { get } = held as { get?: unknown }
+  return typeof get === 'function' ? (held as WorkingDirectoryOwner) : null
+}
 
 const DEFAULT_DIFF_BASIS_MAX_BYTES = 10 * 1024 * 1024
 
@@ -95,6 +149,18 @@ async function* singleChunk(text: string): AsyncGenerator<string, void, void> {
   yield await Promise.resolve(text)
 }
 
+function patched(target: FsTarget, text: string, hunks: readonly PatchHunk[]): string {
+  const result = applyHunks(text, hunks)
+  if (!result.ok) {
+    const { hunkLineNumber, stage } = result.failure
+    throw new FsError(
+      `cannot patch "${target.displayPath}": hunk at patch line ${String(hunkLineNumber)} (${stage}) does not match`,
+      'FS_PATCH_MISMATCH',
+    )
+  }
+  return result.after
+}
+
 function tooLarge(displayPath: string, maxBytes: number, size?: number): FsError {
   const found = size === undefined ? '' : `${String(size)} bytes `
   return new FsError(
@@ -117,6 +183,38 @@ function escapesRoot(rel: string): boolean {
   // An absolute answer means there was no relative route at all, which on
   // win32 is a different drive.
   return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+}
+
+/**
+ * A host path with its symlinks resolved, as a disk mount's root is.
+ *
+ * A disk mount keeps the real path of its root, so a host path spelled
+ * through a link (`/tmp` and `/var` on macOS) would otherwise never fall
+ * under it. Every link is followed, the last component's too: a disk
+ * mount neither lists nor opens a link below its root, so only the
+ * file a link points at has a usable workspace path. The deepest
+ * ancestor that resolves is resolved, so a path that names nothing yet,
+ * or loops, keeps the rest as written.
+ *
+ * @param hostPath an absolute host path.
+ * @returns the path to compare against a disk mount's root.
+ */
+function physicalPath(hostPath: string): string {
+  const lexical = resolve(hostPath)
+  const rest: string[] = []
+  let head = lexical
+  for (;;) {
+    try {
+      return join(realpathSync(head), ...rest)
+    } catch (err) {
+      const code = (err as { code?: unknown }).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') throw err
+    }
+    const parent = dirname(head)
+    if (parent === head) return lexical
+    rest.unshift(basename(head))
+    head = parent
+  }
 }
 
 /**
@@ -193,6 +291,58 @@ export class MirageFileSystem extends FileSystem {
     this.cwd = config.cwd ?? '/'
     this.sessionId = config.sessionId
     this.diffBasisMaxBytes = config.diffBasisMaxBytes ?? DEFAULT_DIFF_BASIS_MAX_BYTES
+    ctx.on('working-directory/access', async (request, next) => {
+      await this.placeInWorld(request.agent.session, request.signal)
+      return next()
+    })
+  }
+
+  /**
+   * Keep a dsh Session's working directory a directory of this world.
+   *
+   * dsh records the directory the harness was launched in, a path on
+   * its own machine, and validates it through this seam before every
+   * bash, file and search call. Here it names nothing, so left alone
+   * every call fails as an unavailable directory. Before dsh looks, a
+   * recorded directory this world cannot enter is replaced: by the
+   * original project's twin when a disk mount holds it, so launching in
+   * a mounted project lands in its mount, else by this adapter's `cwd`.
+   * A directory the agent moved to inside this world is kept, and so is
+   * dsh's own handling of every other access.
+   *
+   * @param session the Session whose directory is being accessed.
+   * @param signal the access's cancellation.
+   */
+  private async placeInWorld(session: WorkingDirectorySession, signal: AbortSignal): Promise<void> {
+    const owner = workingDirectoryOf(this.ctx)
+    if (owner === null) return
+    const recorded = owner.get(session)
+    if (await this.isWorldDirectory(recorded, signal)) return
+    const twin = this.processPathFromHostPath(session.header.cwd ?? owner.defaultDirectory)
+    const place =
+      twin !== undefined && (await this.isWorldDirectory(twin, signal)) ? twin : this.cwd
+    if (place !== recorded) session.append('working-directory/change', { cwd: place })
+  }
+
+  /**
+   * Whether a path is a directory this world can enter. A path that
+   * cannot be resolved or entered (a parent replaced by a file, a link
+   * cycle) is not one; only the caller's own cancellation is raised.
+   *
+   * @param path the candidate absolute path.
+   * @param signal the access's cancellation.
+   * @returns true for a directory.
+   */
+  private async isWorldDirectory(path: string, signal: AbortSignal): Promise<boolean> {
+    if (!posix.isAbsolute(path)) return false
+    let target: FsTarget
+    try {
+      target = await this.resolve(path, { signal })
+    } catch (err) {
+      if (err instanceof FsError && err.code !== 'FS_ABORTED') return false
+      throw err
+    }
+    return (await this.files(signal, 'stat')).isDir(String(target.targetKey))
   }
 
   // The workspace may still be building (declarative mounts resolve
@@ -347,7 +497,7 @@ export class MirageFileSystem extends FileSystem {
     if (!isAbsolute(hostPath)) return undefined
     const workspace = this.ctx.mirage.workspaceIfReady
     if (workspace === null) return undefined
-    const host = resolve(hostPath)
+    const host = physicalPath(hostPath)
     const mounts = workspace.mounts()
     for (const entry of mounts) {
       const { vfs } = entry
@@ -622,37 +772,16 @@ export class MirageFileSystem extends FileSystem {
     return this.withLock(target.targetKey, async () => {
       assertNotAborted(signal, 'write')
       this.assertMutable(sandboxPolicy, target.displayPath)
-      const key = String(target.targetKey)
-      const existing = await this.stat(target, signal)
-      if (existing !== undefined && existing.type !== 'file') {
-        throw new FsError(
-          `cannot write "${target.displayPath}": not a regular file`,
-          'FS_NOT_REGULAR_FILE',
-        )
-      }
-      if (expected?.kind === 'createIfAbsent' && existing !== undefined) {
-        throw new FsError(
-          `cannot write "${target.displayPath}": file already exists`,
-          'FS_NOT_OBSERVED',
-        )
-      }
-      if (expected?.kind === 'replaceIfVersion') {
-        if (existing?.version !== expected.version) {
-          throw new FsError(
-            `cannot write "${target.displayPath}": file changed since it was read`,
-            'FS_STALE_VERSION',
-          )
-        }
-      }
-      const before = existing === undefined ? null : await this.diffBasis(target, content)
+      const existing = await this.writeTarget(target, expected, signal)
+      const before =
+        existing === undefined || this.overBasis(content) ? null : await this.diffBasis(target)
       const crlf = before !== null && detectsCrlf(before)
-      try {
-        await (
-          await this.files(signal, 'write')
-        ).write(key, restoreLineEndings(normalizeLineEndings(content), crlf))
-      } catch (err) {
-        throw mapMirageError(err, 'write', target.displayPath)
-      }
+      await this.store(
+        target,
+        restoreLineEndings(normalizeLineEndings(content), crlf),
+        'write',
+        signal,
+      )
       return {
         operation: existing === undefined ? ('create' as const) : ('update' as const),
         version: await this.versionAfterWrite(target),
@@ -662,14 +791,294 @@ export class MirageFileSystem extends FileSystem {
     })
   }
 
-  // The overwrite-diff basis: the prior content when it is text and both
-  // sides fit the exclusive limit, else null (dsh renders a whole-file
-  // diff then). Never fails the write itself.
-  private async diffBasis(target: FsTarget, content: string): Promise<string | null> {
-    if (Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes) return null
+  async editText(
+    target: FsTarget,
+    edit: FsEditRequest,
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsEditOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'edit')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'edit', signal)
+      const raw = await this.readEditable(target, 'edit', signal)
+      const original = normalizeLineEndings(raw)
+      const edited = applyLiteralEdit(
+        original,
+        normalizeLineEndings(edit.oldString),
+        normalizeLineEndings(edit.newString),
+        edit.replaceAll,
+        target.displayPath,
+      )
+      await this.store(target, restoreLineEndings(edited, detectsCrlf(raw)), 'edit', signal)
+      return {
+        version: await this.versionAfterWrite(target),
+        before: original,
+        after: edited,
+      }
+    })
+  }
+
+  async patchText(
+    target: FsTarget,
+    hunks: readonly PatchHunk[],
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsEditOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'patch')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'patch', signal)
+      const raw = await this.readEditable(target, 'patch', signal)
+      const original = normalizeLineEndings(raw)
+      const after = patched(target, original, hunks)
+      await this.store(target, restoreLineEndings(after, detectsCrlf(raw)), 'patch', signal)
+      return { version: await this.versionAfterWrite(target), before: original, after }
+    })
+  }
+
+  async deleteFile(
+    target: FsTarget,
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsDeleteOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'delete')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'delete', signal)
+      const before = await this.diffBasis(target)
+      assertNotAborted(signal, 'delete')
+      try {
+        await (await this.files(signal, 'delete')).unlink(String(target.targetKey))
+      } catch (err) {
+        throw mapMirageError(err, 'delete', target.displayPath)
+      }
+      return { before: before === null ? null : normalizeLineEndings(before) }
+    })
+  }
+
+  /**
+   * Publish the source, optionally patched, at the destination, then
+   * unlink the source.
+   *
+   * Two workspace ops rather than one rename, because the destination
+   * may sit on another mount (a rename there is EXDEV) and the contract
+   * is a text move: the hunks apply to the normalized text and the
+   * source's line endings carry over. Two paths that address one stored
+   * file (mounts over nested roots) are the same target, as for `mv`,
+   * or the unlink would delete the only copy. Past the last abort check
+   * both effects run, and a source the unlink could not remove, or one
+   * that changed while the destination was written, is reported as
+   * retained rather than raised, since the destination is published.
+   *
+   * @param source the resolved regular file to move.
+   * @param destination where its text is published.
+   * @param options the hunks to apply and the guard on each side.
+   * @param signal aborts before the destination is written.
+   * @param sandboxPolicy the call's mode; `read-only` refuses the move.
+   * @returns the source basis, the destination outcome and whether the
+   *   source is gone.
+   */
+  async moveFile(
+    source: FsTarget,
+    destination: FsTarget,
+    options: {
+      hunks?: readonly PatchHunk[]
+      expectedSource?: { version: FsVersion }
+      expectedDestination?: FsWriteIntent
+    },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsMoveOutcome> {
+    const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
+    const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
+    if (sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))) {
+      throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
+    }
+    return this.withLocks([source.targetKey, destination.targetKey], async () => {
+      assertNotAborted(signal, 'move')
+      this.assertMutable(sandboxPolicy, source.displayPath)
+      const read = await this.requireFile(source, options.expectedSource, 'move', signal)
+      const existing = await this.writeTarget(destination, options.expectedDestination, signal)
+      const raw = await this.readEditable(source, 'move', signal)
+      const original = normalizeLineEndings(raw)
+      const after =
+        options.hunks === undefined ? original : patched(source, original, options.hunks)
+      const content = restoreLineEndings(after, detectsCrlf(raw))
+      const replaced =
+        existing === undefined || this.overBasis(content) ? null : await this.diffBasis(destination)
+      assertNotAborted(signal, 'move')
+      await this.store(destination, content, 'move')
+      const published: FsWriteOutcome = {
+        operation: existing === undefined ? 'create' : 'update',
+        version: await this.versionAfterWrite(destination),
+        before: replaced === null ? null : normalizeLineEndings(replaced),
+        after,
+      }
+      const sourceBefore = this.overBasis(original) ? null : original
+      const retained = (failure: FsError): FsMoveOutcome => ({
+        sourceBefore,
+        destination: published,
+        sourceDeleted: false,
+        sourceFailure: { code: failure.code, message: failure.message },
+      })
+      let now: FsInfo | undefined
+      try {
+        now = await this.stat(source)
+      } catch (err) {
+        return retained(mapMirageError(err, 'stat', source.displayPath))
+      }
+      if (now?.version !== read.version) {
+        return retained(
+          new FsError(
+            `cannot delete "${source.displayPath}": file changed since it was read`,
+            'FS_STALE_VERSION',
+          ),
+        )
+      }
+      try {
+        await (await this.files()).unlink(String(source.targetKey))
+      } catch (err) {
+        return retained(mapMirageError(err, 'delete', source.displayPath))
+      }
+      return { sourceBefore, destination: published, sourceDeleted: true }
+    })
+  }
+
+  /**
+   * Hold the per-target locks of every key, taken in one canonical
+   * order so two moves over the same pair cannot each hold the lock the
+   * other waits for.
+   *
+   * @param keys the targets the body mutates.
+   * @param body the work done under every lock.
+   * @returns what the body resolved with.
+   */
+  private withLocks<T>(keys: readonly FsTargetKey[], body: () => Promise<T>): Promise<T> {
+    const [first, ...rest] = [...keys].sort((a, b) => compareCodePoints(String(a), String(b)))
+    if (first === undefined) return body()
+    return this.withLock(first, () => this.withLocks(rest, body))
+  }
+
+  /**
+   * Stat a mutation's target and refuse it unless it is the regular
+   * file the caller last observed.
+   *
+   * @param target the resolved target about to be changed.
+   * @param expected the version guard; omitted for an unconditional change.
+   * @param verb the operation named in a refusal.
+   * @param signal aborts the stat.
+   * @returns the file's row as observed.
+   */
+  private async requireFile(
+    target: FsTarget,
+    expected: { version: FsVersion } | undefined,
+    verb: string,
+    signal: AbortSignal | undefined,
+  ): Promise<FsInfo> {
+    const existing = await this.stat(target, signal)
+    if (existing === undefined) {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    if (existing.type !== 'file') {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": not a regular file`,
+        'FS_NOT_REGULAR_FILE',
+      )
+    }
+    if (expected !== undefined && existing.version !== expected.version) {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    return existing
+  }
+
+  /**
+   * Stat a write's destination and check it against the write intent.
+   *
+   * @param target the resolved destination.
+   * @param expected the intent; omitted for an unconditional write.
+   * @param signal aborts the stat.
+   * @returns the existing file's row, or undefined when there is none.
+   */
+  private async writeTarget(
+    target: FsTarget,
+    expected: FsWriteIntent | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<FsInfo | undefined> {
+    const existing = await this.stat(target, signal)
+    if (existing !== undefined && existing.type !== 'file') {
+      throw new FsError(
+        `cannot write "${target.displayPath}": not a regular file`,
+        'FS_NOT_REGULAR_FILE',
+      )
+    }
+    if (expected?.kind === 'createIfAbsent' && existing !== undefined) {
+      throw new FsError(
+        `cannot write "${target.displayPath}": file already exists`,
+        'FS_NOT_OBSERVED',
+      )
+    }
+    if (expected?.kind === 'replaceIfVersion' && existing?.version !== expected.version) {
+      throw new FsError(
+        `cannot write "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    return existing
+  }
+
+  private async readEditable(
+    target: FsTarget,
+    verb: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
     let bytes: Uint8Array
     try {
-      bytes = await (await this.files()).read(String(target.targetKey))
+      bytes = await (await this.files(signal, verb)).read(String(target.targetKey))
+    } catch (err) {
+      throw mapMirageError(err, verb, target.displayPath)
+    }
+    return decodeStrictText(bytes, target.displayPath)
+  }
+
+  private async store(
+    target: FsTarget,
+    content: string,
+    verb: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await (await this.files(signal, verb)).write(String(target.targetKey), content)
+    } catch (err) {
+      throw mapMirageError(err, verb, target.displayPath)
+    }
+  }
+
+  private overBasis(content: string): boolean {
+    return Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes
+  }
+
+  // The diff basis of a file about to change: its prior content when it
+  // is text under the exclusive limit, else null (dsh renders a
+  // whole-file diff then). Only the limit's window is read, so a large
+  // file costs no more than that. Never fails the mutation itself.
+  private async diffBasis(target: FsTarget): Promise<string | null> {
+    let bytes: Uint8Array
+    try {
+      bytes = await (
+        await this.files()
+      ).read(String(target.targetKey), {
+        size: this.diffBasisMaxBytes,
+      })
     } catch {
       return null
     }
@@ -684,67 +1093,5 @@ export class MirageFileSystem extends FileSystem {
   private async versionAfterWrite(target: FsTarget): Promise<FsVersion> {
     const after = await this.stat(target)
     return after?.version ?? FsVersion(`missing:${String(target.targetKey)}`)
-  }
-
-  async editText(
-    target: FsTarget,
-    edit: FsEditRequest,
-    expected?: { version: FsVersion },
-    signal?: AbortSignal,
-    sandboxPolicy?: SandboxPolicy,
-  ): Promise<FsEditOutcome> {
-    return this.withLock(target.targetKey, async () => {
-      assertNotAborted(signal, 'edit')
-      this.assertMutable(sandboxPolicy, target.displayPath)
-      const key = String(target.targetKey)
-      const existing = await this.stat(target, signal)
-      // Stale guard before literal matching: an edit based on an old read
-      // reports FS_STALE_VERSION, not a match failure against newer content.
-      if (existing === undefined) {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": file changed since it was read`,
-          'FS_STALE_VERSION',
-        )
-      }
-      if (existing.type !== 'file') {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": not a regular file`,
-          'FS_NOT_REGULAR_FILE',
-        )
-      }
-      if (expected !== undefined && existing.version !== expected.version) {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": file changed since it was read`,
-          'FS_STALE_VERSION',
-        )
-      }
-      let bytes: Uint8Array
-      try {
-        bytes = await (await this.files(signal, 'edit')).read(key)
-      } catch (err) {
-        throw mapMirageError(err, 'edit', target.displayPath)
-      }
-      const raw = decodeStrictText(bytes, target.displayPath)
-      const original = normalizeLineEndings(raw)
-      const edited = applyLiteralEdit(
-        original,
-        normalizeLineEndings(edit.oldString),
-        normalizeLineEndings(edit.newString),
-        edit.replaceAll,
-        target.displayPath,
-      )
-      try {
-        await (
-          await this.files(signal, 'edit')
-        ).write(key, restoreLineEndings(edited, detectsCrlf(raw)))
-      } catch (err) {
-        throw mapMirageError(err, 'edit', target.displayPath)
-      }
-      return {
-        version: await this.versionAfterWrite(target),
-        before: original,
-        after: edited,
-      }
-    })
   }
 }
