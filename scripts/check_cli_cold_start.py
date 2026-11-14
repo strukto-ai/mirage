@@ -23,6 +23,7 @@ HEAVY = (
     "@struktoai/mirage-openai-agents",
     "@struktoai/mirage-langchain",
     "@struktoai/mirage-pi",
+    "@struktoai/mirage-pi-durable",
     "@struktoai/mirage-vercel",
     "@struktoai/mirage-mastra",
     "@struktoai/mirage-claude-agent-sdk",

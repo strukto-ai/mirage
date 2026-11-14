@@ -1,0 +1,104 @@
+---
+title: Pi Durable
+description: Run Pi Durable agents with their file tools and bash on a Mirage workspace.
+icon: /images/pi-logo.svg
+---
+
+[Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable) is Pi's durable agent harness: conversations, turns and tool calls are stored before anything is shown, so a restarted process picks a run up where it stopped. Its built-in tools (`read`, `write`, `edit`, `bash`, code mode) reach files and commands only through an `ExecutionEnv`. `@struktoai/mirage-pi-durable` provides one over a Mirage `Workspace`, so the tools work on whatever the workspace mounts.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-pi-durable @struktoai/mirage-node @earendil-works/pi-durable @earendil-works/pi-ai @earendil-works/chord
+```
+
+## Usage
+
+Install Pi's coding tools and the Mirage extension, and build a `MirageExecutionEnv` for each call:
+
+```ts
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { builtinModels } from '@earendil-works/pi-ai/providers/all'
+import { createRegistry, Harness, MemoryStorage } from '@earendil-works/pi-durable'
+import { CodingTools } from '@earendil-works/pi-durable/tools'
+import { MountMode, RAMVFS, S3VFS, Workspace } from '@struktoai/mirage-node'
+import { MirageExecutionEnv, mirageExtension } from '@struktoai/mirage-pi-durable'
+
+const context = BACKGROUND_CONTEXT
+const ws = new Workspace(
+  { '/': new RAMVFS(), '/s3': new S3VFS({ bucket: 'my-bucket', region: 'us-east-1' }) },
+  { mode: MountMode.WRITE },
+)
+
+const registry = createRegistry()
+registry.install(CodingTools)
+registry.install(mirageExtension(ws))
+
+const harness = await Harness.open(
+  new MemoryStorage(),
+  {
+    models: builtinModels(),
+    registry,
+    env: ({ cwd }) => new MirageExecutionEnv(ws, { cwd: cwd ?? '/' }),
+  },
+  context,
+)
+const root = await harness.root(context, {
+  agent: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' } },
+})
+const run = await root.submit({ type: 'input', content: 'Summarize /s3/reports' }, context)
+await run.wait(context)
+```
+
+`mirageExtension` adds a `mirage` prompt section that describes the mounts. The conversation's `cwd` (`root.configure({ cwd })`) reaches the environment, so each conversation can work in its own directory.
+
+## Durable runs
+
+Open the harness on stored state to keep conversations across restarts. The workspace's files persist as their mounts do:
+
+```ts
+import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
+
+const harness = await Harness.open(
+  await openNodeSqliteStorage('./session.sqlite'),
+  { models: builtinModels(), registry, env: ({ cwd }) => new MirageExecutionEnv(ws, { cwd: cwd ?? '/' }) },
+  context,
+)
+harness.resume()
+```
+
+## Behavior
+
+- **Commands** run in Mirage's shell as one session. Each call starts from its `cwd`, so a `cd` or `export` does not carry over to the next one, as with a new process.
+- **Sessions:** pass `sessionId` to act as a Mirage session, under its profile's mounts, hides and policies. A refused command's output ends with the policy's reason.
+- **Long output** past Pi's bounds is written to a file under `/tmp` as it arrives, which needs a writable mount there. A command cancelled after that keeps its file.
+- **Mount roots** cannot be removed or renamed, nor can a folder holding one, as in the shell.
+- **Watching** polls: every `watch.pollIntervalMs`, Pi compares snapshots of each watched path, asked of the backend each time. A file new to a remote folder shows once the mount's listing of that folder refreshes.
+- **Binary reads** copy the file when Pi opens it, so a later rename or rewrite of the path does not reach an open reader.
+
+## Exports
+
+{/* generated: exports pi-durable start */}
+| Symbol | Purpose |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnv</code> | Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and write the workspace's mounts through its dispatcher, and run their commands in its shell, as one session. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnvOptions</code> | Options for `MirageExecutionEnv`: `cwd` (default `/`), `sessionId`, `id` and `watch.pollIntervalMs` (default 2000). |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi Durable extension named `mirage` whose prompt section describes the workspace's mounts, as the session sees them. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExtensionOptions</code> | Options for `mirageExtension`: `sessionId`, the session whose mounts the prompt describes. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>BuildSystemPromptOptions</code> | Options for `buildSystemPrompt`: which mounts to describe and what to append. |
+{/* generated: exports pi-durable end */}
+
+`MirageExecutionEnv` accepts:
+
+| Option                 | Default             | Purpose                                                                   |
+| ---------------------- | ------------------- | ------------------------------------------------------------------------- |
+| `cwd`                  | `'/'`               | Where relative paths and commands start.                                  |
+| `sessionId`            | default session     | The Mirage session every call acts as, under that session's profile.      |
+| `id`                   | one per workspace   | Pi's file namespace: environments with one id see the same files.         |
+| `watch.pollIntervalMs` | `2000`              | Milliseconds between the snapshots `watch` compares.                      |
+
+## Examples
+
+- [`examples/typescript/agents/pi_durable/ram_pi_durable.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/pi_durable/ram_pi_durable.ts), a Pi Durable run on a RAM workspace.
