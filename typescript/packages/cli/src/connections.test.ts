@@ -130,7 +130,7 @@ describe('mirage vfs against a daemon', () => {
     expect((await run(['vfs', 'get', 'gh', '-o', 'json'])).code).toBe(2)
     const unset = await run(['vfs', 'update', 'gh', '--unset', 'token'])
     expect(unset.code).toBe(2)
-    expect(unset.err).toContain('token is required')
+    expect(unset.err).toContain('github takes exactly one of token or app; got neither')
     rmSync(dir, { recursive: true, force: true })
   })
 

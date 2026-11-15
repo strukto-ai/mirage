@@ -146,19 +146,32 @@ def value_of(
     return raw
 
 
-def check_rules(kind: EntryKind, type: str, config: Fields) -> None:
+def check_rules(
+    kind: EntryKind, type: str, config: Fields, named: set[str]
+) -> None:
     """The checks a type needs beyond its fields' types.
 
     Args:
         kind (EntryKind): the entry's kind.
         type (str): its type.
         config (Fields): its plain fields.
+        named (set[str]): every field given a value, sealed and kept
+            ones included.
     """
     url = config.get("url")
     if kind == "cli" and type == "mcp" and isinstance(url, str):
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.netloc:
             raise invalid("url must be the MCP server's https URL")
+    # GitHub authenticates with a token or as an App, never both: no one
+    # field is required, so the rule is the pair's.
+    if (kind, type) in (("vfs", "github"), ("cli", "gh")):
+        token = "token" in named
+        if token == any(name.startswith("app.") for name in named):
+            got = "both" if token else "neither"
+            raise invalid(
+                f"{type} takes exactly one of token or app; got {got}"
+            )
 
 
 def check_values(
@@ -207,7 +220,7 @@ def check_values(
         )
         if f["required"] and used and f["name"] not in named:
             raise invalid(f"{f['name']} is required")
-    check_rules(kind, type, config)
+    check_rules(kind, type, config, named)
     size = len(
         json.dumps(
             {"config": config, "sealed": sealed},

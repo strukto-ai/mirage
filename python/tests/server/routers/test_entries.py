@@ -30,6 +30,9 @@ GITHUB = {
     "type": "github",
     "fields": {"owner": "strukto-ai", "repo": "mirage", "token": "ghp_x"},
 }
+# A GitHub App's fields as an entry writes them, its block's as
+# `app.<field>`.
+APP = {"app.app_id": "7", "app.private_key": "k", "app.installation_id": 42}
 
 
 @pytest.fixture
@@ -109,7 +112,9 @@ async def test_put_keeps_a_sealed_field_left_out_and_null_removes_it(
         "/v1/vfs/github", json={"fields": {"owner": "o", "token": None}}
     )
     assert r.status_code == 400
-    assert r.json()["error"]["message"] == "token is required"
+    assert r.json()["error"]["message"] == (
+        "github takes exactly one of token or app; got neither"
+    )
     await client.post(
         "/v1/clis",
         json={
@@ -138,7 +143,15 @@ async def test_fields_are_checked_against_the_type(client):
         ({"type": "nope", "fields": {}}, "type must be a vfs: "),
         (
             {"type": "github", "fields": {"owner": "o"}},
-            "token is required",
+            "github takes exactly one of token or app; got neither",
+        ),
+        (
+            {"type": "github", "fields": {"token": "t", **APP}},
+            "github takes exactly one of token or app; got both",
+        ),
+        (
+            {"type": "github", "fields": {"app.app_id": "7"}},
+            "app.private_key is required",
         ),
         (
             {"type": "github", "fields": {"token": "t", "x": 1}},
@@ -242,12 +255,18 @@ async def test_list_filters_by_type_and_name(client):
 async def test_types_are_read_off_the_config_schemas(client):
     vfs = (await client.get("/v1/vfs/types")).json()
     token = next(f for f in vfs["github"] if f["name"] == "token")
+    # Neither credential is required alone: the pair's rule is checked on
+    # a write.
     assert token == {
         "name": "token",
         "type": "string",
         "secret": True,
-        "required": True,
+        "required": False,
     }
+    key = next(f for f in vfs["github"] if f["name"] == "app.private_key")
+    assert key["group"] == "app"
+    assert key["secret"] is True
+    assert key["required"] is True
     assert "ram" not in vfs
     clis = (await client.get("/v1/clis/types")).json()
     assert "git" not in clis

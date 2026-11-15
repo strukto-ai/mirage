@@ -127,9 +127,9 @@ def test_missing_required_fields_are_named_without_a_terminal(daemon):
     r = run("cli", "create", "m", "--type", "mcp", stdin="")
     assert r.exit_code == 2
     assert "missing required fields: url" in r.output
-    r = run("vfs", "create", "g", "--type", "github", "--set", "owner=o")
+    r = run("cli", "create", "l", "--type", "linear", stdin="")
     assert r.exit_code == 2
-    assert "missing required fields: token" in r.output
+    assert "missing required fields: api_key" in r.output
 
 
 def test_set_parses_json_values(daemon, store):
@@ -188,7 +188,7 @@ def test_update_keeps_fields_and_unset_removes_them(daemon, store):
     assert got["config"] == {"owner": "o"}
     r = run("vfs", "update", "gh", "--unset", "token")
     assert r.exit_code == 2
-    assert "token is required" in r.output
+    assert "github takes exactly one of token or app; got neither" in r.output
 
 
 def test_a_file_names_the_secrets_to_read(daemon, store, tmp_path: Path):
