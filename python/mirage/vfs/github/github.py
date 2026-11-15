@@ -142,6 +142,7 @@ class GitHubVFS(BaseVFS):
             GitHubAccount(
                 GhConfig(
                     token=config.token,
+                    app=config.app,
                     base_url=config.base_url,
                     timeout=config.timeout,
                 )

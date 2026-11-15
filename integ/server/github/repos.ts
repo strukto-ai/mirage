@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
-import { API_PREFIXES, DEFAULT_LOGIN, REPO_DATE } from './config.ts'
+import { API_PREFIXES, DEFAULT_LOGIN, INSTALLATION_ACCOUNT, REPO_DATE } from './config.ts'
 import type { C } from './config.ts'
 import { commitHistory } from './compare.ts'
 import {
@@ -541,6 +541,41 @@ export function repoRoutes(): KitRoute<C>[] {
         },
       }
     }),
+    // One GitHub App installation, on INSTALLATION_ACCOUNT. Its token is
+    // minted for any App JWT: the fake checks the JWT's shape, not its
+    // signature, and the token lasts an hour, as the vendor's does.
+    route<C>('POST', `${p}/app/installations/:id/access_tokens`, (ctx) => {
+      const jwt = /^bearer [\w-]+\.[\w-]+\.[\w-]+$/i
+      if (!jwt.test(String(ctx.headers.authorization ?? ''))) {
+        return fail(401, 'A JSON web token could not be decoded')
+      }
+      const expires = new Date(Date.now() + 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+      return {
+        status: 201,
+        body: {
+          token: `ghs_integ${param(ctx, 'id')}`,
+          expires_at: expires,
+          permissions: { contents: 'read', metadata: 'read' },
+          repository_selection: 'all',
+        },
+      }
+    }),
+    // The repositories that installation reaches, which is how a client with
+    // an installation token, which cannot ask /user, learns whose they are.
+    route<C>(
+      'GET',
+      `${p}/installation/repositories`,
+      authed(async (ctx) => {
+        const repos = (await allRepos(ctx.db, ctx.tenant))
+          .filter((r) => r.owner === INSTALLATION_ACCOUNT)
+          .sort((a, b) => (a.fullName < b.fullName ? -1 : 1))
+        const items = await Promise.all(repos.map((r) => repoJson(ctx.db, ctx.tenant, r)))
+        return {
+          status: 200,
+          body: { total_count: items.length, repository_selection: 'all', repositories: items },
+        }
+      }),
+    ),
     route<C>('GET', `${p}/user/repos`, authed(listRepos)),
     route<C>('GET', `${p}/users/:owner/repos`, authed(listRepos)),
     route<C>('GET', `${p}/orgs/:owner/repos`, authed(listRepos)),

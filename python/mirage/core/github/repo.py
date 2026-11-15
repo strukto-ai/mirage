@@ -194,14 +194,38 @@ def parse_repo(spec: str) -> RepoRef:
 
 
 async def login(account: GitHubAccount) -> str:
-    """The authenticated account's login name.
+    """The authenticated account's login name: for an App, the account
+    the installation is on, read off a repository it reaches, since an
+    installation token cannot ask `/user`.
 
     Args:
-        account (GitHubAccount): the token, API base and pool to ride.
+        account (GitHubAccount): the credential, API base and pool to ride.
 
     Returns:
         str: the login, empty when the account reports none.
+
+    Raises:
+        ValueError: an App installation that reaches no repository.
     """
+    if account.config.app is not None:
+        listed = await github_request(
+            account,
+            "GET",
+            "/installation/repositories",
+            params={"per_page": "1"},
+        )
+        repos = (
+            listed.get("repositories") if isinstance(listed, dict) else None
+        )
+        first = repos[0] if isinstance(repos, list) and repos else None
+        owner = first.get("owner") if isinstance(first, dict) else None
+        name = owner.get("login") if isinstance(owner, dict) else None
+        if not isinstance(name, str):
+            raise ValueError(
+                "a GitHub App installation that reaches no repository has "
+                'no owner to clone from; use the "OWNER/REPO" format'
+            )
+        return name
     me = await github_request(account, "GET", "/user")
     name = me.get("login") if isinstance(me, dict) else None
     return name if isinstance(name, str) else ""

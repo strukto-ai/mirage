@@ -2034,6 +2034,33 @@
       ]
     },
     {
+      "id": "cli-gh-app",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "facet": "cli",
+      "auth": "app",
+      "clis": [
+        "gh"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "vfs": "github",
+          "backend": "github",
+          "repo": "integ/repo-cli",
+          "mode": "read"
+        },
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "hf-prefix",
       "hosts": [
         "python",

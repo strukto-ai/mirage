@@ -146,6 +146,9 @@ export interface Target {
   // source whose every fetch fails. Only the ram opener consults it;
   // main.ts refuses it on any other VFS.
   secrets?: string
+  // 'app' installs `gh` as a GitHub App installation instead of with a
+  // token. Only the github opener consults it.
+  auth?: 'app'
   clis?: string[]
   // 'yaml' builds the target's MCP CLIs through the workspace config
   // loader, header auth; else in code, bearer. Only the mcp opener consults it.

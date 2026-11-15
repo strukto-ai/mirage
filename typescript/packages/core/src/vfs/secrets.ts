@@ -224,6 +224,12 @@ function unwrapSchema(schema: z.core.SomeType): z.core.SomeType {
       current = current.unwrap()
       continue
     }
+    // A preprocessed block (GitHub's `app`) is walked as what it parses
+    // to, so the secrets inside it are still found.
+    if (current instanceof z.ZodPipe) {
+      current = current.out
+      continue
+    }
     const candidate = current as {
       def?: { innerType?: z.core.SomeType }
       _zod?: { def?: { innerType?: z.core.SomeType } }

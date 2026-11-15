@@ -261,28 +261,105 @@ def type_fields(
     return spec
 
 
-def fill(draft: Draft, name: str, spec: list[dict[str, Any]]) -> None:
+# The credentials an entry takes exactly one of, by `kind/type`: a field,
+# or a block by its group. No one of them is required, so the field spec
+# alone would prompt for none. GitHub authenticates with a token or as an
+# App.
+ONE_CREDENTIAL: dict[str, tuple[str, ...]] = {
+    "vfs/github": ("token", "app"),
+    "cli/gh": ("token", "app"),
+}
+# A PEM key spans lines, which a prompt cannot take, so its prompt also
+# reads `@PATH`.
+FILE_PROMPTS = frozenset({"app.private_key"})
+
+
+def credential_given(credential: str, given: set[str]) -> bool:
+    """Whether a credential, a field or a block's group, is given.
+
+    Args:
+        credential (str): the field, or the block's group.
+        given (set[str]): the fields given a value.
+    """
+    return credential in given or any(
+        key.startswith(f"{credential}.") for key in given
+    )
+
+
+def typed_answer(field: dict[str, Any] | None, answer: str) -> Any:
+    """A prompted answer as its field types it: a number field's as a
+    number.
+
+    Args:
+        field (dict[str, Any] | None): the field's spec.
+        answer (str): what was typed.
+    """
+    if field is None or field.get("type") != "number":
+        return answer
+    try:
+        number = float(answer)
+    except ValueError:
+        return answer
+    return int(number) if number.is_integer() else number
+
+
+def fill(
+    draft: Draft,
+    name: str,
+    spec: list[dict[str, Any]],
+    credentials: tuple[str, ...] = (),
+) -> None:
     """Read the sealed values, then the required fields still missing:
-    prompted for in a terminal, else refused, all named at once.
+    prompted for in a terminal, else refused, all named at once. An entry
+    that takes one of several credentials and names none is asked which
+    one first.
 
     Args:
         draft (Draft): the entry.
         name (str): its name, for the prompts.
         spec (list[dict[str, Any]]): the type's fields.
+        credentials (tuple[str, ...]): the credentials it takes exactly
+            one of, if any.
     """
     for key, path in draft.secrets:
         draft.fields[key] = read_secret(key, path, name)
     given = {k for k, v in draft.fields.items() if v not in (None, "")}
+    unchosen = bool(credentials) and not any(
+        credential_given(c, given) for c in credentials
+    )
     missing = missing_required(spec, given)
-    if not missing:
+    if not unchosen and not missing:
         return
     if not sys.stdin.isatty():
-        fail(f"missing required fields: {', '.join(missing)}", exit_code=2)
-    secret = {f["name"] for f in spec if f.get("secret")}
+        named = [" or ".join(credentials), *missing] if unchosen else missing
+        fail(f"missing required fields: {', '.join(named)}", exit_code=2)
+    if unchosen:
+        choice = ""
+        while choice not in credentials:
+            choice = str(
+                typer.prompt(
+                    f"Authenticate {name} with {' or '.join(credentials)}"
+                )
+            ).strip()
+        block = [
+            f["name"]
+            for f in spec
+            if f.get("group") == choice and f.get("required")
+        ]
+        missing = [*(block or [choice]), *missing]
     for key in missing:
-        draft.fields[key] = str(
-            typer.prompt(label(key, name), hide_input=key in secret)
+        field = next((f for f in spec if f["name"] == key), None)
+        hint = " (@PATH reads it from a file)" if key in FILE_PROMPTS else ""
+        answer = str(
+            typer.prompt(
+                f"{label(key, name)}{hint}",
+                hide_input=bool(field and field.get("secret")),
+            )
         )
+        if key in FILE_PROMPTS and answer.startswith("@") and len(answer) > 1:
+            draft.fields[key] = one_line(read_file(answer[1:]))
+        else:
+            draft.fields[key] = typed_answer(field, answer)
 
 
 def text(value: Any) -> str:
@@ -423,7 +500,12 @@ def kind_app(kind: Kind) -> typer.Typer:
             client.ensure_running()
             spec = type_fields(client, kind, draft.type)
             refuse_argv_secrets(draft, spec)
-            fill(draft, draft.name, spec)
+            fill(
+                draft,
+                draft.name,
+                spec,
+                ONE_CREDENTIAL.get(f"{kind.name}/{draft.type}", ()),
+            )
             r = client.request(
                 "POST",
                 kind.route,
