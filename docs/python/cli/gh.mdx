@@ -103,6 +103,7 @@ This list is generated from Mirage's registered command tree.
 | `gh release edit` | Edit a release |
 | `gh run list` | List workflow runs. Aliases: `ls`. |
 | `gh run view` | View a workflow run |
+| `gh run watch` | Watch a run until it completes, showing its progress |
 | `gh run rerun` | Rerun a workflow run |
 | `gh run cancel` | Cancel a workflow run |
 | `gh run delete` | Delete a workflow run |
@@ -258,7 +259,8 @@ invalidate mounted caches; read API methods leave them intact.
 | Pull-request creation | Requires a title and a body or body file. `--head` defaults to `branch` and `--base` to the repository's default branch. |
 | Forks | `--clone` is refused; `--remote` without a repository is refused. |
 | Repository operations | No `repo set-default`. `repo sync` acts on a repository on GitHub, never a local checkout. |
-| Release assets and live runs | `release upload`, `release download`, `run watch` and `run download` are absent. |
+| Release assets and run artifacts | `release upload`, `release download` and `run download` are absent. |
+| Watching | `run watch` and `pr checks --watch` print every refresh, as gh does where stdout is no terminal, and deliver them when the watch ends. |
 | Raw API | REST pagination only; no verbose, cache, hostname, preview or template flags. |
 | Help topics | `environment` and `exit-codes` are supported, alongside command help. |
 | HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |

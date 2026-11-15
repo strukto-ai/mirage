@@ -747,6 +747,25 @@ def _pr() -> CommandSpec:
                     JSON,
                     JQ,
                     TEMPLATE,
+                    _flag(
+                        long="--watch",
+                        description="Watch checks until they finish",
+                    ),
+                    _flag(
+                        long="--fail-fast",
+                        description="Exit watch mode on first check failure",
+                    ),
+                    Argument(
+                        "-i",
+                        "--interval",
+                        type="int",
+                        default="10",
+                        help="Refresh interval in seconds in watch mode",
+                    ),
+                    _flag(
+                        long="--required",
+                        description="Only show checks that are required",
+                    ),
                 ),
             ),
             CommandSpec(
@@ -1483,6 +1502,31 @@ def _run() -> CommandSpec:
                 ),
             ),
             CommandSpec(
+                name="watch",
+                description=(
+                    "Watch a run until it completes, showing its progress"
+                ),
+                arguments=(
+                    Argument("RUN-ID", metavar="<run-id>", nargs="?"),
+                    REPO,
+                    _flag(
+                        long="--compact",
+                        description="Show only relevant/failed steps",
+                    ),
+                    _flag(
+                        long="--exit-status",
+                        description="Exit with non-zero status if run fails",
+                    ),
+                    Argument(
+                        "-i",
+                        "--interval",
+                        type="int",
+                        default="3",
+                        help="Refresh interval in seconds",
+                    ),
+                ),
+            ),
+            CommandSpec(
                 name="rerun",
                 description="Rerun a workflow run",
                 arguments=(
@@ -1709,6 +1753,7 @@ _READS = (
     "release view",
     "run list",
     "run view",
+    "run watch",
     "workflow list",
     "workflow view",
     "cache list",

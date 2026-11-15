@@ -55,6 +55,7 @@ from mirage.rs.stream import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, PathSpec
+from mirage.utils.abort import sleep
 from mirage.utils.clock import system_now
 from mirage.version import __version__
 
@@ -262,6 +263,9 @@ class GhHost:
             return await self._jq(request, data)
         if op == "now":
             return Served({"now": system_now()})
+        if op == "sleep":
+            await sleep(float(cast(int, request["seconds"])))
+            return Served({})
         if op == "memory":
             check_memory(cast(int, request["size"]))
             return Served({})

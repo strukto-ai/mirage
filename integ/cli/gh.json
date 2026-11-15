@@ -3301,6 +3301,58 @@
         "stdout": "[\"first\",\"second\",\"third\"]\n[\"second\",\"third\"]\n[\"two\"]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gh_pr_checks_required_shows_only_required_checks",
+      "seq": 569087,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr checks 5 --required; echo \"exit=$?\"; gh pr checks 5 --required --json name,bucket",
+      "expect": {
+        "exit": 0,
+        "stdout": "test\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n[{\"bucket\":\"pass\",\"name\":\"test\"}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_checks_watch_flags_follow_gh",
+      "seq": 569088,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr checks 5 --fail-fast 2>&1 | head -1; gh pr checks 5 -i 5 2>&1 | head -1; gh pr checks 5 --watch --json name 2>&1 | head -1; gh pr checks -R integ/repo-cli 2>&1 | head -1; gh pr diff -R integ/repo-cli 2>&1 | head -1; gh pr checks 5 --watch -i 1; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cannot use `--fail-fast` flag without `--watch` flag\ncannot use `--interval` flag without `--watch` flag\ncannot use `--watch` with `--json` flag\nargument required when using the `--repo` flag\nargument required when using the `--repo` flag\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_watch_follows_a_run_to_its_end",
+      "seq": 569089,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run watch 200; echo \"exit=$?\"; gh run watch 200 --exit-status; echo \"exit=$?\"; gh run watch 2>&1 | head -1; timeout 2 gh run watch 202 -i 1; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "Run Archive (200) has already completed with 'failure'\nexit=0\nRun Archive (200) has already completed with 'failure'\nexit=1\nrun ID required when not running interactively\nexit=124\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_checks_watch_stops_at_the_first_failure",
+      "seq": 9950066,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/watched -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/watched.md -f message=w -f branch=watched -f content=eA== --silent; n=$(gh pr create -t watched -b b -H watched -B main | sed 's#.*/##'); sha=$(gh pr view $n --json headRefOid --jq .headRefOid); gh api repos/integ/repo-cli/statuses/$sha -f state=pending -f context=deploy --silent; gh pr checks $n --required 2>&1; echo \"exit=$?\"; gh pr checks $n; echo \"exit=$?\"; timeout 2 gh pr checks $n --watch -i 1; echo \"exit=$?\"; gh api repos/integ/repo-cli/statuses/$sha -f state=failure -f context=lint -f description=broke --silent; gh pr checks $n --watch --fail-fast -i 1; echo \"exit=$?\"; gh pr checks $n --json name,bucket; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "no required checks reported on the 'watched' branch\nexit=1\ndeploy\tpending\t0\t\t\nexit=8\nexit=124\nRefreshing checks status every 1 seconds. Press Ctrl+C to quit.\n\nlint\tfail\t0\t\tbroke\ndeploy\tpending\t0\t\t\nlint\tfail\t0\t\tbroke\ndeploy\tpending\t0\t\t\nexit=1\n[{\"bucket\":\"pending\",\"name\":\"deploy\"},{\"bucket\":\"fail\",\"name\":\"lint\"}]\nexit=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

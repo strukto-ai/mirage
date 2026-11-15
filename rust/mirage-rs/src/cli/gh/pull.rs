@@ -31,6 +31,7 @@ use crate::core::github::pull::{
     pull_for_branch, pull_request_fields, search_pull_request_fields, status_contexts,
 };
 use crate::core::github::repo::{RepoRef, github_repo, graphql_data, mutate};
+use crate::request::Request;
 
 fn oid() -> Shape {
     pointer(vec![("oid", Shape::Str)])
@@ -915,6 +916,9 @@ fn changed_names(diff: &str) -> Vec<String> {
 }
 
 pub(crate) async fn diff_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
+    if flags.as_nonempty("repo").is_some() && texts.is_empty() {
+        return usage("argument required when using the `--repo` flag");
+    }
     let (repo, number) = target(account, texts, flags).await?;
     let name_only = flags.gh_bool("name_only");
     let text = diff_pull(account, &repo, number, flags.gh_bool("patch") && !name_only)
@@ -1016,16 +1020,26 @@ fn check_before(a: &Obj, b: &Obj) -> bool {
     left == "fail" || (left == "pending" && right == "success")
 }
 
-pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
-    json_fields(flags, &CHECK_FIELDS)?;
-    let (_, _, node) = find(account, flags, texts, "number,headRefName,id").await?;
-    let contexts = status_contexts(
-        account,
-        node.get("id").text(),
-        node.get("headRefName").text(),
-    )
-    .await?;
-    let rows: Vec<Obj> = newest_checks(contexts).iter().map(check).collect();
+/// A pull request's checks as gh's aggregateChecks rows them, only the
+/// required ones under `--required`.
+async fn check_rows(account: &Account, node: &Obj, required: bool) -> Result<Vec<Obj>> {
+    let branch = node.get("headRefName").text();
+    let contexts = status_contexts(account, node.get("id").text(), branch).await?;
+    let rows: Vec<Obj> = newest_checks(contexts)
+        .iter()
+        .filter(|context| !required || context.get("isRequired").as_bool() == Some(true))
+        .map(check)
+        .collect();
+    if rows.is_empty() && required {
+        return value(format!(
+            "no required checks reported on the '{branch}' branch"
+        ));
+    }
+    Ok(rows)
+}
+
+/// gh's table of checks where stdout is no terminal, in its order.
+fn checks_table(rows: &[Obj]) -> String {
     let mut sorted: Vec<&Obj> = rows.iter().collect();
     for start in 1..sorted.len() {
         let mut at = start;
@@ -1034,7 +1048,7 @@ pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String
             at -= 1;
         }
     }
-    let human: String = sorted
+    sorted
         .iter()
         .map(|row| {
             let span = match (
@@ -1057,18 +1071,88 @@ pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String
                 row.get("description").text().to_owned(),
             ])
         })
-        .collect();
-    let failing = rows
-        .iter()
-        .any(|row| row.get("bucket").as_str() == Some("fail"));
-    let pending = rows
-        .iter()
-        .any(|row| row.get("bucket").as_str() == Some("pending"));
-    let data = Json::Arr(rows.into_iter().map(Json::Obj).collect());
-    let mut out = typed_out(account, &data, flags, human, &CHECK_FIELDS).await?;
-    if failing {
+        .collect()
+}
+
+fn any_bucket(rows: &[Obj], bucket: &str) -> bool {
+    rows.iter()
+        .any(|row| row.get("bucket").as_str() == Some(bucket))
+}
+
+/// Whether `-i/--interval` was spelled out, which gh's Changed tells.
+fn interval_given(account: &Account) -> bool {
+    account.argv_has("--interval")
+        || account
+            .argv
+            .iter()
+            .any(|word| word.starts_with("-i") && !word.starts_with("--"))
+}
+
+pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
+    json_fields(flags, &CHECK_FIELDS)?;
+    let watch = flags.gh_bool("watch");
+    if flags.raw("json").is_some() && watch {
+        return usage("cannot use `--watch` with `--json` flag");
+    }
+    if flags.as_nonempty("repo").is_some() && texts.is_empty() {
+        return usage("argument required when using the `--repo` flag");
+    }
+    let fail_fast = flags.gh_bool("fail_fast");
+    if fail_fast && !watch {
+        return usage("cannot use `--fail-fast` flag without `--watch` flag");
+    }
+    if !watch && interval_given(account) {
+        return usage("cannot use `--interval` flag without `--watch` flag");
+    }
+    let interval = flags.as_int("interval").unwrap_or(10);
+    let required = flags.gh_bool("required");
+    let (_, _, node) = find(account, flags, texts, "number,headRefName,id").await?;
+    let mut rows = check_rows(account, &node, required).await?;
+    if flags.raw("json").is_some() {
+        let data = Json::Arr(rows.into_iter().map(Json::Obj).collect());
+        return typed_out(account, &data, flags, String::new(), &CHECK_FIELDS).await;
+    }
+    let mut printed = String::new();
+    loop {
+        let pending = any_bucket(&rows, "pending");
+        if pending && watch {
+            printed.push_str(&format!(
+                "Refreshing checks status every {interval} seconds. Press Ctrl+C to quit.\n\n"
+            ));
+        }
+        printed.push_str(&checks_table(&rows));
+        if !pending || !watch || (fail_fast && any_bucket(&rows, "fail")) {
+            break;
+        }
+        account
+            .host
+            .ask(Request::Memory {
+                size: printed.len() as u64,
+            })
+            .await;
+        account
+            .host
+            .ask(Request::Sleep {
+                seconds: interval.max(0) as u64,
+            })
+            .await;
+        rows = match check_rows(account, &node, required).await {
+            Ok(rows) => rows,
+            Err(failure) => {
+                return Err(Failure::Printed {
+                    output: printed.into_bytes(),
+                    message: failure.text(),
+                });
+            }
+        };
+    }
+    if watch {
+        printed.push_str(&checks_table(&rows));
+    }
+    let mut out = Out::text(printed);
+    if any_bucket(&rows, "fail") {
         out.exit = 1;
-    } else if pending {
+    } else if any_bucket(&rows, "pending") {
         out.exit = 8;
     }
     Ok(out)

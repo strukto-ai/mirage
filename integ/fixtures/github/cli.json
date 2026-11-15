@@ -5,7 +5,10 @@
       "owner": "integ",
       "name": "repo-cli",
       "defaultBranch": "main",
-      "sourceDir": "github/repo-v1"
+      "sourceDir": "github/repo-v1",
+      "requiredChecksJson": [
+        "test"
+      ]
     }
   ],
   "workflows": [

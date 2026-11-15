@@ -1,6 +1,7 @@
 // Follows gh 2.85.0's pkg/cmd/run and pkg/cmd/workflow (MIT; see
 // licenses/third_party/gh.txt).
 
+use std::collections::BTreeMap;
 use std::io::Read;
 
 use super::accessor::{
@@ -488,12 +489,7 @@ pub(crate) async fn run_view_cmd(
     let annotations = annotations_of(account, &repo, &jobs).await?;
     let (reply, _) = account.host.ask(Request::Now).await;
     let now = (reply.now.unwrap_or(0.0) * 1e9) as i128;
-    let started = if row.get("startedAt").text().is_empty() {
-        row.get("createdAt")
-    } else {
-        row.get("startedAt")
-    };
-    let ago = fuzzy_ago(now, instant(&time_field(started)).unwrap_or(0));
+    let ago = ago_of(&row, now);
     let url = row.get("url").text();
     let exit_status = flags.gh_bool("exit_status");
     let mut text = format!("\n{}\n\n", run_header(&row, &ago, &pull, attempt));
@@ -570,6 +566,205 @@ pub(crate) async fn run_view_cmd(
     Ok(Out {
         exit: i32::from(exit_status && failing),
         ..Out::text(text)
+    })
+}
+
+/// gh's RenderJobsCompact, uncolored: each job, and under one that did not
+/// pass only its failed steps and the step in progress.
+fn render_jobs_compact(jobs: &[Json]) -> String {
+    let mut lines = Vec::new();
+    for job in jobs {
+        lines.push(
+            render_jobs(std::slice::from_ref(job), false)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_owned(),
+        );
+        if job.get("status").as_str() == Some("completed")
+            && job.get("conclusion").as_str() == Some("success")
+        {
+            continue;
+        }
+        let mut running = None;
+        for step in job.get("steps").items() {
+            let line = format!("  {} {}", symbol(step), step.get("name").text());
+            if failed(step) {
+                lines.push(line.clone());
+            }
+            if step.get("status").as_str() == Some("in_progress") {
+                running = Some(line);
+            }
+        }
+        lines.extend(running);
+    }
+    lines.join("\n")
+}
+
+/// One frame of `gh run watch`: the run fetched again, its header, jobs
+/// and annotations, as gh's renderRun writes them. Annotations of a job
+/// no longer in progress are kept and, as gh's cache does, stand in for
+/// what was gathered before them.
+async fn watch_frame(
+    account: &Account,
+    repo: &RepoRef,
+    id: &str,
+    pull: &str,
+    compact: bool,
+    cache: &mut BTreeMap<i128, Vec<(String, Json)>>,
+) -> Result<(Json, String)> {
+    let found = get_run(account, repo, id, 0)
+        .await
+        .map_err(|failure| Failure::Value(format!("failed to get run: {}", failure.text())))?;
+    let row = Json::Obj(run(&found));
+    let run_id = row.get("databaseId").as_int().unwrap_or(0);
+    let jobs = list_jobs(account, repo, run_id, 0)
+        .await
+        .map_err(|failure| Failure::Value(format!("failed to get jobs: {}", failure.text())))?;
+    let mut annotations: Vec<(String, Json)> = Vec::new();
+    let mut forbidden = false;
+    for job in &jobs {
+        let job_id = job.get("id").as_int().unwrap_or(0);
+        if let Some(kept) = cache.get(&job_id) {
+            annotations = kept.clone();
+            continue;
+        }
+        match job_annotations(account, repo, job_id).await {
+            Ok(found) => annotations.extend(
+                found
+                    .items()
+                    .iter()
+                    .map(|one| (job.get("name").text().to_owned(), one.clone())),
+            ),
+            Err(Failure::Api(error)) if error.status == 404 => {}
+            Err(Failure::Api(error)) if error.status == 403 => {
+                forbidden = true;
+                break;
+            }
+            Err(failure) => {
+                return value(format!("failed to get annotations: {}", failure.text()));
+            }
+        }
+        if job.get("status").as_str() != Some("in_progress") {
+            cache.insert(job_id, annotations.clone());
+        }
+    }
+    let (reply, _) = account.host.ask(Request::Now).await;
+    let now = (reply.now.unwrap_or(0.0) * 1e9) as i128;
+    let mut frame = format!("{}\n\n", run_header(&row, &ago_of(&row, now), pull, 0));
+    if jobs.is_empty() {
+        return Ok((row, frame));
+    }
+    frame.push_str("JOBS\n");
+    if compact {
+        frame.push_str(&render_jobs_compact(&jobs));
+    } else {
+        frame.push_str(&render_jobs(&jobs, true));
+    }
+    frame.push('\n');
+    if forbidden {
+        frame.push_str(&format!("\nANNOTATIONS\n{ANNOTATIONS_FORBIDDEN}"));
+    } else if !annotations.is_empty() {
+        frame.push_str(&format!(
+            "\nANNOTATIONS\n{}\n",
+            render_annotations(&annotations)
+        ));
+    }
+    Ok((row, frame))
+}
+
+/// How long ago a run started, in go-gh's words.
+fn ago_of(row: &Json, now: i128) -> String {
+    let started = if row.get("startedAt").text().is_empty() {
+        row.get("createdAt")
+    } else {
+        row.get("startedAt")
+    };
+    fuzzy_ago(now, instant(&time_field(started)).unwrap_or(0))
+}
+
+/// `gh run watch`: the run's progress a frame each interval until it
+/// completes, every frame printed where stdout is no terminal.
+pub(crate) async fn run_watch_cmd(
+    account: &Account,
+    flags: &Flags,
+    texts: &[String],
+) -> Result<Out> {
+    let Some(id) = texts.first() else {
+        return usage("run ID required when not running interactively");
+    };
+    let interval = flags.as_int("interval").unwrap_or(3);
+    let exit_status = flags.gh_bool("exit_status");
+    let repo = repo_for(account, flags)?;
+    let found = get_run(account, &repo, id, 0)
+        .await
+        .map_err(|failure| Failure::Value(format!("failed to get run: {}", failure.text())))?;
+    let mut row = Json::Obj(run(&found));
+    let succeeded = |row: &Json| row.get("conclusion").as_str() == Some("success");
+    if row.get("status").as_str() == Some("completed") {
+        return Ok(Out {
+            exit: i32::from(exit_status && !succeeded(&row)),
+            ..Out::text(format!(
+                "Run {} ({}) has already completed with '{}'\n",
+                row.get("workflowName").text(),
+                row.get("databaseId").show(),
+                row.get("conclusion").text()
+            ))
+        });
+    }
+    let pull = pull_for_run(account, &repo, &row).await;
+    let mut cache = BTreeMap::new();
+    let mut printed = String::new();
+    let mut frame = String::new();
+    while row.get("status").as_str() != Some("completed") {
+        let run_id = row.get("databaseId").show();
+        match watch_frame(
+            account,
+            &repo,
+            &run_id,
+            &pull,
+            flags.gh_bool("compact"),
+            &mut cache,
+        )
+        .await
+        {
+            Ok((next, text)) => {
+                row = next;
+                frame = text;
+            }
+            Err(failure) if printed.is_empty() => return Err(failure),
+            Err(failure) => {
+                return Err(Failure::Printed {
+                    output: printed.into_bytes(),
+                    message: failure.text(),
+                });
+            }
+        }
+        if row.get("status").as_str() == Some("completed") {
+            break;
+        }
+        printed.push_str(&format!(
+            "Refreshing run status every {interval} seconds. Press Ctrl+C to quit.\n\n"
+        ));
+        printed.push_str(&frame);
+        frame.clear();
+        account
+            .host
+            .ask(Request::Memory {
+                size: printed.len() as u64,
+            })
+            .await;
+        account
+            .host
+            .ask(Request::Sleep {
+                seconds: interval.max(0) as u64,
+            })
+            .await;
+    }
+    printed.push_str(&frame);
+    Ok(Out {
+        exit: i32::from(exit_status && !succeeded(&row)),
+        ..Out::text(printed)
     })
 }
 
@@ -1468,6 +1663,26 @@ mod tests {
         assert_eq!(
             render_annotations(&[("format".to_owned(), failure), ("lint".to_owned(), warning)]),
             "X exit 1\nformat: .github#28\n\n! slow\nlint: a.py#0\n"
+        );
+    }
+
+    #[test]
+    fn compact_jobs_keep_only_failed_steps_and_the_step_in_progress() {
+        let jobs = Json::parse(
+            br#"[{"id":1,"name":"ok","status":"completed","conclusion":"success",
+                  "started_at":null,"completed_at":null,
+                  "steps":[{"name":"a","status":"completed","conclusion":"success"}]},
+                 {"id":2,"name":"bad","status":"in_progress","conclusion":null,
+                  "started_at":null,"completed_at":null,
+                  "steps":[{"name":"a","status":"completed","conclusion":"success"},
+                           {"name":"b","status":"completed","conclusion":"failure"},
+                           {"name":"c","status":"in_progress","conclusion":null},
+                           {"name":"d","status":"queued","conclusion":null}]}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            render_jobs_compact(jobs.items()),
+            "✓ ok in 0s (ID 1)\n* bad in 0s (ID 2)\n  X b\n  * c"
         );
     }
 

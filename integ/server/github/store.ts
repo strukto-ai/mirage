@@ -36,6 +36,7 @@ export interface RepoRow {
   name: string
   defaultBranch: string
   metaJson: string
+  requiredChecksJson: string
   truncated: boolean
   sourceDir: string
   sourceBranch: string
