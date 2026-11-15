@@ -74,5 +74,14 @@ export function githubRoutes(): KitRoute<C>[] {
     ...searchRoutes(),
     ...insightRoutes(),
     route<C>('GET', '/raw/:owner/:repo/:ref/*path', authedRoute(withRepo(rawContent))),
+    // A git clone's first request. The fake serves no git transport, so it
+    // answers as github.com does for a repository it will not serve: a 404
+    // git reports as "repository not found". `gh repo clone` cases read the
+    // URL git was handed, not a checkout.
+    route<C>('GET', '/:owner/:repo.git/info/refs', () => ({
+      status: 404,
+      body: 'Repository not found.\n',
+      headers: { 'Content-Type': 'text/plain' },
+    })),
   ]
 }
