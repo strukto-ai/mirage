@@ -103,10 +103,23 @@ CASES = [
     ),
     ("get /w/t.xlsx /Sheet1 --depth 0", 0, "/Sheet1 (sheet) children=2\n", ""),
     (
-        "get /w/t.xlsx",
+        "get /w/t.xlsx | sed -E 's/ (created|modified)=[^ ]+//g'",
         0,
-        "/ (workbook) calc.fullPrecision=true calc.fullCalcOnLoad=true\n"
-        "/Sheet1 (sheet) children=2\n",
+        "/ (workbook) "
+        "author=OfficeCLI lastModifiedBy=OfficeCLI "
+        "calc.fullPrecision=true calc.fullCalcOnLoad=true "
+        "theme.name=Office Theme theme.colorScheme=Office "
+        "theme.color.dk1=#000000 theme.color.lt1=#FFFFFF "
+        "theme.color.dk2=#44546A theme.color.lt2=#E7E6E6 "
+        "theme.color.accent1=#4472C4 theme.color.accent2=#ED7D31 "
+        "theme.color.accent3=#A5A5A5 theme.color.accent4=#FFC000 "
+        "theme.color.accent5=#5B9BD5 theme.color.accent6=#70AD47 "
+        "theme.color.hlink=#0563C1 theme.color.folHlink=#954F72 "
+        "theme.fontScheme=Office theme.font.major.latin=Calibri Light "
+        "theme.font.major.eastAsia= theme.font.minor.latin=Calibri "
+        "theme.font.minor.eastAsia= theme.formatScheme=Office "
+        "extended.application=OfficeCLI/1.0.161"
+        "\n/Sheet1 (sheet) children=2\n",
         "",
     ),
     (
@@ -298,4 +311,4 @@ async def test_batch_reads_input_files_and_stdin():
 def test_only_get_and_query_read():
     assert {
         path for path, handler in OFFICE.handlers.items() if handler.write
-    } == {"create", "set", "remove", "batch"}
+    } == {"create", "set", "add", "remove", "move", "swap", "batch"}

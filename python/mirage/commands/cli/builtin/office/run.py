@@ -57,10 +57,21 @@ async def run_command(
         "path": texts[0] if texts else "/",
         "json": flags.as_bool("json"),
     }
-    if name == "set":
+    if name in ("set", "add"):
         config["props"] = list(flags.as_list("prop"))
-    if name in ("create", "batch"):
+    if name in ("create", "batch", "add"):
         config["force"] = flags.as_bool("force")
+    if name in ("add", "move"):
+        config["index"] = flags.as_int("index")
+        config["after"] = flags.as_str("after")
+        config["before"] = flags.as_str("before")
+    if name == "add":
+        config["type"] = flags.as_str("type")
+        config["from"] = flags.as_str("from")
+    if name == "move":
+        config["to"] = flags.as_str("to")
+    if name == "swap":
+        config["path2"] = texts[1] if len(texts) > 1 else ""
     if name == "get":
         config["depth"] = flags.as_int("depth")
     if name == "query":

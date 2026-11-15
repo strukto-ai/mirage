@@ -12,13 +12,14 @@ use std::collections::{HashMap, HashSet};
 
 use super::batch::{self, Item};
 use super::book::{Book, Refusal};
+use super::media::{self, Media};
 use super::node::{Json, Node, Value, lines, matches};
 use super::query::{Warning, filter_selector, text_matches};
 use super::tree::{self, A, CP, CT, DC, DCTERMS, E, EP, REL, Tree, W, outer_xml};
 use super::units::{hex_color, int_or_text, round_trip_date};
 use super::{
-    Config, Fail, Out, Outcome, Output, SetFail, VERBS, batch_source, item_warnings, print_batch,
-    text, unsupported_text,
+    Config, Fail, Out, Outcome, Output, SetFail, VERBS, batch_source, item_warnings, pairs,
+    print_batch, text, unsupported_text,
 };
 use super::{slides, word};
 use crate::request::failure_text;
@@ -84,6 +85,10 @@ pub(super) struct Pkg<'h> {
     slots: HashMap<String, Slot>,
     names: Vec<String>,
     changed: HashSet<String>,
+    /// Parts a command took out, by key.
+    dropped: HashSet<String>,
+    /// Parts a command added that are not XML, as written.
+    binaries: Vec<(String, Vec<u8>)>,
     pub(super) main: String,
 }
 
@@ -91,6 +96,9 @@ pub(super) struct Pkg<'h> {
 pub(super) struct Snapshot {
     trees: Vec<(String, Option<Tree>)>,
     changed: HashSet<String>,
+    names: Vec<String>,
+    dropped: HashSet<String>,
+    binaries: Vec<(String, Vec<u8>)>,
 }
 
 impl<'h> Pkg<'h> {
@@ -130,6 +138,8 @@ impl<'h> Pkg<'h> {
             slots,
             names,
             changed: HashSet::new(),
+            dropped: HashSet::new(),
+            binaries: Vec::new(),
             main: String::new(),
         };
         if !pkg.slots.contains_key(&key(CONTENT_TYPES)) {
@@ -163,11 +173,221 @@ impl<'h> Pkg<'h> {
 
     pub(super) fn has(&self, name: &str) -> bool {
         let k = key(name);
-        self.names.iter().any(|n| key(n) == k)
+        !self.dropped.contains(&k) && self.names.iter().any(|n| key(n) == k)
+    }
+
+    /// The part's tree to change, parsed first if no command read it yet;
+    /// the part is then written on save.
+    pub(super) fn xml_mut(&mut self, name: &str) -> Option<&mut Tree> {
+        let k = key(name);
+        if self.dropped.contains(&k) {
+            return None;
+        }
+        let slot = self.slots.get_mut(&k)?;
+        if slot.tree.get().is_none() {
+            let _ = slot.tree.set(tree::parse(&slot.bytes).ok());
+        }
+        let t = slot.tree.get_mut()?.as_mut()?;
+        self.changed.insert(k);
+        Some(t)
+    }
+
+    /// A new XML part with its content type, written on save.
+    pub(super) fn add_part(&mut self, name: &str, t: Tree, content_type: &str) {
+        let k = key(name);
+        let cell = OnceCell::new();
+        let _ = cell.set(Some(t));
+        self.slots.insert(
+            k.clone(),
+            Slot {
+                name: name.to_string(),
+                bytes: Vec::new(),
+                tree: cell,
+            },
+        );
+        self.dropped.remove(&k);
+        if !self.names.iter().any(|n| key(n) == k) {
+            self.names.push(name.to_string());
+        }
+        self.changed.insert(k);
+        self.set_override(name, Some(content_type));
+    }
+
+    /// The part taken out of the package with its relationships part and
+    /// content type.
+    pub(super) fn drop_part(&mut self, name: &str) {
+        let rels = rels_name(name);
+        for n in [name.to_string(), rels] {
+            let k = key(&n);
+            if self.has(&n) {
+                self.dropped.insert(k.clone());
+                self.changed.remove(&k);
+                self.binaries.retain(|(b, _)| key(b) != k);
+            }
+        }
+        self.set_override(name, None);
+    }
+
+    /// A new part that is not XML, its extension given the content type
+    /// `content_type` unless one is, written on save.
+    pub(super) fn add_binary(&mut self, name: &str, data: Vec<u8>, content_type: &str) {
+        let k = key(name);
+        self.binaries.retain(|(b, _)| key(b) != k);
+        self.binaries.push((name.to_string(), data));
+        self.dropped.remove(&k);
+        if !self.names.iter().any(|n| key(n) == k) {
+            self.names.push(name.to_string());
+        }
+        let ext = name.rsplit_once('.').map_or("", |(_, e)| e).to_string();
+        let Some(ct) = self.xml_mut(CONTENT_TYPES) else {
+            return;
+        };
+        let root = ct.root;
+        let defaults = ct.root().children(CT, "Default");
+        if defaults.iter().any(|d| {
+            d.attr("Extension")
+                .is_some_and(|e| e.eq_ignore_ascii_case(&ext))
+        }) {
+            return;
+        }
+        let at = ct.nodes[root]
+            .kids
+            .iter()
+            .position(|k| matches!(k, tree::Kid::El(c) if ct.nodes[*c].name != "Default"));
+        let prefix = ct.nodes[root].prefix.clone();
+        let d = ct.create(CT, "Default", &prefix);
+        tree::set_attr(ct, d, "Extension", &ext);
+        tree::set_attr(ct, d, "ContentType", content_type);
+        tree::insert_at(ct, root, at, d);
+    }
+
+    /// The name a new image part of `ext` related from `owner` takes: in
+    /// the media folder beside the owner's, the first of `image.ext`,
+    /// `image2.ext`, ... not in the package.
+    pub(super) fn media_name(&self, owner: &str, ext: &str) -> String {
+        let mut dir: Vec<&str> = owner.trim_start_matches('/').split('/').collect();
+        dir.pop();
+        dir.pop();
+        let dir = dir.iter().map(|s| format!("/{s}")).collect::<String>();
+        (1..)
+            .map(|n| {
+                let seq = if n == 1 { String::new() } else { n.to_string() };
+                format!("{dir}/media/image{seq}.{ext}")
+            })
+            .find(|name| !self.has(name))
+            .unwrap_or_default()
+    }
+
+    /// The content types part's override for `name` set, or removed.
+    fn set_override(&mut self, name: &str, content_type: Option<&str>) {
+        let Some(ct) = self.xml_mut(CONTENT_TYPES) else {
+            return;
+        };
+        let root = ct.root;
+        let found: Vec<tree::Id> = ct
+            .root()
+            .children(CT, "Override")
+            .into_iter()
+            .filter(|o| {
+                o.attr("PartName")
+                    .is_some_and(|p| p.eq_ignore_ascii_case(name))
+            })
+            .map(|o| o.id)
+            .collect();
+        for id in &found {
+            ct.detach(*id);
+        }
+        if let Some(kind) = content_type {
+            let prefix = ct.nodes[root].prefix.clone();
+            let o = ct.create(CT, "Override", &prefix);
+            tree::set_attr(ct, o, "PartName", name);
+            tree::set_attr(ct, o, "ContentType", kind);
+            ct.append(root, o);
+        }
+    }
+
+    /// A relationship from `owner` to `target` (as the relationship writes
+    /// it) of type `kind`, made unless one already says the same; its id.
+    pub(super) fn add_rel(
+        &mut self,
+        owner: &str,
+        kind: &str,
+        target: &str,
+        external: bool,
+    ) -> String {
+        if let Some(r) = self
+            .rels(owner)
+            .into_iter()
+            .find(|r| !external && !r.external && r.kind == kind && r.target == target)
+        {
+            return r.id;
+        }
+        let rels = rels_name(owner);
+        if !self.has(&rels) {
+            let mut t = Tree::fragment(REL, "Relationships", "");
+            t.declaration =
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n".to_string();
+            let root = t.root;
+            t.nodes[root].prefix = String::new();
+            t.nodes[root].decls.push((String::new(), REL.to_string()));
+            let k = key(&rels);
+            let cell = OnceCell::new();
+            let _ = cell.set(Some(t));
+            self.slots.insert(
+                k.clone(),
+                Slot {
+                    name: rels.clone(),
+                    bytes: Vec::new(),
+                    tree: cell,
+                },
+            );
+            self.dropped.remove(&k);
+            if !self.names.iter().any(|n| key(n) == k) {
+                self.names.push(rels.clone());
+            }
+        }
+        let used: Vec<String> = self.rels(owner).into_iter().map(|r| r.id).collect();
+        let id = (1..)
+            .map(|n| format!("rId{n}"))
+            .find(|id| !used.contains(id))
+            .unwrap_or_default();
+        if let Some(t) = self.xml_mut(&rels) {
+            let root = t.root;
+            let prefix = t.nodes[root].prefix.clone();
+            let r = t.create(REL, "Relationship", &prefix);
+            tree::set_attr(t, r, "Id", &id);
+            tree::set_attr(t, r, "Type", kind);
+            tree::set_attr(t, r, "Target", target);
+            if external {
+                tree::set_attr(t, r, "TargetMode", "External");
+            }
+            t.append(root, r);
+        }
+        id
+    }
+
+    /// The relationship `id` of `owner` taken out.
+    pub(super) fn drop_rel(&mut self, owner: &str, id: &str) {
+        let rels = rels_name(owner);
+        if let Some(t) = self.xml_mut(&rels) {
+            let gone: Vec<tree::Id> = t
+                .root()
+                .children(REL, "Relationship")
+                .into_iter()
+                .filter(|r| r.attr("Id") == Some(id))
+                .map(|r| r.id)
+                .collect();
+            for g in gone {
+                t.detach(g);
+            }
+        }
     }
 
     /// A part's size in bytes.
     pub(super) fn size(&self, name: &str) -> Option<u64> {
+        if let Some((_, data)) = self.binaries.iter().find(|(b, _)| key(b) == key(name)) {
+            return Some(data.len() as u64);
+        }
         if let Some(slot) = self.slots.get(&key(name)) {
             if !self.changed.contains(&key(name)) {
                 return Some(slot.bytes.len() as u64);
@@ -178,6 +398,9 @@ impl<'h> Pkg<'h> {
 
     /// The part's tree, or none when it is absent or not XML.
     pub(super) fn xml(&self, name: &str) -> Option<&Tree> {
+        if self.dropped.contains(&key(name)) {
+            return None;
+        }
         let slot = self.slots.get(&key(name))?;
         slot.tree
             .get_or_init(|| tree::parse(&slot.bytes).ok())
@@ -245,7 +468,7 @@ impl<'h> Pkg<'h> {
     }
 
     pub(super) fn dirty(&self) -> bool {
-        !self.changed.is_empty()
+        !self.changed.is_empty() || !self.dropped.is_empty() || !self.binaries.is_empty()
     }
 
     pub(super) fn snapshot(&self) -> Snapshot {
@@ -260,10 +483,18 @@ impl<'h> Pkg<'h> {
                 })
                 .collect(),
             changed: self.changed.clone(),
+            names: self.names.clone(),
+            dropped: self.dropped.clone(),
+            binaries: self.binaries.clone(),
         }
     }
 
     pub(super) fn restore(&mut self, snap: Snapshot) {
+        let known: HashSet<String> = snap.names.iter().map(|n| key(n)).collect();
+        self.slots.retain(|k, _| known.contains(k));
+        self.names = snap.names;
+        self.dropped = snap.dropped;
+        self.binaries = snap.binaries;
         for k in self
             .changed
             .difference(&snap.changed)
@@ -296,8 +527,31 @@ impl<'h> Pkg<'h> {
                 }
             }
         }
+        for (name, data) in std::mem::take(&mut self.binaries) {
+            self.book.put(name.trim_start_matches('/'), data);
+        }
+        let mut dropped: Vec<String> = self.dropped.iter().cloned().collect();
+        dropped.sort();
+        for k in dropped {
+            self.book.drop_part(&k);
+        }
         self.book.save(host, path).await
     }
+}
+
+/// `to` as a relationship target from `from`.
+pub(super) fn relative(from: &str, to: &str) -> String {
+    let from_dir: Vec<&str> = from.trim_start_matches('/').split('/').collect();
+    let from_dir = &from_dir[..from_dir.len().saturating_sub(1)];
+    let to_parts: Vec<&str> = to.trim_start_matches('/').split('/').collect();
+    let common = from_dir
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut out: Vec<String> = vec!["..".to_string(); from_dir.len() - common];
+    out.extend(to_parts[common..].iter().map(|s| s.to_string()));
+    out.join("/")
 }
 
 /// Where the content types part's root starts, when it is not an
@@ -900,14 +1154,205 @@ impl Kind {
     }
 }
 
-fn pairs(props: &[String]) -> Vec<(String, String)> {
-    props
-        .iter()
-        .map(|p| match p.split_once('=') {
-            Some((k, v)) => (k.trim().to_string(), v.to_string()),
-            None => (p.trim().to_string(), String::new()),
+/// What a placed shape's position line and overlap check read: the
+/// shape's own properties and those of the other shapes on its slide.
+struct PlacementView {
+    own: Option<(String, Vec<(String, String)>)>,
+    siblings: Vec<(String, Vec<(String, String)>)>,
+}
+
+/// The view `placement` reads, taken before the package is saved: empty
+/// unless `wanted` and the deck placed a shape at `path`.
+fn placement_view(kind: Kind, pkg: &Pkg<'_>, wanted: bool, path: &str) -> PlacementView {
+    let empty = PlacementView {
+        own: None,
+        siblings: Vec::new(),
+    };
+    if !wanted || !matches!(kind, Kind::Slides) {
+        return empty;
+    }
+    let props = |n: &Node| -> Vec<(String, String)> {
+        n.format
+            .iter()
+            .map(|(k, v)| (k.clone(), v.text()))
+            .collect()
+    };
+    let Ok(node) = kind.get(pkg, path, 1) else {
+        return empty;
+    };
+    if matches!(
+        node.kind.as_str(),
+        "slide" | "paragraph" | "run" | "cell" | "row" | "tc" | "tr"
+    ) {
+        return empty;
+    }
+    let slide = path
+        .strip_prefix("/slide[")
+        .and_then(|r| r.split_once(']'))
+        .map(|(n, _)| format!("/slide[{n}]"));
+    let siblings = slide
+        .and_then(|s| kind.get(pkg, &s, 1).ok())
+        .map(|s| {
+            s.children
+                .iter()
+                .filter(|c| c.path != path && c.path != node.path)
+                .map(|c| (c.path.clone(), props(c)))
+                .collect()
         })
-        .collect()
+        .unwrap_or_default();
+    PlacementView {
+        own: Some((node.path.clone(), props(&node))),
+        siblings,
+    }
+}
+
+/// A placed shape's position line, `x: X  y: Y  width: W  height: H`, and
+/// a warning for each other shape at exactly its spot.
+fn placement(
+    _kind: Kind,
+    view: &PlacementView,
+    _path: &str,
+) -> (Option<String>, Vec<super::Advice>) {
+    let Some((_, own)) = &view.own else {
+        return (None, Vec::new());
+    };
+    let get =
+        |p: &[(String, String)], k: &str| p.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+    let (Some(x), Some(y)) = (get(own, "x"), get(own, "y")) else {
+        return (None, Vec::new());
+    };
+    let line = format!(
+        "x: {x}  y: {y}  width: {}  height: {}",
+        get(own, "width").unwrap_or_else(|| "?".to_string()),
+        get(own, "height").unwrap_or_else(|| "?".to_string())
+    );
+    let names: Vec<String> = view
+        .siblings
+        .iter()
+        .filter(|(_, p)| {
+            get(p, "x").as_deref() == Some(x.as_str())
+                && get(p, "y").as_deref() == Some(y.as_str())
+                && !(x == "0cm" && y == "0cm")
+        })
+        .map(|(path, p)| get(p, "name").unwrap_or_else(|| path.clone()))
+        .collect();
+    let advice = if names.is_empty() {
+        Vec::new()
+    } else {
+        vec![super::Advice {
+            message: format!("Same position as {}", names.join(", ")),
+            code: "position_overlap",
+            suggestion: Some("Use --prop x=... y=... to set distinct positions".to_string()),
+        }]
+    };
+    (Some(line), advice)
+}
+
+/// The properties `get` shows on the node at `path`, as text, or none
+/// when it does not resolve.
+fn snapshot(kind: Kind, pkg: &Pkg<'_>, path: &str) -> Option<Vec<(String, String)>> {
+    if !path.starts_with('/') {
+        return None;
+    }
+    let node = kind.get(pkg, path, 1).ok()?;
+    Some(
+        node.format
+            .iter()
+            .map(|(k, v)| (k.clone(), v.text()))
+            .collect(),
+    )
+}
+
+/// What `set` echoes after its line when a value landed in another form
+/// than it was given: each property the change touched that a requested
+/// key accounts for, as `get` now shows it.
+fn applied_suffix(
+    applied: &[(String, String)],
+    before: Option<&[(String, String)]>,
+    after: Option<&[(String, String)]>,
+) -> String {
+    let Some(after) = after else {
+        return String::new();
+    };
+    if applied.is_empty() {
+        return String::new();
+    }
+    let camel = |key: &str, req: &str| {
+        key.len() > req.len()
+            && key[..req.len()].eq_ignore_ascii_case(req)
+            && key[req.len()..].starts_with(|c: char| c.is_ascii_uppercase())
+    };
+    let prefix = |a: &str, b: &str| {
+        a.len() > b.len() + 1
+            && a[..b.len()].eq_ignore_ascii_case(b)
+            && a.as_bytes()[b.len()] == b'.'
+    };
+    let diff_attributable = |key: &str, req: &(String, String)| {
+        key.eq_ignore_ascii_case(&req.0)
+            || prefix(key, &req.0)
+            || prefix(&req.0, key)
+            || camel(key, &req.0)
+    };
+    let segment = |req: &str, value: &str| {
+        req.contains(':') && {
+            let v = value.trim().trim_start_matches('#');
+            req.split(':')
+                .any(|s| s.trim().trim_start_matches('#').eq_ignore_ascii_case(v))
+        }
+    };
+    let fallback = |kv: &(String, String), req: &(String, String)| {
+        kv.0.eq_ignore_ascii_case(&req.0)
+            || (prefix(&kv.0, &req.0) && kv.1 == req.1)
+            || (camel(&kv.0, &req.0) && segment(&req.1, &kv.1))
+    };
+    let diff: Vec<&(String, String)> = match before {
+        Some(before) => after
+            .iter()
+            .filter(|kv| {
+                !before
+                    .iter()
+                    .any(|b| b.0.eq_ignore_ascii_case(&kv.0) && b.1 == kv.1)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let mut picked: Vec<(String, String)> = Vec::new();
+    for req in applied {
+        let from_diff: Vec<&(String, String)> = diff
+            .iter()
+            .copied()
+            .filter(|kv| diff_attributable(&kv.0, req))
+            .collect();
+        let chosen: Vec<&(String, String)> = if from_diff.is_empty() {
+            after.iter().filter(|kv| fallback(kv, req)).collect()
+        } else {
+            from_diff
+        };
+        for kv in chosen {
+            match picked.iter_mut().find(|p| p.0.eq_ignore_ascii_case(&kv.0)) {
+                Some(p) => p.1 = kv.1.clone(),
+                None => picked.push(kv.clone()),
+            }
+        }
+    }
+    if picked.is_empty() {
+        return String::new();
+    }
+    picked.sort_by_key(|(k, _)| k.to_lowercase());
+    let identical = applied.iter().all(|r| {
+        picked
+            .iter()
+            .any(|d| d.0.eq_ignore_ascii_case(&r.0) && d.1 == r.1)
+    }) && picked.iter().all(|d| {
+        applied
+            .iter()
+            .any(|r| d.0.eq_ignore_ascii_case(&r.0) && d.1 == r.1)
+    });
+    if identical {
+        return String::new();
+    }
+    let shown: Vec<String> = picked.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    format!(" (applied: {})", shown.join(", "))
 }
 
 /// One office command on a Word document or a PowerPoint deck.
@@ -1002,8 +1447,22 @@ pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
                 Ok(p) => p,
                 Err(f) => return out.fail(&f),
             };
+            let props = pairs(&config.props);
+            let before = (config.command == "set")
+                .then(|| snapshot(kind, &pkg, &path))
+                .flatten();
             let done = if config.command == "set" {
-                kind.set(&mut pkg, &path, &pairs(&config.props))
+                kind.set(&mut pkg, &path, &props)
+                    .map(|(message, warnings)| {
+                        let after = snapshot(kind, &pkg, &path);
+                        (
+                            format!(
+                                "{message}{}",
+                                applied_suffix(&props, before.as_deref(), after.as_deref())
+                            ),
+                            warnings,
+                        )
+                    })
             } else {
                 kind.remove(&mut pkg, &path).map_err(SetFail::Fail)
             };
@@ -1019,18 +1478,112 @@ pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
             for w in &warnings {
                 host.warn(format!("{w}\n").as_bytes());
             }
+            let moved = config.command == "set"
+                && props.iter().any(|(k, _)| {
+                    ["x", "left", "y", "top", "width", "w", "height", "h"]
+                        .iter()
+                        .any(|p| k.eq_ignore_ascii_case(p))
+                });
+            let view = placement_view(kind, &pkg, moved, &path);
             if pkg.dirty() {
                 if let Some(reply) = pkg.save(host, &config.absolute).await {
                     return out.fail(&Fail::of(text(&failure_text(&reply))));
                 }
             }
-            out.done(&message)
+            let (spatial, advice) = placement(kind, &view, &path);
+            match spatial {
+                Some(line) if out.json => out.done(&format!("{message}\n  {line}")),
+                Some(line) => {
+                    host.print(format!("{message}\n  {line}\n").as_bytes());
+                    for a in &advice {
+                        host.warn(format!("  WARNING: {}\n", a.message).as_bytes());
+                    }
+                    0
+                }
+                None => out.done(&message),
+            }
         }
         "batch" => run_batch(&out, config, kind).await,
-        "create" => out.fail(&Fail::of(format!(
-            "create on .{} is not available yet",
-            kind.ext()
-        ))),
+        "create" => super::create(&out, config).await,
+        "add" | "move" | "swap" => {
+            if config.command == "add" {
+                if let Some(fail) = super::add_usage(config) {
+                    return out.fail(&fail);
+                }
+            }
+            let mut pkg = match Pkg::open(host, config).await {
+                Ok(p) => p,
+                Err(f) => return out.fail(&f),
+            };
+            let place = word::edit::Place {
+                index: config.index,
+                after: config.after.as_deref(),
+                before: config.before.as_deref(),
+            };
+            let kind_name = config.kind.clone().unwrap_or_default();
+            let props = pairs(&config.props);
+            let images = if config.command == "add" {
+                media::gather(host, media::sources(&kind_name, &props)).await
+            } else {
+                Media::new()
+            };
+            let done: Result<(String, Vec<String>, Vec<String>), Fail> =
+                match (kind, config.command.as_str()) {
+                    (Kind::Word, "add") => {
+                        word::edit::add(&mut pkg, &path, &kind_name, &place, &props, &images)
+                    }
+                    (Kind::Word, "move") => {
+                        word::edit::move_to(&mut pkg, &path, config.to.as_deref(), &place)
+                            .map(|m| (m, Vec::new(), Vec::new()))
+                    }
+                    (Kind::Word, "swap") => word::edit::swap(
+                        &mut pkg,
+                        &path,
+                        config.path2.as_deref().unwrap_or_default(),
+                    )
+                    .map(|m| (m, Vec::new(), Vec::new())),
+                    (Kind::Slides, "add") => {
+                        slides::edit::add(&mut pkg, &path, &kind_name, &place, &props, &images)
+                    }
+                    (Kind::Slides, "move") => {
+                        slides::edit::move_to(&mut pkg, &path, config.to.as_deref(), &place)
+                            .map(|m| (m, Vec::new(), Vec::new()))
+                    }
+                    (Kind::Slides, "swap") => slides::edit::swap(
+                        &mut pkg,
+                        &path,
+                        config.path2.as_deref().unwrap_or_default(),
+                    )
+                    .map(|m| (m, Vec::new(), Vec::new())),
+                    _ => Err(Fail::of(format!("Unknown command: {}", config.command))),
+                };
+            let (line, unread, warnings) = match done {
+                Ok(d) => d,
+                Err(f) => return out.fail(&f),
+            };
+            for w in &warnings {
+                host.warn(format!("{w}\n").as_bytes());
+            }
+            let pkg_view = placement_view(kind, &pkg, config.command == "add", &line);
+            if pkg.dirty() {
+                if let Some(reply) = pkg.save(host, &config.absolute).await {
+                    return out.fail(&Fail::of(text(&failure_text(&reply))));
+                }
+            }
+            if config.command == "add" {
+                let (spatial, advice) = placement(kind, &pkg_view, &line);
+                super::added(
+                    &out,
+                    &kind_name,
+                    &line,
+                    &unread,
+                    spatial.as_deref(),
+                    &advice,
+                )
+            } else {
+                out.done(&line)
+            }
+        }
         other => out.fail(&Fail::of(format!("Unknown command: {other}"))),
     }
 }
@@ -1041,6 +1594,7 @@ fn run_item(
     item: &Item,
     json: bool,
     notes: &mut Vec<String>,
+    images: &Media,
 ) -> Result<Output, (String, Option<&'static str>)> {
     let fail = |f: Fail| (f.message, f.code);
     let verb = item.command.to_ascii_lowercase();
@@ -1108,9 +1662,106 @@ fn run_item(
             notes.extend(warnings);
             Ok(Output::Text(message))
         }
+        "add" => {
+            let Some(parent) = item
+                .field("parent")
+                .or_else(|| item.path.clone())
+                .filter(|p| !p.is_empty())
+            else {
+                return Err(("'add' command requires 'parent' field. Example: {\"command\": \"add\", \"parent\": \"/slide[1]\", \"type\": \"shape\", \"props\": {\"text\": \"Hello\"}}".to_string(), None));
+            };
+            let kind_name = item.field("type").unwrap_or_default();
+            if kind_name.is_empty() && item.field("from").is_none_or(|f| f.is_empty()) {
+                return Err(("'add' command requires 'type' or 'from' field. Example: {\"command\": \"add\", \"parent\": \"/\", \"type\": \"slide\"}".to_string(), None));
+            }
+            let (after, before) = (item.field("after"), item.field("before"));
+            let index = item.index();
+            let place = word::edit::Place {
+                index,
+                after: if index.is_none() {
+                    after.as_deref().filter(|a| !a.is_empty())
+                } else {
+                    None
+                },
+                before: if index.is_none() && after.as_deref().is_none_or(str::is_empty) {
+                    before.as_deref().filter(|b| !b.is_empty())
+                } else {
+                    None
+                },
+            };
+            let props = item.props.clone().unwrap_or_default();
+            let (at, unread, warnings) = match kind {
+                Kind::Word => word::edit::add(pkg, &parent, &kind_name, &place, &props, images),
+                Kind::Slides => slides::edit::add(pkg, &parent, &kind_name, &place, &props, images),
+            }
+            .map_err(fail)?;
+            notes.extend(warnings);
+            let at = at.split('\n').next().unwrap_or_default().to_string();
+            let mut message = format!("Added {kind_name} at {at}");
+            if !unread.is_empty() {
+                message.push_str(&match kind {
+                    Kind::Word => format!(
+                        "\nWARNING: UNSUPPORTED props on {at}: {}",
+                        unread
+                            .iter()
+                            .map(|k| format!("{k} (not supported)"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    Kind::Slides => format!(
+                        "\nWARNING: UNSUPPORTED props: {}. Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.",
+                        unread.join(", ")
+                    ),
+                });
+            }
+            Ok(Output::Text(message))
+        }
+        "move" => {
+            let path = item.path.clone().unwrap_or_else(|| "/".to_string());
+            let (after, before) = (item.field("after"), item.field("before"));
+            let index = item.index();
+            let place = word::edit::Place {
+                index,
+                after: if index.is_none() {
+                    after.as_deref().filter(|a| !a.is_empty())
+                } else {
+                    None
+                },
+                before: if index.is_none() && after.as_deref().is_none_or(str::is_empty) {
+                    before.as_deref().filter(|b| !b.is_empty())
+                } else {
+                    None
+                },
+            };
+            let to = item.field("to");
+            match kind {
+                Kind::Word => word::edit::move_to(pkg, &path, to.as_deref(), &place),
+                Kind::Slides => slides::edit::move_to(pkg, &path, to.as_deref(), &place),
+            }
+            .map(Output::Text)
+            .map_err(fail)
+        }
+        "swap" => {
+            let second = item
+                .field("path2")
+                .filter(|p| !p.is_empty())
+                .or_else(|| item.field("to"));
+            let (Some(first), Some(second)) = (
+                item.path.clone().filter(|p| !p.is_empty()),
+                second.filter(|p| !p.is_empty()),
+            ) else {
+                return Err(("'swap' command requires 'path' and 'path2' (or 'to') fields. Example: {\"command\": \"swap\", \"path\": \"/slide[1]\", \"path2\": \"/slide[2]\"}".to_string(), None));
+            };
+            match kind {
+                Kind::Word => word::edit::swap(pkg, &first, &second),
+                Kind::Slides => slides::edit::swap(pkg, &first, &second),
+            }
+            .map(Output::Text)
+            .map_err(fail)
+        }
         v if VERBS.contains(&v) => Err((
             format!(
-                "Command '{}' is not supported here. Supported commands: meta, get, query, set, remove.",
+                "Command '{}' is not supported here. Supported commands: meta, get, query, set, add, remove, move, swap.",
                 item.command
             ),
             None,
@@ -1163,7 +1814,14 @@ async fn run_batch(out: &Out<'_>, config: &Config, kind: Kind) -> i32 {
         let warnings = item_warnings(item);
         let snap = pkg.snapshot();
         let mut notes = Vec::new();
-        let result = run_item(&mut pkg, kind, item, config.json, &mut notes);
+        let images = if item.command.eq_ignore_ascii_case("add") {
+            let kind_name = item.field("type").unwrap_or_default();
+            let props = item.props.clone().unwrap_or_default();
+            media::gather(host, media::sources(&kind_name, &props)).await
+        } else {
+            Media::new()
+        };
+        let result = run_item(&mut pkg, kind, item, config.json, &mut notes, &images);
         if result.is_err() {
             pkg.restore(snap);
         }

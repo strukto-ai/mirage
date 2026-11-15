@@ -76,6 +76,30 @@ const ECHO: [&str; 22] = [
 ];
 
 impl Item {
+    /// A field the item carries as text: a string, or a number as written.
+    pub(super) fn field(&self, name: &str) -> Option<String> {
+        self.others
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .and_then(|(_, v)| match v {
+                Json::Str(s) => Some(s.clone()),
+                Json::Int(n) => Some(n.to_string()),
+                _ => None,
+            })
+    }
+
+    /// The item's `index` field.
+    pub(super) fn index(&self) -> Option<i64> {
+        self.others
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("index"))
+            .and_then(|(_, v)| match v {
+                Json::Int(n) => Some(*n),
+                Json::Str(s) => s.trim().parse().ok(),
+                _ => None,
+            })
+    }
+
     /// The item as it is echoed with its failure.
     pub(super) fn echo(&self) -> Json {
         let mut fields = Vec::new();

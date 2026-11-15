@@ -59,11 +59,10 @@
       "targets": [
         "cli-office"
       ],
-      "conformance_skip": "office create writes no document properties or theme",
-      "command": "office create /scratch/o5.xlsx >/dev/null && office set /scratch/o5.xlsx /Sheet1/A1 --prop value=1 >/dev/null && office get /scratch/o5.xlsx && office get /scratch/o5.xlsx /Sheet1 --depth 0",
+      "command": "office create /scratch/o5.xlsx >/dev/null && office set /scratch/o5.xlsx /Sheet1/A1 --prop value=1 >/dev/null && office get /scratch/o5.xlsx | sed -E 's/ (created|modified)=[^ ]+//g' && office get /scratch/o5.xlsx /Sheet1 --depth 0",
       "expect": {
         "exit": 0,
-        "stdout": "/ (workbook) calc.fullPrecision=true calc.fullCalcOnLoad=true\n/Sheet1 (sheet) children=1\n/Sheet1 (sheet) children=1\n",
+        "stdout": "/ (workbook) author=OfficeCLI lastModifiedBy=OfficeCLI calc.fullPrecision=true theme.name=Office Theme theme.colorScheme=Office theme.color.dk1=#000000 theme.color.lt1=#FFFFFF theme.color.dk2=#44546A theme.color.lt2=#E7E6E6 theme.color.accent1=#4472C4 theme.color.accent2=#ED7D31 theme.color.accent3=#A5A5A5 theme.color.accent4=#FFC000 theme.color.accent5=#5B9BD5 theme.color.accent6=#70AD47 theme.color.hlink=#0563C1 theme.color.folHlink=#954F72 theme.fontScheme=Office theme.font.major.latin=Calibri Light theme.font.major.eastAsia= theme.font.minor.latin=Calibri theme.font.minor.eastAsia= theme.formatScheme=Office extended.application=OfficeCLI/1.0.161\n/Sheet1 (sheet) children=1\n/Sheet1 (sheet) children=1\n",
         "stderr": ""
       }
     },
@@ -326,6 +325,202 @@
         "exit": 0,
         "stdout": "/Sheet1/A1 (cell) \"a\\nb\" type=SharedString value=a\nb\n/Sheet1/B1 (cell) \"c\\nde\" type=SharedString richtext=true value=c\nd\re\n/Sheet1/C1 (cell) \"e\\nf\" type=InlineString value=e\nf\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "office_xlsx_sheet_add_rename_remove",
+      "seq": 13600025,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w1.xlsx && office add /scratch/w1.xlsx / --type sheet --prop name=Report && office add /scratch/w1.xlsx / --type sheet --prop name=First --prop position=0 && office add /scratch/w1.xlsx / --type sheet --prop name=report ; office set /scratch/w1.xlsx /Report --prop name=Summary && office remove /scratch/w1.xlsx /First && office query /scratch/w1.xlsx sheet",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w1.xlsx\nAdded sheet at /Report\nAdded sheet at /First\nUpdated /Report: name=Summary\nRemoved /First\n/Sheet1 (sheet)\n/Summary (sheet)\n",
+        "stderr": "Error: A sheet named 'Report' already exists. Sheet names must be unique.\n"
+      }
+    },
+    {
+      "id": "office_xlsx_sheet_rename_follows_formulas",
+      "seq": 13600026,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w2.xlsx && office add /scratch/w2.xlsx / --type sheet --prop name=Data && office set /scratch/w2.xlsx /Sheet1/A1 --prop formula=Data!B2 && office set /scratch/w2.xlsx /Data --prop name='My Data' && office get /scratch/w2.xlsx /Sheet1/A1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w2.xlsx\nAdded sheet at /Data\nUpdated /Sheet1/A1: formula=Data!B2\nUpdated /Data: name=My Data\n/Sheet1/A1 (cell) \"#OCLI_NOTEVAL!\" type=Number formula='My Data'!B2 evaluated=false\n",
+        "stderr": ""
+      },
+      "conformance_skip": "office does not evaluate formulas; OfficeCLI does"
+    },
+    {
+      "id": "office_docx_paragraphs_runs_tables",
+      "seq": 13600027,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w3.docx && office add /scratch/w3.docx /body --type paragraph --prop text=Hello && office add /scratch/w3.docx /body --type paragraph --prop text=Title --prop style=Heading1 && office add '/scratch/w3.docx' '/body/p[1]' --type run --prop text=' world' --prop italic=true && office add /scratch/w3.docx /body --type table --prop data='a,b;c,d' && office get /scratch/w3.docx /body --depth 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w3.docx\nAdded paragraph at /body/p[@paraId=00100000]\nAdded paragraph at /body/p[@paraId=00100002]\nAdded run at /body/p[@paraId=00100000]/r[2]\nAdded table at /body/tbl[1]\n/body (body)\n/body/p[@paraId=00100000] (paragraph) \"Hello world\" children=2 style=Normal paraId=00100000 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100002] (paragraph) \"Title\" children=1 style=heading 1 paraId=00100002 styleId=Heading1 styleName=heading 1 effective.size=16pt effective.size.src=/styles/Heading1 effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults effective.color=#2F5496 effective.color.src=/styles/Heading1 effective.spaceBefore=12pt effective.spaceBefore.src=/styles/Heading1 effective.spaceAfter=0pt effective.spaceAfter.src=/styles/Heading1 effective.lineSpacing=1.0792x effective.lineSpacing.src=/styles/Normal\n/body/tbl[1] (table) children=2 cols=2 rows=2 border.top=single border.top.sz=4 border.bottom=single border.bottom.sz=4 border.insideH=single border.insideH.sz=4 border.insideV=single border.insideV.sz=4 border.left=single border.left.sz=4 border.right=single border.right.sz=4 width=8306 colWidths=4153dxa,4153dxa\n/body/sectPr[1] (section) pageWidth=21cm pageHeight=29.7cm marginTop=2.54cm marginBottom=2.54cm marginLeft=3.18cm marginRight=3.18cm docGrid.type=default\n",
+        "stderr": "  WARNING: style 'Heading1' was not defined in the styles part; added Word's built-in definition ('heading 1')\n"
+      }
+    },
+    {
+      "id": "office_docx_set_move_swap_remove",
+      "seq": 13600028,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w4.docx && office add /scratch/w4.docx /body --type paragraph --prop text=One && office add /scratch/w4.docx /body --type paragraph --prop text=Two && office add /scratch/w4.docx /body --type paragraph --prop text=Three && office set /scratch/w4.docx '/body/p[1]' --prop text=First --prop bold=true --prop alignment=center && office move /scratch/w4.docx '/body/p[1]' --index 2 && office swap /scratch/w4.docx '/body/p[1]' '/body/p[2]' && office remove /scratch/w4.docx '/body/p[3]' && office get /scratch/w4.docx /body",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w4.docx\nAdded paragraph at /body/p[@paraId=00100000]\nAdded paragraph at /body/p[@paraId=00100002]\nAdded paragraph at /body/p[@paraId=00100004]\nUpdated /body/p[1]: text=First, bold=true, alignment=center (applied: bold=true)\nMoved to /body/p[3]\nSwapped /body/p[2] <-> /body/p[1]\nRemoved /body/p[3]\n/body (body)\n/body/p[@paraId=00100004] (paragraph) \"Three\" children=1 style=Normal paraId=00100004 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100002] (paragraph) \"Two\" children=1 style=Normal paraId=00100002 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/sectPr[1] (section) pageWidth=21cm pageHeight=29.7cm marginTop=2.54cm marginBottom=2.54cm marginLeft=3.18cm marginRight=3.18cm docGrid.type=default\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_docx_table_cell_shading",
+      "seq": 13600029,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w5.docx && office add /scratch/w5.docx /body --type table --prop rows=2 --prop cols=2 && office set /scratch/w5.docx '/body/tbl[1]/tr[1]/tc[1]' --prop text=Score --prop shading=FFC000 && office get /scratch/w5.docx '/body/tbl[1]/tr[1]/tc[1]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w5.docx\nAdded table at /body/tbl[1]\nUpdated /body/tbl[1]/tr[1]/tc[1]: text=Score, shading=FFC000\n/body/tbl[1]/tr[1]/tc[1] (cell) \"Score\" fill=#FFC000 width=4153dxa\n/body/tbl[1]/tr[1]/tc[1]/p[@paraId=00100000] (paragraph) \"Score\" children=1 style=Normal paraId=00100000 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_pptx_slides_shapes_tables",
+      "seq": 13600030,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w6.pptx && office add /scratch/w6.pptx / --type slide --prop layout=title --prop title=Hello && office add /scratch/w6.pptx '/slide[1]' --type textbox --prop text=Note --prop size=20 --prop bold=true --prop x=1cm --prop y=2cm && office add /scratch/w6.pptx '/slide[1]' --type table --prop rows=2 --prop cols=2 && office set /scratch/w6.pptx '/slide[1]/shape[2]' --prop fill=00FF00 && office get /scratch/w6.pptx '/slide[1]' --depth 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w6.pptx\n  totalSlides: 0\n  slideWidth: 960pt\n  slideHeight: 540pt\nAdded slide at /slide[1]\nAdded textbox at /slide[1]/shape[@id=100000]\n  x: 1cm  y: 2cm  width: 10cm  height: 5cm\nAdded table at /slide[1]/table[@id=100001]\n  x: 1.27cm  y: 126pt  width: 22.86cm  height: 58.4pt\nUpdated /slide[1]/shape[2]: fill=00FF00 (applied: fill=#00FF00)\n/slide[1] (slide) layout=Title Slide layoutType=title\n/slide[1]/shape[@id=2] (title) \"Hello\" name=Title phType=ctrTitle id=2 isTitle=true x=54pt y=167.75pt width=21.59cm height=115.75pt zorder=1 effective.size=44pt effective.size.src=/spec-default effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont\n/slide[1]/shape[@id=2]/paragraph[1] (paragraph) \"Hello\" children=1\n/slide[1]/shape[@id=100000] (textbox) \"Note\" name=TextBox 2 id=100000 isTitle=false x=1cm y=2cm width=10cm height=5cm fill=#00FF00 geometry=rect size=20pt bold=true zorder=2 effective.font.latin=Calibri effective.font.latin.src=/theme/minorFont effective.font=Calibri effective.font.src=/theme/minorFont\n/slide[1]/shape[@id=100000]/paragraph[1] (paragraph) \"Note\" children=1\n/slide[1]/table[@id=100001] (table) name=Table 1 id=100001 rows=2 cols=2 colWidths=11.43cm,11.43cm firstRow=true bandedRows=true x=1.27cm y=126pt width=22.86cm height=58.4pt zorder=3\n/slide[1]/table[@id=100001]/tr[1] (tr) children=2 height=29.2pt\n/slide[1]/table[@id=100001]/tr[2] (tr) children=2 height=29.2pt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_pptx_move_swap_remove_slides",
+      "seq": 13600031,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w7.pptx && office add /scratch/w7.pptx / --type slide --prop title=A && office add /scratch/w7.pptx / --type slide --prop title=B && office add /scratch/w7.pptx / --type slide --prop title=C && office move /scratch/w7.pptx '/slide[3]' --index 0 && office swap /scratch/w7.pptx '/slide[1]' '/slide[2]' && office remove /scratch/w7.pptx '/slide[3]' && office query /scratch/w7.pptx title",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w7.pptx\n  totalSlides: 0\n  slideWidth: 960pt\n  slideHeight: 540pt\nAdded slide at /slide[1]\nAdded slide at /slide[2]\nAdded slide at /slide[3]\nMoved to /slide[1]\nSwapped /slide[2] <-> /slide[1]\nRemoved /slide[3]\n/slide[1]/shape[@id=2] (title) \"A\" children=1 name=Title phType=title id=2 isTitle=true x=66pt y=28.75pt width=29.21cm height=104pt zorder=1 effective.size=44pt effective.size.src=/spec-default effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont\n/slide[2]/shape[@id=2] (title) \"C\" children=1 name=Title phType=title id=2 isTitle=true x=66pt y=28.75pt width=29.21cm height=104pt zorder=1 effective.size=44pt effective.size.src=/spec-default effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_batch_adds",
+      "seq": 13600032,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w8.docx && office batch /scratch/w8.docx --commands '[{\"command\":\"add\",\"parent\":\"/body\",\"type\":\"paragraph\",\"props\":{\"text\":\"A\"}},{\"command\":\"add\",\"parent\":\"/body\",\"type\":\"paragraph\",\"props\":{\"text\":\"B\"}},{\"command\":\"move\",\"path\":\"/body/p[2]\",\"index\":0}]' && office query /scratch/w8.docx paragraph",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w8.docx\n[1] Added paragraph at /body/p[@paraId=00100000]\n[2] Added paragraph at /body/p[@paraId=00100002]\n[3] Moved to /body/p[1]\n\nBatch complete: 3 succeeded, 0 failed, 3 total\n/body/p[@paraId=00100002] (paragraph) \"B\" children=1 style=Normal paraId=00100002 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100000] (paragraph) \"A\" children=1 style=Normal paraId=00100000 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_docx_rows_and_cells",
+      "seq": 13600033,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w9.docx && office add /scratch/w9.docx /body --type table --prop data='Name,Score;Ann,90' && office add /scratch/w9.docx '/body/tbl[1]' --type row --prop c1=Bob --prop c2=85 && office add /scratch/w9.docx '/body/tbl[1]/tr[1]' --type cell --prop text=Note --prop shading=FFC000 && office add /scratch/w9.docx '/body/tbl[1]' --type cell ; office get /scratch/w9.docx '/body/tbl[1]' --depth 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "Created: /scratch/w9.docx\nAdded table at /body/tbl[1]\nAdded row at /body/tbl[1]/tr[3]\nAdded cell at /body/tbl[1]/tr[1]/tc[3]\n/body/tbl[1] (table) cols=3 rows=3 border.top=single border.top.sz=4 border.bottom=single border.bottom.sz=4 border.insideH=single border.insideH.sz=4 border.insideV=single border.insideV.sz=4 border.left=single border.left.sz=4 border.right=single border.right.sz=4 width=8306 colWidths=4153dxa,4153dxa,4153dxa\n/body/tbl[1]/tr[1] (row)\n/body/tbl[1]/tr[1]/tc[1] (cell) \"Name\" children=1 width=4153dxa\n/body/tbl[1]/tr[1]/tc[2] (cell) \"Score\" children=1 width=4153dxa\n/body/tbl[1]/tr[1]/tc[3] (cell) \"Note\" children=1 fill=#FFC000 width=4153dxa\n/body/tbl[1]/tr[2] (row)\n/body/tbl[1]/tr[2]/tc[1] (cell) \"Ann\" children=1 width=4153dxa\n/body/tbl[1]/tr[2]/tc[2] (cell) \"90\" children=1 width=4153dxa\n/body/tbl[1]/tr[2]/tc[3] (cell) \"\" children=1 width=4153dxa\n/body/tbl[1]/tr[3] (row)\n/body/tbl[1]/tr[3]/tc[1] (cell) \"Bob\" children=1 width=4153dxa\n/body/tbl[1]/tr[3]/tc[2] (cell) \"85\" children=1 width=4153dxa\n/body/tbl[1]/tr[3]/tc[3] (cell) \"\" children=1 width=4153dxa\n",
+        "stderr": "Error: Cannot add 'cell' under /body/tbl[1]: tables only accept rows (/body/tbl[N]/tr). Use --type row.\n"
+      }
+    },
+    {
+      "id": "office_pptx_table_cells",
+      "seq": 13600034,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w10.pptx >/dev/null && office add /scratch/w10.pptx / --type slide >/dev/null && office add /scratch/w10.pptx '/slide[1]' --type table --prop rows=2 --prop cols=2 >/dev/null && office set /scratch/w10.pptx '/slide[1]/table[1]/tr[1]/tc[1]' --prop text=Region --prop bold=true --prop fill=FFC000 && office set /scratch/w10.pptx '/slide[1]/table[1]/tr[2]/tc[2]' --prop text=1250 --prop alignment=right && office add /scratch/w10.pptx '/slide[1]/table[1]' --type row && office set /scratch/w10.pptx '/slide[1]/table[1]' --prop x=2cm && office set /scratch/w10.pptx '/slide[1]/table[1]/tr[3]/tc[5]' --prop text=x ; office get /scratch/w10.pptx '/slide[1]/table[1]' --depth 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "Updated /slide[1]/table[1]/tr[1]/tc[1]: text=Region, bold=true, fill=FFC000 (applied: bold=true, fill=#FFC000)\nUpdated /slide[1]/table[1]/tr[2]/tc[2]: text=1250, alignment=right\nAdded row at /slide[1]/table[1]/tr[3]\nUpdated /slide[1]/table[1]: x=2cm\n  x: 2cm  y: 126pt  width: 22.86cm  height: 87.6pt\n/slide[1]/table[@id=100000] (table) name=Table 1 id=100000 rows=3 cols=2 colWidths=11.43cm,11.43cm firstRow=true bandedRows=true x=2cm y=126pt width=22.86cm height=87.6pt zorder=1\n/slide[1]/table[@id=100000]/tr[1] (tr) height=29.2pt\n/slide[1]/table[@id=100000]/tr[1]/tc[1] (tc) \"Region\" fill=#FFC000 bold=true\n/slide[1]/table[@id=100000]/tr[1]/tc[2] (tc) \"\"\n/slide[1]/table[@id=100000]/tr[2] (tr) height=29.2pt\n/slide[1]/table[@id=100000]/tr[2]/tc[1] (tc) \"\"\n/slide[1]/table[@id=100000]/tr[2]/tc[2] (tc) \"1250\" align=right\n/slide[1]/table[@id=100000]/tr[3] (tr) height=29.2pt\n/slide[1]/table[@id=100000]/tr[3]/tc[1] (tc) \"\"\n/slide[1]/table[@id=100000]/tr[3]/tc[2] (tc) \"\"\n",
+        "stderr": "Error: Cell 5 not found (row has 2 cells)\n"
+      }
+    },
+    {
+      "id": "office_docx_lists",
+      "seq": 13600035,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w11.docx >/dev/null && office add /scratch/w11.docx /body --type paragraph --prop text=Apples --prop listStyle=bullet && office add /scratch/w11.docx /body --type paragraph --prop text=Pears --prop listStyle=bullet && office add /scratch/w11.docx /body --type paragraph --prop text=Step --prop listStyle=numbered && office set /scratch/w11.docx '/body/p[2]' --prop listStyle=none && office get /scratch/w11.docx /body",
+      "expect": {
+        "exit": 0,
+        "stdout": "Added paragraph at /body/p[@paraId=00100000]\nAdded paragraph at /body/p[@paraId=00100002]\nAdded paragraph at /body/p[@paraId=00100004]\nUpdated /body/p[2]: listStyle=none\n/body (body)\n/body/p[@paraId=00100000] (paragraph) \"Apples\" children=1 style=Normal paraId=00100000 numId=1 numLevel=0 numFmt=bullet listStyle=bullet start=1 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100002] (paragraph) \"Pears\" children=1 style=Normal paraId=00100002 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100004] (paragraph) \"Step\" children=1 style=Normal paraId=00100004 numId=2 numLevel=0 numFmt=decimal listStyle=ordered start=1 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/sectPr[1] (section) pageWidth=21cm pageHeight=29.7cm marginTop=2.54cm marginBottom=2.54cm marginLeft=3.18cm marginRight=3.18cm docGrid.type=default\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "office_docx_hyperlinks",
+      "seq": 13600036,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w12.docx >/dev/null && office add /scratch/w12.docx /body --type paragraph --prop 'text=See ' >/dev/null && office add /scratch/w12.docx '/body/p[1]' --type hyperlink --prop url=https://example.com --prop text=example && office add /scratch/w12.docx '/body/p[1]' --type hyperlink --prop text=nourl ; office query /scratch/w12.docx hyperlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "Added hyperlink at /body/p[1]/hyperlink[1]\n/body/p[@paraId=00100000]/hyperlink[1] (hyperlink) \"example\" url=https://example.com color=hyperlink underline=single\n",
+        "stderr": "Error: 'url' or 'anchor' property is required for hyperlink type\n"
+      }
+    },
+    {
+      "id": "office_pptx_notes",
+      "seq": 13600037,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "office create /scratch/w13.pptx >/dev/null && office add /scratch/w13.pptx / --type slide --prop title=One >/dev/null && office add /scratch/w13.pptx '/slide[1]' --type notes --prop 'text=Say hello' && office set /scratch/w13.pptx '/slide[1]/notes' --prop 'text=Line one\\nLine two' && office get /scratch/w13.pptx '/slide[1]/notes' && office remove /scratch/w13.pptx '/slide[1]/notes' && office get /scratch/w13.pptx '/slide[1]/notes'",
+      "expect": {
+        "exit": 1,
+        "stdout": "Added notes at /slide[1]/notes\nUpdated /slide[1]/notes: text=Line one\nLine two\n/slide[1]/notes (notes) \"Line one\\nLine two\" text=Line one\nLine two lang=en-US\nRemoved /slide[1]/notes\n",
+        "stderr": "Error: Notes not found at /slide[1]/notes (slide has no speaker notes)\n"
+      }
+    },
+    {
+      "id": "office_pptx_pictures",
+      "seq": 13600038,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "printf '\\211PNG\\r\\n\\032\\n\\000\\000\\000\\rIHDR\\000\\000\\000(\\000\\000\\000\\024\\010\\002\\000\\000\\000\\000\\000\\000\\000' > /scratch/dot.png && office create /scratch/w14.pptx >/dev/null && office add /scratch/w14.pptx / --type slide >/dev/null && office add /scratch/w14.pptx '/slide[1]' --type picture --prop src=/scratch/dot.png && office add /scratch/w14.pptx '/slide[1]' --type image --prop path=/scratch/dot.png --prop height=2cm --prop alt=Red --prop rotation=45 && office add /scratch/w14.pptx '/slide[1]' --type picture --prop src=/scratch/dot.png --prop crop=10 --prop opacity=0.5 --prop x=1cm --prop y=1cm && office get /scratch/w14.pptx '/slide[1]' --depth 1 | sed -E 's/ relId=[^ ]+//' && office add /scratch/w14.pptx '/slide[1]' --type picture --prop src=/scratch/missing.png",
+      "expect": {
+        "exit": 1,
+        "stdout": "Added picture at /slide[1]/picture[@id=100000]\n  x: 264pt  y: 162pt  width: 15.24cm  height: 7.62cm\nAdded image at /slide[1]/picture[@id=100001]\n  x: 5376000emu  y: 3069000emu  width: 4cm  height: 2cm\nAdded picture at /slide[1]/picture[@id=100002]\n  x: 1cm  y: 1cm  width: 15.24cm  height: 7.62cm\n/slide[1] (slide) layout=Blank layoutType=blank\n/slide[1]/picture[@id=100000] (picture) name=Picture 1 id=100000 alt=(missing) contentType=image/png fileSize=33 x=264pt y=162pt width=15.24cm height=7.62cm zorder=1\n/slide[1]/picture[@id=100001] (picture) name=Picture 2 id=100001 alt=Red contentType=image/png fileSize=33 x=5376000emu y=3069000emu width=4cm height=2cm rotation=45 zorder=2\n/slide[1]/picture[@id=100002] (picture) name=Picture 3 id=100002 alt=(missing) contentType=image/png fileSize=33 x=1cm y=1cm width=15.24cm height=7.62cm zorder=3 opacity=0.5 crop=10,10,10,10\n",
+        "stderr": "Error: Image file not found: /scratch/missing.png\n"
+      }
+    },
+    {
+      "id": "office_docx_pictures",
+      "seq": 13600039,
+      "targets": [
+        "cli-office"
+      ],
+      "command": "printf '\\211PNG\\r\\n\\032\\n\\000\\000\\000\\rIHDR\\000\\000\\000(\\000\\000\\000\\024\\010\\002\\000\\000\\000\\000\\000\\000\\000' > /scratch/dot.png && office create /scratch/w15.docx >/dev/null && office add /scratch/w15.docx /body --type paragraph --prop text=Hello >/dev/null && office add /scratch/w15.docx '/body/p[1]' --type picture --prop src=/scratch/dot.png && office add /scratch/w15.docx /body --type picture --prop src=/scratch/dot.png --prop wrap=square --prop width=5cm --prop alt=Dot && office add /scratch/w15.docx /body --type picture --prop 'src=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAAAAAAAA' --prop crop=5 && office batch /scratch/w15.docx --commands '[{\"command\":\"add\",\"parent\":\"/body\",\"type\":\"picture\",\"props\":{\"src\":\"/scratch/dot.png\",\"alt\":\"B\"}}]' && office get /scratch/w15.docx /body --depth 2 | sed -E 's/ relId=[^ ]+//' && office add /scratch/w15.docx /body --type picture --prop src=/scratch/dot.png --prop width=0",
+      "expect": {
+        "exit": 1,
+        "stdout": "Added picture at /body/p[@paraId=00100000]/r[2]\nAdded picture at /body/p[@paraId=00100002]\nAdded picture at /body/p[@paraId=00100004]\n[1] Added picture at /body/p[@paraId=00100006]\n\nBatch complete: 1 succeeded, 0 failed, 1 total\n/body (body)\n/body/p[@paraId=00100000] (paragraph) \"Hello\" style=Normal paraId=00100000 effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100000]/r[1] (run) \"Hello\" effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100000]/r[2] (picture) \"\" id=1 name=dot.png width=15.2cm height=7.6cm alt= wrap=inline\n/body/p[@paraId=00100002] (paragraph) \"\" style=Normal paraId=00100002 lineSpacing=1x lineRule=auto effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100002]/r[1] (picture) \"Dot\" id=2 name=Dot width=5.0cm height=2.5cm alt=Dot anchor=true wrap=square relativeHeight=1 hRelative=margin vRelative=margin\n/body/p[@paraId=00100004] (paragraph) \"\" style=Normal paraId=00100004 lineSpacing=1x lineRule=auto effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100004]/r[1] (picture) \"\" id=3 name=image width=15.2cm height=7.6cm alt= crop=5,5,5,5 wrap=inline\n/body/p[@paraId=00100006] (paragraph) \"\" style=Normal paraId=00100006 lineSpacing=1x lineRule=auto effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n/body/p[@paraId=00100006]/r[1] (picture) \"B\" id=4 name=B width=15.2cm height=7.6cm alt=B wrap=inline\n/body/sectPr[1] (section) pageWidth=21cm pageHeight=29.7cm marginTop=2.54cm marginBottom=2.54cm marginLeft=3.18cm marginRight=3.18cm docGrid.type=default\n",
+        "stderr": "Error: Invalid 'width' value: '0'. Picture width must be > 0 (OOXML ST_PositiveCoordinate).\n"
       }
     }
   ]

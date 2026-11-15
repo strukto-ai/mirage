@@ -12,6 +12,7 @@
 mod cascade;
 mod color;
 mod deck;
+pub(super) mod edit;
 mod motion;
 mod nodes;
 mod paths;
@@ -187,17 +188,13 @@ pub(super) fn query(pkg: &Pkg<'_>, selector: &str) -> Result<Vec<Node>, Fail> {
 }
 
 pub(super) fn set(
-    _pkg: &mut Pkg<'_>,
+    pkg: &mut Pkg<'_>,
     path: &str,
-    _props: &[(String, String)],
+    props: &[(String, String)],
 ) -> Result<(String, Vec<String>), SetFail> {
-    Err(SetFail::Fail(Fail::of(format!(
-        "set on .pptx is not available yet: {path}"
-    ))))
+    edit::set(pkg, path, props)
 }
 
-pub(super) fn remove(_pkg: &mut Pkg<'_>, path: &str) -> Result<(String, Vec<String>), Fail> {
-    Err(Fail::of(format!(
-        "remove on .pptx is not available yet: {path}"
-    )))
+pub(super) fn remove(pkg: &mut Pkg<'_>, path: &str) -> Result<(String, Vec<String>), Fail> {
+    edit::remove(pkg, path)
 }

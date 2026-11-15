@@ -14,7 +14,9 @@
 //! it as OfficeCLI's Word and PowerPoint handlers do.
 
 mod batch;
+mod blank;
 mod book;
+mod media;
 mod node;
 mod package;
 mod query;
@@ -27,6 +29,7 @@ mod tests;
 mod tree;
 mod units;
 mod word;
+mod workbook;
 mod xml;
 
 use serde::Deserialize;
@@ -78,6 +81,23 @@ struct Config {
     stop_on_error: bool,
     #[serde(default)]
     best_effort: bool,
+    /// `add --type`.
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    index: Option<i64>,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default)]
+    before: Option<String>,
+    /// `move --to`.
+    #[serde(default)]
+    to: Option<String>,
+    /// `swap`'s second path.
+    #[serde(default)]
+    path2: Option<String>,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -491,17 +511,7 @@ async fn run(host: Host, config: Config) -> i32 {
                 Err(f) => return out.fail(&f),
             };
             let done = if config.command == "set" {
-                let pairs = config
-                    .props
-                    .iter()
-                    .map(|p| {
-                        p.split_once('=')
-                            .map_or((p.trim().to_string(), String::new()), |(k, v)| {
-                                (k.trim().to_string(), v.to_string())
-                            })
-                    })
-                    .collect::<Vec<_>>();
-                set(&mut book, &doc, &goal, &path, &pairs).await
+                set(&mut book, &doc, &goal, &path, &pairs(&config.props)).await
             } else {
                 remove(&mut book, &doc, &goal, &path)
                     .await
@@ -523,19 +533,260 @@ async fn run(host: Host, config: Config) -> i32 {
             }
             out.done(&line)
         }
+        "add" => add_command(&out, &config, &path).await,
         "batch" => run_batch(&out, &config).await,
         other => out.fail(&Fail::of(format!("Unknown command: {other}"))),
     }
 }
 
+/// Why an `add` names no element to make, or where to put it twice.
+fn add_usage(config: &Config) -> Option<Fail> {
+    let placed = usize::from(config.index.is_some())
+        + usize::from(config.after.is_some())
+        + usize::from(config.before.is_some());
+    if placed > 1 {
+        let mut fail = Fail::coded(
+            "--index, --after, and --before are mutually exclusive. Use only one.".to_string(),
+            "invalid_argument",
+        );
+        fail.suggestion = Some(
+            "Use --index for positional insert, or --after/--before for anchor-based insert."
+                .to_string(),
+        );
+        return Some(fail);
+    }
+    let kind = config.kind.as_deref().unwrap_or_default();
+    let from = config.from.as_deref().unwrap_or_default();
+    if kind.is_empty() && from.is_empty() {
+        let mut fail = Fail::coded(
+            "Either --type or --from must be specified.".to_string(),
+            "missing_argument",
+        );
+        fail.suggestion = Some(
+            "Use --type to specify element type, or --from to copy an existing element."
+                .to_string(),
+        );
+        fail.help = Some("office add <file> <parent> --type <type> --prop src=<file>".to_string());
+        return Some(fail);
+    }
+    if !from.is_empty() && !config.props.is_empty() {
+        let mut fail = Fail::coded(
+            "--prop cannot be combined with --from; use `set` on the copied path to modify properties.".to_string(),
+            "invalid_argument",
+        );
+        fail.suggestion = Some(
+            "Run `add --from` first, then `set <new-path> --prop k=v` on the result.".to_string(),
+        );
+        return Some(fail);
+    }
+    None
+}
+
+/// An advisory line `add` or `set` prints on stderr: its message, the code
+/// `--json` names and a suggestion.
+struct Advice {
+    message: String,
+    code: &'static str,
+    suggestion: Option<String>,
+}
+
+/// The line `add` prints once the element is made, a placed shape's
+/// position, its advisories, and the props it did not read, which print as
+/// unsupported and exit 2.
+fn added(
+    out: &Out<'_>,
+    kind: &str,
+    at: &str,
+    unread: &[String],
+    spatial: Option<&str>,
+    advice: &[Advice],
+) -> i32 {
+    let message = format!("Added {} at {at}", kind.to_lowercase());
+    if out.json {
+        let data = match spatial {
+            Some(line) => format!("{message}\n  {line}"),
+            None => message.clone(),
+        };
+        let mut warnings: Vec<Json> = advice
+            .iter()
+            .map(|a| {
+                let mut fields = vec![
+                    ("message", Json::Str(a.message.clone())),
+                    ("code", Json::Str(a.code.to_string())),
+                ];
+                if let Some(s) = &a.suggestion {
+                    fields.push(("suggestion", Json::Str(s.clone())));
+                }
+                Json::obj(fields)
+            })
+            .collect();
+        warnings.extend(unread.iter().map(|k| {
+            Json::obj(vec![
+                ("message", Json::Str(format!("Unsupported property: {k}"))),
+                ("code", Json::Str("unsupported_property".to_string())),
+            ])
+        }));
+        let mut env = vec![
+            ("success", Json::Bool(true)),
+            ("data", Json::Str(data.clone())),
+            ("message", Json::Str(data)),
+        ];
+        if !warnings.is_empty() {
+            env.push(("warnings", Json::Arr(warnings)));
+        }
+        out.host
+            .print(format!("{}\n", Json::obj(env).pretty()).as_bytes());
+    } else {
+        out.host.print(format!("{message}\n").as_bytes());
+        if let Some(line) = spatial {
+            out.host.print(format!("  {line}\n").as_bytes());
+        }
+        for a in advice {
+            out.host
+                .warn(format!("  WARNING: {}\n", a.message).as_bytes());
+        }
+        if !unread.is_empty() {
+            out.host.warn(
+                format!(
+                    "UNSUPPORTED props: {}. Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.\n",
+                    unread.join(", ")
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    i32::from(!unread.is_empty()) * 2
+}
+
+/// The element types `add` makes in a workbook, as OfficeCLI lists them.
+const XLSX_TYPES: &str = "sheet, row, cell, col, namedrange, comment, validation, autofilter, cf, databar, colorscale, iconset, formulacf, cellis, ole, picture, shape, slicer, sparkline, table, chart, pivottable";
+
+async fn add_command(out: &Out<'_>, config: &Config, parent: &str) -> i32 {
+    if let Some(fail) = add_usage(config) {
+        return out.fail(&fail);
+    }
+    if config.from.as_deref().is_some_and(|f| !f.is_empty()) {
+        return out.fail(&Fail::of(
+            "add --from on .xlsx is not available yet".to_string(),
+        ));
+    }
+    let kind = config.kind.clone().unwrap_or_default();
+    let lower = kind.to_ascii_lowercase();
+    let foreign = match lower.as_str() {
+        "slide" | "slidemaster" | "slidelayout" | "notes" => Some("pptx"),
+        "paragraph" | "p" | "field" => Some("docx/pptx"),
+        "section" | "header" | "footer" => Some("docx"),
+        _ => None,
+    };
+    if let Some(format) = foreign {
+        return out.fail(&Fail::of(format!(
+            "Invalid element type '{kind}' for xlsx files (belongs to {format}). Valid values: {XLSX_TYPES}."
+        )));
+    }
+    let (mut book, doc) = match open_book(out.host, config).await {
+        Ok(b) => b,
+        Err(f) => return out.fail(&f),
+    };
+    let props = pairs(&config.props);
+    let done = match lower.as_str() {
+        "sheet" => workbook::add(&mut book, &doc, parent, &props).await,
+        t if XLSX_TYPES.split(", ").any(|v| v == t) => Err(Fail::of(format!(
+            "add --type {kind} on .xlsx is not available yet"
+        ))),
+        _ => {
+            let name = parent
+                .trim_start_matches('/')
+                .split('/')
+                .next()
+                .unwrap_or("");
+            Err(Fail::of(format!("Sheet not found: {name}")))
+        }
+    };
+    let (at, unread) = match done {
+        Ok(d) => d,
+        Err(f) => return out.fail(&f),
+    };
+    if let Some(reply) = book.save(out.host, &config.absolute).await {
+        return out.fail(&Fail::of(text(&failure_text(&reply))));
+    }
+    added(out, &kind, &at, &unread, None, &[])
+}
+
+/// `--prop` values as key and value pairs, a bare key taking an empty
+/// value; a `text`, `value` or `cN` value has its `\n`, `\t`, `\r`,
+/// `\v` and `\\` escapes resolved, as OfficeCLI reads them.
+fn pairs(props: &[String]) -> Vec<(String, String)> {
+    props
+        .iter()
+        .map(|p| match p.split_once('=') {
+            Some((k, v)) => {
+                let key = k.trim().to_string();
+                let cell = key.len() >= 2
+                    && key.starts_with(['c', 'C'])
+                    && key[1..].bytes().all(|b| b.is_ascii_digit());
+                let escaped =
+                    key.eq_ignore_ascii_case("text") || key.eq_ignore_ascii_case("value") || cell;
+                (
+                    key,
+                    if escaped {
+                        resolve_escapes(v)
+                    } else {
+                        v.to_string()
+                    },
+                )
+            }
+            None => (p.trim().to_string(), String::new()),
+        })
+        .collect()
+}
+
+/// `\n`, `\t`, `\r`, `\v` and `\\` in `value` as the characters they
+/// stand for; any other backslash stays.
+fn resolve_escapes(value: &str) -> String {
+    if !value.contains('\\') {
+        return value.to_string();
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mapped = match chars.peek() {
+            Some('\\') => Some('\\'),
+            Some('n') => Some('\n'),
+            Some('t') => Some('\t'),
+            Some('r') => Some('\r'),
+            Some('v') => Some('\u{0B}'),
+            _ => None,
+        };
+        match mapped {
+            Some(m) => {
+                out.push(m);
+                chars.next();
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 async fn create(out: &Out<'_>, config: &Config) -> i32 {
     let file = text(&config.file);
-    if !file.to_ascii_lowercase().ends_with(".xlsx") {
+    let lower = file.to_ascii_lowercase();
+    let make: fn(&str) -> blank::Parts = if lower.ends_with(".xlsx") {
+        blank::workbook_parts
+    } else if lower.ends_with(".docx") {
+        blank::document_parts
+    } else if lower.ends_with(".pptx") {
+        blank::deck_parts
+    } else {
         let ext = file
             .rsplit_once('.')
             .map_or(String::new(), |(_, e)| format!(".{e}"));
-        return out.fail(&Fail::of(format!("Unsupported file type: {ext}")));
-    }
+        return out.fail(&Fail::of(format!("Unsupported file type: {ext}. Supported: .docx, .xlsx, .pptx, or any extension served by an installed format-handler plugin that implements `create`.")));
+    };
     if !config.force && out.host.stat(&config.absolute).await.is_some() {
         let mut fail = Fail::coded(
             format!("File already exists: {file}. Use --force to overwrite."),
@@ -544,29 +795,34 @@ async fn create(out: &Out<'_>, config: &Config) -> i32 {
         fail.suggestion = Some("Add --force flag or remove the file first.".to_string());
         return out.fail(&fail);
     }
+    let now = blank::now(out.host).await;
     if let Some(reply) = write_out(
         out.host,
         &config.absolute,
-        vec![Piece::Made(blank())],
+        vec![Piece::Made(package(&make(&now)))],
         WriteMode::Replace,
     )
     .await
     {
         return out.fail(&Fail::of(text(&failure_text(&reply))));
     }
-    out.done(&format!(
+    let status = out.done(&format!(
         "Created: {}",
         if out.json {
             text(&config.absolute)
         } else {
             file
         }
-    ))
+    ));
+    if lower.ends_with(".pptx") && !out.json {
+        out.host
+            .print(b"  totalSlides: 0\n  slideWidth: 960pt\n  slideHeight: 540pt\n");
+    }
+    status
 }
 
 const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const PKG: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 const STYLES_TYPE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
 
@@ -576,25 +832,6 @@ fn default_styles() -> String {
     format!(
         "{HEAD}<styleSheet xmlns=\"{MAIN}\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>"
     )
-}
-
-/// The parts of a workbook of one empty sheet, Sheet1, set to calculate
-/// when opened.
-fn blank_parts() -> Vec<(&'static str, Vec<u8>)> {
-    let head = HEAD;
-    vec![
-        ("[Content_Types].xml", format!("{head}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>").into_bytes()),
-        ("_rels/.rels", format!("{head}<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>").into_bytes()),
-        ("xl/workbook.xml", format!("{head}<workbook xmlns=\"{MAIN}\" xmlns:r=\"{REL}\"><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets><calcPr fullCalcOnLoad=\"1\"/></workbook>").into_bytes()),
-        ("xl/_rels/workbook.xml.rels", format!("{head}<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"{REL}/styles\" Target=\"styles.xml\"/></Relationships>").into_bytes()),
-        ("xl/worksheets/sheet1.xml", format!("{head}<worksheet xmlns=\"{MAIN}\" xmlns:r=\"{REL}\"><sheetData/></worksheet>").into_bytes()),
-        ("xl/styles.xml", default_styles().into_bytes()),
-    ]
-}
-
-/// A workbook of one empty sheet, Sheet1, set to calculate when opened.
-fn blank() -> Vec<u8> {
-    package(&blank_parts())
 }
 
 /// The sheet a typed name stands for: by name without case, or
@@ -869,7 +1106,7 @@ fn cell_text_fault(value: &str, at: &str) -> Option<String> {
 }
 
 const CELL_PROPS: &[&str] = &["value", "formula", "type"];
-const SHEET_PROPS: &[&str] = &["hidden"];
+const SHEET_PROPS: &[&str] = &["hidden", "name"];
 
 /// The line office prints once the change is saved, or why nothing
 /// changed.
@@ -908,6 +1145,12 @@ async fn set(
     match goal {
         Target::Sheet(name) => {
             let (_, entry) = resolve_sheet(doc, name, None)?;
+            if let Some(new) = get("name") {
+                workbook::rename(book, doc, entry, &new).await?;
+            }
+            if get("hidden").is_none() {
+                return Ok(format!("Updated {path}: {}", shown.join(", ")));
+            }
             let hide = matches!(
                 get("hidden")
                     .unwrap_or_default()
@@ -999,6 +1242,9 @@ async fn set(
             if rewritten.formula_replaced {
                 drop_calc_chain(book, &doc.wb_part).await;
             }
+            if get("formula").is_some() {
+                full_calc_on_load(book, &doc.wb_part).await;
+            }
             let applied = match kind.as_deref() {
                 Some("string") => " (applied: type=String)",
                 Some("number") => " (applied: type=Number)",
@@ -1008,6 +1254,46 @@ async fn set(
         }
         _ => Err(Fail::of(format!("Unsupported path: {path}")).into()),
     }
+}
+
+/// The workbook set to recalculate when opened, as a formula was written
+/// without a computed value: `calcPr` added in schema order when absent.
+async fn full_calc_on_load(book: &mut Book<'_>, wb_part: &str) {
+    let Some(xml) = book.part(wb_part).await else {
+        return;
+    };
+    let calc = tags(&xml).find(|t| t.kind != Kind::End && t.is("calcPr"));
+    let updated = match calc {
+        Some(tag) => {
+            if tag.attr("fullCalcOnLoad").as_deref() == Some("1") {
+                return;
+            }
+            [
+                &xml[..tag.start],
+                &retag(&tag, &[("fullCalcOnLoad", Some("1"))], tag.kind)[..],
+                &xml[tag.end..],
+            ]
+            .concat()
+        }
+        None => {
+            let anchor = tags(&xml).find(|t| {
+                t.kind != Kind::End
+                    && (t.is("oleSize") || t.is("customWorkbookViews") || t.is("pivotCaches"))
+            });
+            match anchor {
+                Some(tag) => {
+                    let prefix = String::from_utf8_lossy(tag.prefix()).into_owned();
+                    let entry = format!("<{prefix}calcPr fullCalcOnLoad=\"1\"/>");
+                    [&xml[..tag.start], entry.as_bytes(), &xml[tag.start..]].concat()
+                }
+                None => match before_end(&xml, "workbook", "calcPr", "fullCalcOnLoad=\"1\"") {
+                    Some(done) => done,
+                    None => return,
+                },
+            }
+        }
+    };
+    book.put(wb_part, updated);
 }
 
 /// The calculation chain dropped, as a formula it lists was overwritten;
@@ -1061,6 +1347,11 @@ fn strip(xml: &[u8], name: &str, hit: impl Fn(&xml::Tag<'_>) -> bool) -> Vec<u8>
 }
 
 async fn remove(book: &mut Book<'_>, doc: &Doc, goal: &Target, path: &str) -> Result<String, Fail> {
+    if let Target::Sheet(name) = goal {
+        let (_, entry) = resolve_sheet(doc, name, None)?;
+        workbook::remove(book, doc, entry).await?;
+        return Ok(format!("Removed {path}"));
+    }
     let Target::Comment(name, index) = goal else {
         return Err(Fail::of(format!("Unsupported path: {path}")));
     };
@@ -1207,9 +1498,40 @@ async fn run_item(
                 .map(Output::Text)
                 .map_err(fail)
         }
+        "add" => {
+            let Some(parent) = item
+                .field("parent")
+                .or_else(|| item.path.clone())
+                .filter(|p| !p.is_empty())
+            else {
+                return Err(("'add' command requires 'parent' field. Example: {\"command\": \"add\", \"parent\": \"/slide[1]\", \"type\": \"shape\", \"props\": {\"text\": \"Hello\"}}".to_string(), None));
+            };
+            let kind = item.field("type").unwrap_or_default();
+            if kind.is_empty() && item.field("from").is_none_or(|f| f.is_empty()) {
+                return Err(("'add' command requires 'type' or 'from' field. Example: {\"command\": \"add\", \"parent\": \"/\", \"type\": \"slide\"}".to_string(), None));
+            }
+            if !kind.eq_ignore_ascii_case("sheet") {
+                return Err((
+                    format!("add --type {kind} on .xlsx is not available yet"),
+                    None,
+                ));
+            }
+            let props = item.props.clone().unwrap_or_default();
+            let (at, unread) = workbook::add(book, &doc, &parent, &props)
+                .await
+                .map_err(fail)?;
+            let mut message = format!("Added {kind} at {at}");
+            if !unread.is_empty() {
+                message.push_str(&format!(
+                    "\nWARNING: UNSUPPORTED props: {}. Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.",
+                    unread.join(", ")
+                ));
+            }
+            Ok(Output::Text(message))
+        }
         v if VERBS.contains(&v) => Err((
             format!(
-                "Command '{}' is not supported here. Supported commands: meta, get, query, set, remove.",
+                "Command '{}' is not supported here. Supported commands: meta, get, query, set, add, remove.",
                 item.command
             ),
             None,

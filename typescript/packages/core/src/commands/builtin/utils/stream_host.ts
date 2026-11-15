@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { statEpoch } from '../../../utils/dates.ts'
+import { clockReply, statEpoch } from '../../../utils/dates.ts'
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
@@ -262,6 +262,8 @@ export class StreamHost {
         break
       case 'run':
         return this.run(request)
+      case 'clock':
+        return { reply: {}, data: clockReply() }
     }
     throw new Error(`unknown stream request: ${JSON.stringify(request.op)}`)
   }

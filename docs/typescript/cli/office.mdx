@@ -4,14 +4,14 @@ description: "Supported OfficeCLI commands for Excel workbooks, Word documents a
 icon: file-lines
 ---
 
-Create, read and edit `.xlsx` workbooks, and read `.docx` documents and
-`.pptx` decks, on any mount. Mirage implements the commands below with
+Create, read and edit `.xlsx` workbooks, `.docx` documents and `.pptx`
+decks on any mount. Mirage implements the commands below with
 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)'s paths, output and
 messages.
 
 ## Setup
 
-`office` has no account config. It reads and writes workbooks through
+`office` has no account config. It reads and writes files through
 existing mounts.
 
 ```typescript
@@ -35,7 +35,10 @@ This list is generated from Mirage's registered command tree.
 | `office get` | Get a document node by path |
 | `office query` | Query document elements with CSS-like selectors |
 | `office set` | Modify a document node's properties |
+| `office add` | Add a new element to the document |
 | `office remove` | Remove an element from the document |
+| `office move` | Move an element to a new position or parent |
+| `office swap` | Swap two elements in the document |
 | `office batch` | Execute multiple commands from a JSON array in a single pass |
 {/* END GENERATED CLI COMMANDS */}
 
@@ -59,8 +62,12 @@ the workbook's and each sheet's own properties.
 | Command | Props |
 | --- | --- |
 | `set` on a cell | `value`, `type` (`string` or `number`), `formula` |
-| `set` on a sheet | `hidden` |
-| `remove` | a comment |
+| `set` on a sheet | `name`, `hidden` |
+| `add --type sheet` | `name`, `position`, `hidden`, `tabColor` |
+| `remove` | a sheet or a comment |
+
+Renaming a sheet renames it in every formula, defined name, link and chart
+that points at it.
 
 ## Batch
 
@@ -120,10 +127,81 @@ layer each came from in `.src`. A `query` selector names an element such as
 `paragraph`, `run`, `table`, `cell`, `picture`, `style`, `slide` or `shape`,
 with the same predicates, `:contains(text)` and `:empty`.
 
+## Edit a document
+
+```bash
+office create /data/memo.docx
+office add /data/memo.docx /body --type paragraph --prop text="Quarterly review" --prop style=Heading1
+office add /data/memo.docx /body --type paragraph --prop text="Revenue grew." --prop bold=true
+office add /data/memo.docx /body --type paragraph --prop text="North led" --prop listStyle=bullet
+office add /data/memo.docx '/body/p[2]' --type hyperlink --prop url=https://example.com --prop text=details
+office add /data/memo.docx /body --type table --prop data="Region,Revenue;North,1250"
+office add /data/memo.docx '/body/tbl[1]' --type row --prop c1=South --prop c2=830
+office add /data/memo.docx /body --type picture --prop src=/data/chart.png --prop width=12cm --prop alt="Revenue by region"
+office set /data/memo.docx '/body/tbl[1]/tr[1]/tc[1]' --prop shading=FFC000
+office move /data/memo.docx '/body/p[2]' --index 0
+office swap /data/memo.docx '/body/p[1]' '/body/p[2]'
+office remove /data/memo.docx '/body/p[2]'
+```
+
+`add` makes a paragraph, a run or a hyperlink in a paragraph, a table, a
+row, a cell, a picture or a page, column or line break (`pagebreak`,
+`columnbreak`, `break`). A
+paragraph takes `text` (each `\n` starts another paragraph), `style`,
+`alignment`, spacing and indents, and the run props `bold`, `italic`,
+`underline`, `size`, `font`, `color`, `highlight` and the other toggles. A
+table takes `rows` and `cols`, or `data` with `;` between rows and `,`
+between cells; a row takes its cells' text as `c1`, `c2` and so on, and
+`height` and `header`; a cell takes `text`, `width`, `shading` and
+`gridSpan`. `set` changes the same props on a paragraph or run,
+and `text` and `shading` on a cell. A built-in style such as `Heading1`
+that the document lacks is added with Word's definition. `listStyle`
+(`bullet`, `numbered` or `none`) with `listLevel` and `start` puts a
+paragraph in a list, continuing the list just before it when that one is
+the same kind. A hyperlink takes `url` or `anchor`, `text` and the run
+props. A picture takes `src`, a file or a base64 `data:` URI, with `width`
+and `height`; a side left out follows the image's aspect, 6 inches wide by
+default. It also takes `alt`, `name` and `crop`, and `wrap` (`square`,
+`tight`, `through` or `topandbottom`) with `hposition`, `vposition`,
+`hrelative` and `vrelative` to float it. In a paragraph it is appended as a
+run; anywhere else it gets a paragraph of its own.
+
+## Edit a deck
+
+```bash
+office create /data/deck.pptx
+office add /data/deck.pptx / --type slide --prop layout=title --prop title=Results
+office add /data/deck.pptx '/slide[1]' --type textbox --prop text="Up 12%" --prop x=2cm --prop y=12cm --prop size=24
+office add /data/deck.pptx '/slide[1]' --type table --prop data="Q1,Q2;10,12"
+office set /data/deck.pptx '/slide[1]/shape[2]' --prop fill=FFC000 --prop bold=true
+office set /data/deck.pptx '/slide[1]/table[1]/tr[1]/tc[1]' --prop text=Quarter --prop bold=true
+office add /data/deck.pptx '/slide[1]/table[1]' --type row
+office add /data/deck.pptx '/slide[1]' --type picture --prop src=/data/logo.png --prop width=4cm --prop x=1cm --prop y=1cm
+office add /data/deck.pptx '/slide[1]' --type notes --prop text="Mention the Q2 launch"
+office add /data/deck.pptx / --type slide --prop layout="Title and Content" --prop title=Next --prop text="One\nTwo"
+office move /data/deck.pptx '/slide[2]' --index 0
+office remove /data/deck.pptx '/slide[2]'
+```
+
+`add` makes a slide from a layout, chosen by name, type or number, with its
+`title` and `text`; a text box with `text`, `x`, `y`, `width`, `height`,
+`fill` and the run props `size`, `bold`, `italic`, `underline`, `color` and
+`font`; a table of `rows` and `cols`, or `data`, and rows in it; a picture
+from `src` with `x`, `y`, `width`, `height`, `alt`, `name`, `crop`,
+`rotation`, `flipH`, `flipV` and `opacity`, centered and 6 inches wide at
+the image's aspect unless placed; or a slide's speaker notes with `text`. `set` changes the same props on a shape,
+`text`, the run props, `fill` and `alignment` on a table cell
+(`/slide[N]/table[K]/tr[R]/tc[C]`), `text` on `/slide[N]/notes`, and
+`hidden` and `notes` on a slide. A shape placed or moved prints its
+position, and a warning when another shape starts at the same spot.
+`move` and `swap` reorder slides, or the shapes of one slide.
+
 ## Differences from OfficeCLI
 
-- `create`, `set` and `remove` take `.xlsx` workbooks only; `.docx` and
-  `.pptx` files take `get`, `query` and `batch` items that read.
+- `add` makes the element types above; others, such as charts, comments and
+  headers, and `add --from` are not available yet. `set` takes the props
+  above.
+- A picture's `src` is a file or a `data:` URI; a URL is not fetched.
 - An equation's text is plain, not LaTeX, and a chart in a deck shows its
   frame and name but not its plot properties.
 - A Word `query` reads paragraphs, runs, tables, rows, cells, pictures,
@@ -135,11 +213,12 @@ with the same predicates, `:contains(text)` and `:empty`.
 - A formula is stored without a computed value, and Excel calculates it on
   open. A formula cell with no stored value shows `#OCLI_NOTEVAL!` and
   `evaluated=false`.
-- `create` writes a blank workbook with no document properties or theme.
 - `set` takes the props above; overwriting the first cell of a shared formula
   is refused.
 - `query` reads cells, rows, comments and sheets; charts, tables, pivot tables
   and other elements return no matches.
-- `batch` runs `get`, `query`, `set` and `remove` items.
+- `batch` runs `get`, `query`, `set`, `add`, `remove`, `move` and `swap`
+  items.
+- A save does not stamp the `OfficeCLI.LastModified` custom property.
 - Usage errors and `--help` use Mirage's wording. Messages that name the command
   say `office`.
