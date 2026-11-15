@@ -228,6 +228,58 @@ impl<'h> Pkg<'h> {
         self.set_override(name, None);
     }
 
+    /// `part` taken out with every part only it reaches, directly or
+    /// through parts it takes, as a removed slide takes its notes and media.
+    pub(super) fn drop_owned(&mut self, part: &str) {
+        let same = |a: &str, b: &str| key(a) == key(b);
+        let targets = |pkg: &Pkg<'_>, owner: &str| -> Vec<String> {
+            pkg.rels(owner)
+                .into_iter()
+                .filter(|r| !r.external)
+                .map(|r| resolve_target(owner, &r.target))
+                .filter(|t| pkg.has(t))
+                .collect()
+        };
+        let mut gone = vec![part.to_string()];
+        let mut at = 0;
+        while at < gone.len() {
+            let current = gone[at].clone();
+            at += 1;
+            for t in targets(self, &current) {
+                if !gone.iter().any(|g| same(g, &t)) {
+                    gone.push(t);
+                }
+            }
+        }
+        let mut queue: Vec<String> = self
+            .names
+            .iter()
+            .filter(|n| n.ends_with(".rels") && self.has(n))
+            .filter_map(|n| n.rsplit_once("/_rels/"))
+            .map(|(dir, file)| format!("{dir}/{}", file.trim_end_matches(".rels")))
+            .filter(|o| !gone.iter().any(|g| same(g, o)))
+            .collect();
+        let mut kept: Vec<String> = Vec::new();
+        while let Some(owner) = queue.pop() {
+            for t in targets(self, &owner) {
+                if same(&t, part) || kept.iter().any(|k| same(k, &t)) {
+                    continue;
+                }
+                if gone.iter().any(|g| same(g, &t)) {
+                    queue.push(t.clone());
+                }
+                kept.push(t);
+            }
+        }
+        for name in gone
+            .iter()
+            .enumerate()
+            .filter_map(|(i, g)| (i == 0 || !kept.iter().any(|k| same(k, g))).then_some(g.clone()))
+        {
+            self.drop_part(&name);
+        }
+    }
+
     /// A new part that is not XML, its extension given the content type
     /// `content_type` unless one is, written on save.
     pub(super) fn add_binary(&mut self, name: &str, data: Vec<u8>, content_type: &str) {
@@ -1453,27 +1505,38 @@ pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
                 .flatten();
             let done = if config.command == "set" {
                 kind.set(&mut pkg, &path, &props)
-                    .map(|(message, warnings)| {
-                        let after = snapshot(kind, &pkg, &path);
-                        (
-                            format!(
-                                "{message}{}",
-                                applied_suffix(&props, before.as_deref(), after.as_deref())
-                            ),
-                            warnings,
-                        )
-                    })
             } else {
                 kind.remove(&mut pkg, &path).map_err(SetFail::Fail)
             };
-            let (message, warnings) = match done {
-                Ok(d) => d,
+            let (message, warnings, left) = match done {
+                Ok((message, warnings)) => (message, warnings, None),
+                Err(SetFail::Partial {
+                    message,
+                    warnings,
+                    keys,
+                    element,
+                    valid,
+                }) => (message, warnings, Some((keys, element, valid))),
                 Err(SetFail::Fail(f)) => return out.fail(&f),
                 Err(SetFail::Unsupported {
                     keys,
                     element,
                     valid,
                 }) => return out.unsupported(&path, &keys, element, valid),
+            };
+            let message = if config.command == "set" {
+                let after = snapshot(kind, &pkg, &path);
+                let applied: Vec<(String, String)> = props
+                    .iter()
+                    .filter(|(k, _)| left.as_ref().is_none_or(|(keys, ..)| !keys.contains(k)))
+                    .cloned()
+                    .collect();
+                format!(
+                    "{message}{}",
+                    applied_suffix(&applied, before.as_deref(), after.as_deref())
+                )
+            } else {
+                message
             };
             for w in &warnings {
                 host.warn(format!("{w}\n").as_bytes());
@@ -1491,16 +1554,22 @@ pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
                 }
             }
             let (spatial, advice) = placement(kind, &view, &path);
+            let message = match &spatial {
+                Some(line) => format!("{message}\n  {line}"),
+                None => message,
+            };
+            if let Some((keys, element, valid)) = left {
+                return out.partly(&message, &keys, element, valid);
+            }
             match spatial {
-                Some(line) if out.json => out.done(&format!("{message}\n  {line}")),
-                Some(line) => {
-                    host.print(format!("{message}\n  {line}\n").as_bytes());
+                Some(_) if !out.json => {
+                    host.print(format!("{message}\n").as_bytes());
                     for a in &advice {
                         host.warn(format!("  WARNING: {}\n", a.message).as_bytes());
                     }
                     0
                 }
-                None => out.done(&message),
+                _ => out.done(&message),
             }
         }
         "batch" => run_batch(&out, config, kind).await,
@@ -1645,6 +1714,19 @@ fn run_item(
                 Ok((message, warnings)) => {
                     notes.extend(warnings);
                     Ok(Output::Text(message))
+                }
+                Err(SetFail::Partial {
+                    message,
+                    warnings,
+                    keys,
+                    element,
+                    valid,
+                }) => {
+                    notes.extend(warnings);
+                    Ok(Output::Text(format!(
+                        "{message}\n{}",
+                        unsupported_text(&keys, element, valid)
+                    )))
                 }
                 Err(SetFail::Fail(f)) => Err(fail(f)),
                 Err(SetFail::Unsupported {

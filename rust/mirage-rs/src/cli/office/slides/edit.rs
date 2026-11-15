@@ -91,7 +91,7 @@ fn rgb(value: &str) -> Result<String, Fail> {
     let v = value.trim().trim_start_matches('#');
     let v = if v.len() == 3 {
         v.chars().flat_map(|c| [c, c]).collect()
-    } else if v.len() == 8 {
+    } else if v.len() == 8 && v.is_ascii() {
         v[2..].to_string()
     } else {
         v.to_string()
@@ -132,6 +132,130 @@ fn paragraphs_xml(text: &str, rpr: &str) -> String {
             }
         })
         .collect()
+}
+
+/// The order `a:rPr` keeps its children in.
+const RPR_KIDS: &[&str] = &[
+    "ln",
+    "noFill",
+    "solidFill",
+    "gradFill",
+    "blipFill",
+    "pattFill",
+    "grpFill",
+    "effectLst",
+    "effectDag",
+    "highlight",
+    "uLnTx",
+    "uLn",
+    "uFillTx",
+    "uFill",
+    "latin",
+    "ea",
+    "cs",
+    "sym",
+    "hlinkClick",
+    "hlinkMouseOver",
+    "rtl",
+    "extLst",
+];
+
+const FILLS: &[&str] = &[
+    "noFill",
+    "solidFill",
+    "gradFill",
+    "blipFill",
+    "pattFill",
+    "grpFill",
+];
+
+/// The run properties `rpr` written onto the run's `a:rPr` `old`, keeping
+/// every property `rpr` does not name.
+fn merge_rpr(t: &mut Tree, old: Id, rpr: &str) -> Result<(), Fail> {
+    let frag = parse(&rpr.replacen("<a:rPr", &format!("<a:rPr xmlns:a=\"{A}\""), 1))?;
+    let root = frag.root();
+    for a in root.attrs() {
+        let kept = a.name == "lang" && at(t, old).attr("lang").is_some();
+        if a.ns.is_empty() && !kept {
+            set_attr(t, old, &a.name, &a.value);
+        }
+    }
+    for kid in root.elements() {
+        let name = kid.name();
+        let clash: Vec<Id> = at(t, old)
+            .elements()
+            .filter(|e| e.name() == name || (FILLS.contains(&name) && FILLS.contains(&e.name())))
+            .map(|e| e.id)
+            .collect();
+        for c in clash {
+            t.detach(c);
+        }
+        let rank = |n: &str| {
+            RPR_KIDS
+                .iter()
+                .position(|k| *k == n)
+                .unwrap_or(RPR_KIDS.len())
+        };
+        let pos = t.nodes[old]
+            .kids
+            .iter()
+            .position(|k| matches!(k, Kid::El(c) if rank(&t.nodes[*c].name) > rank(name)));
+        let copy = t.adopt(kid);
+        t.nodes[copy].decls.clear();
+        insert_at(t, old, pos, copy);
+    }
+    Ok(())
+}
+
+/// The run properties `rpr` applied to every run under `body`, merged into
+/// each run's own.
+fn apply_rpr(t: &mut Tree, body: Id, rpr: &str) -> Result<(), Fail> {
+    let runs: Vec<Id> = at(t, body)
+        .descendants_named(A, "r")
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    for r in runs {
+        let old = match at(t, r).child(A, "rPr").map(|e| e.id) {
+            Some(old) => old,
+            None => {
+                let fresh = t.create(A, "rPr", "a");
+                insert_at(t, r, Some(0), fresh);
+                fresh
+            }
+        };
+        merge_rpr(t, old, rpr)?;
+    }
+    Ok(())
+}
+
+/// The paragraphs under `body` replaced by `text`'s lines, each keeping the
+/// first paragraph's `a:pPr` and the first run's `a:rPr`.
+fn replace_text(t: &mut Tree, body: Id, text: &str) -> Result<(), Fail> {
+    let first = |name: &str| {
+        at(t, body)
+            .descendants_named(A, name)
+            .first()
+            .map(|e| tree::outer_xml(*e))
+    };
+    let ppr = first("pPr");
+    let rpr = first("rPr").unwrap_or_else(|| "<a:rPr lang=\"en-US\"/>".to_string());
+    let paras: Vec<Id> = at(t, body).children(A, "p").iter().map(|e| e.id).collect();
+    for p in paras {
+        t.detach(p);
+    }
+    let lines = paragraphs_xml(text, &rpr);
+    let lines = match &ppr {
+        Some(ppr) => lines.replace("<a:p>", &format!("<a:p>{ppr}")),
+        None => lines,
+    };
+    let frag = parse(&format!("<a:txBody xmlns:a=\"{A}\">{lines}</a:txBody>"))?;
+    for p in frag.root().children(A, "p") {
+        let copy = t.adopt(p);
+        t.nodes[copy].decls.clear();
+        t.append(body, copy);
+    }
+    Ok(())
 }
 
 /// The run properties `size`, `bold`, `italic`, `color`, `font` and
@@ -437,7 +561,8 @@ fn slide_number(path: &str) -> Option<(usize, &str)> {
 }
 
 /// The element of a slide's shape tree a path tail names: `shape[K]`,
-/// `shape[@id=X]`, `table[K]`, `table[@id=X]` or `placeholder[T]`.
+/// `shape[@id=X]`, `picture[K]`, `table[K]`, `table[@id=X]` or
+/// `placeholder[T]`.
 fn shape_in(t: &Tree, tail: &str) -> Result<Id, Fail> {
     let root = t.root();
     let tree = root
@@ -453,6 +578,7 @@ fn shape_in(t: &Tree, tail: &str) -> Result<Id, Fail> {
         .unwrap_or((seg, ""));
     let shapes: Vec<tree::E<'_>> = match kind.to_ascii_lowercase().as_str() {
         "shape" => tree.children(P, "sp"),
+        "picture" => tree.children(P, "pic"),
         "table" => tree
             .children(P, "graphicFrame")
             .into_iter()
@@ -595,11 +721,11 @@ pub(in super::super) fn add(
                 )));
             };
             let part = slide_at(pkg, n)?;
+            let _ = tail;
             if lower == "table" {
-                add_table(pkg, &part, n, props)
+                add_table(pkg, &part, n, place, props)
             } else {
-                let _ = tail;
-                add_text_box(pkg, &part, n, props)
+                add_text_box(pkg, &part, n, place, props)
             }
         }
         t if TYPES.contains(&t) => Err(fail(format!(
@@ -622,6 +748,17 @@ fn add_slide(
             "Invalid parent '{parent}' for --type slide: a slide can only be added at '/' (slides hang off the presentation root, not under another element)."
         )));
     }
+    let anchor = |path: &str| -> Result<i64, Fail> {
+        match slide_number(path).filter(|(_, t)| t.is_empty()) {
+            Some((n, _)) => slide_at(pkg, n).map(|_| n as i64),
+            None => Err(fail(format!("Anchor element not found: {path}"))),
+        }
+    };
+    let index = match (place.after, place.before) {
+        (Some(a), _) => Some(anchor(a)?),
+        (_, Some(b)) => Some(anchor(b)? - 1),
+        _ => place.index,
+    };
     let mut took = Vec::new();
     let layout_hint = get(props, &["layout"]).map(|(k, v)| {
         took.push(k.clone());
@@ -713,8 +850,7 @@ fn add_slide(
     let sid = t.create(P, "sldId", "");
     set_attr(t, sid, "id", &new_id.to_string());
     set_attr_ns(t, sid, R, "id", &rid);
-    let at = place
-        .index
+    let at = index
         .filter(|i| *i >= 0 && (*i as usize) < ids.len())
         .and_then(|i| {
             t.nodes[list]
@@ -739,6 +875,7 @@ fn add_text_box(
     pkg: &mut Pkg<'_>,
     part: &str,
     n: usize,
+    place: &Place<'_>,
     props: &[(String, String)],
 ) -> Result<Added, Fail> {
     let id = next_shape_id(pkg);
@@ -793,7 +930,7 @@ fn add_text_box(
         "<p:sp xmlns:a=\"{A}\" xmlns:p=\"{P}\"><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>{fill}</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/>{body}</p:txBody></p:sp>",
         escape(&name)
     );
-    append_shape(pkg, part, &xml)?;
+    insert_shape(pkg, part, &xml, place)?;
     Ok((
         format!("/slide[{n}]/shape[@id={id}]"),
         unread(props, &took),
@@ -801,8 +938,60 @@ fn add_text_box(
     ))
 }
 
-/// `xml`, one shape element, appended to the slide's shape tree.
-fn append_shape(pkg: &mut Pkg<'_>, part: &str, xml: &str) -> Result<(), Fail> {
+/// The shape-tree element `--after` or `--before` names on slide `part`,
+/// and whether the new shape goes after it.
+fn shape_anchor(pkg: &Pkg<'_>, part: &str, place: &Place<'_>) -> Result<Option<(Id, bool)>, Fail> {
+    let Some((path, after)) = place
+        .after
+        .map(|a| (a, true))
+        .or(place.before.map(|b| (b, false)))
+    else {
+        return Ok(None);
+    };
+    match locate(pkg, path)? {
+        (p, Some(el)) if p == part => Ok(Some((el, after))),
+        _ => Err(fail(format!("Anchor element not found: {path}"))),
+    }
+}
+
+/// Where in the shape tree a new shape goes: beside its anchor, before the
+/// `index`th shape, or last.
+fn shape_slot(
+    t: &Tree,
+    tree_id: Id,
+    index: Option<i64>,
+    anchored: Option<(Id, bool)>,
+) -> Option<usize> {
+    let kids = &t.nodes[tree_id].kids;
+    if let Some((aid, after)) = anchored {
+        let mut top = aid;
+        while t.nodes[top].parent != Some(tree_id) {
+            top = t.nodes[top].parent?;
+        }
+        return kids
+            .iter()
+            .position(|k| matches!(k, Kid::El(c) if *c == top))
+            .map(|p| if after { p + 1 } else { p });
+    }
+    let content: Vec<usize> = kids
+        .iter()
+        .enumerate()
+        .filter_map(|(i, k)| match k {
+            Kid::El(c) if !matches!(t.nodes[*c].name.as_str(), "nvGrpSpPr" | "grpSpPr") => Some(i),
+            _ => None,
+        })
+        .collect();
+    match index {
+        Some(i) if i >= 0 && (i as usize) < content.len() => Some(content[i as usize]),
+        Some(_) => content.last().map(|l| l + 1),
+        None => None,
+    }
+}
+
+/// `xml`, one shape element, put in the slide's shape tree where `place`
+/// says.
+fn insert_shape(pkg: &mut Pkg<'_>, part: &str, xml: &str, place: &Place<'_>) -> Result<(), Fail> {
+    let anchored = shape_anchor(pkg, part, place)?;
     let fragment = parse(xml)?;
     let t = pkg
         .xml_mut(part)
@@ -815,7 +1004,8 @@ fn append_shape(pkg: &mut Pkg<'_>, part: &str, xml: &str) -> Result<(), Fail> {
         .ok_or_else(|| fail("Corrupt file: slide data missing".to_string()))?;
     let copy = t.adopt(fragment.root());
     t.nodes[copy].decls.clear();
-    t.append(tree_id, copy);
+    let pos = shape_slot(t, tree_id, place.index, anchored);
+    insert_at(t, tree_id, pos, copy);
     Ok(())
 }
 
@@ -1042,35 +1232,7 @@ fn add_picture(
         "<p:pic xmlns:a=\"{A}\" xmlns:p=\"{P}\" xmlns:r=\"{R}\"><p:nvPicPr><p:cNvPr id=\"{id}\" name=\"{}\"{descr}/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill>{blip}{src_rect}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm{xfrm}><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>",
         escape(&name)
     );
-    let fragment = parse(&xml)?;
-    let t = pkg
-        .xml_mut(&part)
-        .ok_or_else(|| fail("Corrupt file: slide data missing".to_string()))?;
-    let tree_id = t
-        .root()
-        .child(P, "cSld")
-        .and_then(|c| c.child(P, "spTree"))
-        .map(|e| e.id)
-        .ok_or_else(|| fail("Corrupt file: slide data missing".to_string()))?;
-    let copy = t.adopt(fragment.root());
-    t.nodes[copy].decls.clear();
-    let content: Vec<usize> = t.nodes[tree_id]
-        .kids
-        .iter()
-        .enumerate()
-        .filter_map(|(i, k)| match k {
-            Kid::El(c) if !(t.nodes[*c].name == "nvGrpSpPr" || t.nodes[*c].name == "grpSpPr") => {
-                Some(i)
-            }
-            _ => None,
-        })
-        .collect();
-    let pos = match place.index {
-        Some(i) if i >= 0 && (i as usize) < content.len() => Some(content[i as usize]),
-        Some(_) => content.last().map(|l| l + 1),
-        None => None,
-    };
-    insert_at(t, tree_id, pos, copy);
+    insert_shape(pkg, &part, &xml, place)?;
     Ok((
         format!("/slide[{n}]/picture[@id={id}]"),
         unread(props, &took),
@@ -1082,6 +1244,7 @@ fn add_table(
     pkg: &mut Pkg<'_>,
     part: &str,
     n: usize,
+    place: &Place<'_>,
     props: &[(String, String)],
 ) -> Result<Added, Fail> {
     let id = next_shape_id(pkg);
@@ -1166,7 +1329,7 @@ fn add_table(
         "<p:graphicFrame xmlns:a=\"{A}\" xmlns:p=\"{P}\"><p:nvGraphicFramePr><p:cNvPr id=\"{id}\" name=\"{}\"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></p:xfrm><a:graphic><a:graphicData uri=\"{TABLE_URI}\"><a:tbl><a:tblPr firstRow=\"1\" bandRow=\"1\"/><a:tblGrid>{grid}</a:tblGrid>{body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
         escape(&name)
     );
-    append_shape(pkg, part, &xml)?;
+    insert_shape(pkg, part, &xml, place)?;
     Ok((
         format!("/slide[{n}]/table[@id={id}]"),
         unread(props, &took),
@@ -1332,45 +1495,12 @@ pub(in super::super) fn set(
         }
     }
     let body = at(t, sp).child(P, "txBody").map(|e| e.id);
-    if let (Some(text), Some(body)) = (&text, body) {
-        let keep = at(t, body)
-            .descendants_named(A, "rPr")
-            .first()
-            .map(|e| tree::outer_xml(*e));
-        let paras: Vec<Id> = at(t, body).children(A, "p").iter().map(|e| e.id).collect();
-        for p in paras {
-            t.detach(p);
+    if let Some(body) = body {
+        if let Some(text) = &text {
+            replace_text(t, body, text)?;
         }
-        let run = if has_run_props {
-            rpr.clone()
-        } else {
-            keep.unwrap_or_else(|| "<a:rPr lang=\"en-US\"/>".to_string())
-        };
-        let frag = parse(&format!(
-            "<a:txBody xmlns:a=\"{A}\">{}</a:txBody>",
-            paragraphs_xml(text, &run)
-        ))?;
-        for p in frag.root().children(A, "p") {
-            let copy = t.adopt(p);
-            t.nodes[copy].decls.clear();
-            t.append(body, copy);
-        }
-    } else if has_run_props {
-        if let Some(body) = body {
-            let runs: Vec<Id> = at(t, body)
-                .descendants_named(A, "r")
-                .iter()
-                .map(|e| e.id)
-                .collect();
-            let frag = parse(&rpr.replacen("<a:rPr", &format!("<a:rPr xmlns:a=\"{A}\""), 1))?;
-            for r in runs {
-                if let Some(old) = at(t, r).child(A, "rPr").map(|e| e.id) {
-                    t.detach(old);
-                }
-                let copy = t.adopt(frag.root());
-                t.nodes[copy].decls.clear();
-                insert_at(t, r, Some(0), copy);
-            }
+        if has_run_props {
+            apply_rpr(t, body, &rpr)?;
         }
     }
     finish(path, props, &took, "shape")
@@ -1754,34 +1884,10 @@ fn set_cell(
         }
     };
     if let Some(text) = &text {
-        let paras: Vec<Id> = at(t, body).children(A, "p").iter().map(|e| e.id).collect();
-        for p in paras {
-            t.detach(p);
-        }
-        let frag = parse(&format!(
-            "<a:txBody xmlns:a=\"{A}\">{}</a:txBody>",
-            paragraphs_xml(text, &rpr)
-        ))?;
-        for p in frag.root().children(A, "p") {
-            let copy = t.adopt(p);
-            t.nodes[copy].decls.clear();
-            t.append(body, copy);
-        }
-    } else if has_run_props {
-        let runs: Vec<Id> = at(t, body)
-            .descendants_named(A, "r")
-            .iter()
-            .map(|e| e.id)
-            .collect();
-        let frag = parse(&rpr.replacen("<a:rPr", &format!("<a:rPr xmlns:a=\"{A}\""), 1))?;
-        for r in runs {
-            if let Some(old) = at(t, r).child(A, "rPr").map(|e| e.id) {
-                t.detach(old);
-            }
-            let copy = t.adopt(frag.root());
-            t.nodes[copy].decls.clear();
-            insert_at(t, r, Some(0), copy);
-        }
+        replace_text(t, body, text)?;
+    }
+    if has_run_props {
+        apply_rpr(t, body, &rpr)?;
     }
     if let Some(algn) = alignment {
         let paras: Vec<Id> = at(t, body).children(A, "p").iter().map(|e| e.id).collect();
@@ -1917,19 +2023,16 @@ fn finish(
     took: &[String],
     element: &'static str,
 ) -> Result<(String, Vec<String>), SetFail> {
-    let keys = unread(props, took);
-    if !keys.is_empty() && took.is_empty() {
-        return Err(SetFail::Unsupported {
-            keys,
-            element,
-            valid: &[
-                "text", "fill", "x", "y", "width", "height", "size", "bold", "italic", "color",
-                "font",
-            ],
-        });
-    }
-    let shown: Vec<String> = props.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    Ok((format!("Updated {path}: {}", shown.join(", ")), Vec::new()))
+    super::super::partial(
+        path,
+        props,
+        took,
+        Vec::new(),
+        element,
+        &[
+            "text", "fill", "x", "y", "width", "height", "size", "bold", "italic", "color", "font",
+        ],
+    )
 }
 
 /// The `sldIdLst` entries of the presentation, in order.
@@ -1999,7 +2102,7 @@ pub(in super::super) fn remove(
         }
     }
     pkg.drop_rel(&main, &rid);
-    pkg.drop_part(&part);
+    pkg.drop_owned(&part);
     Ok((format!("Removed {path}"), Vec::new()))
 }
 

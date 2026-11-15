@@ -1030,3 +1030,320 @@ fn a_document_takes_inline_and_floating_pictures() {
         "Error: Invalid 'width' value: '0'. Picture width must be > 0 (OOXML ST_PositiveCoordinate).\n"
     );
 }
+
+/// Member `name` of the zip `archive` among `host`'s files, or None.
+fn member(host: &mut crate::host::Host, archive: &str, name: &str) -> Option<String> {
+    let config = serde_json::json!({"archive": archive, "base": "", "p": true, "members": [name]});
+    let mut stream = crate::open("unzip", config.to_string().as_bytes()).expect("opens");
+    let status = host.drive(stream.as_mut());
+    host.err.clear();
+    let out = String::from_utf8_lossy(&std::mem::take(&mut host.out)).into_owned();
+    (status == 0).then_some(out)
+}
+
+#[test]
+fn a_rename_touches_only_whole_sheet_references() {
+    use super::workbook::rename_in_formula;
+    assert_eq!(
+        rename_in_formula("OtherData!A1+Data!A1+'Data'!B1+data!C1", "Data", "Summary").as_deref(),
+        Some("OtherData!A1+Summary!A1+Summary!B1+Summary!C1")
+    );
+    assert_eq!(
+        rename_in_formula("SUM(Data!A1:A3)&\"Data!\"&[1]Data!A1", "Data", "My Data").as_deref(),
+        Some("SUM('My Data'!A1:A3)&\"Data!\"&[1]Data!A1")
+    );
+    assert_eq!(
+        rename_in_formula("'Bob''s'!A1+'X Data'!A1", "Bob's", "Bob").as_deref(),
+        Some("Bob!A1+'X Data'!A1")
+    );
+    assert_eq!(rename_in_formula("Data1!A1+Data.x!B2", "Data", "S"), None);
+}
+
+#[test]
+fn a_sheet_renamed_and_hidden_at_once_hides_and_one_visible_sheet_stays() {
+    let mut host = crate::host::Host::default();
+    cmd(
+        &mut host,
+        "b.xlsx",
+        serde_json::json!({"command": "create"}),
+    );
+    for name in ["Data", "Other"] {
+        let add = serde_json::json!({"command": "add", "path": "/", "type": "sheet", "props": [format!("name={name}")]});
+        cmd(&mut host, "b.xlsx", add);
+    }
+    let both = serde_json::json!({"command": "set", "path": "/Data", "props": ["name=Totals", "hidden=true"]});
+    assert_eq!(cmd(&mut host, "b.xlsx", both).2, 0);
+    let workbook = member(&mut host, "b.xlsx", "xl/workbook.xml").unwrap();
+    assert!(
+        workbook.contains(r#"name="Totals""#) && workbook.contains(r#"state="hidden""#),
+        "{workbook}"
+    );
+    let hide = serde_json::json!({"command": "set", "path": "/Other", "props": ["hidden=true"]});
+    assert_eq!(cmd(&mut host, "b.xlsx", hide).2, 0);
+    let remove = serde_json::json!({"command": "remove", "path": "/Sheet1"});
+    assert_eq!(
+        cmd(&mut host, "b.xlsx", remove),
+        (
+            String::new(),
+            "Error: Cannot remove sheet 'Sheet1': a workbook must keep at least one visible sheet, or Excel refuses to open the file. Unhide another sheet first.\n".to_string(),
+            1
+        )
+    );
+}
+
+#[test]
+fn a_removed_sheet_keeps_what_another_sheet_still_reaches() {
+    const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let rels = |target: &str, kind: &str| {
+        format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/{kind}" Target="{target}"/></Relationships>"#
+        )
+        .into_bytes()
+    };
+    let sheet = format!(
+        r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{REL}"><sheetData/><drawing r:id="rId1"/></worksheet>"#
+    )
+    .into_bytes();
+    let mut parts: Vec<(&str, Vec<u8>)> = super::blank::workbook_parts("2026-01-01T00:00:00Z")
+        .into_iter()
+        .map(|(name, data)| {
+            let text = String::from_utf8(data).unwrap();
+            let text = match name {
+                "xl/workbook.xml" => text.replace(
+                    "</sheets>",
+                    r#"<sheet name="A" sheetId="2" r:id="rId8"/><sheet name="B" sheetId="3" r:id="rId9"/></sheets>"#,
+                ),
+                "xl/_rels/workbook.xml.rels" => text.replace(
+                    "</Relationships>",
+                    &format!(r#"<Relationship Id="rId8" Type="{REL}/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId9" Type="{REL}/worksheet" Target="worksheets/sheet3.xml"/></Relationships>"#),
+                ),
+                "[Content_Types].xml" => text.replace(
+                    "</Types>",
+                    r#"<Default Extension="png" ContentType="image/png"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>"#,
+                ),
+                _ => text,
+            };
+            (name, text.into_bytes())
+        })
+        .collect();
+    parts.push(("xl/worksheets/sheet2.xml", sheet.clone()));
+    parts.push(("xl/worksheets/sheet3.xml", sheet));
+    parts.push((
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        rels("../drawings/drawing1.xml", "drawing"),
+    ));
+    parts.push((
+        "xl/worksheets/_rels/sheet3.xml.rels",
+        rels("../drawings/drawing1.xml", "drawing"),
+    ));
+    parts.push((
+        "xl/drawings/drawing1.xml",
+        br#"<?xml version="1.0"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>"#.to_vec(),
+    ));
+    parts.push((
+        "xl/drawings/_rels/drawing1.xml.rels",
+        rels("../media/image1.png", "image"),
+    ));
+    parts.push(("xl/media/image1.png", DOT.to_vec()));
+    let mut host = crate::host::Host::default();
+    host.files
+        .insert("w.xlsx".to_string(), super::book::package(&parts));
+    let remove = serde_json::json!({"command": "remove", "path": "/A"});
+    assert_eq!(cmd(&mut host, "w.xlsx", remove).0, "Removed /A\n");
+    assert!(member(&mut host, "w.xlsx", "xl/worksheets/sheet2.xml").is_none());
+    assert!(member(&mut host, "w.xlsx", "xl/drawings/drawing1.xml").is_some());
+    assert!(member(&mut host, "w.xlsx", "xl/media/image1.png").is_some());
+}
+
+#[test]
+fn word_moves_and_swaps_refuse_what_would_nest_or_cross() {
+    let mut host = crate::host::Host::default();
+    cmd(
+        &mut host,
+        "d.docx",
+        serde_json::json!({"command": "create"}),
+    );
+    for text in ["One", "Two"] {
+        let add = serde_json::json!({"command": "add", "path": "/body", "type": "paragraph", "props": [format!("text={text}")]});
+        cmd(&mut host, "d.docx", add);
+    }
+    let table = serde_json::json!({"command": "add", "path": "/body", "type": "table", "props": ["rows=2", "cols=2"]});
+    cmd(&mut host, "d.docx", table);
+    let refused = [
+        (
+            serde_json::json!({"command": "move", "path": "/body/p[1]", "to": "/body/p[2]"}),
+            "Error: Cannot move a paragraph into another paragraph (would create invalid <w:p><w:p>). To place after a paragraph, use `--after <path>`; to reorder within /body, omit --to.\n",
+        ),
+        (
+            serde_json::json!({"command": "move", "path": "/body/tbl[1]", "to": "/body/tbl[1]/tr[1]"}),
+            "Error: Cannot move '/body/tbl[1]' into one of its own descendants ('/body/tbl[1]/tr[1]').\n",
+        ),
+        (
+            serde_json::json!({"command": "swap", "path": "/body/tbl[1]", "path2": "/body/tbl[1]/tr[1]"}),
+            "Error: Cannot swap elements with different parents\n",
+        ),
+        (
+            serde_json::json!({"command": "set", "path": "/body/p[1]", "props": ["size=中"]}),
+            "Error: Invalid font size: '中'. Expected a finite number (e.g., '12', '10.5', '14pt').\n",
+        ),
+    ];
+    for (config, error) in refused {
+        assert_eq!(cmd(&mut host, "d.docx", config).1, error);
+    }
+    let still = serde_json::json!({"command": "move", "path": "/body/p[1]", "after": "/body/p[1]"});
+    assert_eq!(cmd(&mut host, "d.docx", still).0, "Moved to /body/p[1]\n");
+}
+
+#[test]
+fn word_adds_keep_order_lists_and_formatting_where_they_land() {
+    let mut host = crate::host::Host::default();
+    cmd(
+        &mut host,
+        "d.docx",
+        serde_json::json!({"command": "create"}),
+    );
+    let add = |props: Vec<&str>, index: Option<i64>| {
+        let mut config = serde_json::json!({"command": "add", "path": "/body", "type": "paragraph", "props": props});
+        if let Some(i) = index {
+            config["index"] = serde_json::json!(i);
+        }
+        config
+    };
+    cmd(&mut host, "d.docx", add(vec!["text=a\\nb"], None));
+    for (text, list) in [("A1", true), ("Gap", false), ("B1", true)] {
+        let mut props = vec![format!("text={text}")];
+        if list {
+            props.push("listStyle=numbered".to_string());
+        }
+        cmd(
+            &mut host,
+            "d.docx",
+            add(props.iter().map(String::as_str).collect(), None),
+        );
+    }
+    cmd(
+        &mut host,
+        "d.docx",
+        add(vec!["text=A2", "listStyle=numbered"], Some(3)),
+    );
+    let link = serde_json::json!({"command": "add", "path": "/body/p[1]", "type": "hyperlink", "props": ["url=https://example.com", "text=link"]});
+    cmd(&mut host, "d.docx", link);
+    let bold = serde_json::json!({"command": "set", "path": "/body/p[1]", "props": ["bold=true", "italic=false"]});
+    assert_eq!(cmd(&mut host, "d.docx", bold).2, 0);
+    let doc = member(&mut host, "d.docx", "word/document.xml").unwrap();
+    let body = doc.split("<w:body>").nth(1).unwrap();
+    let texts: Vec<&str> = body
+        .split("<w:t xml:space=\"preserve\">")
+        .skip(1)
+        .filter_map(|t| t.split('<').next())
+        .collect();
+    assert_eq!(texts, ["a", "link", "b", "A1", "A2", "Gap", "B1"]);
+    assert!(
+        body.trim_end()
+            .ends_with("</w:sectPr></w:body></w:document>"),
+        "{body}"
+    );
+    let nums: Vec<&str> = body
+        .split("<w:numId w:val=\"")
+        .skip(1)
+        .filter_map(|t| t.split('"').next())
+        .collect();
+    assert_eq!(nums, ["1", "1", "2"], "A2 joins A1's list, not B1's");
+    let link_run = body.split("<w:hyperlink").nth(1).unwrap();
+    assert!(
+        link_run.contains("<w:b/>") && link_run.contains("<w:i w:val=\"false\"/>"),
+        "{link_run}"
+    );
+    let partial = serde_json::json!({"command": "set", "path": "/body/p[1]", "props": ["bold=true", "bogus=1"]});
+    assert_eq!(
+        cmd(&mut host, "d.docx", partial),
+        (
+            "Updated /body/p[1]: bold=true\n".to_string(),
+            "UNSUPPORTED props: bogus (valid paragraph props: text, style, alignment, bold, italic, font, size, color, spaceBefore, spaceAfter, spaceBeforeLines, spaceAfterLines, lineSpacing, indent, liststyle, formula, direction, bidi). Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.\n".to_string(),
+            2
+        )
+    );
+}
+
+#[test]
+fn deck_edits_keep_formatting_place_shapes_and_drop_what_a_slide_owned() {
+    let mut host = crate::host::Host::default();
+    host.files.insert("dot.png".to_string(), DOT.to_vec());
+    cmd(
+        &mut host,
+        "s.pptx",
+        serde_json::json!({"command": "create"}),
+    );
+    let slide = serde_json::json!({"command": "add", "path": "/", "type": "slide"});
+    cmd(&mut host, "s.pptx", slide.clone());
+    let boxed = serde_json::json!({"command": "add", "path": "/slide[1]", "type": "textbox", "props": ["text=Hi", "size=24", "color=FF0000", "bold=true"]});
+    cmd(&mut host, "s.pptx", boxed);
+    let italic = serde_json::json!({"command": "set", "path": "/slide[1]/shape[1]", "props": ["italic=true"]});
+    assert_eq!(cmd(&mut host, "s.pptx", italic).2, 0);
+    let first = serde_json::json!({"command": "add", "path": "/slide[1]", "type": "textbox", "props": ["text=Zero"], "index": 0});
+    cmd(&mut host, "s.pptx", first);
+    let get = serde_json::json!({"command": "get", "path": "/slide[1]", "depth": 1});
+    let out = cmd(&mut host, "s.pptx", get).0;
+    let zero = out.find("\"Zero\"").unwrap();
+    let hi = out.find("\"Hi\"").unwrap();
+    assert!(zero < hi, "{out}");
+    assert!(
+        out.contains("size=24pt bold=true italic=true color=#FF0000"),
+        "{out}"
+    );
+    let before = serde_json::json!({"command": "add", "path": "/", "type": "slide", "props": ["title=Before"], "before": "/slide[1]"});
+    assert_eq!(
+        cmd(&mut host, "s.pptx", before).0,
+        "Added slide at /slide[1]\n"
+    );
+    let picture = serde_json::json!({"command": "add", "path": "/slide[2]", "type": "picture", "props": ["src=dot.png"]});
+    cmd(&mut host, "s.pptx", picture);
+    let moved =
+        serde_json::json!({"command": "set", "path": "/slide[2]/picture[1]", "props": ["x=1cm"]});
+    assert_eq!(cmd(&mut host, "s.pptx", moved).2, 0);
+    let notes =
+        serde_json::json!({"command": "set", "path": "/slide[2]", "props": ["notes=Secret"]});
+    cmd(&mut host, "s.pptx", notes);
+    let partial = serde_json::json!({"command": "set", "path": "/slide[2]/shape[1]", "props": ["text=Hello", "bogus=1"]});
+    let (out, err, status) = cmd(&mut host, "s.pptx", partial);
+    assert_eq!(
+        (out.as_str(), status),
+        ("Updated /slide[2]/shape[1]: text=Hello\n", 2)
+    );
+    assert!(
+        err.starts_with("UNSUPPORTED props: bogus (valid shape props: "),
+        "{err}"
+    );
+    let remove = serde_json::json!({"command": "remove", "path": "/slide[2]"});
+    assert_eq!(cmd(&mut host, "s.pptx", remove).0, "Removed /slide[2]\n");
+    let types = member(&mut host, "s.pptx", "[[]Content_Types].xml").unwrap();
+    assert!(!types.contains("notesSlide+xml"), "{types}");
+    assert!(member(&mut host, "s.pptx", "ppt/media/image.png").is_none());
+    assert!(member(&mut host, "s.pptx", "ppt/slideLayouts/slideLayout1.xml").is_some());
+}
+
+#[test]
+fn a_tiff_frames_at_its_aspect() {
+    let mut tiff = b"II*\0\x08\0\0\0\x02\0".to_vec();
+    tiff.extend_from_slice(&[0x00, 0x01, 3, 0, 1, 0, 0, 0, 40, 0, 0, 0]);
+    tiff.extend_from_slice(&[0x01, 0x01, 4, 0, 1, 0, 0, 0, 20, 0, 0, 0]);
+    tiff.extend_from_slice(&[0, 0, 0, 0]);
+    let mut host = crate::host::Host::default();
+    host.files.insert("dot.tif".to_string(), tiff);
+    cmd(
+        &mut host,
+        "p.pptx",
+        serde_json::json!({"command": "create"}),
+    );
+    cmd(
+        &mut host,
+        "p.pptx",
+        serde_json::json!({"command": "add", "path": "/", "type": "slide"}),
+    );
+    let add = serde_json::json!({"command": "add", "path": "/slide[1]", "type": "picture", "props": ["src=dot.tif"]});
+    assert!(
+        cmd(&mut host, "p.pptx", add)
+            .0
+            .contains("width: 15.24cm  height: 7.62cm")
+    );
+}

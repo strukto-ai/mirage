@@ -343,83 +343,128 @@ fn formula_ref(name: &str) -> String {
     }
 }
 
-/// `text` with `from` replaced by `to` without regard to case.
-fn replace_ci(text: &str, from: &str, to: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let needle = from.to_lowercase();
-    if lower.len() != text.len() || !lower.contains(&needle) {
-        return text.contains(from).then(|| text.replace(from, to));
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    while let Some(found) = lower[at..].find(&needle) {
-        out.push_str(&text[at..at + found]);
-        out.push_str(to);
-        at += found + needle.len();
-    }
-    out.push_str(&text[at..]);
-    Some(out)
+/// Whether a sheet reference may start right after `before`: not inside a
+/// longer name, a quoted name or an external workbook's `[n]` prefix.
+fn ref_boundary(before: Option<char>) -> bool {
+    before.is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '\'' | ']')))
 }
 
-/// A formula with `from` replaced by `to` outside its string literals and
-/// bracketed structured references.
-pub(super) fn rename_in_formula(formula: &str, from: &str, to: &str) -> Option<String> {
-    let chars: Vec<char> = formula.chars().collect();
-    let mut out = String::with_capacity(formula.len());
-    let mut changed = false;
+/// Whether `chars` from `at` spell `name`, case aside, then `!`.
+fn bare_ref_at(chars: &[(usize, char)], at: usize, name: &str) -> Option<usize> {
+    let mut i = at;
+    for want in name.chars() {
+        let (_, got) = *chars.get(i)?;
+        if !got.to_lowercase().eq(want.to_lowercase()) {
+            return None;
+        }
+        i += 1;
+    }
+    (chars.get(i).map(|c| c.1) == Some('!')).then_some(i + 1)
+}
+
+/// Byte spans of each `name!` or `'name'!` prefix in `formula` that names
+/// the sheet `name`, outside its string literals and bracketed parts.
+fn sheet_refs(formula: &str, name: &str) -> Vec<std::ops::Range<usize>> {
+    let chars: Vec<(usize, char)> = formula.char_indices().collect();
+    let byte = |i: usize| chars.get(i).map_or(formula.len(), |c| c.0);
+    let lower = name.to_lowercase();
+    let mut out = Vec::new();
+    let mut before = None;
     let mut i = 0;
     while i < chars.len() {
-        match chars[i] {
+        let c = chars[i].1;
+        match c {
             '"' => {
-                out.push('"');
                 i += 1;
                 while i < chars.len() {
-                    out.push(chars[i]);
-                    if chars[i] == '"' {
-                        if chars.get(i + 1) == Some(&'"') {
-                            out.push('"');
+                    if chars[i].1 == '"' {
+                        if chars.get(i + 1).map(|c| c.1) == Some('"') {
                             i += 2;
                             continue;
                         }
-                        i += 1;
                         break;
                     }
                     i += 1;
                 }
+                i += 1;
+                before = Some('"');
             }
             '[' => {
                 let mut depth = 0;
                 while i < chars.len() {
-                    let c = chars[i];
-                    out.push(c);
-                    i += 1;
-                    if c == '[' {
-                        depth += 1;
-                    } else if c == ']' {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
+                    match chars[i].1 {
+                        '[' => depth += 1,
+                        ']' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
                         }
+                        _ => {}
                     }
-                }
-            }
-            _ => {
-                let start = i;
-                while i < chars.len() && chars[i] != '"' && chars[i] != '[' {
                     i += 1;
                 }
-                let chunk: String = chars[start..i].iter().collect();
-                match replace_ci(&chunk, from, to) {
-                    Some(done) => {
-                        changed = true;
-                        out.push_str(&done);
-                    }
-                    None => out.push_str(&chunk),
-                }
+                i += 1;
+                before = Some(']');
             }
+            '\'' if ref_boundary(before) => {
+                let mut quoted = String::new();
+                let mut j = i + 1;
+                while j < chars.len() {
+                    if chars[j].1 == '\'' {
+                        if chars.get(j + 1).map(|c| c.1) == Some('\'') {
+                            quoted.push('\'');
+                            j += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    quoted.push(chars[j].1);
+                    j += 1;
+                }
+                if chars.get(j + 1).map(|c| c.1) == Some('!') && quoted.to_lowercase() == lower {
+                    out.push(byte(i)..byte(j + 2));
+                }
+                i = j + 1;
+                before = Some('\'');
+            }
+            _ => match ref_boundary(before)
+                .then(|| bare_ref_at(&chars, i, name))
+                .flatten()
+            {
+                Some(end) => {
+                    out.push(byte(i)..byte(end));
+                    i = end;
+                    before = Some('!');
+                }
+                None => {
+                    before = Some(c);
+                    i += 1;
+                }
+            },
         }
     }
-    changed.then_some(out)
+    out
+}
+
+/// A formula with each reference to sheet `from` pointed at sheet `to`,
+/// leaving string literals, bracketed parts and longer names alone; None
+/// when nothing changed.
+pub(super) fn rename_in_formula(formula: &str, from: &str, to: &str) -> Option<String> {
+    let spans = sheet_refs(formula, from);
+    if spans.is_empty() {
+        return None;
+    }
+    let to = formula_ref(to);
+    let mut out = String::with_capacity(formula.len());
+    let mut last = 0;
+    for span in spans {
+        out.push_str(&formula[last..span.start]);
+        out.push_str(&to);
+        last = span.end;
+    }
+    out.push_str(&formula[last..]);
+    Some(out)
 }
 
 /// `xml` with the text of each `names` element passed through `edit`;
@@ -525,25 +570,22 @@ pub(super) async fn rename(
         (v == old).then(|| name.to_string())
     })
     .unwrap_or(workbook);
-    let (from, to) = (formula_ref(&old), formula_ref(name));
-    let workbook =
-        edit_texts(&workbook, &["definedName"], |t| replace_ci(t, &from, &to)).unwrap_or(workbook);
+    let rename = |t: &str| rename_in_formula(t, &old, name);
+    let workbook = edit_texts(&workbook, &["definedName"], rename).unwrap_or(workbook);
     book.put(&doc.wb_part, workbook);
     for sheet in &doc.sheets {
         let Some(mut xml) = book.part(&sheet.part).await else {
             continue;
         };
         let mut changed = false;
-        if let Some(done) = edit_texts(&xml, &["f"], |t| rename_in_formula(t, &from, &to)) {
+        if let Some(done) = edit_texts(
+            &xml,
+            &["f", "formula", "formula1", "formula2", "sqref"],
+            rename,
+        ) {
             (xml, changed) = (done, true);
         }
-        if let Some(done) = edit_texts(&xml, &["formula", "formula1", "formula2", "sqref"], |t| {
-            replace_ci(t, &from, &to)
-        }) {
-            (xml, changed) = (done, true);
-        }
-        if let Some(done) = edit_attrs(&xml, "hyperlink", "location", |v| replace_ci(v, &from, &to))
-        {
+        if let Some(done) = edit_attrs(&xml, "hyperlink", "location", rename) {
             (xml, changed) = (done, true);
         }
         if changed {
@@ -559,7 +601,7 @@ pub(super) async fn rename(
                 continue;
             }
             if let Some(xml) = book.part(&chart).await {
-                if let Some(done) = edit_texts(&xml, &["f"], |t| replace_ci(t, &from, &to)) {
+                if let Some(done) = edit_texts(&xml, &["f"], rename) {
                     book.put(&chart, done);
                 }
             }
@@ -583,9 +625,7 @@ pub(super) async fn rename(
 
 /// Whether `text` names the sheet `name` as a reference does.
 fn names_sheet(text: &str, name: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains(&format!("{}!", name.to_lowercase()))
-        || lower.contains(&format!("'{}'!", name.to_lowercase()))
+    !sheet_refs(text, name).is_empty()
 }
 
 /// Text of each `names` element in `xml`.
@@ -609,6 +649,16 @@ pub(super) async fn remove(book: &mut Book<'_>, doc: &Doc, entry: &Entry) -> Res
         ));
     }
     let name = entry.name.clone();
+    if !entry.hidden()
+        && !doc
+            .sheets
+            .iter()
+            .any(|s| s.part != entry.part && !s.hidden())
+    {
+        return Err(Fail::of(format!(
+            "Cannot remove sheet '{name}': a workbook must keep at least one visible sheet, or Excel refuses to open the file. Unhide another sheet first."
+        )));
+    }
     let refused = |what: &str, fix: &str| {
         Fail::of(format!(
             "Cannot remove sheet '{name}': it is referenced by {what}. Remove or repoint {fix} first."
@@ -698,10 +748,7 @@ pub(super) async fn remove(book: &mut Book<'_>, doc: &Doc, entry: &Entry) -> Res
             let rest = &workbook[t.end..];
             let end = memchr::memchr(b'<', rest).unwrap_or(rest.len());
             let body = unescape(&rest[..end]);
-            body.to_lowercase()
-                .contains(&format!("{}!", name.to_lowercase()))
-                .then(|| t.attr("name"))
-                .flatten()
+            names_sheet(&body, &name).then(|| t.attr("name")).flatten()
         })
         .collect();
     if !orphans.is_empty() {
@@ -780,8 +827,9 @@ pub(super) async fn remove(book: &mut Book<'_>, doc: &Doc, entry: &Entry) -> Res
     Ok(())
 }
 
-/// `part` dropped with every part its relationships reach that nothing
-/// left in the package still reaches, and their content types.
+/// `part` dropped with every part its relationships reach that no other
+/// part still reaches, directly or through a part it keeps, and their
+/// content types.
 async fn drop_owned(book: &mut Book<'_>, part: &str) {
     let mut gone = vec![part.to_string()];
     let mut at = 0;
@@ -799,18 +847,25 @@ async fn drop_owned(book: &mut Book<'_>, part: &str) {
             gone.push(target);
         }
     }
-    let mut kept = Vec::new();
-    for name in book.names() {
-        if !name.ends_with(".rels") {
+    let mut queue: Vec<String> = book
+        .names()
+        .iter()
+        .filter(|n| n.ends_with(".rels"))
+        .map(|n| owner_of(n))
+        .filter(|o| !gone.contains(o))
+        .collect();
+    let mut kept: Vec<String> = Vec::new();
+    while let Some(owner) = queue.pop() {
+        let Some(rels) = book.part(&rels_of(&owner)).await else {
             continue;
-        }
-        let owner = owner_of(&name);
-        if gone.contains(&owner) {
-            continue;
-        }
-        if let Some(rels) = book.part(&name).await {
-            for (_, _, target) in relationships(&rels, &owner) {
-                kept.push(target);
+        };
+        for (_, _, target) in relationships(&rels, &owner) {
+            if target == part || kept.contains(&target) {
+                continue;
+            }
+            kept.push(target.clone());
+            if gone.contains(&target) {
+                queue.push(target);
             }
         }
     }

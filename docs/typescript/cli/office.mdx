@@ -202,6 +202,10 @@ position, and a warning when another shape starts at the same spot.
   headers, and `add --from` are not available yet. `set` takes the props
   above.
 - A picture's `src` is a file or a `data:` URI; a URL is not fetched.
+- Renaming a sheet changes only whole references to it, so `OtherData!A1`
+  stays when `Data` is renamed. Removing the last visible sheet is refused,
+  and a list item added with `--index`, `--after` or `--before` continues
+  the list just before it.
 - An equation's text is plain, not LaTeX, and a chart in a deck shows its
   frame and name but not its plot properties.
 - A Word `query` reads paragraphs, runs, tables, rows, cells, pictures,

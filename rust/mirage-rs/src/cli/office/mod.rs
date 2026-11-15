@@ -187,8 +187,8 @@ impl Fail {
     }
 }
 
-/// Why a set changed nothing: the refusal, or the properties it does not
-/// take.
+/// Why a set did not apply every property: the refusal, the properties it
+/// does not take, or those it left once the rest were applied.
 enum SetFail {
     Fail(Fail),
     Unsupported {
@@ -196,6 +196,54 @@ enum SetFail {
         element: &'static str,
         valid: &'static [&'static str],
     },
+    Partial {
+        message: String,
+        warnings: Vec<String>,
+        keys: Vec<String>,
+        element: &'static str,
+        valid: &'static [&'static str],
+    },
+}
+
+/// The set's outcome once some props were applied: `Partial` when others
+/// were left, else the line and warnings.
+fn partial(
+    path: &str,
+    props: &[(String, String)],
+    took: &[String],
+    warnings: Vec<String>,
+    element: &'static str,
+    valid: &'static [&'static str],
+) -> Result<(String, Vec<String>), SetFail> {
+    let taken = |k: &str| took.iter().any(|t| t.eq_ignore_ascii_case(k));
+    let shown: Vec<String> = props
+        .iter()
+        .filter(|(k, _)| taken(k))
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    let message = format!("Updated {path}: {}", shown.join(", "));
+    let keys: Vec<String> = props
+        .iter()
+        .map(|(k, _)| k.clone())
+        .filter(|k| !taken(k))
+        .collect();
+    if keys.is_empty() {
+        return Ok((message, warnings));
+    }
+    if shown.is_empty() {
+        return Err(SetFail::Unsupported {
+            keys,
+            element,
+            valid,
+        });
+    }
+    Err(SetFail::Partial {
+        message,
+        warnings,
+        keys,
+        element,
+        valid,
+    })
 }
 
 impl From<Fail> for SetFail {
@@ -351,30 +399,33 @@ impl Out<'_> {
             .print(format!("{}\n", Json::obj(env).pretty()).as_bytes());
     }
 
+    /// The line of a set that applied some props, then the ones it left.
+    fn partly(&self, message: &str, keys: &[String], element: &str, valid: &[&str]) -> i32 {
+        if self.json {
+            let env = Json::obj(vec![
+                ("success", Json::Bool(true)),
+                ("data", Json::Str(message.to_string())),
+                ("message", Json::Str(message.to_string())),
+                ("warnings", unsupported_warnings(keys, element, valid)),
+            ]);
+            self.host.print(format!("{}\n", env.pretty()).as_bytes());
+        } else {
+            self.host.print(format!("{message}\n").as_bytes());
+            self.host
+                .warn(format!("{}\n", unsupported_text(keys, element, valid)).as_bytes());
+        }
+        2
+    }
+
     fn unsupported(&self, path: &str, keys: &[String], element: &str, valid: &[&str]) -> i32 {
         if self.json {
-            let warnings = keys
-                .iter()
-                .map(|k| {
-                    Json::obj(vec![
-                        (
-                            "message",
-                            Json::Str(format!(
-                                "Unsupported property: {k} (valid {element} props: {})",
-                                valid.join(", ")
-                            )),
-                        ),
-                        ("code", Json::Str("unsupported_property".to_string())),
-                    ])
-                })
-                .collect();
             let env = Json::obj(vec![
                 ("success", Json::Bool(false)),
                 (
                     "message",
                     Json::Str(format!("Error: No properties applied to {path}")),
                 ),
-                ("warnings", Json::Arr(warnings)),
+                ("warnings", unsupported_warnings(keys, element, valid)),
             ]);
             self.host.print(format!("{}\n", env.pretty()).as_bytes());
         } else {
@@ -385,6 +436,26 @@ impl Out<'_> {
         }
         2
     }
+}
+
+/// One `unsupported_property` warning per key, as `--json` lists them.
+fn unsupported_warnings(keys: &[String], element: &str, valid: &[&str]) -> Json {
+    Json::Arr(
+        keys.iter()
+            .map(|k| {
+                Json::obj(vec![
+                    (
+                        "message",
+                        Json::Str(format!(
+                            "Unsupported property: {k} (valid {element} props: {})",
+                            valid.join(", ")
+                        )),
+                    ),
+                    ("code", Json::Str("unsupported_property".to_string())),
+                ])
+            })
+            .collect(),
+    )
 }
 
 fn unsupported_text(keys: &[String], element: &str, valid: &[&str]) -> String {
@@ -517,8 +588,15 @@ async fn run(host: Host, config: Config) -> i32 {
                     .await
                     .map_err(SetFail::Fail)
             };
-            let line = match done {
-                Ok(line) => line,
+            let (line, left) = match done {
+                Ok(line) => (line, None),
+                Err(SetFail::Partial {
+                    message,
+                    keys,
+                    element,
+                    valid,
+                    ..
+                }) => (message, Some((keys, element, valid))),
                 Err(SetFail::Fail(f)) => return out.fail(&f),
                 Err(SetFail::Unsupported {
                     keys,
@@ -531,7 +609,10 @@ async fn run(host: Host, config: Config) -> i32 {
                     return out.fail(&Fail::of(text(&failure_text(&reply))));
                 }
             }
-            out.done(&line)
+            match left {
+                Some((keys, element, valid)) => out.partly(&line, &keys, element, valid),
+                None => out.done(&line),
+            }
         }
         "add" => add_command(&out, &config, &path).await,
         "batch" => run_batch(&out, &config).await,
@@ -1145,8 +1226,10 @@ async fn set(
     match goal {
         Target::Sheet(name) => {
             let (_, entry) = resolve_sheet(doc, name, None)?;
+            let mut current = entry.name.clone();
             if let Some(new) = get("name") {
                 workbook::rename(book, doc, entry, &new).await?;
+                current = new;
             }
             if get("hidden").is_none() {
                 return Ok(format!("Updated {path}: {}", shown.join(", ")));
@@ -1174,7 +1257,7 @@ async fn set(
             for tag in tags(&xml) {
                 if tag.kind != Kind::End
                     && tag.is("sheet")
-                    && tag.attr("name").as_deref() == Some(entry.name.as_str())
+                    && tag.attr("name").as_deref() == Some(current.as_str())
                 {
                     out.extend_from_slice(&xml[last..tag.start]);
                     out.extend(retag(
@@ -1478,6 +1561,16 @@ async fn run_item(
                     line.replace(" (applied: type=String)", "")
                         .replace(" (applied: type=Number)", ""),
                 )),
+                Err(SetFail::Partial {
+                    message,
+                    keys,
+                    element,
+                    valid,
+                    ..
+                }) => Ok(Output::Text(format!(
+                    "{message}\n{}",
+                    unsupported_text(&keys, element, valid)
+                ))),
                 Err(SetFail::Fail(f)) => Err(fail(f)),
                 Err(SetFail::Unsupported {
                     keys,

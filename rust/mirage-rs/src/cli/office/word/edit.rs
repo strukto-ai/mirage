@@ -382,8 +382,13 @@ fn explicit_false(v: &str) -> bool {
 /// A font size in points, as OfficeCLI reads one.
 fn font_size(value: &str) -> Result<f64, Fail> {
     let mut v = value.trim();
-    if v.len() >= 2 && v[v.len() - 2..].eq_ignore_ascii_case("pt") {
-        v = v[..v.len() - 2].trim();
+    if let Some(head) = v
+        .len()
+        .checked_sub(2)
+        .filter(|at| v.is_char_boundary(*at) && v[*at..].eq_ignore_ascii_case("pt"))
+        .map(|at| &v[..at])
+    {
+        v = head.trim();
     }
     if v.contains(',') {
         return Err(fail(format!(
@@ -522,7 +527,11 @@ fn highlight(value: &str) -> Result<String, Fail> {
 /// A color as `w:color` stores it: six hex digits, upper case.
 fn hex(value: &str) -> Result<String, Fail> {
     let v = value.trim().trim_start_matches('#');
-    let v = if v.len() == 8 { &v[2..] } else { v };
+    let v = if v.len() == 8 && v.is_ascii() {
+        &v[2..]
+    } else {
+        v
+    };
     let v = if v.len() == 3 {
         v.chars().flat_map(|c| [c, c]).collect::<String>()
     } else {
@@ -533,7 +542,7 @@ fn hex(value: &str) -> Result<String, Fail> {
     }
     named_color(value)
         .map(str::to_string)
-        .ok_or_else(|| fail(format!("Invalid color value: '{value}'. Expected a hex color (e.g. FF0000, #FF0000) or a color name.")))
+        .ok_or_else(|| fail(format!("Invalid color value: '{value}'. Expected 6-digit hex RGB (e.g. FF0000), 8-digit AARRGGBB (e.g. 80FF0000), 3-digit shorthand (e.g. F00) or 4-digit #RGBA shorthand (e.g. F00A), named color (e.g. red), rgb()/rgba()/hsl()/hsla() notation, or 'transparent'.")))
 }
 
 fn named_color(name: &str) -> Option<&'static str> {
@@ -617,12 +626,7 @@ fn line_spacing(value: &str) -> Result<(i64, bool), Fail> {
 
 /// The props `set` and `add` read off a run, written into `rpr`. Returns
 /// the keys it took.
-fn apply_run(
-    t: &mut Tree,
-    rpr: Id,
-    props: &[(String, String)],
-    adding: bool,
-) -> Result<Vec<String>, Fail> {
+fn apply_run(t: &mut Tree, rpr: Id, props: &[(String, String)]) -> Result<Vec<String>, Fail> {
     let mut took = Vec::new();
     let get = |keys: &[&str]| {
         props
@@ -664,10 +668,6 @@ fn apply_run(
         let hp = half_points(&v)?;
         let sz = replace(t, rpr, "sz", RPR_ORDER);
         wattr(t, sz, "val", &hp);
-        if !adding {
-            let cs = replace(t, rpr, "szCs", RPR_ORDER);
-            wattr(t, cs, "val", &hp);
-        }
     }
     if let Some((k, v)) = get(&["size.cs", "font.size.cs"]) {
         took.push(k);
@@ -704,7 +704,7 @@ fn apply_run(
             took.push(k);
             if truthy(&v) {
                 replace(t, rpr, name, RPR_ORDER);
-            } else if adding && explicit_false(&v) {
+            } else if explicit_false(&v) {
                 let e = replace(t, rpr, name, RPR_ORDER);
                 wattr(t, e, "val", "false");
             } else {
@@ -1308,18 +1308,15 @@ fn continuation(
     pkg: &Pkg<'_>,
     part: &str,
     container: Id,
-    target: Option<Id>,
+    before: Option<usize>,
     bullet: bool,
     level: i64,
 ) -> Option<i64> {
     let t = pkg.xml(part)?;
     let kids = children(t, container);
-    let end = match target {
-        Some(id) => kids.iter().position(|k| *k == id)?,
-        None => kids.len(),
-    };
+    let end = before.unwrap_or(kids.len()).min(kids.len());
     for &cur in kids[..end].iter().rev() {
-        if !is(t, cur, "p") || Some(cur) == target {
+        if !is(t, cur, "p") {
             continue;
         }
         let num = child(t, cur, "pPr").and_then(|ppr| child(t, ppr, "numPr"));
@@ -1449,7 +1446,7 @@ fn plan_list(
     props: &[(String, String)],
     part: &str,
     container: Id,
-    target: Option<Id>,
+    before: Option<usize>,
     current_level: Option<i64>,
 ) -> Result<Option<ListPlan>, Fail> {
     let get = |keys: &[&str]| {
@@ -1503,7 +1500,7 @@ fn plan_list(
         "bullet" | "unordered" | "ul"
     );
     let target_level = level.or(current_level).unwrap_or(0);
-    let continued = continuation(pkg, part, container, target, bullet, target_level);
+    let continued = continuation(pkg, part, container, before, bullet, target_level);
     let (num_id, ilvl) = match continued {
         Some(id) if start.is_none() => (id, target_level),
         _ => (new_list(pkg, bullet, start, level)?, level.unwrap_or(0)),
@@ -2030,7 +2027,7 @@ fn add_picture(
     t.nodes[run].decls.clear();
     if needs_rpr {
         let rpr = el(t, "rPr");
-        apply_run(t, rpr, &formats, true)?;
+        apply_run(t, rpr, &formats)?;
         insert_at(t, run, Some(0), rpr);
     }
     let anchored_at = |t: &Tree| {
@@ -2149,9 +2146,18 @@ pub(in super::super) fn add(
         Some((path, after)) => {
             let word = Word::new(pkg);
             let (apart, aid, _) = word.locate(path)?;
-            if apart != part {
-                return Err(fail(format!("Anchor {path} is not under {parent}")));
-            }
+            let top = word.pkg.xml(&part).filter(|_| apart == part).and_then(|t| {
+                let mut cur = aid;
+                while t.nodes[cur].parent != Some(parent_id) {
+                    cur = t.nodes[cur].parent?;
+                }
+                Some(cur)
+            });
+            let Some(aid) = top else {
+                return Err(fail(format!(
+                    "Anchor element is not a child of {parent}: {path}"
+                )));
+            };
             Some((aid, after))
         }
         None => None,
@@ -2163,7 +2169,23 @@ pub(in super::super) fn add(
         None
     };
     let list = if matches!(lower.as_str(), "paragraph" | "p") {
-        plan_list(pkg, props, &part, parent_id, None, None)?
+        let before = pkg.xml(&part).and_then(|t| {
+            let kids = &t.nodes[parent_id].kids;
+            let at = match anchored {
+                Some((aid, after)) => kids
+                    .iter()
+                    .position(|k| matches!(k, Kid::El(c) if *c == aid))
+                    .map(|p| if after { p + 1 } else { p }),
+                None => index.and_then(|i| insertion(t, parent_id, Some(i), &|c| block(t, c))),
+            }?;
+            Some(
+                kids[..at]
+                    .iter()
+                    .filter(|k| matches!(k, Kid::El(_)))
+                    .count(),
+            )
+        });
+        plan_list(pkg, props, &part, parent_id, before, None)?
     } else {
         None
     };
@@ -2193,6 +2215,14 @@ pub(in super::super) fn add(
     let t = pkg
         .xml_mut(&part)
         .ok_or_else(|| fail(format!("Path not found: {parent}")))?;
+    let anchor_at = |t: &Tree| -> Option<usize> {
+        let (aid, after) = anchored?;
+        t.nodes[parent_id]
+            .kids
+            .iter()
+            .position(|k| matches!(k, Kid::El(c) if *c == aid))
+            .map(|p| if after { p + 1 } else { p })
+    };
     let at = |t: &Tree, counted: &dyn Fn(Id) -> bool| -> Option<usize> {
         if let Some((aid, after)) = anchored {
             let pos = t.nodes[parent_id]
@@ -2215,6 +2245,7 @@ pub(in super::super) fn add(
                 None => vec![None],
             };
             let mut first = None;
+            let mut base = None;
             let mut unread = Vec::new();
             let mut warnings = Vec::new();
             for (li, line) in lines.iter().enumerate() {
@@ -2238,21 +2269,20 @@ pub(in super::super) fn add(
                     let r = el(t, "r");
                     let rpr = el(t, "rPr");
                     t.append(r, rpr);
-                    took.extend(apply_run(t, rpr, props, true)?);
+                    took.extend(apply_run(t, rpr, props)?);
                     run_content(t, r, line);
                     t.append(p, r);
                 } else {
                     let scratch = el(t, "rPr");
-                    took.extend(apply_run(t, scratch, props, true)?);
+                    took.extend(apply_run(t, scratch, props)?);
                     if !t.nodes[scratch].kids.is_empty() {
                         place_ordered(t, ppr, scratch, PPR_ORDER);
                     }
                 }
-                let pos = match (index, anchored) {
-                    (Some(i), None) => insertion(t, parent_id, Some(i + li), &|c| block(t, c)),
-                    _ => at(t, &|c| block(t, c)).map(|p| p + li),
-                };
-                insert_at(t, parent_id, pos, p);
+                if li == 0 {
+                    base = at(t, &|c| block(t, c));
+                }
+                insert_at(t, parent_id, base.map(|b| b + li), p);
                 if li == 0 {
                     first = Some(p);
                     unread = props
@@ -2275,7 +2305,7 @@ pub(in super::super) fn add(
             let r = el(t, "r");
             let rpr = el(t, "rPr");
             t.append(r, rpr);
-            let mut took = apply_run(t, rpr, props, true)?;
+            let mut took = apply_run(t, rpr, props)?;
             if let Some((k, v)) = props
                 .iter()
                 .rev()
@@ -2477,6 +2507,7 @@ pub(in super::super) fn add(
                 .filter(|c| is(t, *c, "tr"))
                 .collect();
             let pos = match index {
+                _ if anchored.is_some() => anchor_at(t),
                 Some(i) if i < rows.len() => t.nodes[parent_id]
                     .kids
                     .iter()
@@ -2563,7 +2594,7 @@ pub(in super::super) fn add(
                 })
                 .cloned()
                 .collect();
-            took.extend(apply_run(t, rpr, &run_keys, true)?);
+            took.extend(apply_run(t, rpr, &run_keys)?);
             for key in ["bold", "italic"] {
                 if let Some((k, _)) = get(&[key]) {
                     took.push(k);
@@ -2610,6 +2641,7 @@ pub(in super::super) fn add(
                 .filter(|c| !is(t, *c, "pPr"))
                 .collect();
             let pos = match index {
+                _ if anchored.is_some() => anchor_at(t),
                 Some(i) if i < content.len() => t.nodes[parent_id]
                     .kids
                     .iter()
@@ -2689,6 +2721,7 @@ pub(in super::super) fn add(
                     .filter(|c| is(t, *c, "r"))
                     .collect();
                 let pos = match index {
+                    _ if anchored.is_some() => anchor_at(t),
                     Some(i) if i < runs.len() => t.nodes[parent_id]
                         .kids
                         .iter()
@@ -2772,11 +2805,15 @@ pub(in super::super) fn add(
                     wattr(t, w, "w", "0");
                     wattr(t, w, "type", &v.to_ascii_lowercase());
                 } else {
-                    let dxa = if v.len() > 3 && v[v.len() - 3..].eq_ignore_ascii_case("dxa") {
-                        &v[..v.len() - 3]
-                    } else {
-                        v
-                    };
+                    let dxa = v
+                        .len()
+                        .checked_sub(3)
+                        .filter(|at| {
+                            *at > 0
+                                && v.is_char_boundary(*at)
+                                && v[*at..].eq_ignore_ascii_case("dxa")
+                        })
+                        .map_or(v, |at| &v[..at]);
                     wattr(t, w, "w", dxa);
                     wattr(t, w, "type", "dxa");
                 }
@@ -2819,12 +2856,12 @@ pub(in super::super) fn add(
                 for r in &runs {
                     let rpr = el(t, "rPr");
                     insert_at(t, *r, Some(0), rpr);
-                    took.extend(apply_run(t, rpr, &run_keys, false)?);
+                    took.extend(apply_run(t, rpr, &run_keys)?);
                 }
                 let ppr = el(t, "pPr");
                 insert_at(t, p, Some(0), ppr);
                 let mark = el(t, "rPr");
-                took.extend(apply_run(t, mark, &run_keys, false)?);
+                took.extend(apply_run(t, mark, &run_keys)?);
                 if runs.is_empty() && t.nodes[mark].kids.is_empty() {
                     t.detach(ppr);
                 } else {
@@ -2877,6 +2914,7 @@ pub(in super::super) fn add(
                 .filter(|c| is(t, *c, "tc"))
                 .collect();
             let pos = match index {
+                _ if anchored.is_some() => anchor_at(t),
                 Some(i) if i < cells.len() => t.nodes[parent_id]
                     .kids
                     .iter()
@@ -3196,7 +3234,8 @@ pub(in super::super) fn set(
                 .and_then(|ppr| child(t, ppr, "numPr"))
                 .and_then(|n| wval(t, n, "ilvl"))
                 .and_then(|v| v.parse::<i64>().ok());
-            plan_list(pkg, props, &part, container, Some(id), current)?
+            let before = children(t, container).iter().position(|k| *k == id);
+            plan_list(pkg, props, &part, container, before, current)?
         }
         _ => None,
     };
@@ -3258,6 +3297,13 @@ pub(in super::super) fn set(
             }
             let runs: Vec<Id> = children(t, id)
                 .into_iter()
+                .flat_map(|c| {
+                    if is(t, c, "hyperlink") {
+                        children(t, c)
+                    } else {
+                        vec![c]
+                    }
+                })
                 .filter(|c| is(t, *c, "r"))
                 .collect();
             let run_keys: Vec<(String, String)> = props
@@ -3276,7 +3322,7 @@ pub(in super::super) fn set(
                             x
                         }
                     };
-                    run_took = apply_run(t, rpr, &run_keys, false)?;
+                    run_took = apply_run(t, rpr, &run_keys)?;
                 }
                 took.extend(run_took);
             }
@@ -3292,7 +3338,7 @@ pub(in super::super) fn set(
                     x
                 }
             };
-            took.extend(apply_run(t, rpr, props, false)?);
+            took.extend(apply_run(t, rpr, props)?);
             if let Some(text) = &text {
                 took.push("text".to_string());
                 for c in children(t, id) {
@@ -3360,37 +3406,69 @@ pub(in super::super) fn set(
         }
         _ => {}
     }
-    let unread: Vec<String> = props
-        .iter()
-        .map(|(k, _)| k.clone())
-        .filter(|k| !took.iter().any(|x| x.eq_ignore_ascii_case(k)))
-        .collect();
     let _ = PARAGRAPH_KEYS;
-    if !unread.is_empty() && took.is_empty() {
-        return Err(SetFail::Unsupported {
-            keys: unread,
-            element: match name.as_str() {
-                "p" => "paragraph",
-                "r" => "run",
-                "tc" => "cell",
-                "tbl" => "table",
-                _ => "element",
-            },
-            valid: &[
-                "text",
-                "style",
-                "alignment",
-                "bold",
-                "italic",
-                "size",
-                "font",
-                "color",
-            ],
-        });
-    }
-    let shown: Vec<String> = props.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    Ok((format!("Updated {path}: {}", shown.join(", ")), warnings))
+    let (element, valid): (&'static str, &'static [&'static str]) = match name.as_str() {
+        "p" => ("paragraph", PARAGRAPH_VALID),
+        "r" => ("run", RUN_VALID),
+        "tc" => ("cell", OTHER_VALID),
+        "tbl" => ("table", OTHER_VALID),
+        _ => ("element", OTHER_VALID),
+    };
+    super::super::partial(path, props, &took, warnings, element, valid)
 }
+
+/// The paragraph props OfficeCLI lists when it refuses one.
+const PARAGRAPH_VALID: &[&str] = &[
+    "text",
+    "style",
+    "alignment",
+    "bold",
+    "italic",
+    "font",
+    "size",
+    "color",
+    "spaceBefore",
+    "spaceAfter",
+    "spaceBeforeLines",
+    "spaceAfterLines",
+    "lineSpacing",
+    "indent",
+    "liststyle",
+    "formula",
+    "direction",
+    "bidi",
+];
+
+/// The run props OfficeCLI lists when it refuses one.
+const RUN_VALID: &[&str] = &[
+    "text",
+    "bold",
+    "italic",
+    "font",
+    "size",
+    "color",
+    "underline",
+    "strike",
+    "highlight",
+    "caps",
+    "smallcaps",
+    "superscript",
+    "subscript",
+    "shading",
+    "link",
+    "formula",
+];
+
+const OTHER_VALID: &[&str] = &[
+    "text",
+    "style",
+    "alignment",
+    "bold",
+    "italic",
+    "size",
+    "font",
+    "color",
+];
 
 /// `remove`: the element at `path` taken out.
 pub(in super::super) fn remove(
@@ -3502,7 +3580,12 @@ pub(in super::super) fn move_to(
     let anchored = match anchor {
         Some((p, after)) => {
             let word = Word::new(pkg);
-            let (_, aid, _) = word.locate(p)?;
+            let (ap, aid, _) = word.locate(p)?;
+            if ap != part {
+                return Err(fail(format!(
+                    "Cannot move {path} next to {p}: a different part"
+                )));
+            }
             Some((aid, after))
         }
         None => None,
@@ -3515,6 +3598,36 @@ pub(in super::super) fn move_to(
         (None, Some((aid, _))) => t.nodes[aid].parent.unwrap_or(t.root),
         (None, None) => t.nodes[id].parent.unwrap_or(t.root),
     };
+    if is(t, id, "r") && is(t, parent, "body") {
+        return Err(fail(
+            "Cannot move a run (w:r) directly to /body. Runs must live inside a paragraph."
+                .to_string(),
+        ));
+    }
+    if is(t, id, "p") && is(t, parent, "p") {
+        return Err(fail("Cannot move a paragraph into another paragraph (would create invalid <w:p><w:p>). To place after a paragraph, use `--after <path>`; to reorder within /body, omit --to.".to_string()));
+    }
+    if is(t, id, "tbl") && is(t, parent, "p") {
+        return Err(fail(
+            "Cannot move a table into a paragraph. Use `--after <paragraph-path>` to place it after."
+                .to_string(),
+        ));
+    }
+    if anchored.is_some_and(|(aid, _)| aid == id) {
+        return Ok(format!("Moved to {path}"));
+    }
+    let dest = to.or(place.after).or(place.before).unwrap_or(path);
+    let mut up = Some(parent);
+    while let Some(cur) = up {
+        if cur == id {
+            return Err(fail(if parent == id {
+                format!("Cannot move '{path}' into itself.")
+            } else {
+                format!("Cannot move '{path}' into one of its own descendants ('{dest}').")
+            }));
+        }
+        up = t.nodes[cur].parent;
+    }
     t.detach(id);
     let name = t.nodes[id].name.clone();
     let pos = if let Some((aid, after)) = anchored {
@@ -3539,9 +3652,9 @@ pub(in super::super) fn swap(pkg: &mut Pkg<'_>, first: &str, second: &str) -> Re
         let (pa, a, _) = word.locate(first)?;
         let (pb, b, _) = word.locate(second)?;
         if pa != pb {
-            return Err(fail(format!(
-                "Cannot swap {first} and {second}: they are in different parts"
-            )));
+            return Err(fail(
+                "Cannot swap elements with different parents".to_string(),
+            ));
         }
         (pa, a, b)
     };
@@ -3551,6 +3664,11 @@ pub(in super::super) fn swap(pkg: &mut Pkg<'_>, first: &str, second: &str) -> Re
     let (Some(pa), Some(pb)) = (t.nodes[a].parent, t.nodes[b].parent) else {
         return Err(fail(format!("Cannot swap {first} and {second}")));
     };
+    if pa != pb {
+        return Err(fail(
+            "Cannot swap elements with different parents".to_string(),
+        ));
+    }
     let ia = t.nodes[pa]
         .kids
         .iter()

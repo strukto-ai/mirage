@@ -309,8 +309,8 @@ fn positive(w: i64, h: i64) -> Option<(u32, u32)> {
     (w > 0 && h > 0).then_some((w as u32, h as u32))
 }
 
-/// An image's pixel size, read from a PNG, BMP, GIF or JPEG header or an
-/// SVG's root.
+/// An image's pixel size, read from a PNG, BMP, GIF, JPEG or TIFF header
+/// or an SVG's root.
 fn dimensions(b: &[u8]) -> Option<(u32, u32)> {
     if b.len() < 24 {
         return None;
@@ -331,10 +331,51 @@ fn dimensions(b: &[u8]) -> Option<(u32, u32)> {
     if header.starts_with(&[0xFF, 0xD8]) {
         return jpeg_size(b);
     }
+    if header.starts_with(b"II*\0") || header.starts_with(b"MM\0*") {
+        return tiff_size(b);
+    }
     if looks_like_svg(header) {
         return svg_size(b);
     }
     None
+}
+
+/// A TIFF's size, from the width and length tags of its first image.
+fn tiff_size(b: &[u8]) -> Option<(u32, u32)> {
+    let big = b.starts_with(b"MM");
+    let u16_at = |at: usize| -> Option<u32> {
+        let x: [u8; 2] = b.get(at..at + 2)?.try_into().ok()?;
+        Some(u32::from(if big {
+            u16::from_be_bytes(x)
+        } else {
+            u16::from_le_bytes(x)
+        }))
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        let x: [u8; 4] = b.get(at..at + 4)?.try_into().ok()?;
+        Some(if big {
+            u32::from_be_bytes(x)
+        } else {
+            u32::from_le_bytes(x)
+        })
+    };
+    let ifd = usize::try_from(u32_at(4)?).ok()?;
+    let count = usize::try_from(u16_at(ifd)?).ok()?;
+    let (mut w, mut h) = (0, 0);
+    for i in 0..count {
+        let entry = ifd + 2 + i * 12;
+        let value = match u16_at(entry + 2)? {
+            3 => u16_at(entry + 8)?,
+            4 => u32_at(entry + 8)?,
+            _ => continue,
+        };
+        match u16_at(entry)? {
+            256 => w = value,
+            257 => h = value,
+            _ => {}
+        }
+    }
+    positive(i64::from(w), i64::from(h))
 }
 
 /// A JPEG's size, from the first start-of-frame marker before its scan.
