@@ -16,6 +16,7 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -127,9 +128,43 @@ def test_missing_required_fields_are_named_without_a_terminal(daemon):
     r = run("cli", "create", "m", "--type", "mcp", stdin="")
     assert r.exit_code == 2
     assert "missing required fields: url" in r.output
-    r = run("cli", "create", "l", "--type", "linear", stdin="")
+    r = run("vfs", "create", "g", "--type", "github", "--set", "owner=o")
     assert r.exit_code == 2
-    assert "missing required fields: api_key" in r.output
+    assert "missing required fields: token or app" in r.output
+
+
+@pytest.fixture
+def terminal(monkeypatch):
+    """Prompt as a terminal would: CliRunner feeds the answers."""
+    monkeypatch.setattr(
+        "mirage.cli.connections.sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
+
+
+def test_a_terminal_chooses_the_github_token(daemon, store, terminal):
+    r = run(
+        "vfs", "create", "g", "--type", "github", stdin="nope\ntoken\nghp_t\n"
+    )
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "g") == {"token": "ghp_t"}
+
+
+def test_a_terminal_chooses_a_github_app_and_reads_its_key_file(
+    daemon, store, terminal, tmp_path
+):
+    key = tmp_path / "app.pem"
+    key.write_text(
+        "-----BEGIN RSA PRIVATE KEY-----\nk\n-----END RSA PRIVATE KEY-----\n"
+    )
+    answers = f"app\n7\n@{key}\n42\n"
+    r = run("cli", "create", "gh", "--type", "gh", stdin=answers)
+    assert r.exit_code == 0, r.output
+    got = json.loads(run("cli", "get", "gh").output)
+    assert got["config"] == {"app.app_id": "7", "app.installation_id": 42}
+    assert sealed(store, "cli", "gh") == {
+        "app.private_key": key.read_text().removesuffix("\n")
+    }
 
 
 def test_set_parses_json_values(daemon, store):

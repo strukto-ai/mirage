@@ -111,6 +111,9 @@ describe('mirage vfs against a daemon', () => {
     const r = await run(['cli', 'create', 'm', '--type', 'mcp'])
     expect(r.code).toBe(2)
     expect(r.err).toContain('missing required fields: url')
+    const gh = await run(['vfs', 'create', 'g', ...GH])
+    expect(gh.code).toBe(2)
+    expect(gh.err).toContain('missing required fields: token or app')
   })
 
   it('reads a secret file, keeps fields on update and removes one with --unset', async () => {
