@@ -77,6 +77,33 @@
       ]
     },
     {
+      "id": "mount_type_ssh_leaves_a_file_mount_off_the_box",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs and places VFS.md through the SDK, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "note": "sshfs mounts only a directory: a file mounted at a path of its own, such as the workspace's VFS.md, stays in the workspace, and the box sees the directories beside it.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/served": { "vfs": "ram", "files": { "seed.txt": "seed\n" } }
+        },
+        "vfs_md": "/VFS.md"
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cat /served/seed.txt; test -e /VFS.md; echo $?'",
+          "expect": { "exit": 0, "stdout": "seed\n1\n", "stderr": "" }
+        },
+        {
+          "command": "test -s /VFS.md && echo placed",
+          "expect": { "exit": 0, "stdout": "placed\n" }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_serves_the_sessions_view",
       "runtimes": [
         "docker",

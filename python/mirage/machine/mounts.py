@@ -51,8 +51,9 @@ from mirage.runtime.types import RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import FileType
 from mirage.utils.quote import single_quote
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, reader_of
 from mirage.workspace.session import SessionState
+from mirage.workspace.types import MountRow
 
 logger = logging.getLogger(__name__)
 
@@ -348,8 +349,10 @@ class MachineMounts:
         self._instance = uuid.uuid4().hex[:8]
         self._serves = 0
         self._sources: set[str] = set()
-        # Whether each top prefix is a directory, read once per mount.
-        self._directories: dict[str, bool] = {}
+        # Whether each top prefix is a directory, read once per mount: keyed
+        # by the mount's row, which the registry builds anew whenever its
+        # mounts change.
+        self._directories: dict[str, tuple[MountRow | None, bool]] = {}
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -646,17 +649,39 @@ class MachineMounts:
         for prefix in list(self._directories):
             if prefix not in prefixes:
                 del self._directories[prefix]
+        reader = reader_of(files)
         out: list[str] = []
         for prefix in prefixes:
-            directory = self._directories.get(prefix)
-            if directory is None:
-                directory = (
-                    await files.stat(prefix)
-                ).type == FileType.DIRECTORY
-                self._directories[prefix] = directory
-            if directory:
+            row = reader.owner(prefix)
+            known = self._directories.get(prefix)
+            if known is None or known[0] is not row:
+                known = (row, await self._is_directory(files, prefix))
+                self._directories[prefix] = known
+            if known[1]:
                 out.append(prefix)
         return out
+
+    async def _is_directory(self, files: Files, prefix: str) -> bool:
+        """Whether ``prefix`` is a directory.
+
+        A stat that fails, such as a disk mount whose folder is gone,
+        counts as one: the prefix is served as before, and the machine's
+        own mount or the serve answers for it.
+
+        Args:
+            files (Files): the session's files.
+            prefix (str): a top prefix the session sees.
+
+        Returns:
+            bool: whether to serve it.
+        """
+        try:
+            return (await files.stat(prefix)).type == FileType.DIRECTORY
+        except Exception as exc:
+            logger.debug(
+                "%s: could not stat %s: %s", self._provider, prefix, exc
+            )
+            return True
 
     async def _reconcile(
         self,
