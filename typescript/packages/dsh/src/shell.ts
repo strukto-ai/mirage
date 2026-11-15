@@ -44,7 +44,7 @@ import type {
   ExecuteResult,
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { type MirageClient, MirageRemoteError } from './remote/client.ts'
+import { type MirageClient, MirageRemoteError } from '@struktoai/mirage-core/remote/client'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 

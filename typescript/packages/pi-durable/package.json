@@ -32,13 +32,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./remote": {
+      "types": "./dist/remote/index.d.ts",
+      "import": "./dist/remote/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup --config ../../tsup.base.config.ts",
+    "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -54,6 +58,7 @@
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-durable": "^1.5.2",
     "@struktoai/mirage-node": "workspace:*",
+    "@struktoai/mirage-server": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",

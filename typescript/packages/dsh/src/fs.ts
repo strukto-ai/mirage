@@ -39,7 +39,7 @@ import { makeStorageKey } from '@struktoai/mirage-core/workspace/mount/storage'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
-import type { RemoteFiles } from './remote/client.ts'
+import type { RemoteFiles } from '@struktoai/mirage-core/remote/client'
 import {
   applyLiteralEdit,
   decodeStrictText,

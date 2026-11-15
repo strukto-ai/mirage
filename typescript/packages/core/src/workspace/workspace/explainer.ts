@@ -96,7 +96,7 @@ export class VfsExplainer {
   }
 
   /** Explain `session.vfs.stat`; `nofollow` stats a link itself, not its target. */
-  stat(path: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
+  stat(path: string, opts: { nofollow?: boolean; fresh?: boolean } = {}): Promise<VfsExplanation> {
     return dry('stat', [path], this.files, (files) => files.stat(path, undefined, opts))
   }
 

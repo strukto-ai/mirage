@@ -67,6 +67,26 @@ const harness = await Harness.open(
 harness.resume()
 ```
 
+## Use a workspace on a Mirage server
+
+Give `MirageExecutionEnv` and `mirageExtension` where a [Mirage server](/typescript/access/server)'s workspace lives instead of a `Workspace`, and Pi's tools call it over HTTP: each file call goes to its VFS API, each command to its shell. The harness can then run where nothing is mounted, such as a Cloudflare Worker or Durable Object. Import from `@struktoai/mirage-pi-durable/remote` there, which leaves out the workspace code of this process:
+
+```ts
+import { MirageExecutionEnv, mirageExtension } from '@struktoai/mirage-pi-durable/remote'
+
+const remote = { url: 'https://mirage.example.com', workspace: 'ws_123', token: process.env.MIRAGE_TOKEN }
+registry.install(mirageExtension(remote))
+const harness = await Harness.open(
+  storage,
+  { models, registry, env: ({ cwd }) => new MirageExecutionEnv(remote, { cwd: cwd ?? '/', sessionId: 'agent' }) },
+  context,
+)
+```
+
+- The server owns the mounts, machines and profiles. `sessionId` names a session on the server, created on first use.
+- `id` defaults to the server and workspace, so every process reaching one workspace shares Pi's file namespace.
+- The prompt section lists the mounts as the server describes them.
+
 ## Behavior
 
 - **Commands** run in Mirage's shell as one session. Each call starts from its `cwd`, so a `cd` or `export` does not carry over to the next one, as with a new process.
@@ -81,9 +101,10 @@ harness.resume()
 {/* generated: exports pi-durable start */}
 | Symbol | Purpose |
 | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnv</code> | Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and write the workspace's mounts through its dispatcher, and run their commands in its shell, as one session. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnvOptions</code> | Options for `MirageExecutionEnv`: `cwd` (default `/`), `sessionId`, `id` and `watch.pollIntervalMs` (default 2000). |
-| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi Durable extension named `mirage` whose prompt section describes the workspace's mounts, as the session sees them. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnv</code> | Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and write the workspace's mounts and run their commands in its shell, as one session. The workspace is one in this process, or one a Mirage server holds, reached over its HTTP API. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageRemote</code> | Where a remote workspace lives and how to reach it. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi Durable extension named `mirage` whose prompt section describes the workspace's mounts, as the session sees them; for a server's workspace, as the server describes them. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageExtensionOptions</code> | Options for `mirageExtension`: `sessionId`, the session whose mounts the prompt describes. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |

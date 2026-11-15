@@ -21,7 +21,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
-import { MirageExecutionEnv } from './env.ts'
+import { MirageExecutionEnv } from './execution_env.ts'
 
 const context = BACKGROUND_CONTEXT
 

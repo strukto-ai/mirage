@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { FileType } from '@struktoai/mirage-core/types'
 import { AuthMode, buildApp } from '@struktoai/mirage-server'
-import { MirageClient, MirageRemoteError } from './client.ts'
+import { MirageClient, MirageRemoteError } from '@struktoai/mirage-core/remote/client'
 
 const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }
 const TOKEN = 'dsh-remote-test'

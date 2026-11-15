@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { MirageService } from '../service.ts'
 import type { MirageShellConfig } from '../shell.ts'
 import { MirageShellExecutor } from '../shell.ts'
-import { MirageClient, type MirageRemote } from './client.ts'
+import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
 import { RemoteMirageService } from './service.ts'
 
 const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }

@@ -12,18 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Buffer } from 'node:buffer'
-import { fsError } from '@struktoai/mirage-core/errors/fs'
-import { FileStat } from '@struktoai/mirage-core/types'
-import type {
-  JsonValue,
-  PolicyDecision,
-  PolicyDecisionKind,
-  FileType,
-} from '@struktoai/mirage-core/types'
-import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
-import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
-import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
+import { fsError } from '../errors/fs.ts'
+import type { ShellExplanation } from '../policy/types.ts'
+import { FileStat } from '../types.ts'
+import type { FileType, JsonValue, PolicyDecision, PolicyDecisionKind } from '../types.ts'
+import { decodeBase64, encodeBase64 } from '../utils/base64.ts'
+import { snakeToCamel } from '../utils/normalize.ts'
+import { ExecuteResult } from '../workspace/workspace/types.ts'
 
 /** Where a remote workspace lives and how to reach it. */
 export interface MirageRemote {
@@ -61,6 +56,18 @@ export interface RemoteShellCall {
   onOutput?: (channel: 'stdout' | 'stderr', data: Uint8Array) => Promise<void>
 }
 
+/** A mount as the server describes it. */
+export interface RemoteMount {
+  /** Where it is mounted, e.g. `/data`. */
+  prefix: string
+  /** The VFS behind it, e.g. `ram` or `s3`. */
+  vfs: string
+  /** `read`, `write` or `exec`. */
+  mode: string
+  /** What it holds, as its config describes it; empty when none does. */
+  description: string
+}
+
 /** One session's file calls on a remote workspace. */
 export interface RemoteFiles {
   stat(path: string): Promise<FileStat>
@@ -91,6 +98,10 @@ interface WireResult {
 interface WireError {
   error?: { code?: string; message?: string; errno?: string; param?: string }
   detail?: string
+}
+
+interface WireDetail {
+  mounts?: Partial<RemoteMount>[]
 }
 
 type WireStat = Partial<Record<keyof FileStat, unknown>> & { name: string; type: string }
@@ -148,7 +159,14 @@ function trimTrailingSlashes(url: string): string {
 
 function concat(chunks: Uint8Array[]): Uint8Array {
   const [only] = chunks
-  return chunks.length === 1 && only !== undefined ? only : Buffer.concat(chunks)
+  if (chunks.length === 1 && only !== undefined) return only
+  const out = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0))
+  let at = 0
+  for (const chunk of chunks) {
+    out.set(chunk, at)
+    at += chunk.length
+  }
+  return out
 }
 
 async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
@@ -299,7 +317,7 @@ export class MirageClient {
     if (call.stdin !== undefined) {
       const form = new FormData()
       form.append('request', JSON.stringify(request))
-      form.append('stdin', new Blob([call.stdin]))
+      form.append('stdin', new Blob([new Uint8Array(call.stdin)]))
       init = { method: 'POST', headers: this.headers, body: form }
     } else {
       init = {
@@ -318,7 +336,7 @@ export class MirageClient {
     for await (const record of ndjson(response.body)) {
       if (typeof record.stream === 'string' && typeof record.data === 'string') {
         const channel = record.stream === 'stderr' ? 'stderr' : 'stdout'
-        const data = new Uint8Array(Buffer.from(record.data, 'base64'))
+        const data = decodeBase64(record.data)
         if (call.onOutput !== undefined) await call.onOutput(channel, data)
         else (channel === 'stderr' ? stderr : stdout).push(data)
         continue
@@ -411,7 +429,7 @@ export class MirageClient {
       ...(opts.size !== undefined ? { size: opts.size } : {}),
     }
     const answer = await this.vfs<{ data: string }>('read', body, opts.sessionId, opts.signal)
-    return new Uint8Array(Buffer.from(answer.data, 'base64'))
+    return decodeBase64(answer.data)
   }
 
   /** Replace a file's bytes. */
@@ -421,7 +439,7 @@ export class MirageClient {
     sessionId?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.vfs('write', { path, data: Buffer.from(data).toString('base64') }, sessionId, signal)
+    await this.vfs('write', { path, data: encodeBase64(data) }, sessionId, signal)
   }
 
   /** Append bytes to a file. */
@@ -431,17 +449,26 @@ export class MirageClient {
     sessionId?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.vfs(
-      'append',
-      { path, data: Buffer.from(data).toString('base64') },
-      sessionId,
-      signal,
-    )
+    await this.vfs('append', { path, data: encodeBase64(data) }, sessionId, signal)
   }
 
-  /** A path's metadata, links followed. */
-  async stat(path: string, sessionId?: string, signal?: AbortSignal): Promise<FileStat> {
-    const answer = await this.vfs<{ entry: WireStat }>('stat', { path }, sessionId, signal)
+  /**
+   * A path's metadata, links followed unless `nofollow` asks for the link's
+   * own; `fresh` asks the backend past its cache. A server older than
+   * `fresh` refuses it as an `unknown_field`.
+   */
+  async stat(
+    path: string,
+    sessionId?: string,
+    signal?: AbortSignal,
+    opts: { nofollow?: boolean; fresh?: boolean } = {},
+  ): Promise<FileStat> {
+    const body = {
+      path,
+      ...(opts.nofollow === true ? { nofollow: true } : {}),
+      ...(opts.fresh === true ? { fresh: true } : {}),
+    }
+    const answer = await this.vfs<{ entry: WireStat }>('stat', body, sessionId, signal)
     return statOf(answer.entry)
   }
 
@@ -463,6 +490,35 @@ export class MirageClient {
   /** Create a directory. */
   async mkdir(path: string, sessionId?: string, signal?: AbortSignal): Promise<void> {
     await this.vfs('mkdir', { path }, sessionId, signal)
+  }
+
+  /** Remove an empty directory. */
+  async rmdir(path: string, sessionId?: string, signal?: AbortSignal): Promise<void> {
+    await this.vfs('rmdir', { path }, sessionId, signal)
+  }
+
+  /** Cut or extend a file to `length` bytes. */
+  async truncate(
+    path: string,
+    length: number,
+    sessionId?: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.vfs('truncate', { path, length }, sessionId, signal)
+  }
+
+  /** The workspace's mounts, as the server describes them. */
+  async mounts(signal?: AbortSignal): Promise<RemoteMount[]> {
+    const detail = await this.json<WireDetail>('', undefined, {
+      method: 'GET',
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    return (detail.mounts ?? []).map((mount) => ({
+      prefix: mount.prefix ?? '/',
+      vfs: mount.vfs ?? '',
+      mode: mount.mode ?? '',
+      description: mount.description ?? '',
+    }))
   }
 
   /** Remove a file. */

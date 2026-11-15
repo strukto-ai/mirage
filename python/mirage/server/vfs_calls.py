@@ -84,7 +84,7 @@ VFS_CALLS: tuple[VfsCall, ...] = (
     VfsCall(
         "stat",
         "A path's metadata.",
-        {"path": PATH, "nofollow": FLAG},
+        {"path": PATH, "nofollow": FLAG, "fresh": FLAG},
         ("path",),
         key="entry",
     ),

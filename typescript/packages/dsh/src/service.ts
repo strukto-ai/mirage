@@ -28,7 +28,7 @@ import type { NodeWorkspaceOptions } from '@struktoai/mirage-node'
 import { buildVfs, Workspace } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
 import { hostPathToVirtual } from './host_path.ts'
-import { MirageClient, type MirageRemote } from './remote/client.ts'
+import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
 import { remoteOnly } from './remote/service.ts'
 import type { MirageWorld } from './world.ts'
 
