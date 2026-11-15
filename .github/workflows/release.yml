@@ -45,6 +45,7 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: "24"
+          wasm-cache: "false"
       - name: Install
         working-directory: typescript
         run: pnpm install --frozen-lockfile
