@@ -943,22 +943,6 @@ class GwsService:
             )
         )
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         config: dict[str, JsonValue] = {
             "client_id": "integ",
@@ -1035,22 +1019,6 @@ class EmailService:
                 use_ssl=False,
             )
         )
-
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
 
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         # h1 and h2 are the same spec installed twice: two head words,
@@ -1323,22 +1291,6 @@ class HfHubService:
         )
         return self.KINDS[kind](config)
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "hf": (
@@ -1561,22 +1513,6 @@ class SlackService:
             )
         )
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "slack": (
@@ -1757,22 +1693,6 @@ class TrelloService:
             )
         )
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "trello": (
@@ -1842,22 +1762,6 @@ class MCPService:
         cli = await mcp_cli(install)
         return cls({name: (cli, install) for name in names})
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return self.installs
 
@@ -1899,22 +1803,6 @@ class DiscordService:
                 **mount.get("config", {}),
             )
         )
-
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
 
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
@@ -1961,22 +1849,6 @@ class LinearService:
                 base_url=self.graphql,
             )
         )
-
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
 
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
@@ -2188,22 +2060,6 @@ class AirtableService:
             )
         )
 
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
-
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         # The same bounds as the mount, scoped to two of the fixture's three
         # bases so the battery can show a refused one (the Archive).
@@ -2278,22 +2134,6 @@ class NotionService:
         return NotionVFS(
             config=NotionConfig(api_key=self.token, base_url=f"{self.base}/v1")
         )
-
-    def gh_credential(self) -> dict[str, JsonValue]:
-        """The credential the `gh` install rides: the fixed token, or a
-        GitHub App installation whose key is PKCS#1, as GitHub downloads
-        one. The fake checks a JWT's shape, not its signature, so a key
-        made for the run serves.
-        """
-        if not self.app:
-            return {"token": "ghp-integ"}
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ).decode()
-        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
 
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
