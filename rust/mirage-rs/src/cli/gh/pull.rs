@@ -1079,13 +1079,44 @@ fn any_bucket(rows: &[Obj], bucket: &str) -> bool {
         .any(|row| row.get("bucket").as_str() == Some(bucket))
 }
 
-/// Whether `-i/--interval` was spelled out, which gh's Changed tells.
-fn interval_given(account: &Account) -> bool {
-    account.argv_has("--interval")
-        || account
-            .argv
-            .iter()
-            .any(|word| word.starts_with("-i") && !word.starts_with("--"))
+/// `pr checks`' options that take a value, whose next word is that value.
+const CHECKS_VALUE_OPTIONS: [&str; 4] = ["--repo", "--json", "--jq", "--template"];
+const CHECKS_VALUE_SHORTS: [char; 4] = ['R', 'q', 't', 'i'];
+
+/// Whether `-i/--interval` was spelled out, which gh's Changed tells: the
+/// line's options read as pflag reads them, a value never taken for one.
+fn interval_given(argv: &[String]) -> bool {
+    let mut words = argv.iter();
+    while let Some(word) = words.next() {
+        if word == "--" {
+            return false;
+        }
+        if let Some(long) = word.strip_prefix("--") {
+            let name = long.split('=').next().unwrap_or("");
+            if name == "interval" {
+                return true;
+            }
+            if !long.contains('=') && CHECKS_VALUE_OPTIONS.contains(&format!("--{name}").as_str()) {
+                words.next();
+            }
+            continue;
+        }
+        let Some(cluster) = word.strip_prefix('-').filter(|rest| !rest.is_empty()) else {
+            continue;
+        };
+        for (at, letter) in cluster.char_indices() {
+            if letter == 'i' {
+                return true;
+            }
+            if CHECKS_VALUE_SHORTS.contains(&letter) {
+                if at + letter.len_utf8() == cluster.len() {
+                    words.next();
+                }
+                break;
+            }
+        }
+    }
+    false
 }
 
 pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
@@ -1101,7 +1132,7 @@ pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String
     if fail_fast && !watch {
         return usage("cannot use `--fail-fast` flag without `--watch` flag");
     }
-    if !watch && interval_given(account) {
+    if !watch && interval_given(&account.argv) {
         return usage("cannot use `--interval` flag without `--watch` flag");
     }
     let interval = flags.as_int("interval").unwrap_or(10);
@@ -1905,6 +1936,31 @@ async fn update_reviews(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn argv(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| (*word).to_owned()).collect()
+    }
+
+    #[test]
+    fn an_interval_is_given_only_as_an_option_never_as_a_value() {
+        assert!(interval_given(&argv(&["5", "-i", "3"])));
+        assert!(interval_given(&argv(&["5", "-i3"])));
+        assert!(interval_given(&argv(&["5", "--interval=3"])));
+        assert!(interval_given(&argv(&["--watch", "--interval", "3"])));
+        assert!(!interval_given(&argv(&[
+            "5",
+            "--json",
+            "name",
+            "--template",
+            "-items"
+        ])));
+        assert!(!interval_given(&argv(&[
+            "5", "--json", "name", "-t", "-i {{.}}"
+        ])));
+        assert!(!interval_given(&argv(&["5", "-R", "-i/repo"])));
+        assert!(!interval_given(&argv(&["5", "--", "-i"])));
+        assert!(!interval_given(&argv(&["5", "--watch"])));
+    }
 
     #[test]
     fn a_diff_names_its_b_sides_quotes_and_all() {

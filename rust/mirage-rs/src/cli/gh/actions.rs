@@ -462,6 +462,14 @@ pub(crate) async fn run_view_cmd(
             .map_err(|failure| Failure::Value(format!("failed to get jobs: {}", failure.text())))?,
     };
     if logs || failed_only {
+        // A job from an earlier attempt reads that attempt's archive, whose
+        // files carry its own steps, rather than the latest's.
+        let log_attempt = match (&selected, attempt) {
+            (Some(job), 0) => {
+                u64::try_from(job.get("run_attempt").as_int().unwrap_or(0)).unwrap_or(0)
+            }
+            _ => attempt,
+        };
         return Ok(Out {
             stdout: run_log(
                 account,
@@ -470,7 +478,7 @@ pub(crate) async fn run_view_cmd(
                 &jobs,
                 selected.is_some(),
                 failed_only,
-                attempt,
+                log_attempt,
             )
             .await?,
             ..Out::default()
@@ -602,9 +610,10 @@ fn render_jobs_compact(jobs: &[Json]) -> String {
 }
 
 /// One frame of `gh run watch`: the run fetched again, its header, jobs
-/// and annotations, as gh's renderRun writes them. Annotations of a job
-/// no longer in progress are kept and, as gh's cache does, stand in for
-/// what was gathered before them.
+/// and annotations, as gh's renderRun writes them. A completed job's own
+/// annotations are kept and not fetched again; unlike gh's cache, which
+/// also keeps a queued job's and lets a kept entry replace what the frame
+/// gathered before it, no job's fresh annotations are lost.
 async fn watch_frame(
     account: &Account,
     repo: &RepoRef,
@@ -626,17 +635,16 @@ async fn watch_frame(
     for job in &jobs {
         let job_id = job.get("id").as_int().unwrap_or(0);
         if let Some(kept) = cache.get(&job_id) {
-            annotations = kept.clone();
+            annotations.extend(kept.iter().cloned());
             continue;
         }
-        match job_annotations(account, repo, job_id).await {
-            Ok(found) => annotations.extend(
-                found
-                    .items()
-                    .iter()
-                    .map(|one| (job.get("name").text().to_owned(), one.clone())),
-            ),
-            Err(Failure::Api(error)) if error.status == 404 => {}
+        let own: Vec<(String, Json)> = match job_annotations(account, repo, job_id).await {
+            Ok(found) => found
+                .items()
+                .iter()
+                .map(|one| (job.get("name").text().to_owned(), one.clone()))
+                .collect(),
+            Err(Failure::Api(error)) if error.status == 404 => Vec::new(),
             Err(Failure::Api(error)) if error.status == 403 => {
                 forbidden = true;
                 break;
@@ -644,10 +652,11 @@ async fn watch_frame(
             Err(failure) => {
                 return value(format!("failed to get annotations: {}", failure.text()));
             }
+        };
+        if job.get("status").as_str() == Some("completed") {
+            cache.insert(job_id, own.clone());
         }
-        if job.get("status").as_str() != Some("in_progress") {
-            cache.insert(job_id, annotations.clone());
-        }
+        annotations.extend(own);
     }
     let (reply, _) = account.host.ask(Request::Now).await;
     let now = (reply.now.unwrap_or(0.0) * 1e9) as i128;

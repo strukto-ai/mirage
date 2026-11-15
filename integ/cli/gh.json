@@ -3321,10 +3321,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh pr checks 5 --fail-fast 2>&1 | head -1; gh pr checks 5 -i 5 2>&1 | head -1; gh pr checks 5 --watch --json name 2>&1 | head -1; gh pr checks -R integ/repo-cli 2>&1 | head -1; gh pr diff -R integ/repo-cli 2>&1 | head -1; gh pr checks 5 --watch -i 1; echo \"exit=$?\"",
+      "command": "gh pr checks 5 --fail-fast 2>&1 | head -1; gh pr checks 5 -i 5 2>&1 | head -1; gh pr checks 5 --watch --json name 2>&1 | head -1; gh pr checks 5 --json name -t '-items: {{len .}}'; echo; gh pr checks -R integ/repo-cli 2>&1 | head -1; gh pr diff -R integ/repo-cli 2>&1 | head -1; gh pr checks 5 --watch -i 1; echo \"exit=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "cannot use `--fail-fast` flag without `--watch` flag\ncannot use `--interval` flag without `--watch` flag\ncannot use `--watch` with `--json` flag\nargument required when using the `--repo` flag\nargument required when using the `--repo` flag\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n",
+        "stdout": "cannot use `--fail-fast` flag without `--watch` flag\ncannot use `--interval` flag without `--watch` flag\ncannot use `--watch` with `--json` flag\n-items: 2\nargument required when using the `--repo` flag\nargument required when using the `--repo` flag\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n",
         "stderr": ""
       }
     },
