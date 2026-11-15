@@ -135,9 +135,11 @@ with the same predicates, `:contains(text)` and `:empty`.
 - A formula is stored without a computed value, and Excel calculates it on
   open. A formula cell with no stored value shows `#OCLI_NOTEVAL!` and
   `evaluated=false`.
+- `create` writes a blank workbook with no document properties or theme.
 - `set` takes the props above; overwriting the first cell of a shared formula
   is refused.
 - `query` reads cells, rows, comments and sheets; charts, tables, pivot tables
   and other elements return no matches.
 - `batch` runs `get`, `query`, `set` and `remove` items.
-- Usage errors and `--help` use Mirage's wording.
+- Usage errors and `--help` use Mirage's wording. Messages that name the command
+  say `office`.

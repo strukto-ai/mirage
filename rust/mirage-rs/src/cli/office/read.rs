@@ -48,7 +48,7 @@ pub(super) struct Doc {
     pub(super) sheets: Vec<Entry>,
     shared: Vec<Item>,
     pub(super) styles: style::Book,
-    date1904: bool,
+    pub(super) date1904: bool,
     workbook: Vec<u8>,
 }
 

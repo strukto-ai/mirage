@@ -51,8 +51,10 @@ pub(super) fn col_name(mut col: u32) -> String {
     String::from_utf8(s).unwrap_or_default()
 }
 
-/// The serial day count of a `YYYY-MM-DD` date, as Excel counts from 1900.
-pub(super) fn date_serial(text: &str) -> Option<f64> {
+/// The serial day count of a `YYYY-MM-DD` date in the workbook's date
+/// system, as Excel counts it: 1900 counts its fictitious 29 February, so a
+/// day before March 1900 is one less than the calendar gives.
+pub(super) fn date_serial(text: &str, date1904: bool) -> Option<f64> {
     let mut parts = text.split('-');
     let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
@@ -87,7 +89,14 @@ pub(super) fn date_serial(text: &str) -> Option<f64> {
         let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1;
         era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy
     };
-    Some((days(y, m, d) - days(1899, 12, 30)) as f64)
+    let mut serial = days(y, m, d) - days(1899, 12, 30);
+    if (y, m) < (1900, 3) && serial >= 2 {
+        serial -= 1;
+    }
+    if date1904 {
+        serial -= 1462;
+    }
+    Some(serial as f64)
 }
 
 /// Why a worksheet could not take its edits.
@@ -470,19 +479,29 @@ impl Styles {
             .iter()
             .find(|t| t.kind == Kind::End && t.is("numFmts"))
             .copied();
-        let xml = match (open, close, root) {
-            (Some(open), Some(close), _) => {
-                let count = (self.custom.len() + 1).to_string();
-                [
-                    &self.xml[..open.start],
-                    &retag(&open, &[("count", Some(&count))], Kind::Start),
-                    &self.xml[open.end..close.start],
-                    entry.as_bytes(),
-                    &self.xml[close.start..],
-                ]
-                .concat()
-            }
-            (_, _, Some(root)) => {
+        let empty = all
+            .iter()
+            .find(|t| t.kind == Kind::Empty && t.is("numFmts"))
+            .copied();
+        let count = (self.custom.len() + 1).to_string();
+        let xml = match (open, close, empty, root) {
+            (Some(open), Some(close), _, _) => [
+                &self.xml[..open.start],
+                &retag(&open, &[("count", Some(&count))], Kind::Start),
+                &self.xml[open.end..close.start],
+                entry.as_bytes(),
+                &self.xml[close.start..],
+            ]
+            .concat(),
+            (_, _, Some(empty), _) => [
+                &self.xml[..empty.start],
+                &retag(&empty, &[("count", Some(&count))], Kind::Start),
+                entry.as_bytes(),
+                format!("</{}>", String::from_utf8_lossy(empty.name)).as_bytes(),
+                &self.xml[empty.end..],
+            ]
+            .concat(),
+            (_, _, _, Some(root)) => {
                 let block = format!("<{p}numFmts count=\"1\">{entry}</{p}numFmts>");
                 [
                     &self.xml[..root.end],

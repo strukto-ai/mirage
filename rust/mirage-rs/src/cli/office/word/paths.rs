@@ -73,7 +73,8 @@ fn indexed<'s>(path: &'s str, names: &[&str], last: bool) -> Option<(&'s str, &'
 }
 
 fn starts_ci(s: &str, prefix: &str) -> bool {
-    s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix)
+    s.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 impl<'p> Word<'p> {

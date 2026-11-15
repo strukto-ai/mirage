@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use flate2::{Compress, Compression, Crc, FlushCompress};
 
 use super::xml::{Kind, tags};
-use crate::request::{Opening, Reply, Request, failed};
+use crate::request::{Opening, Reply, Request, WriteMode, failed};
 use crate::task::Host;
 use crate::zip::{
     ARCHIVE, Decoder, Directory, Entry, Piece, Spool, ending, fields, keep, placed, write_out,
@@ -29,6 +29,8 @@ pub(super) struct Book<'h> {
     comment: Vec<u8>,
     changed: HashMap<String, Vec<u8>>,
     dropped: HashSet<String>,
+    /// The members a command added, by the names they are written under.
+    added: Vec<String>,
     /// Where the central directory starts, so the last member's bytes are
     /// known.
     directory_at: u64,
@@ -38,6 +40,7 @@ pub(super) struct Book<'h> {
 pub(super) struct Mark {
     changed: HashMap<String, Vec<u8>>,
     dropped: HashSet<String>,
+    added: Vec<String>,
 }
 
 fn key(name: &str) -> String {
@@ -80,6 +83,7 @@ impl<'h> Book<'h> {
             comment,
             changed: HashMap::new(),
             dropped: HashSet::new(),
+            added: Vec::new(),
             directory_at: 0,
         };
         book.directory_at = book
@@ -116,7 +120,9 @@ impl<'h> Book<'h> {
             .find(|e| key(&String::from_utf8_lossy(&e.name)) == want)
     }
 
-    /// A part's bytes, as last changed or as the package holds them.
+    /// A part's bytes, as last changed or as the package holds them; None
+    /// when its data inflates past the size the directory gives it or past
+    /// what memory can hold.
     pub(super) async fn part(&mut self, name: &str) -> Option<Vec<u8>> {
         if self.dropped.contains(&key(name)) {
             return None;
@@ -128,11 +134,18 @@ impl<'h> Book<'h> {
         let start = self.spool.data_start(&entry).await.ok()??;
         let packed = self.spool.read(start, entry.csize).await.ok()?;
         let mut decoder = Decoder::new(&entry)?;
-        let mut out = Vec::with_capacity(entry.size as usize);
+        let size = usize::try_from(entry.size).ok()?;
+        let mut out = Vec::new();
+        out.try_reserve(size.min(packed.len().saturating_mul(1032).saturating_add(1024)))
+            .ok()?;
         let mut window = Vec::new();
         let mut at = 0;
         while at < packed.len() || decoder.pending() {
             let used = decoder.step(&packed[at..], &mut window);
+            if out.len() + window.len() > size {
+                return None;
+            }
+            out.try_reserve(window.len()).ok()?;
             out.extend_from_slice(&window);
             if used == 0 && window.is_empty() {
                 break;
@@ -143,6 +156,9 @@ impl<'h> Book<'h> {
     }
 
     pub(super) fn put(&mut self, name: &str, data: Vec<u8>) {
+        if self.entry(name).is_none() && !self.added.iter().any(|a| key(a) == key(name)) {
+            self.added.push(name.trim_start_matches('/').to_string());
+        }
         self.changed.insert(key(name), data);
     }
 
@@ -152,6 +168,7 @@ impl<'h> Book<'h> {
             .iter()
             .filter(|e| !e.is_dir())
             .map(|e| String::from_utf8_lossy(&e.name).into_owned())
+            .chain(self.added.iter().cloned())
             .filter(|n| !self.dropped.contains(&key(n)))
             .collect()
     }
@@ -180,17 +197,20 @@ impl<'h> Book<'h> {
         Mark {
             changed: self.changed.clone(),
             dropped: self.dropped.clone(),
+            added: self.added.clone(),
         }
     }
 
     pub(super) fn restore(&mut self, mark: Mark) {
         self.changed = mark.changed;
         self.dropped = mark.dropped;
+        self.added = mark.added;
     }
 
-    /// The package written whole to `path`: each unchanged member as the
-    /// spool holds it, each changed one deflated anew, then a directory
-    /// that points at where each now stands.
+    /// The package written whole to `path`, replacing it only once all of
+    /// it is written: each unchanged member as the spool holds it, each
+    /// changed or added one deflated anew, then a directory that points at
+    /// where each now stands.
     pub(super) async fn save(mut self, host: &Host, path: &[u8]) -> Option<Reply> {
         let mut order: Vec<Entry> = self.entries.clone();
         order.sort_by_key(|e| e.local);
@@ -224,10 +244,23 @@ impl<'h> Book<'h> {
                 }
             }
         }
+        for name in &self.added {
+            if self.dropped.contains(&key(name)) {
+                continue;
+            }
+            let Some(data) = self.changed.remove(&key(name)) else {
+                continue;
+            };
+            count += 1;
+            let (local, record) = member(name.as_bytes(), &data, None);
+            central.extend(placed(&record, offset));
+            offset += local.len() as u64;
+            pieces.push(Piece::Made(local));
+        }
         let size = central.len() as u64;
         let end = ending(count, size, offset, &self.comment);
         pieces.push(Piece::Made([central, end].concat()));
-        write_out(host, path, pieces).await
+        write_out(host, path, pieces, WriteMode::Replace).await
     }
 }
 

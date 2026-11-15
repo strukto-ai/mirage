@@ -950,7 +950,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     let size = directory.len() as u64;
     directory.extend(ending(records.len() as u64, size, offset, &comment));
     pieces.push(Piece::Made(directory));
-    if let Some(reply) = write_out(&host, &config.output, pieces).await {
+    if let Some(reply) = write_out(&host, &config.output, pieces, WriteMode::Create).await {
         return create_error(&reply, true);
     }
     let unremoved = if config.move_files {
@@ -1118,7 +1118,7 @@ async fn delete(
     let size = directory.len() as u64;
     directory.extend(ending(kept.len() as u64, size, offset, &comment));
     pieces.push(Piece::Made(directory));
-    if let Some(reply) = write_out(host, &config.output, pieces).await {
+    if let Some(reply) = write_out(host, &config.output, pieces, WriteMode::Create).await {
         let text = say(CREATE, &[&failure_text(&reply), archive]);
         host.warn(&text);
         return CREATE_EXIT;
@@ -1130,12 +1130,18 @@ async fn delete(
     0
 }
 
-/// The pieces as the file at `path`, whole; the host's failure if any.
-pub(crate) async fn write_out(host: &Host, path: &[u8], pieces: Vec<Piece>) -> Option<Reply> {
+/// The pieces as the file at `path`, whole, its first write opened in
+/// `mode`; the host's failure if any.
+pub(crate) async fn write_out(
+    host: &Host,
+    path: &[u8],
+    pieces: Vec<Piece>,
+    mode: WriteMode,
+) -> Option<Reply> {
     let path = path.to_vec();
     let mut writes = vec![Request::Write {
         path: path.clone(),
-        mode: WriteMode::Create,
+        mode,
         data: Vec::new(),
     }];
     writes.extend(pieces.into_iter().map(|piece| {

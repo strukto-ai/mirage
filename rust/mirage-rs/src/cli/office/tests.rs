@@ -42,8 +42,12 @@ fn paths() {
 
 #[test]
 fn values() {
-    assert_eq!(date_serial("2024-03-15"), Some(45366.0));
-    assert_eq!(date_serial("2024-02-30"), None);
+    assert_eq!(date_serial("2024-03-15", false), Some(45366.0));
+    assert_eq!(date_serial("2024-02-30", false), None);
+    assert_eq!(date_serial("1900-01-01", false), Some(1.0));
+    assert_eq!(date_serial("1900-02-28", false), Some(59.0));
+    assert_eq!(date_serial("1900-03-01", false), Some(61.0));
+    assert_eq!(date_serial("2024-03-15", true), Some(43904.0));
     assert_eq!(number("42").as_deref(), Some("42"));
     assert_eq!(number("3.5").as_deref(), Some("3.5"));
     assert_eq!(number("true"), None);
@@ -146,6 +150,16 @@ const DECK: &[u8] = include_bytes!("../../../../../integ/fixtures/office/v1/deck
 fn office(name: &str, bytes: &[u8], config: serde_json::Value) -> (String, String, i32) {
     let mut host = crate::host::Host::default();
     host.files.insert(name.to_string(), bytes.to_vec());
+    run(&mut host, name, config)
+}
+
+/// One office command on `name` among `host`'s files: stdout, stderr,
+/// status.
+fn run(
+    host: &mut crate::host::Host,
+    name: &str,
+    config: serde_json::Value,
+) -> (String, String, i32) {
     let mut config = config;
     config["file"] = serde_json::json!(name);
     config["absolute"] = serde_json::json!(name);
@@ -314,4 +328,101 @@ fn line_ends_and_attribute_spaces_read_as_xml_reads_them() {
         tree.root().child(super::tree::W, "t").unwrap().text(),
         "x\ny\nz\rp\nq"
     );
+}
+
+#[test]
+fn a_date_lands_formatted_where_no_styles_part_was() {
+    let rel = r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#;
+    let kind = r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#;
+    let workbook = |date1904: bool| {
+        let parts: Vec<(&str, Vec<u8>)> = super::blank_parts()
+            .into_iter()
+            .filter(|(name, _)| *name != "xl/styles.xml")
+            .map(|(name, data)| {
+                let mut text = String::from_utf8(data).unwrap();
+                text = text.replace(rel, "").replace(kind, "");
+                if date1904 {
+                    text = text.replace("<calcPr", r#"<workbookPr date1904="1"/><calcPr"#);
+                }
+                (name, text.into_bytes())
+            })
+            .collect();
+        super::book::package(&parts)
+    };
+    for date1904 in [false, true] {
+        let mut host = crate::host::Host::default();
+        host.files.insert("w.xlsx".to_string(), workbook(date1904));
+        let set = serde_json::json!({"command": "set", "path": "/Sheet1/C1", "props": ["value=1900-02-28"]});
+        let (out, err, status) = run(&mut host, "w.xlsx", set);
+        assert_eq!(
+            (out.as_str(), err.as_str(), status),
+            ("Updated /Sheet1/C1: value=1900-02-28\n", "", 0)
+        );
+        let get = serde_json::json!({"command": "get", "path": "/Sheet1/C1"});
+        let (out, err, status) = run(&mut host, "w.xlsx", get);
+        assert_eq!(
+            (out.as_str(), err.as_str(), status),
+            (
+                "/Sheet1/C1 (cell) \"1900-02-28\" type=Number numFmtId=164 numberformat=yyyy-mm-dd\n",
+                "",
+                0
+            ),
+            "date1904={date1904}"
+        );
+    }
+}
+
+#[test]
+fn a_cell_refuses_text_xml_cannot_hold() {
+    let set =
+        serde_json::json!({"command": "set", "path": "/Sheet1/A2", "props": ["value=p\u{b}q"]});
+    let (out, err, status) = office("w.xlsx", &super::blank(), set);
+    assert_eq!(
+        (out.as_str(), err.as_str(), status),
+        (
+            "",
+            "Error: cell value at A2 contains XML-illegal control character U+000B at position 1. Allowed control chars: \\t, \\n, \\r.\n",
+            1
+        )
+    );
+}
+
+#[test]
+fn an_empty_format_list_takes_the_date_format() {
+    let xml = r#"<styleSheet xmlns="m"><numFmts count="0"/><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>"#;
+    let mut styles = Styles::new(xml.as_bytes().to_vec());
+    assert_eq!(styles.date_style(0), 1);
+    let text = String::from_utf8(styles.xml.clone()).unwrap();
+    assert_eq!(text.matches("<numFmts").count(), 1);
+    assert!(text.contains(
+        r#"<numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>"#
+    ));
+}
+
+#[test]
+fn a_utf16_part_parses() {
+    let text = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:t>中文</w:t></w:r>";
+    let little: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(text.encode_utf16().flat_map(u16::to_le_bytes))
+        .collect();
+    let big: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+    for bytes in [little, big] {
+        let tree = super::tree::parse(&bytes).ok().unwrap();
+        assert_eq!(
+            tree.root().child(super::tree::W, "t").unwrap().text(),
+            "中文"
+        );
+    }
+    assert!(super::tree::parse(&[0xFF, 0xFE, b'<']).is_err());
+}
+
+#[test]
+fn a_word_path_with_wide_characters_reads_without_panicking() {
+    let (out, _, status) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "get", "path": "/body/p[1]/bookmarkStart[@name=中文]"}),
+    );
+    assert!(status == 0 || out.is_empty(), "{out}");
 }

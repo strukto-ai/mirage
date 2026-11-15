@@ -45,6 +45,7 @@
       "targets": [
         "cli-office"
       ],
+      "conformance_skip": "office does not evaluate formulas; OfficeCLI does",
       "command": "office create /scratch/o4.xlsx >/dev/null && office set /scratch/o4.xlsx /Sheet1/B1 --prop formula=A1*2 && office get /scratch/o4.xlsx /Sheet1",
       "expect": {
         "exit": 0,
@@ -58,6 +59,7 @@
       "targets": [
         "cli-office"
       ],
+      "conformance_skip": "office create writes no document properties or theme",
       "command": "office create /scratch/o5.xlsx >/dev/null && office set /scratch/o5.xlsx /Sheet1/A1 --prop value=1 >/dev/null && office get /scratch/o5.xlsx && office get /scratch/o5.xlsx /Sheet1 --depth 0",
       "expect": {
         "exit": 0,
@@ -149,6 +151,7 @@
       "targets": [
         "cli-office"
       ],
+      "conformance_skip": "office sets value, formula and type only",
       "command": "office create /scratch/o12.xlsx >/dev/null && office set /scratch/o12.xlsx /Sheet1/A1 --prop bogus=1",
       "expect": {
         "exit": 2,

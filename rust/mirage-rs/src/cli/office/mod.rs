@@ -41,7 +41,7 @@ use self::sheet::{
     without_shape,
 };
 use self::xml::{Kind, retag, tags};
-use crate::request::{Opening, Request, failed, failure_text};
+use crate::request::{Opening, Request, WriteMode, failed, failure_text};
 use crate::task::Host;
 use crate::zip::{Piece, write_out};
 use crate::{Stream, StreamError, parse_config, task};
@@ -544,7 +544,14 @@ async fn create(out: &Out<'_>, config: &Config) -> i32 {
         fail.suggestion = Some("Add --force flag or remove the file first.".to_string());
         return out.fail(&fail);
     }
-    if let Some(reply) = write_out(out.host, &config.absolute, vec![Piece::Made(blank())]).await {
+    if let Some(reply) = write_out(
+        out.host,
+        &config.absolute,
+        vec![Piece::Made(blank())],
+        WriteMode::Replace,
+    )
+    .await
+    {
         return out.fail(&Fail::of(text(&failure_text(&reply))));
     }
     out.done(&format!(
@@ -557,20 +564,37 @@ async fn create(out: &Out<'_>, config: &Config) -> i32 {
     ))
 }
 
-/// A workbook of one empty sheet, Sheet1, set to calculate when opened.
-fn blank() -> Vec<u8> {
-    const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-    const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-    const PKG: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
-    let head = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
-    package(&[
+const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const PKG: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+const STYLES_TYPE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
+
+/// The styles part of a blank workbook: one font, fill pair, border and
+/// cell format.
+fn default_styles() -> String {
+    format!(
+        "{HEAD}<styleSheet xmlns=\"{MAIN}\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>"
+    )
+}
+
+/// The parts of a workbook of one empty sheet, Sheet1, set to calculate
+/// when opened.
+fn blank_parts() -> Vec<(&'static str, Vec<u8>)> {
+    let head = HEAD;
+    vec![
         ("[Content_Types].xml", format!("{head}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>").into_bytes()),
         ("_rels/.rels", format!("{head}<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>").into_bytes()),
         ("xl/workbook.xml", format!("{head}<workbook xmlns=\"{MAIN}\" xmlns:r=\"{REL}\"><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets><calcPr fullCalcOnLoad=\"1\"/></workbook>").into_bytes()),
         ("xl/_rels/workbook.xml.rels", format!("{head}<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"{REL}/styles\" Target=\"styles.xml\"/></Relationships>").into_bytes()),
         ("xl/worksheets/sheet1.xml", format!("{head}<worksheet xmlns=\"{MAIN}\" xmlns:r=\"{REL}\"><sheetData/></worksheet>").into_bytes()),
-        ("xl/styles.xml", format!("{head}<styleSheet xmlns=\"{MAIN}\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>").into_bytes()),
-    ])
+        ("xl/styles.xml", default_styles().into_bytes()),
+    ]
+}
+
+/// A workbook of one empty sheet, Sheet1, set to calculate when opened.
+fn blank() -> Vec<u8> {
+    package(&blank_parts())
 }
 
 /// The sheet a typed name stands for: by name without case, or
@@ -774,6 +798,72 @@ async fn styles_of(book: &mut Book<'_>, wb_part: &str) -> Option<(String, Styles
     Some((part, Styles::new(xml)))
 }
 
+/// The workbook's styles, or a blank workbook's added to the package when
+/// it has none, as OfficeCLI adds a stylesheet before it formats a cell.
+async fn styles_or_new(book: &mut Book<'_>, wb_part: &str) -> Option<(String, Styles)> {
+    if let Some(found) = styles_of(book, wb_part).await {
+        return Some(found);
+    }
+    let part = book::resolve(wb_part, "styles.xml");
+    if book.size(&part).is_some() {
+        return None;
+    }
+    let rels_part = rels_of(wb_part);
+    let rels = book.part(&rels_part).await?;
+    let types = book.part("[Content_Types].xml").await?;
+    let ids: Vec<String> = relationships(&rels, wb_part)
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect();
+    let id = (1..)
+        .map(|n| format!("rId{n}"))
+        .find(|id| !ids.contains(id))?;
+    let rel = format!("<Relationship Id=\"{id}\" Type=\"{REL}/styles\" Target=\"styles.xml\"/>");
+    let kind = format!("<Override PartName=\"/{part}\" ContentType=\"{STYLES_TYPE}\"/>");
+    let rels = before_end(&rels, "Relationships", &rel)?;
+    let types = before_end(&types, "Types", &kind)?;
+    let xml = default_styles().into_bytes();
+    book.put(&part, xml.clone());
+    book.put(&rels_part, rels);
+    book.put("[Content_Types].xml", types);
+    Some((part, Styles::new(xml)))
+}
+
+/// `xml` with `entry` put just inside the end of its `root` element.
+fn before_end(xml: &[u8], root: &str, entry: &str) -> Option<Vec<u8>> {
+    let end = tags(xml)
+        .filter(|t| t.kind == Kind::End && t.is(root))
+        .last()?;
+    Some([&xml[..end.start], entry.as_bytes(), &xml[end.start..]].concat())
+}
+
+/// Why a cell cannot hold `value`, in OfficeCLI's words: past Excel's
+/// length limit, or holding a character XML cannot carry.
+fn cell_text_fault(value: &str, at: &str) -> Option<String> {
+    let length = value.encode_utf16().count();
+    if length > 32_767 {
+        return Some(format!(
+            "Cell value at {at} exceeds Excel's 32767-character limit (got {length})"
+        ));
+    }
+    let mut position = 0;
+    for c in value.chars() {
+        let code = c as u32;
+        if code < 0x20 && !matches!(c, '\t' | '\n' | '\r') {
+            return Some(format!(
+                "cell value at {at} contains XML-illegal control character U+{code:04X} at position {position}. Allowed control chars: \\t, \\n, \\r."
+            ));
+        }
+        if matches!(c, '\u{FFFE}' | '\u{FFFF}') {
+            return Some(format!(
+                "cell value at {at} contains the XML-illegal noncharacter U+{code:04X} at position {position}."
+            ));
+        }
+        position += c.len_utf16();
+    }
+    None
+}
+
 const CELL_PROPS: &[&str] = &["value", "formula", "type"];
 const SHEET_PROPS: &[&str] = &["hidden"];
 
@@ -854,6 +944,10 @@ async fn set(
         }
         Target::Cell(name, (row, col)) => {
             let (_, entry) = resolve_sheet(doc, name, Some((*row, *col)))?;
+            let at = format!("{}{row}", col_name(*col));
+            if let Some(fault) = get("value").and_then(|v| cell_text_fault(&v, &at)) {
+                return Err(Fail::of(fault).into());
+            }
             let kind = get("type").map(|t| t.to_ascii_lowercase());
             let val = match (get("formula"), get("value")) {
                 (Some(f), _) => Val::Formula(f.trim_start_matches('=').to_string()),
@@ -868,7 +962,7 @@ async fn set(
                     },
                     _ => number(&v)
                         .map(Val::Num)
-                        .or_else(|| date_serial(&v).map(Val::Date))
+                        .or_else(|| date_serial(&v, doc.date1904).map(Val::Date))
                         .unwrap_or(Val::Str(v)),
                 },
                 (None, None) => {
@@ -879,7 +973,7 @@ async fn set(
                 }
             };
             let mut styles = match val {
-                Val::Date(_) => styles_of(book, &doc.wb_part).await.map(|(_, s)| s),
+                Val::Date(_) => styles_or_new(book, &doc.wb_part).await.map(|(_, s)| s),
                 _ => None,
             };
             let Some(xml) = book.part(&entry.part).await else {

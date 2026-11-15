@@ -605,9 +605,41 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// A part's bytes as a tree.
+/// A part written in UTF-16, which its byte-order mark or its opening `<?`
+/// shows, as text.
+fn utf16(bytes: &[u8]) -> Option<Result<String, Malformed>> {
+    let (big, body) = match bytes {
+        [0xFF, 0xFE, rest @ ..] => (false, rest),
+        [0xFE, 0xFF, rest @ ..] => (true, rest),
+        [b'<', 0, b'?', 0, ..] => (false, bytes),
+        [0, b'<', 0, b'?', ..] => (true, bytes),
+        _ => return None,
+    };
+    if body.len() % 2 != 0 {
+        return Some(Err(Malformed));
+    }
+    let units = body.chunks_exact(2).map(|pair| {
+        let pair = [pair[0], pair[1]];
+        if big {
+            u16::from_be_bytes(pair)
+        } else {
+            u16::from_le_bytes(pair)
+        }
+    });
+    Some(
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map_err(|_| Malformed),
+    )
+}
+
+/// A part's bytes as a tree, read as UTF-8 or UTF-16.
 pub(super) fn parse(bytes: &[u8]) -> Result<Tree, Malformed> {
-    let s = std::str::from_utf8(bytes).map_err(|_| Malformed)?;
+    let wide = utf16(bytes).transpose()?;
+    let s = match &wide {
+        Some(text) => text.as_str(),
+        None => std::str::from_utf8(bytes).map_err(|_| Malformed)?,
+    };
     let s = s.strip_prefix('\u{feff}').unwrap_or(s);
     let mut p = Parser {
         s,
