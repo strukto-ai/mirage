@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,14 +15,17 @@ const env = {
 const registry = join(process.env.CARGO_HOME ?? join(homedir(), '.cargo'), 'registry', 'src')
 const output = new URL('../src/generated/', import.meta.url)
 const built = new URL('../dist/generated/', import.meta.url)
+// CI keeps the modules between runs (.github/actions/setup-node-pnpm), keyed
+// on all that decides their bytes, rust/ and this script, so a module found
+// there was built from these sources and cargo is not run for it.
+const kept = process.env.MIRAGE_WASM_CACHE
 
-// Build one crate's module and write the files its `#mirage-*-wasm` import
-// names. The streams module's dependencies and its LTO run at opt-level 2,
-// which keeps it smaller, mirage-rs at the profile's 3 (awk is a tenth slower
-// at 2), as does the shell module; gh's, which waits on GitHub, is built for
-// size. `small` names the crates built for size inside a module, the codecs and
-// parsers no hot loop waits on.
-function embed(crate, name, build, small = []) {
+// Build one crate's module. The streams module's dependencies and its LTO run
+// at opt-level 2, which keeps it smaller, mirage-rs at the profile's 3 (awk is
+// a tenth slower at 2), as does the shell module; gh's, which waits on GitHub,
+// is built for size. `small` names the crates built for size inside a module,
+// the codecs and parsers no hot loop waits on.
+function compile(crate, build, small) {
   let messages
   try {
     messages = execFileSync(
@@ -67,7 +70,22 @@ function embed(crate, name, build, small = []) {
     .flatMap((message) => message.filenames)
     .find((file) => file.endsWith(artifact))
   if (path === undefined) throw new Error(`cargo reported no ${artifact}`)
-  const wasm = readFileSync(path)
+  return readFileSync(path)
+}
+
+// Write the files a module's `#mirage-*-wasm` import names.
+function embed(crate, name, build, small = []) {
+  const cached = kept && join(kept, `${name}.wasm`)
+  let wasm
+  if (cached && existsSync(cached)) {
+    wasm = readFileSync(cached)
+  } else {
+    wasm = compile(crate, build, small)
+    if (cached) {
+      mkdirSync(kept, { recursive: true })
+      writeFileSync(cached, wasm)
+    }
+  }
   mkdirSync(output, { recursive: true })
   writeFileSync(
     new URL(`${name}.d.ts`, output),

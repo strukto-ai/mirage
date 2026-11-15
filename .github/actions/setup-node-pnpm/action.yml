@@ -11,6 +11,12 @@ inputs:
   pnpm-version:
     description: pnpm version to install.
     default: "10.32.1"
+  wasm-cache:
+    description: >-
+      Take the wasm modules core embeds from an earlier run built from the
+      same sources. The release passes false, so the tarballs it packs carry
+      the modules it compiled itself.
+    default: "true"
 runs:
   using: composite
   steps:
@@ -66,3 +72,26 @@ runs:
       with:
         path: ~/.cache/node-gyp
         key: node-gyp-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}
+
+    # Compiling the three wasm modules was four and a half of the five minutes
+    # a full `pnpm install` took, in each of some twenty jobs a run. Only rust/
+    # and embed-rs.mjs decide their bytes, so the key is both as git holds
+    # them, which a fresh checkout is. embed-rs reads a module found in the
+    # directory and writes one it compiled there; a job that never builds them
+    # leaves it absent, and the cache saves nothing for that job.
+    - name: Name the wasm modules' cache
+      if: inputs.wasm-cache == 'true'
+      id: wasm
+      shell: bash
+      run: |
+        rust=$(git rev-parse HEAD:rust)
+        script=$(git rev-parse HEAD:typescript/packages/core/scripts/embed-rs.mjs)
+        echo "key=embed-rs-${{ runner.os }}-$rust-$script" >> "$GITHUB_OUTPUT"
+        echo "MIRAGE_WASM_CACHE=$RUNNER_TEMP/embed-rs" >> "$GITHUB_ENV"
+
+    - name: Cache the wasm modules
+      if: inputs.wasm-cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/embed-rs
+        key: ${{ steps.wasm.outputs.key }}
