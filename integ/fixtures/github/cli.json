@@ -5,7 +5,10 @@
       "owner": "integ",
       "name": "repo-cli",
       "defaultBranch": "main",
-      "sourceDir": "github/repo-v1"
+      "sourceDir": "github/repo-v1",
+      "requiredChecksJson": [
+        "test"
+      ]
     }
   ],
   "workflows": [
@@ -22,6 +25,165 @@
     }
   ],
   "runs": [
+    {
+      "repo": "integ/repo-cli",
+      "id": 200,
+      "name": "Archive",
+      "displayTitle": "Archive the build",
+      "workflowId": 102,
+      "runNumber": 1,
+      "runAttempt": 1,
+      "event": "pull_request",
+      "headBranch": "feature",
+      "headSha": "c13318709d4eb753fe20ea762abe77e19a8e5e73",
+      "status": "completed",
+      "conclusion": "failure",
+      "createdAt": "2025-12-31T00:00:00Z",
+      "updatedAt": "2025-12-31T00:01:30Z",
+      "runStartedAt": "2025-12-31T00:00:02Z",
+      "jobsJson": [
+        {
+          "id": 398,
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2025-12-31T00:00:02Z",
+          "completed_at": "2025-12-31T00:00:40Z",
+          "steps": [
+            {
+              "name": "Set up job",
+              "number": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:02Z",
+              "completed_at": "2025-12-31T00:00:03Z",
+              "log": "2025-12-31T00:00:02.0000000Z Current runner version: '2.330.0'\n"
+            },
+            {
+              "name": "Run make archive",
+              "number": 2,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:03Z",
+              "completed_at": "2025-12-31T00:00:40Z",
+              "log": "2025-12-31T00:00:03.0000000Z ##[group]Run make archive\n2025-12-31T00:00:39.0000000Z archive.tar.gz written\n"
+            }
+          ],
+          "annotations": [
+            {
+              "path": "Makefile",
+              "start_line": 4,
+              "end_line": 4,
+              "start_column": null,
+              "end_column": null,
+              "annotation_level": "warning",
+              "title": "",
+              "message": "archive.tar.gz is larger than 1 MB",
+              "raw_details": "",
+              "blob_href": "https://github.com/integ/repo-cli/blob/c13318709d4eb753fe20ea762abe77e19a8e5e73/Makefile"
+            }
+          ]
+        },
+        {
+          "id": 399,
+          "name": "upload",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2025-12-31T00:00:41Z",
+          "completed_at": "2025-12-31T00:01:30Z",
+          "steps": [
+            {
+              "name": "Set up job",
+              "number": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:41Z",
+              "completed_at": "2025-12-31T00:00:42Z",
+              "log": "2025-12-31T00:00:41.0000000Z Current runner version: '2.330.0'\n"
+            },
+            {
+              "name": "Upload archive",
+              "number": 2,
+              "status": "completed",
+              "conclusion": "failure",
+              "started_at": "2025-12-31T00:00:42Z",
+              "completed_at": "2025-12-31T00:01:29Z",
+              "log": "2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\n2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\n"
+            },
+            {
+              "name": "Notify",
+              "number": 3,
+              "status": "completed",
+              "conclusion": "skipped",
+              "started_at": null,
+              "completed_at": null,
+              "log": ""
+            },
+            {
+              "name": "Complete job",
+              "number": 4,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:01:29Z",
+              "completed_at": "2025-12-31T00:01:30Z",
+              "log": "2025-12-31T00:01:30.0000000Z Cleaning up orphan processes\n"
+            }
+          ],
+          "annotations": [
+            {
+              "path": "upload.sh",
+              "start_line": 7,
+              "end_line": 7,
+              "start_column": null,
+              "end_column": null,
+              "annotation_level": "failure",
+              "title": "",
+              "message": "Upload rejected: 403 Forbidden",
+              "raw_details": "",
+              "blob_href": "https://github.com/integ/repo-cli/blob/c13318709d4eb753fe20ea762abe77e19a8e5e73/upload.sh"
+            },
+            {
+              "path": ".github",
+              "start_line": 12,
+              "end_line": 12,
+              "start_column": null,
+              "end_column": null,
+              "annotation_level": "failure",
+              "title": "",
+              "message": "Process completed with exit code 1.",
+              "raw_details": "",
+              "blob_href": "https://github.com/integ/repo-cli/blob/c13318709d4eb753fe20ea762abe77e19a8e5e73/.github"
+            }
+          ]
+        }
+      ],
+      "artifactsJson": [
+        {
+          "id": 901,
+          "node_id": "MDg6QXJ0aWZhY3Q5MDE=",
+          "name": "archive",
+          "size_in_bytes": 1048576,
+          "url": "https://api.github.com/repos/integ/repo-cli/actions/artifacts/901",
+          "archive_download_url": "https://api.github.com/repos/integ/repo-cli/actions/artifacts/901/zip",
+          "expired": false,
+          "created_at": "2025-12-31T00:00:40Z",
+          "expires_at": "2026-03-31T00:00:40Z",
+          "updated_at": "2025-12-31T00:00:40Z"
+        },
+        {
+          "id": 900,
+          "node_id": "MDg6QXJ0aWZhY3Q5MDA=",
+          "name": "build-logs",
+          "size_in_bytes": 2048,
+          "url": "https://api.github.com/repos/integ/repo-cli/actions/artifacts/900",
+          "archive_download_url": "https://api.github.com/repos/integ/repo-cli/actions/artifacts/900/zip",
+          "expired": true,
+          "created_at": "2025-12-31T00:00:40Z",
+          "expires_at": "2025-12-31T00:00:41Z",
+          "updated_at": "2025-12-31T00:00:40Z"
+        }
+      ]
+    },
     {
       "repo": "integ/repo-cli",
       "id": 201,

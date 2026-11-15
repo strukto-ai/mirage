@@ -1830,7 +1830,85 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n      --exit-status       Exit with non-zero status if run failed\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
+        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n  -a, --attempt uint      The attempt number of the workflow run\n      --exit-status       Exit with non-zero status if run failed\n  -j, --job string        View a specific job ID from a run\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  -v, --verbose           Show job steps\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
+      }
+    },
+    {
+      "id": "gh_run_view_json_jobs_shapes_each_job_as_gh_does",
+      "seq": 569064,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 200 --json jobs --jq '.jobs[] | select(.conclusion==\"failure\")'; gh run view 200 --json databaseId,jobs --jq '[.databaseId, (.jobs | map(.databaseId)), .jobs[1].steps[2]]'; gh run list --json jobs 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"completedAt\":\"2025-12-31T00:01:30Z\",\"conclusion\":\"failure\",\"databaseId\":399,\"name\":\"upload\",\"startedAt\":\"2025-12-31T00:00:41Z\",\"status\":\"completed\",\"steps\":[{\"completedAt\":\"2025-12-31T00:00:42Z\",\"conclusion\":\"success\",\"name\":\"Set up job\",\"number\":1,\"startedAt\":\"2025-12-31T00:00:41Z\",\"status\":\"completed\"},{\"completedAt\":\"2025-12-31T00:01:29Z\",\"conclusion\":\"failure\",\"name\":\"Upload archive\",\"number\":2,\"startedAt\":\"2025-12-31T00:00:42Z\",\"status\":\"completed\"},{\"completedAt\":\"0001-01-01T00:00:00Z\",\"conclusion\":\"skipped\",\"name\":\"Notify\",\"number\":3,\"startedAt\":\"0001-01-01T00:00:00Z\",\"status\":\"completed\"},{\"completedAt\":\"2025-12-31T00:01:30Z\",\"conclusion\":\"success\",\"name\":\"Complete job\",\"number\":4,\"startedAt\":\"2025-12-31T00:01:29Z\",\"status\":\"completed\"}],\"url\":\"https://github.com/integ/repo-cli/actions/runs/200/job/399\"}\n[200,[398,399],{\"completedAt\":\"0001-01-01T00:00:00Z\",\"conclusion\":\"skipped\",\"name\":\"Notify\",\"number\":3,\"startedAt\":\"0001-01-01T00:00:00Z\",\"status\":\"completed\"}]\nUnknown JSON field: \"jobs\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_log_prints_only_that_job",
+      "seq": 569065,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view --job 399 --log-failed; gh run view 201 -j 398 --log; gh run view 200 --log-failed",
+      "expect": {
+        "exit": 0,
+        "stdout": "upload\tUpload archive\t2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\nupload\tUpload archive\t2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\nbuild\tSet up job\t2025-12-31T00:00:02.0000000Z Current runner version: '2.330.0'\nbuild\tRun make archive\t2025-12-31T00:00:03.0000000Z ##[group]Run make archive\nbuild\tRun make archive\t2025-12-31T00:00:39.0000000Z archive.tar.gz written\nupload\tUpload archive\t2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\nupload\tUpload archive\t2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_prints_its_steps_and_where_its_log_is",
+      "seq": 569066,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view --job 399 --exit-status > /scratch/job; echo \"exit=$?\"; sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/' /scratch/job; gh run view -j 398 | sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nANNOTATIONS\nX Upload rejected: 403 Forbidden\nupload: upload.sh#7\n\nX Process completed with exit code 1.\nupload: .github#12\n\n\nTo see the logs for the failed steps, try: gh run view --log-failed --job=399\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\n\nANNOTATIONS\n! archive.tar.gz is larger than 1 MB\nbuild: Makefile#4\n\n\nTo see the full job log, try: gh run view --log --job=398\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_must_exist",
+      "seq": 569067,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 2>&1 | head -1; gh run view --job 999 2>&1 | sed 's# (http.*##'; gh run view --job 999 --json jobs 2>&1 | sed 's# (http.*##'",
+      "expect": {
+        "exit": 0,
+        "stdout": "run or job ID required when not running interactively\nfailed to get job: HTTP 404: Not Found\nfailed to get job: HTTP 404: Not Found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_lists_jobs_annotations_and_artifacts",
+      "seq": 569068,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 200 --exit-status > /scratch/run; echo \"exit=$?\"; sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/' /scratch/run; gh run view 200 -v | sed -n '/^JOBS/,/^$/p'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\nJOBS\n✓ build in 38s (ID 398)\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nANNOTATIONS\n! archive.tar.gz is larger than 1 MB\nbuild: Makefile#4\n\nX Upload rejected: 403 Forbidden\nupload: upload.sh#7\n\nX Process completed with exit code 1.\nupload: .github#12\n\n\nARTIFACTS\narchive\nbuild-logs (expired)\n\nTo see what failed, try: gh run view 200 --log-failed\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\nJOBS\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_reads_one_attempt",
+      "seq": 569069,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 201 --attempt 1 | sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/'; gh run view 201 -a 1 --json attempt,url; gh run view 201 -a 9 2>&1 | sed 's# (http.*##'; gh run view 201 --attempt x 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n* main CI · 201 (Attempt #1)\nTriggered via push AGO\n\nJOBS\n✓ test in 55s (ID 401)\n\nFor more information about the job, try: gh run view --job=401\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/201/attempts/1\n{\"attempt\":1,\"url\":\"https://github.com/integ/repo-cli/actions/runs/201/attempts/1\"}\nfailed to get run: HTTP 404: Not Found\ninvalid argument \"x\" for \"-a, --attempt\" flag: strconv.ParseUint: parsing \"x\": invalid syntax\n",
+        "stderr": ""
       }
     },
     {
@@ -3221,6 +3299,58 @@
       "expect": {
         "exit": 0,
         "stdout": "[\"first\",\"second\",\"third\"]\n[\"second\",\"third\"]\n[\"two\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_checks_required_shows_only_required_checks",
+      "seq": 569087,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr checks 5 --required; echo \"exit=$?\"; gh pr checks 5 --required --json name,bucket",
+      "expect": {
+        "exit": 0,
+        "stdout": "test\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n[{\"bucket\":\"pass\",\"name\":\"test\"}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_checks_watch_flags_follow_gh",
+      "seq": 569088,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr checks 5 --fail-fast 2>&1 | head -1; gh pr checks 5 -i 5 2>&1 | head -1; gh pr checks 5 --watch --json name 2>&1 | head -1; gh pr checks 5 --json name -t '-items: {{len .}}'; echo; gh pr checks -R integ/repo-cli 2>&1 | head -1; gh pr diff -R integ/repo-cli 2>&1 | head -1; gh pr checks 5 --watch -i 1; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cannot use `--fail-fast` flag without `--watch` flag\ncannot use `--interval` flag without `--watch` flag\ncannot use `--watch` with `--json` flag\n-items: 2\nargument required when using the `--repo` flag\nargument required when using the `--repo` flag\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nci/legacy\tpass\t0\thttps://example.test/status/legacy\tLegacy status passed\ntest\tpass\t0\thttps://example.test/check/301\tAll checks passed\nexit=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_watch_follows_a_run_to_its_end",
+      "seq": 569089,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run watch 200; echo \"exit=$?\"; gh run watch 200 --exit-status; echo \"exit=$?\"; gh run watch 2>&1 | head -1; timeout 2 gh run watch 202 -i 1; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "Run Archive (200) has already completed with 'failure'\nexit=0\nRun Archive (200) has already completed with 'failure'\nexit=1\nrun ID required when not running interactively\nexit=124\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_checks_watch_stops_at_the_first_failure",
+      "seq": 9950066,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/watched -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/watched.md -f message=w -f branch=watched -f content=eA== --silent; n=$(gh pr create -t watched -b b -H watched -B main | sed 's#.*/##'); sha=$(gh pr view $n --json headRefOid --jq .headRefOid); gh api repos/integ/repo-cli/statuses/$sha -f state=pending -f context=deploy --silent; gh pr checks $n --required 2>&1; echo \"exit=$?\"; gh pr checks $n; echo \"exit=$?\"; timeout 2 gh pr checks $n --watch -i 1; echo \"exit=$?\"; gh api repos/integ/repo-cli/statuses/$sha -f state=failure -f context=lint -f description=broke --silent; gh pr checks $n --watch --fail-fast -i 1; echo \"exit=$?\"; gh pr checks $n --json name,bucket; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "no required checks reported on the 'watched' branch\nexit=1\ndeploy\tpending\t0\t\t\nexit=8\nexit=124\nRefreshing checks status every 1 seconds. Press Ctrl+C to quit.\n\nlint\tfail\t0\t\tbroke\ndeploy\tpending\t0\t\t\nlint\tfail\t0\t\tbroke\ndeploy\tpending\t0\t\t\nexit=1\n[{\"bucket\":\"pending\",\"name\":\"deploy\"},{\"bucket\":\"fail\",\"name\":\"lint\"}]\nexit=0\n",
         "stderr": ""
       }
     }
