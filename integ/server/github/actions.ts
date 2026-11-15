@@ -66,6 +66,7 @@ interface Job {
   started_at: string | null
   completed_at: string | null
   steps: JobStep[]
+  annotations?: JsonValue[]
 }
 
 interface RunRow {
@@ -84,6 +85,7 @@ interface RunRow {
   updatedAt: string
   runStartedAt: string | null
   jobsJson: string
+  artifactsJson: string
 }
 
 interface CheckRow {
@@ -114,14 +116,15 @@ function workflowJson(row: Workflow): JsonValue {
   return { id: row.id, name: row.name, path: row.path, state: row.state }
 }
 
-function runJson(repo: RepoRow, row: RunRow): JsonValue {
+function runJson(repo: RepoRow, row: RunRow, attempt = row.runAttempt): JsonValue {
+  const [owner = '', name = ''] = repo.fullName.split('/')
   return {
     id: row.id,
     name: row.name,
     display_title: row.displayTitle,
     workflow_id: row.workflowId,
     run_number: row.runNumber,
-    run_attempt: row.runAttempt,
+    run_attempt: attempt,
     event: row.event,
     head_branch: row.headBranch,
     head_sha: row.headSha,
@@ -132,6 +135,7 @@ function runJson(repo: RepoRow, row: RunRow): JsonValue {
     run_started_at: row.runStartedAt,
     html_url: `https://github.com/${repo.fullName}/actions/runs/${String(row.id)}`,
     jobs_url: `https://api.github.com/repos/${repo.fullName}/actions/runs/${String(row.id)}/jobs`,
+    head_repository: { name, full_name: repo.fullName, owner: { login: owner } },
   }
 }
 
@@ -374,6 +378,40 @@ async function getRun(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   return row === null ? fail(404, 'Not Found') : { status: 200, body: runJson(repo, row) }
 }
 
+// One attempt of a run. The fake keeps no history of earlier attempts, so
+// each one up to the current reads as the run does now.
+async function attemptOf(ctx: Ctx<C>, repo: RepoRow): Promise<RunRow | null> {
+  const id = idParam(ctx, 'run_id')
+  const attempt = idParam(ctx, 'attempt')
+  const row = id === null ? null : await runById(ctx, repo, id)
+  if (row === null || attempt === null || attempt < 1 || attempt > row.runAttempt) return null
+  return row
+}
+
+async function getAttempt(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+  const row = await attemptOf(ctx, repo)
+  if (row === null) return fail(404, 'Not Found')
+  return { status: 200, body: runJson(repo, row, idParam(ctx, 'attempt') ?? row.runAttempt) }
+}
+
+async function listArtifacts(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+  const id = idParam(ctx, 'run_id')
+  const run = id === null ? null : await runById(ctx, repo, id)
+  if (run === null) return fail(404, 'Not Found')
+  const parsed = JSON.parse(run.artifactsJson) as unknown
+  return pagedReply(ctx, Array.isArray(parsed) ? (parsed as JsonValue[]) : [], 'artifacts')
+}
+
+// A job is the check run of the same id, so its annotations are the job's.
+async function checkRunAnnotations(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+  const id = idParam(ctx, 'check_run_id')
+  for (const run of await runRows(ctx, repo)) {
+    const job = jobsOf(run).find((each) => each.id === id)
+    if (job !== undefined) return { status: 200, body: job.annotations ?? [] }
+  }
+  return fail(404, 'Not Found')
+}
+
 function jobsOf(run: RunRow): Job[] {
   const parsed = JSON.parse(run.jobsJson) as unknown
   return Array.isArray(parsed) ? (parsed as Job[]) : []
@@ -406,7 +444,12 @@ function jobJson(repo: RepoRow, run: RunRow, job: Job): JsonValue {
 
 async function listJobs(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const id = idParam(ctx, 'run_id')
-  const run = id === null ? null : await runById(ctx, repo, id)
+  const run =
+    param(ctx, 'attempt') !== ''
+      ? await attemptOf(ctx, repo)
+      : id === null
+        ? null
+        : await runById(ctx, repo, id)
   if (run === null) return fail(404, 'Not Found')
   return pagedReply(
     ctx,
@@ -439,7 +482,12 @@ function logName(name: string): string {
 // directory as `<job>/<number>_<step>.txt`. Only a completed run has one.
 async function runLogs(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const id = idParam(ctx, 'run_id')
-  const run = id === null ? null : await runById(ctx, repo, id)
+  const run =
+    param(ctx, 'attempt') !== ''
+      ? await attemptOf(ctx, repo)
+      : id === null
+        ? null
+        : await runById(ctx, repo, id)
   if (run === null || run.status !== 'completed') return fail(404, 'Not Found')
   const entries: Array<[string, Buffer]> = []
   jobsOf(run).forEach((job, ordinal) => {
@@ -663,6 +711,27 @@ export function actionRoutes(): KitRoute<C>[] {
       route<C>('GET', `${actions}/runs/:run_id`, authedRoute(withRepo(getRun))),
       route<C>('GET', `${actions}/runs/:run_id/jobs`, authedRoute(withRepo(listJobs))),
       route<C>('GET', `${actions}/runs/:run_id/logs`, authedRoute(withRepo(runLogs))),
+      route<C>('GET', `${actions}/runs/:run_id/artifacts`, authedRoute(withRepo(listArtifacts))),
+      route<C>(
+        'GET',
+        `${actions}/runs/:run_id/attempts/:attempt`,
+        authedRoute(withRepo(getAttempt)),
+      ),
+      route<C>(
+        'GET',
+        `${actions}/runs/:run_id/attempts/:attempt/jobs`,
+        authedRoute(withRepo(listJobs)),
+      ),
+      route<C>(
+        'GET',
+        `${actions}/runs/:run_id/attempts/:attempt/logs`,
+        authedRoute(withRepo(runLogs)),
+      ),
+      route<C>(
+        'GET',
+        `${p}/repos/:owner/:repo/check-runs/:check_run_id/annotations`,
+        authedRoute(withRepo(checkRunAnnotations)),
+      ),
       route<C>('GET', `${actions}/jobs/:job_id`, authedRoute(withRepo(getJob))),
       route<C>('GET', `${actions}/jobs/:job_id/logs`, authedRoute(withRepo(jobLogs))),
       route<C>('POST', `${actions}/runs/:run_id/rerun`, authedRoute(withRepo(rerun)), {

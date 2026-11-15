@@ -1830,7 +1830,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n      --exit-status       Exit with non-zero status if run failed\n  -j, --job string        View a specific job ID from a run\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
+        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n  -a, --attempt uint      The attempt number of the workflow run\n      --exit-status       Exit with non-zero status if run failed\n  -j, --job string        View a specific job ID from a run\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  -v, --verbose           Show job steps\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
       }
     },
     {
@@ -1865,10 +1865,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh run view --job 399; gh run view -j 398",
+      "command": "gh run view --job 399 --exit-status > /scratch/job; echo \"exit=$?\"; sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/' /scratch/job; gh run view -j 398 | sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/'",
       "expect": {
         "exit": 0,
-        "stdout": "title:\tNightly archive\nworkflow:\tArchive\nstatus:\tcompleted\nconclusion:\tfailure\nbranch:\tmain\nevent:\tschedule\n\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nTo see the logs for the failed steps, try: gh run view --log-failed --job=399\ntitle:\tNightly archive\nworkflow:\tArchive\nstatus:\tcompleted\nconclusion:\tfailure\nbranch:\tmain\nevent:\tschedule\n\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\n\nTo see the full job log, try: gh run view --log --job=398\n",
+        "stdout": "exit=1\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nANNOTATIONS\nX Upload rejected: 403 Forbidden\nupload: upload.sh#7\n\nX Process completed with exit code 1.\nupload: .github#12\n\n\nTo see the logs for the failed steps, try: gh run view --log-failed --job=399\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\n\nANNOTATIONS\n! archive.tar.gz is larger than 1 MB\nbuild: Makefile#4\n\n\nTo see the full job log, try: gh run view --log --job=398\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\n",
         "stderr": ""
       }
     },
@@ -1882,6 +1882,32 @@
       "expect": {
         "exit": 0,
         "stdout": "run or job ID required when not running interactively\nfailed to get job: HTTP 404: Not Found\nfailed to get job: HTTP 404: Not Found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_lists_jobs_annotations_and_artifacts",
+      "seq": 569068,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 200 --exit-status > /scratch/run; echo \"exit=$?\"; sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/' /scratch/run; gh run view 200 -v | sed -n '/^JOBS/,/^$/p'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n\nX feature Archive integ/repo-cli#5 · 200\nTriggered via pull_request AGO\n\nJOBS\n✓ build in 38s (ID 398)\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nANNOTATIONS\n! archive.tar.gz is larger than 1 MB\nbuild: Makefile#4\n\nX Upload rejected: 403 Forbidden\nupload: upload.sh#7\n\nX Process completed with exit code 1.\nupload: .github#12\n\n\nARTIFACTS\narchive\nbuild-logs (expired)\n\nTo see what failed, try: gh run view 200 --log-failed\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/200\nJOBS\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_reads_one_attempt",
+      "seq": 569069,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 201 --attempt 1 | sed -E 's/^(Triggered via [a-z_]+) .*/\\1 AGO/'; gh run view 201 -a 1 --json attempt,url; gh run view 201 -a 9 2>&1 | sed 's# (http.*##'; gh run view 201 --attempt x 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n* main CI · 201 (Attempt #1)\nTriggered via push AGO\n\nJOBS\n✓ test in 55s (ID 401)\n\nFor more information about the job, try: gh run view --job=401\nView this run on GitHub: https://github.com/integ/repo-cli/actions/runs/201/attempts/1\n{\"attempt\":1,\"url\":\"https://github.com/integ/repo-cli/actions/runs/201/attempts/1\"}\nfailed to get run: HTTP 404: Not Found\ninvalid argument \"x\" for \"-a, --attempt\" flag: strconv.ParseUint: parsing \"x\": invalid syntax\n",
         "stderr": ""
       }
     },

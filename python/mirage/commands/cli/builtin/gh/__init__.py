@@ -1367,8 +1367,8 @@ def _release() -> CommandSpec:
     )
 
 
-# `gh run view`'s flags: the summary's, one job's, and gh 2.85's two log
-# views.
+# `gh run view`'s flags: the summary's, one job's or attempt's, and gh 2.85's
+# two log views.
 RUN_VIEW_OPTIONS = (
     REPO,
     JSON,
@@ -1378,6 +1378,13 @@ RUN_VIEW_OPTIONS = (
         description="Exit with non-zero status if run failed",
     ),
     Argument("-j", "--job", help="View a specific job ID from a run"),
+    Argument(
+        "-a",
+        "--attempt",
+        metavar="uint",
+        help="The attempt number of the workflow run",
+    ),
+    _flag(short="-v", long="--verbose", description="Show job steps"),
     _flag(
         long="--log",
         description="View full log for either a run or specific job",

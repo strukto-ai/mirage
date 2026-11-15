@@ -9,14 +9,14 @@ use super::accessor::{
 };
 use super::shape::{Shape, exported};
 use crate::core::github::actions::{
-    dispatch_workflow, get_job, get_run, job_log, list_jobs, list_runs, list_workflows, rerun,
-    rerun_job, run_log_archive, the_workflow, workflow_content,
+    dispatch_workflow, get_job, get_run, job_annotations, job_log, list_artifacts, list_jobs,
+    list_runs, list_workflows, rerun, rerun_job, run_log_archive, the_workflow, workflow_content,
 };
 use crate::core::github::client::{
     Account, Failure, Result, github_request, github_request_response, usage, value,
 };
 use crate::core::github::json::{Json, Obj, quoted};
-use crate::core::github::repo::{RepoRef, github_repo};
+use crate::core::github::repo::{RepoRef, github_repo, graphql_data};
 use crate::request::Request;
 
 const RUN_FIELDS: [&str; 16] = [
@@ -202,7 +202,7 @@ fn exported_job(job: &Json) -> Json {
     Json::Obj(out)
 }
 
-/// gh's Symbol for a job or a step, uncolored.
+/// gh's Symbol for a run, a job or a step, uncolored.
 fn symbol(item: &Json) -> &'static str {
     if item.get("status").as_str() != Some("completed") {
         return "*";
@@ -214,42 +214,204 @@ fn symbol(item: &Json) -> &'static str {
     }
 }
 
-/// One job as gh's RenderJobs prints it with its steps, then the hint gh
-/// gives after a single job.
-fn job_summary(job: &Json) -> String {
-    let at = |key: &str| instant(&time_field(job.get(key))).unwrap_or(0);
-    let elapsed = at("completed_at") - at("started_at");
-    let took = if elapsed < 0 {
-        String::new()
-    } else {
-        format!(" in {}", go_duration(elapsed))
-    };
-    let id = job.get("id").show();
-    let mut text = format!(
-        "{} {}{took} (ID {id})\n",
-        symbol(job),
-        job.get("name").show()
-    );
-    for step in job.get("steps").items() {
-        text.push_str(&format!("  {} {}\n", symbol(step), step.get("name").show()));
-    }
-    if FAILURE_STATES.contains(&job.get("conclusion").show().as_str()) {
-        text.push_str(&format!(
-            "\nTo see the logs for the failed steps, try: gh run view --log-failed --job={id}\n"
-        ));
-    } else {
-        text.push_str(&format!(
-            "\nTo see the full job log, try: gh run view --log --job={id}\n"
-        ));
-    }
-    text
+fn failed(item: &Json) -> bool {
+    FAILURE_STATES.contains(&item.get("conclusion").text())
 }
+
+const NANOS_PER_MINUTE: i128 = 60_000_000_000;
+const NANOS_PER_HOUR: i128 = 60 * NANOS_PER_MINUTE;
+
+/// go-gh's RelativeTimeAgo: how long before `now` `then` was, in the one
+/// unit that fits.
+fn fuzzy_ago(now: i128, then: i128) -> String {
+    let ago = now - then;
+    let about = |amount: i128, unit: &str| {
+        let plural = if amount == 1 { "" } else { "s" };
+        format!("about {amount} {unit}{plural} ago")
+    };
+    let hours = ago / NANOS_PER_HOUR;
+    if ago < NANOS_PER_MINUTE {
+        "less than a minute ago".to_owned()
+    } else if ago < NANOS_PER_HOUR {
+        about(ago / NANOS_PER_MINUTE, "minute")
+    } else if hours < 24 {
+        about(hours, "hour")
+    } else if hours < 30 * 24 {
+        about(hours / 24, "day")
+    } else if hours < 365 * 24 {
+        about(hours / 24 / 30, "month")
+    } else {
+        about(
+            (ago as f64 / NANOS_PER_HOUR as f64 / 24.0 / 365.0) as i128,
+            "year",
+        )
+    }
+}
+
+/// gh's RenderRunHeader, uncolored: the run's state, branch, workflow, the
+/// pull request it ran for, its ID and attempt, then what triggered it.
+fn run_header(row: &Json, ago: &str, pull: &str, attempt: u64) -> String {
+    let label = if attempt > 0 {
+        format!(" (Attempt #{attempt})")
+    } else {
+        String::new()
+    };
+    format!(
+        "{} {} {}{pull} · {}{label}\nTriggered via {} {ago}",
+        symbol(row),
+        row.get("headBranch").text(),
+        row.get("workflowName").text(),
+        row.get("databaseId").show(),
+        row.get("event").text(),
+    )
+}
+
+/// gh's RenderJobs, uncolored: each job with its time and ID, and its
+/// steps when `verbose` or when it failed.
+fn render_jobs(jobs: &[Json], verbose: bool) -> String {
+    let at = |job: &Json, key: &str| instant(&time_field(job.get(key))).unwrap_or(0);
+    let mut lines = Vec::new();
+    for job in jobs {
+        let elapsed = at(job, "completed_at") - at(job, "started_at");
+        let took = if elapsed < 0 {
+            String::new()
+        } else {
+            format!(" in {}", go_duration(elapsed))
+        };
+        lines.push(format!(
+            "{} {}{took} (ID {})",
+            symbol(job),
+            job.get("name").text(),
+            job.get("id").as_int().unwrap_or(0)
+        ));
+        if verbose || failed(job) {
+            for step in job.get("steps").items() {
+                lines.push(format!("  {} {}", symbol(step), step.get("name").text()));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+/// gh's RenderAnnotations, uncolored: each annotation's level and message
+/// over the job, path and line it points at.
+fn render_annotations(annotations: &[(String, Json)]) -> String {
+    let mut lines = Vec::new();
+    for (job, annotation) in annotations {
+        let level = match annotation.get("annotation_level").as_str() {
+            Some("failure") => "X",
+            Some("warning") => "!",
+            _ => "-",
+        };
+        lines.push(format!("{level} {}", annotation.get("message").text()));
+        lines.push(format!(
+            "{job}: {}#{}\n",
+            annotation.get("path").text(),
+            annotation.get("start_line").as_int().unwrap_or(0)
+        ));
+    }
+    lines.join("\n")
+}
+
+const PULL_FOR_RUN: &str = "
+		query PullRequestForRun($owner: String!, $repo: String!, $headRefName: String!) {
+			repository(owner: $owner, name: $repo) {
+				pullRequests(headRefName: $headRefName, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) {
+					nodes {
+						number
+						headRepository {
+							owner {
+								login
+							}
+							name
+						}
+					}
+				}
+			}
+		}";
+
+/// gh's PullRequestForRun: the newest pull request from the run's branch
+/// of the run's own head repository, as ` OWNER/REPO#N`, or nothing.
+async fn pull_for_run(account: &Account, repo: &RepoRef, row: &Json) -> String {
+    let mut variables = Obj::new();
+    variables.set("owner", repo.owner.as_str());
+    variables.set("repo", repo.repo.as_str());
+    variables.set("headRefName", row.get("headBranch").text());
+    let Ok(data) = graphql_data(account, PULL_FOR_RUN, variables).await else {
+        return String::new();
+    };
+    let head = row.get("headRepository");
+    data.get("repository")
+        .get("pullRequests")
+        .get("nodes")
+        .items()
+        .iter()
+        .rev()
+        .find(|pull| {
+            let theirs = pull.get("headRepository");
+            theirs.get("owner").get("login").text() == head.get("owner").get("login").text()
+                && theirs.get("name").text() == head.get("name").text()
+        })
+        .map(|pull| {
+            format!(
+                " {}/{}#{}",
+                repo.owner,
+                repo.repo,
+                pull.get("number").as_int().unwrap_or(0)
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// Every job's annotations, or None when the token may not read them.
+async fn annotations_of(
+    account: &Account,
+    repo: &RepoRef,
+    jobs: &[Json],
+) -> Result<Option<Vec<(String, Json)>>> {
+    let mut out = Vec::new();
+    for job in jobs {
+        let id = job.get("id").as_int().unwrap_or(0);
+        match job_annotations(account, repo, id).await {
+            Ok(found) => out.extend(
+                found
+                    .items()
+                    .iter()
+                    .map(|one| (job.get("name").text().to_owned(), one.clone())),
+            ),
+            Err(Failure::Api(error)) if error.status == 404 => {}
+            Err(Failure::Api(error)) if error.status == 403 => return Ok(None),
+            Err(failure) => {
+                return value(format!("failed to get annotations: {}", failure.text()));
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
+/// `--attempt` as pflag reads a uint64; 0 is no attempt.
+fn attempt_flag(flags: &Flags) -> Result<u64> {
+    let Some(text) = flags.as_str("attempt") else {
+        return Ok(0);
+    };
+    match text.parse::<u64>() {
+        Ok(attempt) if text.bytes().all(|b| b.is_ascii_digit()) => Ok(attempt),
+        _ => usage(format!(
+            "invalid argument {} for \"-a, --attempt\" flag: strconv.ParseUint: parsing {}: invalid syntax",
+            quoted(text),
+            quoted(text)
+        )),
+    }
+}
+
+const ANNOTATIONS_FORBIDDEN: &str = "requesting annotations returned 403 Forbidden as the token does not have sufficient permissions. Note that it is not currently possible to create a fine-grained PAT with the `checks:read` permission.";
 
 pub(crate) async fn run_view_cmd(
     account: &Account,
     flags: &Flags,
     texts: &[String],
 ) -> Result<Out> {
+    let attempt = attempt_flag(flags)?;
     let fields = json_fields(flags, &SINGLE_RUN_FIELDS)?;
     let job = flags.as_str("job").filter(|job| !job.is_empty());
     if texts.is_empty() && job.is_none() {
@@ -273,46 +435,142 @@ pub(crate) async fn run_view_cmd(
         Some(job) => job.get("run_id").show(),
         None => texts[0].clone(),
     };
-    let found = get_run(account, &repo, &id)
+    let found = get_run(account, &repo, &id, attempt)
         .await
         .map_err(|failure| Failure::Value(format!("failed to get run: {}", failure.text())))?;
     let mut row = run(&found);
-    if fields
-        .as_ref()
-        .is_some_and(|fields| fields.iter().any(|field| field == "jobs"))
-    {
-        let run_id = row.get("databaseId").as_int().unwrap_or(0);
-        let jobs = list_jobs(account, &repo, run_id).await?;
-        row.set("jobs", Json::Arr(jobs.iter().map(exported_job).collect()));
+    let run_id = row.get("databaseId").as_int().unwrap_or(0);
+    if let Some(fields) = &fields {
+        if fields.iter().any(|field| field == "jobs") {
+            let jobs = list_jobs(account, &repo, run_id, attempt).await?;
+            row.set("jobs", Json::Arr(jobs.iter().map(exported_job).collect()));
+        }
+        return typed_out(
+            account,
+            &Json::Obj(row),
+            flags,
+            String::new(),
+            &SINGLE_RUN_FIELDS,
+        )
+        .await;
     }
-    if (logs || failed_only) && fields.is_none() {
+    let jobs = match &selected {
+        Some(job) => vec![job.clone()],
+        None => list_jobs(account, &repo, run_id, attempt)
+            .await
+            .map_err(|failure| Failure::Value(format!("failed to get jobs: {}", failure.text())))?,
+    };
+    if logs || failed_only {
         return Ok(Out {
-            stdout: run_log(account, &repo, &row, selected.as_ref(), failed_only).await?,
+            stdout: run_log(
+                account,
+                &repo,
+                &row,
+                &jobs,
+                selected.is_some(),
+                failed_only,
+                attempt,
+            )
+            .await?,
             ..Out::default()
         });
     }
-    let mut human = format!(
-        "title:\t{}\nworkflow:\t{}\nstatus:\t{}\nconclusion:\t{}\nbranch:\t{}\nevent:\t{}\n",
-        row.get("displayTitle").show(),
-        row.get("workflowName").show(),
-        row.get("status").show(),
-        row.get("conclusion").show(),
-        row.get("headBranch").show(),
-        row.get("event").show()
-    );
-    if let Some(job) = &selected {
-        human.push('\n');
-        human.push_str(&job_summary(job));
+    let row = Json::Obj(row);
+    let pull = pull_for_run(account, &repo, &row).await;
+    let artifacts = match selected {
+        Some(_) => Vec::new(),
+        None => list_artifacts(account, &repo, run_id)
+            .await
+            .map_err(|failure| {
+                Failure::Value(format!("failed to get artifacts: {}", failure.text()))
+            })?,
+    };
+    let annotations = annotations_of(account, &repo, &jobs).await?;
+    let (reply, _) = account.host.ask(Request::Now).await;
+    let now = (reply.now.unwrap_or(0.0) * 1e9) as i128;
+    let started = if row.get("startedAt").text().is_empty() {
+        row.get("createdAt")
+    } else {
+        row.get("startedAt")
+    };
+    let ago = fuzzy_ago(now, instant(&time_field(started)).unwrap_or(0));
+    let url = row.get("url").text();
+    let exit_status = flags.gh_bool("exit_status");
+    let mut text = format!("\n{}\n\n", run_header(&row, &ago, &pull, attempt));
+    let conclusion = row.get("conclusion").text();
+    if (jobs.is_empty() && conclusion == "failure") || conclusion == "startup_failure" {
+        text.push_str(&format!(
+            "X This run likely failed because of a workflow file issue.\n\nFor more information, see: {url}\n"
+        ));
+        return Ok(Out {
+            exit: i32::from(exit_status),
+            ..Out::text(text)
+        });
     }
-    let conclusion = row.get("conclusion").clone();
-    let mut out = typed_out(account, &Json::Obj(row), flags, human, &SINGLE_RUN_FIELDS).await?;
-    if flags.gh_bool("exit_status")
-        && !conclusion.is_null()
-        && !matches!(conclusion.as_str(), Some("") | Some("success"))
-    {
-        out.exit = 1;
+    if selected.is_none() {
+        text.push_str("JOBS\n");
     }
-    Ok(out)
+    text.push_str(&render_jobs(
+        &jobs,
+        selected.is_some() || flags.gh_bool("verbose"),
+    ));
+    text.push('\n');
+    match &annotations {
+        None => text.push_str(&format!("\nANNOTATIONS\n{ANNOTATIONS_FORBIDDEN}\n")),
+        Some(found) if !found.is_empty() => {
+            text.push_str(&format!("\nANNOTATIONS\n{}\n", render_annotations(found)));
+        }
+        Some(_) => {}
+    }
+    let failing = match &selected {
+        Some(job) => {
+            let id = job.get("id").show();
+            if failed(job) {
+                text.push_str(&format!(
+                    "\nTo see the logs for the failed steps, try: gh run view --log-failed --job={id}\n"
+                ));
+            } else {
+                text.push_str(&format!(
+                    "\nTo see the full job log, try: gh run view --log --job={id}\n"
+                ));
+            }
+            failed(job)
+        }
+        None => {
+            if !artifacts.is_empty() {
+                text.push_str("\nARTIFACTS\n");
+                for artifact in &artifacts {
+                    let expired = if artifact.get("expired").as_bool() == Some(true) {
+                        " (expired)"
+                    } else {
+                        ""
+                    };
+                    text.push_str(&format!("{}{expired}\n", artifact.get("name").text()));
+                }
+            }
+            text.push('\n');
+            if failed(&row) {
+                text.push_str(&format!(
+                    "To see what failed, try: gh run view {run_id} --log-failed\n"
+                ));
+            } else if jobs.len() == 1 {
+                text.push_str(&format!(
+                    "For more information about the job, try: gh run view --job={}\n",
+                    jobs[0].get("id").show()
+                ));
+            } else {
+                text.push_str(
+                    "For more information about a job, try: gh run view --job=<job-id>\n",
+                );
+            }
+            failed(&row)
+        }
+    };
+    text.push_str(&format!("View this run on GitHub: {url}\n"));
+    Ok(Out {
+        exit: i32::from(exit_status && failing),
+        ..Out::text(text)
+    })
 }
 
 /// A job's name as the archive spells it: the `/` and `:` the server
@@ -575,28 +833,26 @@ async fn run_log(
     account: &Account,
     repo: &RepoRef,
     row: &Obj,
-    selected: Option<&Json>,
+    jobs: &[Json],
+    selected: bool,
     failed_only: bool,
+    attempt: u64,
 ) -> Result<Vec<u8>> {
     let id = row.get("databaseId").as_int().unwrap_or(0);
-    let jobs = match selected {
-        Some(job) => {
-            if job.get("status").as_str() != Some("completed") {
-                return value(format!(
-                    "job {} is still in progress; logs will be available when it is complete",
-                    job.get("id").show()
-                ));
-            }
-            vec![job.clone()]
+    if let (true, Some(job)) = (selected, jobs.first()) {
+        if job.get("status").as_str() != Some("completed") {
+            return value(format!(
+                "job {} is still in progress; logs will be available when it is complete",
+                job.get("id").show()
+            ));
         }
-        None => list_jobs(account, repo, id).await?,
-    };
+    }
     if row.get("status").as_str() != Some("completed") {
         return value(format!(
             "run {id} is still in progress; logs will be available when it is complete"
         ));
     }
-    let data = match run_log_archive(account, repo, id).await {
+    let data = match run_log_archive(account, repo, id, attempt).await {
         Ok(data) => data,
         Err(Failure::Api(error)) => {
             let reason = if error.status == 404 {
@@ -616,7 +872,7 @@ async fn run_log(
         .iter()
         .map(|entry| entry.name.as_str())
         .collect();
-    let segments = log_segments(&jobs, &names, failed_only)?;
+    let segments = log_segments(jobs, &names, failed_only)?;
     let mut printed = Vec::new();
     for segment in segments {
         let log = match &segment.source {
@@ -677,7 +933,7 @@ pub(crate) async fn run_rerun_cmd(
             Ok(_) => Ok(Out::default()),
         };
     }
-    let found = get_run(account, &repo, &run_id.cloned().unwrap_or_default())
+    let found = get_run(account, &repo, &run_id.cloned().unwrap_or_default(), 0)
         .await
         .map_err(|failure| Failure::Value(format!("failed to get run: {}", failure.text())))?;
     let id = found.get("id").show();
@@ -970,7 +1226,7 @@ async fn run_action(
     };
     let repo = repo_for(account, flags)?;
     let path = format!("/repos/{}/{}/actions/runs/{id}", repo.owner, repo.repo);
-    match get_run(account, &repo, id).await {
+    match get_run(account, &repo, id, 0).await {
         Err(Failure::Api(error)) if error.status == 404 => {
             return value(format!("{missing} {id}"));
         }
@@ -1157,26 +1413,74 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_job_summary_lists_its_steps_and_points_at_its_failed_log() {
-        let job = Json::parse(UPLOAD).unwrap();
+    fn a_failed_job_lists_its_steps_and_a_passing_one_only_when_verbose() {
+        let failed = Json::parse(UPLOAD).unwrap();
+        let passed = Json::parse(
+            br#"{"id":398,"name":"build","status":"completed","conclusion":"success",
+                "started_at":"2025-12-31T00:00:02Z","completed_at":"2025-12-31T00:00:40Z",
+                "steps":[{"name":"Set up job","status":"completed","conclusion":"success"}]}"#,
+        )
+        .unwrap();
+        let jobs = [passed, failed];
         assert_eq!(
-            job_summary(&job),
-            "X upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload\n  - Notify\n\n\
-             To see the logs for the failed steps, try: gh run view --log-failed --job=399\n"
+            render_jobs(&jobs, false),
+            "✓ build in 38s (ID 398)\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload\n  - Notify"
         );
+        assert!(render_jobs(&jobs, true).starts_with("✓ build in 38s (ID 398)\n  ✓ Set up job\n"));
     }
 
     #[test]
-    fn a_running_job_summary_has_no_elapsed_time_and_points_at_its_full_log() {
+    fn a_running_job_has_no_elapsed_time() {
         let job = Json::parse(
             br#"{"id":8,"name":"lint","status":"in_progress","conclusion":null,
                 "started_at":"2026-01-01T00:00:00Z","completed_at":null,"steps":[]}"#,
         )
         .unwrap();
+        assert_eq!(render_jobs(&[job], true), "* lint (ID 8)");
+    }
+
+    #[test]
+    fn the_header_names_branch_workflow_pull_request_and_attempt() {
+        let row = Json::parse(
+            br#"{"status":"completed","conclusion":"failure","headBranch":"fix",
+                "workflowName":"CI","databaseId":200,"event":"pull_request"}"#,
+        )
+        .unwrap();
         assert_eq!(
-            job_summary(&job),
-            "* lint (ID 8)\n\nTo see the full job log, try: gh run view --log --job=8\n"
+            run_header(&row, "about 2 hours ago", " o/r#7", 2),
+            "X fix CI o/r#7 · 200 (Attempt #2)\nTriggered via pull_request about 2 hours ago"
         );
+        assert_eq!(
+            run_header(&row, "less than a minute ago", "", 0),
+            "X fix CI · 200\nTriggered via pull_request less than a minute ago"
+        );
+    }
+
+    #[test]
+    fn annotations_print_level_message_and_where_with_a_blank_line_between() {
+        let failure = Json::parse(
+            br#"{"annotation_level":"failure","message":"exit 1","path":".github","start_line":28}"#,
+        )
+        .unwrap();
+        let warning =
+            Json::parse(br#"{"annotation_level":"warning","message":"slow","path":"a.py"}"#)
+                .unwrap();
+        assert_eq!(
+            render_annotations(&[("format".to_owned(), failure), ("lint".to_owned(), warning)]),
+            "X exit 1\nformat: .github#28\n\n! slow\nlint: a.py#0\n"
+        );
+    }
+
+    #[test]
+    fn fuzzy_ago_names_the_largest_unit_and_its_plural() {
+        let minute = NANOS_PER_MINUTE;
+        let hour = NANOS_PER_HOUR;
+        assert_eq!(fuzzy_ago(59 * 1_000_000_000, 0), "less than a minute ago");
+        assert_eq!(fuzzy_ago(minute, 0), "about 1 minute ago");
+        assert_eq!(fuzzy_ago(2 * hour + minute, 0), "about 2 hours ago");
+        assert_eq!(fuzzy_ago(47 * hour, 0), "about 1 day ago");
+        assert_eq!(fuzzy_ago(60 * 24 * hour, 0), "about 2 months ago");
+        assert_eq!(fuzzy_ago(800 * 24 * hour, 0), "about 2 years ago");
     }
 
     #[test]

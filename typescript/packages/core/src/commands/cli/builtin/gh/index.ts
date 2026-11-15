@@ -947,6 +947,11 @@ function run(): CommandSpec {
           JQ,
           flag({ long: '--exit-status', description: 'Exit with non-zero status if run failed' }),
           new Argument(['-j', '--job'], { help: 'View a specific job ID from a run' }),
+          new Argument(['-a', '--attempt'], {
+            metavar: 'uint',
+            help: 'The attempt number of the workflow run',
+          }),
+          flag({ short: '-v', long: '--verbose', description: 'Show job steps' }),
           flag({ long: '--log', description: 'View full log for either a run or specific job' }),
           flag({
             long: '--log-failed',
