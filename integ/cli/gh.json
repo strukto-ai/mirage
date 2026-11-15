@@ -2484,6 +2484,19 @@
       }
     },
     {
+      "id": "gh_app_repo_clone_names_the_installation_owner",
+      "seq": 569951,
+      "targets": [
+        "cli-gh-app"
+      ],
+      "command": "cd /scratch && gh repo clone repo-cli d 2>&1 | grep -o '[a-z-]*/repo-cli.git'",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ/repo-cli.git\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "gh_auth_token_help_describes_refusal",
       "seq": 569948,
       "targets": [
