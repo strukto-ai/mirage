@@ -999,6 +999,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         _install_clis(ws, world["clis"])
     for name in world.get("builtin_clis", []):
         ws.register_cli(name, cli_spec_for(name))
+    if "vfs_md" in world:
+        await ws.vfs_md(world["vfs_md"])
     made_dirs: set[str] = set()
     for prefix, name, data in seeds:
         # A nested seed needs its directory first: write refuses a

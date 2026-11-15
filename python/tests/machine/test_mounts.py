@@ -461,6 +461,55 @@ async def test_ssh_refuses_a_line_while_the_session_restricts_tmp():
 
 
 @pytest.mark.asyncio
+async def test_ssh_leaves_a_file_mounted_at_its_own_path_off_the_machine():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    await ws.vfs_md("/VFS.md")
+    result = await ws.shell("python3 job.py")
+    assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
+    assert [shlex.split(p.split(" 2>")[0])[-1] for p in sandbox.pipes] == [
+        "/data",
+        "/my notes",
+    ]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ssh_serves_a_directory_mounted_where_a_file_was():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    await ws.vfs_md("/asset")
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/my notes"]
+    await ws.unmount("/asset")
+    ws.add_mount("/asset", RAMVFS(), MountMode.WRITE)
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/my notes", "/asset"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_both_runs_a_line_on_its_own_prefix_the_workspace_cannot_stat():
+    sandbox = FakeMachine("both", ["/data"])
+    gone = RAMVFS()
+
+    async def stat(path):
+        raise FileNotFoundError(
+            errno.ENOENT, os.strerror(errno.ENOENT), path.virtual
+        )
+
+    gone.stat = stat
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": gone, "/my notes": RAMVFS()},
+        mode=MountMode.WRITE,
+        **on(sandbox),
+    )
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/my notes"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "cwd, ran", [("/notes", False), ("/data", True), ("/", True)]
 )

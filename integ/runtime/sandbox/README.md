@@ -12,6 +12,8 @@ sshfs still running as a restart between check and run leaves it, exits
 acknowledged and could not land (a capped mount) fails its line with the
 error, though the program saw it succeed. The box keeps its own `/tmp`: a
 workspace `/tmp` is not served over it, and a line run from it exits 126.
+A file mounted at a path of its own, such as `VFS.md`, stays in the
+workspace: sshfs mounts only a directory.
 
 | File              | Pins                                                                                                                    | Runs on                                                                     |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
