@@ -556,13 +556,6 @@ export class MachineMounts {
   }
 
   /**
-   * Serve what the session sees and drop what it no longer does. Returns
-   * why the line may not run, a prefix another sshfs still serves or another
-   * mount covers, which is left alone and nothing new served, or null once
-   * in step, or with a mount of the machine's own gone, which `validate`
-   * refuses.
-   */
-  /**
    * Those of `prefixes` sshfs can mount: directories. A file mounted at a
    * path of its own, such as a `VFS.md`, stays off the machine.
    */
@@ -582,6 +575,13 @@ export class MachineMounts {
     return out
   }
 
+  /**
+   * Serve what the session sees and drop what it no longer does. Returns
+   * why the line may not run, a prefix another sshfs still serves or another
+   * mount covers, which is left alone and nothing new served, or null once
+   * in step, or with a mount of the machine's own gone, which `validate`
+   * refuses.
+   */
   private async reconcile(
     binding: WorkspaceBinding,
     files: Files,
