@@ -452,14 +452,22 @@ export class MirageClient {
     await this.vfs('append', { path, data: encodeBase64(data) }, sessionId, signal)
   }
 
-  /** A path's metadata, links followed unless `nofollow` asks for the link's own. */
+  /**
+   * A path's metadata, links followed unless `nofollow` asks for the link's
+   * own; `fresh` asks the backend past its cache. A server older than
+   * `fresh` refuses it as an `unknown_field`.
+   */
   async stat(
     path: string,
     sessionId?: string,
     signal?: AbortSignal,
-    opts: { nofollow?: boolean } = {},
+    opts: { nofollow?: boolean; fresh?: boolean } = {},
   ): Promise<FileStat> {
-    const body = opts.nofollow === true ? { path, nofollow: true } : { path }
+    const body = {
+      path,
+      ...(opts.nofollow === true ? { nofollow: true } : {}),
+      ...(opts.fresh === true ? { fresh: true } : {}),
+    }
     const answer = await this.vfs<{ entry: WireStat }>('stat', body, sessionId, signal)
     return statOf(answer.entry)
   }

@@ -101,9 +101,10 @@ const harness = await Harness.open(
 {/* generated: exports pi-durable start */}
 | Symbol | Purpose |
 | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnv</code> | Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and write the workspace's mounts through its dispatcher, and run their commands in its shell, as one session. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnvOptions</code> | Options for `MirageExecutionEnv`: `cwd` (default `/`), `sessionId`, `id` and `watch.pollIntervalMs` (default 2000). |
-| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi Durable extension named `mirage` whose prompt section describes the workspace's mounts, as the session sees them. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExecutionEnv</code> | Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and write the workspace's mounts and run their commands in its shell, as one session. The workspace is one in this process, or one a Mirage server holds, reached over its HTTP API. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageRemote</code> | Where a remote workspace lives and how to reach it. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi Durable extension named `mirage` whose prompt section describes the workspace's mounts, as the session sees them; for a server's workspace, as the server describes them. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageExtensionOptions</code> | Options for `mirageExtension`: `sessionId`, the session whose mounts the prompt describes. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |

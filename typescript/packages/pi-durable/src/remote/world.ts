@@ -19,14 +19,23 @@ import {
   MirageRemoteError,
   type MirageRemote,
 } from '@struktoai/mirage-core/remote/client'
+import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { EnvExecution, EnvWorld } from '../world.ts'
 
 // The window a streamed read asks for, and the batch a streamed write sends.
 const CHUNK_BYTES = 1024 * 1024
 
+// The output a streamed command may queue before the server's stream waits
+// for the reader: the spill can lag behind a fast command without the queue
+// growing past this.
+const QUEUE_BYTES = 1024 * 1024
+
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+const AUTOMATIC_MOUNTS = ['/dev', prefixOf(HISTORY_PREFIX), prefixOf(BIN_PREFIX)]
 
 /**
  * A line with `env` exported ahead of it, on its first line so the line
@@ -49,14 +58,21 @@ function prefixOf(path: string): string {
   return path.slice(0, end)
 }
 
-/** One streamed command on the server, its chunks queued for one reader. */
+/**
+ * One streamed command on the server, its chunks queued for one reader. The
+ * queue is bounded: past `QUEUE_BYTES` the output handler waits for the
+ * reader, so the server's stream waits too and memory holds at most that.
+ */
 class RemoteExecution implements EnvExecution {
   readonly events: AsyncIterable<OutputEvent>
   private readonly controller = new AbortController()
   private readonly queued: OutputEvent[] = []
   private readonly outcome: Promise<ExecuteResult>
   private wake: (() => void) | undefined
+  private room: (() => void) | undefined
+  private queuedBytes = 0
   private finished = false
+  private stopped = false
 
   constructor(
     start: (
@@ -69,10 +85,15 @@ class RemoteExecution implements EnvExecution {
       signal === undefined
         ? this.controller.signal
         : AbortSignal.any([this.controller.signal, signal])
-    this.outcome = start(signals, (stream, data) => {
+    this.outcome = start(signals, async (stream, data) => {
       this.queued.push({ stream, data })
+      this.queuedBytes += data.length
       this.notify()
-      return Promise.resolve()
+      while (this.queuedBytes > QUEUE_BYTES && !this.stopped) {
+        await new Promise<void>((resolve) => {
+          this.room = resolve
+        })
+      }
     })
     const settle = (): void => {
       this.finished = true
@@ -89,17 +110,31 @@ class RemoteExecution implements EnvExecution {
     wake?.()
   }
 
+  private release(): void {
+    const room = this.room
+    this.room = undefined
+    room?.()
+  }
+
   private async *drain(): AsyncGenerator<OutputEvent> {
-    for (;;) {
-      const next = this.queued.shift()
-      if (next !== undefined) {
-        yield next
-        continue
+    try {
+      for (;;) {
+        const next = this.queued.shift()
+        if (next !== undefined) {
+          this.queuedBytes -= next.data.length
+          if (this.queuedBytes <= QUEUE_BYTES) this.release()
+          yield next
+          continue
+        }
+        if (this.finished) return
+        await new Promise<void>((resolve) => {
+          this.wake = resolve
+        })
       }
-      if (this.finished) return
-      await new Promise<void>((resolve) => {
-        this.wake = resolve
-      })
+    } finally {
+      // A reader that stops early never frees room, so the stream stops waiting.
+      this.stopped = true
+      this.release()
     }
   }
 
@@ -108,6 +143,8 @@ class RemoteExecution implements EnvExecution {
   }
 
   cancel(): void {
+    this.stopped = true
+    this.release()
     this.controller.abort(new DOMException('canceled', 'AbortError'))
   }
 }
@@ -147,9 +184,11 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
       return run(...args)
     }
   let mounts: Promise<string[]> | undefined
+  // The server leaves the mounts every workspace has (`/dev`, the history and
+  // program views) out of its mount list, so they are added back here.
   const prefixes = (): Promise<string[]> => {
     mounts ??= client.mounts().then(
-      (found) => found.map((mount) => prefixOf(mount.prefix)),
+      (found) => [...found.map((mount) => prefixOf(mount.prefix)), ...AUTOMATIC_MOUNTS],
       (err: unknown) => {
         mounts = undefined
         throw err
@@ -157,6 +196,7 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
     )
     return mounts
   }
+  let freshKnown = true
   const encode = (data: string | Uint8Array): Uint8Array =>
     typeof data === 'string' ? new TextEncoder().encode(data) : data
 
@@ -209,9 +249,20 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
         if (!pending.started || pending.held > 0) await flush()
       }),
       append: call((path: string, data: Uint8Array) => client.append(path, data, sessionId)),
-      stat: call((path: string, options: { nofollow?: boolean } = {}) =>
-        client.stat(path, sessionId, undefined, { nofollow: options.nofollow === true }),
-      ),
+      stat: call(async (path: string, options: { nofollow?: boolean; fresh?: boolean } = {}) => {
+        const nofollow = options.nofollow === true
+        if (options.fresh !== true || !freshKnown) {
+          return client.stat(path, sessionId, undefined, { nofollow })
+        }
+        try {
+          return await client.stat(path, sessionId, undefined, { nofollow, fresh: true })
+        } catch (err) {
+          // A server older than `fresh` refuses it; the cached row is then the best it has.
+          if (!(err instanceof MirageRemoteError && err.code === 'unknown_field')) throw err
+          freshKnown = false
+          return client.stat(path, sessionId, undefined, { nofollow })
+        }
+      }),
       readdir: call((path: string) => client.readdir(path, sessionId)),
       exists: call((path: string) => client.exists(path, sessionId)),
       isDir: call((path: string) => client.isDir(path, sessionId)),
@@ -247,6 +298,10 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
           options: { cwd: string; env?: Record<string, string>; signal?: AbortSignal },
         ) => {
           const command = withEnv(line, options.env)
+          // The server's shell request has no environment, so the values ride
+          // in the line's text; a line carrying any stays out of the
+          // session's history, where a token would outlive the command.
+          const secret = command !== line
           return Promise.resolve<EnvExecution>(
             new RemoteExecution(
               (signal, onOutput) =>
@@ -254,6 +309,7 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
                   cwd: options.cwd,
                   signal,
                   onOutput,
+                  ...(secret ? { record: false } : {}),
                   ...(sessionId === undefined ? {} : { sessionId }),
                 }),
               options.signal,

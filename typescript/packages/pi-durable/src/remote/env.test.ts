@@ -181,6 +181,91 @@ describe('MirageExecutionEnv on a Mirage server', () => {
     if (!result.ok) expect(result.error.code).toBe('timeout')
   })
 
+  it('keeps a command carrying env values out of the session history', async () => {
+    const remote = await workspace()
+    const env = new MirageExecutionEnv(remote, { sessionId: 'agent' })
+    getOrThrow(await env.exec('echo "$TOKEN" > /seen.txt', { env: { TOKEN: 's3cret' } }, context))
+    getOrThrow(await env.exec('echo plain', undefined, context))
+    expect(decode(await new MirageClient(remote).read('/seen.txt'))).toBe('s3cret\n')
+    const history = (
+      await new MirageClient(remote).shell('cat /.bash_history', { sessionId: 'agent' })
+    ).stdoutText
+    expect(history).toContain('echo plain')
+    expect(history).not.toContain('s3cret')
+  })
+
+  it('refuses to remove a mount the server keeps out of its mount list', async () => {
+    const remote = await workspace()
+    const env = new MirageExecutionEnv(remote)
+    const removed = await env.remove('/dev', { recursive: true }, context)
+    expect(removed.ok).toBe(false)
+    expect(await new MirageClient(remote).exists('/dev/null')).toBe(true)
+  })
+
+  it('spills a command whose output outruns the queue, in full', async () => {
+    const env = new MirageExecutionEnv(await workspace())
+    const result = getOrThrow(
+      await env.exec('seq 1 400000', { spill: { afterBytes: 100, afterLines: 10 } }, context),
+    )
+    const spilled = getOrThrow(await env.readTextFile(result.spillPath ?? '', context))
+    expect(spilled.length).toBeGreaterThan(2 * 1024 * 1024)
+    expect(spilled.split('\n')[399999]).toBe('400000')
+  })
+
+  it('asks the server past its cache when a watch polls', async () => {
+    const remote = await workspace()
+    const bodies: string[] = []
+    const seeing: typeof fetch = (input, init) => {
+      const target = input instanceof Request ? input.url : input.toString()
+      if (typeof init?.body === 'string' && target.includes('/vfs/stat')) bodies.push(init.body)
+      return fetch(input, init)
+    }
+    const env = new MirageExecutionEnv(
+      { ...remote, fetch: seeing },
+      { watch: { pollIntervalMs: 50 } },
+    )
+    getOrThrow(await env.writeFile('/w.txt', 'a', context))
+    const watcher = getOrThrow(await env.watch([{ path: '/w.txt' }], () => undefined, context))
+    await watcher.stop(context)
+    expect(bodies.some((body) => body.includes('"fresh":true'))).toBe(true)
+  })
+
+  it('watches through a server that predates fresh, on its cached rows', async () => {
+    const remote = await workspace()
+    let refused = 0
+    const old: typeof fetch = (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('"fresh"')) {
+        refused += 1
+        return Promise.resolve(
+          Response.json(
+            {
+              error: {
+                code: 'unknown_field',
+                message: 'fresh is not a known field',
+                param: 'fresh',
+              },
+            },
+            { status: 422 },
+          ),
+        )
+      }
+      return fetch(input, init)
+    }
+    const env = new MirageExecutionEnv({ ...remote, fetch: old }, { watch: { pollIntervalMs: 50 } })
+    getOrThrow(await env.writeFile('/w.txt', 'a', context))
+    const changes: string[] = []
+    const watcher = getOrThrow(
+      await env.watch([{ path: '/w.txt' }], (change) => changes.push(change.kind), context),
+    )
+    getOrThrow(await env.writeFile('/w.txt', 'changed', context))
+    for (let i = 0; i < 40 && changes.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await watcher.stop(context)
+    expect(refused).toBe(1)
+    expect(changes).toContain('paths')
+  })
+
   it('runs a Harness with the coding tools on the server workspace', async () => {
     const remote = await workspace({
       mounts: { '/': { vfs: 'ram', mode: 'write' }, '/data': { vfs: 'ram', mode: 'write' } },
