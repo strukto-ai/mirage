@@ -4978,7 +4978,7 @@
         {
           "op": "exec",
           "command": "cat /data/log.txt | stream-copy | cat",
-          "cancel_after_ms": 30,
+          "cancel_on_stall": "/data",
           "expect": {
             "value": {
               "aborted": true
