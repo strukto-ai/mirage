@@ -5,7 +5,7 @@
 //! and the section nodes.
 
 use super::super::node::{Node, Value, number_text};
-use super::super::office::{core_properties, extended_properties, theme_properties};
+use super::super::package::{core_properties, extended_properties, theme_properties};
 use super::super::tree::{E, R, W, is_on, on_off};
 use super::super::units::{f2, hex_color, twips_to_cm, twips_to_pt};
 use super::{

@@ -1,7 +1,7 @@
 // Adapted from OfficeCLI 1.0.161.
 // https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
 // Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
-//! officecli on a Word document or a PowerPoint deck: the package as its
+//! office on a Word document or a PowerPoint deck: the package as its
 //! XML parts, each parsed into a tree the first time a command reads it,
 //! and the `get`, `query`, `set`, `remove` and `batch` commands over them,
 //! answered as OfficeCLI 1.0.161 answers them. A save rewrites only the
@@ -101,7 +101,7 @@ impl<'h> Pkg<'h> {
             Err(Refusal::Missing) => return Err(Fail::missing(&config.absolute)),
             Err(Refusal::Unreadable) => {
                 return Err(Fail::of(format!(
-                    "Not a document officecli reads: {} (not-zip)",
+                    "Not a document 'office' reads: {} (not-zip)",
                     text(&config.file)
                 )));
             }
@@ -134,7 +134,7 @@ impl<'h> Pkg<'h> {
         };
         if !pkg.slots.contains_key(&key(CONTENT_TYPES)) {
             return Err(Fail::of(format!(
-                "Not a document officecli reads: {} (no-content-types)",
+                "Not a document 'office' reads: {} (no-content-types)",
                 text(&config.file)
             )));
         }
@@ -153,7 +153,7 @@ impl<'h> Pkg<'h> {
             .find(|r| !r.external && r.kind.ends_with("/officeDocument"))
         else {
             return Err(Fail::of(format!(
-                "Not a document officecli reads: {} (no-main-document)",
+                "Not a document 'office' reads: {} (no-main-document)",
                 text(&config.file)
             )));
         };
@@ -405,7 +405,7 @@ pub(super) fn enriched(message: String) -> Fail {
     } else if m.contains("already exists") {
         set(&mut f, "duplicate_name");
     } else if m.starts_with("UNSUPPORTED props:") {
-        f.help = Some("officecli help <format>-set".to_string());
+        f.help = Some("office help <format>-set".to_string());
         set(&mut f, "unsupported_property");
     } else if m.contains("property is required")
         || m.contains("property required")
@@ -910,7 +910,7 @@ fn pairs(props: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// One officecli command on a Word document or a PowerPoint deck.
+/// One office command on a Word document or a PowerPoint deck.
 pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
     let out = Out {
         host,
@@ -978,7 +978,7 @@ pub(super) async fn run(host: &Host, config: &Config, kind: Kind) -> i32 {
                         if results.is_empty() {
                             host.warn(
                                 format!(
-                                    "No matches. Run 'officecli help {} query' for selector syntax.\n",
+                                    "No matches. Run 'office help {} query' for selector syntax.\n",
                                     kind.ext()
                                 )
                                 .as_bytes(),

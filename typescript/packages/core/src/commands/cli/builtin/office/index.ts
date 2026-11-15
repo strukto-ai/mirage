@@ -30,10 +30,10 @@ export const JSON_FLAG = new Argument('--json', {
   help: 'Output as JSON (AI-friendly)',
 })
 
-export const OFFICECLI = new CLI({
+export const OFFICE = new CLI({
   spec: new CommandSpec({
-    name: 'officecli',
-    description: 'officecli: AI-friendly CLI for Office documents (.docx, .xlsx, .pptx)',
+    name: 'office',
+    description: 'office: AI-friendly CLI for Office documents (.docx, .xlsx, .pptx)',
     subcommands: [
       new CommandSpec({
         name: 'create',

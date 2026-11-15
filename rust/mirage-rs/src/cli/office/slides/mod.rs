@@ -20,7 +20,7 @@ mod tables;
 mod text;
 
 use super::node::{Node, Value};
-use super::office::Pkg;
+use super::package::Pkg;
 use super::tree::{E, P};
 use super::{Fail, SetFail};
 
@@ -175,7 +175,7 @@ pub(super) fn placeholder_type_name(t: Option<&str>) -> String {
 
 /// A refusal with the code and hints OfficeCLI reads off its message.
 pub(super) fn fail(message: String) -> Fail {
-    super::office::enriched(message)
+    super::package::enriched(message)
 }
 
 pub(super) fn get(pkg: &Pkg<'_>, path: &str, depth: usize) -> Result<Node, Fail> {

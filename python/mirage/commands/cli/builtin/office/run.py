@@ -34,12 +34,12 @@ async def run_command(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Run one officecli command through mirage-rs, which reads the
+    """Run one office command through mirage-rs, which reads the
     workbook from a host spool and writes it back through the mount that
     owns it, every part the command leaves alone copied as it stands.
 
     Args:
-        accessor (Accessor): unused; officecli holds no account.
+        accessor (Accessor): unused; office holds no account.
         paths (list[PathSpec]): the workbook.
         texts (list[str]): the DOM path or selector, when the command
             takes one.
@@ -86,4 +86,4 @@ async def run_command(
         dash=False,
     )
     io = IOResult()
-    return hosted_stream("officecli", config, host, io), io
+    return hosted_stream("office", config, host, io), io

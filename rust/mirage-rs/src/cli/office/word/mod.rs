@@ -18,7 +18,7 @@ mod table;
 mod things;
 
 use super::node::{Node, Value, number_text};
-use super::office::Pkg;
+use super::package::Pkg;
 use super::tree::{E, M, MC, W, W14, is_on, on_off};
 use super::units::{f2, half_points, hex_color, js_number};
 use super::{Fail, SetFail};
@@ -29,7 +29,7 @@ pub(super) const WPG: &str = "http://schemas.microsoft.com/office/word/2010/word
 
 /// A refusal with the code and hints OfficeCLI reads off its message.
 pub(super) fn fail(message: String) -> Fail {
-    super::office::enriched(message)
+    super::package::enriched(message)
 }
 
 /// Compatibility flags in the order OfficeCLI lists them, with their element names.

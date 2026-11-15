@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use super::super::Fail;
 use super::super::node::{Node, Value};
-use super::super::office::Pkg;
+use super::super::package::Pkg;
 use super::super::tree::{E, Tree, W, on_off};
 use super::super::units::{half_points, hex_color, js_number, word_line_spacing, word_spacing};
 use super::{fail, num_value, w_child, w_val};
@@ -83,7 +83,7 @@ impl<'p> Word<'p> {
         self.pkg
             .xml(&self.main_part)
             .map(Tree::root)
-            .ok_or_else(|| fail("Not a document officecli reads".to_string()))
+            .ok_or_else(|| fail("Not a document 'office' reads".to_string()))
     }
 
     pub(super) fn body(&self) -> Option<E<'p>> {

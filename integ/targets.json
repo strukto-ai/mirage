@@ -2696,13 +2696,13 @@
       ]
     },
     {
-      "id": "cli-officecli",
+      "id": "cli-office",
       "hosts": [
         "python",
         "typescript-node"
       ],
       "clis": [
-        "officecli"
+        "office"
       ],
       "mounts": [
         {

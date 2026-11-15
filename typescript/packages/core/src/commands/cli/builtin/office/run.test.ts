@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { OFFICECLI } from './index.ts'
+import { OFFICE } from './index.ts'
 
 const DEC = new TextDecoder()
 
@@ -80,17 +80,12 @@ const CASES: [string, number, string, string][] = [
     '/Sheet1/A1 (cell) "42" type=String value=42\n/Sheet1/A3 (cell) "2024-03-15" type=Number numFmtId=164 numberformat=yyyy-mm-dd value=45366\n',
     "Warning: non-numeric 'true' for 'value' at /Sheet1/C1\n",
   ],
-  [
-    'query /w/t.xlsx zzz',
-    0,
-    '',
-    "No matches. Run 'officecli help xlsx query' for selector syntax.\n",
-  ],
+  ['query /w/t.xlsx zzz', 0, '', "No matches. Run 'office help xlsx query' for selector syntax.\n"],
   [
     "query /w/t.xlsx 'cell[valu=1]'",
     0,
     '',
-    "Warning: unknown key 'valu'. Available: evaluated, formula, numberformat, numFmtId, text, type, value (did you mean 'value'?)\nNo matches. Run 'officecli help xlsx query' for selector syntax.\n",
+    "Warning: unknown key 'valu'. Available: evaluated, formula, numberformat, numFmtId, text, type, value (did you mean 'value'?)\nNo matches. Run 'office help xlsx query' for selector syntax.\n",
   ],
   [
     "query /w/t.xlsx 'cell[type=Number'",
@@ -133,7 +128,7 @@ const CASES: [string, number, string, string][] = [
     'set /w/t.xlsx /Sheet1/A1 --prop bogus=1',
     2,
     'Error: No properties applied to /Sheet1/A1\n',
-    "UNSUPPORTED props: bogus (valid cell props: value, formula, type). Run 'officecli help <format> <element>' to see valid props, or raw-set for raw XML.\n",
+    "UNSUPPORTED props: bogus (valid cell props: value, formula, type). Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.\n",
   ],
   [
     'set /w/t.xlsx /Sheet1/A1',
@@ -165,16 +160,16 @@ const CASES: [string, number, string, string][] = [
 
 function workspace(): Workspace {
   const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
-  ws.registerCli('officecli', OFFICECLI)
+  ws.registerCli('office', OFFICE)
   return ws
 }
 
-describe('officecli', () => {
-  it('answers each line as officecli does', async () => {
+describe('office', () => {
+  it('answers each line as OfficeCLI does', async () => {
     const ws = workspace()
     try {
       for (const [line, code, out, err] of CASES) {
-        const result = await ws.shell(`officecli ${line}`)
+        const result = await ws.shell(`office ${line}`)
         expect(
           [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)],
           line,
@@ -188,10 +183,10 @@ describe('officecli', () => {
   it('replaces the workbook under create --force', async () => {
     const ws = workspace()
     try {
-      await ws.shell('officecli create /w/t.xlsx')
-      await ws.shell('officecli set /w/t.xlsx /Sheet1/A1 --prop value=1')
-      expect((await ws.shell('officecli create /w/t.xlsx --force')).exitCode).toBe(0)
-      const cell = await ws.shell('officecli get /w/t.xlsx /Sheet1/A1')
+      await ws.shell('office create /w/t.xlsx')
+      await ws.shell('office set /w/t.xlsx /Sheet1/A1 --prop value=1')
+      expect((await ws.shell('office create /w/t.xlsx --force')).exitCode).toBe(0)
+      const cell = await ws.shell('office get /w/t.xlsx /Sheet1/A1')
       expect(DEC.decode(cell.stdout)).toBe('/Sheet1/A1 (cell) "(empty)"\n')
     } finally {
       await ws.close()
@@ -201,19 +196,19 @@ describe('officecli', () => {
   it('reads batch items from an input file and from stdin', async () => {
     const ws = workspace()
     try {
-      await ws.shell('officecli create /w/t.xlsx')
+      await ws.shell('office create /w/t.xlsx')
       const item = '[{"command":"set","path":"/Sheet1/A1","props":{"value":"5"}}]'
       await ws.shell(`echo '${item}' > /w/in.json`)
-      const fromFile = await ws.shell('officecli batch /w/t.xlsx --input /w/in.json')
+      const fromFile = await ws.shell('office batch /w/t.xlsx --input /w/in.json')
       expect(fromFile.exitCode).toBe(0)
       expect(DEC.decode(fromFile.stdout).startsWith('[1] Updated /Sheet1/A1: value=5\n')).toBe(true)
       const piped = await ws.shell(
-        `echo '[{"command":"get","path":"/Sheet1/A1"}]' | officecli batch /w/t.xlsx`,
+        `echo '[{"command":"get","path":"/Sheet1/A1"}]' | office batch /w/t.xlsx`,
       )
       expect(DEC.decode(piped.stdout).startsWith('[1] /Sheet1/A1 (cell) "5" type=Number\n')).toBe(
         true,
       )
-      const missing = await ws.shell('officecli batch /w/t.xlsx --input /w/missing.json')
+      const missing = await ws.shell('office batch /w/t.xlsx --input /w/missing.json')
       expect([missing.exitCode, DEC.decode(missing.stderr)]).toEqual([
         1,
         'Error: Input file not found: /w/missing.json\n',
@@ -224,7 +219,7 @@ describe('officecli', () => {
   })
 
   it('reads only under get and query', () => {
-    const writers = Object.entries(OFFICECLI.handlers)
+    const writers = Object.entries(OFFICE.handlers)
       .filter(([, handler]) => handler.write)
       .map(([path]) => path)
       .sort()

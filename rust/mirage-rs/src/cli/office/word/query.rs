@@ -12,7 +12,7 @@
 
 use super::super::Fail;
 use super::super::node::{Node, Value};
-use super::super::office::{contains_ci, generic_attr, generic_query, word_char};
+use super::super::package::{contains_ci, generic_attr, generic_query, word_char};
 use super::super::tree::{E, W, WP, is_on, on_off};
 use super::super::units::{f2, hex_color};
 use super::{

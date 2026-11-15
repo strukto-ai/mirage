@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.officecli.run import run_command
+from mirage.commands.cli.builtin.office.run import run_command
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 
@@ -32,11 +32,11 @@ JSON_FLAG = Argument(
     help="Output as JSON (AI-friendly)",
 )
 
-OFFICECLI = CLI(
+OFFICE = CLI(
     spec=CommandSpec(
-        name="officecli",
+        name="office",
         description=(
-            "officecli: AI-friendly CLI for Office documents "
+            "office: AI-friendly CLI for Office documents "
             "(.docx, .xlsx, .pptx)"
         ),
         subcommands=(

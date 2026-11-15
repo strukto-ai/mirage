@@ -2625,7 +2625,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------
 
-rust/mirage-rs/src/cli/officecli/ is adapted from OfficeCLI 1.0.161
+rust/mirage-rs/src/cli/office/ is adapted from OfficeCLI 1.0.161
 (https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161, commit
 91c06b6f5c80e3f33d957ff0426672f558efa25e): the paths, node properties,
 selectors, output and messages of its Excel, Word and PowerPoint handlers.

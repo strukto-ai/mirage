@@ -5,7 +5,7 @@
 //! and any other element as OfficeCLI's `ElementToNode` dispatches it.
 
 use super::super::node::{Node, Value, number_text};
-use super::super::office::resolve_target;
+use super::super::package::resolve_target;
 use super::super::tree::{A, E, M, R, W, W14, WP, is_on, on_off, outer_xml};
 use super::super::units::{
     f2, fixed, fmt, half_points, hex_color, word_line_spacing, word_spacing,

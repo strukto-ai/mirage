@@ -48,7 +48,10 @@ SUMMARIES = {
     "himalaya": "List and search mail; read, compose, reply, forward and send messages",
     "linear": "Query teams, issues, projects and documents; update issues and comments",
     "ntn": "Read and edit Markdown pages, query data sources and call Notion APIs",
-    "officecli": "Create, read and edit Excel workbooks with OfficeCLI paths",
+    "office": (
+        "Create and edit Excel workbooks, read Word and PowerPoint files, "
+        "with OfficeCLI paths"
+    ),
     "search": (
         "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "
         "for a query"

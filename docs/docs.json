@@ -279,7 +279,7 @@
                   "home/setup/cli/gh",
                   "home/setup/cli/hf",
                   "home/setup/cli/git",
-                  "home/setup/cli/officecli",
+                  "home/setup/cli/office",
                   "home/setup/cli/search"
                 ]
               }
@@ -536,7 +536,7 @@
                   "python/cli/gh",
                   "python/cli/hf",
                   "python/cli/git",
-                  "python/cli/officecli",
+                  "python/cli/office",
                   "python/cli/search"
                 ]
               }
@@ -728,7 +728,7 @@
                   "typescript/cli/gh",
                   "typescript/cli/hf",
                   "typescript/cli/git",
-                  "typescript/cli/officecli",
+                  "typescript/cli/office",
                   "typescript/cli/search"
                 ]
               }

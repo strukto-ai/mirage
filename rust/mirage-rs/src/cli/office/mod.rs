@@ -1,7 +1,7 @@
 // Adapted from OfficeCLI 1.0.161.
 // https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
 // Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
-//! officecli's workbook commands as OfficeCLI 1.0.161 (iOfficeAI,
+//! office's workbook commands as OfficeCLI 1.0.161 (iOfficeAI,
 //! Apache-2.0) answers them: `create`, `get`, `query`, `set`, `remove` and
 //! `batch` over an .xlsx the host spools, with its paths (`/`, `/Sheet`,
 //! `/Sheet/A1`, `/Sheet/A1:B2`, `/Sheet/row[N]`, `Sheet!A1`,
@@ -10,13 +10,13 @@
 //! and copies every other part from the spool as it stands. Divergences: a
 //! formula is stored and shown without a computed value, `query` reads
 //! cells, rows, comments and sheets only, and `batch` runs `get`, `query`,
-//! `set` and `remove` items. A .docx or .pptx goes to `office`, which reads
+//! `set` and `remove` items. A .docx or .pptx goes to `package`, which reads
 //! it as OfficeCLI's Word and PowerPoint handlers do.
 
 mod batch;
 mod book;
 mod node;
-mod office;
+mod package;
 mod query;
 mod read;
 mod sheet;
@@ -135,7 +135,7 @@ impl Fail {
                 "Check the file path. Use an absolute path or a path relative to the current directory."
                     .to_string(),
             ),
-            help: Some("officecli create <path> --type docx|xlsx|pptx".to_string()),
+            help: Some("office create <path> --type docx|xlsx|pptx".to_string()),
             valid: None,
         }
     }
@@ -369,7 +369,7 @@ impl Out<'_> {
 
 fn unsupported_text(keys: &[String], element: &str, valid: &[&str]) -> String {
     format!(
-        "UNSUPPORTED props: {} (valid {element} props: {}). Run 'officecli help <format> <element>' to see valid props, or raw-set for raw XML.",
+        "UNSUPPORTED props: {} (valid {element} props: {}). Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.",
         keys.join(", "),
         valid.join(", ")
     )
@@ -381,7 +381,7 @@ async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc
         Err(Refusal::Missing) => return Err(Fail::missing(&config.absolute)),
         Err(Refusal::Unreadable) => {
             return Err(Fail::of(format!(
-                "Not a workbook officecli reads: {}",
+                "Not a workbook 'office' reads: {}",
                 text(&config.file)
             )));
         }
@@ -389,7 +389,7 @@ async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc
     };
     let Some(doc) = Doc::load(&mut book).await else {
         return Err(Fail::of(format!(
-            "Not a workbook officecli reads: {}",
+            "Not a workbook 'office' reads: {}",
             text(&config.file)
         )));
     };
@@ -397,8 +397,8 @@ async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc
 }
 
 async fn run(host: Host, config: Config) -> i32 {
-    if let Some(kind) = office::Kind::of(&text(&config.file)) {
-        return office::run(&host, &config, kind).await;
+    if let Some(kind) = package::Kind::of(&text(&config.file)) {
+        return package::run(&host, &config, kind).await;
     }
     let out = Out {
         host: &host,
@@ -442,7 +442,7 @@ async fn run(host: Host, config: Config) -> i32 {
                             let ext = file
                                 .rsplit_once('.')
                                 .map_or(String::new(), |(_, e)| e.to_ascii_lowercase());
-                            host.warn(format!("No matches. Run 'officecli help {ext} query' for selector syntax.\n").as_bytes());
+                            host.warn(format!("No matches. Run 'office help {ext} query' for selector syntax.\n").as_bytes());
                         }
                     }
                     0
@@ -754,7 +754,7 @@ fn hydrate(doc: &Doc, scope: &Scope<'_>, results: &mut [Node]) {
     }
 }
 
-/// A number as the text officecli stores, or None when `value` is not one.
+/// A number as the text office stores, or None when `value` is not one.
 fn number(value: &str) -> Option<String> {
     let v = value.trim();
     let ok = !v.is_empty()
@@ -777,7 +777,7 @@ async fn styles_of(book: &mut Book<'_>, wb_part: &str) -> Option<(String, Styles
 const CELL_PROPS: &[&str] = &["value", "formula", "type"];
 const SHEET_PROPS: &[&str] = &["hidden"];
 
-/// The line officecli prints once the change is saved, or why nothing
+/// The line office prints once the change is saved, or why nothing
 /// changed.
 async fn set(
     book: &mut Book<'_>,
@@ -889,7 +889,7 @@ async fn set(
             edits.entry(*row).or_default().insert(*col, val);
             let rewritten = match sheet::rewrite(&xml, edits, &mut styles) {
                 Ok(r) => r,
-                Err(Refused::Shared(cell)) => return Err(Fail::of(format!("{cell} is the master of a shared formula that other cells use, which officecli here does not rewrite")).into()),
+                Err(Refused::Shared(cell)) => return Err(Fail::of(format!("{cell} is the master of a shared formula that other cells use, which 'office' here does not rewrite")).into()),
                 Err(Refused::NoSheetData) => return Err(Fail::of("worksheet has no sheetData".to_string()).into()),
             };
             book.put(&entry.part, rewritten.xml);
@@ -1039,7 +1039,7 @@ async fn run_item(
     let fail = |f: Fail| (f.message, f.code);
     let verb = item.command.to_ascii_lowercase();
     let Some(doc) = Doc::load(book).await else {
-        return Err(("Not a workbook officecli reads".to_string(), None));
+        return Err(("Not a workbook 'office' reads".to_string(), None));
     };
     match verb.as_str() {
         "meta" => Ok(Output::Text("meta".to_string())),

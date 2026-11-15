@@ -65,7 +65,7 @@ CLI_SERVICES: dict[str, tuple[str, ...]] = {
     "himalaya": ("email",),
     "linear": ("linear",),
     "ntn": ("notion",),
-    "officecli": (),
+    "office": (),
     "search": (),
     "slack": ("slack",),
     "trello": ("trello",),

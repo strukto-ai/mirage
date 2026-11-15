@@ -1,5 +1,5 @@
 ---
-title: officecli
+title: office
 description: "Supported OfficeCLI commands for Excel workbooks, Word documents and PowerPoint decks."
 icon: file-excel
 ---
@@ -11,16 +11,16 @@ messages.
 
 ## Setup
 
-`officecli` has no account config. It reads and writes workbooks through
+`office` has no account config. It reads and writes workbooks through
 existing mounts.
 
 ```python
 from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.officecli import OFFICECLI
+from mirage.commands.cli.builtin.office import OFFICE
 from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-ws.register_cli("officecli", OFFICECLI)
+ws.register_cli("office", OFFICE)
 ```
 
 For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
@@ -28,28 +28,28 @@ For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 {/* BEGIN GENERATED CLI COMMANDS */}
 ## Supported commands
 
-Run `officecli <command> --help` for the supported flags and operands.
+Run `office <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
 
 | Command | Description |
 | --- | --- |
-| `officecli create` | Create a blank Office document |
-| `officecli get` | Get a document node by path |
-| `officecli query` | Query document elements with CSS-like selectors |
-| `officecli set` | Modify a document node's properties |
-| `officecli remove` | Remove an element from the document |
-| `officecli batch` | Execute multiple commands from a JSON array in a single pass |
+| `office create` | Create a blank Office document |
+| `office get` | Get a document node by path |
+| `office query` | Query document elements with CSS-like selectors |
+| `office set` | Modify a document node's properties |
+| `office remove` | Remove an element from the document |
+| `office batch` | Execute multiple commands from a JSON array in a single pass |
 {/* END GENERATED CLI COMMANDS */}
 
 ## Edit a workbook
 
 ```bash
-officecli create /data/report.xlsx
-officecli set /data/report.xlsx /Sheet1/A1 --prop value=Revenue
-officecli set /data/report.xlsx /Sheet1/B1 --prop value=1250.5
-officecli set /data/report.xlsx Sheet1!C1 --prop value=2024-03-15
-officecli get /data/report.xlsx /Sheet1
-officecli get /data/report.xlsx /Sheet1/A1 --json
+office create /data/report.xlsx
+office set /data/report.xlsx /Sheet1/A1 --prop value=Revenue
+office set /data/report.xlsx /Sheet1/B1 --prop value=1250.5
+office set /data/report.xlsx Sheet1!C1 --prop value=2024-03-15
+office get /data/report.xlsx /Sheet1
+office get /data/report.xlsx /Sheet1/A1 --json
 ```
 
 A path names the workbook (`/`), a sheet (`/Sheet1`), a cell (`/Sheet1/A1` or
@@ -67,8 +67,8 @@ the workbook's and each sheet's own properties.
 ## Batch
 
 ```bash
-officecli create /data/sales.xlsx
-officecli batch /data/sales.xlsx --commands '[
+office create /data/sales.xlsx
+office batch /data/sales.xlsx --commands '[
   {"command":"set","path":"/Sheet1/A1","props":{"value":"Region"}},
   {"command":"set","path":"/Sheet1/B1","props":{"value":"Revenue"}},
   {"command":"set","path":"/Sheet1/A2","props":{"value":"North"}},
@@ -86,10 +86,10 @@ the workbook as it was, unless `--best-effort` keeps what succeeded;
 ## Query
 
 ```bash
-officecli query /data/sales.xlsx 'row[Revenue>1000]'
-officecli query /data/sales.xlsx 'B[value>500]'
-officecli query /data/sales.xlsx 'Sheet1!cell:contains(South)'
-officecli query /data/sales.xlsx 'cell[type=Number], comment' --json
+office query /data/sales.xlsx 'row[Revenue>1000]'
+office query /data/sales.xlsx 'B[value>500]'
+office query /data/sales.xlsx 'Sheet1!cell:contains(South)'
+office query /data/sales.xlsx 'cell[type=Number], comment' --json
 ```
 
 A selector names cells (`cell` or a column letter such as `B`), rows, comments
@@ -103,11 +103,11 @@ sheet's table, defined or found from its header row.
 ## Read a document or deck
 
 ```bash
-officecli get /data/memo.docx /body --depth 2
-officecli get /data/memo.docx /body/p[1]/r[1] --json
-officecli query /data/memo.docx 'p[style=Heading1]'
-officecli get /data/deck.pptx /slide[1] --depth 3
-officecli query /data/deck.pptx 'shape:contains(Revenue)'
+office get /data/memo.docx /body --depth 2
+office get /data/memo.docx /body/p[1]/r[1] --json
+office query /data/memo.docx 'p[style=Heading1]'
+office get /data/deck.pptx /slide[1] --depth 3
+office query /data/deck.pptx 'shape:contains(Revenue)'
 ```
 
 A Word path names the body (`/body`), a paragraph (`/body/p[2]` or

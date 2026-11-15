@@ -3330,8 +3330,8 @@ def cli_install(
 
     A CLI that talks to an API gets both the tree and the credentials
     pointing at itself from its mock service. `git`, `search` and
-    `officecli` need neither: git reads a repository out of a mount,
-    search asks a mount's own search and officecli edits workbooks on
+    `office` need neither: git reads a repository out of a mount,
+    search asks a mount's own search and office edits workbooks on
     one, which is what makes them installable from a bare name, so they
     resolve through the registry the YAML ``clis:`` section uses and
     install with no config at all.

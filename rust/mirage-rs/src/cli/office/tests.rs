@@ -142,7 +142,7 @@ fn comments_and_their_shapes() {
 const MEMO: &[u8] = include_bytes!("../../../../../integ/fixtures/office/v1/memo.docx");
 const DECK: &[u8] = include_bytes!("../../../../../integ/fixtures/office/v1/deck.pptx");
 
-/// One officecli command on `name`, holding `bytes`: stdout, stderr, status.
+/// One office command on `name`, holding `bytes`: stdout, stderr, status.
 fn office(name: &str, bytes: &[u8], config: serde_json::Value) -> (String, String, i32) {
     let mut host = crate::host::Host::default();
     host.files.insert(name.to_string(), bytes.to_vec());
@@ -152,7 +152,7 @@ fn office(name: &str, bytes: &[u8], config: serde_json::Value) -> (String, Strin
     if config.get("props").is_none() {
         config["props"] = serde_json::json!([]);
     }
-    let mut stream = crate::open("officecli", config.to_string().as_bytes()).expect("opens");
+    let mut stream = crate::open("office", config.to_string().as_bytes()).expect("opens");
     let status = host.drive(stream.as_mut());
     (
         String::from_utf8(std::mem::take(&mut host.out)).unwrap(),

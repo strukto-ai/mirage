@@ -6,7 +6,7 @@
 
 use super::super::Fail;
 use super::super::node::{Node, Value};
-use super::super::office::{Pkg, core_properties, extended_properties, theme_properties};
+use super::super::package::{Pkg, core_properties, extended_properties, theme_properties};
 use super::super::tree::{A, C, E, P, R, Tree};
 use super::super::units::{format_emu, format_emu_paired, hex_color, round_even};
 use super::cascade::{Resolved, complete_frame, ph_layer, placeholder_matches};

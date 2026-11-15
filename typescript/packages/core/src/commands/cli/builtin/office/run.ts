@@ -23,7 +23,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 
 /**
- * Run one officecli command through mirage-rs, which reads the workbook
+ * Run one office command through mirage-rs, which reads the workbook
  * from a host spool and writes it back through the mount that owns it,
  * every part the command leaves alone copied as it stands.
  */
@@ -37,7 +37,7 @@ export function runCommand(
   const flags = new FlagView(ctx.flags, spec)
   const name = spec.name
   const [workbook] = paths
-  if (workbook === undefined) throw new Error('officecli: the workbook operand is missing')
+  if (workbook === undefined) throw new Error('office: the workbook operand is missing')
   const operands = [workbook]
   const config: Record<string, util.JSONType> = {
     command: name,
@@ -66,5 +66,5 @@ export function runCommand(
   const files = commandFiles(ctx, operands)
   const host = new StreamHost(operands, files.read, ctx, false)
   const io = new IOResult()
-  return Promise.resolve([hostedStream('officecli', config, host, io, ctx.signal), io])
+  return Promise.resolve([hostedStream('office', config, host, io, ctx.signal), io])
 }

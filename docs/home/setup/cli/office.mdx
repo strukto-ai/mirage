@@ -1,7 +1,7 @@
 ---
-title: officecli
+title: office
 icon: file-excel
-description: Set up the credential-free officecli for Excel, Word and PowerPoint files with Python or TypeScript.
+description: Set up the credential-free office CLI for Excel, Word and PowerPoint files with Python or TypeScript.
 ---
 
 Mirage implements [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)'s
@@ -11,23 +11,23 @@ paths, selectors, `--prop` values and `--json` output. An edit
 rewrites only what it changes; charts, styles, named ranges and validations stay
 as they were.
 
-`officecli` needs no account config and reads workbooks through existing mounts.
-Register it on `ws`. Commands: [Python](/python/cli/officecli) ·
-[TypeScript](/typescript/cli/officecli).
+`office` needs no account config and reads workbooks through existing mounts.
+Register it on `ws`. Commands: [Python](/python/cli/office) ·
+[TypeScript](/typescript/cli/office).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
-    from mirage.commands.cli.builtin.officecli import OFFICECLI
+    from mirage.commands.cli.builtin.office import OFFICE
 
-    ws.register_cli("officecli", OFFICECLI)
+    ws.register_cli("office", OFFICE)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { OFFICECLI } from '@struktoai/mirage-node'
+    import { OFFICE } from '@struktoai/mirage-node'
 
-    ws.registerCli('officecli', OFFICECLI)
+    ws.registerCli('office', OFFICE)
     ```
   </Tab>
 </Tabs>

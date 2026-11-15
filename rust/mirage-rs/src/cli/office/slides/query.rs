@@ -11,7 +11,7 @@ use fancy_regex::Regex;
 
 use super::super::Fail;
 use super::super::node::{Node, Value};
-use super::super::office::{
+use super::super::package::{
     contains_ci, contains_text, generic_query, predicates, take_nth, word_char,
 };
 use super::super::query::{emu, filter_selector};

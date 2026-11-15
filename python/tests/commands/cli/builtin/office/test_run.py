@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.officecli import OFFICECLI
+from mirage.commands.cli.builtin.office import OFFICE
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -34,9 +34,7 @@ SHEET_NOT_FOUND = (
     'Sheet not found: "Nope". Available sheets: [Sheet1]. Use DOM path '
     '"/Sheet1/A1" or Excel notation "Sheet1!A1".'
 )
-NO_MATCHES = (
-    "No matches. Run 'officecli help xlsx query' for selector syntax.\n"
-)
+NO_MATCHES = "No matches. Run 'office help xlsx query' for selector syntax.\n"
 CASES = [
     ("create /w/t.xlsx", 0, "Created: /w/t.xlsx\n", ""),
     (
@@ -194,7 +192,7 @@ CASES = [
         2,
         "Error: No properties applied to /Sheet1/A1\n",
         "UNSUPPORTED props: bogus (valid cell props: value, formula, type). "
-        "Run 'officecli help <format> <element>' to see valid props, or "
+        "Run 'office help <format> <element>' to see valid props, or "
         "raw-set for raw XML.\n",
     ),
     (
@@ -246,9 +244,9 @@ CASES = [
 @pytest.mark.asyncio
 async def test_lines_answer_as_officecli_does():
     with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
-        ws.register_cli("officecli", OFFICECLI)
+        ws.register_cli("office", OFFICE)
         for line, code, out, err in CASES:
-            result = await ws.shell(f"officecli {line}")
+            result = await ws.shell(f"office {line}")
             got = (
                 result.exit_code,
                 (result.stdout or b"").decode(),
@@ -260,38 +258,36 @@ async def test_lines_answer_as_officecli_does():
 @pytest.mark.asyncio
 async def test_create_force_replaces_the_workbook():
     with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
-        ws.register_cli("officecli", OFFICECLI)
-        await ws.shell("officecli create /w/t.xlsx")
-        await ws.shell("officecli set /w/t.xlsx /Sheet1/A1 --prop value=1")
-        result = await ws.shell("officecli create /w/t.xlsx --force")
+        ws.register_cli("office", OFFICE)
+        await ws.shell("office create /w/t.xlsx")
+        await ws.shell("office set /w/t.xlsx /Sheet1/A1 --prop value=1")
+        result = await ws.shell("office create /w/t.xlsx --force")
         assert result.exit_code == 0
-        cell = await ws.shell("officecli get /w/t.xlsx /Sheet1/A1")
+        cell = await ws.shell("office get /w/t.xlsx /Sheet1/A1")
         assert cell.stdout == b'/Sheet1/A1 (cell) "(empty)"\n'
 
 
 @pytest.mark.asyncio
 async def test_batch_reads_input_files_and_stdin():
     with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
-        ws.register_cli("officecli", OFFICECLI)
-        await ws.shell("officecli create /w/t.xlsx")
+        ws.register_cli("office", OFFICE)
+        await ws.shell("office create /w/t.xlsx")
         item = '[{"command":"set","path":"/Sheet1/A1","props":{"value":"5"}}]'
         await ws.shell(f"echo '{item}' > /w/in.json")
-        from_file = await ws.shell(
-            "officecli batch /w/t.xlsx --input /w/in.json"
-        )
+        from_file = await ws.shell("office batch /w/t.xlsx --input /w/in.json")
         assert from_file.exit_code == 0
         assert from_file.stdout.startswith(
             b"[1] Updated /Sheet1/A1: value=5\n"
         )
         piped = await ws.shell(
             'echo \'[{"command":"get","path":"/Sheet1/A1"}]\' '
-            "| officecli batch /w/t.xlsx"
+            "| office batch /w/t.xlsx"
         )
         assert piped.stdout.startswith(
             b'[1] /Sheet1/A1 (cell) "5" type=Number\n'
         )
         missing = await ws.shell(
-            "officecli batch /w/t.xlsx --input /w/missing.json"
+            "office batch /w/t.xlsx --input /w/missing.json"
         )
         assert (missing.exit_code, missing.stderr) == (
             1,
@@ -301,5 +297,5 @@ async def test_batch_reads_input_files_and_stdin():
 
 def test_only_get_and_query_read():
     assert {
-        path for path, handler in OFFICECLI.handlers.items() if handler.write
+        path for path, handler in OFFICE.handlers.items() if handler.write
     } == {"create", "set", "remove", "batch"}
