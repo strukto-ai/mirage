@@ -456,6 +456,7 @@ impl Host {
                 }
                 (json!({"status": status}), Vec::new())
             }
+            "clock" => (json!({}), b"[1795147261,0]".to_vec()),
             op => panic!("unknown request {op}"),
         }
     }

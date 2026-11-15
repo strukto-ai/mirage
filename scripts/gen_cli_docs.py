@@ -49,8 +49,8 @@ SUMMARIES = {
     "linear": "Query teams, issues, projects and documents; update issues and comments",
     "ntn": "Read and edit Markdown pages, query data sources and call Notion APIs",
     "office": (
-        "Create and edit Excel workbooks, read Word and PowerPoint files, "
-        "with OfficeCLI paths"
+        "Create and edit Excel workbooks, Word documents and PowerPoint "
+        "decks with OfficeCLI paths"
     ),
     "search": (
         "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "

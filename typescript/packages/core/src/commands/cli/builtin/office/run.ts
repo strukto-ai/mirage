@@ -46,8 +46,20 @@ export function runCommand(
     path: texts[0] ?? '/',
     json: flags.asBool('json'),
   }
-  if (name === 'set') config.props = flags.asList('prop')
-  if (name === 'create' || name === 'batch') config.force = flags.asBool('force')
+  if (name === 'set' || name === 'add') config.props = flags.asList('prop')
+  if (name === 'create' || name === 'batch' || name === 'add') config.force = flags.asBool('force')
+  if (name === 'add' || name === 'move') {
+    config.index = flags.asInt('index') ?? null
+    config.after = flags.asStr('after') ?? null
+    config.before = flags.asStr('before') ?? null
+  }
+  if (name === 'add') {
+    config.type = flags.asStr('type') ?? null
+    config.from = flags.asStr('from') ?? null
+  }
+  if (name === 'move') config.to = flags.asStr('to') ?? null
+  if (name === 'swap') config.path2 = texts[1] ?? ''
+  if (name === 'move') config.props = flags.asList('prop')
   if (name === 'get') config.depth = flags.asInt('depth') ?? null
   if (name === 'query') config.find = flags.asStr('find') ?? null
   if (name === 'batch') {

@@ -340,6 +340,46 @@ impl Tree {
     }
 }
 
+/// `child` put among `parent`'s kids at index `at` of its kid list, or
+/// last when None or past the end.
+pub(super) fn insert_at(t: &mut Tree, parent: Id, at: Option<usize>, child: Id) {
+    t.detach(child);
+    t.nodes[child].parent = Some(parent);
+    let kids = &mut t.nodes[parent].kids;
+    match at {
+        Some(i) if i < kids.len() => kids.insert(i, Kid::El(child)),
+        _ => kids.push(Kid::El(child)),
+    }
+}
+
+/// Attribute `name`, of no namespace, of element `id` set to `value`.
+pub(super) fn set_attr(t: &mut Tree, id: Id, name: &str, value: &str) {
+    set_attr_ns(t, id, "", name, value);
+}
+
+/// Attribute `name` of namespace `ns` of element `id` set to `value`,
+/// prefixed as the writer prefixes the namespace.
+pub(super) fn set_attr_ns(t: &mut Tree, id: Id, ns: &str, name: &str, value: &str) {
+    let el = &mut t.nodes[id];
+    if let Some(a) = el.attrs.iter_mut().find(|a| &*a.ns == ns && a.name == name) {
+        a.value = value.to_string();
+        return;
+    }
+    el.attrs.push(Attr {
+        ns: Arc::from(ns),
+        name: name.to_string(),
+        prefix: prefix_for(ns).to_string(),
+        value: value.to_string(),
+    });
+}
+
+/// Attribute `name` of namespace `ns` taken off element `id`.
+pub(super) fn remove_attr(t: &mut Tree, id: Id, ns: &str, name: &str) {
+    t.nodes[id]
+        .attrs
+        .retain(|a| !(&*a.ns == ns && a.name == name));
+}
+
 /// Why a part did not parse.
 #[derive(Debug)]
 pub(super) struct Malformed;

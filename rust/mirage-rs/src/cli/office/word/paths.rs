@@ -6,7 +6,7 @@
 
 use super::super::Fail;
 use super::super::node::{Node, number_text};
-use super::super::tree::{E, MC, W, W14};
+use super::super::tree::{E, Id, MC, W, W14};
 use super::{
     Segment, Word, fail, has_ancestor_within, is_math_wrapper, jsn, para_id, parse_path, row_cells,
     table_rows, w_child, w_val,
@@ -181,6 +181,53 @@ impl<'p> Word<'p> {
             &found.path
         };
         Ok(self.element(element, at, depth))
+    }
+
+    /// The part and element `path` names for a command that changes it,
+    /// with the path as the navigator spells it.
+    pub(crate) fn locate(&self, path: &str) -> Result<(String, Id, String), Fail> {
+        let (element, at) = if path == "/" || path.eq_ignore_ascii_case("/body") {
+            (self.body(), "/body".to_string())
+        } else {
+            let segments = parse_path(path)?;
+            let found = self.navigate(&segments)?;
+            let Some(element) = found.element else {
+                let mut msg = format!("Path not found: {path}");
+                if let Some(c) = found.context {
+                    msg.push_str(&format!(". {c}"));
+                }
+                return Err(fail(msg));
+            };
+            let at = if found.path.is_empty() {
+                path.to_string()
+            } else {
+                found.path
+            };
+            (Some(element), at)
+        };
+        let Some(element) = element else {
+            return Err(fail(format!("Path not found: {path}")));
+        };
+        let part = self
+            .part_holding(element)
+            .ok_or_else(|| fail(format!("Path not found: {path}")))?;
+        Ok((part, element.id, at))
+    }
+
+    /// The part whose tree holds `e`.
+    pub(crate) fn part_holding(&self, e: E<'_>) -> Option<String> {
+        let mut parts = vec![self.main_part.clone()];
+        parts.extend(self.header_parts.iter().cloned());
+        parts.extend(self.footer_parts.iter().cloned());
+        parts.extend(self.styles_part.iter().cloned());
+        parts.extend(self.numbering_part.iter().cloned());
+        parts.extend(self.settings_part.iter().cloned());
+        for kind in ["comments", "footnotes", "endnotes"] {
+            parts.extend(self.pkg.related(&self.main_part, kind));
+        }
+        parts
+            .into_iter()
+            .find(|p| self.pkg.xml(p).is_some_and(|t| std::ptr::eq(t, e.t)))
     }
 
     pub(super) fn sections(&self) -> Vec<E<'p>> {

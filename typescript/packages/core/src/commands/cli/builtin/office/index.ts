@@ -93,11 +93,94 @@ export const OFFICE = new CLI({
         ],
       }),
       new CommandSpec({
+        name: 'add',
+        description: 'Add a new element to the document',
+        arguments: [
+          FILE,
+          new Argument('PARENT', {
+            metavar: 'parent',
+            help: "Parent DOM path. Conventions per handler: docx uses /body (or /body/p[N] for nested adds); xlsx uses /Sheet1 (or any sheet name); pptx slide uses '/' (slides hang off the presentation root), pptx shape uses /slide[N]. Wrap paths containing brackets in single quotes for zsh: '/slide[1]'.",
+          }),
+          new Argument('--type', {
+            metavar: 'type',
+            help: 'Element type to add (e.g. paragraph, run, table, sheet, row, cell, slide, shape, picture, diagram/flowchart, ole, video)',
+          }),
+          new Argument('--from', {
+            metavar: 'from',
+            help: 'Copy from an existing element path (e.g. /slide[1]/shape[2])',
+          }),
+          new Argument('--index', {
+            type: 'int',
+            metavar: 'index',
+            help: 'Insert position (0-based). If omitted, appends to end',
+          }),
+          new Argument('--after', {
+            metavar: 'after',
+            help: 'Insert after the element at this path (e.g. p[@paraId=1A2B3C4D])',
+          }),
+          new Argument('--before', {
+            metavar: 'before',
+            help: 'Insert before the element at this path',
+          }),
+          new Argument('--prop', {
+            action: 'append',
+            metavar: 'prop',
+            help: 'Property to set (key=value, e.g. --prop src=image.png --prop width=6in)',
+          }),
+          JSON_FLAG,
+          new Argument('--force', {
+            action: 'store_true',
+            help: 'Force write even if document is protected',
+          }),
+        ],
+      }),
+      new CommandSpec({
         name: 'remove',
         description: 'Remove an element from the document',
         arguments: [
           FILE,
           new Argument('PATH', { metavar: 'path', help: 'DOM path of the element to remove' }),
+          JSON_FLAG,
+        ],
+      }),
+      new CommandSpec({
+        name: 'move',
+        description: 'Move an element to a new position or parent',
+        arguments: [
+          FILE,
+          new Argument('PATH', { metavar: 'path', help: 'DOM path of the element to move' }),
+          new Argument('--to', {
+            metavar: 'to',
+            help: 'Target parent path. If omitted, reorders within the current parent',
+          }),
+          new Argument('--index', {
+            type: 'int',
+            metavar: 'index',
+            help: 'Insert position (0-based) among the remaining siblings after the element is detached — moving p[1] to --index 2 in [P1,P2,P3,P4] gives [P2,P3,P1,P4]. If omitted, appends to end',
+          }),
+          new Argument('--after', {
+            metavar: 'after',
+            help: 'Move after the element at this path',
+          }),
+          new Argument('--before', {
+            metavar: 'before',
+            help: 'Move before the element at this path',
+          }),
+          new Argument('--prop', {
+            action: 'append',
+            metavar: 'prop',
+            help: 'Property to set on the move (e.g. --prop trackChange.author=Alice for tracked moves)',
+          }),
+          JSON_FLAG,
+        ],
+      }),
+      new CommandSpec({
+        name: 'swap',
+        description: 'Swap two elements in the document',
+        arguments: [
+          new Argument('FILE', { type: 'path', metavar: 'file', help: 'Office document path' }),
+          new Argument('PATH1', { metavar: 'path1', help: 'DOM path of the first element' }),
+          new Argument('PATH2', { metavar: 'path2', help: 'DOM path of the second element' }),
           JSON_FLAG,
         ],
       }),
@@ -137,7 +220,10 @@ export const OFFICE = new CLI({
     get: new CLIHandler({ fn: runCommand }),
     query: new CLIHandler({ fn: runCommand }),
     set: new CLIHandler({ fn: runCommand, write: true }),
+    add: new CLIHandler({ fn: runCommand, write: true }),
     remove: new CLIHandler({ fn: runCommand, write: true }),
+    move: new CLIHandler({ fn: runCommand, write: true }),
+    swap: new CLIHandler({ fn: runCommand, write: true }),
     batch: new CLIHandler({ fn: runCommand, write: true }),
   },
 })
