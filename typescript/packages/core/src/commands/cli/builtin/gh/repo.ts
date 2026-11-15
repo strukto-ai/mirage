@@ -28,8 +28,17 @@ import { splitMarked } from '../git/util.ts'
 import { GIST_ORIGIN, GITHUB_HOST } from './constants.ts'
 import { checkHost, webOrigin } from './host.ts'
 
-function tokenHeader(accessor: GitHubAccount): Record<string, string> {
-  return { Authorization: `Basic ${btoa(`x-access-token:${accessor.config.token}`)}` }
+/**
+ * The Authorization git sends GitHub for the install's token: Basic with the
+ * token as the password, what gh's credential helper hands git. An App's is
+ * its installation's current token.
+ */
+export async function tokenHeader(accessor: GitHubAccount): Promise<Record<string, string>> {
+  const token =
+    accessor.transport.token === undefined
+      ? (accessor.config.token ?? '')
+      : await accessor.transport.token()
+  return { Authorization: `Basic ${btoa(`x-access-token:${token}`)}` }
 }
 
 /**
@@ -57,7 +66,7 @@ export async function cloneCmd(
     checkHost(accessor, repoHost(spec))
     ref =
       !spec.includes('/') && !spec.includes(':')
-        ? { owner: await login(accessor.transport), repo: spec }
+        ? { owner: await login(accessor.transport, accessor.config.app !== undefined), repo: spec }
         : parseRepo(spec)
   } catch (err) {
     if (!(err instanceof Error)) throw err
@@ -116,5 +125,11 @@ async function clone(
   }
   const operands = parsed.args.map(([word]) => word)
   const sameOrigin = operands[0]?.startsWith(`${origin}/`) ?? false
-  return gitClone(new NOOPAccessor(), [], operands, git, sameOrigin ? tokenHeader(accessor) : {})
+  return gitClone(
+    new NOOPAccessor(),
+    [],
+    operands,
+    git,
+    sameOrigin ? await tokenHeader(accessor) : {},
+  )
 }

@@ -25,6 +25,8 @@ import {
   stallTimeout,
 } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
+import { AppTokens, appMinter, type MintedToken } from './app.ts'
+import type { GitHubAppAuth } from './config.ts'
 import { API_BASE, API_VERSION, GRAPHQL_PATH, RAW_MEDIA_TYPE } from './constants.ts'
 
 // A rate limit is a wait, not a failure, but an unbounded wait is a hang;
@@ -60,6 +62,11 @@ export interface GitHubTransport {
   ): Promise<ApiResponse>
   /** GET a path's raw media type as its bytes arrive. */
   stream?(path: string): AsyncIterable<Uint8Array>
+  /**
+   * The token calls ride: the configured one, or an App installation's
+   * current one, minted when there is none or it is about to expire.
+   */
+  token?(): Promise<string>
 }
 
 const Kit = Octokit.plugin(retry, throttling)
@@ -111,12 +118,26 @@ export class HttpGitHubTransport implements GitHubTransport {
   readonly baseUrl: string
   private readonly kit: InstanceType<typeof Kit>
   private readonly fetcher: typeof fetch
+  private readonly fixedToken: string | undefined
+  private readonly appTokens: AppTokens | undefined
+  private readonly mint: (() => Promise<MintedToken>) | undefined
 
-  constructor(opts: { token: string; baseUrl?: string; timeout?: number }) {
+  constructor(opts: { token?: string; app?: GitHubAppAuth; baseUrl?: string; timeout?: number }) {
+    if ((opts.token === undefined) === (opts.app === undefined)) {
+      throw new Error('GitHub auth takes exactly one of token or app')
+    }
     this.baseUrl = opts.baseUrl ?? API_BASE
     this.fetcher = stallTimeout(opts.timeout)
+    this.fixedToken = opts.token
+    if (opts.app !== undefined) {
+      this.appTokens = new AppTokens(opts.app)
+      // Minting rides a client of its own: one through this kit would pass
+      // the hook below, which asks for the token being minted.
+      const minter = new Octokit({ baseUrl: this.baseUrl, request: { fetch: this.fetcher } })
+      this.mint = appMinter(opts.app, minter.request)
+    }
     this.kit = new Kit({
-      auth: opts.token,
+      ...(opts.token === undefined ? {} : { auth: opts.token }),
       baseUrl: this.baseUrl,
       // The statuses plugin-retry leaves alone: its own list, plus 500.
       // Octokit reports a request that got no response at all as a 500, so
@@ -136,6 +157,19 @@ export class HttpGitHubTransport implements GitHubTransport {
           count < GITHUB_RETRIES,
       },
     })
+    if (this.appTokens !== undefined) {
+      this.kit.hook.before('request', async (options) => {
+        options.headers.authorization = `token ${await this.token()}`
+      })
+    }
+  }
+
+  async token(): Promise<string> {
+    if (this.fixedToken !== undefined) return this.fixedToken
+    if (this.appTokens === undefined || this.mint === undefined) {
+      throw new Error('GitHub auth takes exactly one of token or app')
+    }
+    return this.appTokens.token(this.mint)
   }
 
   get(path: string, params?: Record<string, string>): Promise<unknown> {

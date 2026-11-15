@@ -54,13 +54,40 @@ const gh = await GitHubVFS.create({
 
 The token reaches the browser, so use a fine-grained PAT scoped to read-only access on a single repo.
 
+## GitHub App
+
+Instead of `token`, give `app` and Mirage mints the App's installation tokens
+itself, replacing each before its hour runs out, so a long-lived VFS keeps
+reading. `repositories` and `permissions` narrow every token it mints.
+
+```ts
+const gh = await GitHubVFS.create({
+  app: {
+    appId: 123456,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+    installationId: 7890123,
+    repositories: ['mirage'],
+    permissions: { contents: 'read' },
+  },
+  owner: 'strukto-ai',
+  repo: 'mirage',
+})
+```
+
+The private key is the PEM GitHub downloads (PKCS#1) or PKCS#8, and works in
+Node, the browser and Cloudflare Workers. Keep it on a server: in the browser
+it is readable by the page. An installation token cannot ask who it is, so
+`gh repo clone NAME` without an owner clones from the account the App is
+installed on. `gh` takes the same `app` block.
+
 ## Config
 
 {/* generated: config-table github start */}
 | Field | Description |
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | GitHub personal access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>app</code> | A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set. |
 | <code style={{ whiteSpace: 'nowrap' }}>owner</code><br />required | Repository owner, a user or an organization. |
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code><br />required | Repository name. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created. |

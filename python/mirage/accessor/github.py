@@ -16,24 +16,31 @@ import asyncio
 from collections.abc import Iterable
 
 from mirage.accessor.base import Accessor, SessionAccessor
+from mirage.core.github.app import AppTokens
 from mirage.core.github.config import GhConfig
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.tree_entry import TreeEntry
 
 
 class GitHubAccount(SessionAccessor):
-    """One GitHub account: token, API base and the pool its calls ride.
+    """One GitHub account: credential, API base and the pool its calls
+    ride.
 
     A gh install's accessor, and the account a github mount holds.
 
     Args:
-        config (GhConfig): the token and API base; a gh install's also
-            names its default repository and branch.
+        config (GhConfig): the token or App and the API base; a gh
+            install's also names its default repository and branch.
     """
 
     def __init__(self, config: GhConfig) -> None:
         super().__init__(config.timeout)
         self.config = config
+        # An App's installation token, minted on the first call and
+        # replaced before it expires; None for a fixed token.
+        self.app_tokens: AppTokens | None = (
+            None if config.app is None else AppTokens(config.app)
+        )
 
     @property
     def api_base(self) -> str:
@@ -56,20 +63,22 @@ class GitHubAccount(SessionAccessor):
         return None
 
     def join(self, peers: Iterable[Accessor]) -> None:
-        """Ride the pool of a peer account on the same token and API base.
+        """Ride the pool, and an App's tokens, of a peer account on the
+        same credential and API base.
 
         Args:
             peers (Iterable[Accessor]): the workspace's other accessors.
         """
-        token = self.config.token.get_secret_value()
         for peer in peers:
             account = self._peer(peer)
             if (
                 account is not None
                 and account is not self
-                and account.config.token.get_secret_value() == token
+                and account.config.token == self.config.token
+                and account.config.app == self.config.app
             ):
                 self.share(account)
+                self.app_tokens = account.app_tokens
                 return
 
     def reaches(self, peer: Accessor) -> bool:

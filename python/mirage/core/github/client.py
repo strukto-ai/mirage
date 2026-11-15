@@ -15,6 +15,8 @@
 import base64
 import json
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
+from datetime import datetime
 from enum import Enum
 from typing import Any, cast
 from urllib.parse import urlencode
@@ -30,6 +32,7 @@ from mirage.core.api.client import (
     lowered_headers,
 )
 from mirage.core.api.errors import ApiError
+from mirage.core.github.app import MintedToken, app_jwt
 from mirage.core.github.constants import (
     API_BASE,
     API_VERSION,
@@ -44,12 +47,58 @@ class _NoBody(Enum):
     TOKEN = 0
 
 
-def github_headers(token: SecretStr) -> dict[str, str]:
+def github_headers(token: SecretStr | str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {reveal_secret(token)}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": API_VERSION,
     }
+
+
+async def github_token(account: GitHubAccount) -> str:
+    """The token the account's calls ride: its fixed one, or its App
+    installation's current one, minted when there is none or it is about
+    to expire.
+
+    Args:
+        account (GitHubAccount): the credential, API base and pool.
+    """
+    config = account.config
+    if config.token is not None:
+        return config.token.get_secret_value()
+    if account.app_tokens is None:
+        raise ValueError("GitHub auth takes exactly one of token or app")
+    return await account.app_tokens.token(lambda: _mint(account))
+
+
+async def _mint(account: GitHubAccount) -> MintedToken:
+    """Mint an installation token, narrowed to the App config's
+    repositories and permissions when it names them.
+
+    Args:
+        account (GitHubAccount): an account configured with an App.
+
+    Returns:
+        MintedToken: the token and its expiry, in epoch seconds.
+    """
+    app = account.config.app
+    assert app is not None
+    body: dict[str, JsonValue] = {}
+    if app.repositories is not None:
+        body["repositories"] = list(app.repositories)
+    if app.permissions is not None:
+        body["permissions"] = dict(app.permissions)
+    data = await api_request(
+        "POST",
+        (account.config.base_url or API_BASE)
+        + f"/app/installations/{app.installation_id}/access_tokens",
+        error_of=_error_of,
+        headers=github_headers(app_jwt(app)),
+        json_body=body,
+        session=account.pool,
+    )
+    expires = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+    return data["token"], expires.timestamp()
 
 
 def graphql_url(base_url: str | None = None) -> str:
@@ -132,7 +181,7 @@ async def github_get(
         "GET",
         (account.config.base_url or API_BASE) + path.format(**kwargs),
         error_of=_error_of,
-        headers=github_headers(account.config.token),
+        headers=github_headers(await github_token(account)),
         params=params,
         session=account.pool,
     )
@@ -204,7 +253,7 @@ async def github_raw_response(
         if path == GRAPHQL_PATH
         else (base_url or API_BASE) + path
     )
-    merged = github_headers(account.config.token)
+    merged = github_headers(await github_token(account))
     for key, value in (headers or {}).items():
         prior = next(
             (name for name in merged if name.lower() == key.lower()), None
@@ -355,21 +404,26 @@ async def fetch_blob(
     return base64.b64decode(data["content"])
 
 
-def stream_blob(
+async def stream_blob(
     account: GitHubAccount, owner: str, repo: str, sha: str
 ) -> AsyncGenerator[bytes, None]:
     """A blob's bytes as they download, in GitHub's raw media type.
 
     Args:
-        account (GitHubAccount): the token, API base and pool.
+        account (GitHubAccount): the credential, API base and pool.
         owner (str): the repository's owner.
         repo (str): the repository.
         sha (str): the blob's sha.
     """
     config = account.config
-    return api_stream(
-        (config.base_url or API_BASE) + blob_path(owner, repo, sha),
-        error_of=_error_of,
-        headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
-        session=account.pool,
-    )
+    token = await github_token(account)
+    async with aclosing(
+        api_stream(
+            (config.base_url or API_BASE) + blob_path(owner, repo, sha),
+            error_of=_error_of,
+            headers={**github_headers(token), "Accept": RAW_MEDIA_TYPE},
+            session=account.pool,
+        )
+    ) as source:
+        async for chunk in source:
+            yield chunk

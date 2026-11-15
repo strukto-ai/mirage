@@ -23,11 +23,36 @@ vfs = GitHubVFS(
 ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 ```
 
+### GitHub App
+
+Instead of `token`, give `app` and Mirage mints the App's installation tokens
+itself, replacing each before its hour runs out, so a long-lived VFS keeps
+reading. `repositories` and `permissions` narrow every token it mints.
+
+```python
+from mirage.vfs.github import GitHubAppAuth, GitHubConfig
+
+config = GitHubConfig(
+    app=GitHubAppAuth(
+        app_id=123456,
+        private_key=open("app.private-key.pem").read(),
+        installation_id=7890123,
+        repositories=["my-repo"],
+        permissions={"contents": "read"},
+    ))
+```
+
+The private key is the PEM GitHub downloads (PKCS#1) or PKCS#8. An
+installation token cannot ask who it is, so `gh repo clone NAME` without an
+owner clones from the account the App is installed on. `gh` takes the same
+`app` block.
+
 {/* generated: config-table github start */}
 | Field | Description |
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | GitHub personal access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>app</code> | A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set. |
 | <code style={{ whiteSpace: 'nowrap' }}>owner</code> | Repository owner, a user or an organization. Required unless the `GitHubVFS` constructor is given `owner`. |
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |

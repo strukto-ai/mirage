@@ -29,7 +29,7 @@ import { VERSION } from '../../../../version.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { cobraRefusal, setsValueFlag } from '../../cobra.ts'
-import { CONNECT_HINT, GITHUB_HOST } from './constants.ts'
+import { APP_TOKEN_MASK, CONNECT_HINT, GITHUB_HOST } from './constants.ts'
 
 type Request = Readonly<Record<string, unknown>>
 
@@ -253,7 +253,7 @@ export async function runLeaf(
     texts: [...texts],
     repo: config.repo ?? null,
     branch: config.branch ?? null,
-    token_mask: maskedToken(config.token),
+    token_mask: config.token === undefined ? APP_TOKEN_MASK : maskedToken(config.token),
     base_url: config.baseUrl ?? null,
     version: VERSION,
     argv_len: ctx.argv?.length ?? 0,

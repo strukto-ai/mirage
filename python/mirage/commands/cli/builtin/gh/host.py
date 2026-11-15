@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from mirage.accessor.github import GitHubAccount
 from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
+    APP_TOKEN_MASK,
     CONNECT_HINT,
     GITHUB_HOST,
 )
@@ -314,7 +315,11 @@ async def run_leaf(
             "texts": list(texts),
             "repo": config.repo,
             "branch": config.branch,
-            "token_mask": masked_token(config.token.get_secret_value()),
+            "token_mask": (
+                APP_TOKEN_MASK
+                if config.token is None
+                else masked_token(config.token.get_secret_value())
+            ),
             "base_url": config.base_url,
             "version": __version__,
             "argv_len": len(ctx.argv),

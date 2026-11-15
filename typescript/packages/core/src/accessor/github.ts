@@ -19,7 +19,7 @@ import type { TreeEntry } from '../core/github/tree_entry.ts'
 import { Accessor } from './base.ts'
 
 /**
- * One GitHub account: token, API base and the transport its calls ride. A gh
+ * One GitHub account: credential, API base and the transport its calls ride. A gh
  * install's accessor, and the account a github mount holds.
  */
 export class GitHubAccount extends Accessor {
@@ -48,13 +48,19 @@ export class GitHubAccount extends Accessor {
   }
 
   /**
-   * Ride the transport (and its write limiter) of a peer account, a gh
-   * install's or a github mount's, on the same token and API base.
+   * Ride the transport (its write limiter, and an App's tokens) of a peer
+   * account, a gh install's or a github mount's, on the same credential and
+   * API base.
    */
   override join(peers: readonly Accessor[]): void {
     for (const peer of peers) {
       const account = this.peer(peer)
-      if (account !== null && account !== this && account.config.token === this.config.token) {
+      if (
+        account !== null &&
+        account !== this &&
+        account.config.token === this.config.token &&
+        JSON.stringify(account.config.app) === JSON.stringify(this.config.app)
+      ) {
         this.transport = account.transport
         return
       }
