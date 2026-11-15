@@ -3330,11 +3330,12 @@ def cli_install(
     """The spec and config to install one CLI under its head word.
 
     A CLI that talks to an API gets both the tree and the credentials
-    pointing at itself from its mock service. `git` and `search` need
-    neither: git reads a repository out of a mount and search asks a
-    mount's own search, which is what makes them installable from a
-    bare name, so they resolve through the registry the YAML ``clis:``
-    section uses and install with no config at all.
+    pointing at itself from its mock service. `git`, `search` and
+    `office` need neither: git reads a repository out of a mount,
+    search asks a mount's own search and office edits workbooks on
+    one, which is what makes them installable from a bare name, so they
+    resolve through the registry the YAML ``clis:`` section uses and
+    install with no config at all.
 
     Args:
         service (Service | None): the target's mock service, None for a

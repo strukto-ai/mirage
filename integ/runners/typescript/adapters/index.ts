@@ -85,6 +85,7 @@ import {
   NotionVFS,
   NTN,
   OCIVFS,
+  OFFICE,
   OneDriveVFS,
   PathSpec,
   PostgresVFS,
@@ -288,9 +289,9 @@ export function runId(): string {
 /**
  * Install the CLIs a mount-backed target declares.
  *
- * `git` and `search` talk to no API: git reads a repository out of a mount and
- * search asks a mount's own search, which is what makes them installable from a
- * bare name with no config at all, where every other one needs its mock service
+ * `git`, `search` and `office` talk to no API: git reads a repository out of
+ * a mount, search asks a mount's own search and office edits workbooks on
+ * one, which is what makes them installable from a bare name with no config at all, where every other one needs its mock service
  * to hand over both the tree and the credentials pointing at itself.
  */
 function installLocalClis(
@@ -299,6 +300,7 @@ function installLocalClis(
 ): void {
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
   if (target.clis?.includes('search') === true) ws.registerCli('search', SEARCH)
+  if (target.clis?.includes('office') === true) ws.registerCli('office', OFFICE)
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 

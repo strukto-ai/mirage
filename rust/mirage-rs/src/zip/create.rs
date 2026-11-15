@@ -143,7 +143,7 @@ pub(super) struct Config {
 }
 
 /// Little-endian fields, each a value and its width in bytes.
-fn fields(parts: &[(u64, usize)]) -> Vec<u8> {
+pub(crate) fn fields(parts: &[(u64, usize)]) -> Vec<u8> {
     parts
         .iter()
         .flat_map(|&(value, width)| value.to_le_bytes().into_iter().take(width))
@@ -427,7 +427,7 @@ fn encode(name: &[u8], member: &Facts<'_>) -> (Vec<u8>, Vec<u8>) {
 
 /// `central` pointing at its local record, through a ZIP64 field when the
 /// offset is past ZIP32 (after the sizes one already holds).
-fn placed(central: &[u8], offset: u64) -> Vec<u8> {
+pub(crate) fn placed(central: &[u8], offset: u64) -> Vec<u8> {
     let mut record = central.to_vec();
     record[42..46].copy_from_slice(&fields(&[(offset.min(ZIP32), 4)]));
     if offset < ZIP32 {
@@ -456,7 +456,7 @@ fn placed(central: &[u8], offset: u64) -> Vec<u8> {
 
 /// The end of an archive of `count` records whose directory, `size` bytes,
 /// starts at `offset`: in ZIP64 form where it outgrows ZIP32.
-fn ending(count: u64, size: u64, offset: u64, comment: &[u8]) -> Vec<u8> {
+pub(crate) fn ending(count: u64, size: u64, offset: u64, comment: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     if count >= 0xFFFF || offset.max(size) >= ZIP32 {
         out = fields(&[
@@ -698,12 +698,12 @@ async fn add(
 /// What the archive is written from: bytes this run made, and windows of
 /// the spools, a window that carries on where the one before stops joined
 /// to it, so untouched records go as one write.
-enum Piece {
+pub(crate) enum Piece {
     Made(Vec<u8>),
     Kept(u32, u64, u64),
 }
 
-fn keep(pieces: &mut Vec<Piece>, fd: u32, skip: u64, size: u64) {
+pub(crate) fn keep(pieces: &mut Vec<Piece>, fd: u32, skip: u64, size: u64) {
     if let Some(Piece::Kept(last, from, held)) = pieces.last_mut() {
         if *last == fd && *from + *held == skip {
             *held += size;
@@ -950,7 +950,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     let size = directory.len() as u64;
     directory.extend(ending(records.len() as u64, size, offset, &comment));
     pieces.push(Piece::Made(directory));
-    if let Some(reply) = write_out(&host, &config.output, pieces).await {
+    if let Some(reply) = write_out(&host, &config.output, pieces, WriteMode::Create).await {
         return create_error(&reply, true);
     }
     let unremoved = if config.move_files {
@@ -1118,7 +1118,7 @@ async fn delete(
     let size = directory.len() as u64;
     directory.extend(ending(kept.len() as u64, size, offset, &comment));
     pieces.push(Piece::Made(directory));
-    if let Some(reply) = write_out(host, &config.output, pieces).await {
+    if let Some(reply) = write_out(host, &config.output, pieces, WriteMode::Create).await {
         let text = say(CREATE, &[&failure_text(&reply), archive]);
         host.warn(&text);
         return CREATE_EXIT;
@@ -1130,12 +1130,18 @@ async fn delete(
     0
 }
 
-/// The pieces as the file at `path`, whole; the host's failure if any.
-async fn write_out(host: &Host, path: &[u8], pieces: Vec<Piece>) -> Option<Reply> {
+/// The pieces as the file at `path`, whole, its first write opened in
+/// `mode`; the host's failure if any.
+pub(crate) async fn write_out(
+    host: &Host,
+    path: &[u8],
+    pieces: Vec<Piece>,
+    mode: WriteMode,
+) -> Option<Reply> {
     let path = path.to_vec();
     let mut writes = vec![Request::Write {
         path: path.clone(),
-        mode: WriteMode::Create,
+        mode,
         data: Vec::new(),
     }];
     writes.extend(pieces.into_iter().map(|piece| {
