@@ -2,7 +2,7 @@ name: Set up uv
 description: >-
   uv at the version the repo pins, with a download cache that keeps the
   wheels it fetched, so a job installs them from the GitHub cache rather
-  than from PyPI.
+  than from PyPI, and a cache of the mirage._rs build for the same rust/.
 inputs:
   save-cache:
     description: >-
@@ -38,11 +38,37 @@ runs:
     # with cargo, so every job that sets up either language gets Rust too.
     - uses: ./.github/actions/setup-rust
 
-    - name: Choose the Cargo profile for mirage._rs
+    # Compiling mirage._rs was nearly all of each `uv sync`, two to three
+    # minutes in some forty-five jobs a run, and cargo rebuilt it every time:
+    # it judges a crate by its files' mtimes, which a checkout sets to now.
+    # So maturin builds into a directory of its own, cached under the exact
+    # tree git holds for rust/, the profile and the platform. The key has no
+    # fallback: a job that restored another tree's build and never compiled
+    # would save it under this tree's key.
+    - name: Choose the Cargo profile and build directory for mirage._rs
+      id: build
       shell: bash
       env:
         PROFILE: ${{ inputs.cargo-profile }}
-      run: echo "MATURIN_PEP517_ARGS=--profile $PROFILE" >> "$GITHUB_ENV"
+      run: |
+        dir="${RUNNER_TEMP//\\//}/mirage-rs"
+        echo "MATURIN_PEP517_ARGS=--profile $PROFILE --target-dir $dir" >> "$GITHUB_ENV"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "key=mirage-rs-${{ runner.os }}-${{ runner.arch }}-$PROFILE-$(git rev-parse HEAD:rust)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the build of mirage._rs
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.build.outputs.dir }}
+        key: ${{ steps.build.outputs.key }}
+
+    # The restored build was compiled from exactly these sources, so it is
+    # dated after the checkout and cargo finds every crate fresh.
+    - name: Date the restored build after the checkout
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: find "${{ steps.build.outputs.dir }}" -exec touch -t 209901010000 {} +
 
     - uses: astral-sh/setup-uv@v7
       with:
