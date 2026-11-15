@@ -45,14 +45,17 @@ import type { StreamName } from '@struktoai/mirage-core/io/types'
 import { FileType, type FileStat } from '@struktoai/mirage-core/types'
 import { posixNormpath, resolvePath } from '@struktoai/mirage-core/utils/path'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
-import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { decisionLine } from '@struktoai/mirage-core/workspace/tools/io_text'
-import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import type { ExecuteResult, Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { toFileError } from './errors.ts'
 import { PollingWatcher, resolveTargets } from './watch.ts'
+import {
+  ensureParents,
+  type EnvExecution,
+  type EnvFiles,
+  type EnvShell,
+  type EnvWorld,
+} from './world.ts'
 
 /**
  * Options for `MirageExecutionEnv`: `cwd` (default `/`), `sessionId`,
@@ -84,17 +87,6 @@ const KINDS: Partial<Record<FileType, FileKind>> = {
 const MAX_SYMLINKS = 40
 
 const SPILL_BUFFER_BYTES = 1024 * 1024
-
-const ids = new WeakMap<Workspace, string>()
-
-function workspaceId(ws: Workspace): string {
-  let id = ids.get(ws)
-  if (id === undefined) {
-    id = `mirage:${crypto.randomUUID()}`
-    ids.set(ws, id)
-  }
-  return id
-}
 
 function abortedResult(context: Context, path?: string): Result<never, FileError> | undefined {
   return context.abortSignal?.aborted === true
@@ -255,7 +247,7 @@ class MirageDirReader implements DirReader {
   private closed = false
 
   constructor(
-    private readonly files: Files,
+    private readonly files: EnvFiles,
     private readonly names: readonly string[],
     private readonly path: string,
   ) {}
@@ -289,9 +281,12 @@ class MirageDirReader implements DirReader {
 }
 
 /** A path's own row (a link is itself), or null when it is gone. */
-async function lstatInfo(files: Files, path: string): Promise<Result<FileInfo, FileError> | null> {
+async function lstatInfo(
+  files: EnvFiles,
+  path: string,
+): Promise<Result<FileInfo, FileError> | null> {
   try {
-    const info = infoOf(path, await files.stat(path, undefined, { nofollow: true }))
+    const info = infoOf(path, await files.stat(path, { nofollow: true }))
     return info.ok ? info : null
   } catch (error) {
     if (isMissingPath(error)) return null
@@ -317,7 +312,7 @@ class OutputSpill {
   private writing: Promise<void> = Promise.resolve()
 
   constructor(
-    private readonly files: Files,
+    private readonly files: EnvFiles,
     private readonly bounds: ShellSpillOptions,
     private readonly create: () => Promise<Result<string, FileError>>,
   ) {}
@@ -355,7 +350,7 @@ class OutputSpill {
       const created = await this.create()
       if (!created.ok) throw created.error
       this.path = created.value
-      await this.files.write(created.value, pipe.stream(true))
+      await this.files.writeStream(created.value, pipe.stream(true))
     })().catch((error: unknown) => {
       pipe.closeReader()
       this.fail(toFileError(error, this.path))
@@ -388,22 +383,23 @@ class OutputSpill {
 }
 
 /**
- * Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and
- * write the workspace's mounts through its dispatcher, and run their
- * commands in its shell, as one session.
+ * Pi Durable's `ExecutionEnv` over one Mirage world: Pi's tools read and
+ * write its files and run their commands in its shell, as one session.
+ * `MirageExecutionEnv` builds the world from a workspace in this process or
+ * one a Mirage server holds.
  */
-export class MirageExecutionEnv implements ExecutionEnv {
+export class WorldExecutionEnv implements ExecutionEnv {
   readonly id: string
   cwd: string
-  private readonly session: Session
-  private readonly files: Files
+  private readonly shell: EnvShell
+  private readonly files: EnvFiles
   private readonly pollIntervalMs: number
-  private readonly running = new Set<ShellExecution>()
+  private readonly running = new Set<EnvExecution>()
 
-  constructor(ws: Workspace, options: MirageExecutionEnvOptions = {}) {
-    this.session = new Session(ws, options.sessionId ?? null)
-    this.files = this.session.vfs
-    this.id = options.id ?? workspaceId(ws)
+  constructor(world: EnvWorld, options: MirageExecutionEnvOptions = {}) {
+    this.shell = world.shell
+    this.files = world.files
+    this.id = world.id
     this.cwd = options.cwd ?? '/'
     this.pollIntervalMs = options.watch?.pollIntervalMs ?? 2000
   }
@@ -447,7 +443,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
   ): Promise<Result<TextLineReader, FileError>> {
     const resolved = this.resolve(path)
     return this.attempt(resolved, context, async () => {
-      const chunks = await this.files.read(resolved, { stream: true })
+      const chunks = await this.files.readStream(resolved)
       return new MirageTextLineReader(chunks[Symbol.asyncIterator](), resolved)
     })
   }
@@ -487,7 +483,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     const resolved = this.resolve(path)
     const opened = await this.attempt(resolved, context, async () => {
       if (options?.noFollow === true) {
-        const own = await this.files.stat(resolved, undefined, { nofollow: true })
+        const own = await this.files.stat(resolved, { nofollow: true })
         if (own.type === FileType.SYMLINK)
           throw new FileError('invalid', 'Refusing to follow a symbolic link', resolved)
       }
@@ -564,8 +560,8 @@ export class MirageExecutionEnv implements ExecutionEnv {
    * Refuse a path that is a mount root or holds one, as the shell refuses
    * `rm` and `mv` of a mountpoint: busy, before anything under it moves.
    */
-  private refuseMount(path: string): void {
-    if (this.files.isMount(path) || this.files.submounts(path).length > 0)
+  private async refuseMount(path: string): Promise<void> {
+    if (await this.files.holdsMount(path))
       throw new FileError('unknown', `${path}: ${posixPhrase('EBUSY')}`, path)
   }
 
@@ -577,7 +573,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     const source = this.resolve(sourcePath)
     const destination = this.resolve(destinationPath)
     return this.attempt(source, context, async () => {
-      this.refuseMount(source)
+      await this.refuseMount(source)
       await this.files.rename(source, destination)
     })
   }
@@ -585,7 +581,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
   async fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {
     const resolved = this.resolve(path)
     const stat = await this.attempt(resolved, context, () =>
-      this.files.stat(resolved, undefined, { nofollow: true }),
+      this.files.stat(resolved, { nofollow: true }),
     )
     return stat.ok ? infoOf(resolved, stat.value) : stat
   }
@@ -650,7 +646,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
           continue
         }
         const next = resolvePath(part, resolved)
-        const stat = await this.files.stat(next, undefined, { nofollow: true })
+        const stat = await this.files.stat(next, { nofollow: true })
         if (stat.type !== FileType.SYMLINK) {
           resolved = next
           directory = stat.type === FileType.DIRECTORY
@@ -697,7 +693,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
 
   private async removeTree(path: string): Promise<void> {
     for (const child of await this.files.readdir(path)) {
-      const stat = await this.files.stat(child, undefined, { nofollow: true })
+      const stat = await this.files.stat(child, { nofollow: true })
       if (stat.type === FileType.DIRECTORY) await this.removeTree(child)
       else await this.files.unlink(child)
     }
@@ -713,7 +709,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     return this.attempt(resolved, context, async () => {
       let stat: FileStat
       try {
-        stat = await this.files.stat(resolved, undefined, { nofollow: true })
+        stat = await this.files.stat(resolved, { nofollow: true })
       } catch (error) {
         if (options?.force === true && isMissingPath(error)) return
         throw error
@@ -724,7 +720,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
       }
       if (options?.recursive !== true)
         throw new FileError('is_directory', `${resolved}: Is a directory`, resolved)
-      this.refuseMount(resolved)
+      await this.refuseMount(resolved)
       await this.removeTree(resolved)
     })
   }
@@ -734,9 +730,8 @@ export class MirageExecutionEnv implements ExecutionEnv {
     context: Context,
   ): Promise<Result<string, FileError>> {
     return this.attempt('', context, async () => {
-      const made = await this.session.shell(
+      const made = await this.shell.run(
         `mktemp -d --tmpdir ${singleQuote(`${prefix ?? 'tmp-'}XXXXXX`)}`,
-        { record: false },
       )
       if (made.exitCode !== 0) throw new FileError('unknown', made.stderrText.trimEnd())
       return made.stdoutText.trimEnd()
@@ -764,10 +759,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     const [program] = argv
     if (program === undefined)
       return err(new ExecutionError('spawn_error', 'Empty argv: no program to run'))
-    const found = await this.session.shell(`command -v -- ${singleQuote(program)}`, {
-      cwd,
-      record: false,
-    })
+    const found = await this.shell.run(`command -v -- ${singleQuote(program)}`, { cwd })
     if (found.exitCode !== 0)
       return err(new ExecutionError('spawn_error', `${program}: command not found`))
     return ok(argv.map(singleQuote).join(' '))
@@ -790,7 +782,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
     const timer = timeout === undefined ? undefined : AbortSignal.timeout(timeout * 1000)
     const signals = [signal, timer].filter((s): s is AbortSignal => s !== undefined)
     const env = options?.env
-    let execution: ShellExecution
+    let execution: EnvExecution
     try {
       if (!(await this.files.isDir(cwd))) {
         return err(new ExecutionError('spawn_error', `Working directory does not exist: ${cwd}`))
@@ -801,8 +793,7 @@ export class MirageExecutionEnv implements ExecutionEnv {
         if (!argv.ok) return argv
         line = argv.value
       }
-      execution = await this.session.shell(line, {
-        stream: true,
+      execution = await this.shell.stream(line, {
         cwd,
         ...(env === undefined || Object.keys(env).length === 0 ? {} : { env }),
         ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }),

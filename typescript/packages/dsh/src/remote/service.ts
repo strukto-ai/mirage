@@ -17,7 +17,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { MirageWorld } from '../world.ts'
-import { MirageClient, type MirageRemote } from './client.ts'
+import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
 
 const ON_SERVER = 'mirage: the workspace is on a Mirage server; reach it through ctx.mirage.remote'
 

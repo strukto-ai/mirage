@@ -24,7 +24,7 @@ export {
   type RemoteFiles,
   type RemoteSession,
   type RemoteShellCall,
-} from './client.ts'
+} from '@struktoai/mirage-core/remote/client'
 export { MirageFileSystem, type MirageFsConfig } from '../fs.ts'
 export { MirageShellExecutor, type MirageShellConfig } from '../shell.ts'
 export { MirageSpillStore, type MirageSpillConfig } from '../spill-store.ts'

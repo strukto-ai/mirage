@@ -14,7 +14,7 @@
 
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { MirageClient } from './remote/client.ts'
+import type { MirageClient } from '@struktoai/mirage-core/remote/client'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

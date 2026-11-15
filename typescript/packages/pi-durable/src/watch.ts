@@ -17,8 +17,8 @@ import type { FileChange, FileWatcher, WatchTarget } from '@earendil-works/pi-du
 import { isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { FileType, type FileStat } from '@struktoai/mirage-core/types'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { toFileError } from './errors.ts'
+import type { EnvFiles } from './world.ts'
 
 /** A watch target with its path resolved and its exclusions read once. */
 export interface ResolvedTarget {
@@ -55,7 +55,7 @@ async function statOrNull(read: () => Promise<FileStat>): Promise<FileStat | nul
 }
 
 async function visitDir(
-  files: Files,
+  files: EnvFiles,
   dir: string,
   target: ResolvedTarget,
   seen: Map<string, string>,
@@ -71,9 +71,7 @@ async function visitDir(
   for (const path of entries) {
     const name = path.slice(path.lastIndexOf('/') + 1)
     if ((target.hidden && name.startsWith('.')) || target.names.has(name)) continue
-    const stat = await statOrNull(() =>
-      files.stat(path, undefined, { nofollow: true, fresh: true }),
-    )
+    const stat = await statOrNull(() => files.stat(path, { nofollow: true, fresh: true }))
     if (stat === null) continue
     seen.set(path, signature(stat))
     if (deep && stat.type === FileType.DIRECTORY) await visitDir(files, path, target, seen, true)
@@ -86,12 +84,12 @@ async function visitDir(
  * cached rows, as `tail -f` asks.
  */
 async function scan(
-  files: Files,
+  files: EnvFiles,
   targets: readonly ResolvedTarget[],
 ): Promise<Map<string, string>> {
   const seen = new Map<string, string>()
   for (const target of targets) {
-    const stat = await statOrNull(() => files.stat(target.path, undefined, { fresh: true }))
+    const stat = await statOrNull(() => files.stat(target.path, { fresh: true }))
     if (stat === null) continue
     seen.set(target.path, signature(stat))
     if (stat.type === FileType.DIRECTORY)
@@ -131,7 +129,7 @@ export class PollingWatcher implements FileWatcher {
   private running: Promise<void> | undefined
 
   private constructor(
-    private readonly files: Files,
+    private readonly files: EnvFiles,
     private readonly targets: readonly ResolvedTarget[],
     private readonly onChange: (change: FileChange) => void,
     private readonly intervalMs: number,
@@ -140,7 +138,7 @@ export class PollingWatcher implements FileWatcher {
 
   /** Establish coverage: the snapshot later changes are compared with, then the first poll. */
   static async open(
-    files: Files,
+    files: EnvFiles,
     targets: readonly ResolvedTarget[],
     onChange: (change: FileChange) => void,
     intervalMs: number,

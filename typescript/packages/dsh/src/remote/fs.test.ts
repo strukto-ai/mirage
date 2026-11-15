@@ -22,7 +22,7 @@ import { AuthMode, buildApp } from '@struktoai/mirage-server'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { MirageFileSystem } from '../fs.ts'
 import { MirageSpillStore } from '../spill-store.ts'
-import { MirageClient, type MirageRemote } from './client.ts'
+import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
 import { RemoteMirageService } from './service.ts'
 
 const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }

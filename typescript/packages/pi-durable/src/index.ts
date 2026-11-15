@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { MirageExecutionEnv, type MirageExecutionEnvOptions } from './env.ts'
+export { type MirageExecutionEnvOptions } from './env.ts'
+export { MirageExecutionEnv } from './execution_env.ts'
+export type { MirageRemote } from '@struktoai/mirage-core/remote/client'
 export { mirageExtension, type MirageExtensionOptions } from './extension.ts'
 export { MIRAGE_SYSTEM_PROMPT, buildSystemPrompt } from '@struktoai/mirage-core/agents/prompt'
 export type { BuildSystemPromptOptions } from '@struktoai/mirage-core/agents/prompt'
