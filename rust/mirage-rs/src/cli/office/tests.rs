@@ -1347,3 +1347,57 @@ fn a_tiff_frames_at_its_aspect() {
             .contains("width: 15.24cm  height: 7.62cm")
     );
 }
+
+#[test]
+fn slide_text_set_keeps_formatting_written_in_the_default_namespace() {
+    const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+    const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let mut parts: Vec<(&str, Vec<u8>)> = super::blank::deck_parts("2026-01-01T00:00:00Z")
+        .into_iter()
+        .map(|(name, data)| {
+            let text = String::from_utf8(data).unwrap();
+            let text = match name {
+                "ppt/presentation.xml" => text.replace(
+                    "<p:sldIdLst/>",
+                    r#"<p:sldIdLst><p:sldId id="256" r:id="rId9"/></p:sldIdLst>"#,
+                ),
+                "ppt/_rels/presentation.xml.rels" => text.replace(
+                    "</Relationships>",
+                    &format!(r#"<Relationship Id="rId9" Type="{REL}/slide" Target="slides/slide1.xml"/></Relationships>"#),
+                ),
+                "[Content_Types].xml" => text.replace(
+                    "</Types>",
+                    r#"<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>"#,
+                ),
+                _ => text,
+            };
+            (name, text.into_bytes())
+        })
+        .collect();
+    parts.push((
+        "ppt/slides/slide1.xml",
+        format!(
+            r#"<?xml version="1.0"?><p:sld xmlns:p="{P}" xmlns:r="{REL}"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="TextBox 1"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><bodyPr xmlns="{A}"/><lstStyle xmlns="{A}"/><p xmlns="{A}"><pPr algn="ctr"/><r><rPr lang="en-US" sz="2400" b="1"/><t>Hi</t></r></p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#
+        )
+        .into_bytes(),
+    ));
+    parts.push((
+        "ppt/slides/_rels/slide1.xml.rels",
+        format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>"#
+        )
+        .into_bytes(),
+    ));
+    let mut host = crate::host::Host::default();
+    host.files
+        .insert("d.pptx".to_string(), super::book::package(&parts));
+    let set = serde_json::json!({"command": "set", "path": "/slide[1]/shape[1]", "props": ["text=Hello\\nWorld", "italic=true"]});
+    assert_eq!(cmd(&mut host, "d.pptx", set).2, 0);
+    let slide = member(&mut host, "d.pptx", "ppt/slides/slide1.xml").unwrap();
+    assert_eq!(slide.matches("rPr ").count(), 2, "{slide}");
+    assert_eq!(slide.matches(r#"algn="ctr""#).count(), 2, "{slide}");
+    let get = serde_json::json!({"command": "get", "path": "/slide[1]/shape[1]", "depth": 0});
+    let out = cmd(&mut host, "d.pptx", get).0;
+    assert!(out.contains("size=24pt bold=true italic=true"), "{out}");
+}

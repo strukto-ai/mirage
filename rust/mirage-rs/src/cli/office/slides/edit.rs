@@ -232,28 +232,44 @@ fn apply_rpr(t: &mut Tree, body: Id, rpr: &str) -> Result<(), Fail> {
 /// The paragraphs under `body` replaced by `text`'s lines, each keeping the
 /// first paragraph's `a:pPr` and the first run's `a:rPr`.
 fn replace_text(t: &mut Tree, body: Id, text: &str) -> Result<(), Fail> {
-    let first = |name: &str| {
+    let mut kept = Tree::fragment(A, "txBody", "a");
+    let mut keep = |name: &str| {
         at(t, body)
             .descendants_named(A, name)
             .first()
-            .map(|e| tree::outer_xml(*e))
+            .map(|e| kept.adopt(*e))
     };
-    let ppr = first("pPr");
-    let rpr = first("rPr").unwrap_or_else(|| "<a:rPr lang=\"en-US\"/>".to_string());
+    let ppr = keep("pPr");
+    let rpr = keep("rPr");
     let paras: Vec<Id> = at(t, body).children(A, "p").iter().map(|e| e.id).collect();
     for p in paras {
         t.detach(p);
     }
-    let lines = paragraphs_xml(text, &rpr);
-    let lines = match &ppr {
-        Some(ppr) => lines.replace("<a:p>", &format!("<a:p>{ppr}")),
-        None => lines,
-    };
+    let lines = paragraphs_xml(text, "<a:rPr lang=\"en-US\"/>");
     let frag = parse(&format!("<a:txBody xmlns:a=\"{A}\">{lines}</a:txBody>"))?;
     for p in frag.root().children(A, "p") {
         let copy = t.adopt(p);
         t.nodes[copy].decls.clear();
         t.append(body, copy);
+        if let Some(ppr) = ppr.filter(|_| !t.nodes[copy].kids.is_empty()) {
+            let own = t.adopt(at(&kept, ppr));
+            insert_at(t, copy, Some(0), own);
+        }
+        let Some(rpr) = rpr else {
+            continue;
+        };
+        for r in at(t, copy)
+            .children(A, "r")
+            .iter()
+            .map(|e| e.id)
+            .collect::<Vec<Id>>()
+        {
+            if let Some(old) = at(t, r).child(A, "rPr").map(|e| e.id) {
+                t.detach(old);
+            }
+            let own = t.adopt(at(&kept, rpr));
+            insert_at(t, r, Some(0), own);
+        }
     }
     Ok(())
 }
