@@ -36,7 +36,13 @@ runs:
   steps:
     # uv builds mirage-rs and the TypeScript build embeds its wasm, both
     # with cargo, so every job that sets up either language gets Rust too.
+    # maturin builds in a directory of its own (below), so a Python job
+    # takes only the cargo registry from the entry the TypeScript jobs
+    # share and save.
     - uses: ./.github/actions/setup-rust
+      with:
+        shared-key: mirage-rs
+        save: "false"
 
     # Compiling mirage._rs was nearly all of each `uv sync`, two to three
     # minutes in some forty-five jobs a run, and cargo rebuilt it every time:

@@ -1343,13 +1343,24 @@ jobs:
           ref: ${{ env.DRIVE9_REF }}
           path: drive9
 
+      # The server, not Go's module and build caches: those were a 563 MB
+      # entry for one binary that only changes with DRIVE9_REF.
+      - name: Cache drive9-server
+        id: drive9
+        uses: actions/cache@v6
+        with:
+          path: drive9/bin/drive9-server
+          key: drive9-server-${{ runner.os }}-${{ runner.arch }}-${{ env.DRIVE9_REF }}
+
       - name: Set up Go
+        if: steps.drive9.outputs.cache-hit != 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: drive9/go.mod
-          cache-dependency-path: drive9/go.sum
+          cache: false
 
       - name: Build drive9-server
+        if: steps.drive9.outputs.cache-hit != 'true'
         working-directory: drive9
         run: make build-server
 
