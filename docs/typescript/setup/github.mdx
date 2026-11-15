@@ -64,7 +64,8 @@ reading. `repositories` and `permissions` narrow every token it mints.
 const gh = await GitHubVFS.create({
   app: {
     appId: 123456,
-    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+    // A Worker secret, an env var, or any string holding the PEM.
+    privateKey: env.GITHUB_APP_PRIVATE_KEY,
     installationId: 7890123,
     repositories: ['mirage'],
     permissions: { contents: 'read' },
@@ -74,9 +75,12 @@ const gh = await GitHubVFS.create({
 })
 ```
 
-The private key is the PEM GitHub downloads (PKCS#1) or PKCS#8, and works in
-Node, the browser and Cloudflare Workers. Keep it on a server: in the browser
-it is readable by the page. An installation token cannot ask who it is, so
+The private key is a string, so nothing reads a file: pass it from an
+environment variable, a Worker secret, or a secret store through a
+[pointer](/home/service-credentials). It is the PEM GitHub generates (PKCS#1)
+or PKCS#8, with real newlines or `\n` escapes, and works in Node, the browser
+and Cloudflare Workers. Keep it on a server: in the browser it is readable by
+the page. An installation token cannot ask who it is, so
 `gh repo clone NAME` without an owner clones from the account the App is
 installed on. `gh` takes the same `app` block.
 

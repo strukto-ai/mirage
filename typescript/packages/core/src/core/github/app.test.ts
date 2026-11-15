@@ -16,8 +16,9 @@ import { createPrivateKey, createPublicKey, generateKeyPairSync, verify } from '
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccount } from '../../accessor/github.ts'
 import { tokenHeader } from '../../commands/cli/builtin/gh/repo.ts'
-import { redactedConfigDump } from '../../vfs/secrets.ts'
-import { parseConfigWithSchema } from '../../vfs/secrets.ts'
+import { registerSecrets } from '../../secrets/registry.ts'
+import { resolveConfigSecrets } from '../../secrets/sources.ts'
+import { parseConfigWithSchema, redactedConfigDump, z } from '../../vfs/secrets.ts'
 import { AppTokens, pkcs8Key } from './app.ts'
 import { HttpGitHubTransport } from './client.ts'
 import { GhConfig, GitHubConfig } from './config.ts'
@@ -246,6 +247,22 @@ describe('GitHub auth config', () => {
     expect(() =>
       parseConfigWithSchema(GitHubConfig, { ...repo, app: { ...app(), installation: 1 } }),
     ).toThrow()
+  })
+
+  it('reads a pointer inside the app block from its secret source', async () => {
+    // A stand-in vault: core registers no source of its own.
+    registerSecrets('github-app-vault', z.strictObject({}), () =>
+      Promise.resolve({ fields: { PRIVATE_KEY: PEM } }),
+    )
+    const raw = await resolveConfigSecrets({
+      ...repo,
+      app: {
+        app_id: 7,
+        installation_id: 42,
+        private_key: { from: 'github-app-vault', ref: 'github-app', key: 'PRIVATE_KEY' },
+      },
+    })
+    expect(parseConfigWithSchema(GitHubConfig, raw).app?.privateKey).toBe(PEM)
   })
 
   it("redacts the App's private key", () => {

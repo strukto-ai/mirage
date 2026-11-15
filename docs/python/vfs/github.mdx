@@ -30,22 +30,41 @@ itself, replacing each before its hour runs out, so a long-lived VFS keeps
 reading. `repositories` and `permissions` narrow every token it mints.
 
 ```python
+import os
+
 from mirage.vfs.github import GitHubAppAuth, GitHubConfig
 
 config = GitHubConfig(
     app=GitHubAppAuth(
         app_id=123456,
-        private_key=open("app.private-key.pem").read(),
+        private_key=os.environ["GITHUB_APP_PRIVATE_KEY"],
         installation_id=7890123,
         repositories=["my-repo"],
         permissions={"contents": "read"},
     ))
 ```
 
-The private key is the PEM GitHub downloads (PKCS#1) or PKCS#8. An
-installation token cannot ask who it is, so `gh repo clone NAME` without an
-owner clones from the account the App is installed on. `gh` takes the same
-`app` block.
+The private key is a string, so it can come from anywhere: an environment
+variable, a dotenv file, or a secret store through a
+[pointer](/home/service-credentials):
+
+```yaml
+mounts:
+  /github:
+    vfs: github
+    config:
+      owner: my-org
+      repo: my-repo
+      app:
+        app_id: 123456
+        installation_id: 7890123
+        private_key: {from: aws-sm, ref: mirage/github-app, key: PRIVATE_KEY}
+```
+
+It is the PEM GitHub generates (PKCS#1) or PKCS#8, with real newlines or
+`\n` escapes. An installation token cannot ask who it is, so
+`gh repo clone NAME` without an owner clones from the account the App is
+installed on. `gh` takes the same `app` block.
 
 {/* generated: config-table github start */}
 | Field | Description |

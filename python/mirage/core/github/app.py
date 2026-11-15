@@ -48,9 +48,10 @@ def app_jwt(app: GitHubAppAuth, now: float | None = None) -> str:
         "exp": issued + JWT_LIFETIME,
         "iss": str(app.app_id),
     }
-    return jwt.encode(
-        payload, reveal_secret(app.private_key), algorithm="RS256"
-    )
+    # A key kept on one line, as an env var or a dotenv entry holds it,
+    # spells its newlines `\n`; PEM needs real ones.
+    key = reveal_secret(app.private_key).replace("\\n", "\n")
+    return jwt.encode(payload, key, algorithm="RS256")
 
 
 class AppTokens:

@@ -32,6 +32,7 @@ from mirage.core.github.app import REFRESH_MARGIN, AppTokens
 from mirage.core.github.client import github_request, github_token
 from mirage.core.github.config import GhConfig, GitHubAppAuth, GitHubConfig
 from mirage.core.github.repo import login
+from mirage.secrets.sources import resolve_config_secrets
 
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 # GitHub's download format, PKCS#1.
@@ -263,5 +264,35 @@ def test_config_refuses_an_unknown_key_in_an_app_block():
 def test_config_keeps_the_private_key_secret():
     config = GitHubConfig(owner="o", repo="r", app=_app())
     assert PEM not in repr(config)
+    assert config.app is not None
+    assert config.app.private_key.get_secret_value() == PEM
+
+
+@pytest.mark.asyncio
+async def test_mints_with_a_key_whose_newlines_are_escaped(base_url):
+    one_line = PEM.replace("\n", "\\n")
+    config = GhConfig(
+        app=GitHubAppAuth(app_id=7, private_key=one_line, installation_id=42),
+        base_url=base_url,
+    )
+    async with GitHubAccount(config) as account:
+        assert await github_token(account) == "ghs_1"
+    token = _mints()[0]["authorization"].removeprefix("Bearer ")
+    assert jwt.decode(token, PUBLIC, algorithms=["RS256"])["iss"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_a_pointer_inside_the_app_block_reads_its_secret(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", PEM)
+    raw = {
+        "owner": "o",
+        "repo": "r",
+        "app": {
+            "app_id": 7,
+            "installation_id": 42,
+            "private_key": {"from": "env", "key": "GITHUB_APP_PRIVATE_KEY"},
+        },
+    }
+    config = GitHubConfig(**await resolve_config_secrets(raw))
     assert config.app is not None
     assert config.app.private_key.get_secret_value() == PEM
