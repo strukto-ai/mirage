@@ -24,12 +24,25 @@ inputs:
       sync installs, so an integ fixture's pyproject does not move the key;
       a job that installs from requirements files adds them.
     default: python/uv.lock
+  cargo-profile:
+    description: >-
+      The Cargo profile maturin builds mirage._rs with when uv builds the
+      project. `ci` (rust/Cargo.toml) skips release's fat LTO, which cost
+      every job that syncs the venv about three minutes; a job that checks
+      the install users get passes `release`.
+    default: ci
 runs:
   using: composite
   steps:
     # uv builds mirage-rs and the TypeScript build embeds its wasm, both
     # with cargo, so every job that sets up either language gets Rust too.
     - uses: ./.github/actions/setup-rust
+
+    - name: Choose the Cargo profile for mirage._rs
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.cargo-profile }}
+      run: echo "MATURIN_PEP517_ARGS=--profile $PROFILE" >> "$GITHUB_ENV"
 
     - uses: astral-sh/setup-uv@v7
       with:
