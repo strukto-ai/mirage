@@ -152,13 +152,15 @@ gh pr view 17 --json files,commits,reviews --jq '.files[].path'
 gh pr checks 17 --json name,bucket,state
 gh run list --workflow ci.yml --json databaseId,status,conclusion
 gh run view 123456 --log-failed
+gh run view 123456 --json jobs --jq '.jobs[] | select(.conclusion=="failure")'
+gh run view --job 654321 --log-failed
 gh workflow view ci.yml --yaml --ref release
 ```
 
 Use `-R/--repo [HOST/]OWNER/REPO` where supported to override the configured
 repository. Typed `--jq` requires `--json`. List commands paginate up to
-`-L/--limit`. Typed `--json` fields follow upstream's for each command, except
-`jobs` on `run view`; use `gh api` for additional data.
+`-L/--limit`. Typed `--json` fields follow upstream's for each command; use
+`gh api` for additional data.
 
 ```bash
 gh issue create --title 'Broken build' --body-file /work/issue.md --label bug
@@ -174,7 +176,8 @@ gh run rerun 123456 --failed
 Commands are noninteractive: supply titles, bodies, branches and confirmation
 flags explicitly. Body/notes files and `--input` files use the workspace VFS;
 `-` selects stdin. Workflow YAML is read at the selected ref. Run logs are
-available only after completion; `--log-failed` selects failed steps.
+available only after completion; `--log-failed` selects failed steps and
+`-j/--job` one job, whose run it names.
 
 ## Repositories
 

@@ -7,6 +7,7 @@ use super::accessor::{
     Flags, Out, camel, go_duration, instant, json_fields, limit_or_refuse, read_cli_file, repo_for,
     time_field, tsv, typed_out,
 };
+use super::shape::{Shape, exported};
 use crate::core::github::actions::{
     dispatch_workflow, get_job, get_run, job_log, list_jobs, list_runs, list_workflows, rerun,
     rerun_job, run_log_archive, the_workflow, workflow_content,
@@ -27,6 +28,26 @@ const RUN_FIELDS: [&str; 16] = [
     "event",
     "headBranch",
     "headSha",
+    "name",
+    "number",
+    "startedAt",
+    "status",
+    "updatedAt",
+    "url",
+    "workflowDatabaseId",
+    "workflowName",
+];
+/// `gh run view`'s fields: a run's, and its jobs.
+const SINGLE_RUN_FIELDS: [&str; 17] = [
+    "attempt",
+    "conclusion",
+    "createdAt",
+    "databaseId",
+    "displayTitle",
+    "event",
+    "headBranch",
+    "headSha",
+    "jobs",
     "name",
     "number",
     "startedAt",
@@ -142,32 +163,135 @@ pub(crate) async fn run_list_cmd(account: &Account, flags: &Flags) -> Result<Out
     typed_out(account, &data, flags, human, &RUN_FIELDS).await
 }
 
+/// A job under `gh run view --json jobs`, as gh's Run.ExportData builds
+/// it: a map, so its keys print sorted, and a time it lacks prints as Go's
+/// zero time.
+fn exported_job(job: &Json) -> Json {
+    let step = Shape::Struct(
+        vec![
+            ("completedAt", Shape::Time, Some("completed_at")),
+            ("conclusion", Shape::Str, None),
+            ("name", Shape::Str, None),
+            ("number", Shape::Int, None),
+            ("startedAt", Shape::Time, Some("started_at")),
+            ("status", Shape::Str, None),
+        ],
+        false,
+    );
+    let mut out = Obj::new();
+    out.set(
+        "completedAt",
+        exported(job.get("completed_at"), &Shape::Time),
+    );
+    out.set("conclusion", job.get("conclusion").text());
+    out.set("databaseId", job.get("id").as_int().unwrap_or(0));
+    out.set("name", job.get("name").text());
+    out.set("startedAt", exported(job.get("started_at"), &Shape::Time));
+    out.set("status", job.get("status").text());
+    out.set(
+        "steps",
+        Json::Arr(
+            job.get("steps")
+                .items()
+                .iter()
+                .map(|one| exported(one, &step))
+                .collect(),
+        ),
+    );
+    out.set("url", job.get("html_url").text());
+    Json::Obj(out)
+}
+
+/// gh's Symbol for a job or a step, uncolored.
+fn symbol(item: &Json) -> &'static str {
+    if item.get("status").as_str() != Some("completed") {
+        return "*";
+    }
+    match item.get("conclusion").as_str() {
+        Some("success") => "✓",
+        Some("skipped") | Some("neutral") => "-",
+        _ => "X",
+    }
+}
+
+/// One job as gh's RenderJobs prints it with its steps, then the hint gh
+/// gives after a single job.
+fn job_summary(job: &Json) -> String {
+    let at = |key: &str| instant(&time_field(job.get(key))).unwrap_or(0);
+    let elapsed = at("completed_at") - at("started_at");
+    let took = if elapsed < 0 {
+        String::new()
+    } else {
+        format!(" in {}", go_duration(elapsed))
+    };
+    let id = job.get("id").show();
+    let mut text = format!(
+        "{} {}{took} (ID {id})\n",
+        symbol(job),
+        job.get("name").show()
+    );
+    for step in job.get("steps").items() {
+        text.push_str(&format!("  {} {}\n", symbol(step), step.get("name").show()));
+    }
+    if FAILURE_STATES.contains(&job.get("conclusion").show().as_str()) {
+        text.push_str(&format!(
+            "\nTo see the logs for the failed steps, try: gh run view --log-failed --job={id}\n"
+        ));
+    } else {
+        text.push_str(&format!(
+            "\nTo see the full job log, try: gh run view --log --job={id}\n"
+        ));
+    }
+    text
+}
+
 pub(crate) async fn run_view_cmd(
     account: &Account,
     flags: &Flags,
     texts: &[String],
 ) -> Result<Out> {
-    json_fields(flags, &RUN_FIELDS)?;
-    let Some(id) = texts.first() else {
+    let fields = json_fields(flags, &SINGLE_RUN_FIELDS)?;
+    let job = flags.as_str("job").filter(|job| !job.is_empty());
+    if texts.is_empty() && job.is_none() {
         return usage("run or job ID required when not running interactively");
-    };
+    }
     let logs = flags.gh_bool("log");
     let failed_only = flags.gh_bool("log_failed");
     if logs && failed_only {
         return usage("specify only one of --log or --log-failed");
     }
     let repo = repo_for(account, flags)?;
-    let found = get_run(account, &repo, id)
+    // A job names its own run, and gh then sets aside any run ID given.
+    let selected =
+        match job {
+            Some(job) => Some(get_job(account, &repo, job).await.map_err(|failure| {
+                Failure::Value(format!("failed to get job: {}", failure.text()))
+            })?),
+            None => None,
+        };
+    let id = match &selected {
+        Some(job) => job.get("run_id").show(),
+        None => texts[0].clone(),
+    };
+    let found = get_run(account, &repo, &id)
         .await
         .map_err(|failure| Failure::Value(format!("failed to get run: {}", failure.text())))?;
-    let row = run(&found);
-    if (logs || failed_only) && flags.as_str("json").is_none() {
+    let mut row = run(&found);
+    if fields
+        .as_ref()
+        .is_some_and(|fields| fields.iter().any(|field| field == "jobs"))
+    {
+        let run_id = row.get("databaseId").as_int().unwrap_or(0);
+        let jobs = list_jobs(account, &repo, run_id).await?;
+        row.set("jobs", Json::Arr(jobs.iter().map(exported_job).collect()));
+    }
+    if (logs || failed_only) && fields.is_none() {
         return Ok(Out {
-            stdout: run_log(account, &repo, &row, failed_only).await?,
+            stdout: run_log(account, &repo, &row, selected.as_ref(), failed_only).await?,
             ..Out::default()
         });
     }
-    let human = format!(
+    let mut human = format!(
         "title:\t{}\nworkflow:\t{}\nstatus:\t{}\nconclusion:\t{}\nbranch:\t{}\nevent:\t{}\n",
         row.get("displayTitle").show(),
         row.get("workflowName").show(),
@@ -176,8 +300,12 @@ pub(crate) async fn run_view_cmd(
         row.get("headBranch").show(),
         row.get("event").show()
     );
+    if let Some(job) = &selected {
+        human.push('\n');
+        human.push_str(&job_summary(job));
+    }
     let conclusion = row.get("conclusion").clone();
-    let mut out = typed_out(account, &Json::Obj(row), flags, human, &RUN_FIELDS).await?;
+    let mut out = typed_out(account, &Json::Obj(row), flags, human, &SINGLE_RUN_FIELDS).await?;
     if flags.gh_bool("exit_status")
         && !conclusion.is_null()
         && !matches!(conclusion.as_str(), Some("") | Some("success"))
@@ -441,15 +569,28 @@ async fn api_job_log(account: &Account, repo: &RepoRef, job: i128) -> Result<Vec
 }
 
 /// `gh run view --log` and `--log-failed`: printed a line at a time
-/// behind the job and step it came from.
+/// behind the job and step it came from, the run's jobs or the one
+/// `--job` selected.
 async fn run_log(
     account: &Account,
     repo: &RepoRef,
     row: &Obj,
+    selected: Option<&Json>,
     failed_only: bool,
 ) -> Result<Vec<u8>> {
     let id = row.get("databaseId").as_int().unwrap_or(0);
-    let jobs = list_jobs(account, repo, id).await?;
+    let jobs = match selected {
+        Some(job) => {
+            if job.get("status").as_str() != Some("completed") {
+                return value(format!(
+                    "job {} is still in progress; logs will be available when it is complete",
+                    job.get("id").show()
+                ));
+            }
+            vec![job.clone()]
+        }
+        None => list_jobs(account, repo, id).await?,
+    };
     if row.get("status").as_str() != Some("completed") {
         return value(format!(
             "run {id} is still in progress; logs will be available when it is complete"
@@ -973,5 +1114,76 @@ mod tests {
     #[test]
     fn bytes_that_are_no_zip_are_refused() {
         assert!(Zip::open(b"not a zip").is_none());
+    }
+
+    const UPLOAD: &[u8] = br#"{"id":399,"run_id":200,"name":"upload","status":"completed",
+        "conclusion":"failure","started_at":"2025-12-31T00:00:41Z",
+        "completed_at":"2025-12-31T00:01:30Z",
+        "html_url":"https://github.com/o/r/actions/runs/200/job/399","steps":[
+        {"number":1,"name":"Set up job","status":"completed","conclusion":"success",
+         "started_at":"2025-12-31T00:00:41Z","completed_at":"2025-12-31T00:00:42Z"},
+        {"number":2,"name":"Upload","status":"completed","conclusion":"failure",
+         "started_at":"2025-12-31T00:00:42Z","completed_at":"2025-12-31T00:01:29Z"},
+        {"number":3,"name":"Notify","status":"completed","conclusion":"skipped",
+         "started_at":null,"completed_at":null}]}"#;
+
+    #[test]
+    fn a_job_exports_sorted_with_go_zero_times_for_what_it_lacks() {
+        let job = Json::parse(UPLOAD).unwrap();
+        assert_eq!(
+            exported_job(&job).dump(),
+            concat!(
+                r#"{"completedAt":"2025-12-31T00:01:30Z","conclusion":"failure","#,
+                r#""databaseId":399,"name":"upload","startedAt":"2025-12-31T00:00:41Z","#,
+                r#""status":"completed","steps":["#,
+                r#"{"completedAt":"2025-12-31T00:00:42Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2025-12-31T00:00:41Z","status":"completed"},"#,
+                r#"{"completedAt":"2025-12-31T00:01:29Z","conclusion":"failure","name":"Upload","number":2,"startedAt":"2025-12-31T00:00:42Z","status":"completed"},"#,
+                r#"{"completedAt":"0001-01-01T00:00:00Z","conclusion":"skipped","name":"Notify","number":3,"startedAt":"0001-01-01T00:00:00Z","status":"completed"}],"#,
+                r#""url":"https://github.com/o/r/actions/runs/200/job/399"}"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_queued_job_exports_null_conclusion_as_empty_and_no_steps_as_empty() {
+        let job = Json::parse(br#"{"id":7,"status":"queued","conclusion":null}"#).unwrap();
+        let out = exported_job(&job);
+        assert_eq!(out.get("conclusion").as_str(), Some(""));
+        assert_eq!(
+            out.get("completedAt").as_str(),
+            Some("0001-01-01T00:00:00Z")
+        );
+        assert_eq!(out.get("steps").dump(), "[]");
+    }
+
+    #[test]
+    fn a_failed_job_summary_lists_its_steps_and_points_at_its_failed_log() {
+        let job = Json::parse(UPLOAD).unwrap();
+        assert_eq!(
+            job_summary(&job),
+            "X upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload\n  - Notify\n\n\
+             To see the logs for the failed steps, try: gh run view --log-failed --job=399\n"
+        );
+    }
+
+    #[test]
+    fn a_running_job_summary_has_no_elapsed_time_and_points_at_its_full_log() {
+        let job = Json::parse(
+            br#"{"id":8,"name":"lint","status":"in_progress","conclusion":null,
+                "started_at":"2026-01-01T00:00:00Z","completed_at":null,"steps":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            job_summary(&job),
+            "* lint (ID 8)\n\nTo see the full job log, try: gh run view --log --job=8\n"
+        );
+    }
+
+    #[test]
+    fn one_job_falls_back_to_its_own_log_when_the_archive_lacks_it() {
+        let job = Json::parse(UPLOAD).unwrap();
+        let segments = log_segments(std::slice::from_ref(&job), &[], false).unwrap();
+        assert_eq!(segments.len(), 1);
+        assert!(matches!(segments[0].source, Source::Job(399)));
     }
 }

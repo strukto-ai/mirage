@@ -313,7 +313,7 @@ async function dispatchWorkflow(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     return fail(422, "Workflow does not have 'workflow_dispatch' trigger")
   }
   const rows = await runRows(ctx, repo)
-  const id = 201 + rows.length
+  const id = Math.max(200, ...rows.map((r) => r.id)) + 1
   await ctx.db.githubRun.create({
     data: {
       tenant: ctx.tenant,
@@ -322,7 +322,7 @@ async function dispatchWorkflow(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       name: workflow.name,
       displayTitle: `${workflow.name} dispatch`,
       workflowId: workflow.id,
-      runNumber: rows.length + 1,
+      runNumber: rows.filter((r) => r.workflowId === workflow.id).length + 1,
       runAttempt: 1,
       event: 'workflow_dispatch',
       headBranch: branch,

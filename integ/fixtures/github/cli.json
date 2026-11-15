@@ -24,6 +24,99 @@
   "runs": [
     {
       "repo": "integ/repo-cli",
+      "id": 200,
+      "name": "Archive",
+      "displayTitle": "Nightly archive",
+      "workflowId": 102,
+      "runNumber": 1,
+      "runAttempt": 1,
+      "event": "schedule",
+      "headBranch": "main",
+      "headSha": "c13318709d4eb753fe20ea762abe77e19a8e5e73",
+      "status": "completed",
+      "conclusion": "failure",
+      "createdAt": "2025-12-31T00:00:00Z",
+      "updatedAt": "2025-12-31T00:01:30Z",
+      "runStartedAt": "2025-12-31T00:00:02Z",
+      "jobsJson": [
+        {
+          "id": 398,
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2025-12-31T00:00:02Z",
+          "completed_at": "2025-12-31T00:00:40Z",
+          "steps": [
+            {
+              "name": "Set up job",
+              "number": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:02Z",
+              "completed_at": "2025-12-31T00:00:03Z",
+              "log": "2025-12-31T00:00:02.0000000Z Current runner version: '2.330.0'\n"
+            },
+            {
+              "name": "Run make archive",
+              "number": 2,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:03Z",
+              "completed_at": "2025-12-31T00:00:40Z",
+              "log": "2025-12-31T00:00:03.0000000Z ##[group]Run make archive\n2025-12-31T00:00:39.0000000Z archive.tar.gz written\n"
+            }
+          ]
+        },
+        {
+          "id": 399,
+          "name": "upload",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2025-12-31T00:00:41Z",
+          "completed_at": "2025-12-31T00:01:30Z",
+          "steps": [
+            {
+              "name": "Set up job",
+              "number": 1,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:00:41Z",
+              "completed_at": "2025-12-31T00:00:42Z",
+              "log": "2025-12-31T00:00:41.0000000Z Current runner version: '2.330.0'\n"
+            },
+            {
+              "name": "Upload archive",
+              "number": 2,
+              "status": "completed",
+              "conclusion": "failure",
+              "started_at": "2025-12-31T00:00:42Z",
+              "completed_at": "2025-12-31T00:01:29Z",
+              "log": "2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\n2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\n"
+            },
+            {
+              "name": "Notify",
+              "number": 3,
+              "status": "completed",
+              "conclusion": "skipped",
+              "started_at": null,
+              "completed_at": null,
+              "log": ""
+            },
+            {
+              "name": "Complete job",
+              "number": 4,
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2025-12-31T00:01:29Z",
+              "completed_at": "2025-12-31T00:01:30Z",
+              "log": "2025-12-31T00:01:30.0000000Z Cleaning up orphan processes\n"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repo": "integ/repo-cli",
       "id": 201,
       "name": "CI",
       "displayTitle": "Initial checks",

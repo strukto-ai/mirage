@@ -1830,7 +1830,59 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n      --exit-status       Exit with non-zero status if run failed\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
+        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n      --exit-status       Exit with non-zero status if run failed\n  -j, --job string        View a specific job ID from a run\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
+      }
+    },
+    {
+      "id": "gh_run_view_json_jobs_shapes_each_job_as_gh_does",
+      "seq": 569064,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 200 --json jobs --jq '.jobs[] | select(.conclusion==\"failure\")'; gh run view 200 --json databaseId,jobs --jq '[.databaseId, (.jobs | map(.databaseId)), .jobs[1].steps[2]]'; gh run list --json jobs 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"completedAt\":\"2025-12-31T00:01:30Z\",\"conclusion\":\"failure\",\"databaseId\":399,\"name\":\"upload\",\"startedAt\":\"2025-12-31T00:00:41Z\",\"status\":\"completed\",\"steps\":[{\"completedAt\":\"2025-12-31T00:00:42Z\",\"conclusion\":\"success\",\"name\":\"Set up job\",\"number\":1,\"startedAt\":\"2025-12-31T00:00:41Z\",\"status\":\"completed\"},{\"completedAt\":\"2025-12-31T00:01:29Z\",\"conclusion\":\"failure\",\"name\":\"Upload archive\",\"number\":2,\"startedAt\":\"2025-12-31T00:00:42Z\",\"status\":\"completed\"},{\"completedAt\":\"0001-01-01T00:00:00Z\",\"conclusion\":\"skipped\",\"name\":\"Notify\",\"number\":3,\"startedAt\":\"0001-01-01T00:00:00Z\",\"status\":\"completed\"},{\"completedAt\":\"2025-12-31T00:01:30Z\",\"conclusion\":\"success\",\"name\":\"Complete job\",\"number\":4,\"startedAt\":\"2025-12-31T00:01:29Z\",\"status\":\"completed\"}],\"url\":\"https://github.com/integ/repo-cli/actions/runs/200/job/399\"}\n[200,[398,399],{\"completedAt\":\"0001-01-01T00:00:00Z\",\"conclusion\":\"skipped\",\"name\":\"Notify\",\"number\":3,\"startedAt\":\"0001-01-01T00:00:00Z\",\"status\":\"completed\"}]\nUnknown JSON field: \"jobs\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_log_prints_only_that_job",
+      "seq": 569065,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view --job 399 --log-failed; gh run view 201 -j 398 --log; gh run view 200 --log-failed",
+      "expect": {
+        "exit": 0,
+        "stdout": "upload\tUpload archive\t2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\nupload\tUpload archive\t2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\nbuild\tSet up job\t2025-12-31T00:00:02.0000000Z Current runner version: '2.330.0'\nbuild\tRun make archive\t2025-12-31T00:00:03.0000000Z ##[group]Run make archive\nbuild\tRun make archive\t2025-12-31T00:00:39.0000000Z archive.tar.gz written\nupload\tUpload archive\t2025-12-31T00:00:42.0000000Z ##[group]Run ./upload.sh archive.tar.gz\nupload\tUpload archive\t2025-12-31T00:01:29.0000000Z ##[error]Process completed with exit code 1.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_prints_its_steps_and_where_its_log_is",
+      "seq": 569066,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view --job 399; gh run view -j 398",
+      "expect": {
+        "exit": 0,
+        "stdout": "title:\tNightly archive\nworkflow:\tArchive\nstatus:\tcompleted\nconclusion:\tfailure\nbranch:\tmain\nevent:\tschedule\n\nX upload in 49s (ID 399)\n  ✓ Set up job\n  X Upload archive\n  - Notify\n  ✓ Complete job\n\nTo see the logs for the failed steps, try: gh run view --log-failed --job=399\ntitle:\tNightly archive\nworkflow:\tArchive\nstatus:\tcompleted\nconclusion:\tfailure\nbranch:\tmain\nevent:\tschedule\n\n✓ build in 38s (ID 398)\n  ✓ Set up job\n  ✓ Run make archive\n\nTo see the full job log, try: gh run view --log --job=398\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_run_view_job_must_exist",
+      "seq": 569067,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh run view 2>&1 | head -1; gh run view --job 999 2>&1 | sed 's# (http.*##'; gh run view --job 999 --json jobs 2>&1 | sed 's# (http.*##'",
+      "expect": {
+        "exit": 0,
+        "stdout": "run or job ID required when not running interactively\nfailed to get job: HTTP 404: Not Found\nfailed to get job: HTTP 404: Not Found\n",
+        "stderr": ""
       }
     },
     {

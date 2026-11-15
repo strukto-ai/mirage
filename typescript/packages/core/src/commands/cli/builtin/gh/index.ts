@@ -946,6 +946,7 @@ function run(): CommandSpec {
           JSON_FIELDS,
           JQ,
           flag({ long: '--exit-status', description: 'Exit with non-zero status if run failed' }),
+          new Argument(['-j', '--job'], { help: 'View a specific job ID from a run' }),
           flag({ long: '--log', description: 'View full log for either a run or specific job' }),
           flag({
             long: '--log-failed',
