@@ -51,3 +51,11 @@ strip = true
 [profile.wasm-size]
 inherits = "release"
 opt-level = "z"
+
+# What CI's test jobs build mirage._rs with (.github/actions/setup-uv). Each
+# job that syncs the venv compiles it, and release's fat LTO over one codegen
+# unit was most of that sync. Same opt-level; the wheels keep release.
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16

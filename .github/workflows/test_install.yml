@@ -106,6 +106,7 @@ jobs:
         uses: ./.github/actions/setup-uv
         with:
           cache-suffix: install-${{ steps.week.outputs.week }}
+          cargo-profile: release
 
       - name: Base install (no extras)
         working-directory: python
