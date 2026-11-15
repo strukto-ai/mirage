@@ -253,7 +253,10 @@ async def github_raw_response(
         if path == GRAPHQL_PATH
         else (base_url or API_BASE) + path
     )
-    merged = github_headers(await github_token(account))
+    # A caller's own Authorization wins, as gh adds its token only to a
+    # request without one, so no token is minted for it.
+    own = any(key.lower() == "authorization" for key in headers or {})
+    merged = github_headers("" if own else await github_token(account))
     for key, value in (headers or {}).items():
         prior = next(
             (name for name in merged if name.lower() == key.lower()), None

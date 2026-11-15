@@ -153,6 +153,17 @@ async def test_mints_the_next_token_five_minutes_before_expiry(base_url):
 
 
 @pytest.mark.asyncio
+async def test_a_callers_own_authorization_wins_and_mints_nothing(base_url):
+    own = {"Authorization": "Bearer other"}
+    async with _account(base_url) as account:
+        await github_request(
+            account, "POST", "/repos/o/r/issues", {"title": "t"}, headers=own
+        )
+    assert _mints() == []
+    assert [s["authorization"] for s in _calls()] == ["Bearer other"]
+
+
+@pytest.mark.asyncio
 async def test_mints_once_for_concurrent_first_calls(base_url):
     async with _account(base_url) as account:
         await asyncio.gather(

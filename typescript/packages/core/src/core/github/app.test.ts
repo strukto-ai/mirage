@@ -137,6 +137,20 @@ describe('GitHub App auth', () => {
     expect(calls().map((seen) => seen.authorization)).toEqual(['token ghs_1', 'token ghs_2'])
   })
 
+  it("leaves a caller's own Authorization alone, and mints nothing for it", async () => {
+    const own = { Authorization: 'Bearer other' }
+    await transport().request('POST', '/repos/o/r/issues', { title: 't' }, undefined, own)
+    const fixed = new HttpGitHubTransport({ token: 'ghp_x', baseUrl: BASE })
+    await fixed.request('GET', '/repos/o/r', undefined, undefined, own)
+    await fixed.get('/repos/o/r')
+    expect(mints()).toHaveLength(0)
+    expect(calls().map((seen) => seen.authorization)).toEqual([
+      'Bearer other',
+      'Bearer other',
+      'token ghp_x',
+    ])
+  })
+
   it('mints once for concurrent first calls', async () => {
     const github = transport()
     await Promise.all([github.get('/a'), github.get('/b'), github.token()])

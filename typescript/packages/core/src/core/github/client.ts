@@ -137,7 +137,6 @@ export class HttpGitHubTransport implements GitHubTransport {
       this.mint = appMinter(opts.app, minter.request)
     }
     this.kit = new Kit({
-      ...(opts.token === undefined ? {} : { auth: opts.token }),
       baseUrl: this.baseUrl,
       // The statuses plugin-retry leaves alone: its own list, plus 500.
       // Octokit reports a request that got no response at all as a 500, so
@@ -157,11 +156,16 @@ export class HttpGitHubTransport implements GitHubTransport {
           count < GITHUB_RETRIES,
       },
     })
-    if (this.appTokens !== undefined) {
-      this.kit.hook.before('request', async (options) => {
+    // The credential rides every request that names none of its own. gh adds
+    // its token only to a request without an Authorization, so `gh api -H
+    // 'Authorization: ...'` runs as the account the line chose; octokit's
+    // own token hook overwrote it. An App's token is minted here, on the
+    // first request that needs one.
+    this.kit.hook.before('request', async (options) => {
+      if (options.headers.authorization === undefined) {
         options.headers.authorization = `token ${await this.token()}`
-      })
-    }
+      }
+    })
   }
 
   async token(): Promise<string> {
