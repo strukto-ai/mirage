@@ -162,9 +162,7 @@ export class HttpGitHubTransport implements GitHubTransport {
     // own token hook overwrote it. An App's token is minted here, on the
     // first request that needs one.
     this.kit.hook.before('request', async (options) => {
-      if (options.headers.authorization === undefined) {
-        options.headers.authorization = `token ${await this.token()}`
-      }
+      options.headers.authorization ??= `token ${await this.token()}`
     })
   }
 
