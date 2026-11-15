@@ -224,29 +224,60 @@ export function remoteWorld(remote: MirageRemote, sessionId?: string, id?: strin
         client.write(path, encode(data), sessionId),
       ),
       writeStream: call(async (path: string, chunks: AsyncIterable<Uint8Array>) => {
-        // The first batch replaces the file and the rest append, so a long
-        // stream never sits in memory whole.
-        const pending = { batch: [] as Uint8Array[], held: 0, started: false }
-        const flush = async (): Promise<void> => {
-          const joined = new Uint8Array(pending.held)
+        // The chunks are read as they come and never wait on the server: a
+        // write the server holds (a workspace capture waits out running
+        // lines) must not stall the line whose output this is, or neither
+        // ends. Requests go out one at a time and carry at most a batch, the
+        // first replacing the file and the rest appending; only a held
+        // request lets what waits behind it grow past one batch.
+        const pending = { chunks: [] as Uint8Array[], held: 0, started: false }
+        let inFlight: Promise<void> | undefined
+        let failure: { error: unknown } | undefined
+        const take = (): Uint8Array => {
+          const size = Math.min(pending.held, CHUNK_BYTES)
+          const out = new Uint8Array(size)
           let at = 0
-          for (const chunk of pending.batch) {
-            joined.set(chunk, at)
-            at += chunk.length
+          while (at < size) {
+            const [head] = pending.chunks
+            if (head === undefined) break
+            const part = head.subarray(0, size - at)
+            out.set(part, at)
+            at += part.length
+            if (part.length === head.length) pending.chunks.shift()
+            else pending.chunks[0] = head.subarray(part.length)
           }
+          pending.held -= size
+          return out
+        }
+        const send = (): void => {
+          const batch = take()
           const replace = !pending.started
-          pending.batch = []
-          pending.held = 0
           pending.started = true
-          if (replace) await client.write(path, joined, sessionId)
-          else await client.append(path, joined, sessionId)
+          inFlight = (
+            replace ? client.write(path, batch, sessionId) : client.append(path, batch, sessionId)
+          ).then(
+            () => {
+              inFlight = undefined
+              if (pending.held >= CHUNK_BYTES && failure === undefined) send()
+            },
+            (error: unknown) => {
+              inFlight = undefined
+              failure = { error }
+            },
+          )
         }
         for await (const chunk of chunks) {
-          pending.batch.push(chunk)
+          if (failure !== undefined) throw failure.error
+          pending.chunks.push(chunk)
           pending.held += chunk.length
-          if (pending.held >= CHUNK_BYTES) await flush()
+          if (pending.held >= CHUNK_BYTES && inFlight === undefined) send()
         }
-        if (!pending.started || pending.held > 0) await flush()
+        for (;;) {
+          while (inFlight !== undefined) await inFlight
+          if (failure !== undefined) throw failure.error
+          if (pending.started && pending.held === 0) return
+          send()
+        }
       }),
       append: call((path: string, data: Uint8Array) => client.append(path, data, sessionId)),
       stat: call(async (path: string, options: { nofollow?: boolean; fresh?: boolean } = {}) => {

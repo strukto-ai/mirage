@@ -16,6 +16,7 @@ import { defineExtension, section, type Extension } from '@earendil-works/pi-dur
 import { buildSystemPrompt } from '@struktoai/mirage-core/agents/prompt'
 import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { isRemote } from './world.ts'
 
 /** Options for `mirageExtension`: `sessionId`, the session whose mounts the prompt describes. */
 export interface MirageExtensionOptions {
@@ -46,10 +47,8 @@ export function mirageExtension(
   source: Workspace | MirageRemote,
   opts: MirageExtensionOptions = {},
 ): Extension {
-  const named = source as Partial<MirageRemote>
-  const prompt =
-    typeof named.url === 'string' && typeof named.workspace === 'string'
-      ? () => remotePrompt(source as MirageRemote)
-      : () => buildSystemPrompt({ workspace: source as Workspace, sessionId: opts.sessionId })
+  const prompt = isRemote(source)
+    ? () => remotePrompt(source)
+    : () => buildSystemPrompt({ workspace: source, sessionId: opts.sessionId })
   return defineExtension({ name: 'mirage', sections: [section('mirage', prompt)] })
 }

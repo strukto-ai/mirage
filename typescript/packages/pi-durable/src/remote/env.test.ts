@@ -33,6 +33,7 @@ import { AuthMode, buildApp } from '@struktoai/mirage-server'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { MirageExecutionEnv as RootEnv } from '../execution_env.ts'
 import { MirageExecutionEnv, mirageExtension } from './index.ts'
+import { remoteWorld } from './world.ts'
 
 const context = BACKGROUND_CONTEXT
 const TOKEN = 'pi-remote-env'
@@ -210,6 +211,43 @@ describe('MirageExecutionEnv on a Mirage server', () => {
     const spilled = getOrThrow(await env.readTextFile(result.spillPath ?? '', context))
     expect(spilled.length).toBeGreaterThan(2 * 1024 * 1024)
     expect(spilled.split('\n')[399999]).toBe('400000')
+  })
+
+  it('keeps reading a spill while the server holds its write', async () => {
+    // A workspace capture holds new writes until the lines it waits for end, so
+    // a spill that stopped reading while its write is held would stall the
+    // command whose output it is, and the capture with it.
+    const remote = await workspace()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const holding: typeof fetch = async (input, init) => {
+      const target = input instanceof Request ? input.url : input.toString()
+      if (/\/vfs\/(write|append)/.test(target)) await held
+      return fetch(input, init)
+    }
+    const world = remoteWorld({ ...remote, fetch: holding })
+    const CHUNK = 128 * 1024
+    let consumed = 0
+    let readAll!: () => void
+    const allRead = new Promise<void>((resolve) => {
+      readAll = resolve
+    })
+    async function* output(): AsyncGenerator<Uint8Array> {
+      for (let i = 0; i < 64; i += 1) {
+        consumed += 1
+        await Promise.resolve()
+        yield new Uint8Array(CHUNK).fill(97)
+      }
+      readAll()
+    }
+    const writing = world.files.writeStream('/spill.log', output())
+    await Promise.race([allRead, new Promise((resolve) => setTimeout(resolve, 2000))])
+    expect(consumed).toBe(64)
+    release()
+    await writing
+    expect((await new MirageClient(remote).stat('/spill.log')).size).toBe(64 * CHUNK)
   })
 
   it('asks the server past its cache when a watch polls', async () => {

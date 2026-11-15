@@ -17,12 +17,7 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import { WorldExecutionEnv, type MirageExecutionEnvOptions } from './env.ts'
 import { localWorld } from './local.ts'
 import { remoteWorld } from './remote/world.ts'
-
-/** Whether a source names a workspace on a Mirage server rather than one in this process. */
-export function isRemote(source: Workspace | MirageRemote): source is MirageRemote {
-  const named = source as Partial<MirageRemote>
-  return typeof named.url === 'string' && typeof named.workspace === 'string'
-}
+import { isRemote } from './world.ts'
 
 /**
  * Pi Durable's `ExecutionEnv` over a Mirage workspace: Pi's tools read and

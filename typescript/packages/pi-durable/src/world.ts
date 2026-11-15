@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OutputEvent } from '@struktoai/mirage-core/io/types'
+import type { MirageRemote } from '@struktoai/mirage-core/remote/client'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
@@ -88,4 +89,15 @@ export async function ensureParents(files: EnvFiles, path: string): Promise<void
   } catch (err) {
     if (!(await files.exists(parent))) throw err
   }
+}
+
+/**
+ * Whether a source names a workspace on a Mirage server rather than one in
+ * this process.
+ *
+ * @param source a workspace, or where a server's workspace lives.
+ */
+export function isRemote(source: unknown): source is MirageRemote {
+  const named = source as Partial<MirageRemote>
+  return typeof named.url === 'string' && typeof named.workspace === 'string'
 }
