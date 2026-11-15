@@ -57,13 +57,32 @@ class FakeMachine {
   readonly id = 'sb-77'
   readonly process = new FakeProcess()
   readonly fs = new FakeFs()
+
+  constructor(readonly state: string) {}
+
+  start(): Promise<void> {
+    FakeClient.changes.push('start')
+    return Promise.resolve()
+  }
+
+  pause(): Promise<void> {
+    FakeClient.changes.push('pause')
+    return FakeClient.pauseRefusal === null
+      ? Promise.resolve()
+      : Promise.reject(FakeClient.pauseRefusal)
+  }
 }
+
+class FakeNotFoundError extends Error {}
 
 class FakeClient {
   static configs: (object | undefined)[] = []
   static fetched: string[] = []
   static disposed = 0
   static last: FakeMachine | null = null
+  static state = 'started'
+  static changes: string[] = []
+  static pauseRefusal: Error | null = null
 
   constructor(readonly config?: object) {
     FakeClient.configs.push(config)
@@ -71,7 +90,7 @@ class FakeClient {
 
   get(sandboxId: string): Promise<FakeMachine> {
     FakeClient.fetched.push(sandboxId)
-    FakeClient.last = new FakeMachine()
+    FakeClient.last = new FakeMachine(FakeClient.state)
     return Promise.resolve(FakeClient.last)
   }
 
@@ -83,7 +102,10 @@ class FakeClient {
 
 class FakedDaytonaMachine extends DaytonaMachine {
   protected override loadSdk(): Promise<DaytonaSdk> {
-    return Promise.resolve({ Daytona: FakeClient } as unknown as DaytonaSdk)
+    return Promise.resolve({
+      Daytona: FakeClient,
+      DaytonaNotFoundError: FakeNotFoundError,
+    } as unknown as DaytonaSdk)
   }
 }
 
@@ -98,6 +120,9 @@ beforeEach(() => {
   FakeClient.fetched = []
   FakeClient.disposed = 0
   FakeClient.last = null
+  FakeClient.state = 'started'
+  FakeClient.changes = []
+  FakeClient.pauseRefusal = null
 })
 
 describe('DaytonaMachine', () => {
@@ -128,7 +153,7 @@ describe('DaytonaMachine', () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBeNull()
-    const sandbox = FakeClient.last ?? new FakeMachine()
+    const sandbox = FakeClient.last ?? new FakeMachine('started')
     const [path] = [...sandbox.fs.files.keys()]
     // Unique per invocation, so concurrent stdin lines never collide.
     expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
@@ -234,4 +259,58 @@ describe('DaytonaMachine output bytes', () => {
       ])
     },
   )
+})
+
+async function reached(): Promise<FakedDaytonaMachine> {
+  const machine = makeRuntime()
+  await machine.connect()
+  await machine.close()
+  return machine
+}
+
+/** Whether a Daytona machine built with `config` asks the workspace to pause it. */
+function asksToPause(config: Partial<DaytonaConfig>): boolean {
+  return new DaytonaMachine('box', { sandboxId: 'sb', ...config }).configAsksToPause()
+}
+
+describe('DaytonaMachine pause', () => {
+  it('leaves a started sandbox as it is on connect', async () => {
+    await makeRuntime().connect()
+    expect([FakeClient.fetched, FakeClient.changes]).toEqual([['sb-live'], []])
+  })
+  it('starts a paused sandbox again on connect', async () => {
+    FakeClient.state = 'paused'
+    await makeRuntime().connect()
+    expect(FakeClient.changes).toEqual(['start'])
+  })
+  it('pauses the sandbox it reached through a client of its own', async () => {
+    await (await reached()).pause()
+    expect([FakeClient.fetched, FakeClient.changes, FakeClient.disposed]).toEqual([
+      ['sb-live', 'sb-live'],
+      ['pause'],
+      2,
+    ])
+  })
+  it('leaves alone a sandbox it never reached', async () => {
+    await makeRuntime().pause()
+    expect([FakeClient.fetched, FakeClient.changes]).toEqual([[], []])
+  })
+  it('counts a sandbox already gone as paused', async () => {
+    const machine = await reached()
+    FakeClient.pauseRefusal = new FakeNotFoundError('gone')
+    await expect(machine.pause()).resolves.toBeUndefined()
+    expect(FakeClient.disposed).toBe(2)
+  })
+  it('raises any other pause failure', async () => {
+    const machine = await reached()
+    FakeClient.pauseRefusal = new Error('container sandboxes cannot pause')
+    await expect(machine.pause()).rejects.toThrow('cannot pause')
+    expect(FakeClient.disposed).toBe(2)
+  })
+  it('asks the workspace to pause it only with onPause: pause', () => {
+    expect([asksToPause({ onPause: 'pause' }), asksToPause({})]).toEqual([true, false])
+    expect(() => new DaytonaMachine('box', { sandboxId: 'sb', onPause: 'stop' as never })).toThrow(
+      'daytona onPause must be one of pause, not "stop"',
+    )
+  })
 })

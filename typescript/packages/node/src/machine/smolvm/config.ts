@@ -14,6 +14,8 @@
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
+import { ON_PAUSE } from './constants.ts'
 
 /** How to reach the user's running microVM. */
 export interface SmolvmConfig extends MachineConfig {
@@ -26,9 +28,12 @@ export interface SmolvmConfig extends MachineConfig {
    * config did not choose.
    */
   machine: string
+  /** `pause`: pause the machine when the workspace pauses; unset leaves it as it is. */
+  onPause?: PauseAction
 }
 
 export const SMOLVM_CONFIG_FIELDS: ConfigFields = {
   ...BASE_CONFIG_FIELDS,
   machine: { type: 'string', required: true },
+  onPause: { type: 'string', options: ON_PAUSE },
 }

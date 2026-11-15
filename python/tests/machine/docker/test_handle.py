@@ -29,19 +29,29 @@ from tests.fixtures.machine import on
 
 class FakeDockerMachine(DockerMachine):
     def __init__(
-        self, running: bool = True, captures=None, name="box", **options
+        self,
+        running: bool = True,
+        captures=None,
+        name="box",
+        state: str | None = None,
+        **options,
     ):
         super().__init__(name, **options)
         self.captures = captures
-        self.running = running
+        self.state = state or ("running" if running else "exited")
+        self.refusal: bytes | None = None
         self.calls: list[tuple[list[str], bytes | None]] = []
 
     async def _exec_program(self, args, stdin=None, output=None, errors=None):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
-            state = b"running" if self.running else b"exited"
+            state = self.state.encode()
             return RunResult(b'{"Status": "' + state + b'"}', None, 0)
+        if args[0] in ("pause", "unpause"):
+            if self.refusal is not None:
+                return RunResult(b"", self.refusal, 1)
+            return RunResult(b"", b"", 0)
         script = args[-1]
         if output is not None:
             await output(f"out:{script}".encode())
@@ -62,6 +72,71 @@ async def test_connect_fails_loud_on_a_stopped_container():
     runtime = FakeDockerMachine(running=False, config={"container": "cid-42"})
     with pytest.raises(RuntimeError, match="not running"):
         await runtime.connect()
+
+
+@pytest.mark.asyncio
+async def test_connect_unpauses_a_paused_container():
+    runtime = FakeDockerMachine(state="paused", config={"container": "c-1"})
+    await runtime.connect()
+    assert runtime.calls[-1] == (["unpause", "c-1"], None)
+
+
+@pytest.mark.asyncio
+async def test_connect_fails_loud_when_the_unpause_fails():
+    runtime = FakeDockerMachine(state="paused", config={"container": "c-1"})
+    runtime.refusal = b"Error response from daemon: cgroup busy"
+    with pytest.raises(
+        RuntimeError, match="docker unpause c-1 failed: .*busy"
+    ):
+        await runtime.connect()
+
+
+async def _reached(**config) -> FakeDockerMachine:
+    runtime = FakeDockerMachine(config={"container": "c-1", **config})
+    await runtime.connect()
+    await runtime.close()
+    return runtime
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_the_container_it_reached():
+    runtime = await _reached()
+    await runtime.pause()
+    assert runtime.calls[-1] == (["pause", "c-1"], None)
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_container_it_never_reached():
+    runtime = FakeDockerMachine(config={"container": "c-1"})
+    await runtime.pause()
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_container_already_gone_counts_as_paused():
+    runtime = await _reached()
+    runtime.refusal = b"Error response from daemon: No such container: c-1"
+    await runtime.pause()
+
+
+@pytest.mark.asyncio
+async def test_any_other_pause_failure_is_raised():
+    runtime = await _reached()
+    runtime.refusal = b"Error response from daemon: container is not running"
+    with pytest.raises(RuntimeError, match="docker pause c-1 failed"):
+        await runtime.pause()
+
+
+def _asks(**config) -> bool:
+    return DockerMachine(
+        "box", config={"container": "c", **config}
+    ).config_asks_to_pause()
+
+
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
+    with pytest.raises(ValueError, match="docker on_pause must be one of"):
+        DockerMachine("box", config={"container": "c", "on_pause": "stop"})
 
 
 def test_container_is_required():

@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
+
+/** The state a paused sandbox reports; the next connect starts it again. */
+export const PAUSED_STATE = 'paused'
+
+/** What `onPause` takes for a sandbox: pause it, keeping its disk and memory (Daytona's VM sandboxes only). */
+export const ON_PAUSE: readonly PauseAction[] = ['pause']
+
 // Providers whose exec API has no stdin stream (Daytona) upload
 // piped bytes to a per-invocation file and redirect it into the line.
 const STDIN_PREFIX = '/tmp/.mirage_stdin'
