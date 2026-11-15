@@ -373,6 +373,60 @@ fn a_date_lands_formatted_where_no_styles_part_was() {
 }
 
 #[test]
+fn a_styles_part_added_under_prefixed_roots_takes_their_prefix() {
+    let rel = r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#;
+    let kind = r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#;
+    let parts: Vec<(&str, Vec<u8>)> = super::blank_parts()
+        .into_iter()
+        .filter(|(name, _)| *name != "xl/styles.xml")
+        .map(|(name, data)| {
+            let text = String::from_utf8(data)
+                .unwrap()
+                .replace(rel, "")
+                .replace(kind, "");
+            let text = match name {
+                "[Content_Types].xml" => text
+                    .replace("<Types xmlns=", "<ct:Types xmlns:ct=")
+                    .replace("</Types>", "</ct:Types>")
+                    .replace("<Default ", "<ct:Default ")
+                    .replace("<Override ", "<ct:Override "),
+                "xl/_rels/workbook.xml.rels" => text
+                    .replace("<Relationships xmlns=", "<pr:Relationships xmlns:pr=")
+                    .replace("</Relationships>", "</pr:Relationships>")
+                    .replace("<Relationship ", "<pr:Relationship "),
+                _ => text,
+            };
+            (name, text.into_bytes())
+        })
+        .collect();
+    let mut host = crate::host::Host::default();
+    host.files
+        .insert("w.xlsx".to_string(), super::book::package(&parts));
+    let set =
+        serde_json::json!({"command": "set", "path": "/Sheet1/C1", "props": ["value=2024-03-15"]});
+    assert_eq!(run(&mut host, "w.xlsx", set).2, 0);
+    let get = serde_json::json!({"command": "get", "path": "/Sheet1/C1"});
+    let (out, _, status) = run(&mut host, "w.xlsx", get);
+    assert_eq!(
+        (out.as_str(), status),
+        (
+            "/Sheet1/C1 (cell) \"2024-03-15\" type=Number numFmtId=164 numberformat=yyyy-mm-dd\n",
+            0
+        )
+    );
+    let mut read = |member: &str| {
+        let config =
+            serde_json::json!({"archive": "w.xlsx", "base": "", "p": true, "members": [member]});
+        let mut stream = crate::open("unzip", config.to_string().as_bytes()).expect("opens");
+        assert_eq!(host.drive(stream.as_mut()), 0);
+        host.err.clear();
+        String::from_utf8(std::mem::take(&mut host.out)).unwrap()
+    };
+    assert!(read("xl/_rels/workbook.xml.rels").contains(r#"<pr:Relationship Id="rId2" "#));
+    assert!(read("[[]Content_Types].xml").contains(r#"<ct:Override PartName="/xl/styles.xml" "#));
+}
+
+#[test]
 fn a_cell_refuses_text_xml_cannot_hold() {
     let set =
         serde_json::json!({"command": "set", "path": "/Sheet1/A2", "props": ["value=p\u{b}q"]});

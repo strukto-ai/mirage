@@ -818,10 +818,10 @@ async fn styles_or_new(book: &mut Book<'_>, wb_part: &str) -> Option<(String, St
     let id = (1..)
         .map(|n| format!("rId{n}"))
         .find(|id| !ids.contains(id))?;
-    let rel = format!("<Relationship Id=\"{id}\" Type=\"{REL}/styles\" Target=\"styles.xml\"/>");
-    let kind = format!("<Override PartName=\"/{part}\" ContentType=\"{STYLES_TYPE}\"/>");
-    let rels = before_end(&rels, "Relationships", &rel)?;
-    let types = before_end(&types, "Types", &kind)?;
+    let rel = format!("Id=\"{id}\" Type=\"{REL}/styles\" Target=\"styles.xml\"");
+    let kind = format!("PartName=\"/{part}\" ContentType=\"{STYLES_TYPE}\"");
+    let rels = before_end(&rels, "Relationships", "Relationship", &rel)?;
+    let types = before_end(&types, "Types", "Override", &kind)?;
     let xml = default_styles().into_bytes();
     book.put(&part, xml.clone());
     book.put(&rels_part, rels);
@@ -829,11 +829,15 @@ async fn styles_or_new(book: &mut Book<'_>, wb_part: &str) -> Option<(String, St
     Some((part, Styles::new(xml)))
 }
 
-/// `xml` with `entry` put just inside the end of its `root` element.
-fn before_end(xml: &[u8], root: &str, entry: &str) -> Option<Vec<u8>> {
+/// `xml` with an empty `name` element holding `attrs` put just inside the
+/// end of its `root` element, under the root's prefix so it shares the
+/// root's namespace.
+fn before_end(xml: &[u8], root: &str, name: &str, attrs: &str) -> Option<Vec<u8>> {
     let end = tags(xml)
         .filter(|t| t.kind == Kind::End && t.is(root))
         .last()?;
+    let prefix = String::from_utf8_lossy(end.prefix());
+    let entry = format!("<{prefix}{name} {attrs}/>");
     Some([&xml[..end.start], entry.as_bytes(), &xml[end.start..]].concat())
 }
 
