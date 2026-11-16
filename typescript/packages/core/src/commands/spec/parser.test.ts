@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import { helpSpec, registeredSpec, specOf } from './builtins.ts'
 import { PARSE_KEPT_CHARS, PARSES_KEPT } from './constants.ts'
 import { flagOccurrences } from './flag_view.ts'
-import { ParsedArgs, parseCommand, parseToKwargs } from './parser.ts'
+import { ParsedArgs, parseCommand, parseToKwargs, wordPaths } from './parser.ts'
 import { CommandSpec, Argument } from './types.ts'
 
 /** The spec the registry parses for a builtin, --help/--version and all. */
@@ -2255,5 +2255,50 @@ describe('declared words', () => {
     expect(whole.texts()).toEqual(['a'])
     const attached = parseCommand(spec, ['-l3', 'a'], '/', 'pdftotext')
     expect({ ...parseToKwargs(attached) }).toEqual({ args_l: '3' })
+  })
+})
+
+describe('wordPaths', () => {
+  const virtuals = (argv: string[], name: string): (string | null)[] =>
+    wordPaths(parseCommand(specOf(name), argv, '/d', name), argv, '/d').map(
+      (p) => p?.virtual ?? null,
+    )
+
+  it.each([
+    [
+      ['-C', 'a', '-Cb', 'x'],
+      [null, '/d/a', '/d/a/b', '/d/a/b/x'],
+    ],
+    [
+      ['-C', 'a', '--directory=b', 'x'],
+      [null, '/d/a', '/d/a/b', '/d/a/b/x'],
+    ],
+    [
+      ['-C', 'a', '-cfrel.tar', 'x'],
+      [null, '/d/a', '/d/rel.tar', '/d/a/x'],
+    ],
+    [
+      ['--file=-', '-c', 'x'],
+      [null, null, '/d/x'],
+    ],
+  ])('resolves each word where tar reads it: %j', (argv, expected) => {
+    expect(virtuals(argv, 'tar')).toEqual(expected)
+  })
+
+  it.each([
+    [
+      ['-f', '-', 'x'],
+      [null, null, '/d/x'],
+    ],
+    [
+      ['--file=', 'x'],
+      [null, '/d/x'],
+    ],
+    [
+      ['--file=../p', 'x'],
+      ['/p', '/d/x'],
+    ],
+  ])('names no file for a dash or an empty value: %j', (argv, expected) => {
+    expect(virtuals(argv, 'grep')).toEqual(expected)
   })
 })

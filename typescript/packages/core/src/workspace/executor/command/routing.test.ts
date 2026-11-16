@@ -154,25 +154,7 @@ describe('programTokens', () => {
 })
 
 describe('commandWords', () => {
-  it.each([
-    [
-      'himalaya message reply 1 --attach ../../slack/export.csv',
-      '../../slack/export.csv',
-      '--attach',
-    ],
-    [
-      'himalaya message reply 1 --attach=../../slack/export.csv',
-      '--attach=../../slack/export.csv',
-      '--attach',
-    ],
-    ['git -C ../../slack/export.csv log', '../../slack/export.csv', '-C'],
-    ['git -C../../slack/export.csv log', '-C../../slack/export.csv', '-C'],
-    ['pdfinfo ../../slack/export.csv', '../../slack/export.csv', null],
-    ['tar -cf ../../slack/export.csv a.txt', '../../slack/export.csv', '-cf'],
-    ['tar -cf../../slack/export.csv a.txt', '-cf../../slack/export.csv', '-cf'],
-    ['grep --file=../../slack/export.csv x', '--file=../../slack/export.csv', '--file'],
-    ['grep -f../../slack/export.csv x', '-f../../slack/export.csv', '-f'],
-  ])('a path word names the path paths holds: %s', async (line, text, option) => {
+  async function seenByPolicy(line: string, setup = ''): Promise<CommandContext> {
     const seen: CommandContext[] = []
     const ws = new Workspace(
       { '/workspace': new RAMVFS(), '/slack': new RAMVFS() },
@@ -181,7 +163,7 @@ describe('commandWords', () => {
         policies: [
           {
             preCommand(ctx) {
-              if (ctx.command === 'cd' || ctx.command === 'mkdir') return null
+              if (['cd', 'mkdir', 'ln', 'echo'].includes(ctx.command)) return null
               seen.push(ctx)
               return { kind: 'deny', reason: 'captured' }
             },
@@ -199,15 +181,70 @@ describe('commandWords', () => {
         password: 'p',
       })
       await ws.shell('mkdir -p /workspace/outbox')
+      if (setup !== '') await ws.shell(setup)
       await ws.shell('cd /workspace/outbox')
       await ws.shell(line)
       const ctx = seen[seen.length - 1]
-      const word = ctx?.words?.find((w) => w.text === text)
-      expect([word?.option, word?.toDict().path]).toEqual([option, '/slack/export.csv'])
-      expect(ctx?.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
+      if (ctx === undefined) throw new Error(`no command reached the policy: ${line}`)
+      return ctx
     } finally {
       await ws.close()
     }
+  }
+
+  it.each([
+    [
+      'himalaya message reply 1 --attach ../../slack/export.csv',
+      '../../slack/export.csv',
+      '--attach',
+    ],
+    [
+      'himalaya message reply 1 --attach=../../slack/export.csv',
+      '--attach=../../slack/export.csv',
+      '--attach',
+    ],
+    ['git -C ../../slack/export.csv log', '../../slack/export.csv', '-C'],
+    ['git -C../../slack/export.csv log', '-C../../slack/export.csv', '-C'],
+    ['pdfinfo ../../slack/export.csv', '../../slack/export.csv', null],
+    ['tar -cf ../../slack/export.csv a.txt', '../../slack/export.csv', '-cf'],
+    ['tar -cf../../slack/export.csv a.txt', '-cf../../slack/export.csv', '-cf'],
+    ['tar -C ../.. -Cslack/export.csv -cf x.tar a.txt', '-Cslack/export.csv', '-C'],
+    ['grep --file=../../slack/export.csv x', '--file=../../slack/export.csv', '--file'],
+    ['grep -f../../slack/export.csv x', '-f../../slack/export.csv', '-f'],
+  ])('a path word names the path paths holds: %s', async (line, text, option) => {
+    const ctx = await seenByPolicy(line)
+    const word = ctx.words?.find((w) => w.text === text)
+    expect([word?.option, word?.toDict().path]).toEqual([option, '/slack/export.csv'])
+    expect(ctx.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
+  })
+
+  it.each([
+    ['himalaya message reply 1 --attach x.csv', 'x.csv'],
+    ['grep --file=x.csv y', '--file=x.csv'],
+    ['tar -cf x.csv a.txt', 'x.csv'],
+  ])('a policy sees the file a linked option value opens: %s', async (line, text) => {
+    const ctx = await seenByPolicy(
+      line,
+      'echo s > /slack/export.csv && ln -s /slack/export.csv /workspace/outbox/x.csv',
+    )
+    const word = ctx.words?.find((w) => w.text === text)
+    expect(word?.toDict().path).toBe('/workspace/outbox/x.csv')
+    expect(ctx.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
+  })
+
+  it.each(['grep --file= x', 'pdfinfo -'])(
+    'a dash or an empty value names no file: %s',
+    async (line) => {
+      const virtuals = (await seenByPolicy(line)).paths.map((p) => p.virtual)
+      expect(virtuals).not.toContain('/workspace/outbox')
+      expect(virtuals).not.toContain('/workspace/outbox/-')
+    },
+  )
+
+  it('a dash-led group value is a value', async () => {
+    const ctx = await seenByPolicy('git -C -x log')
+    const word = ctx.words?.find((w) => w.text === '-x')
+    expect([word?.kind, word?.option]).toEqual(['value', '-C'])
   })
 })
 

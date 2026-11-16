@@ -838,3 +838,52 @@ def test_group_help_and_abbreviation_settings_apply_to_the_whole_node():
         assert result.exit_code != 0
         assert b"unknown option" in result.output
     assert "--help" not in node_help("tool", tree)
+
+
+def _based_tree() -> CommandSpec:
+    pair = Argument(
+        "--pair",
+        nargs=2,
+        type="path",
+        value_types=("str", "path"),
+        action="extend",
+    )
+    return CommandSpec(
+        name="r",
+        operand_base="-C",
+        arguments=(
+            Argument("-C", type="path", default="."),
+            Argument("--dir", type="path"),
+            pair,
+        ),
+        subcommands=(
+            CommandSpec(
+                name="mid",
+                arguments=(pair,),
+                subcommands=(CommandSpec(name="leaf"),),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "argv, paths, values",
+    [
+        (["-C", "a", "-Cb", "mid", "leaf"], {1: "/w/a", 2: "/w/a/b"}, (1,)),
+        (
+            ["-C", "a", "--dir=d", "mid", "leaf"],
+            {1: "/w/a", 2: "/w/a/d"},
+            (1,),
+        ),
+        (["-C", "-x", "mid", "leaf"], {1: "/w/-x"}, (1,)),
+        (
+            ["--pair", "n1", "f1", "mid", "--pair", "n2", "f2", "leaf"],
+            {2: "/w/f1", 6: "/w/f2"},
+            (1, 2, 5, 6),
+        ),
+    ],
+)
+def test_walk_keeps_each_group_value_by_where_it_stands(argv, paths, values):
+    result = walk("r", _based_tree(), argv, "/w")
+    assert {k: v.virtual for k, v in result.value_paths.items()} == paths
+    assert result.value_positions == values
