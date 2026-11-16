@@ -190,12 +190,6 @@ an empty name exits 128 with git's `empty filename in tree entry`.
 For authenticated GitHub clones, `gh repo clone` supplies its configured token,
 and only to its configured GitHub origin.
 
-`git clone --depth <n>` fetches only the newest `n` commits of the branch it
-checks out, which keeps a large repository small in a RAM mount. Like git, it
-implies `--single-branch`; pass `--no-single-branch` to take every branch at
-that depth. `log`, `show` and the other history commands stop at the oldest
-commit fetched, which `--decorate` labels `grafted`.
-
 `--git-dir` and `--work-tree` override `GIT_DIR` and `GIT_WORK_TREE` and resolve
 against `-C`. Repository `core.worktree` and `core.bare` affect discovery;
 linked worktrees use their recorded layout. Working-tree commands refuse bare
