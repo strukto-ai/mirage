@@ -622,6 +622,22 @@
       },
       "steps": [
         {
+          "command": "echo hi; gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo hi; /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
           "command": "/usr/bin/gcc x.c",
           "expect": {
             "exit": 126,

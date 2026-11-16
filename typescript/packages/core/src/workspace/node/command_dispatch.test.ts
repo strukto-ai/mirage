@@ -547,6 +547,37 @@ describe('a wrapper running a program spelled by its path', () => {
   })
 })
 
+describe('a program spelled by its path under an ask rule', () => {
+  it.each(['/usr/bin/python3 -c 1', 'nohup /usr/bin/python3 -c 1'])(
+    'is asked once: %s',
+    async (line) => {
+      const ws = new Workspace(
+        { '/': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          machines: {
+            m: { provider: 'in_process', runtime: 'monty' },
+            b: new Named('b', { captures: [EXTERNAL_COMMANDS] }),
+          },
+          profiles: { default: { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } } },
+        },
+      )
+      try {
+        const held = await ws.shell(line)
+        expect(held.exitCode).toBe(126)
+        const pending = ws.decisions.pending()
+        expect(pending).toHaveLength(1)
+        await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
+        const ran = await ws.shell(line)
+        expect(ran.exitCode).toBe(0)
+        expect(ws.decisions.pending()).toEqual([])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})
+
 class OtherBox extends Box {
   override readonly name: string = 'other'
   constructor() {

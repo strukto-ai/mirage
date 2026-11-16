@@ -539,6 +539,32 @@ async def test_a_wrapper_goes_where_a_path_spelled_program_is_routed(line):
         await ws.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["/usr/bin/python3 -c 1", "nohup /usr/bin/python3 -c 1"]
+)
+async def test_a_path_spelled_program_is_asked_once(line):
+    ws = _spelled(
+        profiles={
+            "default": {
+                "commands": {
+                    "ask": [{"reason": "nod", "commands": ["python3"]}]
+                }
+            }
+        }
+    )
+    try:
+        held = await ws.shell(line)
+        assert held.exit_code == 126
+        (pending,) = ws.decisions.pending()
+        await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
+        ran = await ws.shell(line)
+        assert ran.exit_code == 0
+        assert ws.decisions.pending() == ()
+    finally:
+        await ws.close()
+
+
 class OtherBox(Box):
     name = "other"
     captures = ("hostname",)
