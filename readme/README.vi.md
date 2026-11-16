@@ -204,7 +204,6 @@ uv add 'mirage-ai[monty]'     # Monty, runtime Python trong tiến trình mà c�
 ```bash
 npm install @struktoai/mirage-node      # máy chủ Node.js và CLI
 npm install @struktoai/mirage-browser   # trình duyệt / edge runtime
-npm install @struktoai/mirage-vercel    # adapter Vercel AI; mỗi framework agent có package riêng
 ```
 
 Cả hai gói runtime đều tự động kéo theo `@struktoai/mirage-core`.
