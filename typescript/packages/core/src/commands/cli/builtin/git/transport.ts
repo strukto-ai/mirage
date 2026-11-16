@@ -76,13 +76,15 @@ export interface Transport {
   advertise(): Promise<Advertisement>
   /**
    * `has` says whether the receiver already holds an object; `depth` is how
-   * many commits deep to fetch, null for the whole history.
+   * many commits deep to fetch, null for the whole history; `shallow` lists
+   * the receiver's shallow commits.
    */
   fetchPack(
     wants: readonly string[],
     haves: readonly string[],
     has: (oid: string) => Promise<boolean>,
     depth?: number | null,
+    shallow?: readonly string[],
   ): Promise<Fetched>
 }
 
@@ -371,22 +373,26 @@ export class HttpTransport implements Transport {
   }
 
   /**
-   * POST the wants and haves to upload-pack; return the pack. A depth asks for
-   * the `shallow` capability and sends `deepen`; the server names each commit
-   * it cut in a `shallow` line ahead of the pack.
+   * POST the wants and haves to upload-pack; return the pack. A shallow
+   * receiver names its shallow commits, so the server does not count what lies
+   * past them as held, and a depth sends `deepen`; both ask for the `shallow`
+   * capability, and the server names each commit it cut in a `shallow` line
+   * ahead of the pack.
    */
   async fetchPack(
     wants: readonly string[],
     haves: readonly string[],
     _has?: (oid: string) => Promise<boolean>,
     depth: number | null = null,
+    shallow: readonly string[] = [],
   ): Promise<Fetched> {
     const [first, ...rest] = wants
     if (first === undefined) return { pack: new Uint8Array(), shallow: [] }
-    const caps = depth === null ? CAPABILITIES : `${CAPABILITIES} shallow`
+    const caps = depth === null && !shallow.length ? CAPABILITIES : `${CAPABILITIES} shallow`
     const parts = [
       pktLine(`want ${first} ${caps}\n`),
       ...rest.map((want) => pktLine(`want ${want}\n`)),
+      ...shallow.map((oid) => pktLine(`shallow ${oid}\n`)),
       ...(depth === null ? [] : [pktLine(`deepen ${String(depth)}\n`)]),
       ENC.encode(FLUSH),
       ...haves.map((have) => pktLine(`have ${have}\n`)),
@@ -402,20 +408,20 @@ export class HttpTransport implements Transport {
       concat(parts),
     )
     const pack: Uint8Array[] = []
-    const shallow: string[] = []
+    const cut: string[] = []
     for (const line of pktLines(reply)) {
       if (line === null) continue
       const text = DEC.decode(line.subarray(0, 4))
       if (text.startsWith('NAK') || text === 'ACK ') continue
       if (DEC.decode(line.subarray(0, SHALLOW_LINE.length)) === SHALLOW_LINE) {
-        shallow.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
+        cut.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
         continue
       }
       if (line[0] === PACK_BAND) pack.push(line.subarray(1))
       else if (line[0] === ERROR_BAND)
         throw new GitError(`remote error: ${DEC.decode(line.subarray(1)).trim()}`)
     }
-    return { pack: concat(pack), shallow }
+    return { pack: concat(pack), shallow: cut }
   }
 }
 

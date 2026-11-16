@@ -170,18 +170,21 @@ async function holds(repo: Repo, oid: string): Promise<boolean> {
 }
 
 /**
- * Fetch what `wants` reaches that is missing, then reopen. The commits a depth
- * cut are listed in `.git/shallow` before the repository is reopened, so every
- * walk after it stops there.
+ * Fetch what `wants` reaches that is missing, then reopen. The receiver's
+ * shallow commits go with the request, so the remote sends what lies past them,
+ * and the commits a depth cut are listed in `.git/shallow` before the
+ * repository is reopened, so every walk after it stops there. `held` are
+ * commits already here that no ref names yet, offered as haves too.
  */
 async function receive(
   repo: Repo,
   transport: Transport,
   wants: readonly string[],
   depth: number | null = null,
+  held: readonly string[] = [],
 ): Promise<Repo> {
   const refs = await resolvedRefs(repo)
-  const tips = new Set(refs.values())
+  const tips = new Set([...refs.values(), ...held])
   const missing: string[] = []
   for (const want of new Set(wants)) if (!(await holds(repo, want))) missing.push(want)
   if (!missing.length) return repo
@@ -190,6 +193,7 @@ async function receive(
     [...tips].sort(compareCodePoints),
     tips.size ? (oid) => holds(repo, oid) : () => Promise.resolve(false),
     depth,
+    [...repo.shallow].sort(compareCodePoints),
   )
   await storePack(repo, fetched.pack)
   await addShallow(repo, fetched.shallow)
@@ -264,6 +268,8 @@ export async function fetchObjects(
       current,
       transport,
       tags.map((tag) => tag.oid),
+      depth,
+      wants.map((want) => want.oid),
     )
   return [current, [...wants, ...tags]]
 }

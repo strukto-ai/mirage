@@ -217,11 +217,14 @@ async def _receive(
     transport: LocalTransport | HttpTransport,
     wants: list[str],
     depth: int | None = None,
+    held: list[str] | None = None,
 ) -> BaseRepo:
     """Fetch what ``wants`` reaches that is missing, then reopen.
 
-    The commits a depth cut are listed in ``.git/shallow`` before the
-    repository is reopened, so every walk after it stops there.
+    The receiver's shallow commits go with the request, so the remote
+    sends what lies past them, and the commits a depth cut are listed in
+    ``.git/shallow`` before the repository is reopened, so every walk
+    after it stops there.
 
     Args:
         vfs (Files): the session's files.
@@ -230,10 +233,14 @@ async def _receive(
         wants (list[str]): object ids asked for.
         depth (int | None): how many commits deep to fetch, None for
             the whole history.
+        held (list[str] | None): commits already here that no ref
+            names yet, offered as haves too.
     """
     repo = await open_repo(vfs, location)
     store = repo.object_store
-    tips = {oid for oid in repo.refs.as_dict().values()}
+    tips = {oid for oid in repo.refs.as_dict().values()} | {
+        oid.encode() for oid in held or []
+    }
     missing = [
         want
         for want in dict.fromkeys(wants)
@@ -249,6 +256,7 @@ async def _receive(
         haves,
         store.__contains__ if tips else (lambda _oid: False),
         depth,
+        tuple(sorted(oid.decode() for oid in repo.get_shallow())),
     )
     await store_pack(vfs, location.commondir, fetched.pack)
     await add_shallow(vfs, location.commondir, fetched.shallow)
@@ -344,7 +352,12 @@ async def fetch_objects(
     )
     if tags:
         repo = await _receive(
-            vfs, location, transport, [tag.oid for tag in tags]
+            vfs,
+            location,
+            transport,
+            [tag.oid for tag in tags],
+            depth,
+            [want.oid for want in wanted],
         )
     return repo, wanted + tags
 

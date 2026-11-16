@@ -312,6 +312,35 @@ async def test_a_shallow_clone_over_smart_http_matches_git(served, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_fetch_into_a_shallow_clone_gets_what_lies_past_the_cut(
+    served,
+):
+    pytest.importorskip("httpx")
+    work, url = served
+    with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        result = await ws.shell(f"cd /w && git clone -q --depth 1 {url} c")
+        assert result.exit_code == 0
+        subprocess.run(
+            [
+                "bash",
+                "-ec",
+                "echo one > a && git commit -qam back && "
+                "git push -q ../srv/repo.git main && "
+                "git -C ../srv/repo.git repack -adbq",
+            ],
+            cwd=work,
+            check=True,
+            capture_output=True,
+            env=ENV,
+        )
+        result = await ws.shell("cd /w/c && git fetch -q")
+        assert result.exit_code == 0
+        result = await ws.shell("cd /w/c && git show origin/main:a")
+        assert (result.exit_code, result.stdout) == (0, b"one\n")
+
+
+@pytest.mark.asyncio
 async def test_a_missing_http_repository_is_not_found(served):
     pytest.importorskip("httpx")
     _, url = served
