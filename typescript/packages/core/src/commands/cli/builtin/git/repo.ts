@@ -45,9 +45,10 @@ const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
-// One rewrite of `.git/shallow` at a time, so fetches running side by side
-// keep each other's cuts: each update waits for the one before it settles.
-const SHALLOW_WRITERS: { last: Promise<unknown> } = { last: Promise.resolve() }
+// One rewrite of each `.git/shallow` at a time, so fetches running side by
+// side keep each other's cuts: an update waits for the last one queued on its
+// path, and the path is dropped once its queue settles.
+const SHALLOW_WRITERS = new Map<string, Promise<void>>()
 
 /**
  * A repository living in a mount, opened for reading.
@@ -253,7 +254,8 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
 export async function addShallow(repo: Repo, oids: readonly string[]): Promise<void> {
   if (!oids.length) return
   const path = repo.location.commondir.join(SHALLOW_FILE)
-  const update = SHALLOW_WRITERS.last.then(async () => {
+  const before = SHALLOW_WRITERS.get(path.virtual) ?? Promise.resolve()
+  const update = before.then(async () => {
     const held = new TextDecoder()
       .decode((await readOptional(repo.vfs, path)) ?? new Uint8Array())
       .split(/\s+/)
@@ -265,11 +267,16 @@ export async function addShallow(repo: Repo, oids: readonly string[]): Promise<v
       new TextEncoder().encode(lines.map((oid) => `${oid}\n`).join('')),
     )
   })
-  SHALLOW_WRITERS.last = update.then(
+  const settled = update.then(
     () => undefined,
     () => undefined,
   )
-  await update
+  SHALLOW_WRITERS.set(path.virtual, settled)
+  try {
+    await update
+  } finally {
+    if (SHALLOW_WRITERS.get(path.virtual) === settled) SHALLOW_WRITERS.delete(path.virtual)
+  }
 }
 
 /**
