@@ -188,7 +188,7 @@ export async function clone(
   const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
-    notes += await populate(ctx, transport, target, stored, local)
+    notes += await populate(ctx, transport, target, stored, local, typed)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
     // A refused checkout leaves the clone behind, as git does.
@@ -213,7 +213,8 @@ export async function clone(
 /**
  * Lay the clone out, fetch into it and check it out; returns what it prints
  * after `Cloning into`. `local` is whether the remote is a plain path, which
- * git copies whole whatever the depth, and prints `done.` after.
+ * git copies whole whatever the depth, and prints `done.` after; `typed` is
+ * `--depth` as typed, past `checkDepth`, null for the whole history.
  */
 async function populate(
   ctx: Context,
@@ -221,10 +222,10 @@ async function populate(
   target: PathSpec,
   url: string,
   local: boolean,
+  typed: string | null,
 ): Promise<string> {
   const fl = new FlagView(ctx.flags)
   const vfs = requireVfs(ctx)
-  const typed = fl.asStr('depth') ?? null
   let depth: number | null = null
   let notes = ''
   if (typed !== null && local) notes = LOCAL_DEPTH_WARNING

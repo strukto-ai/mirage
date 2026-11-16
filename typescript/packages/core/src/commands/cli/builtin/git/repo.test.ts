@@ -122,3 +122,34 @@ it('holds up no other repository behind a stalled shallow update', async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('answers branch -d in a shallow repository without reading past the cut', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-shallow-'))
+  const ws = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
+  ws.registerCli('git', GIT)
+  try {
+    native(root, ['init', '-q', '-b', 'main'])
+    for (const subject of ['first', 'second', 'third'])
+      native(root, ['commit', '-q', '--allow-empty', '-m', subject])
+    native(root, ['checkout', '-q', '-b', 'side', 'HEAD~1'])
+    native(root, ['commit', '-q', '--allow-empty', '-m', 'side'])
+    native(root, ['checkout', '-q', 'main'])
+    const second = native(root, ['rev-parse', 'HEAD~1']).trim()
+    const first = native(root, ['rev-parse', 'HEAD~2']).trim()
+    rmSync(join(root, '.git', 'objects', first.slice(0, 2), first.slice(2)))
+    await load(ws, root)
+    await ws.dispatch('write', '/repo/.git/shallow', [new TextEncoder().encode(`${second}\n`)])
+    const refused = await ws.shell('git -C /repo branch -d side')
+    expect(DEC.decode(refused.stderr)).toContain("error: the branch 'side' is not fully merged")
+    expect(refused.exitCode).toBe(1)
+    native(root, ['branch', 'merged', 'HEAD~1'])
+    await ws.dispatch('write', '/repo/.git/refs/heads/merged', [
+      new TextEncoder().encode(`${second}\n`),
+    ])
+    const deleted = await ws.shell('git -C /repo branch -d merged')
+    expect(deleted.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

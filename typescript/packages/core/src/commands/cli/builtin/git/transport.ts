@@ -188,10 +188,14 @@ export async function missingObjects(
   const trees: string[] = []
   const seen = new Set<string>()
   const queue: [string, number][] = wants.map((want) => [want, 1])
-  const take = (): [string, number] | undefined => (depth === null ? queue.pop() : queue.shift())
+  // Breadth first reads from a cursor rather than shifting, so the walk stays
+  // linear; a tag's target takes the slot the tag was just read from.
+  let head = 0
+  const take = (): [string, number] | undefined =>
+    depth === null ? queue.pop() : head < queue.length ? queue[head++] : undefined
   const now = (item: [string, number]): void => {
     if (depth === null) queue.push(item)
-    else queue.unshift(item)
+    else queue[--head] = item
   }
   for (let next = take(); next !== undefined; next = take()) {
     const [oid, level] = next
