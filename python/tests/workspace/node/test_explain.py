@@ -36,13 +36,14 @@ from mirage.policy import (
     Policy,
     Route,
     ShellNode,
+    VfsContext,
 )
 from mirage.policy.match import Outcome
 from mirage.policy.types import DryRun, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.table import whole_line_runtime
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunResult, ScriptSource
 from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -1072,6 +1073,95 @@ async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
             assert [(e.exit_code, e.stderr) for e in said if e.exit_code] == [
                 (126, await ran.stderr_str())
             ]
+    finally:
+        await ws.close()
+
+
+class _NoHostname(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        """Refuse hostname, the way a deployment's own policy would.
+
+        Args:
+            ctx (CommandContext): the classified command.
+        """
+        return Deny("no hostname") if ctx.command == "hostname" else None
+
+
+class _ReadOnly(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        """Refuse writes, a policy with no say at pre_command.
+
+        Args:
+            ctx (VfsContext): the op.
+        """
+        return Deny("read only") if ctx.write else None
+
+
+NO_HOSTNAME = """
+def pre_command(ctx):
+    if ctx['command'] == 'hostname':
+        return {'kind': 'deny', 'reason': 'no hostname'}
+    return None
+"""
+
+HIDDEN_HOSTNAME = (
+    "X=hostname; $X",
+    "sh -c 'X=hostname; $X'",
+    'eval "$(echo host)name"',
+    "H=host; eval ${H}name",
+    "echo hostname | sh",
+    "echo hostname | bash",
+    "printf hostname > /data/s; sh /data/s",
+    "source /dev/stdin <<< hostname",
+    "xargs <<< hostname",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scripted", [False, True])
+async def test_a_policy_refuses_what_a_whole_line_gate_cannot_read(scripted):
+    # Off a whole-line runtime a pre_command policy judges each command
+    # once its words are expanded; such a runtime expands them itself, so
+    # its gate refuses what it cannot read for a policy as for a rule.
+    box = _LineBox()
+    policy = {"pre_command": [{"script": ScriptSource(NO_HOSTNAME)}]}
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"policy": policy} if scripted else {}},
+        policies=[] if scripted else [_NoHostname()],
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line in HIDDEN_HOSTNAME:
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code == 126, line
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            )
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_whole_line_runs_as_typed_with_no_policy_at_pre_command():
+    # Mirage's own pre_command policies and a policy with no say at
+    # pre_command leave the line as it was: the runtime takes it whole.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        policies=[_ReadOnly()],
+        machines=[box],
+    )
+    try:
+        for line in HIDDEN_HOSTNAME:
+            assert (await ws.shell(line)).exit_code == 0, line
+        assert box.lines == list(HIDDEN_HOSTNAME)
     finally:
         await ws.close()
 

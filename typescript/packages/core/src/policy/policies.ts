@@ -38,6 +38,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
+import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
 import { composeSettled, Composition, type CompositionResult } from './composition.ts'
 import { Decisions, opQuestion } from './decisions.ts'
@@ -708,12 +709,14 @@ export class Policies {
    * counts, unless it speaks per session (`SessionScopedMixin`) and says this
    * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it, a profile's policy at that entry point is one profile's,
-   * not every session's. `codedOnly` leaves the profile's rules out, for a
-   * caller whose line's gate already answers for them.
+   * not every session's. `userOnly` leaves Mirage's own policies out: the
+   * profile's rules, for a caller whose line's gate already answers for them,
+   * and the mount-root rule.
    */
-  async wantsFor(method: PolicyMethod, sessionId: string, codedOnly = false): Promise<boolean> {
+  async wantsFor(method: PolicyMethod, sessionId: string, userOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
+    const own = (p: Policy) => p instanceof PermissionsPolicy || p instanceof MountRootPolicy
+    for (const policy of policies.filter((p) => !(userOnly && own(p)))) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(method, sessionId)) return true

@@ -24,13 +24,14 @@ import type {
   Policy,
   Route,
   ShellNode,
+  VfsContext,
 } from '../../policy/index.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { DryRun } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import { type RunResult, ScriptSource } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { ConsoleStore } from '../../shell/console/index.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
@@ -185,6 +186,30 @@ class LineBox extends Runtime implements LineExecutorMixin {
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
   }
 }
+
+const noHostname: Policy = {
+  preCommand: (ctx: CommandContext): Action | null =>
+    ctx.command === 'hostname' ? { kind: 'deny', reason: 'no hostname' } : null,
+}
+
+const NO_HOSTNAME = `
+def pre_command(ctx):
+    if ctx['command'] == 'hostname':
+        return {'kind': 'deny', 'reason': 'no hostname'}
+    return None
+`
+
+const HIDDEN_HOSTNAME = [
+  'X=hostname; $X',
+  "sh -c 'X=hostname; $X'",
+  'eval "$(echo host)name"',
+  'H=host; eval ${H}name',
+  'echo hostname | sh',
+  'echo hostname | bash',
+  'printf hostname > /data/s; sh /data/s',
+  'source /dev/stdin <<< hostname',
+  'xargs <<< hostname',
+] as const
 
 /** Every command an explained tree holds, nested scopes included. */
 function commands(node: ShellNode): CommandExplanation[] {
@@ -869,6 +894,54 @@ describe('prejudge', () => {
         [126, DEC.decode(ran.stderr)],
       ])
     }
+  })
+
+  it.each([false, true])(
+    'refuses what a whole-line gate cannot read under a policy (scripted %s)',
+    async (scripted) => {
+      // Off a whole-line runtime a preCommand policy judges each command once
+      // its words are expanded; such a runtime expands them itself, so its
+      // gate refuses what it cannot read for a policy as for a rule.
+      const box = new LineBox()
+      const preCommand = [{ runtime: 'monty', script: new ScriptSource(NO_HOSTNAME, 'python') }]
+      const w = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: { r: SessionProfile(scripted ? { policy: { pre_command: preCommand } } : {}) },
+          policies: scripted ? [] : [noHostname],
+          machines: [box],
+        },
+      )
+      open.push(w)
+      w.createSession('s', { profile: 'r' })
+      for (const line of HIDDEN_HOSTNAME) {
+        const said = await w.explain(line, 's')
+        const ran = await w.shell(line, { sessionId: 's' })
+        expect([line, ran.exitCode]).toEqual([line, 126])
+        expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
+      }
+      expect(box.lines).toEqual([])
+    },
+    30_000,
+  )
+
+  it('runs a whole line as typed with no policy at preCommand', async () => {
+    // Mirage's own preCommand policies and a policy with no say at preCommand
+    // leave the line as it was: the runtime takes it whole.
+    const box = new LineBox()
+    const readOnly: Policy = {
+      preVfs: (ctx: VfsContext) => (ctx.write ? { kind: 'deny', reason: 'read only' } : null),
+    }
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, policies: [readOnly], machines: [box] },
+    )
+    open.push(w)
+    for (const line of HIDDEN_HOSTNAME) {
+      expect([line, (await w.shell(line)).exitCode]).toEqual([line, 0])
+    }
+    expect(box.lines).toEqual([...HIDDEN_HOSTNAME])
   })
 
   it('says what a whole-line gate refuses past the chain', async () => {

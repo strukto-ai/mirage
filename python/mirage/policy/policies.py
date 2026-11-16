@@ -37,6 +37,7 @@ from mirage.errors.types import FsCondition
 from mirage.observe.context import command_records
 from mirage.policy.base import Policy
 from mirage.policy.builtin.mount_mode import MountModePolicy
+from mirage.policy.builtin.mount_root import MountRootPolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.composition import (
     Composition,
@@ -886,7 +887,7 @@ class Policies:
         return method in self._wanted
 
     async def wants_for(
-        self, method: str, session_id: str, coded_only: bool = False
+        self, method: str, session_id: str, user_only: bool = False
     ) -> bool:
         """True when some policy will speak at ``method`` for this session.
 
@@ -900,12 +901,15 @@ class Policies:
         Args:
             method (str): method name (pre_command, pre_vfs, pre_network).
             session_id (str): the session, empty when none is bound.
-            coded_only (bool): leave the profile's rules out, for a
-                caller whose line's gate already answers for them.
+            user_only (bool): leave Mirage's own policies out: the
+                profile's rules, for a caller whose line's gate already
+                answers for them, and the mount-root rule.
         """
         base = getattr(Policy, method)
         for policy in (*self._policies, *filter(None, [self._placement])):
-            if coded_only and isinstance(policy, PermissionsPolicy):
+            if user_only and isinstance(
+                policy, (PermissionsPolicy, MountRootPolicy)
+            ):
                 continue
             if getattr(type(policy), method) is base:
                 continue
