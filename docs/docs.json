@@ -542,8 +542,7 @@
                   "python/cli/git",
                   "python/cli/office",
                   "python/cli/pdftotext",
-                  "python/cli/pdfinfo",
-                  "python/cli/search"
+                  "python/cli/pdfinfo"
                 ]
               }
             ]
@@ -737,8 +736,7 @@
                   "typescript/cli/git",
                   "typescript/cli/office",
                   "typescript/cli/pdftotext",
-                  "typescript/cli/pdfinfo",
-                  "typescript/cli/search"
+                  "typescript/cli/pdfinfo"
                 ]
               }
             ]
