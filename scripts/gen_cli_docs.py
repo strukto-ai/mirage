@@ -73,7 +73,7 @@ SUMMARIES = {
         "assign, label and comment on cards"
     ),
 }
-HOME_EXCLUDED = frozenset({"search"})
+UNLISTED = frozenset({"search"})
 
 
 def commands(
@@ -139,19 +139,18 @@ def reference(cli: CLI) -> str:
     return "\n".join([*rows, END])
 
 
-def catalog(language: str, excluded: frozenset[str] = frozenset()) -> str:
-    """Render the bundled CLI inventory for an overview page.
+def catalog(language: str) -> str:
+    """Render the listed CLI inventory for an overview page.
 
     Args:
         language (str): The documentation section containing the links.
-        excluded (frozenset[str]): Programs the page leaves out.
     """
     rows = [
         START,
         "| Program | Supported operations | Commands |",
         "| --- | --- | --- |",
     ]
-    for name in sorted(set(BUILTIN_CLI_SPECS) - excluded):
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
         spec = cli_spec_for(name)
         count = sum(1 for _ in commands(spec.spec))
         rows.append(
@@ -202,9 +201,7 @@ def main() -> int:
         pages[directory / "index.mdx"] = catalog(language)
         for name in sorted(BUILTIN_CLI_SPECS):
             pages[directory / f"{name}.mdx"] = reference(cli_spec_for(name))
-    pages[ROOT / "docs/home/setup/clis.mdx"] = catalog(
-        "home/setup", HOME_EXCLUDED
-    )
+    pages[ROOT / "docs/home/setup/clis.mdx"] = catalog("home/setup")
     stale = []
     for path, block in pages.items():
         text = path.read_text()

@@ -4,8 +4,8 @@ description: "Register and discover Mirage’s supported CLIs, and use them with
 icon: wrench
 ---
 
-Mirage includes fifteen command-line programs for working with services, Git
-repositories and search mounts inside a workspace. Each program's `--help` describes the
+Mirage includes command-line programs for working with services and Git
+repositories inside a workspace. Each program's `--help` describes the
 commands and flags implemented by Mirage.
 
 The [host `mirage` CLI](/home/access/cli) connects to and manages workspaces.
@@ -29,13 +29,12 @@ The programs on this page run in those workspaces through `ws.shell(...)`,
 | [office](/typescript/cli/office) | Create and edit Excel workbooks, Word documents and PowerPoint decks with OfficeCLI paths | 9 |
 | [pdfinfo](/typescript/cli/pdfinfo) | Print a PDF's metadata, page count, page sizes, encryption and version | 1 |
 | [pdftotext](/typescript/cli/pdftotext) | Extract a PDF's text in reading order, by layout or in drawing order, page by page | 1 |
-| [search](/typescript/cli/search) | Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts for a query | 1 |
 | [slack](/typescript/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 14 |
 | [trello](/typescript/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 |
 {/* END GENERATED CLI COMMANDS */}
 
-All fifteen are available in Python and TypeScript on Node. The TypeScript Node
-package provides `hf` and `himalaya`; the other thirteen live in core. These are
+All of them are available in Python and TypeScript on Node. The TypeScript Node
+package provides `hf` and `himalaya`; the others live in core. These are
 Mirage implementations of the listed command trees, not installed copies of
 the upstream binaries. Each reference links its upstream project or service
 API and documents its supported subset, limits and relevant licenses. See
@@ -55,7 +54,7 @@ await ws.shell('slack --help')
 ```
 
 `registerCli(name, spec, config)` validates the config object with the spec's schema.
-`git` and `search` have no account config; register their `GIT` and `SEARCH` specs without the third argument.
+`git`, `office`, `pdfinfo` and `pdftotext` have no account config; register their specs without the third argument.
 Two installations of the same spec under different names can use different
 accounts. Registration is a host operation, not an agent shell command.
 
