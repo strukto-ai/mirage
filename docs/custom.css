@@ -72,6 +72,10 @@ h1#page-title {
   font-weight: 700;
 }
 
-.prose td:first-child > code {
+.prose table td:first-child {
+  min-width: 0;
+}
+
+.prose td > code {
   word-break: normal;
 }
