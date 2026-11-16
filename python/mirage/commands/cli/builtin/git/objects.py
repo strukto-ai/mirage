@@ -15,6 +15,7 @@
 import asyncio
 from io import BytesIO
 from typing import IO, Iterator, cast
+from weakref import WeakKeyDictionary
 
 from dulwich.object_format import SHA1
 from dulwich.object_store import PackCapableObjectStore
@@ -30,7 +31,6 @@ from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
-from mirage.cache.lock import KeyLock
 from mirage.commands.cli.builtin.git.constants import (
     FANOUT_LEN,
     IDX_SUFFIX,
@@ -53,9 +53,12 @@ from mirage.workspace.files import Files
 
 PACK_SUFFIX = ".pack"
 HEX_DIGITS = frozenset(b"0123456789abcdef")
-# One rewrite of a repository's ``.git/shallow`` at a time, so fetches
-# running side by side keep each other's cuts.
-SHALLOW_WRITERS = KeyLock()
+# One rewrite of ``.git/shallow`` at a time on each event loop, so fetches
+# running side by side keep each other's cuts; an asyncio lock serves the
+# loop it first waits on only.
+SHALLOW_WRITERS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    WeakKeyDictionary()
+)
 
 
 def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
@@ -467,7 +470,8 @@ async def add_shallow(
     if not oids:
         return
     path = commondir.join(SHALLOW_FILE)
-    async with SHALLOW_WRITERS.with_lock(path.virtual):
+    loop = asyncio.get_running_loop()
+    async with SHALLOW_WRITERS.setdefault(loop, asyncio.Lock()):
         held = (await read_optional(vfs, path) or b"").decode().split()
         await write_file(
             vfs,
