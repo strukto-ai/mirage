@@ -28,14 +28,14 @@ import { GWS } from '../../commands/cli/builtin/gws/index.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 
 describe('buildFileCache', () => {
-  it('defaults to RAM sized by cacheLimit', () => {
-    const cache = buildFileCache(undefined, 1024)
+  it('defaults to a 32MB RAM store', () => {
+    const cache = buildFileCache(undefined)
     expect(cache).toBeInstanceOf(RAMFileCacheStore)
-    expect(cache.cacheLimit).toBe(1024)
+    expect(cache.cacheLimit).toBe(32 * 1024 * 1024)
   })
 
-  it('a config limit wins over the legacy cacheLimit knob', () => {
-    const cache = buildFileCache({ type: CacheType.RAM, limit: 2048 }, 1024)
+  it('sizes the RAM store by the config limit', () => {
+    const cache = buildFileCache({ type: CacheType.RAM, limit: 2048 })
     expect(cache.cacheLimit).toBe(2048)
   })
 

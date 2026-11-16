@@ -36,10 +36,6 @@ impl Doc {
         }
     }
 
-    fn has(&self, name: &str) -> bool {
-        matches!(self, Self::Map(fields) if fields.iter().any(|(key, _)| key.named(name)))
-    }
-
     fn list(&self, where_: &str, expected: &str) -> Result<&[Doc], String> {
         match self {
             Self::Null => Ok(&[]),
@@ -461,13 +457,6 @@ fn store(raw: &Doc) -> Result<(), String> {
             ));
         }
     }
-    for (old, new) in [("observer", "logs"), ("workspace", "sessions")] {
-        if raw.has(old) {
-            return Err(format!(
-                "config `store.{old}` is now `store.{new}`; rename the key"
-            ));
-        }
-    }
     config_fields(
         raw,
         &[
@@ -810,27 +799,6 @@ mod tests {
             )]))
             .unwrap_err()
             .contains("cannot be redis")
-        );
-        assert!(
-            store(&object(vec![(
-                "observer",
-                object(vec![("type", Doc::text("disk"))])
-            )]))
-            .unwrap_err()
-            .contains("`store.observer` is now `store.logs`")
-        );
-        assert!(
-            store(&object(vec![(
-                "workspace",
-                object(vec![("type", Doc::text("disk"))])
-            )]))
-            .unwrap_err()
-            .contains("`store.workspace` is now `store.sessions`")
-        );
-        assert!(
-            store(&object(vec![("observer", Doc::Null)]))
-                .unwrap_err()
-                .contains("`store.observer` is now `store.logs`")
         );
         assert!(
             store(&object(vec![(

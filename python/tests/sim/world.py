@@ -21,6 +21,7 @@ from typing import Any, TypeVar
 from pydantic import SecretStr
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.cache.file.config import CacheConfig
 from mirage.core.github.config import GitHubConfig
 from mirage.shell.join import shell_join
 from mirage.utils.ids import SeededIdSource
@@ -354,7 +355,7 @@ class Sim:
         workspace = Workspace(
             mount_map,
             mode=MountMode.WRITE,
-            cache_limit=cache_limit,
+            cache=CacheConfig(limit=cache_limit),
             clock=clock,
             ids=SeededIdSource(ids_seed, clock),
         )

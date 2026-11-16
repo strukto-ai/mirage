@@ -63,9 +63,6 @@ export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'workers',
 ])
 export const DEFAULT_RATE_LIMITS = 'ip=1000/minute'
-export const RENAMED_KEYS: Readonly<Record<string, string>> = {
-  jwt_clock_skew: 'jwt_clock_skew_seconds',
-}
 
 export class DaemonConfigError extends Error {
   constructor(message: string) {
@@ -74,18 +71,7 @@ export class DaemonConfigError extends Error {
   }
 }
 
-/** Name the new key for a `[daemon]` key under its old name. */
-export function renamedKeyMessage(key: string): string {
-  return `config.toml: \`daemon.${key}\` is now \`daemon.${RENAMED_KEYS[key] ?? ''}\`; rename the key`
-}
-
 export function validateDaemonTable(table: Record<string, string>): void {
-  const renamed = Object.keys(table)
-    .filter((k) => Object.hasOwn(RENAMED_KEYS, k))
-    .sort(compareCodePoints)
-  if (renamed.length > 0) {
-    throw new DaemonConfigError(renamed.map(renamedKeyMessage).join('; '))
-  }
   const unknown = Object.keys(table)
     .filter((k) => !ALLOWED_KEYS.has(k))
     .sort(compareCodePoints)

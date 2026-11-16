@@ -3293,7 +3293,7 @@ def test_a_policy_is_a_block_not_a_path():
 
 
 def test_a_policy_names_its_programs_per_method():
-    with pytest.raises(ValidationError, match="per method"):
+    with pytest.raises(ValidationError, match="names runtime, script"):
         SessionProfile.model_validate(
             {"policy": {"script": ScriptSource("pass"), "runtime": "monty"}}
         )
@@ -3305,20 +3305,6 @@ def test_a_policy_names_its_programs_per_method():
     )
     assert profile.policy is not None
     assert sorted(profile.policy) == ["post_vfs", "pre_vfs"]
-
-
-def test_the_old_script_and_runtime_keys_are_told_where_they_went():
-    # Shipped first as `script` with `runtime` beside it; the refusal
-    # says where they went.
-    with pytest.raises(ValidationError, match="now a policy block"):
-        SessionProfile.model_validate(
-            {
-                "script": ScriptSource("None"),
-                "runtime": "monty",
-            }
-        )
-    with pytest.raises(ValidationError, match="now a policy block"):
-        SessionProfile.model_validate({"runtime": "monty"})
 
 
 def test_explicit_null_reason_is_refused():

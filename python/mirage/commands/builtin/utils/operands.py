@@ -189,7 +189,7 @@ async def split_in_order(
         if isinstance(st, Exception):
             order.append(encode_text(fs_error_line(cmd_name, p, st)))
             continue
-        if getattr(st, "type", None) == FileType.DIRECTORY:
+        if st.type == FileType.DIRECTORY:
             order.append(encode_text(fs_error_line(cmd_name, p, eisdir(p))))
             continue
         order.append(p)
@@ -316,7 +316,7 @@ async def split_opened(
                 continue
             unread[p.raw_path] = line
         else:
-            if getattr(st, "type", None) == FileType.DIRECTORY:
+            if st.type == FileType.DIRECTORY:
                 unread[p.raw_path] = encode_text(
                     fs_error_line(cmd_name, p, eisdir(p))
                 )

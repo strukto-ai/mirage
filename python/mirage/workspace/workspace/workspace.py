@@ -345,7 +345,6 @@ class Workspace:
     def __init__(
         self,
         mounts: dict[str, VFSMount],
-        cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
         max_body_bytes: str | int | None = None,
         max_env: str | int | None = MAX_ENV,
@@ -439,7 +438,7 @@ class Workspace:
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
         self._cache: FileCacheMixin = build_file_cache(
-            cache, cache_limit, self._clock, self._workspace_id
+            cache, self._clock, self._workspace_id
         )
         self._index_config = index
         self._closed = False

@@ -90,7 +90,6 @@ export interface WorkspaceOptions {
    */
   driftPolicy?: DriftPolicy
   sessionId?: string
-  cacheLimit?: string | number
   /**
    * What the RAM mounts store and what a command builds may hold together, a
    * size like `32MB` or a count of bytes; null runs uncapped. Defaults to

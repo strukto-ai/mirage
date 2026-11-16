@@ -589,20 +589,6 @@ class SessionProfile(BaseModel):
             check_command_limits(v, "profile", takes_line=True)
         return v
 
-    @model_validator(mode="before")
-    @classmethod
-    def _v_script_is_policy(cls, data: Any) -> Any:
-        # The keys this was first shipped under, a `script` named for
-        # what the file is rather than what it does and a `runtime`
-        # beside it that read as the profile's own; refused with the new
-        # spelling rather than as two more unknown keys.
-        if isinstance(data, dict) and ("script" in data or "runtime" in data):
-            raise ValueError(
-                "script and runtime are now a policy block, policy: "
-                "{pre_command: [{script: <file>, runtime: <runtime>}]}"
-            )
-        return data
-
     @field_validator("policy", mode="before")
     @classmethod
     def _v_policy(cls, v: Any) -> Any:
@@ -610,11 +596,6 @@ class SessionProfile(BaseModel):
             return None
         if not isinstance(v, Mapping):
             raise ValueError("policy must be a mapping of method to programs")
-        if "script" in v or "runtime" in v:
-            raise ValueError(
-                "policy names its programs per method, policy: "
-                "{pre_command: [{script: <file>, runtime: <runtime>}]}"
-            )
         unknown = sorted(str(k) for k in v if k not in METHODS)
         if unknown:
             raise ValueError(

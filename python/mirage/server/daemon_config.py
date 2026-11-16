@@ -70,26 +70,10 @@ NUMERIC_KEYS = frozenset(
 # "256MB".
 SIZE_KEYS = frozenset({"max_memory", "max_env"})
 DEFAULT_RATE_LIMITS = "ip=1000/minute"
-RENAMED_KEYS = {"jwt_clock_skew": "jwt_clock_skew_seconds"}
 
 
 class DaemonConfigError(Exception):
     """Raised when config.toml's ``[daemon]`` table is unusable."""
-
-
-def renamed_key_message(key: str) -> str:
-    """Name the new key for a ``[daemon]`` key under its old name.
-
-    Args:
-        key (str): a key in :data:`RENAMED_KEYS`.
-
-    Returns:
-        str: the message telling the user to rename it.
-    """
-    return (
-        f"config.toml: `daemon.{key}` is now "
-        f"`daemon.{RENAMED_KEYS[key]}`; rename the key"
-    )
 
 
 def validate_daemon_table(table: dict[str, Any]) -> None:
@@ -99,14 +83,8 @@ def validate_daemon_table(table: dict[str, Any]) -> None:
         table (dict): parsed ``[daemon]`` table.
 
     Raises:
-        DaemonConfigError: naming the new key for a renamed one, else
-            every offending key.
+        DaemonConfigError: naming every offending key.
     """
-    renamed = sorted(set(table) & RENAMED_KEYS.keys())
-    if renamed:
-        raise DaemonConfigError(
-            "; ".join(renamed_key_message(k) for k in renamed)
-        )
     unknown = sorted(set(table) - ALLOWED_KEYS)
     if unknown:
         raise DaemonConfigError(

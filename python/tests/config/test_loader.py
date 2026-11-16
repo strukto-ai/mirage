@@ -1614,19 +1614,6 @@ profiles:
     assert release.policy["pre_command"][0].runtime == "monty"
 
 
-def test_a_profile_written_with_script_is_told_where_the_keys_went(tmp_path):
-    cfg_file = tmp_path / "ws.yaml"
-    cfg_file.write_text("""\
-mounts:
-  /data:
-    vfs: ram
-profiles:
-  release: {script: roles/x.py, runtime: monty}
-""")
-    with pytest.raises(ValueError, match="now a policy block"):
-        load_config(cfg_file)
-
-
 def test_env_block_literal_and_managed_entries(tmp_path):
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\

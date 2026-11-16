@@ -1201,23 +1201,6 @@ async def test_a_runtime_policies_do_not_run_on_fails_closed():
         await ws.close()
 
 
-def test_the_old_script_and_runtime_keys_are_told_the_new_block():
-    # Shipped first as `script` with `runtime` beside it, a word for
-    # what the file is rather than what it does and an engine that read
-    # as the profile's own; the refusal says where they went.
-    with pytest.raises(ValueError, match="now a policy block"):
-        Workspace(
-            {"/data/": RAMVFS()},
-            mode=MountMode.WRITE,
-            profiles={
-                "release": {
-                    "script": ScriptSource(JUDGE),
-                    "runtime": "monty",
-                }
-            },
-        )
-
-
 @pytest.mark.asyncio
 async def test_a_program_returning_something_else_fails_closed():
     # Anything but an answer or None is refused rather than guessed at.

@@ -239,7 +239,7 @@ describe('the write policy at the workspace entry points', () => {
     ['cannot honour', {}, () => new RAMVFS(), 'conditional', 'ram does not'],
     ['inherits', { write: WritePolicy.CONDITIONAL }, s3Vfs, undefined, WritePolicy.CONDITIONAL],
     ['inherits on null', { write: WritePolicy.CONDITIONAL }, s3Vfs, null, WritePolicy.CONDITIONAL],
-    ['keeps nothing', { cacheLimit: 0 }, s3Vfs, 'conditional', 'caches reads'],
+    ['keeps nothing', { cache: { limit: 0 } }, s3Vfs, 'conditional', 'caches reads'],
   ] as const)(
     'judges an added mount on its write policy: %s',
     (_name, options, vfs, write, expected) => {
@@ -264,7 +264,7 @@ describe('the write policy at the workspace entry points', () => {
 
   it('refuses a conditional mount when the cache keeps nothing', () => {
     // A zero cache limit keeps nothing, so no write would have a version.
-    expect(() => new Workspace({ '/s3': conditionalS3() }, { cacheLimit: 0 })).toThrow(
+    expect(() => new Workspace({ '/s3': conditionalS3() }, { cache: { limit: 0 } })).toThrow(
       'caches reads',
     )
   })

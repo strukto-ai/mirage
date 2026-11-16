@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage import Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.shell.constants import BIN_PREFIX
@@ -222,7 +223,7 @@ def _gridfs() -> GridFSVFS:
         ({}, _s3, "conditional", WritePolicy.CONDITIONAL),
         ({}, _gridfs, "conditional", "gridfs does not"),
         ({"write": "conditional"}, _s3, None, WritePolicy.CONDITIONAL),
-        ({"cache_limit": 0}, _s3, "conditional", "caches reads"),
+        ({"cache": CacheConfig(limit=0)}, _s3, "conditional", "caches reads"),
     ],
     ids=["names", "cannot-honour", "inherits", "keeps-nothing"],
 )
@@ -262,5 +263,5 @@ async def test_a_conditional_mount_needs_a_cache_that_keeps_reads():
     with pytest.raises(ValueError, match="caches reads"):
         Workspace(
             {"/s3": Mount(_s3(), mode=MountMode.WRITE, write="conditional")},
-            cache_limit=0,
+            cache=CacheConfig(limit=0),
         )

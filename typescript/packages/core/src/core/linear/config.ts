@@ -20,7 +20,6 @@ import { timeoutShape } from '../api/config.ts'
 export const LinearConfig = z.object({
   ...timeoutShape,
   apiKey: secretStr().describe('Linear personal API key.'),
-  workspace: z.string().optional().describe('Accepted for compatibility; not read.'),
   teamIds: z
     .array(z.string())
     .readonly()

@@ -975,8 +975,7 @@ async def _restore_sessions(
 
 def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     cache_state = state.get(StateKey.CACHE) or {}
-    if hasattr(ws.cache, "max_drain_bytes"):
-        ws.cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
+    ws.cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
     cache = ws.cache
     if not isinstance(cache, RAMFileCacheStore):
         # Non-RAM cache backend (e.g. Redis) — skip; its content lives

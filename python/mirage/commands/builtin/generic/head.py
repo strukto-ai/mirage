@@ -283,11 +283,8 @@ async def head_generic(
 
             async def bounded() -> AsyncIterator[bytes]:
                 try:
-                    if (
-                        getattr(await stat(p), "type", None)
-                        is FileType.CHAR_DEVICE
-                        and parsed.bytes_ is None
-                    ):
+                    kind = (await stat(p)).type
+                    if kind is FileType.CHAR_DEVICE and parsed.bytes_ is None:
                         async for chunk in truncate_stream(
                             source, io, Limit(max_bytes=CHAR_DEVICE_MAX_BYTES)
                         ):

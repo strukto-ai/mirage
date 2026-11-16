@@ -49,9 +49,7 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  * including its failure mode: asking for a store whose package has not
  * been loaded names the package rather than silently degrading to RAM.
  *
- * @param cache the cache config; undefined keeps the RAM store sized by
- *   `cacheLimit`.
- * @param cacheLimit the size knob used only when no config is given.
+ * @param cache the cache config; undefined keeps the default RAM store.
  * @param clock the clock the RAM store ages entries on. A registered
  *   store takes none: redis expires its keys server-side.
  * @param workspaceId scopes a redis store whose config names no prefix, so
@@ -60,7 +58,6 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  */
 export function buildFileCache(
   cache: CacheConfig | undefined,
-  cacheLimit: string | number = '32MB',
   clock?: Clock,
   workspaceId?: string,
 ): FileCacheStore {
@@ -94,7 +91,7 @@ export function buildFileCache(
     })
   }
   return new RAMFileCacheStore({
-    limit: normalized?.limit ?? cacheLimit,
+    ...(normalized?.limit === undefined ? {} : { limit: normalized.limit }),
     maxDrainBytes: normalized?.maxDrainBytes ?? null,
     ...(clock === undefined ? {} : { clock }),
   })

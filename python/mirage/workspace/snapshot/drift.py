@@ -387,7 +387,7 @@ async def check_drift(
         raise ContentDriftError(path, recorded, None) from exc
     if mount_for(path) is not mount:
         return
-    live = getattr(stat, "fingerprint", None)
+    live = stat.fingerprint
     if live is None:
         return
     if live != recorded:

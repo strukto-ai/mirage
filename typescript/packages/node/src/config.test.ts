@@ -1775,24 +1775,6 @@ describe('CLI to daemon round trip', () => {
     expect(only?.runtime).toBe('monty')
     rmSync(dir, { recursive: true, force: true })
   })
-
-  it('tells a profile written with script and runtime where the keys went', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
-    const file = join(dir, 'w.yaml')
-    writeFileSync(
-      file,
-      [
-        'mounts:',
-        '  /data:',
-        '    vfs: ram',
-        'profiles:',
-        '  release: {script: roles/x.js, runtime: quickjs}',
-        '',
-      ].join('\n'),
-    )
-    expect(() => checkWorkspaceConfigFile(file)).toThrow(/now a policy block/)
-    rmSync(dir, { recursive: true, force: true })
-  })
 })
 
 // integ/fixtures/config/*.json are the contract: the python suite
