@@ -914,6 +914,7 @@
     "overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
    },
    "typescript_only": {
+    "grafted": "A shallow repository's boundary commit read parentless, at each isomorphic-git commit read; Python grafts it once where its object store parses the commit (objects.GraftedCommit).",
     "refOid": "isomorphic-git has no ref table to hand a circling chain to, so each resolve goes through this; Python overrides follow on the one RefTable.",
     "storedItems": "isomorphic-git's tree reader refuses a whole tree over one reserved name, so TypeScript parses the stored bytes; dulwich's Tree parses every name."
    }

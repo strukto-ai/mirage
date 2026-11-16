@@ -42,7 +42,6 @@ from mirage.commands.cli.builtin.git.ref_list import (
 from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
     resolve_object,
-    shallow_commits,
 )
 from mirage.commands.cli.builtin.git.seen import shown_entries
 from mirage.commands.cli.builtin.git.session import opened
@@ -169,11 +168,7 @@ def _names_of(
     return chosen
 
 
-def _parents_of(
-    commit: Commit, first_parent: bool, shallow: set[bytes]
-) -> list[ObjectID]:
-    if commit.id in shallow:
-        return []
+def _parents_of(commit: Commit, first_parent: bool) -> list[ObjectID]:
     return commit.parents[:1] if first_parent else commit.parents
 
 
@@ -181,7 +176,6 @@ def _reach(
     repo: BaseRepo,
     start: ObjectID,
     first_parent: bool,
-    shallow: set[bytes],
 ) -> set[ObjectID]:
     """Every commit a walk from one commit reaches, itself included.
 
@@ -189,14 +183,13 @@ def _reach(
         repo (BaseRepo): the opened repository.
         start (ObjectID): where the walk starts.
         first_parent (bool): whether to follow first parents only.
-        shallow (set[bytes]): the commits whose parents are absent.
     """
     seen = {start}
     pending = [start]
     while pending:
         commit = repo.object_store[pending.pop()]
         assert isinstance(commit, Commit)
-        for parent in _parents_of(commit, first_parent, shallow):
+        for parent in _parents_of(commit, first_parent):
             if parent not in seen:
                 seen.add(parent)
                 pending.append(parent)
@@ -209,7 +202,6 @@ def _nearest(
     names: dict[ObjectID, _Name],
     limit: int,
     first_parent: bool,
-    shallow: set[bytes],
 ) -> tuple[_Name, int] | None:
     """The name closest to a commit and how many commits lie past it.
 
@@ -223,7 +215,6 @@ def _nearest(
         names (dict[ObjectID, _Name]): the best name of each commit.
         limit (int): how many names to weigh.
         first_parent (bool): whether to follow first parents only.
-        shallow (set[bytes]): the commits whose parents are absent.
     """
     queue = [(-target.commit_time, target.id)]
     seen = {target.id}
@@ -234,7 +225,7 @@ def _nearest(
             met.append(names[oid])
         commit = repo.object_store[oid]
         assert isinstance(commit, Commit)
-        for parent in _parents_of(commit, first_parent, shallow):
+        for parent in _parents_of(commit, first_parent):
             if parent in seen:
                 continue
             seen.add(parent)
@@ -243,10 +234,10 @@ def _nearest(
             heapq.heappush(queue, (-found.commit_time, parent))
     if not met:
         return None
-    reached = _reach(repo, target.id, first_parent, shallow)
+    reached = _reach(repo, target.id, first_parent)
     best: tuple[_Name, int] | None = None
     for name in met:
-        depth = len(reached - _reach(repo, name.commit, first_parent, shallow))
+        depth = len(reached - _reach(repo, name.commit, first_parent))
         if best is None or depth < best[1]:
             best = (name, depth)
     return best
@@ -263,7 +254,6 @@ def _described(
     fl: FlagView,
     width: int,
     lightweight: dict[ObjectID, _Name],
-    shallow: set[bytes],
 ) -> str:
     """One commit's description.
 
@@ -275,7 +265,6 @@ def _described(
         width (int): the digits of the commit's id; 0 drops the suffix.
         lightweight (dict[ObjectID, _Name]): every tag, when the line
             left the lightweight ones out.
-        shallow (set[bytes]): the commits whose parents are absent.
 
     Raises:
         GitError: no name describes it.
@@ -292,7 +281,6 @@ def _described(
             names,
             candidates,
             fl.as_bool("first_parent"),
-            shallow,
         )
     if found is None:
         if exact or candidates == 0:
@@ -307,7 +295,6 @@ def _described(
             lightweight,
             DEFAULT_CANDIDATES,
             fl.as_bool("first_parent"),
-            shallow,
         ):
             raise GitError(
                 f"No annotated tags can describe '{oid}'.\n"
@@ -337,7 +324,6 @@ def _describe_all(
     light = fl.as_bool("all") or fl.as_bool("tags")
     names = _names_of(repo, fl, light)
     lightweight = {} if light else _names_of(repo, fl, True)
-    shallow = shallow_commits(repo)
     lines = []
     for revision in revisions:
         try:
@@ -354,7 +340,6 @@ def _describe_all(
                 fl,
                 width,
                 lightweight,
-                shallow,
             )
         )
     return lines

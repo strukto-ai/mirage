@@ -26,7 +26,7 @@ import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
-import { objectType, openRepo, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
+import { grafted, objectType, openRepo, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
@@ -170,7 +170,7 @@ export async function missingObjects(
     else if (type === 'commit') {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
       trees.push(commit.tree)
-      for (const item of commit.parent) stack.push(item)
+      for (const item of grafted(repo, oid, commit.parent)) stack.push(item)
     }
   }
   const held = new Set<string>()

@@ -17,13 +17,20 @@ import git, { Errors } from 'isomorphic-git'
 import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import { configValues, gitFs } from './fs.ts'
-import { exists, readNames, readRange, writeFile } from './io.ts'
+import { exists, readNames, readOptional, readRange, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import { GITLINK_MODE, IDX_SUFFIX, OBJECTS_DIR, PACK_DIR, TREE_MODE } from './constants.ts'
+import {
+  GITLINK_MODE,
+  IDX_SUFFIX,
+  OBJECTS_DIR,
+  PACK_DIR,
+  SHALLOW_FILE,
+  TREE_MODE,
+} from './constants.ts'
 import { GitError } from './errors.ts'
 import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -59,6 +66,8 @@ export interface Repo {
   readonly cache: Record<symbol, unknown>
   /** How many hex digits this repository abbreviates an id to. */
   readonly abbrev: number
+  /** The commits `.git/shallow` lists, read as parentless (`grafted`). */
+  readonly shallow: ReadonlySet<string>
   /** Blobs this invocation hashed from the working tree and never wrote. */
   readonly held: Map<string, Uint8Array>
   /**
@@ -263,12 +272,19 @@ export async function openRepo(
     if (head.byteLength < 4) continue
     packed += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
   }
+  const shallow = await readOptional(vfs, location.commondir.join(SHALLOW_FILE))
   return {
     fs: gitFs(vfs, location),
     vfs,
     location,
     cache: {},
     abbrev: abbrevLength(packed),
+    shallow: new Set(
+      new TextDecoder()
+        .decode(shallow ?? new Uint8Array())
+        .split(/\s+/)
+        .filter(Boolean),
+    ),
     held: new Map(),
     ambiguous,
     places: new Map(),
@@ -288,6 +304,16 @@ export async function openRepo(
  */
 export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array> {
   return repo.held.get(oid) ?? (await git.readBlob({ ...repoArgs(repo), oid })).blob
+}
+
+/**
+ * A commit's parents as git reads them: none for a shallow repository's
+ * boundary commit, which git grafts parentless when it parses one, while the
+ * raw bytes `cat-file` prints keep their `parent` lines. Mirrors Python's
+ * VfsObjectStore graft.
+ */
+export function grafted(repo: Repo, oid: string, parents: readonly string[]): string[] {
+  return repo.shallow.has(oid) ? [] : [...parents]
 }
 
 /**
@@ -357,7 +383,11 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
     committerEmail: committer.email,
     committerTime: committer.timestamp,
     committerTimezoneMinutes: committer.offset,
-    parents: headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7)),
+    parents: grafted(
+      repo,
+      object.oid,
+      headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7)),
+    ),
   }
 }
 

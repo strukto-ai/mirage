@@ -64,6 +64,11 @@ PACK_DIR = "objects/pack"
 IDX_SUFFIX = ".idx"
 FANOUT_LEN = 2
 
+# The commits a shallow repository holds without their parents, and
+# the label git decorates each of them with.
+SHALLOW_FILE = "shallow"
+GRAFTED = "grafted"
+
 # The pretty kinds a placeholder template spells, and the kinds that end
 # every entry with a newline rather than separating entries by one.
 TEMPLATE_KINDS = ("format", "tformat")
