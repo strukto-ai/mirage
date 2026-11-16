@@ -23,9 +23,11 @@ from mirage.execution.process.types import Process
 from mirage.execution.types import MachineName
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.runtime.types import RunResult
 
 
@@ -187,11 +189,14 @@ async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     assert (batched.parent, batched.program) == (int(pid), True)
 
 
-# A runtime the workspace reaches runs its program in its shell's process.
+# A runtime the workspace reaches runs its program as a process of its
+# own as well, and an engine in Mirage's process names the in_process
+# machine of its entry, so ps, kill and wait see it as any machine's.
 @pytest.mark.asyncio
-async def test_a_program_the_workspace_reaches_stays_in_its_shell():
+async def test_a_program_the_workspace_reaches_is_a_process_of_its_own():
     process, line = await _seen("echo $$; probe", "workspace")
-    assert (process.pid, process.program) == (int(line), False)
+    assert (process.parent, process.program) == (int(line), True)
+    assert MontyRuntime().machine == MachineName(IN_PROCESS, "monty")
 
 
 # A program's process stopped with its shell ends by the shell's signal.

@@ -20,7 +20,9 @@ import { MachineName } from '../execution/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { Runtime } from './base.ts'
+import { IN_PROCESS } from './constants.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from './mixin.ts'
+import { MontyRuntime } from './python/monty/runtime.ts'
 import type { RunResult, RuntimeReach } from './types.ts'
 
 const DEC = new TextDecoder()
@@ -162,10 +164,13 @@ describe('Runtime.execute', () => {
     expect([batched.parent, batched.program]).toEqual([Number(xargs), true])
   })
 
-  // A runtime the workspace reaches runs its program in its shell's process.
-  it('keeps a program the workspace reaches in its shell', async () => {
+  // A runtime the workspace reaches runs its program as a process of its own
+  // as well, and an engine in Mirage's process names the in_process machine of
+  // its entry, so ps, kill and wait see it as any machine's.
+  it('runs a program the workspace reaches as a process of its own', async () => {
     const [process, line] = await seen('echo $$; probe', 'workspace')
-    expect([process.id.pid, process.program]).toEqual([Number(line), false])
+    expect([process.parent, process.program]).toEqual([Number(line), true])
+    expect(new MontyRuntime().machine).toEqual(new MachineName(IN_PROCESS, 'monty'))
   })
 
   // A program's process stopped with its shell ends by the shell's signal.

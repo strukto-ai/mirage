@@ -21,7 +21,7 @@ import {
 } from '../context/session_context.ts'
 import { isAborting } from '../errors/fs.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
-import type { MachineName } from '../execution/types.ts'
+import { MachineName } from '../execution/types.ts'
 import { SharedInput } from '../io/async_line_iterator.ts'
 import { liveEgress } from '../io/gateway.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../shell/constants.ts'
@@ -36,7 +36,7 @@ import {
   type RuntimeConfig,
   type RuntimeOptions,
 } from './config.ts'
-import { expandCaptures } from './constants.ts'
+import { IN_PROCESS, expandCaptures } from './constants.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
@@ -114,11 +114,11 @@ export abstract class Runtime<E = unknown> {
 
   /**
    * The machine this runtime runs its programs on, which their process
-   * records name; null for the workspace's own.
+   * records name: an engine in Mirage's process is the `in_process` machine
+   * of its entry's name.
    */
-  // eslint-disable-next-line @typescript-eslint/class-literal-property-style
   get machine(): MachineName | null {
-    return null
+    return new MachineName(IN_PROCESS, this.name)
   }
 
   /**
@@ -214,16 +214,17 @@ export abstract class Runtime<E = unknown> {
   }
 
   /**
-   * Run a program past the workspace's reach as a process of its own, as
-   * bash forks one: the process started for it when it is that process's
+   * Run a program as a process of its own, as bash forks one: the process
+   * started for it when it is that process's
    * one command (`ProcessHandle.take`) or the last a forked shell runs
    * (`endsLine`), as bash execs it in the shell's place, else a child of the
    * running one, in its group, on this runtime's machine. Its record names
    * the processes its command's substitutions started, each `<( )` by its
    * descriptor (`fd`), each `$( )` as part of its arguments (`argv`), and the
-   * stage writing its pipe while it reads its stage's (`stdin`). A run the
-   * workspace reaches stays
-   * in its shell's process, as does one outside a process. A child stopped
+   * stage writing its pipe while it reads its stage's (`stdin`). An engine in
+   * Mirage's own process runs as one too, on its `in_process` machine, so
+   * `ps`, `kill` and `wait` see its runs as they see any machine's; a run
+   * outside a process stays where it is. A child stopped
    * with its shell gets the signal the shell was stopped with, or the
    * interrupt it took; one stopped alone answers 128 plus its signal, and
    * its shell goes on. Mirrors Python's `Runtime._as_program`.
@@ -241,10 +242,9 @@ export abstract class Runtime<E = unknown> {
   ): Promise<RunResult> {
     const processes = this.binding?.processes ?? null
     const { process: shell, session, evaluation } = currentCaller()
-    if (this.reach === 'workspace' || processes === null || shell == null || session == null)
-      return run(ctx)
     const machine = this.machine
-    const instance = machine === null ? null : (processes.machineInstance?.(machine) ?? null)
+    if (machine === null || processes === null || shell == null || session == null) return run(ctx)
+    const instance = processes.machineInstance?.(machine) ?? null
     const line = ctx.flags.c
     const command =
       kind === 'line' && typeof line === 'string'
