@@ -282,8 +282,7 @@
                   "home/setup/cli/git",
                   "home/setup/cli/office",
                   "home/setup/cli/pdftotext",
-                  "home/setup/cli/pdfinfo",
-                  "home/setup/cli/search"
+                  "home/setup/cli/pdfinfo"
                 ]
               }
             ]
