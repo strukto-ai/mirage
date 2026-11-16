@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
+import { HIMALAYA } from '../../../commands/cli/builtin/himalaya/index.ts'
 import { cliSpecFor } from '../../../commands/cli/specs.ts'
+import type { CommandContext } from '../../../policy/types.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { DeviceInput } from '../../../io/types.ts'
@@ -145,6 +147,62 @@ describe('programTokens', () => {
         ['status', 'value', '-C'],
         ['log', 'subcommand', null],
       ])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('commandWords', () => {
+  it.each([
+    [
+      'himalaya message reply 1 --attach ../../slack/export.csv',
+      '../../slack/export.csv',
+      '--attach',
+    ],
+    [
+      'himalaya message reply 1 --attach=../../slack/export.csv',
+      '--attach=../../slack/export.csv',
+      '--attach',
+    ],
+    ['git -C ../../slack/export.csv log', '../../slack/export.csv', '-C'],
+    ['git -C../../slack/export.csv log', '-C../../slack/export.csv', '-C'],
+    ['pdfinfo ../../slack/export.csv', '../../slack/export.csv', null],
+    ['tar -cf ../../slack/export.csv a.txt', '../../slack/export.csv', '-cf'],
+    ['tar -cf../../slack/export.csv a.txt', '-cf../../slack/export.csv', '-cf'],
+  ])('a path word names the path paths holds: %s', async (line, text, option) => {
+    const seen: CommandContext[] = []
+    const ws = new Workspace(
+      { '/workspace': new RAMVFS(), '/slack': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        policies: [
+          {
+            preCommand(ctx) {
+              if (ctx.command === 'cd' || ctx.command === 'mkdir') return null
+              seen.push(ctx)
+              return { kind: 'deny', reason: 'captured' }
+            },
+          },
+        ],
+      },
+    )
+    try {
+      ws.registerCli('git', cliSpecFor('git'))
+      ws.registerCli('pdfinfo', cliSpecFor('pdfinfo'))
+      ws.registerCli('himalaya', HIMALAYA, {
+        imap_host: 'h',
+        smtp_host: 'h',
+        username: 'u',
+        password: 'p',
+      })
+      await ws.shell('mkdir -p /workspace/outbox')
+      await ws.shell('cd /workspace/outbox')
+      await ws.shell(line)
+      const ctx = seen[seen.length - 1]
+      const word = ctx?.words?.find((w) => w.text === text)
+      expect([word?.option, word?.toDict().path]).toEqual([option, '/slack/export.csv'])
+      expect(ctx?.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
     } finally {
       await ws.close()
     }

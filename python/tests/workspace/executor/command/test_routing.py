@@ -14,10 +14,14 @@
 
 import pytest
 
+from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import DeviceInput
+from mirage.policy import Deny
+from mirage.policy.base import Policy
+from mirage.policy.types import CommandContext
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -253,5 +257,78 @@ async def test_rg_searches_the_cwd_when_stdin_is_a_device():
         )
         assert operand is not None and operand.raw_path == ""
         assert default_cwd_operand(["rg", "a"], "rg", reg, "/ram", b"") is None
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, text, option",
+    [
+        (
+            "himalaya message reply 1 --attach ../../slack/export.csv",
+            "../../slack/export.csv",
+            "--attach",
+        ),
+        (
+            "himalaya message reply 1 --attach=../../slack/export.csv",
+            "--attach=../../slack/export.csv",
+            "--attach",
+        ),
+        ("git -C ../../slack/export.csv log", "../../slack/export.csv", "-C"),
+        ("git -C../../slack/export.csv log", "-C../../slack/export.csv", "-C"),
+        ("pdfinfo ../../slack/export.csv", "../../slack/export.csv", None),
+        (
+            "tar -cf ../../slack/export.csv a.txt",
+            "../../slack/export.csv",
+            "-cf",
+        ),
+        (
+            "tar -cf../../slack/export.csv a.txt",
+            "-cf../../slack/export.csv",
+            "-cf",
+        ),
+    ],
+)
+async def test_a_path_word_names_the_path_paths_holds(
+    line: str, text: str, option: str | None
+):
+    seen: list[CommandContext] = []
+
+    class Capture(Policy):
+        def pre_command(self, ctx: CommandContext) -> Deny | None:
+            if ctx.command in ("cd", "mkdir"):
+                return None
+            seen.append(ctx)
+            return Deny("captured")
+
+    ws = Workspace(
+        {"/workspace": RAMVFS(), "/slack": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[Capture()],
+    )
+    try:
+        ws.register_cli("git", cli_spec_for("git"))
+        ws.register_cli("pdfinfo", cli_spec_for("pdfinfo"))
+        ws.register_cli(
+            "himalaya",
+            HIMALAYA,
+            {
+                "imap_host": "h",
+                "smtp_host": "h",
+                "username": "u",
+                "password": "p",
+            },
+        )
+        await ws.shell("mkdir -p /workspace/outbox")
+        await ws.shell("cd /workspace/outbox")
+        await ws.shell(line)
+        ctx = seen[-1]
+        word = next(w for w in ctx.words if w.text == text)
+        assert (word.option, word.to_dict()["path"]) == (
+            option,
+            "/slack/export.csv",
+        )
+        assert "/slack/export.csv" in [p.virtual for p in ctx.paths]
     finally:
         await ws.close()
