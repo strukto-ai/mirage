@@ -172,6 +172,7 @@ and `ls-tree` provide inspection without a host Git process. Run each command's
 ```bash
 git clone /repo /work/copy
 git clone https://github.com/acme/tools.git /work/tools
+git clone --depth 1 https://github.com/acme/tools.git /work/latest
 git -C /work/tools fetch origin
 git -C /work/tools remote -v
 git -C /work/tools config --get remote.origin.url
@@ -186,6 +187,14 @@ with an empty work tree. Reading the entries of a tree that holds an entry with
 an empty name exits 128 with git's `empty filename in tree entry`.
 For authenticated GitHub clones, `gh repo clone` supplies its configured token,
 and only to its configured GitHub origin.
+
+`git clone --depth <n>` fetches only the newest `n` commits of the branch it
+checks out, which keeps a large repository small in a RAM mount. Like git, it
+implies `--single-branch`; pass `--no-single-branch` to take every branch at
+that depth. `log`, `show` and the other history commands stop at the oldest
+commit fetched, which `--decorate` labels `grafted`. A plain workspace path
+ignores the depth with git's warning; use a `file://` URL to clone one
+shallow.
 
 `--git-dir` and `--work-tree` override `GIT_DIR` and `GIT_WORK_TREE` and resolve
 against `-C`. Repository `core.worktree` and `core.bare` affect discovery;
