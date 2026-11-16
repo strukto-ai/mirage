@@ -454,9 +454,14 @@ jobs:
         image: redis:7
         ports:
           - 6379:6379
+        # Every service here probes each second until it first answers, then
+        # every 10 s. Docker's first probe otherwise waits the whole interval,
+        # so a job sat 10 to 15 s on a service that was up in one or two.
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -564,6 +569,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -643,6 +650,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       nextcloud:
@@ -908,6 +917,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
@@ -918,6 +929,8 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -1168,6 +1181,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
@@ -1178,6 +1193,8 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -1286,6 +1303,8 @@ jobs:
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 10
       chroma:
@@ -2058,7 +2077,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b, c1, c2, c3, d, e, f, g1, g2, g3, h1, h2, h3]
+        leg: [a, b, c1, c2, d, e, f, g1, g2, h1, h3]
     services:
       redis:
         image: redis:7
@@ -2067,12 +2086,14 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
         # MongoDB 8 refuses to start on the runners' kernel 6.19+ (SERVER-121912).
         # Only the last leg takes the one suite that mounts MongoDB, so only it
-        # starts the service; an empty image skips it on the other thirteen,
+        # starts the service; an empty image skips it on the other ten,
         # and the resolver below refuses a MongoDB suite on any other leg.
         image: ${{ matrix.leg == 'h3' && 'mongo:7.0' || '' }}
         ports:
@@ -2080,6 +2101,8 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 10
     env:
@@ -2105,21 +2128,20 @@ jobs:
       # Every leg keeps the complete SDK and CLI matrices for its suites.
       # Split the long open, policy/program/write and runtime-specific legs
       # at suite boundaries; setup and fresh interpreters still count toward
-      # their wall time. MongoDB and sandbox mount host ordering stays in
-      # parallel.sh. The last leg takes every otherwise-unclaimed suite.
+      # their wall time, so a leg that ran five or six minutes shares its
+      # runner with a sibling rather than paying two minutes of setup alone.
+      # MongoDB and sandbox mount host ordering stays in parallel.sh. The
+      # last leg takes every otherwise-unclaimed suite.
       LEG_A_SUITES: "path/cwd path/rename path/stat"
       LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
       LEG_C1_SUITES: "dir/readdir open/a+ open/mode open/view"
-      LEG_C2_SUITES: "open/a open/r open/x"
-      LEG_C3_SUITES: "open/r+ open/w open/w+"
+      LEG_C2_SUITES: "open/a open/r open/r+ open/w open/w+ open/x"
       LEG_D_SUITES: "dir/glob dir/mkdir dir/rmdir dir/walk facade"
       LEG_E_SUITES: "read routing workspace"
       LEG_F_SUITES: "write/capacity write/exit write/fd write/order write/parallel write/pwrite write/sync write/truncate write/writev"
-      LEG_G1_SUITES: "policy"
+      LEG_G1_SUITES: "policy write/write"
       LEG_G2_SUITES: "program quickjs"
-      LEG_G3_SUITES: "write/write"
       LEG_H1_SUITES: "pyodide"
-      LEG_H2_SUITES: "sandbox host"
     steps:
       - uses: actions/checkout@v7
 
@@ -2196,7 +2218,7 @@ jobs:
             ' <<<"$all"
           }
           named=""
-          for leg in A B C1 C2 C3 D E F G1 G2 G3 H1 H2; do
+          for leg in A B C1 C2 D E F G1 G2 H1; do
             var="LEG_${leg}_SUITES"
             picked=$(select_suites "${!var:-}")
             if [ -z "$picked" ]; then

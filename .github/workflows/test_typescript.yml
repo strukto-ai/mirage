@@ -104,9 +104,14 @@ jobs:
         image: redis:7
         ports:
           - 6379:6379
+        # Both services probe each second until they first answer, then every
+        # 10 s. Docker's first probe otherwise waits the whole interval, so
+        # each leg sat 10 to 15 s on services that were up in one or two.
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       postgres:
@@ -120,6 +125,8 @@ jobs:
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 10
 

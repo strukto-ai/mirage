@@ -117,7 +117,9 @@ def check() -> tuple[list[str], dict[str, str], dict[str, list[str]], str]:
     old = partition(names, OLD_LEGS, "h")
     for leg in "abcdefgh":
         children = (
-            [leg] if leg in "abdef" else [leg + str(i) for i in range(1, 4)]
+            [leg]
+            if leg in "abdef"
+            else [part for part in parts if re.fullmatch(f"{leg}[1-9]", part)]
         )
         actual = sorted(name for child in children for name in parts[child])
         if actual != old[leg]:
