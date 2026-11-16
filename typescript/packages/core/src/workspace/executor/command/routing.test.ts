@@ -170,6 +170,8 @@ describe('commandWords', () => {
     ['pdfinfo ../../slack/export.csv', '../../slack/export.csv', null],
     ['tar -cf ../../slack/export.csv a.txt', '../../slack/export.csv', '-cf'],
     ['tar -cf../../slack/export.csv a.txt', '-cf../../slack/export.csv', '-cf'],
+    ['grep --file=../../slack/export.csv x', '--file=../../slack/export.csv', '--file'],
+    ['grep -f../../slack/export.csv x', '-f../../slack/export.csv', '-f'],
   ])('a path word names the path paths holds: %s', async (line, text, option) => {
     const seen: CommandContext[] = []
     const ws = new Workspace(
