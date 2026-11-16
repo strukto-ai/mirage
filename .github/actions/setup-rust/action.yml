@@ -5,6 +5,18 @@ description: >-
   mirage-rs and the TypeScript build can embed its wasm.
 # setup-uv and setup-node-pnpm both run this, so a job using both gets it
 # twice; the second run finds MIRAGE_RUST_READY and does nothing.
+inputs:
+  shared-key:
+    description: >-
+      Name an entry the jobs passing it share. Without one, each job keeps
+      an entry of its own.
+    default: ""
+  save:
+    description: >-
+      Save the entry when the job ends on main. A job that never builds in
+      rust/target passes false, so the entry it shares holds what the jobs
+      that do build there need.
+    default: "true"
 runs:
   using: composite
   steps:
@@ -19,10 +31,11 @@ runs:
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         workspaces: rust
-        # Each job's entry is ~40 MB, so PRs saving their own would push
-        # the uv and pnpm caches out of the repository's 10 GB. A PR
-        # restores main's entries instead, which every branch can read.
-        save-if: ${{ github.ref == 'refs/heads/main' }}
+        shared-key: ${{ inputs.shared-key }}
+        # An entry is 70 to 270 MB, so PRs saving their own would push the
+        # uv and pnpm caches out of the repository's 10 GB. A PR restores
+        # main's entries instead, which every branch can read.
+        save-if: ${{ github.ref == 'refs/heads/main' && inputs.save == 'true' }}
 
     - name: Mark Rust as set up
       shell: bash

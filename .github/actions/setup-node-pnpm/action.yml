@@ -22,7 +22,11 @@ runs:
   steps:
     # uv builds mirage-rs and the TypeScript build embeds its wasm, both
     # with cargo, so every job that sets up either language gets Rust too.
+    # Building the wasm is the only use these jobs make of rust/target, so
+    # they share one entry, not one each: 32 entries had held 2.8 GB.
     - uses: ./.github/actions/setup-rust
+      with:
+        shared-key: mirage-rs
 
     - name: Install pnpm
       uses: pnpm/action-setup@v6.0.10
