@@ -137,7 +137,7 @@ repos:
         require_serial: true
       - id: integ-typecheck
         name: Type check (integ)
-        entry: bash -c 'cd integ && node_modules/.bin/tsc -p tsconfig.check.json'
+        entry: bash -c 'cd integ && node ../typescript/node_modules/typescript7/bin/tsc -p tsconfig.check.json'
         language: system
         # Every directory tsconfig.check.json includes, not a hand-kept
         # list: the list had already fallen five fakes behind

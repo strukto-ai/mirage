@@ -122,6 +122,7 @@ slack: Permission denied
 - **虛擬命令列工具（CLI）。** `git`、`slack` 和 `ntn` 由 Mirage 自己回應，Agent 無需安裝任何東西即可驅動這些服務，並可跨不同執行環境和機器；同一個工具還能虛擬成兩個或更多，各自使用獨立的名稱和憑證。
 - **動態路由的執行環境。** Python、JavaScript 以及任何其他命令都可以被送到所設定的執行環境，行程內、沙箱或遠端，從而把運算與儲存解耦，任何一方都可以獨立更換。
 - **虛擬化的 Mirage Shell。** 它把檔案系統、CLI 和執行環境綁定到同一條命令列上，因此管線、重新導向、變數、工作和歷史記錄在三者之間都可用。
+- **託管式終端。** 工作階段、工作輸出、歷史記錄和工作區快照保存在你選擇的儲存中，例如 RAM、Redis、S3 或磁碟，因此 Agent 的終端可以比執行它的行程存活得更久。
 - **輕量化設計。** 工作區，也就是虛擬終端機本身，約占 100 KB 記憶體，每個新工作階段約 10 KB，因此一個行程即可服務許多 Agent，無需為每個 Agent 準備容器或虛擬機。
 - **為 Agent 設計的 Profile。** `allow`、`ask` 和 `deny` 管控命令和 CLI，`hide` 和 `show` 管控檔案和目錄，因此被隱藏的路徑不只是不可讀，而是在 Agent 看到的檔案系統中根本不存在。
 - **可腳本化的策略引擎。** 策略腳本可以在任何危險操作執行前將其阻擋，同一套策略堆疊還會攔截每一次 VFS 操作和工作階段寫入，因此檔案和環境變數都不會外洩。
@@ -260,7 +261,7 @@ python3: Permission denied
 
 ## 嵌入式終端機
 
-大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)。
+大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/in-process-terminal)。
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

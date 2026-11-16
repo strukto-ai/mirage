@@ -22,6 +22,7 @@ from mirage.commands.cli.constants import (
     GIT_USAGE_GAP,
     GIT_USAGE_WIDTH,
     HELP_EXIT,
+    POPPLER_EXIT,
     USAGE_EXIT,
 )
 from mirage.commands.spec.compile import (
@@ -31,6 +32,7 @@ from mirage.commands.spec.compile import (
     positional_required,
 )
 from mirage.commands.spec.help import (
+    argparse_help,
     clap_unexpected_argument,
     operand_slot,
     option_metavar,
@@ -383,6 +385,7 @@ def leaf_refusal(
     tool with its own pinned exit. git exits 129 for the same mistake,
     which is neither that nor its own 128 for a fatal. clap exits 2,
     agreeing with argparse by coincidence rather than by lineage.
+    poppler's readers print their help page and exit 99.
 
     git answers in parse-options' words, and some of them print the
     verb's usage block: after an unknown option or an ambiguous
@@ -412,6 +415,8 @@ def leaf_refusal(
             return argparse_message, CLAP_EXIT, None
         worded = clap_leaf_refusal(prog, spec, parsed)
         return worded or argparse_message, CLAP_EXIT, None
+    if style is UsageStyle.POPPLER:
+        return encode_text(argparse_help(prog, spec)), POPPLER_EXIT, None
     if style is not UsageStyle.GIT:
         return argparse_message, ARGPARSE_EXIT, None
     kinds = parsed.option_error_kinds

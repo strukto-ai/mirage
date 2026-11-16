@@ -82,6 +82,46 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.clock import system_now
 
+# How C's atoi and strtol(..., 0) read a number, which is how git reads
+# ``--depth``: atoi for the positive check, strtol for the value.
+ATOI = re.compile(r"\s*([+-]?\d+)")
+STRTOL = re.compile(r"\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)")
+LOCAL_DEPTH_WARNING = (
+    "warning: --depth is ignored in local clones; use file:// instead.\n"
+)
+
+
+def check_depth(text: str) -> None:
+    """Refuse a ``--depth`` git refuses before cloning.
+
+    Args:
+        text (str): the value as typed.
+
+    Raises:
+        GitError: a value C's atoi reads below one.
+    """
+    found = ATOI.match(text)
+    if found is None or int(found.group(1)) < 1:
+        raise GitError(f"depth {text} is not a positive number")
+
+
+def transport_depth(text: str) -> int:
+    """``--depth`` as the transport reads it, C's strtol in base 0.
+
+    Args:
+        text (str): the value as typed, already past ``check_depth``,
+            so it is never negative.
+
+    Raises:
+        GitError: a value strtol does not read whole.
+    """
+    found = STRTOL.fullmatch(text)
+    if found is None:
+        raise GitError(f"transport: invalid depth option '{text}'")
+    digits = found.group(1)
+    base = 16 if digits[:2] in ("0x", "0X") else 8 if digits[0] == "0" else 10
+    return int(digits, base)
+
 
 def default_directory(url: str) -> str:
     """The directory git names a clone after when none is given.
@@ -97,25 +137,28 @@ def default_directory(url: str) -> str:
     return re.split(r"[/:]", path)[-1]
 
 
-def _config(url: str, remote: str, branch: str | None) -> str:
+def _config(
+    url: str, remote: str, branch: str | None, single: Wanted | None
+) -> str:
     """A clone's config, in the order git writes it.
 
     Args:
         url (str): the remote's URL.
         remote (str): the remote's name.
         branch (str | None): the branch checked out, None when detached.
+        single (Wanted | None): the one ref a single-branch clone takes,
+            which its fetch refspec names, none for a detached HEAD;
+            None fetches every branch.
     """
+    fields = [("url", url)]
+    if single is None:
+        fields.append(("fetch", f"+refs/heads/*:refs/remotes/{remote}/*"))
+    elif single.local is not None:
+        fields.append(("fetch", f"+{single.remote}:{single.local}"))
     text = (
         "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
         "\tbare = false\n\tlogallrefupdates = true\n"
-        + config_section(
-            "remote",
-            remote,
-            [
-                ("url", url),
-                ("fetch", f"+refs/heads/*:refs/remotes/{remote}/*"),
-            ],
-        )
+        + config_section("remote", remote, fields)
     )
     if branch is not None:
         text += config_section(
@@ -124,6 +167,30 @@ def _config(url: str, remote: str, branch: str | None) -> str:
             [("remote", remote), ("merge", f"{BRANCH_PREFIX}{branch}")],
         )
     return text
+
+
+def guessed_head(adv: Advertisement, kept: set[str]) -> str | None:
+    """The branch a remote's detached HEAD stands for, as git guesses it.
+
+    A remote that names no symbolic HEAD is read as the branch pointing
+    where HEAD points: the default branch when it does, else the first
+    such branch by name; none leaves HEAD detached (git 2.47.3).
+
+    Args:
+        adv (Advertisement): what the remote published.
+        kept (set[str]): the refs the clone takes.
+    """
+    oid = adv.refs.get("HEAD")
+    branches = sorted(ref for ref in kept if ref.startswith(BRANCH_PREFIX))
+    default = f"{BRANCH_PREFIX}{DEFAULT_BRANCH}"
+    return next(
+        (
+            ref
+            for ref in [default, *branches]
+            if oid is not None and ref in kept and adv.refs[ref] == oid
+        ),
+        None,
+    )
 
 
 def remote_head(
@@ -160,8 +227,12 @@ async def clone(
     A path or ``file://`` URL is a repository inside the workspace, an
     ``https://`` one is fetched over smart HTTP. Every branch lands as a
     remote-tracking ref and every tag as a tag, the remote's HEAD branch
-    is checked out. A failed clone removes what it wrote, and keeps a
-    directory that was already there, empty, as git does.
+    is checked out. ``--single-branch`` takes only the branch or tag it
+    checks out, and the tags that point into its history; ``--depth``
+    implies it and cuts the history that many commits deep, except from
+    a plain path, which git warns it ignores the depth for. A failed
+    clone removes what it wrote, and keeps a directory that was already
+    there, empty, as git does.
 
     Args:
         accessor (Accessor): git reaches no service.
@@ -187,6 +258,9 @@ async def clone(
         )
     url = texts[0]
     name = texts[1] if len(texts) > 1 else default_directory(url)
+    typed = fl.as_str("depth")
+    if typed is not None:
+        check_depth(typed)
     quiet = fl.as_bool("quiet")
     start = start_point(fl)
     target = start.join(name)
@@ -211,9 +285,7 @@ async def clone(
     )
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
-        notes += await _populate(
-            ctx, transport, target, stored, local and not quiet
-        )
+        notes += await _populate(ctx, transport, target, stored, local, typed)
     except GitError as exc:
         # A refused checkout leaves the clone behind, as git does.
         if not isinstance(exc, CloneCheckoutError):
@@ -236,6 +308,7 @@ async def _populate(
     target: PathSpec,
     url: str,
     local: bool,
+    typed: str | None,
 ) -> str:
     """Lay the clone out, fetch into it and check it out.
 
@@ -244,7 +317,10 @@ async def _populate(
         transport (LocalTransport | HttpTransport): the remote.
         target (PathSpec): the clone's working tree.
         url (str): the remote URL as the config records it.
-        local (bool): whether git prints ``done.`` after copying.
+        local (bool): whether the remote is a plain path, which git
+            copies whole whatever the depth, and prints ``done.`` after.
+        typed (str | None): ``--depth`` as typed, past ``check_depth``;
+            None for the whole history.
 
     Returns:
         str: what the clone prints to stderr after ``Cloning into``.
@@ -252,6 +328,15 @@ async def _populate(
     fl = FlagView(ctx.flags)
     vfs = ctx.vfs
     assert vfs is not None
+    depth = None
+    notes = ""
+    if typed is not None and local:
+        notes = LOCAL_DEPTH_WARNING
+    elif typed is not None:
+        depth = transport_depth(typed)
+    single = typed is not None
+    for key, _ in fl.occurrences("single_branch", "no_single_branch"):
+        single = key == "single_branch"
     gitdir = target.join(".git")
     remote = fl.as_str("origin", "origin")
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
@@ -264,7 +349,7 @@ async def _populate(
         target,
         PathSpec.from_str_path(vfs.mount_of(target) or "/", cwd="/"),
     )
-    wanted, notes = ignore_funny(
+    wanted, funny = ignore_funny(
         [
             Wanted(
                 ref,
@@ -287,13 +372,34 @@ async def _populate(
             if ref in kept or ref == "HEAD"
         },
         {ref: oid for ref, oid in advertised.peeled.items() if ref in kept},
-        advertised.head if advertised.head in kept else None,
+        advertised.head
+        if advertised.head in kept
+        else (
+            guessed_head(advertised, kept) if advertised.head is None else None
+        ),
     )
+    notes += funny
     branch, commit = remote_head(adv, fl.as_str("branch"))
     if fl.as_str("branch") is not None and commit is None:
         raise GitError(
             f"Remote branch {branch} not found in upstream {remote}"
         )
+    taken = (
+        f"{BRANCH_PREFIX}{branch}"
+        if branch is not None
+        else (
+            f"{TAG_PREFIX}{fl.as_str('branch')}"
+            if fl.as_str("branch") is not None
+            else None
+        )
+    )
+    narrowed = next((want for want in wanted if want.remote == taken), None)
+    # A detached HEAD no branch stands for is taken alone, into no ref,
+    # and no fetch refspec records it, as git's single-branch clone.
+    if narrowed is None and commit is not None:
+        narrowed = Wanted("HEAD", commit, None)
+    if single and narrowed is not None:
+        wanted = [narrowed]
     if not advertised.refs:
         notes += "warning: You appear to have cloned an empty repository.\n"
     # No HEAD to start from, in an empty remote or one whose HEAD names a
@@ -308,13 +414,17 @@ async def _populate(
             and valid_ref_name(head)
             else f"{BRANCH_PREFIX}{DEFAULT_BRANCH}"
         )[len(BRANCH_PREFIX) :]
-    repo, _ = await fetch_objects(vfs, location, transport, adv, wanted, False)
+    one = narrowed if single else None
+    repo, wanted = await fetch_objects(
+        vfs, location, transport, adv, wanted, one is not None, depth
+    )
     for want in wanted:
-        assert want.local is not None
-        await write_ref(vfs, gitdir, want.local, want.oid.encode())
+        if want.local is not None:
+            await write_ref(vfs, gitdir, want.local, want.oid.encode())
     reason = f"clone: from {url}"
     now = int(system_now())
-    if adv.head is not None and adv.head in adv.refs:
+    fetched = {want.remote for want in wanted}
+    if adv.head is not None and adv.head in fetched:
         tracking = f"refs/remotes/{remote}/HEAD"
         await write_file(
             vfs,
@@ -330,9 +440,9 @@ async def _populate(
     await write_file(
         vfs,
         gitdir.join("config"),
-        _config(url, remote, branch).encode(),
+        _config(url, remote, branch, one).encode(),
     )
-    if local:
+    if local and not fl.as_bool("quiet"):
         notes += "done.\n"
     if commit is None:
         if advertised.refs and not fl.as_bool("no_checkout"):

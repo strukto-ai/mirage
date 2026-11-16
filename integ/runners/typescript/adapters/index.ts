@@ -88,6 +88,8 @@ import {
   OFFICE,
   OneDriveVFS,
   PathSpec,
+  PDFINFO,
+  PDFTOTEXT,
   PostgresVFS,
   QdrantVFS,
   QingStorVFS,
@@ -289,9 +291,10 @@ export function runId(): string {
 /**
  * Install the CLIs a mount-backed target declares.
  *
- * `git`, `search` and `office` talk to no API: git reads a repository out of
- * a mount, search asks a mount's own search and office edits workbooks on
- * one, which is what makes them installable from a bare name with no config at all, where every other one needs its mock service
+ * `git`, `search`, `office`, `pdftotext` and `pdfinfo` talk to no API: git
+ * reads a repository out of a mount, search asks a mount's own search, office
+ * edits workbooks on one and the PDF tools read files on one, which is what
+ * makes them installable from a bare name with no config at all, where every other one needs its mock service
  * to hand over both the tree and the credentials pointing at itself.
  */
 function installLocalClis(
@@ -301,6 +304,8 @@ function installLocalClis(
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
   if (target.clis?.includes('search') === true) ws.registerCli('search', SEARCH)
   if (target.clis?.includes('office') === true) ws.registerCli('office', OFFICE)
+  if (target.clis?.includes('pdftotext') === true) ws.registerCli('pdftotext', PDFTOTEXT)
+  if (target.clis?.includes('pdfinfo') === true) ws.registerCli('pdfinfo', PDFINFO)
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 

@@ -122,6 +122,7 @@ slack: Permission denied
 - **Outils en ligne de commande virtuels (CLI).** `git`, `slack` et `ntn` sont servis par Mirage lui-même, si bien qu'un agent pilote le service sans rien installer, à travers différents runtimes et machines, et un même outil peut être virtualisé en deux ou plus, chacun sous son propre nom avec ses propres identifiants.
 - **Runtimes dynamiques et routés.** Python, JavaScript et n'importe quelle autre commande peuvent être envoyés au runtime configuré, en processus, en bac à sable ou à distance, ce qui découple le calcul du stockage et permet de changer l'un sans toucher à l'autre.
 - **Le shell Mirage virtualisé.** Il relie le système de fichiers, les CLI et les runtimes en une seule ligne de commande, si bien que tubes, redirections, variables, jobs et historique fonctionnent à travers les trois.
+- **Un terminal géré.** Les sessions, la sortie des jobs, l'historique et les instantanés d'espace de travail sont conservés dans le stockage de votre choix, comme la RAM, Redis, S3 ou le disque, si bien que le terminal d'un agent peut survivre au processus qui l'exécute.
 - **Léger par conception.** Un espace de travail, le terminal virtuel lui-même, occupe environ 100 Ko de mémoire et chaque nouvelle session environ 10 Ko, si bien qu'un seul processus sert de nombreux agents sans conteneur ni VM par agent.
 - **Des profils conçus pour les agents.** `allow`, `ask` et `deny` régissent les commandes et les CLI, tandis que `hide` et `show` régissent fichiers et dossiers, si bien qu'un chemin masqué n'est pas seulement illisible mais absent du système de fichiers que voit l'agent.
 - **Un moteur de politiques scriptable.** Un script de politique peut interdire toute action dangereuse avant son exécution, et la même pile filtre chaque opération VFS et chaque écriture de session, si bien que ni un fichier ni une variable d'environnement ne fuit.
@@ -260,7 +261,7 @@ Voir les [scripts de politique](https://docs.mirage.strukto.ai/home/policy/scrip
 
 ## Terminal embarqué
 
-La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
+La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

@@ -83,13 +83,13 @@
             "group": "Examples",
             "pages": [
               {
-                "group": "Lightweight Terminal",
-                "icon": "terminal",
+                "group": "In-Process Terminal",
+                "icon": "square-terminal",
                 "pages": [
-                  "home/examples/lightweight-terminal",
-                  "home/examples/lightweight-terminal/code-review",
-                  "home/examples/lightweight-terminal/co-work",
-                  "home/examples/lightweight-terminal/release-notes"
+                  "home/examples/in-process-terminal",
+                  "home/examples/in-process-terminal/code-review",
+                  "home/examples/in-process-terminal/co-work",
+                  "home/examples/in-process-terminal/release-notes"
                 ]
               },
               "home/examples/policy-security",
@@ -280,6 +280,8 @@
                   "home/setup/cli/hf",
                   "home/setup/cli/git",
                   "home/setup/cli/office",
+                  "home/setup/cli/pdftotext",
+                  "home/setup/cli/pdfinfo",
                   "home/setup/cli/search"
                 ]
               }
@@ -539,6 +541,8 @@
                   "python/cli/hf",
                   "python/cli/git",
                   "python/cli/office",
+                  "python/cli/pdftotext",
+                  "python/cli/pdfinfo",
                   "python/cli/search"
                 ]
               }
@@ -732,6 +736,8 @@
                   "typescript/cli/hf",
                   "typescript/cli/git",
                   "typescript/cli/office",
+                  "typescript/cli/pdftotext",
+                  "typescript/cli/pdfinfo",
                   "typescript/cli/search"
                 ]
               }
@@ -961,6 +967,16 @@
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/home/examples/lightweight-terminal",
+      "destination": "/home/examples/in-process-terminal"
+    },
+    {
+      "source": "/home/examples/lightweight-terminal/:slug*",
+      "destination": "/home/examples/in-process-terminal/:slug*"
+    }
+  ],
   "navbar": {
     "links": [
       {

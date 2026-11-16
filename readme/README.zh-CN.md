@@ -122,6 +122,7 @@ slack: Permission denied
 - **虚拟命令行工具（CLI）。** `git`、`slack` 和 `ntn` 由 Mirage 自己应答，Agent 无需安装任何东西即可驱动这些服务，并可跨不同运行时和机器；同一个工具还能虚拟成两个或更多，各自使用独立的名称和凭据。
 - **动态路由的运行时。** Python、JavaScript 以及任何其他命令都可以被发送到所配置的运行时，进程内、沙箱或远程，从而把计算与存储解耦，任何一方都可以独立更换。
 - **虚拟化的 Mirage Shell。** 它把文件系统、CLI 和运行时绑定到同一条命令行上，因此管道、重定向、变量、作业和历史记录在三者之间都可用。
+- **托管式终端。** 会话、作业输出、历史记录和工作区快照保存在你选择的存储中，例如 RAM、Redis、S3 或磁盘，因此 Agent 的终端可以比运行它的进程存活得更久。
 - **轻量化设计。** 工作区，也就是虚拟终端本身，约占 100 KB 内存，每个新会话约 10 KB，因此一个进程即可服务许多 Agent，无需为每个 Agent 准备容器或虚拟机。
 - **为 Agent 设计的 Profile。** `allow`、`ask` 和 `deny` 管控命令和 CLI，`hide` 和 `show` 管控文件和目录，因此被隐藏的路径不只是不可读，而是在 Agent 看到的文件系统中根本不存在。
 - **可脚本化的策略引擎。** 策略脚本可以在任何危险操作执行前将其阻止，同一套策略栈还会拦截每一次 VFS 操作和会话写入，因此文件和环境变量都不会泄露。
@@ -260,7 +261,7 @@ python3: Permission denied
 
 ## 嵌入式终端
 
-大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)。
+大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/in-process-terminal)。
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

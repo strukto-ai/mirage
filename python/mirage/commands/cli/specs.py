@@ -40,6 +40,8 @@ BUILTIN_CLI_SPECS: dict[str, str] = {
     "linear": "mirage.commands.cli.builtin.linear:LINEAR",
     "ntn": "mirage.commands.cli.builtin.ntn:NTN",
     "office": "mirage.commands.cli.builtin.office:OFFICE",
+    "pdfinfo": "mirage.commands.cli.builtin.pdf:PDFINFO",
+    "pdftotext": "mirage.commands.cli.builtin.pdf:PDFTOTEXT",
     "search": "mirage.commands.cli.builtin.search:SEARCH",
     "slack": "mirage.commands.cli.builtin.slack:SLACK",
     "trello": "mirage.commands.cli.builtin.trello:TRELLO",

@@ -14,6 +14,7 @@
 
 import { clearTenants } from '../../kit/typescript/index.ts'
 import type { Dmmf, DmmfModel } from '../../kit/typescript/index.ts'
+import type { Prisma } from '../../../generated/gws/index.js'
 import type { C } from './client.ts'
 import type { GwsState } from './state.ts'
 import type { DocTab } from './types.ts'
@@ -48,14 +49,16 @@ import type { DocTab } from './types.ts'
 // what SheetCell naming its tab by (spreadsheet, sheetId) and SlideElement
 // naming its slide by (presentation, objectId) buy; see integ/prisma/gws.prisma.
 //
-// The whole flush runs in ONE interactive transaction. A write handler that
-// throws half way is answered as a 500 either way, but without the transaction
-// it would also leave the tenant holding a world that is partly the new state
-// and partly nothing at all, which the next request would serve as if it were
-// real. Deletes go through raw SQL, as `clearTenants` does: `relationMode =
-// "prisma"` checks a required relation only from the client, and a row that is
-// deleted here and inserted again in the same transaction is never missing
-// once it commits.
+// The whole flush runs in ONE transaction. A write handler that throws half
+// way is answered as a 500 either way, but without the transaction it would
+// also leave the tenant holding a world that is partly the new state and
+// partly nothing at all, which the next request would serve as if it were
+// real. A diff is known before anything is written, so it goes as one batch
+// rather than an interactive transaction, which paid an engine round trip per
+// statement: about 20ms of every write. Deletes go through raw SQL, as
+// `clearTenants` does: `relationMode = "prisma"` checks a required relation
+// only from the client, and a row that is deleted here and inserted again in
+// the same transaction is never missing once it commits.
 export async function saveState(
   db: C,
   dmmf: Dmmf,
@@ -64,27 +67,30 @@ export async function saveState(
   flushed?: Rows,
 ): Promise<Rows> {
   const rows = buildRows(tenant, st)
-  await db.$transaction(
-    async (tx) => {
-      if (flushed === undefined) {
+  if (flushed === undefined) {
+    await db.$transaction(
+      async (tx) => {
         await clearTenants(tx, dmmf, [tenant])
-        for (const [name, model] of TABLES) await insert(tx, model, rows[name])
-        return
-      }
-      const inserts: [string, readonly Row[]][] = []
-      for (const [name, model] of TABLES) {
-        const def = modelOf(dmmf, model)
-        const change = diffTable(def, flushed[name], rows[name])
-        if (change === null) continue
-        await remove(tx, def, tenant, change.gone)
-        await renumber(tx, def, change.moved)
-        inserts.push([model, change.put])
-      }
-      for (const [model, put] of inserts) await insert(tx, model, put)
-    },
-    // Large workbooks can outlive Prisma's five-second interactive default.
-    { timeout: 120_000 },
-  )
+        for (const [name, model] of TABLES) {
+          for (const op of insert(tx, model, rows[name])) await op
+        }
+      },
+      // Large workbooks can outlive Prisma's five-second interactive default.
+      { timeout: 120_000 },
+    )
+    return rows
+  }
+  const ops: Op[] = []
+  const inserts: Op[] = []
+  for (const [name, model] of TABLES) {
+    const def = modelOf(dmmf, model)
+    const change = diffTable(def, flushed[name], rows[name])
+    if (change === null) continue
+    ops.push(...remove(db, def, tenant, change.gone), ...renumber(db, def, change.moved))
+    inserts.push(...insert(db, model, change.put))
+  }
+  ops.push(...inserts)
+  if (ops.length > 0) await db.$transaction(ops)
   return rows
 }
 
@@ -169,8 +175,12 @@ function diffTable(model: DmmfModel, before: readonly Row[], after: readonly Row
       before.length === after.length && after.every((r, i) => sameExcept(before[i]!, r, null))
     return same ? null : { gone: 'all', moved: [], put: after }
   }
-  const key = keyOf(model)
-  const identity = (r: Row): string => JSON.stringify(key.map((f) => r[f]))
+  // Every row of one flush is the same tenant's, so the tenant is left out of
+  // the identity, and a key that is then one column is used as it is.
+  const key = keyOf(model).filter((f) => f !== 'tenant')
+  const only = key.length === 1 ? key[0]! : null
+  const identity = (r: Row): unknown =>
+    only === null ? JSON.stringify(key.map((f) => r[f])) : r[only]
   const old = new Map(before.map((r) => [identity(r), r]))
   const gone: Row[] = []
   const moved: Row[] = []
@@ -189,8 +199,12 @@ function diffTable(model: DmmfModel, before: readonly Row[], after: readonly Row
   return gone.length + moved.length + put.length === 0 ? null : { gone, moved, put }
 }
 
+// A statement not yet sent: a Prisma query runs when it is awaited or handed
+// to `$transaction`, so a flush can build its whole batch first.
+type Op = Prisma.PrismaPromise<unknown>
+
 interface RawClient {
-  $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>
+  $executeRawUnsafe(query: string, ...values: unknown[]): Op
 }
 
 function quoted(name: string): string {
@@ -204,51 +218,49 @@ function column(model: DmmfModel, field: string): string {
 
 const DELETE_BATCH = 200
 
-async function remove(
-  tx: RawClient,
-  model: DmmfModel,
-  tenant: string,
-  gone: Change['gone'],
-): Promise<void> {
+function remove(tx: RawClient, model: DmmfModel, tenant: string, gone: Change['gone']): Op[] {
   const table = quoted(model.dbName ?? model.name)
   if (gone === 'all') {
-    await tx.$executeRawUnsafe(`DELETE FROM ${table} WHERE ${column(model, 'tenant')} = ?`, tenant)
-    return
+    return [
+      tx.$executeRawUnsafe(`DELETE FROM ${table} WHERE ${column(model, 'tenant')} = ?`, tenant),
+    ]
   }
   const key = keyOf(model)
   const columns = key.map((f) => column(model, f)).join(', ')
   const tuple = `(${key.map(() => '?').join(', ')})`
+  const ops: Op[] = []
   for (let offset = 0; offset < gone.length; offset += DELETE_BATCH) {
     const batch = gone.slice(offset, offset + DELETE_BATCH)
-    await tx.$executeRawUnsafe(
-      `DELETE FROM ${table} WHERE (${columns}) IN (VALUES ${batch.map(() => tuple).join(', ')})`,
-      ...batch.flatMap((r) => key.map((f) => r[f])),
+    ops.push(
+      tx.$executeRawUnsafe(
+        `DELETE FROM ${table} WHERE (${columns}) IN (VALUES ${batch.map(() => tuple).join(', ')})`,
+        ...batch.flatMap((r) => key.map((f) => r[f])),
+      ),
     )
   }
+  return ops
 }
 
-async function renumber(tx: RawClient, model: DmmfModel, moved: readonly Row[]): Promise<void> {
+function renumber(tx: RawClient, model: DmmfModel, moved: readonly Row[]): Op[] {
   const key = keyOf(model)
   const where = key.map((f) => `${column(model, f)} = ?`).join(' AND ')
   const sql = `UPDATE ${quoted(model.dbName ?? model.name)} SET ${column(model, SEQ)} = ? WHERE ${where}`
-  for (const row of moved) await tx.$executeRawUnsafe(sql, row[SEQ], ...key.map((f) => row[f]))
+  return moved.map((row) => tx.$executeRawUnsafe(sql, row[SEQ], ...key.map((f) => row[f])))
 }
 
 interface CreateManyClient {
-  createMany(args: { data: readonly Row[] }): Promise<unknown>
+  createMany(args: { data: readonly Row[] }): Op
 }
 
-async function insert(tx: RawClient, model: string, rows: readonly Row[]): Promise<void> {
-  if (rows.length === 0) return
-  if (model === 'SheetCell') {
-    await insertCells(tx, rows)
-    return
-  }
+function insert(tx: RawClient, model: string, rows: readonly Row[]): Op[] {
+  if (rows.length === 0) return []
+  if (model === 'SheetCell') return insertCells(tx, rows)
   const delegate = model.charAt(0).toLowerCase() + model.slice(1)
-  await (tx as unknown as Record<string, CreateManyClient>)[delegate]!.createMany({ data: rows })
+  return [(tx as unknown as Record<string, CreateManyClient>)[delegate]!.createMany({ data: rows })]
 }
 
-async function insertCells(tx: RawClient, rows: readonly Row[]): Promise<void> {
+function insertCells(tx: RawClient, rows: readonly Row[]): Op[] {
+  const ops: Op[] = []
   for (let offset = 0; offset < rows.length; offset += 10_000) {
     const cells = JSON.stringify(
       rows
@@ -265,16 +277,19 @@ async function insertCells(tx: RawClient, rows: readonly Row[]): Promise<void> {
     )
     // One bound JSON value avoids constructing a Prisma query node for
     // each field of every cell. SQLite still enforces the composite key.
-    await tx.$executeRawUnsafe(
-      `INSERT INTO "SheetCell" ("tenant", "spreadsheetId", "sheetId", "row", "col", "text", "props")
+    ops.push(
+      tx.$executeRawUnsafe(
+        `INSERT INTO "SheetCell" ("tenant", "spreadsheetId", "sheetId", "row", "col", "text", "props")
        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
               json_extract(value, '$[2]'), json_extract(value, '$[3]'),
               json_extract(value, '$[4]'), json_extract(value, '$[5]'),
               json_extract(value, '$[6]')
        FROM json_each(?)`,
-      cells,
+        cells,
+      ),
     )
   }
+  return ops
 }
 
 export interface Rows {
@@ -430,8 +445,20 @@ export interface Rows {
 // It is a copy rather than a cast because the difference is real: a Buffer from
 // `Buffer.concat` or a pooled allocation is a VIEW into a larger buffer, and
 // handing the driver the view without its offset would store the pool.
+//
+// The copy is kept per source buffer. Every flush builds the whole world's
+// rows and the diff compares them with the last flush's, so an unchanged
+// file used to cost a copy and a byte compare of its content on every write;
+// with the same copy it compares by reference. Handlers replace a buffer
+// rather than writing into one, which is what makes the copy safe to keep.
+const COPIES = new WeakMap<Buffer, Uint8Array<ArrayBuffer>>()
+
 function blob(data: Buffer): Uint8Array<ArrayBuffer> {
-  return new Uint8Array(data)
+  const kept = COPIES.get(data)
+  if (kept !== undefined) return kept
+  const copy = new Uint8Array(data)
+  COPIES.set(data, copy)
+  return copy
 }
 
 // `undefined` is not `null` here: a Prisma createMany input with an absent

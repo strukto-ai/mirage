@@ -16,14 +16,17 @@ import asyncio
 
 import pytest
 from dulwich.pack import Pack
+from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.objects import (
     LooseObjects,
+    add_shallow,
     load_object_store,
     load_packs,
 )
+from mirage.types import PathSpec
 
-from .conftest import GITDIR, mounted, pack_everything
+from .conftest import GITDIR, mounted, mounted_rw, pack_everything
 
 
 async def loose_of(workspace) -> LooseObjects:
@@ -189,3 +192,54 @@ async def test_a_prefix_that_is_not_lowercase_hex_names_nothing(
             lambda: list(packed.iter_prefix(prefix))
         )
     assert found == []
+
+
+@pytest.mark.asyncio
+async def test_a_shallow_commit_reads_parentless_with_its_bytes_kept(
+    repo_path, workspace
+):
+    with Repo(str(repo_path)) as disk:
+        head = disk.head()
+        parent = disk[head].parents[0]
+    (repo_path / ".git" / "shallow").write_bytes(head + b"\n")
+    store = await load_object_store(workspace.vfs, GITDIR)
+    commit = await asyncio.to_thread(store.__getitem__, head)
+    _, raw = await asyncio.to_thread(store.get_raw, head)
+    assert commit.parents == []
+    assert commit.id == head
+    assert commit.as_raw_string() == raw
+    assert b"parent " + parent in raw
+
+
+@pytest.mark.asyncio
+async def test_side_by_side_shallow_updates_keep_every_cut(repo_path):
+    first, second = "1" * 40, "2" * 40
+    with mounted_rw(repo_path) as ws:
+        await asyncio.gather(
+            add_shallow(ws.vfs, GITDIR, (first,)),
+            add_shallow(ws.vfs, GITDIR, (second,)),
+        )
+    shallow = (repo_path / ".git" / "shallow").read_text()
+    assert shallow == f"{first}\n{second}\n"
+
+
+class StalledFiles:
+    """Files whose reads never answer, a mount stuck mid-request."""
+
+    async def read(self, path):
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_shallow_update_holds_up_no_other_repository(
+    repo_path,
+):
+    other = PathSpec.from_str_path("/elsewhere/.git")
+    stalled = asyncio.create_task(
+        add_shallow(StalledFiles(), other, ("1" * 40,))
+    )
+    await asyncio.sleep(0)
+    with mounted_rw(repo_path) as ws:
+        await asyncio.wait_for(add_shallow(ws.vfs, GITDIR, ("2" * 40,)), 5)
+    stalled.cancel()
+    assert (repo_path / ".git" / "shallow").read_text() == "2" * 40 + "\n"

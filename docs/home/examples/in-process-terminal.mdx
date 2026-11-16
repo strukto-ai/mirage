@@ -1,0 +1,243 @@
+---
+title: In-Process Terminal
+sidebarTitle: Overview
+icon: rectangle-terminal
+description: A terminal for agents inside your application, even within a FastAPI or Express server, without a fixed machine or sandbox.
+---
+
+import { SandboxesVsTerminals } from "/snippets/terminal-models.jsx"
+
+Agents are post-trained in a terminal. They run Bash and CLIs and read
+what comes back. What they need is that terminal interface, not
+a fixed machine behind it. Yet the usual answer is a sandbox, a container or
+microVM for each agent, which reserves CPU, memory and local disk, takes time
+to start and needs a service to manage it.
+
+In some agentic services, an agent mostly reads files, calls services and
+waits for answers, so it barely touches the CPU and disk it was given. It needs
+memory only while a command runs, a network connection and a terminal. An
+in-process terminal gives it exactly that inside the server you already have.
+Each terminal is a Mirage session with its own working directory, environment
+and history, and one server process holds many terminals on its event loop.
+
+One [virtual filesystem](/home/setup/vfs) virtualizes remote services as
+files. [CLIs](/home/setup/clis) are virtual too, and an
+[MCP server](/python/cli/mcp) becomes a virtual CLI automatically. Together
+they give an agent a virtual terminal at a fraction of a sandbox's
+infrastructure cost, and with fewer tokens than calling the same services as
+MCP tools ([VFS-Bench 1.0](https://agentvfs.org/benchmark/vfs-bench-1)).
+
+Everything an agent can reach is managed in one place. The Unix commands, CLIs,
+MCP servers, [credentials](/home/service-credentials) and files available to
+each terminal are set on the server, and a [policy](/home/policy/overview)
+refuses a command before it runs.
+
+| | Sandbox per agent | In-process terminal |
+| --- | --- | --- |
+| Runs in | A container or microVM | Your application |
+| Resources | Fixed CPU, memory and disk | Memory as needed |
+| Files | Local disk | One virtual filesystem |
+| Tools | Installed per sandbox | Virtual CLIs, MCP as CLIs |
+| Control | Per sandbox | One place |
+| Start | Boots a machine | Creates a workspace |
+| Runs | Any program | Bash, CLIs, MCP, lightweight interpreters |
+
+## Installation
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty]' fastapi uvicorn
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-node @pydantic/monty express
+    ```
+  </Tab>
+</Tabs>
+
+## Simple Server
+
+The server keeps an in-memory virtual filesystem at `/workspace`. Agents get a
+terminal from `POST /sessions/{id}` and run commands in it with
+`POST /sessions/{id}/run`.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.python.monty import MontyRuntime
+
+    ws = Workspace(
+        {"/workspace": (RAMVFS(), MountMode.EXEC)},
+        machines=[MontyRuntime(captures=["python", "python3"])],
+    )
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/workspace': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Simple Usage
+
+Create a terminal, then send it commands.
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+curl -X POST localhost:3000/sessions/a/run -H 'content-type: application/json' \
+  -d '{"command": "cd /workspace && printf \"INFO start\\nERROR disk full\\nINFO retry\\nERROR timeout\\n\" > app.log && grep -c ERROR app.log"}'
+
+curl -X POST localhost:3000/sessions/a/run -H 'content-type: application/json' \
+  -d '{"command": "grep ERROR app.log | jq -Rnc \"[inputs]\""}'
+```
+
+The first run writes a log and prints `2`. The second starts in `/workspace`,
+where the `cd` left it, and prints `["ERROR disk full","ERROR timeout"]`.
+Each response carries the command's stdout, stderr and exit code.
+
+## Infrastructure Cost
+
+A sandbox reserves memory for every agent, busy or idle. An in-process
+terminal is only a working directory, variables and a history in your
+server's memory, so an idle agent costs almost nothing. Move the slider to
+compare.
+
+<SandboxesVsTerminals />
+
+An in-process terminal is built for I/O-heavy work, the reading, calling and
+piping most agents spend their time on.
+
+- **Idle.** Between an agent's turns, an in-process terminal is only a record
+  of about 10 KB, so one server holds thousands.
+- **I/O-heavy tasks,** such as `curl`, `gh pr list` or reading files from a
+  bucket. A command uses no CPU while it waits for a reply, so many terminals
+  run at once with little slowdown.
+
+Size the server as you would any web service, by how many terminals are
+active at the same moment, not by how many exist.
+
+## Many Terminals at Once
+
+In Mirage, `ws.shell` is a coroutine in Python and a promise in TypeScript,
+and it never blocks the event loop. The handlers above are `async`, so while one terminal
+waits on a file read, a runtime or a slow command, the server keeps serving
+every other terminal, with no thread or process per terminal.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import asyncio
+
+    for sid in ["a", "b", "c"]:
+        ws.create_session(sid)
+    await asyncio.gather(*(ws.shell("sleep 1", session_id=sid) for sid in ["a", "b", "c"]))
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    for (const sid of ['a', 'b', 'c']) ws.createSession(sid)
+    await Promise.all(['a', 'b', 'c'].map((sid) => ws.shell('sleep 1', { sessionId: sid })))
+    ```
+  </Tab>
+</Tabs>
+
+The three commands finish together in about a second; 20 sessions take the
+same. Within one session, commands run one after another in order, as in a real
+terminal, so three `sleep 1` commands on session `a` take three seconds.
+
+## Separation
+
+Workspaces are kept apart.
+
+- **Files.** A terminal sees only its own workspace's files. Agents in
+  different workspaces share nothing unless their virtual filesystems use the
+  same storage, such as one S3 bucket.
+- **Credentials.** Each workspace's virtual filesystems and CLIs carry their
+  own [credentials](/home/service-credentials), so one agent's S3 keys or
+  GitHub token never reach another workspace. Even inside its own workspace,
+  an agent uses them without seeing them, because they stay in the server's
+  memory, never in a file or variable the agent can read.
+- **Within a workspace.** Each terminal is a session, and its
+  [profile](/home/configuration/session) decides which files it sees and which
+  commands and CLIs it may run, so agents in one workspace can each get only
+  what they need.
+
+## Use cases
+
+Each page adds a few lines to this server and shows what an agent does with
+the terminal.
+
+<CardGroup cols={2}>
+  <Card title="Code Review" icon="code-pull-request" href="/home/examples/in-process-terminal/code-review">
+    Review a pull request and a dependency bump with `gh`, `git`, a GitHub
+    mount and an MCP server.
+  </Card>
+  <Card title="Co-Work" icon="users" href="/home/examples/in-process-terminal/co-work">
+    Schedule candidate interviews from an inbox, a calendar and Slack.
+  </Card>
+  <Card title="Release Notes" icon="scroll" href="/home/examples/in-process-terminal/release-notes">
+    Turn a week of merged work into release notes.
+  </Card>
+</CardGroup>

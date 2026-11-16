@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../typescript/node_modules/typescript7/bin/tsc --noEmit"
   },
   "dependencies": {
     "@struktoai/mirage-browser": "workspace:*",

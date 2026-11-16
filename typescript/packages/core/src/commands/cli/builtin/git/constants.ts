@@ -68,6 +68,11 @@ export const PACK_DIR = 'objects/pack'
 export const IDX_SUFFIX = '.idx'
 export const FANOUT_LEN = 2
 
+// The commits a shallow repository holds without their parents, and the label
+// git decorates each of them with.
+export const SHALLOW_FILE = 'shallow'
+export const GRAFTED = 'grafted'
+
 // The pretty kinds a placeholder template spells, and the kinds that end every
 // entry with a newline rather than separating entries by one.
 export const TEMPLATE_KINDS: readonly string[] = ['format', 'tformat']

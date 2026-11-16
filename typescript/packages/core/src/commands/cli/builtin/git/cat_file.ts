@@ -27,7 +27,7 @@ import {
   UsageError,
 } from './errors.ts'
 import { OBJECT_TYPES } from './constants.ts'
-import { rawObject, repoArgs, type Repo } from './repo.ts'
+import { rawObject, readCommit, repoArgs, type Repo } from './repo.ts'
 import { resolveObject } from './revparse.ts'
 import { guarded, located, placeNamed, rooted, shownItems, shownRaw } from './seen.ts'
 import { opened } from './session.ts'
@@ -76,7 +76,7 @@ async function peeled(repo: Repo, obj: GitObject, want: string): Promise<GitObje
       // only where the session is shown it.
       if ((await located(repo, at)) === null) return null
     } else if (at.type === 'commit' && want === 'tree') {
-      const { commit } = await git.readCommit({ ...repoArgs(repo), oid: at.oid })
+      const commit = await readCommit(repo, at.oid)
       rooted(repo, commit.tree)
       at = { oid: commit.tree, type: 'tree' }
     } else {

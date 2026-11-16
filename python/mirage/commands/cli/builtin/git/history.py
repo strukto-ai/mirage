@@ -31,7 +31,11 @@ from dulwich.refs import (
 )
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import TEMPLATE_KINDS, WILDCARDS
+from mirage.commands.cli.builtin.git.constants import (
+    GRAFTED,
+    TEMPLATE_KINDS,
+    WILDCARDS,
+)
 from mirage.commands.cli.builtin.git.dates import date_clock, parse_date_mode
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
@@ -754,7 +758,8 @@ def decorations(
     commit's labels read in reverse ref order; HEAD is pulled to the
     front, spelled ``HEAD -> branch`` when attached (the branch's own
     label is absorbed) and ``HEAD`` alone when detached. Pinned against
-    git 2.50.
+    git 2.50. A shallow repository's boundary commits lead with
+    ``grafted`` (git 2.47.3).
 
     Args:
         repo (BaseRepo): repository whose refs to enumerate.
@@ -778,6 +783,8 @@ def decorations(
             continue
         labels.setdefault(commit.id, []).insert(0, _ref_label(name, full))
     _decorate_head(repo, labels, full)
+    for sha in sorted(repo.get_shallow()):
+        labels.setdefault(sha, []).insert(0, GRAFTED)
     return labels
 
 

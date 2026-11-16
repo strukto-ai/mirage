@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git from 'isomorphic-git'
-
 import { SYMLINK, TREE_MODE } from './constants.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
-import { repoArgs, storedItems, type Repo } from './repo.ts'
+import { readCommit, storedItems, type Repo } from './repo.ts'
 import { decoded, rooted } from './seen.ts'
 import type { GitObject } from './types.ts'
 
@@ -95,7 +93,7 @@ export async function commitEntries(
   commitOid: string | null,
 ): Promise<Map<string, TreeEntry>> {
   if (commitOid === null) return new Map()
-  const { commit } = await git.readCommit({ ...repoArgs(repo), oid: commitOid })
+  const commit = await readCommit(repo, commitOid)
   return treeEntries(repo, commit.tree)
 }
 
@@ -103,7 +101,7 @@ export async function commitEntries(
 export async function resolveTree(repo: Repo, name: string, resolved?: GitObject): Promise<string> {
   const obj = await unwrapped(repo, resolved ?? (await resolveObject(repo, name)), name)
   if (obj.type === 'commit') {
-    const tree = (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
+    const tree = (await readCommit(repo, obj.oid)).tree
     rooted(repo, tree, name)
     return tree
   }

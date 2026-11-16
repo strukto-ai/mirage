@@ -121,6 +121,7 @@ slack: Permission denied
 - **Virtual command line tools (CLIs).** `git`, `slack` and `ntn` are answered by Mirage itself, so an agent drives the service with nothing installed, across different runtimes and machines, and one tool can be virtualized into two or more, each under its own name with its own credentials.
 - **Routed, dynamic runtimes.** Python, JavaScript and any other command can be sent to a configured runtime, in process, sandboxed or remote, which decouples computation from storage and lets either change without touching the other.
 - **The virtualized Mirage shell.** It binds the filesystem, the CLIs and the runtimes into one command line, so pipes, redirection, variables, jobs and history work across all three.
+- **A managed terminal.** Sessions, job output, history and workspace snapshots persist in the storage you pick, such as RAM, Redis, S3 or disk, so an agent's terminal can outlive the process that runs it.
 - **Lightweight by design.** A workspace, the virtual terminal itself, takes about 100 KB of memory and each new session about 10 KB, so one process serves many agents without a container or VM per agent.
 - **Profiles designed for agents.** `allow`, `ask` and `deny` govern commands and CLIs, while `hide` and `show` govern files and folders, so a hidden path is not merely unreadable but absent from the filesystem the agent sees.
 - **A scriptable policy engine.** A policy script can prohibit any dangerous action before it runs, and the same stack gates every VFS op and session write, so neither a file nor an environment variable leaks.
@@ -294,7 +295,7 @@ interface, and Mirage embeds one in an application server. Each terminal is a
 Mirage session with its own working directory, environment and history, and Python
 runs in-process on Monty, so a terminal starts with no container or VM. Here
 it is in Express; the FastAPI version is in the
-[docs](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
+[docs](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

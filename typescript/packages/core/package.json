@@ -56,6 +56,7 @@
     "./mirage_rs.wasm": "./dist/generated/mirage_rs.wasm",
     "./mirage_shell.wasm": "./dist/generated/mirage_shell.wasm",
     "./mirage_gh.wasm": "./dist/generated/mirage_gh.wasm",
+    "./mirage_pdf.wasm": "./dist/generated/mirage_pdf.wasm",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -80,6 +81,12 @@
       "workerd": "./dist/generated/mirage_gh.workerd.js",
       "node": "./dist/generated/mirage_gh.node.js",
       "default": "./dist/generated/mirage_gh.js"
+    },
+    "#mirage-pdf-wasm": {
+      "types": "./src/generated/mirage_pdf.d.ts",
+      "workerd": "./dist/generated/mirage_pdf.workerd.js",
+      "node": "./dist/generated/mirage_pdf.node.js",
+      "default": "./dist/generated/mirage_pdf.js"
     }
   },
   "files": [
@@ -88,9 +95,9 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json",
     "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && vitest run",
-    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
+    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && node ../../node_modules/typescript7/bin/tsc --noEmit",
     "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs"
   },
   "devDependencies": {
