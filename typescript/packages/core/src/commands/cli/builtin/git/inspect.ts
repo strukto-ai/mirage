@@ -60,7 +60,7 @@ import {
 } from './util.ts'
 import { gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
-import { HEAD } from './constants.ts'
+import { HEAD, SHALLOW_FILE } from './constants.ts'
 import { inGitDir, isBare } from './discover.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -750,7 +750,7 @@ async function placeAnswer(
     case '--is-bare-repository':
       return `${String(place.bare)}\n`
     case '--is-shallow-repository': {
-      const shallow = await readOptional(repo.vfs, location.commondir.join('shallow'))
+      const shallow = await readOptional(repo.vfs, location.commondir.join(SHALLOW_FILE))
       return `${String(shallow !== null)}\n`
     }
     case '--show-ref-format':

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git from 'isomorphic-git'
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -40,15 +39,7 @@ import {
   validRefName,
   writeRef,
 } from './refs.ts'
-import {
-  addShallow,
-  grafted,
-  objectType,
-  openRepo,
-  repoArgs,
-  storePack,
-  type Repo,
-} from './repo.ts'
+import { addShallow, readCommit, objectType, openRepo, storePack, type Repo } from './repo.ts'
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import {
@@ -154,12 +145,7 @@ async function isAncestor(repo: Repo, old: string, fresh: string): Promise<boole
     if (seen.has(oid)) continue
     seen.add(oid)
     if ((await objectType(repo, oid)) === 'commit')
-      for (const item of grafted(
-        repo,
-        oid,
-        (await git.readCommit({ ...repoArgs(repo), oid })).commit.parent,
-      ))
-        stack.push(item)
+      for (const item of (await readCommit(repo, oid)).parent) stack.push(item)
   }
   return false
 }

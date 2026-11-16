@@ -189,8 +189,10 @@ def missing_objects(
     upload-pack's edge does. Gitlinks name another repository and are
     never followed. A depth keeps only the commits that many steps from a
     want, the want counting as one, walked breadth first so each commit
-    is counted at its nearest; one at the limit that has parents is cut
-    there, shallow, as ``deepen`` cuts it.
+    is counted at its nearest, a tag's target at the tag's own step; one
+    at the limit that has parents is cut there, shallow, as ``deepen``
+    cuts it. A commit the sender itself holds shallow is cut there too,
+    so a clone of a shallow repository is shallow where it is.
 
     Args:
         repo (BaseRepo): the repository sending objects.
@@ -208,6 +210,8 @@ def missing_objects(
     seen: set[bytes] = set()
     queue = deque((want.encode(), 1) for want in wants)
     take = queue.pop if depth is None else queue.popleft
+    now = queue.append if depth is None else queue.appendleft
+    grafts = repo.get_shallow()
     trees: list[bytes] = []
     while queue:
         oid, level = take()
@@ -220,10 +224,12 @@ def missing_objects(
         obj = repo.object_store[ObjectID(oid)]
         sending.append(obj)
         if isinstance(obj, Tag):
-            queue.append((obj.object[1], level))
+            now((obj.object[1], level))
         elif isinstance(obj, Commit):
             trees.append(obj.tree)
-            if depth is not None and level >= depth and obj.parents:
+            if oid in grafts or (
+                depth is not None and level >= depth and obj.parents
+            ):
                 shallow.append(oid)
             else:
                 queue.extend((parent, level + 1) for parent in obj.parents)

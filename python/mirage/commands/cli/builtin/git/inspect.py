@@ -9,7 +9,11 @@ from dulwich.refs import DictRefsContainer
 from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
-from mirage.commands.cli.builtin.git.constants import GIT_DIR, HEAD
+from mirage.commands.cli.builtin.git.constants import (
+    GIT_DIR,
+    HEAD,
+    SHALLOW_FILE,
+)
 from mirage.commands.cli.builtin.git.discover import in_git_dir, is_bare
 from mirage.commands.cli.builtin.git.errors import (
     AbbrevModeError,
@@ -985,7 +989,7 @@ async def _place_answer(
             return f"{str(place.bare).lower()}\n".encode()
         case "--is-shallow-repository":
             shallow = await read_optional(
-                vfs, location.commondir.join("shallow")
+                vfs, location.commondir.join(SHALLOW_FILE)
             )
             return f"{str(shallow is not None).lower()}\n".encode()
         case "--show-ref-format":

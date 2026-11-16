@@ -172,6 +172,30 @@ def _config(
     return text
 
 
+def guessed_head(adv: Advertisement, kept: set[str]) -> str | None:
+    """The branch a remote's detached HEAD stands for, as git guesses it.
+
+    A remote that names no symbolic HEAD is read as the branch pointing
+    where HEAD points: the default branch when it does, else the first
+    such branch by name; none leaves HEAD detached (git 2.47.3).
+
+    Args:
+        adv (Advertisement): what the remote published.
+        kept (set[str]): the refs the clone takes.
+    """
+    oid = adv.refs.get("HEAD")
+    branches = sorted(ref for ref in kept if ref.startswith(BRANCH_PREFIX))
+    default = f"{BRANCH_PREFIX}{DEFAULT_BRANCH}"
+    return next(
+        (
+            ref
+            for ref in [default, *branches]
+            if oid is not None and ref in kept and adv.refs[ref] == oid
+        ),
+        None,
+    )
+
+
 def remote_head(
     adv: Advertisement, chosen: str | None
 ) -> tuple[str | None, str | None]:
@@ -349,7 +373,11 @@ async def _populate(
             if ref in kept or ref == "HEAD"
         },
         {ref: oid for ref, oid in advertised.peeled.items() if ref in kept},
-        advertised.head if advertised.head in kept else None,
+        advertised.head
+        if advertised.head in kept
+        else (
+            guessed_head(advertised, kept) if advertised.head is None else None
+        ),
     )
     notes += funny
     branch, commit = remote_head(adv, fl.as_str("branch"))

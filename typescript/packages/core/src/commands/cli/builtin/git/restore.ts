@@ -47,7 +47,7 @@ import {
   statOf,
 } from './io.ts'
 
-import { repoArgs, type Repo } from './repo.ts'
+import { readCommit, repoArgs, type Repo } from './repo.ts'
 import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
 import { restored } from './reset.ts'
@@ -126,10 +126,7 @@ export async function sourceTree(
   // is what makes `--source=<tag-id>` read the same tree `--source=v1` reads.
   found = await unwrapped(repo, found, revision)
   // git's one implicit peel: a commit stands for its tree here.
-  const tree =
-    found.type === COMMIT
-      ? (await git.readCommit({ ...repoArgs(repo), oid: found.oid })).commit.tree
-      : found.oid
+  const tree = found.type === COMMIT ? (await readCommit(repo, found.oid)).tree : found.oid
   if (found.type !== COMMIT && found.type !== TREE) throw new UnreadableTreeError(found.oid)
   return [tree, await treeEntries(repo, tree)]
 }

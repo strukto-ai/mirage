@@ -242,7 +242,6 @@ it('clones and fetches over smart http', async () => {
 
 it('clones shallow over smart http as git does', async () => {
   const native = join(tmp, 'native-shallow')
-  // The server answers on this loop, so git runs without blocking it.
   await promisify(execFile)('git', ['clone', '-q', '--depth', '1', url, native], { env: ENV })
   const git = (args: string[]): string =>
     execFileSync('git', ['-C', native, ...args], { env: ENV, encoding: 'utf8' })

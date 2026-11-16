@@ -229,8 +229,7 @@ class GraftedCommit(Commit):
 
     @parents.setter
     def parents(self, value: list[ObjectID]) -> None:
-        self._needs_serialization = True
-        self._parents = value
+        raise AttributeError("a grafted commit's parents cannot be set")
 
 
 class VfsObjectStore(PackCapableObjectStore):
