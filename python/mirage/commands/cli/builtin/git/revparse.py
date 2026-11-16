@@ -328,7 +328,6 @@ def merge_bases(
         other (Commit): the other side.
         others (Commit): further tips of the hypothetical merged side.
     """
-    shallow = shallow_commits(repo)
     known = {commit.id: commit for commit in (one, other, *others)}
 
     def load(oid: ObjectID) -> Commit:
@@ -337,7 +336,7 @@ def merge_bases(
         return known[oid]
 
     def parents_of(oid: ObjectID) -> list[ObjectID]:
-        return [] if oid in shallow else load(oid).parents
+        return load(oid).parents
 
     # What `one` reaches, what the merged side reaches, and what lies
     # beneath a commit both reach.
@@ -391,7 +390,7 @@ def merge_bases(
         flags = reached[oid]
         if oid in origins and flags != origins[oid]:
             redundant.add(oid)
-        if flags == all_origins or oid in shallow:
+        if flags == all_origins:
             continue
         for parent in _commit_at(repo, oid, oid.decode()).parents:
             had = reached.get(parent, 0)
@@ -959,23 +958,6 @@ def _push_target(repo: Repo, branch: str, revision: str) -> str:
             "cannot resolve 'simple' push to a single destination"
         )
     return upstream.ref
-
-
-def shallow_commits(repo: BaseRepo) -> set[bytes]:
-    """The commits a shallow repository holds without their parents.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-    """
-    if isinstance(repo, Repo):
-        data = run_async_from_sync(
-            read_optional(
-                repo.dispatch, repo.location.commondir.join("shallow")
-            ),
-            repo.loop,
-        )
-        return set((data or b"").split())
-    return set(repo.get_shallow())
 
 
 def expand_selector(repo: BaseRepo, name: str, revision: str) -> str:

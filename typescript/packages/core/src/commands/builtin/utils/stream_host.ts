@@ -24,7 +24,7 @@ import { ByteSpool, spooledPair } from '../../../io/spool.ts'
 import { drain } from '../../../io/stream.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { ByteWriter } from '../../../io/writer.ts'
-import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
+import { openStream, serveRequests, type OpenStream, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
@@ -701,6 +701,7 @@ export class StreamHost {
 /**
  * Run a stream that reaches files through `host`, yielding its output as it
  * settles; output closed early still lets what it wrote to its files land.
+ * `open` opens it on the module that carries it, the main one by default.
  * Mirrors Python's `hosted_stream`.
  */
 export async function* hostedStream(
@@ -709,10 +710,14 @@ export async function* hostedStream(
   host: StreamHost,
   io: IOResult,
   signal?: AbortSignal,
+  open: (
+    kind: string,
+    config: Readonly<Record<string, util.JSONType>>,
+  ) => Promise<OpenStream> = openStream,
 ): AsyncIterable<Uint8Array> {
   // The engine opens on the first pull, so output closed before one holds
   // no Wasm handle.
-  const engine = await openStream(kind, config)
+  const engine = await open(kind, config)
   let closed = true
   try {
     yield* serveRequests(engine, host, signal)

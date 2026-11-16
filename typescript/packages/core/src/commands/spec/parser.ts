@@ -904,9 +904,13 @@ export function parseCommand(
         i += 1
         continue
       }
+      // A word the spec declares whole is that option, never a shorter one
+      // with the rest attached as its value: pdftotext's -layout is not -l
+      // given "ayout".
+      const whole = cs.boolSpellings.has(tok) || cs.valueSpellings.includes(tok)
       let matchedOptional = false
       for (const vf of cs.attachSpellings) {
-        if (tok.startsWith(vf) && tok.length > vf.length) {
+        if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, tok.slice(vf.length))
           base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
@@ -919,7 +923,7 @@ export function parseCommand(
       for (const vf of cs.valueSpellings) {
         const dest = cs.destOf(vf)
         const width = cs.nargsByDest.get(dest)
-        if (width !== undefined && tok.startsWith(vf)) {
+        if (width !== undefined && tok.startsWith(vf) && (tok === vf || !whole)) {
           const attachedValue =
             tok.length > vf.length ? attached(tok.slice(vf.length), equalsValues) : null
           const detached = width - (attachedValue === null ? 0 : 1)
@@ -942,7 +946,7 @@ export function parseCommand(
           matchedValue = true
           break
         }
-        if (tok.startsWith(vf) && tok.length > vf.length) {
+        if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           const attachedValue = attached(tok.slice(vf.length), equalsValues)
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, attachedValue)
           base = rebase(flags, cs, vf, attachedValue, base)

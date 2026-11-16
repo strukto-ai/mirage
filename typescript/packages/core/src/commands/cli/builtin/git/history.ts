@@ -24,7 +24,7 @@ import {
   PatternCompileError,
   RevisionAndFilenameError,
 } from './errors.ts'
-import { HEAD, TEMPLATE_KINDS, WILDCARDS } from './constants.ts'
+import { GRAFTED, HEAD, TEMPLATE_KINDS, WILDCARDS } from './constants.ts'
 
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
@@ -663,7 +663,8 @@ export async function displayed(
  * git walks refs alphabetically and prepends each label, so a commit's labels
  * read in reverse ref order; HEAD is pulled to the front, spelled
  * `HEAD -> branch` when attached (the branch's own label is absorbed) and
- * `HEAD` alone when detached. Pinned against git 2.50.
+ * `HEAD` alone when detached. Pinned against git 2.50. A shallow repository's
+ * boundary commits lead with `grafted` (git 2.47.3).
  *
  * @param repo the opened repository
  * @param style `FULL` keeps each ref's whole name, `NONE` loads nothing;
@@ -689,6 +690,8 @@ export async function decorations(
     labels.set(commit.oid, list)
   }
   await decorateHead(repo, refs, resolved, labels, full)
+  for (const oid of [...repo.shallow].sort(compareCodePoints))
+    labels.set(oid, [GRAFTED, ...(labels.get(oid) ?? [])])
   return labels
 }
 

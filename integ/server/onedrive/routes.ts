@@ -28,12 +28,11 @@ import {
   refParent,
   strOf,
 } from './paths.ts'
-import { fileItem, folderItem, itemAt } from './render.ts'
+import { childItems, fileItem, folderItem, itemAt, scopeItems } from './render.ts'
 import {
   addDir,
   addDrive,
   changesAfter,
-  childNames,
   conflictFree,
   copyDir,
   dirAt,
@@ -302,12 +301,7 @@ async function copyItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply
 async function childrenOf(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
   if (p !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
-  const value: JsonValue[] = []
-  const at = stamp(ctx)
-  for (const name of await childNames(ctx.db, ctx.tenant, drive, p)) {
-    const child = await itemAt(ctx.db, ctx.tenant, ctx.url.origin, drive, joinPath(p, name), at)
-    if (child !== null) value.push(child)
-  }
+  const value = await childItems(ctx.db, ctx.tenant, ctx.url.origin, drive, p, stamp(ctx))
   return { status: 200, body: { value } }
 }
 
@@ -381,7 +375,10 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
   if (token === null) {
     return {
       status: 200,
-      body: { value: await enumerate(ctx, drive, scope), '@odata.deltaLink': link },
+      body: {
+        value: await scopeItems(ctx.db, ctx.tenant, ctx.url.origin, drive, scope, stamp(ctx)),
+        '@odata.deltaLink': link,
+      },
     }
   }
   const after = Number(token)
@@ -400,28 +397,6 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
     value.push(found ?? { id, name: baseName(path), deleted: {} })
   }
   return { status: 200, body: { value, '@odata.deltaLink': link } }
-}
-
-// Every item at or under `scope`, folders first and each before its children,
-// as a full enumeration lists them; the root folder carries its `root` facet.
-async function enumerate(ctx: Ctx<C>, drive: string, scope: string): Promise<JsonValue[]> {
-  const inside = (path: string): boolean =>
-    scope === '' || path === scope || path.startsWith(`${scope}/`)
-  const at = stamp(ctx)
-  const dirs = await ctx.db.graphDir.findMany({
-    where: { tenant: ctx.tenant, drive },
-    select: { path: true },
-  })
-  const folders = new Set([scope, ...dirs.map((row) => row.path).filter(inside)])
-  const value: JsonValue[] = []
-  for (const path of [...folders].sort()) {
-    value.push(await folderItem(ctx.db, ctx.tenant, drive, path, at))
-  }
-  const files = await ctx.db.graphFile.findMany({ where: { tenant: ctx.tenant, drive } })
-  for (const row of files.sort((a, b) => (a.path < b.path ? -1 : 1))) {
-    if (inside(row.path)) value.push(await fileItem(ctx.db, ctx.tenant, ctx.url.origin, row))
-  }
-  return value
 }
 
 // An item by the id the renderer gave it, null when it is gone.

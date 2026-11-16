@@ -41,6 +41,7 @@ interface Exports {
   mirage_rs_metadata(handle: number): number
   mirage_rs_take_stderr(handle: number): number
   mirage_rs_request(handle: number): number
+  mirage_rs_reserve(handle: number, len: number): number
   mirage_rs_stage(handle: number, len: number): number
   mirage_rs_respond(handle: number, replyLen: number): number
   mirage_rs_output(handle: number): number
@@ -69,6 +70,24 @@ export const logger: { debug?: (message: string) => void } = {}
 type ModuleSource = WebAssembly.Module | (() => WebAssembly.Module)
 
 /**
+ * A refusing stand-in for every function a module imports. The streams
+ * call no host function: a module whose crates link JavaScript glue (the
+ * PDF module's random number and clock bindings) names it on paths no
+ * stream takes, and a call that ever reached one would fail loudly here.
+ */
+function unbound(module: WebAssembly.Module): WebAssembly.Imports {
+  const imports: Record<string, Record<string, () => never>> = {}
+  for (const { module: from, name, kind } of WebAssembly.Module.imports(module)) {
+    if (kind !== 'function') continue
+    imports[from] ??= {}
+    imports[from][name] = () => {
+      throw new Error(`mirage-rs: the stream called ${from}.${name}, which no host provides`)
+    }
+  }
+  return imports
+}
+
+/**
  * One embedded streams module and the instance its streams run on. A module
  * holds what it compiled, so each compiles once, and recycles its own instance.
  */
@@ -81,7 +100,14 @@ export class StreamModule {
   private next: Exports | undefined
   private making: Promise<void> | undefined
 
-  constructor(private readonly source: ModuleSource) {}
+  /**
+   * `recycle`: the size past which an instance a stream grew is dropped
+   * once none is open on it.
+   */
+  constructor(
+    private readonly source: ModuleSource,
+    readonly recycle = RECYCLE_BYTES,
+  ) {}
 
   compiledModule(): WebAssembly.Module {
     this.compiled ??= compileSync(this.source)
@@ -103,7 +129,10 @@ export class StreamModule {
 
   private async make(): Promise<void> {
     while (this.exports === undefined || this.next === undefined) {
-      const instance = await WebAssembly.instantiate(this.compiledModule(), {})
+      const instance = await WebAssembly.instantiate(
+        this.compiledModule(),
+        unbound(this.compiledModule()),
+      )
       const made = instance.exports as unknown as Exports
       if (this.exports === undefined) this.exports = made
       else this.next ??= made
@@ -147,7 +176,7 @@ export class StreamModule {
     config: Readonly<Record<string, util.JSONType>>,
     movable: boolean,
   ): OpenStream {
-    this.exports ??= new WebAssembly.Instance(this.compiledModule(), {})
+    this.exports ??= new WebAssembly.Instance(this.compiledModule(), unbound(this.compiledModule()))
       .exports as unknown as Exports
     return open(this.exports, this, kind, config, movable)
   }
@@ -331,8 +360,13 @@ export class OpenStream {
     data: Uint8Array | readonly Uint8Array[],
   ): Uint8Array {
     const header = encoder.encode(JSON.stringify(reply))
+    const parts = [header, ...(data instanceof Uint8Array ? [data] : data)]
     return this.guard(() => {
-      for (const part of [header, ...(data instanceof Uint8Array ? [data] : data)]) {
+      this.exports.mirage_rs_reserve(
+        this.handle,
+        parts.reduce((size, part) => size + part.byteLength, 0),
+      )
+      for (const part of parts) {
         for (let offset = 0; offset < part.byteLength; offset += this.capacity) {
           const piece = part.subarray(offset, offset + this.capacity)
           const window = this.exports.mirage_rs_input(this.handle)
@@ -350,7 +384,7 @@ export class OpenStream {
     const held = movables.get(this.exports)
     if (
       this.exports.mirage_rs_open_count() === (held?.size ?? 0) &&
-      this.exports.memory.buffer.byteLength > RECYCLE_BYTES &&
+      this.exports.memory.buffer.byteLength > this.module.recycle &&
       ![...(held ?? [])].some((stream) => stream.busy())
     )
       this.module.retire(this.exports, false)

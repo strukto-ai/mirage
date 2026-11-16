@@ -51,9 +51,9 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
+    "build": "node scripts/clean.mjs && node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
     "test": "node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && vitest run",
-    "typecheck": "node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && tsc --noEmit"
+    "typecheck": "node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && node ../../node_modules/typescript7/bin/tsc --noEmit"
   },
   "dependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",

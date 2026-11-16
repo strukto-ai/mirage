@@ -301,3 +301,15 @@ async def test_bare_format_is_refused_like_git(git_ws):
     result = await git_ws.shell("git -C /repo log --format")
     assert result.exit_code == 128
     assert result.stderr == b"fatal: unrecognized argument: --format\n"
+
+
+@pytest.mark.asyncio
+async def test_a_shallow_history_ends_at_its_grafted_commit(repo_path, git_ws):
+    with Repo(str(repo_path)) as repo:
+        second = repo[repo.head()].parents[0]
+    (repo_path / ".git" / "shallow").write_bytes(second + b"\n")
+    result = await git_ws.shell("git -C /repo log --format=%s/%P/%D")
+    assert result.exit_code == 0
+    rows = result.stdout.decode().splitlines()
+    assert len(rows) == 2
+    assert rows[1] == "second//grafted"

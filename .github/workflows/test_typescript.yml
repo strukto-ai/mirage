@@ -250,6 +250,7 @@ jobs:
           run integ/truth/typescript/pyodide_heredoc.json
           run integ/truth/typescript/pyodide_script.json
           run integ/truth/typescript/pyodide_ram.json
+          run integ/truth/typescript/pyodide_vfs.json
           run integ/truth/typescript/redis.json
           run integ/truth/typescript/redis_index.json
           run integ/truth/typescript/redis_cache.json
@@ -267,39 +268,6 @@ jobs:
         working-directory: typescript
         run: pnpm exec knip
 
-  # The Pyodide filesystem example, then the informational audit, which
-  # needs only this job's install. Its timeout keeps a stalled registry
-  # inside the time the test legs already take, so the gate does not wait.
-  python-fs:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: python-fs and audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: "24"
-
-      - name: Install node-gyp
-        run: npm install -g node-gyp
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile
-
-      - name: Build TypeScript packages
-        working-directory: typescript
-        run: pnpm -r --filter './packages/*' build
-
-      # The truth file carries this one's cwd and `node --import tsx/esm`
-      # spelling, so it runs from the repo root like every other example.
-      - name: Python filesystem example (output checked against integ/ truth file)
-        run: python3 integ/check_example.py integ/truth/typescript/pyodide_vfs.json
-
       # Advisories read against the resolved lockfile, which is what the 27
       # hand-written pnpm.overrides in typescript/package.json pin. Those
       # pins were the only thing between a published advisory and this
@@ -315,6 +283,7 @@ jobs:
       # that stall as a failed audit three runs out of four. A longer
       # timeout and more retries ride it out; a real advisory still fails.
       - name: Audit dependencies for known vulnerabilities (informational)
+        if: ${{ !cancelled() && matrix.typecheck }}
         continue-on-error: true
         timeout-minutes: 5
         working-directory: typescript
@@ -327,7 +296,7 @@ jobs:
     name: test-typescript-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, test, python-fs]
+    needs: [changes, test]
     if: always()
     steps:
       - name: Check required jobs

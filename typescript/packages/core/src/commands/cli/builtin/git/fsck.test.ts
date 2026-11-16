@@ -193,3 +193,25 @@ it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', a
     exitCode: new GitError('').exitCode,
   })
 })
+it('finds nothing missing below a shallow commit', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-fsck-shallow-'))
+  const ws = workspace()
+  try {
+    native(root, ['init', '-q', '-b', 'main'])
+    for (const subject of ['first', 'second', 'third'])
+      native(root, ['commit', '-q', '--allow-empty', '-m', subject])
+    const second = native(root, ['rev-parse', 'HEAD~1']).trim()
+    const first = native(root, ['rev-parse', 'HEAD~2']).trim()
+    writeFileSync(join(root, '.git/shallow'), `${second}\n`)
+    unlinkSync(join(root, '.git/objects', first.slice(0, 2), first.slice(2)))
+    rmSync(join(root, '.git/logs'), { recursive: true, force: true })
+    await load(ws, root)
+    const checked = await ws.shell('git -C /repo fsck --no-dangling')
+    expect(new TextDecoder().decode(checked.stderr)).toBe('')
+    expect(checked.exitCode).toBe(0)
+    expect(new TextDecoder().decode(checked.stdout)).toBe(native(root, ['fsck', '--no-dangling']))
+  } finally {
+    await ws.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

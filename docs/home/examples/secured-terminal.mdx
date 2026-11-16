@@ -1,0 +1,285 @@
+---
+title: Secured Terminal
+icon: shield-halved
+description: Decide which files an agent sees, which commands and CLIs it runs and which credentials its tools use, in one workspace config.
+---
+
+import { FlowDiagram, SecuredDiagram } from "/snippets/routing-diagram.jsx"
+
+<SecuredDiagram />
+
+An agent should reach exactly what its task needs. In Mirage, the files it
+sees, the commands and CLIs it may run and the credentials its tools use are
+all set in one workspace config, on the server, and the agent cannot change
+them. This example gives an analyst agent read access to a bucket and a Slack
+CLI it can read with but not post from.
+
+## Setup
+
+The workspace has an S3 bucket at `/data`, a RAM folder at `/scratch`, and
+the `gh` and `slack` CLIs. Their credentials come from AWS Secrets Manager,
+1Password and the server's environment, and the agent never sees them. The
+`analyst` profile sets what the agent can see and run.
+
+<AccordionGroup>
+  <Accordion title="workspace.yaml">
+    ```yaml workspace.yaml
+    mode: exec
+
+    mounts:
+      /data:
+        vfs: s3
+        config:
+          bucket: ${AWS_S3_BUCKET}
+          region: us-east-1
+          aws_access_key_id: {from: aws-sm, ref: mirage/s3, key: AWS_ACCESS_KEY_ID}
+          aws_secret_access_key: {from: aws-sm, ref: mirage/s3, key: AWS_SECRET_ACCESS_KEY}
+      /scratch:
+        vfs: ram
+
+    machines:
+      monty:
+        provider: in_process
+        runtime: monty
+
+    clis:
+      gh:
+        cli: gh
+        machine: in_process
+        config:
+          token: {from: env, key: GITHUB_TOKEN}
+      slack:
+        cli: slack
+        machine: in_process
+        config:
+          token: {from: 1password, ref: op://Engineering/Slack/credential, key: credential}
+
+    profiles:
+      analyst:
+        cwd: /data
+        env:
+          TEAM: growth
+        mounts:
+          /data: read
+        paths:
+          hide: ["/data/secrets", "*.pem"]
+          show: ["/data/secrets/README.md"]
+        commands:
+          allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
+                  "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
+    ```
+  </Accordion>
+  <Accordion title="Load the workspace">
+    <Tabs>
+      <Tab title="Python" icon="/images/python-logo.svg">
+        ```python
+        from mirage import Workspace
+        from mirage.config import load_config, resolve_secrets
+
+        config = await resolve_secrets(load_config("workspace.yaml"))
+        ws = Workspace(**config.to_workspace_kwargs())
+        agent = await ws.session("agent", profile="analyst")
+        result = await agent.shell("ls")
+        print(await result.stdout_str(), end="")
+        ```
+      </Tab>
+      <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+        ```typescript
+        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
+        const agent = await ws.session('agent', { profile: 'analyst' })
+        const result = await agent.shell('ls')
+        process.stdout.write(result.stdoutText)
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
+
+## File Visibility Control
+
+`paths.hide` makes `/data/secrets` and every `*.pem` absent, and `paths.show`
+brings back `/data/secrets/README.md`. A hidden file is not refused, it does
+not exist, whichever way the agent looks for it.
+
+Shell commands:
+
+```bash
+ls
+# reports
+# secrets
+ls secrets
+# README.md
+cat secrets/aws.txt
+# cat: secrets/aws.txt: No such file or directory
+cat server.pem
+# cat: server.pem: No such file or directory
+grep -r AKIA .
+find . -name '*.pem'
+```
+
+Python commands:
+
+```bash
+python3 -c "print(open('/data/secrets/aws.txt').read())"
+# Traceback (most recent call last):
+#   File "<python-input-0>", line 1, in <module>
+#     print(open('/data/secrets/aws.txt').read())
+#           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# FileNotFoundError: [Errno 2] No such file or directory: '/data/secrets/aws.txt'
+python3 -c "import os; print(os.listdir('/data/secrets'))"
+# ['README.md']
+```
+
+VFS calls:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    await agent.vfs.readdir("/data/secrets")
+    # ['/data/secrets/README.md']
+    await agent.vfs.read("/data/secrets/aws.txt")
+    # FileNotFoundError: [Errno 2] No such file or directory: '/data/secrets/aws.txt'
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    await agent.vfs.readdir('/data/secrets')
+    // [ '/data/secrets/README.md' ]
+    await agent.vfs.read('/data/secrets/aws.txt')
+    // ENOENT /data/secrets/aws.txt
+    ```
+  </Tab>
+  <Tab title="CLI" icon="terminal">
+    ```bash
+    mirage workspace vfs readdir /data/secrets -w secured -s agent
+    # [
+    #   "/data/secrets/README.md"
+    # ]
+    mirage workspace vfs read /data/secrets/aws.txt -w secured -s agent
+    # No such file or directory (ENOENT)
+    ```
+  </Tab>
+</Tabs>
+
+## Commands Control
+
+`commands.allow` lists the only commands the session runs, so everything an
+analyst does not need, such as `rm`, `sed` or `curl`, is off. For a CLI the
+list names single verbs, so `slack` reads messages and members but never posts,
+edits or uploads, and `gh` lists and views pull requests but cannot merge one or
+call `gh api`. The agent reads the shell's own `Permission denied` and exit 126;
+the reason reaches the host on the result's `decision`, shown under each line:
+
+```bash
+slack list-members | jq length
+# 3
+rm reports/q3.csv
+# rm: Permission denied
+# decision: deny, rm is not allowed
+sed -n 1p reports/q3.csv
+# sed: Permission denied
+# decision: deny, sed is not allowed
+curl -s https://example.com
+# curl: Permission denied
+# decision: deny, curl is not allowed
+slack send-message --channel general --text hi
+# slack: Permission denied
+# decision: deny, slack send-message is not allowed
+gh pr merge 1 -R strukto-ai/mirage
+# gh: Permission denied
+# decision: deny, gh pr merge is not allowed
+```
+
+## Agent Profile
+
+An agent profile is a named set of rules under `profiles:`. A session takes a
+profile when it is created, and every line, file call and CLI in that session
+follows it, however the agent connects. A profile can only narrow the
+workspace, never widen it, so one workspace can serve agents with different
+reach. The `analyst` profile above:
+
+```yaml
+profiles:
+  analyst:
+    cwd: /data
+    env:
+      TEAM: growth
+    mounts:
+      /data: read
+    paths:
+      hide: ["/data/secrets", "*.pem"]
+      show: ["/data/secrets/README.md"]
+    commands:
+      allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
+              "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
+```
+
+- `cwd` and `env` start the session in `/data` with `TEAM` set.
+- `mounts` keeps `/data` read-only, though the workspace may write it.
+- `paths` and `commands` are the rules from the two sections above.
+
+A profile also takes `vars`, `network`, `processes`, `command_limits` and
+`policy`; see [Session Profiles](/home/configuration/session).
+
+### Connect to a profile session
+
+With the workspace on a [Mirage server](/home/access/http) as `secured`, the
+agent reaches the same session over HTTP, MCP or SSH:
+
+<Tabs>
+  <Tab title="HTTP" icon="globe">
+    Create the session under the profile, then run lines in it:
+
+    ```bash
+    mirage workspace session create -w secured -s agent -p analyst
+
+    curl -X POST "http://127.0.0.1:8765/v1/workspaces/secured/shell?session_id=agent" \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"command": "cat secrets/aws.txt"}'
+    # {"stdout": "", "stderr": "cat: secrets/aws.txt: No such file or directory\n", "exit_code": 1}
+    ```
+  </Tab>
+  <Tab title="MCP" icon="/images/mcp-icon.svg">
+    Point the agent at the session's MCP URL:
+
+    ```text
+    http://127.0.0.1:8765/v1/workspaces/secured/mcp?session_id=agent
+    ```
+
+    A `shell` call with `rm reports/q3.csv` answers:
+
+    ```text
+    rm: Permission denied
+    policy denied: rm is not allowed
+    ```
+  </Tab>
+  <Tab title="SSH" icon="/images/ssh-logo.svg">
+    Bind the agent's key to the profile in `~/.mirage/ssh/authorized_keys`,
+    so every login of that key runs under it:
+
+    ```text ~/.mirage/ssh/authorized_keys
+    mirage-profile="analyst" ssh-ed25519 AAAA... agent
+    ```
+
+    ```bash
+    ssh -p 2222 secured@127.0.0.1 pwd
+    # /data
+    ssh -p 2222 secured@127.0.0.1 'cat secrets/aws.txt'
+    # cat: secrets/aws.txt: No such file or directory
+    ```
+  </Tab>
+</Tabs>
+
+MCP and SSH add the `policy denied:` line for the agent. See
+[Access](/home/access/overview#sessions) for every way in.
+
+## Learn more
+
+- [Session profiles](/home/configuration/session): every profile key and how rules match.
+- [Service credentials](/home/service-credentials): every source a pointer can read from.
+- [CLIs](/home/setup/clis): the bundled CLIs and their settings.
+- [Policies](/home/policy/policies): rules in code, for what a profile cannot express.

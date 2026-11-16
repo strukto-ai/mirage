@@ -2121,3 +2121,21 @@ def test_readings_stay_right_once_the_table_starts_over():
         for n in range(PARSES_KEPT + 1):
             parsed = parse_command(spec, ["--count", str(n)], "/")
             assert parsed.flags == {"--count": str(n)}
+
+
+# A word the spec declares whole is that option, never a shorter declared
+# option with the rest attached as its value (pdftotext's -layout beside
+# its -l); a word nothing declares whole still attaches.
+def test_a_declared_word_is_never_a_shorter_option_with_a_value():
+    spec = CommandSpec(
+        arguments=(
+            Argument("-l"),
+            Argument("-layout", action="store_true"),
+            Argument("files", nargs="*"),
+        )
+    )
+    whole = parse_command(spec, ["-layout", "-l", "2", "a"], "/", "pdftotext")
+    assert dict(parse_to_kwargs(whole)) == {"layout": True, "args_l": "2"}
+    assert whole.texts() == ["a"]
+    attached = parse_command(spec, ["-l3", "a"], "/", "pdftotext")
+    assert dict(parse_to_kwargs(attached)) == {"args_l": "3"}
