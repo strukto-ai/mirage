@@ -67,7 +67,8 @@ class MachineScope:
 
 def in_scope(scope: MachineScope, machine: str) -> bool:
     """Whether a process on ``machine`` is in a scope: a machine in it,
-    or Mirage's own unless the line picked another machine.
+    or Mirage's own, or an engine's in Mirage's process (``in_process``),
+    unless the line picked another machine.
 
     Args:
         scope (MachineScope): the machines.
@@ -75,7 +76,9 @@ def in_scope(scope: MachineScope, machine: str) -> bool:
     """
     if machine == WORKSPACE_MACHINE:
         return scope.workspace or not scope.picked
-    return machine in scope.ids
+    if machine in scope.ids:
+        return True
+    return not scope.picked and machine.startswith(f"{IN_PROCESS}:")
 
 
 def _reach_of(runtime: RuntimeIdentity | None) -> str:
@@ -200,7 +203,7 @@ def process_scope(
     """Which machines a process search looks at: those ``machine_scope``
     picks, or Mirage's own alone for ``mirage``, as ``ps`` names them.
     An engine's ``in_process`` machine is looked at wherever Mirage's
-    own is, and alone when named, though it has no resources to read.
+    own is (``in_scope``), and alone when named.
 
     Args:
         processes (ProcessTable): the workspace's processes.
@@ -211,20 +214,15 @@ def process_scope(
     """
     if name is not None and names_machine(WORKSPACE_MACHINE, name):
         return MachineScope((), True, True)
-    engines = _engine_machines()
     if name is not None:
         named = [
-            machine for machine in engines if names_machine(machine, name)
+            machine
+            for machine in _engine_machines()
+            if names_machine(machine, name)
         ]
         if named:
             return MachineScope((named[0],), True)
-    scope = machine_scope(processes, name)
-    if scope is None or scope.picked:
-        return scope
-    return replace(
-        scope,
-        ids=(*scope.ids, *(m for m in engines if m not in scope.ids)),
-    )
+    return machine_scope(processes, name)
 
 
 async def read_machines(

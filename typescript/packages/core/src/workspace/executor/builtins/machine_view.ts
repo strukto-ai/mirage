@@ -44,11 +44,13 @@ export interface MachineScope {
 
 /**
  * Whether a process on `machine` is in a scope: a machine in it, or Mirage's
- * own unless the line picked another machine. Mirrors Python's `in_scope`.
+ * own, or an engine's in Mirage's process (`in_process`), unless the line
+ * picked another machine. Mirrors Python's `in_scope`.
  */
 export function inScope(scope: MachineScope, machine: string): boolean {
   if (machine === WORKSPACE_MACHINE) return scope.workspace || !scope.picked
-  return scope.ids.includes(machine)
+  if (scope.ids.includes(machine)) return true
+  return !scope.picked && machine.startsWith(`${IN_PROCESS}:`)
 }
 
 function reachOf(runtime: unknown): string {
@@ -149,20 +151,17 @@ function engineMachines(): string[] {
 /**
  * Which machines a process search looks at: those `machineScope` picks, or
  * Mirage's own alone for `mirage`, as `ps` names them. An engine's
- * `in_process` machine is looked at wherever Mirage's own is, and alone when
- * named, though it has no resources to read. Null when `name` names none.
- * Mirrors Python's `process_scope`.
+ * `in_process` machine is looked at wherever Mirage's own is (`inScope`), and
+ * alone when named. Null when `name` names none. Mirrors Python's
+ * `process_scope`.
  */
 export function processScope(processes: ProcessTable, name: string | null): MachineScope | null {
   if (name !== null && namesMachine(WORKSPACE_MACHINE, name))
     return { ids: [], picked: true, several: false, workspace: true }
-  const engines = engineMachines()
-  const engine = name === null ? undefined : engines.find((machine) => namesMachine(machine, name))
+  const engine =
+    name === null ? undefined : engineMachines().find((machine) => namesMachine(machine, name))
   if (engine !== undefined) return { ids: [engine], picked: true, several: false, workspace: false }
-  const scope = machineScope(processes, name)
-  if (scope === null || scope.picked) return scope
-  const ids = [...scope.ids, ...engines.filter((machine) => !scope.ids.includes(machine))]
-  return { ...scope, ids, several: ids.length + (scope.workspace ? 1 : 0) > 1 }
+  return machineScope(processes, name)
 }
 
 /**

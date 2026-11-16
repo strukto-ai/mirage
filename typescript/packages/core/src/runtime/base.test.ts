@@ -141,6 +141,15 @@ class EngineRuntime extends SeenRuntime {
   }
 }
 
+/** A second engine in Mirage's own process, which runs `idle`. */
+class IdleRuntime extends Runtime {
+  readonly name = 'idle'
+
+  constructor() {
+    super({}, ['idle'])
+  }
+}
+
 async function seen(line: string, reach: RuntimeReach = 'remote'): Promise<[Process, string]> {
   const runtime = new SeenRuntime(reach)
   const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
@@ -217,16 +226,22 @@ describe('Runtime.execute', () => {
   })
 
   // A process search looks at an engine's in_process machine wherever it
-  // looks at Mirage's own, and at it alone when named.
+  // looks at Mirage's own, and at it alone when named; a substitution's
+  // answer stays bare PIDs, however many engines there are.
   it("finds an engine's programs in a process search", async () => {
     const runtime = new EngineRuntime()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime, new IdleRuntime()] })
     try {
       const done = await ws.shell(
         'hold & sleep 0.2; pgrep hold >/dev/null && echo found; ' +
           'pgrep --machine seen hold >/dev/null && echo named; pkill hold; wait $!; echo $?',
       )
       expect(DEC.decode(done.stdout)).toBe('found\nnamed\n143\n')
+      const bare = await ws.shell(
+        'hold & p=$!; sleep 0.2; [ "$(pgrep hold)" = "$p" ] && echo pgrep; ' +
+          '[ "$(pidof hold)" = "$p" ] && echo pidof; pkill hold; wait',
+      )
+      expect(DEC.decode(bare.stdout)).toBe('pgrep\npidof\n')
       const settled = await ws.shell('settle & sleep 0.2; kill $!; wait $!; echo $?')
       expect(DEC.decode(settled.stdout)).toBe('143\n')
     } finally {

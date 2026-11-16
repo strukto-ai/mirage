@@ -161,6 +161,13 @@ class EngineRuntime(SeenRuntime):
         return MachineName(IN_PROCESS, self.name)
 
 
+class IdleRuntime(Runtime):
+    """A second engine in Mirage's own process, which runs ``idle``."""
+
+    name = "idle"
+    captures = ("idle",)
+
+
 async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
     runtime = SeenRuntime(reach)
     ws = Workspace({"/data": RAMVFS()}, machines=[runtime])
@@ -234,11 +241,12 @@ async def test_a_programs_file_calls_name_its_process():
 
 
 # A process search looks at an engine's in_process machine wherever it
-# looks at Mirage's own, and at it alone when named.
+# looks at Mirage's own, and at it alone when named; a substitution's
+# answer stays bare PIDs, however many engines there are.
 @pytest.mark.asyncio
 async def test_a_process_search_finds_an_engines_programs():
     runtime = EngineRuntime()
-    ws = Workspace({"/data": RAMVFS()}, machines=[runtime])
+    ws = Workspace({"/data": RAMVFS()}, machines=[runtime, IdleRuntime()])
     try:
         async with asyncio.timeout(10):
             done = await ws.shell(
@@ -247,6 +255,13 @@ async def test_a_process_search_finds_an_engines_programs():
                 "pkill hold; wait $!; echo $?"
             )
         assert done.stdout == b"found\nnamed\n143\n"
+        async with asyncio.timeout(10):
+            bare = await ws.shell(
+                'hold & p=$!; sleep 0.2; [ "$(pgrep hold)" = "$p" ] && '
+                'echo pgrep; [ "$(pidof hold)" = "$p" ] && echo pidof; '
+                "pkill hold; wait"
+            )
+        assert bare.stdout == b"pgrep\npidof\n"
     finally:
         runtime.release.set()
         await ws.close()
