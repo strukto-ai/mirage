@@ -1,4 +1,5 @@
 import hashlib
+import shutil
 import subprocess
 import zlib
 
@@ -141,3 +142,24 @@ async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
             PathSpec.from_str_path("/repo/denied.pack"),
             b"0" * 20,
         )
+
+
+@pytest.mark.asyncio
+async def test_fsck_of_a_shallow_repository_misses_nothing(repo_path):
+    second = subprocess.check_output(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD~1"], text=True
+    ).strip()
+    first = subprocess.check_output(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD~2"], text=True
+    ).strip()
+    (repo_path / ".git" / "shallow").write_text(second + "\n")
+    (repo_path / ".git" / "objects" / first[:2] / first[2:]).unlink()
+    shutil.rmtree(repo_path / ".git" / "logs")
+    expected = subprocess.check_output(
+        ["git", "-C", str(repo_path), "fsck", "--no-dangling"]
+    )
+    with mounted(repo_path) as ws:
+        ws.register_cli("git", GIT)
+        result = await ws.shell("git -C /repo fsck --no-dangling")
+        assert result.exit_code == 0, await result.stderr_str()
+        assert (result.stdout or b"") == expected

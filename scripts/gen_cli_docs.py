@@ -52,6 +52,14 @@ SUMMARIES = {
         "Create and edit Excel workbooks, Word documents and PowerPoint "
         "decks with OfficeCLI paths"
     ),
+    "pdfinfo": (
+        "Print a PDF's metadata, page count, page sizes, encryption and "
+        "version"
+    ),
+    "pdftotext": (
+        "Extract a PDF's text in reading order, by layout or in drawing "
+        "order, page by page"
+    ),
     "search": (
         "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "
         "for a query"

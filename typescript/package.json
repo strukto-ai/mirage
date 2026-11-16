@@ -112,6 +112,7 @@
     "knip": "^6.26.0",
     "oxfmt": "^0.71.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "typescript7": "npm:typescript@7.0.2"
   }
 }

@@ -1,0 +1,228 @@
+---
+title: Infra-agnostic Terminal
+icon: layer-group
+description: A virtual terminal not tied to any fixed infrastructure, keeping its files, sessions and command logs on whichever backends are already in place.
+---
+
+import { InfraDiagram } from "/snippets/infra-diagram.jsx"
+
+<InfraDiagram />
+
+A terminal needs somewhere to keep its files, its state and its records. In
+Mirage, each of those is a separate backend set in the workspace config, and
+the agent sees the same terminal whichever one is behind it. This example builds a
+support agent's terminal from services a team might already run.
+
+| Part | Backend |
+| --- | --- |
+| Data the agent reads | <img noZoom src="/images/postgres-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Postgres, tables as files at `/db` |
+| Notes the agent writes | <img noZoom src="/images/sqlite-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />SQLite, through the `sql` virtual filesystem at `/notes` |
+| Sessions and background jobs | <img noZoom src="/images/redis-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Redis |
+| Every command it runs | <img noZoom src="/images/langfuse-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Langfuse, as OpenTelemetry traces |
+
+## Setup
+
+The workspace mounts Postgres read-only at `/db` and a SQLite database at
+`/notes`, and keeps its sessions and jobs in Redis. The agent's process sends
+a trace for each line to Langfuse.
+
+<AccordionGroup>
+  <Accordion title="workspace.yaml">
+    ```yaml workspace.yaml
+    workspace_id: support-agent
+    mode: write
+
+    mounts:
+      /db:
+        vfs: postgres
+        mode: read
+        config:
+          dsn: {from: env, key: DATABASE_URL}
+      /notes:
+        vfs: sql
+        config:
+          path: ./notes.db
+
+    store:
+      type: redis
+      url: ${REDIS_URL}
+    ```
+  </Accordion>
+  <Accordion title="Send traces to Langfuse">
+    Mirage sends a trace for each line once the process sets up an
+    OpenTelemetry SDK. Langfuse accepts traces over OTLP, with the project's
+    public and secret keys as basic auth:
+
+    <Tabs>
+      <Tab title="Python" icon="/images/python-logo.svg">
+        ```python
+        import base64
+        import os
+
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        auth = base64.b64encode(f"{os.environ['LANGFUSE_PUBLIC_KEY']}:{os.environ['LANGFUSE_SECRET_KEY']}".encode()).decode()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            BatchSpanProcessor(
+                OTLPSpanExporter(
+                    endpoint=f"{os.environ['LANGFUSE_HOST']}/api/public/otel/v1/traces",
+                    headers={"Authorization": f"Basic {auth}"},
+                )
+            )
+        )
+        trace.set_tracer_provider(provider)
+        ```
+      </Tab>
+      <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+        ```typescript
+        import { trace } from '@opentelemetry/api'
+        import { BatchSpanProcessor, TracerProvider } from '@opentelemetry/sdk-trace'
+        import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+
+        const auth = Buffer.from(`${process.env.LANGFUSE_PUBLIC_KEY}:${process.env.LANGFUSE_SECRET_KEY}`).toString('base64')
+        const provider = new TracerProvider({
+          spanProcessors: [
+            new BatchSpanProcessor({
+              exporter: new OTLPTraceExporter({
+                url: `${process.env.LANGFUSE_HOST}/api/public/otel/v1/traces`,
+                headers: { Authorization: `Basic ${auth}` },
+              }),
+            }),
+          ],
+        })
+        trace.setGlobalTracerProvider(provider)
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+  <Accordion title="Load the workspace">
+    The agent runs its first lines in one process, then continues in a new
+    one:
+
+    <Tabs>
+      <Tab title="Python" icon="/images/python-logo.svg">
+        ```python
+        import asyncio
+        import sys
+
+        from mirage import Workspace
+        from mirage.config import load_config, resolve_secrets
+
+        FIRST = [
+            "ls /db/public/tables",
+            "jq -r 'select(.status == \"refunded\") | .customer_id' /db/public/tables/orders/rows.jsonl | sort -u > /notes/refunds.txt",
+            "cd /notes && export TICKET=4821",
+        ]
+        SECOND = ["pwd", "echo $TICKET", "cat refunds.txt"]
+
+
+        async def main() -> None:
+            config = await resolve_secrets(load_config("workspace.yaml"))
+            ws = Workspace(**config.to_workspace_kwargs())
+            agent = await ws.session("agent")
+            for line in FIRST if sys.argv[1] == "first" else SECOND:
+                result = await agent.shell(line)
+                print(await result.stdout_str(), end="")
+            await ws.close()
+
+
+        asyncio.run(main())
+        provider.shutdown()
+        ```
+
+        ```bash
+        python agent.py first
+        python agent.py second
+        ```
+      </Tab>
+      <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+        ```typescript
+        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+        const first = [
+          'ls /db/public/tables',
+          `jq -r 'select(.status == "refunded") | .customer_id' /db/public/tables/orders/rows.jsonl | sort -u > /notes/refunds.txt`,
+          'cd /notes && export TICKET=4821',
+        ]
+        const second = ['pwd', 'echo $TICKET', 'cat refunds.txt']
+
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
+        const agent = await ws.session('agent')
+        for (const line of process.argv[2] === 'first' ? first : second) {
+          const result = await agent.shell(line)
+          process.stdout.write(result.stdoutText)
+        }
+        await ws.close()
+        await provider.shutdown()
+        ```
+
+        ```bash
+        node agent.ts first
+        node agent.ts second
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
+
+## Files from Postgres and SQLite
+
+[Postgres](/python/vfs/postgres) shows each table as a folder with its
+`schema.json` and its rows as `rows.jsonl`. [SQL](/home/setup/sql) keeps the
+files written under `/notes` in a SQLite database. The first process reads the
+refunded orders from Postgres and writes their customers to SQLite:
+
+```bash
+ls /db/public/tables
+# customers
+# orders
+jq -r 'select(.status == "refunded") | .customer_id' /db/public/tables/orders/rows.jsonl | sort -u > /notes/refunds.txt
+cd /notes && export TICKET=4821
+```
+
+## Sessions in Redis
+
+With `store.type: redis`, the [sessions](/home/infrastructure/sessions) and
+[jobs](/home/infrastructure/jobs) live in Redis under `support-agent`, so any
+process that builds the same workspace picks them up. The second process
+starts where the first one stopped, with the same working directory and
+variables:
+
+```bash
+pwd
+# /notes
+echo $TICKET
+# 4821
+cat refunds.txt
+# 1
+# 3
+```
+
+## Command Logs
+
+Mirage records every line the agent runs as a
+[command log](/home/infrastructure/command-logs). Redis holds no command logs,
+so `history` reads them from disk under `~/.mirage/state`, on the machine that
+ran the line.
+
+Langfuse gets the same lines as traces, the record to read across machines.
+Each line is a `shell` trace, with its command, exit code, output and session.
+See [Spans](/home/infrastructure/command-logs#spans) for every attribute.
+
+## Swap a Backend
+
+Each part changes on its own, in the config, with nothing changed in the
+agent:
+
+- Virtualize S3, Google Drive or another [virtual filesystem](/home/setup/vfs) at
+  `/notes` instead of SQLite.
+- Set `store.type` to `disk` to keep the state on one machine, or move one
+  store elsewhere, such as `store.sessions`. See
+  [Infrastructure](/home/infrastructure/overview).
+- Point the exporter at another OpenTelemetry backend, such as Jaeger or
+  Honeycomb.

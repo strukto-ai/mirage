@@ -92,8 +92,9 @@
                   "home/examples/in-process-terminal/agent-email"
                 ]
               },
-              "home/examples/policy-security",
-              "home/examples/runtime-routing"
+              "home/examples/multi-machine-terminal",
+              "home/examples/secured-terminal",
+              "home/examples/infra-agnostic-terminal"
             ]
           },
           {
@@ -280,6 +281,8 @@
                   "home/setup/cli/hf",
                   "home/setup/cli/git",
                   "home/setup/cli/office",
+                  "home/setup/cli/pdftotext",
+                  "home/setup/cli/pdfinfo",
                   "home/setup/cli/search"
                 ]
               }
@@ -539,6 +542,8 @@
                   "python/cli/hf",
                   "python/cli/git",
                   "python/cli/office",
+                  "python/cli/pdftotext",
+                  "python/cli/pdfinfo",
                   "python/cli/search"
                 ]
               }
@@ -732,6 +737,8 @@
                   "typescript/cli/hf",
                   "typescript/cli/git",
                   "typescript/cli/office",
+                  "typescript/cli/pdftotext",
+                  "typescript/cli/pdfinfo",
                   "typescript/cli/search"
                 ]
               }
@@ -969,6 +976,14 @@
     {
       "source": "/home/examples/lightweight-terminal/:slug*",
       "destination": "/home/examples/in-process-terminal/:slug*"
+    },
+    {
+      "source": "/home/examples/policy-security",
+      "destination": "/home/examples/secured-terminal"
+    },
+    {
+      "source": "/home/examples/runtime-routing",
+      "destination": "/home/examples/multi-machine-terminal"
     }
   ],
   "navbar": {

@@ -2070,6 +2070,21 @@ def selftest_shard() -> None:
             ),
             f"{unmeasured[:3]}",
         )
+        left = shard.work_items(
+            manifest,
+            ["core", "http"],
+            host,
+            skip,
+            counts,
+            seconds,
+            frozenset(harness.SHARED_TARGETS),
+        )
+        check(
+            f"shard ({host}): a skipped target leaves the split, no other",
+            sorted(i for ids, _ in left for i in ids)
+            == sorted(set(ran) - harness.SHARED_TARGETS),
+            f"{sorted({i for ids, _ in left for i in ids} ^ set(ran))}",
+        )
     check(
         "shard: a browser-only target is not split onto the python host",
         "opfs"

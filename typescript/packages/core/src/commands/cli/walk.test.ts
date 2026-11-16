@@ -180,6 +180,19 @@ describe('walk', () => {
     expect(text(result.output).split('\n')[0]).toBe("error: unexpected argument '-Z' found")
   })
 
+  it('answers a poppler group refusal with the help page and exit 99', () => {
+    // poppler 25.03.0's readers answer any command line they refuse with
+    // their help page on stderr and exit 99, a group's option as a leaf's.
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+    const poppler = new CommandSpec({ ...tree(), usageStyle: UsageStyle.POPPLER })
+    for (const argv of [['--zzz', 'gmail'], ['--cwd']]) {
+      const result = walk('gws', poppler, argv)
+      expect(result.stream).toBe('stderr')
+      expect(result.exitCode).toBe(99)
+      expect(text(result.output)).toBe(nodeHelp('gws', poppler, poppler.usageStyle))
+    }
+  })
+
   it('exits 129 for a starved group value', () => {
     const result = walk('gws', tree(), ['--cwd'])
     expect(result.exitCode).toBe(129)

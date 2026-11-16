@@ -13,12 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import IO, Iterator, cast
 
 from dulwich.object_format import SHA1
 from dulwich.object_store import PackCapableObjectStore
-from dulwich.objects import Blob, ObjectID, RawObjectID, ShaFile, sha_to_hex
+from dulwich.objects import (
+    Blob,
+    Commit,
+    ObjectID,
+    RawObjectID,
+    ShaFile,
+    sha_to_hex,
+)
 from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
 from dulwich.repo import BaseRepo
 
@@ -28,12 +37,14 @@ from mirage.commands.cli.builtin.git.constants import (
     IDX_SUFFIX,
     OBJECTS_DIR,
     PACK_DIR,
+    SHALLOW_FILE,
 )
 from mirage.commands.cli.builtin.git.format import FULL_SHA, abbrev_length
 from mirage.commands.cli.builtin.git.io import (
     read_file,
     read_names,
     read_optional,
+    write_file,
     write_once,
 )
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
@@ -43,6 +54,12 @@ from mirage.workspace.files import Files
 
 PACK_SUFFIX = ".pack"
 HEX_DIGITS = frozenset(b"0123456789abcdef")
+# One rewrite of each ``.git/shallow`` at a time, so fetches running side
+# by side keep each other's cuts: a lock and its holders per loop and path,
+# dropped when the last holder lets go (an asyncio lock serves one loop).
+SHALLOW_WRITERS: dict[
+    tuple[asyncio.AbstractEventLoop, str], tuple[asyncio.Lock, int]
+] = {}
 
 
 def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
@@ -204,6 +221,25 @@ def _packed_under(pack: Pack, prefix: bytes) -> Iterator[ObjectID]:
             yield oid
 
 
+class GraftedCommit(Commit):
+    """A shallow repository's boundary commit, parentless as git grafts it.
+
+    Its id and raw bytes are the stored commit's; only the parents it
+    reports are gone, however often dulwich parses it again.
+    """
+
+    __slots__ = ()
+
+    @property
+    def parents(self) -> list[ObjectID]:
+        """None: the history ends here."""
+        return []
+
+    @parents.setter
+    def parents(self, value: list[ObjectID]) -> None:
+        raise AttributeError("a grafted commit's parents cannot be set")
+
+
 class VfsObjectStore(PackCapableObjectStore):
     """A git object database whose bytes come from a mirage mount.
 
@@ -223,14 +259,25 @@ class VfsObjectStore(PackCapableObjectStore):
     repository would use. Packs stay read-only, which costs nothing:
     git never writes into an existing pack either.
 
+    A shallow repository's boundary commits read as parentless, as git
+    grafts them when it parses one: every walk stops there, while the
+    raw bytes ``cat-file`` prints keep their ``parent`` lines.
+
     Args:
         loose (LooseObjects): the loose half, read on demand.
         packs (list[Pack]): every pack, already open.
+        shallow (frozenset[bytes]): the commits ``.git/shallow`` lists.
     """
 
-    def __init__(self, loose: LooseObjects, packs: list[Pack]) -> None:
+    def __init__(
+        self,
+        loose: LooseObjects,
+        packs: list[Pack],
+        shallow: frozenset[bytes] = frozenset(),
+    ) -> None:
         self._loose = loose
         self._packs = packs
+        self.shallow = shallow
         self.object_format = SHA1
 
     def hold(self, obj: ShaFile) -> None:
@@ -324,7 +371,10 @@ class VfsObjectStore(PackCapableObjectStore):
     def __getitem__(self, sha: ObjectID | RawObjectID) -> ShaFile:
         oid = ObjectID(bytes(sha))
         type_num, raw = self.get_raw(oid)
-        return ShaFile.from_raw_string(type_num, raw, sha=oid)
+        obj = ShaFile.from_raw_string(type_num, raw, sha=oid)
+        if isinstance(obj, Commit) and oid in self.shallow:
+            obj.__class__ = GraftedCommit
+        return obj
 
     def add_object(self, obj: ShaFile) -> None:
         """Store one object, loose.
@@ -385,9 +435,11 @@ async def load_object_store(vfs: Files, gitdir: PathSpec) -> VfsObjectStore:
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
     """
     loop = asyncio.get_running_loop()
+    shallow = await read_optional(vfs, gitdir.join(SHALLOW_FILE))
     return VfsObjectStore(
         LooseObjects(vfs, gitdir, loop),
         await load_packs(vfs, gitdir, loop),
+        frozenset((shallow or b"").split()),
     )
 
 
@@ -402,6 +454,51 @@ def _index_pack(data: bytes) -> tuple[bytes, bytes]:
     out = BytesIO()
     write_pack_index(out, pack.sorted_entries(), checksum)
     return out.getvalue(), checksum
+
+
+@asynccontextmanager
+async def _shallow_held(path: PathSpec) -> AsyncIterator[None]:
+    """Hold one ``.git/shallow`` against other rewrites of it.
+
+    Args:
+        path (PathSpec): the shallow file.
+    """
+    key = (asyncio.get_running_loop(), path.virtual)
+    lock, users = SHALLOW_WRITERS.get(key, (asyncio.Lock(), 0))
+    SHALLOW_WRITERS[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        _, users = SHALLOW_WRITERS[key]
+        if users == 1:
+            del SHALLOW_WRITERS[key]
+        else:
+            SHALLOW_WRITERS[key] = (lock, users - 1)
+
+
+async def add_shallow(
+    vfs: Files, commondir: PathSpec, oids: tuple[str, ...]
+) -> None:
+    """List more commits in ``.git/shallow``, one id a line, sorted.
+
+    Args:
+        vfs (Files): the session's files.
+        commondir (PathSpec): absolute virtual path of the shared git
+            directory.
+        oids (tuple[str, ...]): the commits a fetch cut; none writes
+            nothing.
+    """
+    if not oids:
+        return
+    path = commondir.join(SHALLOW_FILE)
+    async with _shallow_held(path):
+        held = (await read_optional(vfs, path) or b"").decode().split()
+        await write_file(
+            vfs,
+            path,
+            "".join(f"{oid}\n" for oid in sorted({*held, *oids})).encode(),
+        )
 
 
 async def store_pack(vfs: Files, commondir: PathSpec, data: bytes) -> None:

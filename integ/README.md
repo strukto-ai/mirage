@@ -335,16 +335,20 @@ syntax and formatting permutations to full runs; it does not establish that
 backend I/O is equivalent to RAM or disk.
 
 `Shared backends full` runs all six targets on both hosts nightly, manually,
-and on relevant pull requests. Implementation changes under `python/mirage`,
+and on relevant pull requests, where Integ calls it and `integ-gate` requires
+it. Implementation changes under `python/mirage`,
 TypeScript package `src` directories and `rust` select all six conservatively,
 as do dependency/build setup, runner, manifest, fake-service, fixture and
 workflow changes. Storage, state, mutation and retained I/O case families
 also select the full workflow; other generic syntax/formatting-only case
-changes use the regular batteries. The workflow's paths list is the exact trigger
-inventory and must be updated when moving these modules or cases.
+changes use the regular batteries. Integ's `shared_full` filter is the exact
+trigger inventory and must be updated when moving these modules or cases. On a
+pull request that sets it, the shared shards leave the six targets to the full
+run, whose parity job diffs them over every case, so each runs once.
 
 Each full target has its own 30-minute job and an isolated fake fleet from
-the existing battery setup. Both regular and full runs check strict goldens,
+the existing battery setup, running the Python and TypeScript batteries at
+once against it. Both regular and full runs check strict goldens,
 retain emitted output and compare all six targets across hosts, including
 missing or extra rows. The full workflow's final gate fails if either the
 batteries or parity fail. Omit `--suite shared` to run a full target locally,
@@ -370,7 +374,9 @@ Python-only battery jobs use the same install path because their fake servers
 do not import mirage packages. Jobs that build TypeScript still run prepare.
 
 The three shared shards per host still run every eligible target once with
-four processes each; only the six shared-contract targets select fewer cases.
+four processes each; only the six shared-contract targets select fewer cases,
+and a pull request that runs `Shared backends full` leaves them out
+(`shard.py --skip-targets`).
 `ci/shard_seconds.json` uses successful target timings from run 41797128971:
 focused coverage for those six backends, full coverage for every other target.
 The scheduler balances the shared fake launcher's load and the worker pool's
@@ -429,7 +435,7 @@ flowchart LR
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
     core & ts --> CLOUDFLARE["integ-cloudflare<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
     NC["Nextcloud tuning and full workflow"] --> ts & data
-    SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> FULL["Shared backends full<br/>six targets × two hosts · goldens · parity"]
+    SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> shared_full --> FULL["shared-full (Shared backends full)<br/>six targets × two hosts · goldens · parity<br/>the shared shards skip these six"]
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]

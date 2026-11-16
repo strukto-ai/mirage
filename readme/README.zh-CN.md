@@ -51,7 +51,18 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage 是 **面向 AI Agent 的虚拟终端**：一个覆盖数据、CLI 和运行时的 Shell。Unix 工具可以触达每个服务，`grep` 会使用各服务自身的搜索，例如 Gmail 或 Slack 的搜索。Mirage 把每条命令路由到适合它的运行时，因此大多数命令行在进程内运行，只有繁重的工作才会进入沙箱，从而降低基础设施成本并节省 token。终端本身很轻：一个工作区约占 **100 KB** 内存，每个新会话约 **10 KB**，因此一个进程可以同时服务许多 Agent。Profile 决定 Agent 能运行什么，甚至能看到什么，而可脚本化的策略会拒绝这些规则无法表达的任何操作。
+AI Agent 在终端中工作。Mirage 是一个**虚拟终端**，它把终端接口、数据存储和计算机器彼此分开。Mirage 把每条命令路由到适合它的机器上，覆盖容器、microVM、云沙箱和 SSH 主机等异构机器。文件、CLI 和机器分别加入，因此它保持灵活、基础设施成本低，并让 Agent 以最高效、最安全的方式工作。
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
+    <img src="../assets/mirage-terminal-light.svg" alt="一个虚拟终端，建立在一个统一的虚拟文件系统之上：每条命令在适合它的机器上运行，经过 Agent 的 allow、deny、show 和 hide 规则，其会话、作业和命令日志保存在为它们选定的后端上" width="100%">
+  </picture>
+</p>
+
+- **可控。** 决定每个 Agent 能触达什么，包括它能看到哪些文件、它的虚拟文件系统和 CLI 在不向它展示的情况下使用哪些凭据，以及由哪台机器运行它的每个程序。
+- **可脚本化。** 整个终端用代码或配置文件定义，从虚拟文件系统、CLI 和机器，到各项规则，例如哪些命令需要审批、Agent 能拿回多少输出。
+- **托管式。** Mirage 管理虚拟终端的基础设施，由所选的后端组合而成。虚拟文件系统放在 S3、Drive、数据库或 RAM 上，作业和历史记录放在 RAM、Redis 或磁盘上，整个工作区可以保存为快照。Agent 运行的每条命令都会被记录，并可以作为 trace 发送到 OpenTelemetry 后端。
 
 <p align="center">
   <picture>
@@ -122,7 +133,6 @@ slack: Permission denied
 - **虚拟命令行工具（CLI）。** `git`、`slack` 和 `ntn` 由 Mirage 自己应答，Agent 无需安装任何东西即可驱动这些服务，并可跨不同运行时和机器；同一个工具还能虚拟成两个或更多，各自使用独立的名称和凭据。
 - **动态路由的运行时。** Python、JavaScript 以及任何其他命令都可以被发送到所配置的运行时，进程内、沙箱或远程，从而把计算与存储解耦，任何一方都可以独立更换。
 - **虚拟化的 Mirage Shell。** 它把文件系统、CLI 和运行时绑定到同一条命令行上，因此管道、重定向、变量、作业和历史记录在三者之间都可用。
-- **托管式终端。** 会话、作业输出、历史记录和工作区快照保存在你选择的存储中，例如 RAM、Redis、S3 或磁盘，因此 Agent 的终端可以比运行它的进程存活得更久。
 - **轻量化设计。** 工作区，也就是虚拟终端本身，约占 100 KB 内存，每个新会话约 10 KB，因此一个进程即可服务许多 Agent，无需为每个 Agent 准备容器或虚拟机。
 - **为 Agent 设计的 Profile。** `allow`、`ask` 和 `deny` 管控命令和 CLI，`hide` 和 `show` 管控文件和目录，因此被隐藏的路径不只是不可读，而是在 Agent 看到的文件系统中根本不存在。
 - **可脚本化的策略引擎。** 策略脚本可以在任何危险操作执行前将其阻止，同一套策略栈还会拦截每一次 VFS 操作和会话写入，因此文件和环境变量都不会泄露。
@@ -153,11 +163,11 @@ Agent 可以通过 Python 和 TypeScript SDK、`mirage` CLI，或基于 FUSE 和
 | **沟通**       | <a href="https://slack.com"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://discord.com"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://github.com/pimalaya/himalaya"><img src="../assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                         |
 | **工作与数据** | <a href="https://linear.app"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://www.notion.so"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a>  <a href="https://workspace.google.com"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://huggingface.co"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> |
 
-## 虚拟运行时
+## 虚拟机器
 
-运行时以同样的方式虚拟化，而且不只针对编程语言。命令行上的任何命令都可以被重定向到所配置的运行时，例如 Python 可以借助 [Monty](https://pydantic.dev/articles/pydantic-monty) 在进程内运行，而另一个命令（比如 `kubectl`）则通过 SSH 发送到远程机器。某一行由哪个运行时处理，可以交给[脚本化的运行时路由器](https://docs.mirage.strukto.ai/home/policy/route-machine)决定。
+机器以同样的方式虚拟化，而且不只针对编程语言。命令行上的任何命令都可以发送到所配置的机器，例如 Python 可以借助 [Monty](https://pydantic.dev/articles/pydantic-monty) 在进程内运行，而另一个命令（比如 `kubectl`）则通过 SSH 在远程机器上运行。某一行由哪台机器处理，可以交给[脚本化的机器路由器](https://docs.mirage.strukto.ai/home/policy/route-machine)决定。
 
-|                | 运行时                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|                | 机器                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -259,37 +269,12 @@ python3: Permission denied
 
 脚本还能在哪些其他阶段作答，参见[策略脚本](https://docs.mirage.strukto.ai/home/policy/scripts)。
 
-## 嵌入式终端
+## 示例
 
-大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/in-process-terminal)。
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** 在你的应用中为 Agent 提供终端，即使在 FastAPI 或 Express 服务器里也行，无需固定的机器或沙箱。
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** 跨不同机器的统一虚拟终端，把每个任务放到适合它的机器上运行，让 AI Agent 更高效、更低成本地完成任务。
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** 在一份工作区配置中决定 Agent 能看到哪些文件、能运行哪些命令和 CLI，以及它的工具使用哪些凭据。
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** 不绑定任何固定基础设施的虚拟终端，把文件、会话和命令日志放在已有的后端上。
 
 ## 贡献者
 

@@ -415,6 +415,7 @@ export async function versionsOf(
 ): Promise<{ id: string; lastModifiedDateTime: string }[]> {
   const rows = await db.graphVersion.findMany({
     where: { tenant, drive, path: norm(path) },
+    select: { versionId: true, modified: true },
     orderBy: { seq: 'asc' },
   })
   // Real Graph lists versions newest-first.

@@ -1424,6 +1424,20 @@ GIT = CLI(
                         action="store_true",
                         help="Leave the working tree empty",
                     ),
+                    Argument(
+                        "--depth",
+                        help="Fetch only this many commits of history",
+                    ),
+                    Argument(
+                        "--single-branch",
+                        action="store_true",
+                        help="Fetch only the branch or tag checked out",
+                    ),
+                    Argument(
+                        "--no-single-branch",
+                        action="store_true",
+                        help="Fetch every branch, even with --depth",
+                    ),
                     REVISION,
                 ),
             ),

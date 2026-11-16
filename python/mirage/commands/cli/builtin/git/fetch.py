@@ -29,7 +29,11 @@ from mirage.commands.cli.builtin.git.errors import (
     MissingRepositoryError,
 )
 from mirage.commands.cli.builtin.git.io import write_file
-from mirage.commands.cli.builtin.git.objects import abbrev_for, store_pack
+from mirage.commands.cli.builtin.git.objects import (
+    abbrev_for,
+    add_shallow,
+    store_pack,
+)
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
     ZERO,
@@ -212,18 +216,31 @@ async def _receive(
     location: RepoLocation,
     transport: LocalTransport | HttpTransport,
     wants: list[str],
+    depth: int | None = None,
+    held: list[str] | None = None,
 ) -> BaseRepo:
     """Fetch what ``wants`` reaches that is missing, then reopen.
+
+    The receiver's shallow commits go with the request, so the remote
+    sends what lies past them, and the commits a depth cut are listed in
+    ``.git/shallow`` before the repository is reopened, so every walk
+    after it stops there.
 
     Args:
         vfs (Files): the session's files.
         location (RepoLocation): the receiving repository.
         transport (LocalTransport | HttpTransport): the remote.
         wants (list[str]): object ids asked for.
+        depth (int | None): how many commits deep to fetch, None for
+            the whole history.
+        held (list[str] | None): commits already here that no ref
+            names yet, offered as haves too.
     """
     repo = await open_repo(vfs, location)
     store = repo.object_store
-    tips = {oid for oid in repo.refs.as_dict().values()}
+    tips = {oid for oid in repo.refs.as_dict().values()} | {
+        oid.encode() for oid in held or []
+    }
     missing = [
         want
         for want in dict.fromkeys(wants)
@@ -234,10 +251,15 @@ async def _receive(
     if not missing:
         return repo
     haves = [tip.decode() for tip in sorted(tips)]
-    pack = await transport.fetch_pack(
-        missing, haves, store.__contains__ if tips else (lambda _oid: False)
+    fetched = await transport.fetch_pack(
+        missing,
+        haves,
+        store.__contains__ if tips else (lambda _oid: False),
+        depth,
+        tuple(sorted(oid.decode() for oid in repo.get_shallow())),
     )
-    await store_pack(vfs, location.commondir, pack)
+    await store_pack(vfs, location.commondir, fetched.pack)
+    await add_shallow(vfs, location.commondir, fetched.shallow)
     return await open_repo(vfs, location)
 
 
@@ -303,6 +325,7 @@ async def fetch_objects(
     adv: Advertisement,
     wanted: list[Wanted],
     follow: bool,
+    depth: int | None = None,
 ) -> tuple[BaseRepo, list[Wanted]]:
     """Bring in every wanted object, then the tags that follow them.
 
@@ -316,9 +339,11 @@ async def fetch_objects(
         adv (Advertisement): what the remote published.
         wanted (list[Wanted]): the refs to take.
         follow (bool): whether tags are auto-followed.
+        depth (int | None): how many commits deep the refs are taken,
+            None for their whole history.
     """
     repo = await _receive(
-        vfs, location, transport, [want.oid for want in wanted]
+        vfs, location, transport, [want.oid for want in wanted], depth
     )
     if not follow:
         return repo, wanted
@@ -327,7 +352,12 @@ async def fetch_objects(
     )
     if tags:
         repo = await _receive(
-            vfs, location, transport, [tag.oid for tag in tags]
+            vfs,
+            location,
+            transport,
+            [tag.oid for tag in tags],
+            depth,
+            [want.oid for want in wanted],
         )
     return repo, wanted + tags
 

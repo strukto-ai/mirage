@@ -12,18 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git, { Errors } from 'isomorphic-git'
+import git, { Errors, type CommitObject } from 'isomorphic-git'
 
 import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import { configValues, gitFs } from './fs.ts'
-import { exists, readNames, readRange, writeFile } from './io.ts'
+import { exists, readNames, readOptional, readRange, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import { GITLINK_MODE, IDX_SUFFIX, OBJECTS_DIR, PACK_DIR, TREE_MODE } from './constants.ts'
+import {
+  GITLINK_MODE,
+  IDX_SUFFIX,
+  OBJECTS_DIR,
+  PACK_DIR,
+  SHALLOW_FILE,
+  TREE_MODE,
+} from './constants.ts'
 import { GitError } from './errors.ts'
 import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -38,6 +45,10 @@ const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
+// One rewrite of each `.git/shallow` at a time, so fetches running side by
+// side keep each other's cuts: an update waits for the last one queued on its
+// path, and the path is dropped once its queue settles.
+const SHALLOW_WRITERS = new Map<string, Promise<void>>()
 
 /**
  * A repository living in a mount, opened for reading.
@@ -59,6 +70,8 @@ export interface Repo {
   readonly cache: Record<symbol, unknown>
   /** How many hex digits this repository abbreviates an id to. */
   readonly abbrev: number
+  /** The commits `.git/shallow` lists, read as parentless (`grafted`). */
+  readonly shallow: ReadonlySet<string>
   /** Blobs this invocation hashed from the working tree and never wrote. */
   readonly held: Map<string, Uint8Array>
   /**
@@ -237,6 +250,35 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
   await git.indexPack({ ...repoArgs(repo), dir: dir.virtual, filepath: name })
 }
 
+/** List more commits in `.git/shallow`, one id a line, sorted; none writes nothing. */
+export async function addShallow(repo: Repo, oids: readonly string[]): Promise<void> {
+  if (!oids.length) return
+  const path = repo.location.commondir.join(SHALLOW_FILE)
+  const before = SHALLOW_WRITERS.get(path.virtual) ?? Promise.resolve()
+  const update = before.then(async () => {
+    const held = new TextDecoder()
+      .decode((await readOptional(repo.vfs, path)) ?? new Uint8Array())
+      .split(/\s+/)
+      .filter(Boolean)
+    const lines = [...new Set([...held, ...oids])].sort(compareCodePoints)
+    await writeFile(
+      repo.vfs,
+      path,
+      new TextEncoder().encode(lines.map((oid) => `${oid}\n`).join('')),
+    )
+  })
+  const settled = update.then(
+    () => undefined,
+    () => undefined,
+  )
+  SHALLOW_WRITERS.set(path.virtual, settled)
+  try {
+    await update
+  } finally {
+    if (SHALLOW_WRITERS.get(path.virtual) === settled) SHALLOW_WRITERS.delete(path.virtual)
+  }
+}
+
 /**
  * Open a repository living in a mount.
  *
@@ -263,12 +305,19 @@ export async function openRepo(
     if (head.byteLength < 4) continue
     packed += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
   }
+  const shallow = await readOptional(vfs, location.commondir.join(SHALLOW_FILE))
   return {
     fs: gitFs(vfs, location),
     vfs,
     location,
     cache: {},
     abbrev: abbrevLength(packed),
+    shallow: new Set(
+      new TextDecoder()
+        .decode(shallow ?? new Uint8Array())
+        .split(/\s+/)
+        .filter(Boolean),
+    ),
     held: new Map(),
     ambiguous,
     places: new Map(),
@@ -288,6 +337,26 @@ export async function openRepo(
  */
 export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array> {
   return repo.held.get(oid) ?? (await git.readBlob({ ...repoArgs(repo), oid })).blob
+}
+
+/**
+ * A commit's parents as git reads them: none for a shallow repository's
+ * boundary commit, which git grafts parentless when it parses one, while the
+ * raw bytes `cat-file` prints keep their `parent` lines. Mirrors Python's
+ * VfsObjectStore graft.
+ */
+function grafted(repo: Repo, oid: string, parents: readonly string[]): string[] {
+  return repo.shallow.has(oid) ? [] : [...parents]
+}
+
+/**
+ * One commit read through isomorphic-git, its parents as git reads them: every
+ * commit read that walks history goes through here, so none follows a parent a
+ * shallow repository does not hold.
+ */
+export async function readCommit(repo: Repo, oid: string): Promise<CommitObject> {
+  const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+  return { ...commit, parent: grafted(repo, oid, commit.parent) }
 }
 
 /**
@@ -357,7 +426,11 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
     committerEmail: committer.email,
     committerTime: committer.timestamp,
     committerTimezoneMinutes: committer.offset,
-    parents: headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7)),
+    parents: grafted(
+      repo,
+      object.oid,
+      headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7)),
+    ),
   }
 }
 

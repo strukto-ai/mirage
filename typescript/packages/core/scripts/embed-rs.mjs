@@ -22,9 +22,11 @@ const kept = process.env.MIRAGE_WASM_CACHE
 
 // Build one crate's module. The streams module's dependencies and its LTO run
 // at opt-level 2, which keeps it smaller, mirage-rs at the profile's 3 (awk is
-// a tenth slower at 2), as does the shell module; gh's, which waits on GitHub,
-// is built for size. `small` names the crates built for size inside a module,
-// the codecs and parsers no hot loop waits on.
+// a tenth slower at 2), as does the shell module and the PDF one, whose
+// parsing is a dozen times slower built for size; the PDF module's regex
+// engine, which pdf_oxide runs only to mend a damaged file, is built for size,
+// as is gh's module, which waits on GitHub. `small` names the crates built for
+// size inside a module, the codecs and parsers no hot loop waits on.
 function compile(crate, build, small) {
   let messages
   try {
@@ -70,7 +72,27 @@ function compile(crate, build, small) {
     .flatMap((message) => message.filenames)
     .find((file) => file.endsWith(artifact))
   if (path === undefined) throw new Error(`cargo reported no ${artifact}`)
-  return readFileSync(path)
+  return bare(readFileSync(path))
+}
+
+// The linker's strip keeps custom sections, such as the metadata wasm-bindgen's
+// macros leave for a tool this build never runs; no host reads them.
+function bare(wasm) {
+  const sections = [wasm.subarray(0, 8)]
+  let at = 8
+  while (at < wasm.length) {
+    const start = at
+    const id = wasm[at++]
+    let size = 0
+    for (let shift = 0; ; shift += 7) {
+      const byte = wasm[at++]
+      size += (byte & 0x7f) * 2 ** shift
+      if (byte < 0x80) break
+    }
+    at += size
+    if (id !== 0) sections.push(wasm.subarray(start, at))
+  }
+  return Buffer.concat(sections)
 }
 
 // Write the files a module's `#mirage-*-wasm` import names.
@@ -161,3 +183,9 @@ embed(
 )
 embed('mirage-shell-wasm', 'mirage_shell', ['--release', '--', '-C', 'opt-level=3'])
 embed('mirage-gh-wasm', 'mirage_gh', ['--profile', 'wasm-size'])
+embed(
+  'mirage-pdf-wasm',
+  'mirage_pdf',
+  ['--release'],
+  ['regex', 'regex-automata', 'regex-syntax', 'aho-corasick'],
+)

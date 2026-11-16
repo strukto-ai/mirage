@@ -2746,6 +2746,30 @@
       ]
     },
     {
+      "id": "cli-pdf",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "pdftotext",
+        "pdfinfo"
+      ],
+      "mounts": [
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/docs",
+          "vfs": "ram",
+          "backend": "memory",
+          "fixture": "pdf/v1"
+        }
+      ]
+    },
+    {
       "id": "cli-airtable",
       "hosts": [
         "python",

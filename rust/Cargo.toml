@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["gh-wasm", "mirage-rs", "python", "shell-wasm", "wasm"]
+members = ["gh-wasm", "mirage-rs", "pdf-wasm", "python", "shell-wasm", "wasm"]
 exclude = ["vendor/grep-regex"]
 
 [workspace.package]
@@ -8,7 +8,7 @@ version = "0.0.9-alpha.2"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/strukto-ai/mirage"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 mirage-rs = { path = "mirage-rs" }
