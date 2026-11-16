@@ -21,8 +21,8 @@ own runner process, `--procs` at a time, largest first, and prints each log
 whole as it finishes with the target's time.
 
 Usage: shard.py --shard I --shards N --procs P --host python|typescript
-       [--facet F]... [--allow-skip SERVICES] [--emit-dir DIR]
-       -- <runner command and its flags>
+       [--facet F]... [--allow-skip SERVICES] [--skip-targets TARGETS]
+       [--emit-dir DIR] -- <runner command and its flags>
 """
 
 import argparse
@@ -94,12 +94,14 @@ def work_items(
     skip: set[str],
     counts: Counter,
     seconds: dict[str, int],
+    skip_targets: frozenset[str] = frozenset(),
 ) -> list[tuple[list[str], int]]:
     """The facets' targets as (ids, seconds), one runner process each.
 
-    A target the host does not run, or one on a service this job leaves to
-    another, is left out: it would cost a process that only prints a skip,
-    and its cases would weigh on the split as if they ran. A target on a
+    A target the host does not run, one on a service this job leaves to
+    another, or one another job runs in full, is left out: it would cost a
+    process that only prints a skip or repeats that job's cases, and its
+    cases would weigh on the split as if they ran. A target on a
     `shared` service shares one world with every other target on it, so
     those travel together as one item, the way the runner gives them one
     lane. A target with no measured seconds yet is estimated from its case
@@ -112,6 +114,7 @@ def work_items(
         skip (set[str]): services another job provisions.
         counts (Counter): cases per target.
         seconds (dict[str, int]): measured seconds per target on `host`.
+        skip_targets (frozenset[str]): target ids another job runs.
     """
     services = manifest.get("services", {})
     lanes: dict[str, list[str]] = {}
@@ -119,6 +122,8 @@ def work_items(
         if target.get("facet", "core") not in facets:
             continue
         if not runs_on(target, host) or target.get("service") in skip:
+            continue
+        if target["id"] in skip_targets:
             continue
         service = target.get("service")
         shared = service is not None and services.get(service, {}).get(
@@ -288,6 +293,7 @@ def main() -> None:
     )
     parser.add_argument("--facet", action="append", dest="facets")
     parser.add_argument("--allow-skip", dest="allow_skip", default="")
+    parser.add_argument("--skip-targets", dest="skip_targets", default="")
     parser.add_argument("--emit-dir", dest="emit_dir")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -302,6 +308,12 @@ def main() -> None:
     unknown = skip - set(manifest.get("services", {}))
     if unknown:
         parser.error(f"--allow-skip names no service: {', '.join(unknown)}")
+    skip_targets = frozenset(t for t in args.skip_targets.split(",") if t)
+    unknown = skip_targets - {target["id"] for target in manifest["targets"]}
+    if unknown:
+        parser.error(
+            f"--skip-targets names no target: {', '.join(sorted(unknown))}"
+        )
     facets = args.facets or ["core"]
     items = work_items(
         manifest,
@@ -310,6 +322,7 @@ def main() -> None:
         skip,
         case_counts(INTEG),
         target_seconds(SECONDS, args.host),
+        skip_targets,
     )
     idle = idle_facets(manifest, facets, items)
     if idle:
