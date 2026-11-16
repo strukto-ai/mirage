@@ -1,4 +1,119 @@
-export const MachineBenchmark = ({ groups, span, ticks, legend, timeSaved, costSaved }) => {
+export const MachineBenchmark = ({ kind }) => {
+  const money = (value) => `$${value.toPrecision(2)}`
+  const saved = (part, whole) => `${Math.round((1 - part / whole) * 100)}%`
+  const fanOutSetup = () => {
+    const lite = 0.25 * 0.0000025 + 2 * 0.00000007 + 0.00002 / 16
+    const monty = [2.77, 2.88, 3.31, 3.2]
+    const montyEnd = Math.max(...monty)
+    const single = { python: 11.7, numpy: 4.1 }
+    const numpy = 4.4
+    const montyCpu = 0.36
+    const singleTime = single.python + single.numpy
+    const mirageTime = montyEnd + numpy
+    const singleCost = singleTime * lite
+    const mirageCost = montyCpu * 0.00002 + numpy * lite
+    return {
+      span: 16,
+      ticks: [0, 4, 8, 12, 16],
+      timeSaved: saved(mirageTime, singleTime),
+      costSaved: saved(mirageCost, singleCost),
+      legend: [
+        ["var(--tm-b)", "Monty"],
+        ["var(--tm-base)", "Python on Cloudflare Sandbox"],
+        ["var(--tm-a)", "NumPy on Cloudflare Sandbox"],
+      ],
+      groups: [
+        {
+          title: "Cloudflare Sandbox only",
+          icon: "/images/cloudflare-logo.svg",
+          tip: `One lite Cloudflare Sandbox, with 1/16 vCPU, 0.25 GiB of memory and 2 GB of disk, counts the four quarters with Python and then runs NumPy. It costs ${money(lite)} a second while it runs, ${money(singleCost)} for this task.`,
+          lanes: [
+            {
+              label: "Cloudflare Sandbox",
+              icon: "/images/cloudflare-logo.svg",
+              segments: [
+                { from: 0, to: single.python, fill: "var(--tm-base)", text: "Python", ink: true },
+                { from: single.python, to: singleTime, fill: "var(--tm-a)", text: "NumPy" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Mirage",
+          icon: "mirage",
+          tip: `Four Monty runs inside Mirage count the quarters in parallel, and only NumPy runs on the lite Cloudflare Sandbox. Monty is priced at a full vCPU's $0.000020 a second for the ${montyCpu} CPU-seconds it uses, so the task costs ${money(mirageCost)}.`,
+          lanes: [
+            ...monty.map((to, index) => ({
+              label: `Monty ${index + 1}`,
+              icon: "/images/pydantic-logo.svg",
+              segments: [{ from: 0, to, fill: "var(--tm-b)" }],
+            })),
+            {
+              label: "Cloudflare Sandbox",
+              icon: "/images/cloudflare-logo.svg",
+              segments: [{ from: montyEnd, to: mirageTime, fill: "var(--tm-a)", text: "NumPy" }],
+            },
+          ],
+        },
+      ],
+    }
+  }
+  const gpuSetup = () => {
+    const rate = 0.526 / 3600
+    const e2b = 2 * 0.000014 + 1 * 0.0000045
+    const alone = { pandas: 15.6, torch: 14.1 }
+    const split = { pandas: 14.3, torch: 13.4 }
+    const aloneTime = alone.pandas + alone.torch
+    const splitTime = split.pandas + split.torch
+    const aloneCost = aloneTime * rate
+    const splitCost = split.pandas * e2b + split.torch * rate
+    return {
+      span: 30,
+      ticks: [0, 10, 20, 30],
+      timeSaved: saved(splitTime, aloneTime),
+      costSaved: saved(splitCost, aloneCost),
+      legend: [
+        ["var(--tm-b)", "pandas on E2B"],
+        ["var(--tm-base)", "pandas on the GPU"],
+        ["var(--tm-a)", "PyTorch on the GPU"],
+      ],
+      groups: [
+        {
+          title: "GPU only",
+          icon: "/images/ec2-logo.svg",
+          tip: `One EC2 g4dn.xlarge with an NVIDIA T4 builds the features with pandas and then trains with PyTorch. It costs $0.526 an hour on demand, ${money(aloneCost)} for this task.`,
+          lanes: [
+            {
+              label: "EC2 GPU",
+              icon: "/images/ec2-logo.svg",
+              segments: [
+                { from: 0, to: alone.pandas, fill: "var(--tm-base)", text: "pandas", ink: true },
+                { from: alone.pandas, to: aloneTime, fill: "var(--tm-a)", text: "PyTorch" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Mirage",
+          icon: "mirage",
+          tip: `pandas builds the features on an E2B sandbox with 2 vCPU and 1 GiB, at ${money(e2b)} a second, and only the training runs on the GPU. Each machine is counted for the seconds it runs, so the task costs ${money(splitCost)}.`,
+          lanes: [
+            {
+              label: "E2B sandbox",
+              icon: "/images/e2b-logo.svg",
+              segments: [{ from: 0, to: split.pandas, fill: "var(--tm-b)", text: "pandas" }],
+            },
+            {
+              label: "EC2 GPU",
+              icon: "/images/ec2-logo.svg",
+              segments: [{ from: split.pandas, to: splitTime, fill: "var(--tm-a)", text: "PyTorch" }],
+            },
+          ],
+        },
+      ],
+    }
+  }
+  const { groups, span, ticks, legend, timeSaved, costSaved } = kind === "gpu" ? gpuSetup() : fanOutSetup()
   const end = Math.max(...groups.flatMap((group) => group.lanes.flatMap((lane) => lane.segments.map((segment) => segment.to))))
   const [run, setRun] = useState(0)
   const [now, setNow] = useState(end)
@@ -217,127 +332,5 @@ export const MachineBenchmark = ({ groups, span, ticks, legend, timeSaved, costS
         ))}
       </div>
     </div>
-  )
-}
-
-export const FanOutBenchmark = () => {
-  const lite = 0.25 * 0.0000025 + 2 * 0.00000007 + 0.00002 / 16
-  const monty = [2.77, 2.88, 3.31, 3.2]
-  const montyEnd = Math.max(...monty)
-  const single = { python: 11.7, numpy: 4.1 }
-  const numpy = 4.4
-  const montyCpu = 0.36
-  const singleTime = single.python + single.numpy
-  const mirageTime = montyEnd + numpy
-  const singleCost = singleTime * lite
-  const mirageCost = montyCpu * 0.00002 + numpy * lite
-  const money = (value) => `$${value.toPrecision(2)}`
-  const saved = (part, whole) => `${Math.round((1 - part / whole) * 100)}%`
-  return (
-    <MachineBenchmark
-      span={16}
-      ticks={[0, 4, 8, 12, 16]}
-      timeSaved={saved(mirageTime, singleTime)}
-      costSaved={saved(mirageCost, singleCost)}
-      legend={[
-        ["var(--tm-b)", "Monty"],
-        ["var(--tm-base)", "Python on Cloudflare Sandbox"],
-        ["var(--tm-a)", "NumPy on Cloudflare Sandbox"],
-      ]}
-      groups={[
-        {
-          title: "Cloudflare Sandbox only",
-          icon: "/images/cloudflare-logo.svg",
-          tip: `One lite Cloudflare Sandbox, with 1/16 vCPU, 0.25 GiB of memory and 2 GB of disk, counts the four quarters with Python and then runs NumPy. It costs ${money(lite)} a second while it runs, ${money(singleCost)} for this task.`,
-          lanes: [
-            {
-              label: "Cloudflare Sandbox",
-              icon: "/images/cloudflare-logo.svg",
-              segments: [
-                { from: 0, to: single.python, fill: "var(--tm-base)", text: "Python", ink: true },
-                { from: single.python, to: singleTime, fill: "var(--tm-a)", text: "NumPy" },
-              ],
-            },
-          ],
-        },
-        {
-          title: "Mirage",
-          icon: "mirage",
-          tip: `Four Monty runs inside Mirage count the quarters in parallel, and only NumPy runs on the lite Cloudflare Sandbox. Monty is priced at a full vCPU's $0.000020 a second for the ${montyCpu} CPU-seconds it uses, so the task costs ${money(mirageCost)}.`,
-          lanes: [
-            ...monty.map((to, index) => ({
-              label: `Monty ${index + 1}`,
-              icon: "/images/pydantic-logo.svg",
-              segments: [{ from: 0, to, fill: "var(--tm-b)" }],
-            })),
-            {
-              label: "Cloudflare Sandbox",
-              icon: "/images/cloudflare-logo.svg",
-              segments: [{ from: montyEnd, to: mirageTime, fill: "var(--tm-a)", text: "NumPy" }],
-            },
-          ],
-        },
-      ]}
-    />
-  )
-}
-
-export const GpuBenchmark = () => {
-  const gpu = 0.526 / 3600
-  const e2b = 2 * 0.000014 + 1 * 0.0000045
-  const alone = { pandas: 15.6, torch: 14.1 }
-  const split = { pandas: 14.3, torch: 13.4 }
-  const aloneTime = alone.pandas + alone.torch
-  const splitTime = split.pandas + split.torch
-  const aloneCost = aloneTime * gpu
-  const splitCost = split.pandas * e2b + split.torch * gpu
-  const money = (value) => `$${value.toPrecision(2)}`
-  const saved = (part, whole) => `${Math.round((1 - part / whole) * 100)}%`
-  return (
-    <MachineBenchmark
-      span={30}
-      ticks={[0, 10, 20, 30]}
-      timeSaved={saved(splitTime, aloneTime)}
-      costSaved={saved(splitCost, aloneCost)}
-      legend={[
-        ["var(--tm-b)", "pandas on E2B"],
-        ["var(--tm-base)", "pandas on the GPU"],
-        ["var(--tm-a)", "PyTorch on the GPU"],
-      ]}
-      groups={[
-        {
-          title: "GPU only",
-          icon: "/images/ec2-logo.svg",
-          tip: `One EC2 g4dn.xlarge with an NVIDIA T4 builds the features with pandas and then trains with PyTorch. It costs $0.526 an hour on demand, ${money(aloneCost)} for this task.`,
-          lanes: [
-            {
-              label: "EC2 GPU",
-              icon: "/images/ec2-logo.svg",
-              segments: [
-                { from: 0, to: alone.pandas, fill: "var(--tm-base)", text: "pandas", ink: true },
-                { from: alone.pandas, to: aloneTime, fill: "var(--tm-a)", text: "PyTorch" },
-              ],
-            },
-          ],
-        },
-        {
-          title: "Mirage",
-          icon: "mirage",
-          tip: `pandas builds the features on an E2B sandbox with 2 vCPU and 1 GiB, at ${money(e2b)} a second, and only the training runs on the GPU. Each machine is counted for the seconds it runs, so the task costs ${money(splitCost)}.`,
-          lanes: [
-            {
-              label: "E2B sandbox",
-              icon: "/images/e2b-logo.svg",
-              segments: [{ from: 0, to: split.pandas, fill: "var(--tm-b)", text: "pandas" }],
-            },
-            {
-              label: "EC2 GPU",
-              icon: "/images/ec2-logo.svg",
-              segments: [{ from: split.pandas, to: splitTime, fill: "var(--tm-a)", text: "PyTorch" }],
-            },
-          ],
-        },
-      ]}
-    />
   )
 }
