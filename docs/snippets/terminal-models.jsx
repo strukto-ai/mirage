@@ -159,9 +159,14 @@ export const SandboxesVsTerminals = () => {
         .terminal-model .tm-dark-only { display: none; }
         html.dark .terminal-model .tm-dark-only { display: inline; }
         html.dark .terminal-model .tm-light-only { display: none; }
-        .terminal-model .tm-tip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--tm-edge); border-radius: 9999px; font-size: 10px; cursor: help; }
+        .terminal-model .tm-legend { position: relative; }
+        .terminal-model .tm-tip { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--tm-edge); border-radius: 9999px; font-size: 10px; line-height: 1; cursor: help; }
         .terminal-model .tm-pop { display: none; position: absolute; top: 22px; right: -8px; width: 260px; padding: 8px 10px; border: 1px solid var(--tm-edge); border-radius: 8px; background: var(--tm-surface); color: var(--tm-ink); font-size: 12px; line-height: 1.45; z-index: 10; }
         .terminal-model .tm-tip:hover .tm-pop, .terminal-model .tm-tip:focus .tm-pop { display: block; }
+        @media (max-width: 639px) {
+          .terminal-model .tm-tip { position: static; }
+          .terminal-model .tm-pop { top: calc(100% + 6px); left: 0; right: 0; width: auto; }
+        }
       `}</style>
       <div className="flex flex-col gap-2 text-sm tm-ink">
         {stepper("agent-count", "Agents", step, setStep, steps.length - 1, count)}
@@ -178,7 +183,7 @@ export const SandboxesVsTerminals = () => {
         {stat("Saving / Month", money(saving))}
       </div>
 
-      <div className="mt-4 flex text-xs tm-muted">
+      <div className="tm-legend mt-4 flex text-xs tm-muted">
         <div className="flex items-center gap-1.5" style={{ width: "55.9%" }}>
           <img src="/images/cloudflare-logo.svg" alt="" className="h-4 w-4" />
           <span>{fleet}</span>
