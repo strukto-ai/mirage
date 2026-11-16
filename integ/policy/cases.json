@@ -617,6 +617,20 @@
     {"op": "exec", "session": "agent", "command": "mv /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mv: Permission denied\n", "decision": "subtree True into None"}}},
     {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "subtree True into None"}}}
    ]
+  },
+  {
+   "id": "a_path_word_names_the_path_the_line_reaches",
+   "settings": {"mode": "write", "mounts": {"/work": {"vfs": "ram", "config": {}}, "/secret": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "in_process", "runtime": "monty"}}, "clis": {"git": {"cli": "git", "machine": "in_process"}, "pdfinfo": {"cli": "pdfinfo", "machine": "in_process"}}},
+   "steps": [
+    {"op": "exec", "command": "mkdir -p /work/sub", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('cd', 'mkdir'):\n        return None\n    named = [w['text'] + ' ' + str(w['option']) + ' ' + w['path'] for w in ctx['words'] if w['path']]\n    return {'kind': 'deny', 'reason': ', '.join(named) + ' | ' + ' '.join(ctx['paths'])}\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && git -C ../../secret log", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "../../secret -C /secret | /secret"}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && git -C../../secret log", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "-C../../secret -C /secret | /secret"}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && pdfinfo ../../secret/r.pdf", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "pdfinfo: Permission denied\n", "decision": "../../secret/r.pdf None /secret/r.pdf | /secret/r.pdf"}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && grep --file=../../secret/p.txt x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "--file=../../secret/p.txt --file /secret/p.txt, x None /work/sub/x | /work/sub/x /secret/p.txt"}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && grep -f../../secret/p.txt x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "-f../../secret/p.txt -f /secret/p.txt, x None /work/sub/x | /work/sub/x /secret/p.txt"}}},
+    {"op": "exec", "session": "agent", "command": "cd /work/sub && tar -cf../../secret/t.tar x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tar: Permission denied\n", "decision": "-cf../../secret/t.tar -cf /secret/t.tar, x None /work/sub/x | /work/sub/x /secret/t.tar"}}}
+   ]
   }
 ]
 }
