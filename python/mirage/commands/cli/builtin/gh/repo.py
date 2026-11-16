@@ -27,20 +27,22 @@ from mirage.commands.cli.walk import find_node
 from mirage.commands.config import Context
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import CommandSpec, FlagValue
+from mirage.core.github.client import github_token
 from mirage.core.github.repo import RepoRef, login, parse_repo, repo_host
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
 
-def token_header(accessor: GitHubAccount) -> dict[str, str]:
+async def token_header(accessor: GitHubAccount) -> dict[str, str]:
     """The Authorization git sends GitHub for the install's token: Basic
     with the token as the password, what gh's credential helper hands git.
+    An App's is its installation's current token.
 
     Args:
         accessor (GitHubAccount): the install's account.
     """
-    secret = f"x-access-token:{accessor.config.token.get_secret_value()}"
+    secret = f"x-access-token:{await github_token(accessor)}"
     return {
         "Authorization": f"Basic {base64.b64encode(secret.encode()).decode()}"
     }
@@ -177,5 +179,5 @@ async def _clone(
         [],
         operands,
         git,
-        token_header(accessor) if same_origin else None,
+        await token_header(accessor) if same_origin else None,
     )

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from typing import Any
 
 from mirage.io.types import ByteSource
 from mirage.machine.constants import EXEC_PRELUDE, not_running_hint
@@ -20,7 +21,9 @@ from mirage.machine.microsandbox.config import MicrosandboxConfig
 from mirage.machine.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
     MICROSANDBOX_HINT,
+    PAUSED_STATE,
     RUNNING_STATE,
+    SANDBOX_GONE,
     own_session,
 )
 from mirage.machine.program import (
@@ -38,7 +41,9 @@ class MicrosandboxMachine(ProgramMachine):
 
     The user starts the sandbox and serves its workspace at the same
     paths inside the guest. Mirage forwards commands, stdin, environment,
-    and cwd without managing the sandbox's lifecycle.
+    and cwd. It pauses the sandbox only when the workspace pauses and its
+    config says ``on_pause: pause`` or the call names it, and the next
+    connect resumes it.
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
@@ -46,6 +51,7 @@ class MicrosandboxMachine(ProgramMachine):
     """
 
     provider = "microsandbox"
+    pauses = True
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
     program = "msb"
@@ -59,31 +65,82 @@ class MicrosandboxMachine(ProgramMachine):
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", self.config.sandbox, "--quiet"), ("--",)
 
+    _closing = False
+
+    def __init__(
+        self,
+        name: str,
+        config: MicrosandboxConfig | dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(name, config)
+        # Every exec probes outside the connect latch; close waits for these.
+        self._probes: set[asyncio.Task[None]] = set()
+        # Bumped by each close: a probe it could not wait for marks nothing.
+        self._generation = 0
+
+    async def close(self) -> None:
+        """Close as any machine does, once the probes under way have
+        settled, so a resume they started is paused after; the cleanup's
+        probes never resume a sandbox paused meanwhile."""
+        self._closing = True
+        try:
+            # A probe on another loop (``with ws:``, closing on the sync
+            # bridge) cannot be awaited here, and its loop is blocked anyway.
+            loop = asyncio.get_running_loop()
+            await asyncio.gather(
+                *(p for p in self._probes if p.get_loop() is loop),
+                return_exceptions=True,
+            )
+            self._generation += 1
+            await super().close()
+        finally:
+            self._closing = False
+
     async def ensure_connected(self) -> None:
         """Skip the connect-once latch: every exec probes the guest."""
 
     async def connect(self) -> None:
-        """Require a running sandbox before executing any commands."""
+        """Require a running sandbox before executing any commands,
+        resuming a paused one unless the workspace is closing."""
+        probe = asyncio.ensure_future(self._probe())
+        self._probes.add(probe)
+        probe.add_done_callback(self._probes.discard)
+        await probe
+
+    async def _probe(self) -> None:
+        generation = self._generation
+        sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
-                await self._connect()
+                status = await self._exec_program(
+                    ["status", sandbox, "--format", "json"]
+                )
         except TimeoutError as error:
             raise RuntimeError(
                 f"msb status timed out after {INSPECT_TIMEOUT_SECONDS} seconds"
             ) from error
-
-    async def _connect(self) -> None:
-        sandbox = self.config.sandbox
-        status = await self._exec_program(
-            ["status", sandbox, "--format", "json"]
-        )
         state = reported_state(status, "msb status", ("status",))
-        if state != RUNNING_STATE:
+        if state == PAUSED_STATE and not self._closing:
+            await self._change_state(["resume", sandbox, "--quiet"])
+        elif state != RUNNING_STATE:
             raise RuntimeError(
                 not_running_hint(
                     "sandbox", sandbox, state, {}, "start it with msb start"
                 )
             )
+        if generation == self._generation:
+            self._reached = True
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the config says ``on_pause: pause``."""
+        return self.config.on_pause == "pause"
+
+    async def _pause_machine(self) -> None:
+        """Suspend the sandbox, keeping its memory on the host; the next
+        connect resumes it."""
+        await self._change_state(
+            ["pause", self.config.sandbox, "--quiet"], SANDBOX_GONE
+        )
 
     async def _exec_argv(
         self,

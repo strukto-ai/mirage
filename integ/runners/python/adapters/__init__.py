@@ -38,6 +38,8 @@ import boto3
 import chromadb
 import lancedb
 from bson import Binary, DatetimeMS, DBRef, Decimal128, Int64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient, models
@@ -1537,19 +1539,24 @@ class GitHubService:
         url (str): GITHUB_URL with the run's path prefix.
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, app: bool = False) -> None:
         self.url = url
+        self.app = app
 
     @classmethod
-    async def create(cls, run_id: str, fixture: str) -> "GitHubService":
+    async def create(
+        cls, run_id: str, fixture: str, app: bool = False
+    ) -> "GitHubService":
         """Seed the target's isolated world.
 
         Args:
             run_id (str): The runner's isolation ID.
             fixture (str): The fixture required by this target's corpus.
+            app (bool): Install `gh` as a GitHub App installation rather
+                than with a token.
         """
         base = os.environ["GITHUB_URL"].rstrip("/")
-        made = cls(f"{base}/_run/{run_id}")
+        made = cls(f"{base}/_run/{run_id}", app)
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{made.url}/reset", json={"fixture": fixture}
@@ -1565,12 +1572,28 @@ class GitHubService:
             )
         )
 
+    def gh_credential(self) -> dict[str, JsonValue]:
+        """The credential the `gh` install rides: the fixed token, or a
+        GitHub App installation whose key is PKCS#1, as GitHub downloads
+        one. The fake checks a JWT's shape, not its signature, so a key
+        made for the run serves.
+        """
+        if not self.app:
+            return {"token": "ghp-integ"}
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        ).decode()
+        return {"app": {"app_id": 1, "private_key": pem, "installation_id": 1}}
+
     def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "gh": (
                 cli_spec_for("gh"),
                 {
-                    "token": "ghp-integ",
+                    **self.gh_credential(),
                     "base_url": self.url,
                     "repo": GH_CLI_REPO,
                     # Not the default branch, so a line that falls back on
@@ -3272,7 +3295,9 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await MCPService.create(target)
     if target.get("service") == "github":
         fixture = "cli" if "gh" in (target.get("clis") or []) else "v1"
-        return await GitHubService.create(run_id, fixture)
+        return await GitHubService.create(
+            run_id, fixture, app=target.get("auth") == "app"
+        )
     if target.get("service") == "slack":
         return await SlackService.create(run_id, target.get("dataset", "v1"))
     if target.get("service") == "trello":
@@ -3330,11 +3355,12 @@ def cli_install(
     """The spec and config to install one CLI under its head word.
 
     A CLI that talks to an API gets both the tree and the credentials
-    pointing at itself from its mock service. `git` and `search` need
-    neither: git reads a repository out of a mount and search asks a
-    mount's own search, which is what makes them installable from a
-    bare name, so they resolve through the registry the YAML ``clis:``
-    section uses and install with no config at all.
+    pointing at itself from its mock service. `git`, `search` and
+    `office` need neither: git reads a repository out of a mount,
+    search asks a mount's own search and office edits workbooks on
+    one, which is what makes them installable from a bare name, so they
+    resolve through the registry the YAML ``clis:`` section uses and
+    install with no config at all.
 
     Args:
         service (Service | None): the target's mock service, None for a

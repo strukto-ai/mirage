@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -31,10 +31,144 @@ async function* piped(): AsyncIterable<Uint8Array> {
   yield ENC.encode('input')
 }
 
+/** `msb` answering status with `state` and failing the verbs in `refusals`. */
+function fakeMsb(state = 'Running'): {
+  state: string
+  calls: string[][]
+  signals: (AbortSignal | undefined)[]
+  refusals: Map<string, string>
+  resumed: Promise<void> | null
+} {
+  const msb = {
+    state,
+    calls: [] as string[][],
+    signals: [] as (AbortSignal | undefined)[],
+    refusals: new Map<string, string>(),
+    resumed: null as Promise<void> | null,
+  }
+  vi.spyOn(program, 'runProgram').mockImplementation(async (_exe, _hint, args, _stdin, options) => {
+    msb.calls.push(args.slice())
+    msb.signals.push(options?.signal)
+    const verb = args[0] ?? ''
+    if (verb === 'resume' && msb.resumed !== null) await msb.resumed
+    const refusal = msb.refusals.get(verb)
+    return Promise.resolve({
+      stdout:
+        verb === 'status' ? ENC.encode(JSON.stringify({ status: msb.state })) : new Uint8Array(),
+      stderr: ENC.encode(refusal ?? ''),
+      exitCode: refusal === undefined ? 0 : 1,
+    })
+  })
+  return msb
+}
+
+async function reached(): Promise<MicrosandboxMachine> {
+  const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+  await machine.connect()
+  await machine.close()
+  return machine
+}
+
+describe('MicrosandboxMachine pause', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+  it('resumes a paused sandbox after its status', async () => {
+    const msb = fakeMsb('Paused')
+    await new MicrosandboxMachine('box', { sandbox: 'sb' }).connect()
+    expect(msb.calls).toEqual([
+      ['status', 'sb', '--format', 'json'],
+      ['resume', 'sb', '--quiet'],
+    ])
+  })
+  it('fails the connect loud when the resume fails', async () => {
+    const msb = fakeMsb('Paused')
+    msb.refusals.set('resume', 'error: snapshot unreadable')
+    await expect(new MicrosandboxMachine('box', { sandbox: 'sb' }).connect()).rejects.toThrow(
+      'msb resume sb --quiet failed',
+    )
+  })
+  it('pauses the sandbox it reached', async () => {
+    const msb = fakeMsb()
+    await (await reached()).pause()
+    expect(msb.calls.at(-1)).toEqual(['pause', 'sb', '--quiet'])
+  })
+  it('leaves alone a sandbox it never reached', async () => {
+    const msb = fakeMsb()
+    await new MicrosandboxMachine('box', { sandbox: 'sb' }).pause()
+    expect(msb.calls).toEqual([])
+  })
+  it('counts a sandbox already gone as paused', async () => {
+    const msb = fakeMsb()
+    const machine = await reached()
+    msb.refusals.set('pause', 'error: sandbox not found: sb')
+    await expect(machine.pause()).resolves.toBeUndefined()
+  })
+  it('raises any other pause failure', async () => {
+    const msb = fakeMsb()
+    const machine = await reached()
+    msb.refusals.set('pause', 'error: sandbox "sb" has no live runtime')
+    await expect(machine.pause()).rejects.toThrow('no live runtime')
+  })
+  it('leaves the sandbox alone for a later workspace that never ran', async () => {
+    const msb = fakeMsb()
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    await machine.connect()
+    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
+    await machine.close()
+    await machine.close()
+    await machine.pause()
+    expect(msb.calls).not.toContainEqual(['pause', 'sb', '--quiet'])
+  })
+  it('pauses a sandbox a resume under way at close reached', async () => {
+    const msb = fakeMsb('Paused')
+    let resume = (): void => undefined
+    msb.resumed = new Promise((resolve) => {
+      resume = resolve
+    })
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    const connecting = machine.connect()
+    await vi.waitFor(() => {
+      expect(msb.calls).toContainEqual(['resume', 'sb', '--quiet'])
+    })
+    const closing = machine.close()
+    resume()
+    await connecting
+    await closing
+    await machine.pause()
+    expect(msb.calls.at(-1)).toEqual(['pause', 'sb', '--quiet'])
+  })
+  it('never resumes on close a sandbox paused meanwhile', async () => {
+    const msb = fakeMsb()
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    await machine.connect()
+    msb.state = 'Paused'
+    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
+    await machine.close()
+    expect(msb.calls.map((call) => call[0])).toEqual(['status', 'status'])
+  })
+  it('stops a resume on the caller signal', async () => {
+    const msb = fakeMsb('Paused')
+    const stop = new AbortController()
+    await new MicrosandboxMachine('box', { sandbox: 'sb' }).connect(stop.signal)
+    expect(msb.signals.at(-1)).toBe(stop.signal)
+  })
+  it('asks the workspace to pause it only with onPause: pause', () => {
+    const asks = (onPause?: 'pause'): boolean =>
+      new MicrosandboxMachine('box', {
+        sandbox: 'sb',
+        ...(onPause === undefined ? {} : { onPause }),
+      }).configAsksToPause()
+    expect([asks('pause'), asks()]).toEqual([true, false])
+    expect(
+      () => new MicrosandboxMachine('box', { sandbox: 'sb', onPause: 'stop' as never }),
+    ).toThrow('microsandbox onPause must be one of pause, not "stop"')
+  })
+})
+
 describe('MicrosandboxMachine', () => {
   it.each([
     ['{"status":"Stopped"}', 'not running'],
-    ['{"status":"Paused"}', 'not running'],
     ['{"status":"Crashed"}', 'not running'],
     ['{"status":"Draining"}', 'not running'],
     ['{"status":"Starting"}', 'not running'],

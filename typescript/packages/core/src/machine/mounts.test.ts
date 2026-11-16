@@ -23,7 +23,7 @@ import {
   getCurrentSession,
   lineRunning,
 } from '../context/session_context.ts'
-import { edquot } from '../errors/fs.ts'
+import { edquot, enoent } from '../errors/fs.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -502,6 +502,45 @@ describe('MachineMounts', () => {
       126,
       'fake: the machine cannot see the working directory /tmp; cd into a mount first\n',
     ])
+    await ws.close()
+  })
+
+  it('leaves a file mounted at a path of its own off the machine', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.vfsMd('/VFS.md')
+    const result = await ws.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+    expect(sandbox.pipes.map((p) => (p.split(' 2>')[0] ?? '').split(' ').at(-1))).toEqual([
+      "'/data'",
+      "notes'",
+    ])
+    await ws.close()
+  })
+
+  it('serves a directory mounted where a file was', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.vfsMd('/asset')
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
+    await ws.unmount('/asset')
+    ws.addMount('/asset', new RAMVFS(), MountMode.WRITE)
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/asset'])
+    await ws.close()
+  })
+
+  it('runs a line on a prefix the machine mounts itself when the workspace cannot stat it', async () => {
+    const sandbox = new FakeMachine('both', ['/data'])
+    const gone = new RAMVFS()
+    gone.stat = (path) => Promise.reject(enoent(path))
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': gone, '/my notes': new RAMVFS() },
+      { mode: MountMode.WRITE, ...on(sandbox) },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/my notes'])
     await ws.close()
   })
 

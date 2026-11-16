@@ -16,8 +16,11 @@ from dataclasses import dataclass
 
 from mirage.machine.config import (
     MachineConfig,
+    check_on_pause,
     require_id,
 )
+from mirage.machine.docker.constants import ON_PAUSE
+from mirage.machine.types import PauseAction
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -29,9 +32,13 @@ class DockerConfig(MachineConfig):
             it yourself (`docker run -d ... sleep infinity`); live
             FUSE mounts need `--cap-add SYS_ADMIN --device /dev/fuse`
             and an image with mirage installed.
+        on_pause (PauseAction | None): ``pause`` pauses the container
+            when the workspace pauses; None leaves it as it is.
     """
 
     container: str
+    on_pause: PauseAction | None = None
 
     def __post_init__(self) -> None:
         require_id("docker", "container", self.container)
+        check_on_pause("docker", self.on_pause, ON_PAUSE)

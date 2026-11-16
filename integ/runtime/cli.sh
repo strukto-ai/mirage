@@ -177,6 +177,7 @@ cli_expressible() {
     and (((.world.mounts // {}) | to_entries) | all(.value.failing == null))
     and (.world.read_control == null)
     and (((.world.builtin_clis // []) | length) == 0)
+    and (.world.vfs_md == null)
     and (((.world.policies // []) | length) == 0)
     and (((.world.machines // {}) | to_entries | map(select(.value.runtime == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)

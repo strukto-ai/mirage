@@ -40,6 +40,9 @@ model GithubRepo {
   // because a fixture states only the fields its task reads, and the renderer
   // fills the rest.
   metaJson      String  @default("{}")
+  // The check and status names branch protection requires of a pull request
+  // into the repository, a JSON array.
+  requiredChecksJson String @default("[]")
   // Answer /contents listings with GitHub's truncation marker, which is a
   // property of the repository as the fixture declares it, not of a request.
   truncated     Boolean @default(false)
@@ -344,8 +347,11 @@ model GithubRun {
   createdAt    String
   updatedAt    String
   runStartedAt String?
-  // Jobs in the vendor's field names; each step's `log` is its archive text.
+  // Jobs in the vendor's field names; each step's `log` is its archive text,
+  // and a job's `annotations` are its check run's.
   jobsJson     String  @default("[]")
+  // Artifacts in the vendor's field names.
+  artifactsJson String @default("[]")
   seq          Int
 
   repository GithubRepo @relation(fields: [tenant, repo], references: [tenant, fullName])

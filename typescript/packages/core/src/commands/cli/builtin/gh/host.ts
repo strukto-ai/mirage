@@ -24,12 +24,13 @@ import { StreamRefusal } from '../../../../rs/errors.ts'
 import { StreamModule, serveRequests, type OpenStream, type Served } from '../../../../rs/stream.ts'
 import { PathSpec } from '../../../../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import { sleep } from '../../../../utils/abort.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 import { VERSION } from '../../../../version.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { cobraRefusal, setsValueFlag } from '../../cobra.ts'
-import { CONNECT_HINT, GITHUB_HOST } from './constants.ts'
+import { APP_TOKEN_MASK, CONNECT_HINT, GITHUB_HOST } from './constants.ts'
 
 type Request = Readonly<Record<string, unknown>>
 
@@ -214,6 +215,8 @@ class GhHost {
         return this.jq(request, data)
       case 'now':
         return Promise.resolve({ reply: { now: systemNow() } })
+      case 'sleep':
+        return sleep(Number(request.seconds) * 1000, this.ctx.signal).then(() => ({ reply: {} }))
       case 'memory':
         checkMemory(Number(request.size))
         return Promise.resolve({ reply: {} })
@@ -253,7 +256,7 @@ export async function runLeaf(
     texts: [...texts],
     repo: config.repo ?? null,
     branch: config.branch ?? null,
-    token_mask: maskedToken(config.token),
+    token_mask: config.token === undefined ? APP_TOKEN_MASK : maskedToken(config.token),
     base_url: config.baseUrl ?? null,
     version: VERSION,
     argv_len: ctx.argv?.length ?? 0,

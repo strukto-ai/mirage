@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from typing import ClassVar
 
 from mirage.io.types import ByteSource
@@ -20,6 +21,8 @@ from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import exec_args, open_program_pipe, run_program
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
+
+logger = logging.getLogger(__name__)
 
 
 class ProgramMachine(MachineHandle, PipeTransportMixin):
@@ -65,6 +68,27 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
             errors=errors,
             connection=True,
         )
+
+    async def _change_state(
+        self, args: list[str], gone: str | None = None
+    ) -> None:
+        """Pause or resume the machine through the program, failing loud
+        unless its stderr says the machine is already gone.
+
+        Args:
+            args (list[str]): the arguments after the program.
+            gone (str | None): what the program's stderr says of a machine
+                already gone, which then counts as done; None fails on it
+                too.
+        """
+        result = await self._exec_program(args)
+        if result.exit_code == 0:
+            return
+        said = (result.stderr or b"").decode().strip()
+        if gone is not None and gone in said:
+            logger.debug("%s: already gone: %s", self.machine, said)
+            return
+        raise RuntimeError(f"{self.program} {' '.join(args)} failed: {said}")
 
     async def _exec_argv(
         self,

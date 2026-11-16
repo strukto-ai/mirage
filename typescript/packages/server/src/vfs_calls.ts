@@ -118,12 +118,14 @@ export const VFS_CALLS: readonly VfsCall[] = [
   row(
     'stat',
     "A path's metadata.",
-    { path: PATH, nofollow: FLAG },
+    { path: PATH, nofollow: FLAG, fresh: FLAG },
     ['path'],
-    (t, a) =>
-      'sessionId' in t
-        ? t.stat(str(a, 'path'), undefined, nofollow(a))
-        : t.stat(str(a, 'path'), nofollow(a)),
+    (t, a) => {
+      const opts = { nofollow: flag(a, 'nofollow'), fresh: flag(a, 'fresh') }
+      return 'sessionId' in t
+        ? t.stat(str(a, 'path'), undefined, opts)
+        : t.stat(str(a, 'path'), opts)
+    },
     'entry',
   ),
   row(

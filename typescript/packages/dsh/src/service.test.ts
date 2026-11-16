@@ -172,12 +172,12 @@ describe('MirageService', () => {
     await fiber.dispose()
   })
 
-  it('refuses both and neither of workspace/mounts', async () => {
+  it('refuses more than one world and none', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
     const ctx = new Context()
     await expect(
       ctx.plugin(MirageService, { workspace: ws, mounts: { '/x': new RAMVFS() } }).await(),
-    ).rejects.toThrow('not both')
+    ).rejects.toThrow('pass one of workspace, mounts or remote')
     await expect(ctx.plugin(MirageService, {}).await()).rejects.toThrow('required')
     await ws.close()
   })

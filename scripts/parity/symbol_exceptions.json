@@ -372,6 +372,11 @@
     "within": "asyncio.wait_for in Python."
    }
   },
+  "machine/daytona/sdk": {
+   "python_only": {
+    "DaytonaNotFoundError": "Python's guarded SDK import names each class it uses; TypeScript loads the @daytonaio/sdk module and reads DaytonaNotFoundError off it."
+   }
+  },
   "machine/e2b/sdk": {
    "python_only": {
     "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields.",
@@ -1803,6 +1808,28 @@
    "typescript_only": {
     "ExecOptions": "workerd's exec takes env and its pipes as options; Python's container takes env alone and always pipes all three.",
     "RelaySocket": "TypeScript's client and the relay share one socket shape across a browser, Node and workerd; Python's client speaks aiohttp's WebSocket only."
+   }
+  },
+  "core/github/app": {
+   "python_only": {
+    "JWT_BACKDATE": "Python signs the App JWT itself with PyJWT; TypeScript's is signed by @octokit/auth-app, inside appMinter.",
+    "JWT_LIFETIME": "Python signs the App JWT itself with PyJWT; TypeScript's is signed by @octokit/auth-app, inside appMinter.",
+    "app_jwt": "Python signs the App JWT itself with PyJWT; TypeScript's is signed by @octokit/auth-app, inside appMinter."
+   },
+   "typescript_only": {
+    "PKCS1_FOOTER": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is.",
+    "PKCS1_HEADER": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is.",
+    "RSA_ALGORITHM": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is.",
+    "appMinter": "Mints through @octokit/auth-app on an Octokit client the transport holds; Python mints with its aiohttp pool in client's _mint, beside the error mapping it shares.",
+    "derElement": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is.",
+    "derLength": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is.",
+    "pkcs8Key": "WebCrypto imports only PKCS#8 keys and GitHub downloads App keys as PKCS#1, so TypeScript wraps the key itself for the browser and Workers; Python's cryptography reads PKCS#1 as it is."
+   }
+  },
+  "core/github/client": {
+   "python_only": {
+    "_mint": "Python mints an App installation token with the pool and error mapping in this module; TypeScript's transport mints through appMinter.",
+    "github_token": "Python's calls are module functions over an account, so the current token is one too; TypeScript's is HttpGitHubTransport.token."
    }
   }
  }

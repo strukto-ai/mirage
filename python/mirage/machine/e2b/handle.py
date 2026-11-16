@@ -155,14 +155,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     """
 
     provider = "e2b"
+    pauses = True
     config_cls = E2BConfig
     config: E2BConfig
 
     _sandbox: Any = None
-    # Set by a connect that reached the sandbox; close hands it to
-    # ``_pausable`` for the pause after.
-    _reached: bool = False
-    _pausable: bool = False
 
     @property
     def instance(self) -> str:
@@ -186,28 +183,13 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             raise RuntimeError(hint) from exc
         self._reached = True
 
-    async def close(self) -> None:
-        """Close as any machine does, so the pause after it touches only a
-        sandbox this workspace reached; a connect still under way settles
-        first."""
-        async with self._connect_lock:
-            pass
-        self._pausable = self._reached
-        self._reached = False
-        await super().close()
-
     def config_asks_to_pause(self) -> bool:
         """Whether the config says ``on_pause: pause``."""
         return self.config.on_pause == "pause"
 
-    async def pause(self) -> None:
-        """Pause the sandbox when the workspace that just closed reached
-        it, keeping its disk and memory; the next connect resumes it. A
-        sandbox already gone has nothing to pause."""
-        pausable = self._pausable
-        self._pausable = False
-        if not pausable:
-            return
+    async def _pause_machine(self) -> None:
+        """Pause the sandbox, keeping its disk and memory; the next connect
+        resumes it. A sandbox already gone has nothing to pause."""
         try:
             await sdk.AsyncSandbox.pause(
                 self.config.sandbox_id, **self._api_params()

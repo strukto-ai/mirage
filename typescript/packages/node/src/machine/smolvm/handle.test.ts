@@ -36,6 +36,7 @@ class FakeSmolvmMachine extends SmolvmMachine {
   state = 'running'
   statusCode = 0
   statusStdout: string | null = null
+  refusal: string | null = null
   readonly calls: [string[], Uint8Array | null][] = []
 
   protected override async execProgram(
@@ -65,6 +66,13 @@ class FakeSmolvmMachine extends SmolvmMachine {
         stderr: new Uint8Array(),
         exitCode: 0,
       })
+    }
+    if (args[1] === 'pause' || args[1] === 'resume') {
+      return {
+        stdout: new Uint8Array(),
+        stderr: ENC.encode(this.refusal ?? ''),
+        exitCode: this.refusal === null ? 0 : 1,
+      }
     }
     const script = args[args.length - 1] ?? ''
     const stdout = ENC.encode(`out:${script}`)
@@ -278,3 +286,56 @@ it.each(RESTRICTIONS)(
     }
   },
 )
+
+async function reached(): Promise<FakeSmolvmMachine> {
+  const machine = new FakeSmolvmMachine('box', { machine: 'vm' })
+  await machine.connect()
+  await machine.close()
+  return machine
+}
+
+/** Whether a smolvm machine built with `config` asks the workspace to pause it. */
+function asksToPause(config: Partial<SmolvmConfig>): boolean {
+  return new SmolvmMachine('box', { machine: 'vm', ...config }).configAsksToPause()
+}
+
+describe('SmolvmMachine pause', () => {
+  it('resumes a paused machine on connect', async () => {
+    const machine = new FakeSmolvmMachine('box', { machine: 'vm' })
+    machine.state = 'paused'
+    await machine.connect()
+    expect(machine.calls.at(-1)).toEqual([['machine', 'resume', '--name', 'vm'], null])
+  })
+  it('fails the connect loud when the resume fails', async () => {
+    const machine = new FakeSmolvmMachine('box', { machine: 'vm' })
+    machine.state = 'paused'
+    machine.refusal = 'Error: checkpoint footer mismatch'
+    await expect(machine.connect()).rejects.toThrow('resume --name vm failed')
+  })
+  it('pauses the machine it reached', async () => {
+    const machine = await reached()
+    await machine.pause()
+    expect(machine.calls.at(-1)).toEqual([['machine', 'pause', '--name', 'vm'], null])
+  })
+  it('leaves alone a machine it never reached', async () => {
+    const machine = new FakeSmolvmMachine('box', { machine: 'vm' })
+    await machine.pause()
+    expect(machine.calls).toEqual([])
+  })
+  it('counts a machine already gone as paused', async () => {
+    const machine = await reached()
+    machine.refusal = 'Error: vm not found: vm'
+    await expect(machine.pause()).resolves.toBeUndefined()
+  })
+  it('raises any other pause failure', async () => {
+    const machine = await reached()
+    machine.refusal = 'Error: machine does not support portable checkpoints'
+    await expect(machine.pause()).rejects.toThrow('portable checkpoints')
+  })
+  it('asks the workspace to pause it only with onPause: pause', () => {
+    expect([asksToPause({ onPause: 'pause' }), asksToPause({})]).toEqual([true, false])
+    expect(() => new SmolvmMachine('box', { machine: 'vm', onPause: 'stop' as never })).toThrow(
+      'smolvm onPause must be one of pause, not "stop"',
+    )
+  })
+})

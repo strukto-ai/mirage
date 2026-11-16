@@ -189,6 +189,11 @@ pub(crate) enum Request {
     /// The time, for a command that reads the clock.
     #[cfg(feature = "gh")]
     Now,
+    /// Wait `seconds` on the host, for a command that polls.
+    #[cfg(feature = "gh")]
+    Sleep {
+        seconds: u64,
+    },
     /// Whether an object grown to `size` bytes still fits the workspace's
     /// memory, the host refusing it if not.
     #[cfg(feature = "gh")]
@@ -459,6 +464,11 @@ impl Request {
             }
             #[cfg(feature = "gh")]
             Request::Now => put("op", "now".into()),
+            #[cfg(feature = "gh")]
+            Request::Sleep { seconds } => {
+                put("op", "sleep".into());
+                put("seconds", (*seconds).into());
+            }
             #[cfg(feature = "gh")]
             Request::Memory { size } => {
                 put("op", "memory".into());

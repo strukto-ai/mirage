@@ -109,7 +109,12 @@ export function valueOf(kind: EntryKind, field: Field, raw: unknown, at: string)
 }
 
 /** The checks a type needs beyond its fields' types. */
-function checkRules(kind: EntryKind, type: string, config: Fields): void {
+function checkRules(
+  kind: EntryKind,
+  type: string,
+  config: Fields,
+  given: ReadonlySet<string>,
+): void {
   const url = config.url
   if (kind === 'cli' && type === 'mcp' && typeof url === 'string') {
     let parsed: URL | undefined
@@ -119,6 +124,14 @@ function checkRules(kind: EntryKind, type: string, config: Fields): void {
       parsed = undefined
     }
     if (parsed?.protocol !== 'https:') throw invalid("url must be the MCP server's https URL")
+  }
+  // GitHub authenticates with a token or as an App, never both: no one
+  // field is required, so the rule is the pair's.
+  if ((kind === 'vfs' && type === 'github') || (kind === 'cli' && type === 'gh')) {
+    const token = given.has('token')
+    if (token === [...given].some((name) => name.startsWith('app.'))) {
+      throw invalid(`${type} takes exactly one of token or app; got ${token ? 'both' : 'neither'}`)
+    }
   }
 }
 
@@ -158,7 +171,7 @@ export function checkValues(
       f.group === undefined || fields.some((g) => g.group === f.group && given.has(g.name))
     if (f.required && used && !given.has(f.name)) throw invalid(`${f.name} is required`)
   }
-  checkRules(kind, type, config)
+  checkRules(kind, type, config, given)
   if (new TextEncoder().encode(JSON.stringify({ config, sealed })).length > MAX_BYTES) {
     throw invalid('fields are larger than 16 KB')
   }

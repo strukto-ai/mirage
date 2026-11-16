@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GitHubAppAuth, GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.vfs.github.github import GitHubVFS
 
-__all__ = ["GitHubConfig", "GitHubVFS", "TreeEntry"]
+__all__ = ["GitHubAppAuth", "GitHubConfig", "GitHubVFS", "TreeEntry"]

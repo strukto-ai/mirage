@@ -48,6 +48,10 @@
       "types": "./dist/plugin/subprocess.d.ts",
       "import": "./dist/plugin/subprocess.js"
     },
+    "./remote": {
+      "types": "./dist/remote/index.d.ts",
+      "import": "./dist/remote/index.js"
+    },
     "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
@@ -90,6 +94,7 @@
     "@deepseek-ai/dsh-subprocess": "0.2.2-rc.3",
     "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
     "@deepseek-ai/dsh-working-directory": "0.2.2-rc.3",
+    "@struktoai/mirage-server": "workspace:*",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
     "vitest": "^4.1.12"

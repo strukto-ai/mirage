@@ -5,7 +5,6 @@ mod bc;
 mod block_size;
 mod calendar;
 mod cat;
-#[cfg(feature = "gh")]
 pub mod cli;
 mod cmp;
 mod colrm;
@@ -471,6 +470,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "wc" => wc::open(config),
         #[cfg(feature = "gh")]
         "gh" => cli::gh::open(config),
+        "office" => cli::office::open(config),
         "xxd" => xxd::open(config),
         "zip" => zip::open_zip(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),

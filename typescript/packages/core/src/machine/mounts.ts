@@ -24,7 +24,9 @@ import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
-import type { Files } from '../workspace/files.ts'
+import { FileType } from '../types.ts'
+import { readerOf, type Files } from '../workspace/files.ts'
+import type { MountRow } from '../workspace/types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../runtime/binding.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
@@ -42,6 +44,8 @@ import {
   UNMOUNT_WAIT_SECONDS,
   mountField,
 } from './constants.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
 
 /** A served prefix's SFTP server, as `session` (`mount/sftp`'s PipeServer). */
 export interface PipeServer {
@@ -296,6 +300,9 @@ export class MachineMounts {
   private readonly instance = crypto.randomUUID().replaceAll('-', '').slice(0, 8)
   private serves = 0
   private readonly sources = new Set<string>()
+  // Whether each top prefix is a directory, read once per mount: keyed by
+  // the mount's row, which the registry builds anew whenever its mounts change.
+  private readonly directories = new Map<string, { row: MountRow | null; directory: boolean }>()
   // Each kill of an ended server's sshfs still running, which close stops.
   private readonly kills = new Set<AbortController>()
 
@@ -553,6 +560,42 @@ export class MachineMounts {
   }
 
   /**
+   * Those of `prefixes` sshfs can mount: directories. A file mounted at a
+   * path of its own, such as a `VFS.md`, stays off the machine.
+   */
+  private async mountable(files: Files, prefixes: string[]): Promise<string[]> {
+    for (const prefix of [...this.directories.keys()]) {
+      if (!prefixes.includes(prefix)) this.directories.delete(prefix)
+    }
+    const reader = readerOf(files)
+    const out: string[] = []
+    for (const prefix of prefixes) {
+      const row = reader.owner(prefix)
+      let known = this.directories.get(prefix)
+      if (known?.row !== row) {
+        known = { row, directory: await this.isDirectory(files, prefix) }
+        this.directories.set(prefix, known)
+      }
+      if (known.directory) out.push(prefix)
+    }
+    return out
+  }
+
+  /**
+   * Whether `prefix` is a directory. A stat that fails, such as a disk
+   * mount whose folder is gone, counts as one: the prefix is served as
+   * before, and the machine's own mount or the serve answers for it.
+   */
+  private async isDirectory(files: Files, prefix: string): Promise<boolean> {
+    try {
+      return (await files.stat(prefix)).type === FileType.DIRECTORY
+    } catch (error) {
+      logger.debug?.(`${this.provider}: could not stat ${prefix}: ${String(error)}`)
+      return true
+    }
+  }
+
+  /**
    * Serve what the session sees and drop what it no longer does. Returns
    * why the line may not run, a prefix another sshfs still serves or another
    * mount covers, which is left alone and nothing new served, or null once
@@ -567,7 +610,10 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const visible = this.mountType === 'fuse' ? [] : servedPrefixes(binding.resolver.prefixes())
+    const visible =
+      this.mountType === 'fuse'
+        ? []
+        : await this.mountable(files, servedPrefixes(binding.resolver.prefixes()))
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
     if (

@@ -17,32 +17,105 @@ import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const GitHubConfig = z.object({
-  ...timeoutShape,
-  token: secretStr().describe('GitHub personal access token.'),
-  owner: z.string().describe('Repository owner, a user or an organization.'),
-  repo: z.string().describe('Repository name.'),
-  ref: z
-    .string()
-    .optional()
-    .describe(
-      "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created.",
+/**
+ * A GitHub App installation that mirage mints tokens for. Each token lasts an
+ * hour; mirage mints the next one before the last expires, so a long-lived
+ * VFS or `gh` install keeps working.
+ */
+export const GitHubAppAuth = z.preprocess(
+  (input: unknown): unknown => {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) return input
+    // The snake_case spellings an `app` block arrives in from yaml or
+    // python. The config loader renames only top-level keys, so the nested
+    // block does its own, as `AWSSMConfig` does.
+    const camels: Readonly<Record<string, string>> = {
+      app_id: 'appId',
+      private_key: 'privateKey',
+      installation_id: 'installationId',
+    }
+    const out: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(input)) {
+      const camel = camels[key]
+      // Both spellings of one field is refused rather than settled by
+      // insertion order: the snake key stays and the strict object
+      // reports it, as python reports the camel one.
+      if (camel === undefined || Object.hasOwn(input, camel)) out[key] = value
+      else out[camel] = value
+    }
+    return out
+  },
+  z.strictObject({
+    appId: z.union([z.number().int(), z.string()]).describe("The App's ID, or its client ID."),
+    privateKey: secretStr().describe(
+      "The App's private key, PEM, PKCS#1 as GitHub downloads it or PKCS#8.",
     ),
-  baseUrl: z.string().optional().meta({
-    description: 'GitHub API root; set it for GitHub Enterprise.',
-    default: 'https://api.github.com',
+    installationId: z.number().int().describe('The installation the tokens act for.'),
+    repositories: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Repository names the tokens are narrowed to. Unset reaches every repository the installation does.',
+      ),
+    permissions: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        'Permissions the tokens are narrowed to, such as `{ contents: "read" }`. Unset grants all the installation has.',
+      ),
   }),
-})
+)
+
+export type GitHubAppAuth = z.infer<typeof GitHubAppAuth>
+
+/** Refuse a GitHub config that names both credentials or neither. */
+function requireOne(config: { token?: unknown; app?: unknown }, ctx: z.RefinementCtx): void {
+  const hasToken = config.token !== undefined
+  if (hasToken === (config.app !== undefined)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `GitHub auth takes exactly one of token or app; got ${hasToken ? 'both' : 'neither'}`,
+    })
+  }
+}
+
+export const GitHubConfig = z
+  .object({
+    ...timeoutShape,
+    token: secretStr()
+      .optional()
+      .describe(
+        'GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set.',
+      ),
+    app: GitHubAppAuth.optional().describe(
+      'A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set.',
+    ),
+    owner: z.string().describe('Repository owner, a user or an organization.'),
+    repo: z.string().describe('Repository name.'),
+    ref: z
+      .string()
+      .optional()
+      .describe(
+        "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created.",
+      ),
+    baseUrl: z.string().optional().meta({
+      description: 'GitHub API root; set it for GitHub Enterprise.',
+      default: 'https://api.github.com',
+    }),
+  })
+  .superRefine(requireOne)
 
 export type GitHubConfig = ConfigOf<typeof GitHubConfig>
 
-export const GhConfig = z.object({
-  ...timeoutShape,
-  token: secretStr(),
-  baseUrl: z.string().optional(),
-  repo: z.string().optional(),
-  branch: z.string().optional(),
-})
+export const GhConfig = z
+  .object({
+    ...timeoutShape,
+    token: secretStr().optional(),
+    app: GitHubAppAuth.optional(),
+    baseUrl: z.string().optional(),
+    repo: z.string().optional(),
+    branch: z.string().optional(),
+  })
+  .superRefine(requireOne)
 
 // Derived, not declared twice. The schema is the one doing real work --
 // it validates an install's config and carries the `secretStr` marker

@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import { type ChildProcess, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { type AddressInfo, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -146,7 +146,7 @@ function mounts(target: Target, build: (m: Target['mounts'][number]) => Config):
 
 /** The CLIs the workspace itself carries, which reach no service. */
 function localClis(target: Target): Config {
-  const names = (target.clis ?? []).filter((name) => name === 'git' || name === 'search')
+  const names = (target.clis ?? []).filter((name) => ['git', 'office', 'search'].includes(name))
   return names.length === 0
     ? {}
     : {
@@ -159,6 +159,20 @@ async function scopedRun(name: string, body: unknown = {}): Promise<string> {
   const scoped = `${env(name)}/_run/${runId()}`
   await reset(`${scoped}/reset`, body)
   return scoped
+}
+
+// The credential the `gh` install rides: the fixed token, or, for a target
+// with `auth: 'app'`, a GitHub App installation whose key is PKCS#1, as
+// GitHub downloads one, made here and signed with inside the Worker. The
+// fake checks a JWT's shape, not its signature.
+function ghCredential(target: Target): Record<string, unknown> {
+  if (target.auth !== 'app') return { token: 'ghp-integ' }
+  const { privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+  })
+  return { app: { app_id: 1, private_key: privateKey, installation_id: 1 } }
 }
 
 // One config per service, mirroring its opener in runners/typescript/adapters.
@@ -255,7 +269,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
                 cli: 'gh',
                 machine: 'in_process',
                 config: {
-                  token: 'ghp-integ',
+                  ...ghCredential(target),
                   base_url: base,
                   repo: 'integ/repo-cli',
                   // Not the default branch, so a line that falls back on

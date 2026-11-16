@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 import os
 from types import SimpleNamespace
@@ -38,7 +39,6 @@ from tests.fixtures.machine import machine_runtime
     ("status", "message"),
     [
         (b'{"status":"Stopped"}', "not running"),
-        (b'{"status":"Paused"}', "not running"),
         (b'{"status":"Crashed"}', "not running"),
         (b'{"status":"Draining"}', "not running"),
         (b'{"status":"Starting"}', "not running"),
@@ -326,6 +326,166 @@ async def test_real_ssh_mount_serves_the_host_session_and_unmounts(mount_type):
         "box", config={"sandbox": MOUNT_SANDBOX}
     ).exec_line(f"mountpoint -q {prefix}", None, {}, "/")
     assert check.exit_code != 0
+
+
+class FakeMsb:
+    """`msb` answering status with ``state`` and failing ``refusal`` verbs."""
+
+    def __init__(self, state: str = "Running") -> None:
+        self.state = state
+        self.refusals: dict[str, bytes] = {}
+        self.calls: list[list[str]] = []
+        self.resuming = asyncio.Event()
+        self.resumed: asyncio.Event | None = None
+
+    async def __call__(
+        self, executable, hint, args, stdin, output=None, errors=None, **_
+    ):
+        self.calls.append(list(args))
+        if args[0] == "status":
+            return RunResult(
+                json.dumps({"status": self.state}).encode(), b"", 0
+            )
+        if args[0] == "resume" and self.resumed is not None:
+            self.resuming.set()
+            await self.resumed.wait()
+        if (said := self.refusals.get(args[0])) is not None:
+            return RunResult(b"", said, 1)
+        return RunResult(b"", b"", 0)
+
+
+def _msb(monkeypatch, state: str = "Running") -> FakeMsb:
+    msb = FakeMsb(state)
+    monkeypatch.setattr("mirage.machine.transport.run_program", msb)
+    return msb
+
+
+@pytest.mark.asyncio
+async def test_connect_resumes_a_paused_sandbox_after_its_status(monkeypatch):
+    msb = _msb(monkeypatch, "Paused")
+    await MicrosandboxMachine("box", config={"sandbox": "sb"}).connect()
+    assert msb.calls == [
+        ["status", "sb", "--format", "json"],
+        ["resume", "sb", "--quiet"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_connect_fails_loud_when_the_resume_fails(monkeypatch):
+    msb = _msb(monkeypatch, "Paused")
+    msb.refusals["resume"] = b"error: snapshot unreadable"
+    with pytest.raises(RuntimeError, match="msb resume sb --quiet failed"):
+        await MicrosandboxMachine("box", config={"sandbox": "sb"}).connect()
+
+
+async def _reached(**config) -> MicrosandboxMachine:
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb", **config})
+    await machine.connect()
+    await machine.close()
+    return machine
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_the_sandbox_it_reached(monkeypatch):
+    msb = _msb(monkeypatch)
+    await (await _reached()).pause()
+    assert msb.calls[-1] == ["pause", "sb", "--quiet"]
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_sandbox_it_never_reached(monkeypatch):
+    msb = _msb(monkeypatch)
+    await MicrosandboxMachine("box", config={"sandbox": "sb"}).pause()
+    assert msb.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_already_gone_counts_as_paused(monkeypatch):
+    msb = _msb(monkeypatch)
+    machine = await _reached()
+    msb.refusals["pause"] = b"error: sandbox not found: sb"
+    await machine.pause()
+
+
+@pytest.mark.asyncio
+async def test_any_other_pause_failure_is_raised(monkeypatch):
+    msb = _msb(monkeypatch)
+    machine = await _reached()
+    msb.refusals["pause"] = b'error: sandbox "sb" has no live runtime'
+    with pytest.raises(RuntimeError, match="no live runtime"):
+        await machine.pause()
+
+
+@pytest.mark.asyncio
+async def test_a_later_workspace_that_never_ran_leaves_the_sandbox_alone(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch)
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    await machine.connect()
+    machine._spent = ["/tmp/report"]
+    await machine.close()
+    await machine.close()
+    await machine.pause()
+    assert ["pause", "sb", "--quiet"] not in msb.calls
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_a_sandbox_a_resume_under_way_at_close_reached(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch, "Paused")
+    msb.resumed = asyncio.Event()
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    connecting = asyncio.ensure_future(machine.connect())
+    await msb.resuming.wait()
+    closing = asyncio.ensure_future(machine.close())
+    await asyncio.sleep(0)
+    msb.resumed.set()
+    await connecting
+    await closing
+    await machine.pause()
+    assert msb.calls[-1] == ["pause", "sb", "--quiet"]
+
+
+@pytest.mark.asyncio
+async def test_a_probe_close_on_another_loop_skipped_marks_nothing(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch, "Paused")
+    msb.resumed = asyncio.Event()
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    connecting = asyncio.ensure_future(machine.connect())
+    await msb.resuming.wait()
+    await asyncio.to_thread(asyncio.run, machine.close())
+    msb.resumed.set()
+    await connecting
+    await machine.close()
+    await machine.pause()
+    assert ["pause", "sb", "--quiet"] not in msb.calls
+
+
+@pytest.mark.asyncio
+async def test_close_never_resumes_a_sandbox_paused_meanwhile(monkeypatch):
+    msb = _msb(monkeypatch)
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    await machine.connect()
+    msb.state = "Paused"
+    machine._spent = ["/tmp/report"]
+    await machine.close()
+    assert [call[0] for call in msb.calls] == ["status", "status"]
+
+
+def _asks(**config) -> bool:
+    return MicrosandboxMachine(
+        "box", config={"sandbox": "sb", **config}
+    ).config_asks_to_pause()
+
+
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
+    with pytest.raises(ValueError, match="microsandbox on_pause must be one"):
+        MicrosandboxMachine("box", config={"sandbox": "s", "on_pause": "x"})
 
 
 def test_mount_type_rejects_an_unknown_value():

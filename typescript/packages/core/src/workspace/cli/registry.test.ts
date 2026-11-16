@@ -28,6 +28,7 @@ import { ManualClock } from '../../utils/clock.ts'
 import { LINEAR } from '../../commands/cli/builtin/linear/index.ts'
 import { AIRTABLE } from '../../commands/cli/builtin/airtable/index.ts'
 import { NTN } from '../../commands/cli/builtin/ntn/index.ts'
+import { OFFICE } from '../../commands/cli/builtin/office/index.ts'
 import { SLACK } from '../../commands/cli/builtin/slack/index.ts'
 import { TRELLO } from '../../commands/cli/builtin/trello/index.ts'
 import { CLIRegistry } from './registry.ts'
@@ -360,6 +361,7 @@ const BUILTIN_CLIS: readonly (readonly [string, CLI])[] = [
   ['slack', SLACK],
   ['discord', DISCORD],
   ['ntn', NTN],
+  ['office', OFFICE],
   ['linear', LINEAR],
   ['airtable', AIRTABLE],
   ['trello', TRELLO],

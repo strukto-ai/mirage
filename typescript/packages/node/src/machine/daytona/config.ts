@@ -14,6 +14,8 @@
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
+import { ON_PAUSE } from './constants.ts'
 
 /** How to reach the user's live Daytona sandbox. */
 export interface DaytonaConfig extends MachineConfig {
@@ -25,10 +27,13 @@ export interface DaytonaConfig extends MachineConfig {
   sandboxId: string
   /** Daytona credential; absent reads DAYTONA_API_KEY. */
   apiKey?: string
+  /** `pause`: pause the sandbox when the workspace pauses; unset leaves it as it is. */
+  onPause?: PauseAction
 }
 
 export const DAYTONA_CONFIG_FIELDS: ConfigFields = {
   ...BASE_CONFIG_FIELDS,
   sandboxId: { type: 'string', required: true },
   apiKey: { type: 'string' },
+  onPause: { type: 'string', options: ON_PAUSE },
 }

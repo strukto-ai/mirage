@@ -12,6 +12,8 @@ mod listing;
 mod tests;
 mod unzip;
 
+pub(super) use create::{Piece, ending, fields, keep, placed, write_out};
+
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 
 use crate::request::{Opening, Request, failed, failure_text};
@@ -32,7 +34,7 @@ const WINDOW: usize = 64 * 1024;
 /// How much of the directory, or of the archive's tail, one request reads.
 const READ: u64 = 1024 * 1024;
 /// The spool the archive is read into.
-const ARCHIVE: u32 = 1;
+pub(super) const ARCHIVE: u32 = 1;
 
 pub(crate) fn open_zip(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: create::Config = parse_config(config)?;

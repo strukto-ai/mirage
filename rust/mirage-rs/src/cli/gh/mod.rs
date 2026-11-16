@@ -152,6 +152,7 @@ async fn dispatch(leaf: &str, account: &Account, flags: &Flags, texts: &[String]
         "run list" => actions::run_list_cmd(account, flags).await,
         "run view" => actions::run_view_cmd(account, flags, texts).await,
         "run rerun" => actions::run_rerun_cmd(account, flags, texts).await,
+        "run watch" => actions::run_watch_cmd(account, flags, texts).await,
         "workflow list" => actions::workflow_list_cmd(account, flags).await,
         "workflow view" => actions::workflow_view_cmd(account, flags, texts).await,
         "workflow run" => actions::workflow_run_cmd(account, flags, texts).await,

@@ -184,6 +184,8 @@ interface World {
   decide_lines?: { path: string; lines: string[] }
   track_reads?: boolean
   builtin_clis?: string[]
+  /** Where the workspace places its VFS.md, a file mounted at a path of its own. */
+  vfs_md?: string
   session_id?: string
   command_limits?: unknown
   max_memory?: string | number | null
@@ -979,6 +981,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     ws.policies.add(new DecideLines(ws, world.decide_lines.path, world.decide_lines.lines))
   }
   for (const name of world.builtin_clis ?? []) ws.registerCli(name, cliSpecFor(name))
+  if (world.vfs_md !== undefined) await ws.vfsMd(world.vfs_md)
   // The world's script CLIs, the yaml `clis:` shape inline: each entry
   // embeds its program instead of naming a file, the same way a runtime
   // entry embeds a policy script here; cli.sh writes them back out to
