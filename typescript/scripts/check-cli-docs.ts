@@ -31,7 +31,10 @@ function commands(node: Node.CommandSpec, parents: readonly string[] = []): stri
   ]
 }
 
-const specs = Object.values(Node).filter((value) => value instanceof Node.CLI)
+const UNDOCUMENTED = new Set(['search'])
+const specs = Object.values(Node).filter(
+  (value) => value instanceof Node.CLI && !UNDOCUMENTED.has(value.spec.name),
+)
 assert.ok(specs.length > 0, 'No bundled CLI specs were loaded')
 const pages = readdirSync(DOCS)
   .filter((name) => name.endsWith('.mdx') && !['index.mdx', 'custom.mdx', 'mcp.mdx'].includes(name))

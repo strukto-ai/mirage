@@ -7,7 +7,7 @@ description: Mount a Qdrant collection as a Mirage filesystem in TypeScript, wit
 `QdrantVFS` exposes a [Qdrant](https://qdrant.tech/) collection as a read-only filesystem: group-by
 payload fields become nested folders, each point is a `.json` payload file (plus
 a `.txt` text file and an optional blob), and semantic search is the
-[`search` CLI](/typescript/cli/search). The TypeScript backend mirrors the [Python one](/python/vfs/qdrant)
+`search` CLI. The TypeScript backend mirrors the [Python one](/python/vfs/qdrant)
 and returns identical results.
 
 ## Install
@@ -43,7 +43,7 @@ await ws.shell("ls /fashion/Men/Shoes/White");
 
 This first setup supports filesystem browsing. Configure query embedding in
 [Search embedding](#search-embedding) and register the
-[`search` CLI](/typescript/cli/search) with `ws.registerCli('search', SEARCH)`
+`search` CLI with `ws.registerCli('search', SEARCH)`
 before running `search`.
 
 ## Config

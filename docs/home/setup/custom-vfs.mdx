@@ -363,6 +363,77 @@ it also returns `None` for `-i`. Source:
 [Python](https://github.com/strukto-ai/mirage/blob/main/python/mirage/core/chroma/search.py),
 [TypeScript](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/src/core/chroma/search.ts).
 
+## Example: answer a ranked search
+
+Override `search` to rank a mount's files with your service's own search,
+such as a vector store's. It gets the path to search under and a
+`SearchQuery`: the text in `query`, and options such as `top_k` in `options`.
+It returns one `(path, record)` pair per hit (`[path, record]` in TypeScript),
+the hit's workspace path and the text to print; `[]` means no match and `None`
+(`null`) declines. A VFS that ranks several paths together also overrides
+`search_many` (`searchMany`).
+
+Pass the path on to the service, so a search under one folder ranks only
+that folder's notes and no other folder's hits use up `top_k`:
+
+```python
+from mirage import BaseVFS, PathSpec, SearchQuery
+from mirage.utils.key_prefix import mounted_path
+
+
+class NotesVFS(BaseVFS):
+    async def search(self, path: PathSpec, query: SearchQuery) -> list[tuple[str, str]] | None:
+        hits = await self.accessor.client.search(
+            query.query, folder=path.vfs_path, limit=int(query.options.get("top_k", 10))
+        )
+        return [(mounted_path(path, "/" + hit.key).virtual, hit.text) for hit in hits]
+```
+
+```ts
+import { BaseVFS, type PathSpec, type SearchQuery } from '@struktoai/mirage-node'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+
+class NotesVFS extends BaseVFS<NotesAccessor> {
+  override async search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {
+    const hits = await this.accessor.client.search(query.query, {
+      folder: path.vfsPath,
+      limit: Number(query.options?.top_k ?? 10),
+    })
+    return hits.map((hit) => [mountedPath(path, `/${hit.key}`).virtual, hit.text])
+  }
+}
+```
+
+A search never passes the file cache. To keep results, the accessor holds a
+`ResponseCache` and returns it from `caches()`; the mount then expires it
+with its read policy and drops it after a write from outside Mirage:
+
+```python
+from mirage import Accessor, ResponseCache
+
+
+class NotesAccessor(Accessor):
+    def __init__(self) -> None:
+        self.searches = ResponseCache[str, list[tuple[str, str]]]()
+
+    def caches(self):
+        return (self.searches,)
+```
+
+```ts
+import { Accessor, ResponseCache } from '@struktoai/mirage-node'
+
+class NotesAccessor extends Accessor {
+  readonly searches = new ResponseCache<string, [string, string][]>()
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.searches]
+  }
+}
+```
+
+`searches.get(key, fetch)` answers from the cache or calls `fetch`.
+
 ## Example: count lines without reading
 
 Override `line_count`:

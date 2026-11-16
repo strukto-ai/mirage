@@ -7,7 +7,7 @@ icon: database
 The LanceDB VFS exposes a LanceDB table as a virtual filesystem mounted at
 some prefix such as `/fashion/`. Group-by columns become nested folders, each
 row becomes a card plus an optional blob file, and semantic search is the
-[`search` CLI](/python/cli/search), which returns ranked rows as canonical file paths.
+`search` CLI, which returns ranked rows as canonical file paths.
 
 For connection setup (LanceDB OSS, object storage, Cloud, Enterprise), see
 [LanceDB Setup](/home/setup/lancedb).
@@ -197,7 +197,7 @@ blob: 3.jpg
 
 ## Semantic search
 
-Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
+Search is the `search` CLI, not a path. Register it on the
 workspace:
 
 ```python

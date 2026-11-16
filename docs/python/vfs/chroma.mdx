@@ -8,7 +8,7 @@ The Chroma VFS exposes an existing ChromaDB collection as text files
 mounted at a prefix such as `/knowledge/`. It is useful when you already have a
 chunked knowledge base in Chroma and want agents to use normal filesystem
 commands like `ls`, `cat`, `grep` and `find`, and to rank chunks by meaning
-with the [`search` CLI](/python/cli/search).
+with the `search` CLI.
 
 For collection setup, see [Chroma Setup](/home/setup/chroma).
 
@@ -195,7 +195,7 @@ grep -n "API key" /knowledge/guides/quickstart.md
 
 ## Vector Search
 
-The [`search` CLI](/python/cli/search) asks Chroma's vector query API. Use it
+The `search` CLI asks Chroma's vector query API. Use it
 when semantic similarity matters more than exact text matching. Register it on
 the workspace:
 

@@ -60,10 +60,6 @@ SUMMARIES = {
         "Extract a PDF's text in reading order, by layout or in drawing "
         "order, page by page"
     ),
-    "search": (
-        "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "
-        "for a query"
-    ),
     "slack": (
         "Read and send messages; manage reactions and pins; find members "
         "and search"
@@ -73,7 +69,8 @@ SUMMARIES = {
         "assign, label and comment on cards"
     ),
 }
-HOME_EXCLUDED = frozenset({"search"})
+UNDOCUMENTED = frozenset({"search"})
+DOCUMENTED = sorted(set(BUILTIN_CLI_SPECS) - UNDOCUMENTED)
 
 
 def commands(
@@ -139,19 +136,18 @@ def reference(cli: CLI) -> str:
     return "\n".join([*rows, END])
 
 
-def catalog(language: str, excluded: frozenset[str] = frozenset()) -> str:
-    """Render the bundled CLI inventory for an overview page.
+def catalog(language: str) -> str:
+    """Render the documented CLI inventory for an overview page.
 
     Args:
         language (str): The documentation section containing the links.
-        excluded (frozenset[str]): Programs the page leaves out.
     """
     rows = [
         START,
         "| Program | Supported operations | Commands |",
         "| --- | --- | --- |",
     ]
-    for name in sorted(set(BUILTIN_CLI_SPECS) - excluded):
+    for name in DOCUMENTED:
         spec = cli_spec_for(name)
         count = sum(1 for _ in commands(spec.spec))
         rows.append(
@@ -182,7 +178,7 @@ def main() -> int:
         "--check", action="store_true", help="Fail on stale documentation"
     )
     args = parser.parse_args()
-    if set(SUMMARIES) != set(BUILTIN_CLI_SPECS):
+    if set(SUMMARIES) != set(DOCUMENTED):
         raise SystemExit(
             "Update CLI overview summaries for the registered programs"
         )
@@ -194,17 +190,15 @@ def main() -> int:
             "custom",
             "mcp",
         }
-        if documented != set(BUILTIN_CLI_SPECS):
+        if documented != set(DOCUMENTED):
             raise SystemExit(
                 f"{language} CLI pages disagree with the registry: "
-                f"{documented ^ set(BUILTIN_CLI_SPECS)}"
+                f"{documented ^ set(DOCUMENTED)}"
             )
         pages[directory / "index.mdx"] = catalog(language)
-        for name in sorted(BUILTIN_CLI_SPECS):
+        for name in DOCUMENTED:
             pages[directory / f"{name}.mdx"] = reference(cli_spec_for(name))
-    pages[ROOT / "docs/home/setup/clis.mdx"] = catalog(
-        "home/setup", HOME_EXCLUDED
-    )
+    pages[ROOT / "docs/home/setup/clis.mdx"] = catalog("home/setup")
     stale = []
     for path, block in pages.items():
         text = path.read_text()
@@ -220,7 +214,7 @@ def main() -> int:
         )
     print(
         f"CLI docs {'checked' if args.check else 'generated'}: "
-        f"{len(pages)} pages, {len(BUILTIN_CLI_SPECS)} programs"
+        f"{len(pages)} pages, {len(DOCUMENTED)} programs"
     )
     return 0
 
