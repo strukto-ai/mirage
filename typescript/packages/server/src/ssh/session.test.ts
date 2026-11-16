@@ -200,6 +200,7 @@ describe('loginEnv', () => {
       account: [],
       command: null,
       term: 'xterm-256color',
+      env: {},
       peer: { address: '10.0.0.5', port: 40000 },
       local: { address: '10.0.0.1', port: 2222 },
     }
@@ -434,6 +435,7 @@ describe('a pty without a terminal type', () => {
       account: [],
       command: null,
       term: '',
+      env: {},
       peer: null,
       local: null,
     }

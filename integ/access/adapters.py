@@ -1901,6 +1901,22 @@ class Http:
                 for c in suite["cases"]
             ]
 
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Run a line with the caller's span in the ``traceparent`` header.
+
+        Args:
+            wid (str): the workspace.
+            command (str): the line.
+            traceparent (str): the caller's span, W3C-encoded.
+        """
+        async with self.server.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/shell",
+                json={"command": command},
+                headers={"traceparent": traceparent},
+            )
+            reply.raise_for_status()
+
     async def case(
         self,
         http: httpx.AsyncClient,
@@ -2138,6 +2154,15 @@ class Cli:
     def _session(self, session: str | None) -> list[str]:
         return ["-s", session] if session else []
 
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Run a line from a CLI started with ``TRACEPARENT`` set."""
+        code, _, err = await run(
+            self.server.cli("shell", "-w", wid, "-c", command, "--json"),
+            {**self.server.env(), "TRACEPARENT": traceparent},
+            tty=True,
+        )
+        assert code == 0, err
+
     async def case(
         self, op: str, wid: str, session: str | None, step: dict[str, Any]
     ) -> Answer:
@@ -2368,6 +2393,16 @@ class Mcp:
                 for c in suite["cases"]
             ]
 
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Call the shell tool with the caller's span in ``_meta``."""
+        http, client = self.client(wid, None, "shell")
+        async with http, client:
+            await client.call_tool(
+                "shell",
+                {"command": command},
+                meta={"traceparent": traceparent},
+            )
+
 
 class McpStdio(Mcp):
     """MCP over ``mirage mcp``'s stdio."""
@@ -2400,6 +2435,23 @@ class McpStdio(Mcp):
                 )
                 for c in suite["cases"]
             ]
+
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Call the shell tool through ``mirage mcp`` with the caller's span
+        in ``_meta``."""
+        argv = self.server.cli("mcp", "-w", wid)
+        params = StdioServerParameters(
+            command=argv[0],
+            args=argv[1:],
+            env=self.server.env(),
+            cwd=str(ROOT),
+        )
+        async with Client(params) as client:
+            await client.call_tool(
+                "shell",
+                {"command": command},
+                meta={"traceparent": traceparent},
+            )
 
 
 async def mcp_case(
@@ -2603,6 +2655,18 @@ class Rpc:
                 for c in suite["cases"]
             ]
 
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Run a line over RPC with the caller's span in the ``traceparent``
+        header."""
+        async with self.server.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/rpc",
+                json=rpc_request(1, "shell", {"command": command}),
+                headers={"traceparent": traceparent},
+            )
+            reply.raise_for_status()
+            rpc_result(reply.json())
+
 
 class RpcStdio(Rpc):
     """RPC over ``mirage rpc``'s stdio."""
@@ -2672,6 +2736,14 @@ class RpcStdio(Rpc):
                 )
                 for c in suite["cases"]
             ]
+
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Run a line through ``mirage rpc`` started with ``TRACEPARENT``
+        set."""
+        argv = self.server.cli("rpc", "-w", wid)
+        env = {**self.server.env(), "TRACEPARENT": traceparent}
+        async with RpcStream(argv, env) as stream:
+            rpc_result(await stream.call("shell", {"command": command}))
 
 
 async def feed_rpc_stdin(
@@ -2818,6 +2890,20 @@ class Ssh:
             "-i",
             str(self.server.d.ssh_key(key)),
         ]
+
+    async def traced(self, wid: str, command: str, traceparent: str) -> None:
+        """Run a line on an exec channel that sends ``TRACEPARENT``."""
+        code, _, err = await self.run(
+            [
+                *self.argv("ssh"),
+                "-o",
+                f"SetEnv=TRACEPARENT={traceparent}",
+                "-T",
+                f"{wid}@127.0.0.1",
+                command,
+            ]
+        )
+        assert code == 0, err
 
     async def suite(
         self, suite: dict[str, Any], prefix: str, config: dict[str, Any]

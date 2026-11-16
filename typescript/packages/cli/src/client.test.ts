@@ -284,3 +284,34 @@ describe('DaemonClient token', () => {
     await expect(running.token()).rejects.toThrow(/changed/)
   })
 })
+
+describe('DaemonClient trace context', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  // Twin of test_requests_carry_the_trace_context_in_the_environment.
+  it('sends the TRACEPARENT in its environment as the W3C header', async () => {
+    const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+    vi.stubEnv('TRACEPARENT', traceparent)
+    const seen: (string | string[] | undefined)[] = []
+    const server = createServer((req, res) => {
+      seen.push(req.headers.traceparent)
+      res.writeHead(200).end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const client = new DaemonClient({
+      context: 'local',
+      url: `http://127.0.0.1:${String(port)}`,
+      authToken: 't',
+      idleGraceSeconds: 30,
+    })
+    try {
+      await client.request('GET', '/v1/health')
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
+    expect(seen).toEqual([traceparent])
+  })
+})

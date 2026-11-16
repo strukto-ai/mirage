@@ -16,6 +16,7 @@ import { Client, StreamableHTTPClientTransport, type Progress } from '@modelcont
 import { McpServer } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { VERSION } from '@struktoai/mirage-core/version'
+import { traceHeaders } from '../env.ts'
 
 /**
  * Answers MCP over one stream by asking the daemon's HTTP endpoint.
@@ -96,7 +97,12 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
       return bearer !== '' ? bearer : undefined
     },
   }
-  await upstream.connect(new StreamableHTTPClientTransport(new URL(url), { authProvider }))
+  await upstream.connect(
+    new StreamableHTTPClientTransport(new URL(url), {
+      authProvider,
+      requestInit: { headers: traceHeaders(process.env) },
+    }),
+  )
   try {
     const { server } = new McpRelay(upstream)
     const closed = new Promise<void>((resolve) => {

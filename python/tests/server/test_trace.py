@@ -100,7 +100,7 @@ async def test_a_shell_request_puts_its_line_in_the_callers_trace(
         )
         assert untraced.status_code == 200, untraced.text
     traced, alone = (
-        s for s in exporter.get_finished_spans() if s.name == "command"
+        s for s in exporter.get_finished_spans() if s.name == "shell"
     )
     assert traced.context.trace_id == TRACE_ID
     assert traced.parent is not None

@@ -82,6 +82,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/context-async-hooks": "^3.0.0",
+    "@opentelemetry/core": "^3.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/lz4js": "^0.2.2",
     "@types/node": "^22.0.0",

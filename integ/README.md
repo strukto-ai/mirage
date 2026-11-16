@@ -48,7 +48,11 @@ runs conformance before the regular CLI and project batteries.
   gates that every HTTP route and CLI command was exercised. `serve.py` and
   `serve.ts` time the server's event loop for the whole run (`loop_lag.py`,
   `loop_lag.ts`) and write the summary to a file as they stop; `run.py`
-  prints it per host and deployment. No route serves it. `inapp.ts` is
+  prints it per host and deployment. No route serves it. They also append
+  every span the server sends to a file (`spans.py`, `spans.ts`): each
+  access then sends one line under a caller's span, the way its protocol
+  carries one (`traceparent` header, MCP `_meta`, `TRACEPARENT`), and the
+  line's `shell` span must sit under it. `inapp.ts` is
   the in-app access on TypeScript. CI uses `--host-jobs 2` to overlap both
   hosts on one runner and `--suite-jobs 3` to run three suites of each
   at once; each host keeps its own home, ports and snapshot prefix, each

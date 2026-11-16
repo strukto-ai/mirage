@@ -25,8 +25,10 @@ per deployment: every credential over HTTP, and a good and a bad one
 through each other access. ``dev`` adds the CLI's lifecycle: spawning,
 status, restart, stop, kill, idle exit, config, the stdio relays, and a
 remote URL that must neither start a daemon nor receive the token file.
-``token`` and ``jwt`` also print how late the server's loop ran, and on
-Python check how many turns of its workspace's loop a quiet line takes.
+``token`` and ``jwt`` also print how late the server's loop ran, on
+Python check how many turns of its workspace's loop a quiet line takes,
+and check that a line joins the trace its caller sent, through every
+access.
 Every deployment times a quiet line beside a busy one (``isolation``).
 
 Three gates end a run over both hosts and every access: every HTTP
@@ -47,6 +49,7 @@ import asyncio
 import base64
 import json
 import re
+import secrets
 import shlex
 import statistics
 import subprocess
@@ -708,6 +711,96 @@ async def waits_beside_busy(
         for wid in wids:
             (await http.delete(f"/v1/workspaces/{wid}")).raise_for_status()
     return timed
+
+
+JOINED = "under the caller's span"
+TRACE_WAIT = 10.0
+
+
+def joined(spans: list[dict[str, Any]], command: str, sent: str) -> str:
+    """Where a line's ``shell`` span sits against the caller's span.
+
+    Args:
+        spans (list[dict[str, Any]]): the spans the server wrote.
+        command (str): the line.
+        sent (str): the ``traceparent`` it was sent with, or empty.
+
+    Returns:
+        str: ``JOINED`` when the span is in the caller's trace and the
+        caller's span is among its ancestors, ``a trace of its own`` for a
+        root span, else what went wrong.
+    """
+    found = [
+        s for s in spans if s["name"] == "shell" and s["command"] == command
+    ]
+    if len(found) != 1:
+        return f"{len(found)} shell spans"
+    line = found[0]
+    if not sent:
+        return (
+            "a trace of its own" if line["parent_id"] is None else "a parent"
+        )
+    _, trace_id, span_id, _ = sent.split("-")
+    if line["trace_id"] != trace_id:
+        return "another trace"
+    parents = {s["span_id"]: s["parent_id"] for s in spans}
+    at = line["parent_id"]
+    while at is not None and at != span_id:
+        at = parents.get(at)
+    return JOINED if at == span_id else "not under the caller's span"
+
+
+async def trace_parents(
+    server: Server, scratch: Path, wanted: set[str], report: Report
+) -> None:
+    """Check that a line joins the trace its caller sent, on every access.
+
+    Each access runs one line under a fresh caller span, carried the way
+    its protocol carries one: the ``traceparent`` header over HTTP and RPC,
+    ``_meta`` over MCP, ``TRACEPARENT`` for the CLI's verbs and SSH. The
+    line's ``shell`` span, read back from the spans the server wrote, must
+    sit under that span in that trace; a line sent with none starts a
+    trace of its own.
+
+    Args:
+        server (Server): the deployed server.
+        scratch (Path): a private directory.
+        wanted (set[str]): the accesses to run.
+        report (Report): the report.
+    """
+    sent: dict[str, tuple[str, str]] = {}
+    for access in server_accesses(server, scratch):
+        if access.name not in wanted:
+            continue
+        command = f"echo trace-{access.name}"
+        traceparent = f"00-{secrets.token_hex(16)}-{secrets.token_hex(8)}-01"
+        await access.traced(SEED, command, traceparent)
+        sent[access.name] = (command, traceparent)
+    if "http" in wanted:
+        command = "echo trace-none"
+        async with server.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{SEED}/shell", json={"command": command}
+            )
+            reply.raise_for_status()
+        sent["untraced"] = (command, "")
+    deadline = time.monotonic() + TRACE_WAIT
+    while True:
+        text = server.d.spans.read_text() if server.d.spans.exists() else ""
+        spans = [json.loads(line) for line in text.splitlines()]
+        found = {s["command"] for s in spans if s["name"] == "shell"}
+        if {c for c, _ in sent.values()} <= found:
+            break
+        if time.monotonic() > deadline:
+            break
+        await asyncio.sleep(0.1)
+    for name, (command, traceparent) in sent.items():
+        want = JOINED if traceparent else "a trace of its own"
+        report.check(
+            f"{server.key} {name} trace.parent",
+            joined(spans, command, traceparent),
+            want,
+        )
 
 
 async def error_checks(
@@ -1696,6 +1789,10 @@ async def main(args: argparse.Namespace) -> int:
                     if "cli" in wanted:
                         await codex_exec(server, report)
                     await isolation(server, report)
+                    if name != "dev":
+                        await trace_parents(
+                            server, scratch / name / "trace", wanted, report
+                        )
                     if name != "dev" and host == "python":
                         await quiet_lines(server)
                     await server_checks(server, report)

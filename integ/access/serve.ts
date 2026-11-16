@@ -23,9 +23,12 @@ import { writeFileSync } from 'node:fs'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { buildApp } from '../../typescript/packages/server/src/app.ts'
 import { LOOP_LAG_ENV, LoopLag } from './loop_lag.ts'
+import { SPANS_ENV, recordSpans } from './spans.ts'
 
 const store = process.env.ACCESS_SNAPSHOT_STORE
 const lagFile = process.env[LOOP_LAG_ENV]
+const spansFile = process.env[SPANS_ENV]
+if (spansFile !== undefined && spansFile !== '') recordSpans(spansFile)
 const app = buildApp(
   store !== undefined && store !== '' ? { snapshotStore: JSON.parse(store) as S3Config } : {},
 )

@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { context } from '@opentelemetry/api'
 import { refused } from '../metrics.ts'
+import { traceHeaders } from '../env.ts'
+import { requestContext } from '../trace.ts'
 import { randomBytes } from 'node:crypto'
 import { recordStatus } from '@struktoai/mirage-core/workspace/executor/statement'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -65,6 +68,8 @@ export interface ChannelRequest {
   account: readonly string[]
   command: string | null
   term: string | null
+  /** The client's `TRACEPARENT` and `TRACESTATE`, as it set them. */
+  env: Readonly<Record<string, string>>
   peer: Endpoint | null
   local: Endpoint | null
 }
@@ -390,7 +395,7 @@ export async function handleChannel(
   const [entry, sessionId] = opened
   const shell = new ShellChannel(registry, entry, sessionId, channel, request)
   started(shell)
-  const status = await shell.serve()
+  const status = await context.with(requestContext(traceHeaders(request.env)), () => shell.serve())
   channel.exit(status)
   channel.end()
 }

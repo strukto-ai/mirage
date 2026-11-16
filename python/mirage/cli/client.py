@@ -45,6 +45,7 @@ from mirage.server.daemon_config import (
     read_daemon_table,
     validate_daemon_table,
 )
+from mirage.server.env import trace_headers
 from mirage.server.paths import mirage_home
 
 logger = logging.getLogger(__name__)
@@ -117,24 +118,29 @@ class DaemonClient:
             self.held = fresh_token(login, path)
             return self.held
 
-    def _headers(self) -> dict[str, str]:
+    def headers(self) -> dict[str, str]:
+        """The headers every request sends: the trace context this
+        process's environment holds, and the bearer token."""
+        headers = trace_headers(os.environ)
         token = self.token()
-        return {"Authorization": f"Bearer {token}"} if token else {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        headers = {**self._headers(), **kwargs.pop("headers", {})}
+        headers = {**self.headers(), **kwargs.pop("headers", {})}
         return self._client.request(method, path, headers=headers, **kwargs)
 
     def stream(
         self, method: str, path: str, **kwargs: Any
     ) -> AbstractContextManager[httpx.Response]:
-        headers = {**self._headers(), **kwargs.pop("headers", {})}
+        headers = {**self.headers(), **kwargs.pop("headers", {})}
         return self._client.stream(method, path, headers=headers, **kwargs)
 
     def is_reachable(self, timeout: float = 0.5) -> bool:
         try:
             r = self._client.get(
-                "/v1/health", timeout=timeout, headers=self._headers()
+                "/v1/health", timeout=timeout, headers=self.headers()
             )
             return r.status_code == 200
         except httpx.RequestError:

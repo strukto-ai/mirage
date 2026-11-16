@@ -139,7 +139,7 @@ describe('a shell request', () => {
     } finally {
       await app.close()
     }
-    const [joined, alone] = spans.filter((s) => s.name === 'command')
+    const [joined, alone] = spans.filter((s) => s.name === 'shell')
     expect([joined?.parent?.traceId, joined?.parent?.spanId]).toEqual([TRACE_ID, PARENT_ID])
     expect(alone?.parent).toBeUndefined()
   })

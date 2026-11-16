@@ -15,6 +15,7 @@
 import asyncio
 import json
 import logging
+import os
 import sys
 from collections.abc import AsyncGenerator, Callable
 
@@ -22,6 +23,7 @@ import anyio
 import httpx
 
 from mirage.concurrency.limiter import run_blocking
+from mirage.server.env import trace_headers
 from mirage.server.rpc.constants import RPC_PARSE_ERROR
 from mirage.server.rpc.server import CANCEL_REQUEST, error_response
 
@@ -58,7 +60,9 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
             sys.stdout.write(text + "\n")
             sys.stdout.flush()
 
-    async with httpx.AsyncClient(auth=Bearer(), timeout=None) as http:
+    async with httpx.AsyncClient(
+        auth=Bearer(), headers=trace_headers(os.environ), timeout=None
+    ) as http:
 
         async def forward(line: str) -> None:
             response = await http.post(

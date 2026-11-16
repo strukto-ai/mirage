@@ -26,8 +26,26 @@ export const ENV_MAX_WORKSPACES = 'MIRAGE_MAX_WORKSPACES'
 export const ENV_POLICY_FILE = 'MIRAGE_POLICY_FILE'
 export const ENV_RATE_LIMITS = 'MIRAGE_RATE_LIMITS'
 export const ENV_RESOURCE_STORE = 'MIRAGE_RESOURCE_STORE'
+export const ENV_TRACE_CONTEXT = ['TRACEPARENT', 'TRACESTATE'] as const
 export const ENV_HOME = 'MIRAGE_HOME'
 export const ENV_WORKERS = 'MIRAGE_WORKERS'
 export const ENV_WORKER_TYPE = 'MIRAGE_WORKER_TYPE'
 export const ENV_WORKER_SOCKET = 'MIRAGE_WORKER_SOCKET'
 export const ENV_WORKER_TOKEN = 'MIRAGE_WORKER_TOKEN'
+
+/**
+ * The W3C trace headers an environment holds: `TRACEPARENT` as
+ * `traceparent` and `TRACESTATE` as `tracestate`. `BAGGAGE` is left out: it
+ * can hold anything the environment's owner put there. `env` is a process's
+ * or the one an SSH client sent.
+ */
+export function traceHeaders(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const headers: Record<string, string> = {}
+  for (const name of ENV_TRACE_CONTEXT) {
+    const value = env[name]
+    if (value !== undefined && value !== '') headers[name.toLowerCase()] = value
+  }
+  return headers
+}

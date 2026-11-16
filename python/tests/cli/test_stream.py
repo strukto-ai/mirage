@@ -181,7 +181,7 @@ async def test_http_output_arrives_before_stdin_eof(
         )
         client = SimpleNamespace(
             settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
-            token=lambda: "",
+            headers=dict,
         )
         task = asyncio.create_task(
             stream.stream_shell(
@@ -261,7 +261,7 @@ async def test_the_line_ending_ends_the_client_while_stdin_stays_open(
             )
             client = SimpleNamespace(
                 settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
-                token=lambda: "",
+                headers=dict,
             )
             code = await asyncio.wait_for(
                 stream.stream_shell(
@@ -325,7 +325,7 @@ async def test_json_collects_channels_and_preserves_metadata(
         )
         client = SimpleNamespace(
             settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
-            token=lambda: "",
+            headers=dict,
         )
         try:
             assert (
@@ -392,7 +392,7 @@ async def test_raw_output_ends_with_the_decision_line(monkeypatch, tmp_path):
         )
         client = SimpleNamespace(
             settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
-            token=lambda: "",
+            headers=dict,
         )
         try:
             assert (
@@ -455,7 +455,7 @@ async def test_an_error_status_says_the_daemons_detail(
             )
             client = SimpleNamespace(
                 settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
-                token=lambda: "",
+                headers=dict,
             )
             with pytest.raises(RuntimeError) as exc:
                 await stream.stream_shell(
