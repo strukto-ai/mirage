@@ -51,7 +51,18 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage là **terminal ảo cho AI Agent**: một shell duy nhất phủ lên dữ liệu, CLI và runtime. Các công cụ Unix tiếp cận mọi dịch vụ, và `grep` chạy trên chức năng tìm kiếm riêng của từng dịch vụ, như của Gmail hay Slack. Mirage định tuyến mỗi lệnh tới runtime phù hợp với nó, nên phần lớn các dòng lệnh chạy trong tiến trình và chỉ công việc nặng mới tới sandbox, giúp giảm chi phí hạ tầng và token. Bản thân terminal rất nhẹ: một workspace chiếm **khoảng 100 KB** bộ nhớ và mỗi session mới **khoảng 10 KB**, nên một tiến trình phục vụ nhiều agent cùng lúc. Profile quyết định agent được chạy gì và thậm chí được thấy gì, còn các chính sách viết bằng script từ chối mọi thứ mà các quy tắc đó không diễn đạt được.
+AI Agent làm việc trong terminal. Mirage là **một terminal ảo** tách riêng giao diện terminal, nơi lưu trữ dữ liệu và các máy tính toán. Mirage định tuyến mỗi lệnh tới máy phù hợp với nó, trên các máy không đồng nhất như container, microVM, sandbox đám mây và máy chủ SSH. File, CLI và máy được thêm vào riêng rẽ, nhờ đó Mirage linh hoạt, chi phí hạ tầng thấp, và agent làm việc theo cách hiệu quả và an toàn nhất.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
+    <img src="../assets/mirage-terminal-light.svg" alt="Một terminal ảo trên một hệ thống tệp ảo hợp nhất: mỗi lệnh chạy trên máy phù hợp với nó, đi qua các quy tắc allow, deny, show và hide của agent, và giữ phiên, tác vụ và nhật ký lệnh trên các backend được chọn cho chúng" width="100%">
+  </picture>
+</p>
+
+- **Kiểm soát được.** Quyết định mỗi agent tiếp cận những gì, thấy những file nào, hệ thống file ảo và CLI của nó dùng thông tin xác thực nào mà không để lộ ra, và máy nào chạy từng chương trình của nó.
+- **Viết script được.** Toàn bộ terminal được định nghĩa bằng code hoặc một file cấu hình, từ hệ thống file ảo, CLI và máy cho tới các quy tắc, như lệnh nào cần phê duyệt và agent nhận lại bao nhiêu đầu ra.
+- **Được quản lý.** Mirage quản lý hạ tầng của terminal ảo, ghép từ các backend được chọn. Hệ thống file ảo nằm trên S3, Drive, một cơ sở dữ liệu hoặc RAM, job và lịch sử trên RAM, Redis hoặc ổ đĩa, và toàn bộ workspace có thể được lưu thành snapshot. Mọi lệnh agent chạy đều được ghi lại và có thể gửi tới một backend OpenTelemetry dưới dạng trace.
 
 <p align="center">
   <picture>
@@ -122,7 +133,6 @@ slack: Permission denied
 - **Công cụ dòng lệnh ảo (CLI).** `git`, `slack` và `ntn` do chính Mirage đáp ứng, nên agent điều khiển dịch vụ mà không cần cài gì, xuyên qua các runtime và máy khác nhau; một công cụ còn có thể ảo hóa thành hai hoặc nhiều hơn, mỗi cái mang tên riêng với thông tin xác thực riêng.
 - **Runtime động, có định tuyến.** Python, JavaScript và bất kỳ lệnh nào khác đều có thể được gửi tới runtime đã cấu hình, trong tiến trình, trong sandbox hoặc từ xa, tách tính toán khỏi lưu trữ và cho phép đổi bên này mà không động tới bên kia.
 - **Mirage shell ảo hóa.** Nó gắn hệ thống tệp, các CLI và các runtime vào cùng một dòng lệnh, nên pipe, chuyển hướng, biến, job và lịch sử đều hoạt động xuyên cả ba.
-- **Một terminal được quản lý.** Session, đầu ra của job, lịch sử và snapshot của workspace được lưu trong kho bạn chọn, như RAM, Redis, S3 hay ổ đĩa, nên terminal của agent có thể tồn tại lâu hơn tiến trình chạy nó.
 - **Nhẹ ngay từ thiết kế.** Một workspace, tức chính terminal ảo, chiếm khoảng 100 KB bộ nhớ và mỗi session mới khoảng 10 KB, nên một tiến trình phục vụ nhiều agent mà không cần container hay VM cho từng agent.
 - **Profile thiết kế cho agent.** `allow`, `ask` và `deny` chi phối lệnh và CLI, còn `hide` và `show` chi phối tệp và thư mục, nên một đường dẫn bị ẩn không chỉ là không đọc được mà còn không tồn tại trong hệ thống tệp mà agent nhìn thấy.
 - **Công cụ chính sách viết được bằng script.** Một script chính sách có thể chặn mọi hành động nguy hiểm trước khi nó chạy, và cùng ngăn xếp đó kiểm soát mọi thao tác VFS và mọi lần ghi session, nên không tệp nào và không biến môi trường nào bị rò rỉ.
@@ -153,11 +163,11 @@ Các công cụ dòng lệnh này được ảo hóa: [Mirage](https://www.struk
 | **Giao tiếp**            | <a href="https://slack.com"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://discord.com"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://github.com/pimalaya/himalaya"><img src="../assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                         |
 | **Công việc và dữ liệu** | <a href="https://linear.app"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://www.notion.so"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a>  <a href="https://workspace.google.com"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://huggingface.co"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> |
 
-## Runtime ảo
+## Máy ảo
 
-Runtime được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ lập trình. Bất kỳ lệnh nào trên dòng đều có thể được chuyển hướng tới một runtime đã cấu hình, nên Python có thể chạy trong tiến trình với [Monty](https://pydantic.dev/articles/pydantic-monty) trong khi một lệnh khác, chẳng hạn `kubectl`, được gửi tới máy từ xa qua SSH. Runtime nào phục vụ một dòng lệnh có thể do một [bộ định tuyến runtime viết bằng script](https://docs.mirage.strukto.ai/home/policy/route-machine) quyết định.
+Máy được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ lập trình. Bất kỳ lệnh nào trên dòng đều có thể được gửi tới một máy đã cấu hình, nên Python có thể chạy trong tiến trình với [Monty](https://pydantic.dev/articles/pydantic-monty) trong khi một lệnh khác, chẳng hạn `kubectl`, chạy trên máy từ xa qua SSH. Máy nào phục vụ một dòng lệnh có thể do một [bộ định tuyến máy viết bằng script](https://docs.mirage.strukto.ai/home/policy/route-machine) quyết định.
 
-|                | Runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|                | Máy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -259,37 +269,12 @@ python3: Permission denied
 
 Xem [script chính sách](https://docs.mirage.strukto.ai/home/policy/scripts) để biết các giai đoạn khác mà script có thể trả lời.
 
-## Terminal nhúng
+## Ví dụ
 
-Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** Một terminal cho agent ngay trong ứng dụng của bạn, kể cả trong máy chủ FastAPI hay Express, không cần máy hay sandbox cố định.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** Một terminal ảo hợp nhất trên nhiều máy khác nhau, chạy mỗi tác vụ trên máy phù hợp với nó, để AI Agent làm việc hiệu quả hơn và rẻ hơn.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** Quyết định trong một cấu hình workspace những file mà agent thấy, những lệnh và CLI mà nó chạy, và những thông tin xác thực mà công cụ của nó dùng.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** Một terminal ảo không gắn với hạ tầng cố định nào, giữ file, phiên và nhật ký lệnh trên các backend sẵn có.
 
 ## Người đóng góp
 

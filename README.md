@@ -52,7 +52,18 @@
   <a href="./readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
-Mirage is **a Virtual Terminal for AI Agents**: one shell over data, CLIs and runtimes. Unix tools reach every service, and `grep` runs on each service's own search, such as Gmail's or Slack's. Mirage routes each command to the runtime that fits it, so most lines run in-process and only heavy work reaches a sandbox, which cuts infrastructure cost and tokens. The terminal itself is light: a workspace takes **about 100 KB** of memory and each new session **about 10 KB**, so one process serves many agents at once. Profiles decide what an agent can run and even what it can see, and scriptable policies refuse anything those rules cannot express.
+AI agents work in a terminal. Mirage is **a virtual terminal** that separates the terminal interface, the data storage and the computing machines. Mirage routes each command to the machine that fits it, across heterogeneous machines such as containers, microVMs, cloud sandboxes and SSH hosts. Files, CLIs and machines are added to it separately, which keeps it flexible and its infrastructure cost low, and lets agents work in the most efficient and safest way.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/mirage-terminal-dark.svg">
+    <img src="assets/mirage-terminal-light.svg" alt="One virtual terminal over one unified virtual filesystem: each command runs on the machine that fits it, passes the agent's allow, deny, show and hide rules, and keeps its sessions, jobs and command logs on the backends chosen for them" width="100%">
+  </picture>
+</p>
+
+- **Controllable.** Decide what each agent reaches, which files it sees, which credentials its virtual filesystems and CLIs use without showing them, and which machine runs each of its programs.
+- **Scriptable.** The whole terminal is defined in code or a config file, from its virtual filesystems, CLIs and machines to its rules, such as which commands need approval and how much output an agent gets back.
+- **Managed.** Mirage manages the virtual terminal's infrastructure, composed from the chosen backends. The virtual filesystem sits on S3, Drive, a database or RAM, jobs and history on RAM, Redis or disk, and whole workspaces can be saved as snapshots. Every command an agent runs is recorded and can be sent to an OpenTelemetry backend as a trace.
 
 <p align="center">
   <picture>
@@ -123,7 +134,6 @@ slack: Permission denied
 - **Virtual command line tools (CLIs).** `git`, `slack` and `ntn` are answered by Mirage itself, so an agent drives the service with nothing installed, across different runtimes and machines, and one tool can be virtualized into two or more, each under its own name with its own credentials.
 - **Routed, dynamic runtimes.** Python, JavaScript and any other command can be sent to a configured runtime, in process, sandboxed or remote, which decouples computation from storage and lets either change without touching the other.
 - **The virtualized Mirage shell.** It binds the filesystem, the CLIs and the runtimes into one command line, so pipes, redirection, variables, jobs and history work across all three.
-- **A managed terminal.** Sessions, job output, history and workspace snapshots persist in the storage you pick, such as RAM, Redis, S3 or disk, so an agent's terminal can outlive the process that runs it.
 - **Lightweight by design.** A workspace, the virtual terminal itself, takes about 100 KB of memory and each new session about 10 KB, so one process serves many agents without a container or VM per agent.
 - **Profiles designed for agents.** `allow`, `ask` and `deny` govern commands and CLIs, while `hide` and `show` govern files and folders, so a hidden path is not merely unreadable but absent from the filesystem the agent sees.
 - **A scriptable policy engine.** A policy script can prohibit any dangerous action before it runs, and the same stack gates every VFS op and session write, so neither a file nor an environment variable leaks.
@@ -162,16 +172,16 @@ accounts it is given.
 | **Communication** | <a href="https://slack.com"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://discord.com"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://github.com/pimalaya/himalaya"><img src="assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                            |
 | **Work and Data** | <a href="https://linear.app"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://www.notion.so"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a>  <a href="https://workspace.google.com"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://huggingface.co"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> |
 
-## Virtual Runtime
+## Virtual Machine
 
-Runtimes are virtualized the same way, and not only for coding languages. Any
-command on the line can be redirected to a configured runtime, so Python might
-run in-process with [Monty](https://pydantic.dev/articles/pydantic-monty) while
-another command, say `kubectl`, is sent to a remote machine over SSH. Which runtime
+Machines are virtualized the same way, and not only for coding languages. Any
+command on the line can be sent to a configured machine, so Python might run
+in-process with [Monty](https://pydantic.dev/articles/pydantic-monty) while
+another command, say `kubectl`, runs on a remote machine over SSH. Which machine
 serves a given line can be decided by a
 [scripted machine router](https://docs.mirage.strukto.ai/home/policy/route-machine).
 
-|                | Runtimes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|                | Machines                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                          |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -290,42 +300,12 @@ python3: Permission denied
 See [policy scripts](https://docs.mirage.strukto.ai/home/policy/scripts) for
 the other stages a script can answer at.
 
-## Embedded Terminal
+## Examples
 
-Most of the time an agent does not need a sandbox, only a terminal-like
-interface, and Mirage embeds one in an application server. Each terminal is a
-Mirage session with its own working directory, environment and history, and Python
-runs in-process on Monty, so a terminal starts with no container or VM. Here
-it is in Express; the FastAPI version is in the
-[docs](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** A terminal for agents inside your application, even within a FastAPI or Express server, without a fixed machine or sandbox.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** A unified virtual terminal across different machines that runs each task on the machine that fits it, so AI agents perform tasks more efficiently and at lower cost.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** Decide which files an agent sees, which commands and CLIs it runs and which credentials its tools use, in one workspace config.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** A virtual terminal not tied to any fixed infrastructure, keeping its files, sessions and command logs on whichever backends are already in place.
 
 ## Contributors
 

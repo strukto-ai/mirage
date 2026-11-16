@@ -92,8 +92,9 @@
                   "home/examples/in-process-terminal/release-notes"
                 ]
               },
-              "home/examples/policy-security",
-              "home/examples/runtime-routing"
+              "home/examples/multi-machine-terminal",
+              "home/examples/secured-terminal",
+              "home/examples/infra-agnostic-terminal"
             ]
           },
           {
@@ -975,6 +976,14 @@
     {
       "source": "/home/examples/lightweight-terminal/:slug*",
       "destination": "/home/examples/in-process-terminal/:slug*"
+    },
+    {
+      "source": "/home/examples/policy-security",
+      "destination": "/home/examples/secured-terminal"
+    },
+    {
+      "source": "/home/examples/runtime-routing",
+      "destination": "/home/examples/multi-machine-terminal"
     }
   ],
   "navbar": {
