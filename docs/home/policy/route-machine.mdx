@@ -131,6 +131,10 @@ wrapper places what has none.
 - If two policies pick different machines, the line is refused.
 - Lines inside a line (`$( )`, `eval`, `source`, `xargs`) run where the
   outer line runs.
+- On a machine that takes whole lines, a word only the machine can expand
+  (`$cmd`) is refused while something would read it: any
+  [`pre_command` policy](/home/policy/policies#pre_command), any profile rule
+  for a command name, and a rule that reads arguments for an argument.
 - `ws.explain(line)` shows which machine each command would run on.
 
 ## Ask a model
