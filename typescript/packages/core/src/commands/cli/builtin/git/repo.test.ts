@@ -18,9 +18,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
+import { addShallow, openRepo } from './repo.ts'
 
 const DEC = new TextDecoder()
 
@@ -60,6 +61,31 @@ it('reads a shallow commit parentless and keeps its raw parent line', async () =
     expect(rows[1]).toBe('second//grafted')
     const raw = await ws.shell(`git -C /repo cat-file -p ${second}`)
     expect(DEC.decode(raw.stdout)).toContain('\nparent ')
+  } finally {
+    await ws.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('keeps every cut when two shallow updates run side by side', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-shallow-'))
+  const ws = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    native(root, ['init', '-q', '-b', 'main'])
+    native(root, ['commit', '-q', '--allow-empty', '-m', 'first'])
+    await load(ws, root)
+    const top = PathSpec.fromStrPath('/repo')
+    const gitdir = top.join('.git')
+    const repo = await openRepo(ws.vfs, {
+      gitdir,
+      commondir: gitdir,
+      worktree: top,
+      mountRoot: top,
+    })
+    const [first, second] = ['1'.repeat(40), '2'.repeat(40)]
+    await Promise.all([addShallow(repo, [first]), addShallow(repo, [second])])
+    const shallow = await ws.dispatch('read', '/repo/.git/shallow')
+    expect(DEC.decode(shallow as Uint8Array)).toBe(`${first}\n${second}\n`)
   } finally {
     await ws.close()
     rmSync(root, { recursive: true, force: true })

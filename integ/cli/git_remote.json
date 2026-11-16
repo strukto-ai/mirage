@@ -377,6 +377,20 @@
         "stdout": "* topic\n  remotes/origin/HEAD -> origin/topic\n  remotes/origin/topic\n+refs/heads/topic:refs/remotes/origin/topic\n* topic\n  remotes/origin/HEAD -> origin/topic\n  remotes/origin/main\n  remotes/origin/topic\nOn branch topic\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_clone_single_branch_of_a_detached_head_takes_only_head",
+      "seq": 568078,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git tag low main~3 && git tag high main && git checkout -q --detach main~2 && git clone -q --depth 1 file:///repo c; git -C c log --oneline --decorate; git -C c branch -a; git -C c config remote.origin.fetch; echo fetch=$?; git clone -q --single-branch file:///repo d; git -C d log --oneline --decorate; git -C d tag; git -C d status | head -1; git checkout -q main; git tag -d low high >/dev/null; rm -rf c d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3a (grafted, HEAD) add delta\n* (no branch)\nfetch=1\n265ec3a (HEAD) add delta\n98b4ffe (tag: low) first commit\nlow\nNot currently on any branch.\n",
+        "stderr": "Note: switching to '265ec3adb16a0c90ad09a180687677927b9d7b7f'.\n\nYou are in 'detached HEAD' state. You can look around, make experimental\nchanges and commit them, and you can discard any commits you make in this\nstate without impacting any branches by switching back to a branch.\n\nIf you want to create a new branch to retain commits you create, you may\ndo so (now or later) by using -c with the switch command. Example:\n\n  git switch -c <new-branch-name>\n\nOr undo this operation with:\n\n  git switch -\n\nTurn off this advice by setting config variable advice.detachedHead to false\n\nNote: switching to '265ec3adb16a0c90ad09a180687677927b9d7b7f'.\n\nYou are in 'detached HEAD' state. You can look around, make experimental\nchanges and commit them, and you can discard any commits you make in this\nstate without impacting any branches by switching back to a branch.\n\nIf you want to create a new branch to retain commits you create, you may\ndo so (now or later) by using -c with the switch command. Example:\n\n  git switch -c <new-branch-name>\n\nOr undo this operation with:\n\n  git switch -\n\nTurn off this advice by setting config variable advice.detachedHead to false\n\n"
+      }
     }
   ]
 }

@@ -28,7 +28,7 @@ import {
   InvalidPathError,
   UsageError,
 } from './errors.ts'
-import { configuredHeaders, fetchObjects, ignoreFunny } from './fetch.ts'
+import { configuredHeaders, fetchObjects, ignoreFunny, wanted } from './fetch.ts'
 import { layOut } from './init.ts'
 import { readNames, removeTree, statOf, writeFile } from './io.ts'
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
@@ -76,8 +76,8 @@ export function defaultDirectory(url: string): string {
 
 /**
  * A clone's config, in the order git writes it. `single` is the one ref a
- * single-branch clone takes, which its fetch refspec names; null fetches every
- * branch.
+ * single-branch clone takes, which its fetch refspec names, none for a detached
+ * HEAD; null fetches every branch.
  */
 function config(
   url: string,
@@ -85,17 +85,13 @@ function config(
   branch: string | null,
   single: { readonly remote: string; readonly local: string | null } | null,
 ): string {
-  const refspec =
-    single === null
-      ? `+refs/heads/*:refs/remotes/${remote}/*`
-      : `+${single.remote}:${single.local ?? single.remote}`
+  const fields: [string, string][] = [['url', url]]
+  if (single === null) fields.push(['fetch', `+refs/heads/*:refs/remotes/${remote}/*`])
+  else if (single.local !== null) fields.push(['fetch', `+${single.remote}:${single.local}`])
   let text =
     '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n' +
     '\tlogallrefupdates = true\n' +
-    configSection('remote', remote, [
-      ['url', url],
-      ['fetch', refspec],
-    ])
+    configSection('remote', remote, fields)
   if (branch !== null)
     text += configSection('branch', branch, [
       ['remote', remote],
@@ -289,7 +285,11 @@ async function populate(
       : chosen !== null
         ? `${TAG_PREFIX}${chosen}`
         : null
-  const narrowed = wants.find((want) => want.remote === taken) ?? null
+  // A detached HEAD no branch stands for is taken alone, into no ref, and no
+  // fetch refspec records it, as git's single-branch clone.
+  const narrowed =
+    wants.find((want) => want.remote === taken) ??
+    (commit !== null ? wanted('HEAD', commit, null) : null)
   if (single && narrowed !== null) wants = [narrowed]
   if (!advertised.refs.size) notes += 'warning: You appear to have cloned an empty repository.\n'
   // No HEAD to start from, in an empty remote or one whose HEAD names a branch
