@@ -481,6 +481,12 @@ SPELLED = [
     "cd /usr/bin && nice ./python3 -c 1",
 ]
 
+NO_PYTHON_PROFILES = {
+    "default": {
+        "commands": {"deny": [{"reason": "no", "commands": ["python3"]}]}
+    }
+}
+
 
 def _spelled(**kwargs) -> Workspace:
     return Workspace(
@@ -500,19 +506,7 @@ def _spelled(**kwargs) -> Workspace:
     "line", [*SPELLED, "ln -s /usr/bin/python3 /py && nice /py -c 1"]
 )
 @pytest.mark.parametrize(
-    "denies",
-    [
-        {"policies": [NoPython()]},
-        {
-            "profiles": {
-                "default": {
-                    "commands": {
-                        "deny": [{"reason": "no", "commands": ["python3"]}]
-                    }
-                }
-            }
-        },
-    ],
+    "denies", [{"policies": [NoPython()]}, {"profiles": NO_PYTHON_PROFILES}]
 )
 async def test_a_wrapper_refuses_a_program_spelled_by_its_path(line, denies):
     # The plain path runs /usr/bin/python3 as python3, so a deny on the

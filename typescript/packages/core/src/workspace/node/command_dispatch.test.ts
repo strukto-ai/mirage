@@ -27,6 +27,7 @@ import type { RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { parse, syntaxRefusal } from '../../shell/parse/parse.ts'
+import type { WorkspaceOptions } from '../workspace/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parserAliases } from './command_dispatch.ts'
 import { buildRuntime } from '../../runtime/table.ts'
@@ -496,9 +497,7 @@ const NO_PYTHON_PROFILES = {
   default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } },
 }
 
-function spelledWs(
-  options: { policies: Policy[] } | { profiles: typeof NO_PYTHON_PROFILES },
-): Workspace {
+function spelledWs(options: Pick<WorkspaceOptions, 'policies' | 'profiles'>): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
@@ -551,17 +550,9 @@ describe('a program spelled by its path under an ask rule', () => {
   it.each(['/usr/bin/python3 -c 1', 'nohup /usr/bin/python3 -c 1'])(
     'is asked once: %s',
     async (line) => {
-      const ws = new Workspace(
-        { '/': new RAMVFS() },
-        {
-          mode: MountMode.EXEC,
-          machines: {
-            m: { provider: 'in_process', runtime: 'monty' },
-            b: new Named('b', { captures: [EXTERNAL_COMMANDS] }),
-          },
-          profiles: { default: { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } } },
-        },
-      )
+      const ws = spelledWs({
+        profiles: { default: { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } } },
+      })
       try {
         const held = await ws.shell(line)
         expect(held.exitCode).toBe(126)
