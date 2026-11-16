@@ -1,0 +1,576 @@
+{
+  "cases": [
+    {
+      "id": "pdf_text_to_stdout",
+      "seq": 13650000,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly Operations Report\nRevenue grew 12 percent over the second quarter, led by\nrenewals in the enterprise segment and a steady rise in\nself-serve sign-ups. Support costs fell as the new routing\ntool cut handoffs between teams.\n\nThe board approved the hiring plan for the fourth quarter and the budget for two new regions.\n\n\fRegional results\nNorth region\nSales rose in every\nmonth of the quarter.\n\nSouth region\nSales held flat while\nmargins improved.\n\n\fMetric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_page_range",
+      "seq": 13650001,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 2 -l 2 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Regional results\nNorth region\nSales rose in every\nmonth of the quarter.\n\nSouth region\nSales held flat while\nmargins improved.\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_last_page_only",
+      "seq": 13650002,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -l 1 /docs/report.pdf - | head -3",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly Operations Report\nRevenue grew 12 percent over the second quarter, led by\nrenewals in the enterprise segment and a steady rise in\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_first_past_end_clamps_last",
+      "seq": 13650003,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 3 -l 9 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_range_refused",
+      "seq": 13650004,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 4 /docs/report.pdf -",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Command Line Error: Wrong page range given: the first page (4) can not be after the last page (3).\n"
+      }
+    },
+    {
+      "id": "pdf_text_range_reversed",
+      "seq": 13650005,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 3 -l 2 /docs/report.pdf -",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Command Line Error: Wrong page range given: the first page (3) can not be after the last page (2).\n"
+      }
+    },
+    {
+      "id": "pdf_text_nopgbrk",
+      "seq": 13650006,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -nopgbrk -f 2 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Regional results\nNorth region\nSales rose in every\nmonth of the quarter.\n\nSouth region\nSales held flat while\nmargins improved.\n\nMetric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_raw",
+      "seq": 13650007,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -raw /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly Operations Report\nRevenue grew 12 percent over the second quarter, led by\nrenewals in the enterprise segment and a steady rise in\nself-serve sign-ups. Support costs fell as the new routing\ntool cut handoffs between teams.\nThe board approved the hiring plan for the fourth quar-\nter and the budget for two new regions.\n\fRegional results\nNorth region\nSales rose in every\nmonth of the quarter.\nSouth region\nSales held flat while\nmargins improved.\n\fMetric\nRevenue\nChurn\nTickets\nValue\n4.2M\n1.8%\n1,204\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_layout_table",
+      "seq": 13650008,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -layout -f 3 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric    Value\nRevenue   4.2M\nChurn     1.8%\nTickets   1,204\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_eol_dos",
+      "seq": 13650009,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -eol dos -f 3 /docs/report.pdf - | od -c | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   M   e   t   r   i   c  \\r  \\n   R   e   v   e   n   u   e  \\r\n0000020  \\n   C   h   u   r   n  \\r  \\n   T   i   c   k   e   t   s  \\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_bad_eol_warns",
+      "seq": 13650010,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -eol vms -f 3 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": "Bad '-eol' value on command line\n"
+      }
+    },
+    {
+      "id": "pdf_text_writes_beside_pdf",
+      "seq": 13650011,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cp /docs/report.pdf /scratch/r1.pdf && pdftotext -f 1 -l 1 /scratch/r1.pdf && cat /scratch/r1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Quarterly Operations Report\nRevenue grew 12 percent over the second quarter, led by\nrenewals in the enterprise segment and a steady rise in\nself-serve sign-ups. Support costs fell as the new routing\ntool cut handoffs between teams.\n\nThe board approved the hiring plan for the fourth quarter and the budget for two new regions.\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_upper_extension",
+      "seq": 13650012,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cp /docs/report.pdf /scratch/R2.PDF && pdftotext -l 1 /scratch/R2.PDF && ls /scratch/R2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/scratch/R2.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_no_extension",
+      "seq": 13650013,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cp /docs/report.pdf /scratch/r3 && pdftotext -l 1 /scratch/r3 && ls /scratch/r3.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/scratch/r3.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_named_output",
+      "seq": 13650014,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 3 /docs/report.pdf /scratch/out4.txt && cat /scratch/out4.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_unwritable_output",
+      "seq": 13650015,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/report.pdf /scratch/nodir/out.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "I/O Error: Couldn't open text file '/scratch/nodir/out.txt'\n"
+      }
+    },
+    {
+      "id": "pdf_text_from_stdin",
+      "seq": 13650016,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cat /docs/report.pdf | pdftotext -f 3 - -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_stdin_needs_output",
+      "seq": 13650017,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cat /docs/report.pdf | pdftotext -",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Command Line Error: You have to provide an output filename when reading from stdin.\n"
+      }
+    },
+    {
+      "id": "pdf_text_missing_file",
+      "seq": 13650018,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/missing.pdf -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "I/O Error: Couldn't open file '/docs/missing.pdf': No such file or directory.\n"
+      }
+    },
+    {
+      "id": "pdf_text_quiet",
+      "seq": 13650019,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -q /docs/missing.pdf -; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_not_a_pdf",
+      "seq": 13650020,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/notes.pdf -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Syntax Warning: May not be a PDF file (continuing anyway)\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't read xref table\n"
+      }
+    },
+    {
+      "id": "pdf_text_unknown_encoding",
+      "seq": 13650021,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -enc Bogus /docs/report.pdf -",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Syntax Error: Couldn't find unicodeMap file for the 'Bogus' encoding\nCommand Line Error: Couldn't get text encoding\n"
+      }
+    },
+    {
+      "id": "pdf_text_utf8_encoding",
+      "seq": 13650022,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -enc UTF-8 -f 3 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_cjk",
+      "seq": 13650023,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/cjk.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "中兴通讯年度报告\n收入增长百分之十二。\n日本語のテキスト\n한국어 텍스트\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_image_only",
+      "seq": 13650024,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/scan.pdf - | od -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000  \\f\n0000001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_locked",
+      "seq": 13650025,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/locked.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "This memo may be read but not copied.\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_grep",
+      "seq": 13650026,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/report.pdf - | grep -c region",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_usage_exit",
+      "seq": 13650027,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_extra_operand_exit",
+      "seq": 13650028,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/report.pdf - extra 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_bad_page_exit",
+      "seq": 13650029,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f two /docs/report.pdf - 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_help_exit",
+      "seq": 13650030,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -h 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_report",
+      "seq": 13650031,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/report.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Quarterly Operations Report\nSubject:         Q3 review\nKeywords:        operations, quarterly\nAuthor:          Ops Team\nCreator:         mirage fixtures\nProducer:        generate.py\nCreationDate:    Fri Mar 15 04:00:00 2024 UTC\nModDate:         Mon Apr  1 09:30:00 2024 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       2682 bytes\nOptimized:       no\nPDF version:     1.5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_cjk",
+      "seq": 13650032,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/cjk.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           年度报告\nAuthor:          财务部\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       no\nPage size:       595.276 x 841.89 pts (A4)\nPage rot:        0\nFile size:       2456 bytes\nOptimized:       no\nPDF version:     1.6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_image_only",
+      "seq": 13650033,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/scan.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Scanned receipt\nProducer:        scanner\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       no\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       575 bytes\nOptimized:       no\nPDF version:     1.4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_locked",
+      "seq": 13650034,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/locked.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Locked memo\nAuthor:          Legal\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       yes (print:yes copy:no change:no addNotes:no algorithm:RC4)\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       1064 bytes\nOptimized:       no\nPDF version:     1.4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_page_list",
+      "seq": 13650035,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -f 1 -l 2 /docs/report.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Quarterly Operations Report\nSubject:         Q3 review\nKeywords:        operations, quarterly\nAuthor:          Ops Team\nCreator:         mirage fixtures\nProducer:        generate.py\nCreationDate:    Fri Mar 15 04:00:00 2024 UTC\nModDate:         Mon Apr  1 09:30:00 2024 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage    1 size:  612 x 792 pts (letter)\nPage    1 rot:   0\nPage    2 size:  612 x 792 pts (letter)\nPage    2 rot:   0\nFile size:       2682 bytes\nOptimized:       no\nPDF version:     1.5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_last_clamps",
+      "seq": 13650036,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -l 9 /docs/cjk.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           年度报告\nAuthor:          财务部\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       no\nPage    1 size:  595.276 x 841.89 pts (A4)\nPage    1 rot:   0\nFile size:       2456 bytes\nOptimized:       no\nPDF version:     1.6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_first_only",
+      "seq": 13650037,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -f 2 /docs/report.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Quarterly Operations Report\nSubject:         Q3 review\nKeywords:        operations, quarterly\nAuthor:          Ops Team\nCreator:         mirage fixtures\nProducer:        generate.py\nCreationDate:    Fri Mar 15 04:00:00 2024 UTC\nModDate:         Mon Apr  1 09:30:00 2024 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nFile size:       2682 bytes\nOptimized:       no\nPDF version:     1.5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_zone",
+      "seq": 13650038,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "TZ=Asia/Shanghai pdfinfo /docs/report.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Quarterly Operations Report\nSubject:         Q3 review\nKeywords:        operations, quarterly\nAuthor:          Ops Team\nCreator:         mirage fixtures\nProducer:        generate.py\nCreationDate:    Fri Mar 15 12:00:00 2024 CST\nModDate:         Mon Apr  1 17:30:00 2024 CST\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       2682 bytes\nOptimized:       no\nPDF version:     1.5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_from_stdin",
+      "seq": 13650039,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "cat /docs/scan.pdf | pdfinfo -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Scanned receipt\nProducer:        scanner\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       no\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       0 bytes\nOptimized:       no\nPDF version:     1.4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_missing_file",
+      "seq": 13650040,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/missing.pdf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "I/O Error: Couldn't open file '/docs/missing.pdf': No such file or directory.\n"
+      }
+    },
+    {
+      "id": "pdf_info_not_a_pdf",
+      "seq": 13650041,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/notes.pdf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Syntax Warning: May not be a PDF file (continuing anyway)\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't read xref table\n"
+      }
+    },
+    {
+      "id": "pdf_info_range_refused",
+      "seq": 13650042,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -f 5 -l 6 /docs/report.pdf",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Command Line Error: Wrong page range given: the first page (5) can not be after the last page (3).\n"
+      }
+    },
+    {
+      "id": "pdf_info_usage_exit",
+      "seq": 13650043,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

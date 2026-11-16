@@ -862,6 +862,18 @@ jobs:
           chmod +x /tmp/officecli-real/officecli
           OFFICECLI_BIN=/tmp/officecli-real/officecli pnpm exec tsx office_conformance.ts
 
+      # Runs every cli-pdf case through the REAL poppler-utils (25.03.0, in
+      # debian:stable-slim pinned by digest), so the goldens are by
+      # construction what pdftotext and pdfinfo print.
+      - name: Run pdf CLI conformance against the real poppler-utils
+        working-directory: integ
+        run: |
+          printf '%s\n' \
+            'FROM debian:stable-slim@sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04' \
+            'RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils poppler-data && rm -rf /var/lib/apt/lists/*' \
+            | docker build -t mirage-poppler -
+          POPPLER_IMAGE=mirage-poppler pnpm exec tsx pdf_conformance.ts
+
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
         env:

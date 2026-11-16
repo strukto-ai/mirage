@@ -982,9 +982,13 @@ def parse_command(
                 flags[cs.numeric_dest] = tok[1:]
                 i += 1
                 continue
+            # A word the spec declares whole is that option, never a
+            # shorter one with the rest attached as its value: pdftotext's
+            # -layout is not -l given "ayout".
+            whole = tok in cs.bool_spellings or tok in cs.value_spellings
             matched_optional = False
             for vf in cs.attach_spellings:
-                if tok.startswith(vf) and len(tok) > len(vf):
+                if tok.startswith(vf) and len(tok) > len(vf) and not whole:
                     _set_value_flag(
                         flags,
                         refusals,
@@ -1002,7 +1006,11 @@ def parse_command(
             matched_value = False
             for vf in cs.value_spellings:
                 arity = cs.nargs_by_dest.get(cs.dest_of(vf))
-                if arity is not None and tok.startswith(vf):
+                if (
+                    arity is not None
+                    and tok.startswith(vf)
+                    and (tok == vf or not whole)
+                ):
                     fixed_attached = tok[len(vf) :]
                     remaining = arity - bool(fixed_attached)
                     if i + remaining < len(scan_argv):
@@ -1029,7 +1037,7 @@ def parse_command(
                     i += 2
                     matched_value = True
                     break
-                if tok.startswith(vf) and len(tok) > len(vf):
+                if tok.startswith(vf) and len(tok) > len(vf) and not whole:
                     attached_value = _attached(tok[len(vf) :], equals_values)
                     _set_value_flag(
                         flags,

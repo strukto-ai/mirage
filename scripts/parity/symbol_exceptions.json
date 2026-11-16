@@ -315,7 +315,8 @@
     "ModuleSource": "What a `#mirage-*-wasm` import gives: the module its host compiled (a page as it loads, workerd's bundler) or Node's loader that compiles it on first use; Python loads its native extension.",
     "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile.",
     "StreamModule": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
-    "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader."
+    "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
+    "unbound": "Stands in for the functions a Wasm module imports, so an instance can be made; Python's native module links nothing from its host."
    }
   },
   "fuse/constants": {
@@ -1808,6 +1809,12 @@
    "python_only": {
     "_mint": "Python mints an App installation token with the pool and error mapping in this module; TypeScript's transport mints through appMinter.",
     "github_token": "Python's calls are module functions over an account, so the current token is one too; TypeScript's is HttpGitHubTransport.token."
+   }
+  },
+  "commands/cli/builtin/pdf/run": {
+   "typescript_only": {
+    "openPdfStream": "The PDF Wasm module, which the TypeScript host loads on first use; Python's native module has pdftotext and pdfinfo built in.",
+    "pdfModule": "The PDF Wasm module, which the TypeScript host loads on first use; Python's native module has pdftotext and pdfinfo built in."
    }
   }
  }

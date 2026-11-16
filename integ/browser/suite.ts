@@ -24,6 +24,8 @@ import {
   JobConsole,
   MountMode,
   OFFICE,
+  PDFINFO,
+  PDFTOTEXT,
   RAMVFS,
   S3VFS,
   Workspace,
@@ -56,6 +58,7 @@ import printfAssignments from '../bash/printf/vflag.json'
 import printfShared from '../bash/printf/shared.json'
 import printfOptions from '../unix/printf/unknown_option.json'
 import officeCorpus from '../cli/office.json'
+import pdfCorpus from '../cli/pdf.json'
 import { POLICY_CHECKS } from './policy.ts'
 
 export interface Outcome {
@@ -153,6 +156,37 @@ function officeBattery(): [string, Check][] {
         for (const name of ['deck.pptx', 'lines.xlsx', 'memo.docx']) {
           const response = await fetch(`/office/${name}`)
           if (!response.ok) throw new Error(`/office/${name} answered ${String(response.status)}`)
+          const stdin = new Uint8Array(await response.arrayBuffer())
+          equal(await shell(ws, `tee /docs/${name} > /dev/null`, { stdin }), [0, '', ''])
+        }
+        const run = await runCase(ws as unknown as ExecWorkspace, c)
+        equal(compare(c, run.exitCode, run.out, run.err, run.elapsed, run.checkOut), [])
+      } finally {
+        await ws.close()
+      }
+    },
+  ])
+}
+
+/**
+ * The pdftotext and pdfinfo corpus cases, each on a workspace of its own
+ * with its target's mounts and the PDF files the page's server serves
+ * seeded.
+ */
+function pdfBattery(): [string, Check][] {
+  return (pdfCorpus.cases as unknown as Case[]).map((c): [string, Check] => [
+    c.id,
+    async () => {
+      const ws = new Workspace(
+        { '/scratch': new RAMVFS(), '/docs': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
+      try {
+        ws.registerCli('pdftotext', PDFTOTEXT)
+        ws.registerCli('pdfinfo', PDFINFO)
+        for (const name of ['cjk.pdf', 'locked.pdf', 'notes.pdf', 'report.pdf', 'scan.pdf']) {
+          const response = await fetch(`/pdf/${name}`)
+          if (!response.ok) throw new Error(`/pdf/${name} answered ${String(response.status)}`)
           const stdin = new Uint8Array(await response.arrayBuffer())
           equal(await shell(ws, `tee /docs/${name} > /dev/null`, { stdin }), [0, '', ''])
         }
@@ -686,6 +720,7 @@ const CHECKS: [string, Check][] = [
   ],
   ...battery(),
   ...officeBattery(),
+  ...pdfBattery(),
 ]
 
 /**

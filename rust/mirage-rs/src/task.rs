@@ -228,13 +228,22 @@ impl Stream for Task {
         Some(request.encode(data))
     }
 
-    fn respond(&mut self, reply: &[u8], data: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.respond_owned(reply, data.to_vec(), out)
+    }
+
+    fn respond_owned(
+        &mut self,
+        reply: &[u8],
+        data: Vec<u8>,
+        _: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
         let reply = Reply::decode(reply).map_err(StreamError::new)?;
         let mut slot = self.host.slot();
         if !std::mem::replace(&mut slot.waiting, false) {
             return Err(StreamError::new("no request is waiting"));
         }
-        slot.reply = Some((reply, data.to_vec()));
+        slot.reply = Some((reply, data));
         Ok(())
     }
 }
