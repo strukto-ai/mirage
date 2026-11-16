@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
@@ -25,7 +26,7 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
-from mirage.utils.path import resolve_path
+from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
 from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.lookup.constants import (
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
     from mirage.workspace.dispatcher.reader import NamespaceReader
     from mirage.workspace.mount import MountRegistry
 
+logger = logging.getLogger(__name__)
+
 
 def path_program(
     word: str,
@@ -62,7 +65,7 @@ def path_program(
 ) -> str | None:
     """The program a path-spelled command word runs through the
     ``/usr/bin`` view (``/usr/bin/python3`` runs ``python3``); None for a
-    word naming no file the session's view lists.
+    word naming no file the session's view lists, a link loop included.
 
     Args:
         word (str): the command word, as typed.
@@ -75,7 +78,11 @@ def path_program(
         return None
     target = resolve_path(word, session.cwd)
     if links is not None:
-        target = links.follow(target)
+        try:
+            target = links.follow(target)
+        except CycleError as exc:
+            logger.debug("a link loop names no program: %s", exc)
+            return None
     mount = registry.try_mount_for(target)
     if mount is None or not isinstance(mount.vfs, BinViewVFS):
         return None
@@ -290,6 +297,7 @@ def mirage_program_at(
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
+    # shortcut: a symlink routes by fallback, pass links if a route must hold.
     inner = path_program(args[at], session, registry) or args[at]
     if inner in PROGRAM_WRAPPERS:
         deeper = mirage_program_at(
@@ -482,7 +490,7 @@ def _wrapped(
 ) -> str | None:
     """The program a wrapper runs, nested wrappers followed, when a
     runtime captures it by name and runs it natively; a word spelled by
-    its ``/usr/bin`` path is that program, as the plain path runs it.
+    its ``/usr/bin`` path, read as typed, is that program.
 
     Args:
         name (str): the wrapper's name.
@@ -497,7 +505,7 @@ def _wrapped(
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
-    # shortcut: a symlink routes by fallback; pass links here if that matters.
+    # shortcut: a symlink routes by fallback, pass links if a route must hold.
     inner = path_program(args[at], session, registry) or args[at]
     if _is_native(bindings.get(inner), inner):
         return inner

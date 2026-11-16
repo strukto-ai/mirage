@@ -1774,3 +1774,16 @@ describe('a /usr/bin path', () => {
     expect(placed.slice(0, -1).every(([, machine]) => machine === '')).toBe(true)
   })
 })
+
+// A loop resolves to no file, so the run reports it and explain allows the
+// line, as for a path the /usr/bin view does not hold.
+describe('a link loop command', () => {
+  it.each(['/data/l1 x', 'nice /data/l1 x'])('names no program: %s', async (line) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    open.push(w)
+    await w.shell('ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2')
+    const said = await w.explain(line)
+    const ran = await w.shell(line)
+    expect([said.outcome, ran.exitCode]).toEqual([Outcome.ALLOW, 126])
+  })
+})

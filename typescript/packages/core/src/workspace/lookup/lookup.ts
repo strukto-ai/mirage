@@ -44,7 +44,7 @@ import {
   readWrapper,
 } from './constants.ts'
 import { Consumer, WrapperAnswer } from './types.ts'
-import { resolvePath } from '../../utils/path.ts'
+import { CycleError, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
@@ -53,8 +53,9 @@ import { compareCodePoints } from '../../utils/sort.ts'
 /**
  * The program a path-spelled command word runs through the `/usr/bin` view
  * (`/usr/bin/python3` runs `python3`); null for a word naming no file the
- * session's view lists. `links`, the session's, are followed to the file;
- * null reads the word as typed. Mirrors Python's `path_program`.
+ * session's view lists, a link loop included. `links`, the session's, are
+ * followed to the file; null reads the word as typed. Mirrors Python's
+ * `path_program`.
  */
 export function pathProgram(
   word: string,
@@ -64,7 +65,14 @@ export function pathProgram(
 ): string | null {
   if (!word.includes('/')) return null
   let target = resolvePath(word, session.cwd)
-  if (links !== null) target = links.follow(target)
+  if (links !== null) {
+    try {
+      target = links.follow(target)
+    } catch (err) {
+      if (err instanceof CycleError) return null
+      throw err
+    }
+  }
   const mount = registry.tryMountFor(target)
   if (mount === null || !(mount.vfs instanceof BinViewVFS)) return null
   const name = stripSlash(registry.resolve(target)[1].mountPath)
@@ -245,6 +253,7 @@ export function mirageProgramAt(
   const [at] = readWrapper(name, args)
   if (at === null) return null
   const word = args[at] ?? ''
+  // shortcut: a symlink routes by fallback, pass links if a route must hold.
   const inner = pathProgram(word, session, registry) ?? word
   if (PROGRAM_WRAPPERS.has(inner)) {
     const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing)
@@ -387,7 +396,7 @@ function outsideMirage(consumer: Consumer): boolean {
 /**
  * The program a wrapper runs, nested wrappers followed, when a runtime
  * captures it by name and runs it natively; a word spelled by its
- * `/usr/bin` path is that program, as the plain path runs it.
+ * `/usr/bin` path, read as typed, is that program.
  */
 function wrapped(
   name: string,
@@ -400,7 +409,7 @@ function wrapped(
   const [at] = readWrapper(name, args)
   if (at === null) return null
   const word = args[at] ?? ''
-  // shortcut: a symlink routes by fallback; pass links here if that matters.
+  // shortcut: a symlink routes by fallback, pass links if a route must hold.
   const inner = pathProgram(word, session, registry) ?? word
   if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
   return wrapped(inner, args.slice(at + 1), bindings, session, registry)

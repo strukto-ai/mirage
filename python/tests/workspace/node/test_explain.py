@@ -2062,3 +2062,18 @@ async def test_explain_places_a_usr_bin_path_as_its_program(line):
         assert all(machine == "" for _, machine in placed[:-1])
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["/data/l1 x", "nice /data/l1 x"])
+async def test_a_link_loop_command_names_no_program(line):
+    # A loop resolves to no file, so the run reports it and explain allows
+    # the line, as for a path the /usr/bin view does not hold.
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        await ws.shell("ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2")
+        said = await ws.explain(line)
+        ran = await ws.shell(line)
+        assert (said.outcome, ran.exit_code) == (Outcome.ALLOW, 126)
+    finally:
+        await ws.close()
