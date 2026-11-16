@@ -104,6 +104,41 @@ export function dirEntry(path: string, modified: string): Record<string, JsonVal
   return { type: 'directory', path, uploadedAt: modified }
 }
 
+// An object as a tree listing first reads it: no bytes, which only the files
+// it lists need, for their size and hash.
+export interface TreeRow {
+  path: string
+  modified: string
+}
+
+// What `row` is in the listing of `baseSlash`: a file entry, the immediate
+// child folder it lies under, or nothing at all.
+function placeOf(row: TreeRow, baseSlash: string, recursive: boolean): 'file' | string | null {
+  if (baseSlash !== '' && !row.path.startsWith(baseSlash)) return null
+  if (recursive) return 'file'
+  const rest = row.path.slice(baseSlash.length)
+  const cut = rest.indexOf('/')
+  return cut === -1 ? 'file' : baseSlash + rest.slice(0, cut)
+}
+
+function baseOf(prefix: string): string {
+  const base = strip(prefix)
+  return base === '' ? '' : `${base}/`
+}
+
+/**
+ * The paths a tree listing renders as files.
+ *
+ * Args:
+ *   rows (TreeRow[]): every object in the bucket.
+ *   prefix (string): the path being listed, possibly empty for the root.
+ *   recursive (boolean): whether to flatten the whole subtree.
+ */
+export function treeFiles(rows: TreeRow[], prefix: string, recursive: boolean): string[] {
+  const baseSlash = baseOf(prefix)
+  return rows.filter((row) => placeOf(row, baseSlash, recursive) === 'file').map((row) => row.path)
+}
+
 /**
  * The vendor's tree listing for one prefix.
  *
@@ -112,32 +147,28 @@ export function dirEntry(path: string, modified: string): Record<string, JsonVal
  * child folder otherwise.
  *
  * Args:
- *   rows (HfObject[]): every object in the bucket.
+ *   rows (TreeRow[]): every object in the bucket, in path order.
+ *   files (Map<string, HfObject>): the objects `treeFiles` named, with bytes.
  *   prefix (string): the path being listed, possibly empty for the root.
  *   recursive (boolean): whether to flatten the whole subtree.
  */
 export function treeEntries(
-  rows: HfObject[],
+  rows: TreeRow[],
+  files: ReadonlyMap<string, HfObject>,
   prefix: string,
   recursive: boolean,
 ): Record<string, JsonValue>[] {
-  const base = strip(prefix)
-  const baseSlash = base === '' ? '' : `${base}/`
+  const baseSlash = baseOf(prefix)
   const entries = new Map<string, Record<string, JsonValue>>()
   for (const row of rows) {
-    if (base !== '' && !row.path.startsWith(baseSlash)) continue
-    if (recursive) {
-      entries.set(row.path, fileEntry(row))
+    const place = placeOf(row, baseSlash, recursive)
+    if (place === null) continue
+    if (place === 'file') {
+      const file = files.get(row.path)
+      if (file !== undefined) entries.set(row.path, fileEntry(file))
       continue
     }
-    const rest = row.path.slice(baseSlash.length)
-    const cut = rest.indexOf('/')
-    if (cut === -1) {
-      entries.set(row.path, fileEntry(row))
-      continue
-    }
-    const child = baseSlash + rest.slice(0, cut)
-    if (!entries.has(child)) entries.set(child, dirEntry(child, row.modified))
+    if (!entries.has(place)) entries.set(place, dirEntry(place, row.modified))
   }
   return [...entries.values()].sort((a, b) =>
     String(a.path) < String(b.path) ? -1 : String(a.path) > String(b.path) ? 1 : 0,

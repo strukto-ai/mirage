@@ -204,20 +204,6 @@ export async function ancestors(db: C, tenant: string, item: Item): Promise<Item
   return chain.reverse()
 }
 
-export async function isDescendant(
-  db: C,
-  tenant: string,
-  id: string,
-  folderId: string,
-): Promise<boolean> {
-  let cur = await itemById(db, tenant, id)
-  while (cur !== null && cur.parentId !== null) {
-    if (cur.parentId === folderId) return true
-    cur = await itemById(db, tenant, cur.parentId)
-  }
-  return false
-}
-
 export async function copyTree(
   db: C,
   tenant: string,

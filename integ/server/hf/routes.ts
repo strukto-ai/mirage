@@ -20,13 +20,22 @@ import {
   deleteFolder,
   deleteObject,
   objectAt,
-  objects,
+  objectRows,
+  objectsAt,
   putXorb,
   registerShard,
   writeObject,
   xetFile,
 } from './store.ts'
-import { clampedReply, fileEntry, notFound, selfUrl, strip, treeEntries } from './wire.ts'
+import {
+  clampedReply,
+  fileEntry,
+  notFound,
+  selfUrl,
+  strip,
+  treeEntries,
+  treeFiles,
+} from './wire.ts'
 import { SERVE_CHUNK_SIZE, serializeChunks, serializedOffsetOf, serveHash } from './xet.ts'
 
 const BOOT = randomUUID().replace(/-/g, '').slice(0, 12)
@@ -50,8 +59,17 @@ function truthy(value: string | null): boolean {
 }
 
 async function tree(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await objects(ctx.db, ctx.tenant, bucketOf(ctx))
-  const entries = treeEntries(rows, ctx.params.path ?? '', truthy(ctx.query.get('recursive')))
+  const bucket = bucketOf(ctx)
+  const prefix = ctx.params.path ?? ''
+  const recursive = truthy(ctx.query.get('recursive'))
+  const rows = await objectRows(ctx.db, ctx.tenant, bucket)
+  const files = await objectsAt(ctx.db, ctx.tenant, bucket, treeFiles(rows, prefix, recursive))
+  const entries = treeEntries(
+    rows,
+    new Map(files.map((file) => [file.path, file])),
+    prefix,
+    recursive,
+  )
   return { status: 200, body: entries }
 }
 

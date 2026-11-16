@@ -14,7 +14,7 @@
 
 import type { Minter } from '../kit/typescript/index.ts'
 import { CAS_TENANT, type C } from './config.ts'
-import type { HfObject } from './wire.ts'
+import type { HfObject, TreeRow } from './wire.ts'
 import { decodeXorb, parseShardFiles, serveHash } from './xet.ts'
 
 function objectKey(
@@ -25,8 +25,24 @@ function objectKey(
   return { tenant_bucket_path: { tenant, bucket, path } }
 }
 
-export async function objects(db: C, tenant: string, bucket: string): Promise<HfObject[]> {
-  return db.hfObject.findMany({ where: { tenant, bucket }, orderBy: { path: 'asc' } })
+// The bucket's objects without their bytes: a listing used to read every
+// object's content to render the few files directly under one folder.
+export async function objectRows(db: C, tenant: string, bucket: string): Promise<TreeRow[]> {
+  return db.hfObject.findMany({
+    where: { tenant, bucket },
+    select: { path: true, modified: true },
+    orderBy: { path: 'asc' },
+  })
+}
+
+export async function objectsAt(
+  db: C,
+  tenant: string,
+  bucket: string,
+  paths: string[],
+): Promise<HfObject[]> {
+  if (paths.length === 0) return []
+  return db.hfObject.findMany({ where: { tenant, bucket, path: { in: paths } } })
 }
 
 export async function objectAt(
