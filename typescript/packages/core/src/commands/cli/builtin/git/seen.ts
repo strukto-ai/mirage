@@ -22,7 +22,7 @@ import { EmptyTreeNameError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { visiblePath } from './pathspec.ts'
 import { loadRefs } from './refs.ts'
-import { objectType, rawObject, repoArgs, storedItems, type Repo } from './repo.ts'
+import { grafted, objectType, rawObject, repoArgs, storedItems, type Repo } from './repo.ts'
 import type { GitObject, RepoLocation, TreeItem } from './types.ts'
 
 /** A leaf as a tree or the index lists it: its mode and its object id. */
@@ -394,7 +394,7 @@ async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
       pending.push((await git.readTag({ ...repoArgs(repo), oid: sha })).tag.object)
     } else if (type === 'commit') {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid: sha })
-      for (const item of commit.parent) pending.push(item)
+      for (const item of grafted(repo, sha, commit.parent)) pending.push(item)
       yield* walk(commit.tree, '')
     }
   }

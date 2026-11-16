@@ -15,7 +15,7 @@ import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadRefs } from './refs.ts'
-import { repoArgs, storedItems, type Repo } from './repo.ts'
+import { grafted, repoArgs, storedItems, type Repo } from './repo.ts'
 import { decoded } from './seen.ts'
 import { opened } from './session.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -169,7 +169,7 @@ export async function fsck(
       const links: string[] = []
       if (result.type === 'commit') {
         const { commit } = await git.readCommit({ ...args, oid })
-        links.push(commit.tree, ...commit.parent)
+        links.push(commit.tree, ...grafted(repo, oid, commit.parent))
       } else if (result.type === 'tree') {
         for (const entry of decoded(await storedItems(repo, oid)))
           if (entry.mode !== GITLINK_MODE) links.push(entry.oid)

@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 from dulwich.pack import Pack
+from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.objects import (
     LooseObjects,
@@ -189,3 +190,20 @@ async def test_a_prefix_that_is_not_lowercase_hex_names_nothing(
             lambda: list(packed.iter_prefix(prefix))
         )
     assert found == []
+
+
+@pytest.mark.asyncio
+async def test_a_shallow_commit_reads_parentless_with_its_bytes_kept(
+    repo_path, workspace
+):
+    with Repo(str(repo_path)) as disk:
+        head = disk.head()
+        parent = disk[head].parents[0]
+    (repo_path / ".git" / "shallow").write_bytes(head + b"\n")
+    store = await load_object_store(workspace.vfs, GITDIR)
+    commit = await asyncio.to_thread(store.__getitem__, head)
+    _, raw = await asyncio.to_thread(store.get_raw, head)
+    assert commit.parents == []
+    assert commit.id == head
+    assert commit.as_raw_string() == raw
+    assert b"parent " + parent in raw

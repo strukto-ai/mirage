@@ -40,7 +40,7 @@ import {
   validRefName,
   writeRef,
 } from './refs.ts'
-import { objectType, openRepo, repoArgs, storePack, type Repo } from './repo.ts'
+import { grafted, objectType, openRepo, repoArgs, storePack, type Repo } from './repo.ts'
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import {
@@ -146,7 +146,11 @@ async function isAncestor(repo: Repo, old: string, fresh: string): Promise<boole
     if (seen.has(oid)) continue
     seen.add(oid)
     if ((await objectType(repo, oid)) === 'commit')
-      for (const item of (await git.readCommit({ ...repoArgs(repo), oid })).commit.parent)
+      for (const item of grafted(
+        repo,
+        oid,
+        (await git.readCommit({ ...repoArgs(repo), oid })).commit.parent,
+      ))
         stack.push(item)
   }
   return false

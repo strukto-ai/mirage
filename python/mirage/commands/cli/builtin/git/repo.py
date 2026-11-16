@@ -17,12 +17,15 @@ from collections.abc import Iterator
 from io import BytesIO
 
 from dulwich.config import ConfigFile
-from dulwich.object_store import PackCapableObjectStore
+from dulwich.objects import ObjectID
 from dulwich.refs import RefsContainer
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.io import read_optional
-from mirage.commands.cli.builtin.git.objects import load_object_store
+from mirage.commands.cli.builtin.git.objects import (
+    VfsObjectStore,
+    load_object_store,
+)
 from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -42,7 +45,7 @@ class Repo(BaseRepo):
     on.
 
     Args:
-        store (PackCapableObjectStore): the object database.
+        store (VfsObjectStore): the object database.
         refs (RefsContainer): every ref, as load_refs reads them.
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
@@ -70,7 +73,7 @@ class Repo(BaseRepo):
 
     def __init__(
         self,
-        store: PackCapableObjectStore,
+        store: VfsObjectStore,
         refs: RefsContainer,
         vfs: Files,
         location: RepoLocation,
@@ -78,6 +81,7 @@ class Repo(BaseRepo):
         ambiguous: list[str] | None,
     ) -> None:
         super().__init__(store, refs)
+        self._shallow = store.shallow
         self.dispatch = vfs
         self.location = location
         self.loop = loop
@@ -89,6 +93,10 @@ class Repo(BaseRepo):
         self.free: set[bytes] = set()
         self.seen: dict[bytes, list[str]] = {}
         self.sightings: Iterator[tuple[bytes, str]] | None = None
+
+    def get_shallow(self) -> set[ObjectID]:
+        """The commits ``.git/shallow`` lists, as the store read them."""
+        return {ObjectID(oid) for oid in self._shallow}
 
 
 async def open_repo(
