@@ -1,151 +1,181 @@
 ---
 title: Co-Work
 icon: users
-description: An agent schedules candidate interviews from a recruiting inbox, two calendars and a Slack channel, with no sandbox.
+description: An agent kicks off a new customer's onboarding from a won deal in Slack, with Google Drive, Docs, Sheets and Notion, with no sandbox.
 ---
 
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "himalaya", name: "Recruiting inbox", text: "reads the replies, sends the confirmations" },
-    { cli: "gws", name: "Google Calendar", text: "reads busy times, books the interviews" },
-    { cli: "slack", name: "Slack", text: "posts the schedule to #hiring-backend", dir: "out" },
+    { cli: "/slack", name: "Slack", text: "reads #deals-won as files" },
+    { cli: "/gdrive", name: "Google Drive", text: "reads the tracker and the plan template as files" },
+    { cli: "gws", name: "Google Docs and Sheets", text: "copies the plan, fills it, adds a row", dir: "out" },
+    { cli: "ntn", name: "Notion", text: "opens the project page", dir: "out" },
+    { cli: "slack", name: "Slack", text: "replies in the deal's thread", dir: "out" },
   ]}
   steps={[
-    { cmd: "himalaya --json envelope search subject '\"interview times\"' …", cli: "himalaya", out: "6 replies" },
-    { cmd: "python3 /workspace/candidates.py", cli: "python3", out: "6 candidates, 2 times each" },
-    { cmd: "gws calendar freebusy query --json '{…}'", cli: "gws", out: "Dana: 7 busy blocks, Omar: 4" },
-    { cmd: "python3 /workspace/plan.py", cli: "python3", out: "5 booked, 1 with no common time" },
-    { cmd: "gws calendar events insert …", cli: "gws", dir: "out", out: "5 interviews on the calendar" },
-    { cmd: "himalaya message reply $id --send …", cli: "himalaya", dir: "out", out: "5 confirmations sent" },
-    { cmd: "slack send-message --channel C07HB2Q9KX …", cli: "slack", out: "the schedule in #hiring-backend" },
+    { cmd: "grep -h \"Deal won\" /slack/channels/deals-won__*/2026-11-16/chat.jsonl …", cli: "/slack", out: "Northwind Health, 120 seats" },
+    { cmd: "jq … '/gdrive/Onboarding/Onboarding tracker.gsheet.json' | sort -n", cli: "/gdrive", out: "Mei Chen has the fewest seats" },
+    { cmd: "gws drive files copy … && gws docs documents batchUpdate …", cli: "gws", dir: "out", out: "the plan, filled in" },
+    { cmd: "gws sheets append --spreadsheet \"$tracker\" …", cli: "gws", dir: "out", out: "Sheet1!A6:E6" },
+    { cmd: "ntn api v1/pages -d \"$(cat /workspace/page.json)\"", cli: "ntn", dir: "out", out: "a project page with a checklist" },
+    { cmd: "slack send-message --thread-ts 1794815580.678919 …", cli: "slack", dir: "out", out: "the team has the links" },
   ]}
   extras={[
     { text: "/workspace in memory" },
-    { text: "python3 on Monty", cli: "python3" },
   ]}
 />
 
-An agent schedules interviews for a recruiting team. It reads the times
-candidates offer in their replies, matches them against the interviewers'
-calendars, books the interviews, confirms each one in the candidate's thread
-and posts the schedule to the hiring channel. A cron job can start it each
-morning while a role is open.
+When a deal closes, the CRM posts it to a Slack channel, and someone in
+customer success starts the onboarding by hand: picks an account manager,
+copies the plan template, fills it in, adds the customer to the tracker,
+opens a project and tells the team. An agent does the same, starting from
+the CRM's message. A cron job, or an event from Slack, can start it.
 
-A job this small needs no VM or sandbox. It runs in a
+A job this small needs no VM or sandbox. It runs in an
 [in-process terminal](/home/examples/in-process-terminal) inside one
 FastAPI or Express server:
 
-- **Files:** `/workspace`, mounted in [memory](/home/setup/ram) for the agent's
-  scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
-  [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
-  instead.
-- **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
-- **CLIs:** [`himalaya`](/python/cli/himalaya) reads and sends mail,
-  [`gws`](/python/cli/gws) calls Google Calendar and
-  [`slack`](/python/cli/slack) posts to Slack, with credentials the server
-  holds, so the agent never sees one.
+- **Files:** `/slack` and `/gdrive` mount [Slack](/python/vfs/slack) and
+  [Google Drive](/python/vfs/gdrive) read-only, so the agent reads messages,
+  Sheets and Docs with `grep` and `jq`. `/workspace`, in
+  [memory](/home/setup/ram), holds its scratch files.
+- **CLIs:** [`gws`](/python/cli/gws) writes to Docs and Sheets,
+  [`ntn`](/python/cli/ntn) to Notion and [`slack`](/python/cli/slack) to
+  Slack. Every change goes through a CLI; the mounts never write.
+- **Credentials:** five keys the server holds, and the agent never sees. The
+  agent finds every channel, folder and file by name.
 
-The commands below are what the agent runs in its terminal. A company is
-hiring a senior backend engineer. Six candidates have replied to the
-recruiting inbox with two times each for the week of 16 November 2026, and
-two engineers, Dana Lee and Omar Haddad, run every interview. All times are
-in UTC.
+The commands below are what the agent runs in its terminal. The CRM posted
+this to `#deals-won`:
+
+```text
+Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
+```
+
+## Before you start
+
+Set up three accounts, and give the server five keys:
+
+| Service | Set up | Keys |
+| --- | --- | --- |
+| Slack | A bot with `channels:read`, `channels:history`, `chat:write` and `users:read`, plus `groups:read` and `groups:history` for a private channel. Invite it to `#deals-won`. See [Slack](/home/setup/slack). | `SLACK_BOT_TOKEN` |
+| Google | An OAuth client and a refresh token with the Drive, Docs and Sheets scopes. See [Google Workspace](/home/setup/google). | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
+| Notion | An internal integration. The agent creates its pages at the top level of the workspace, so nothing needs sharing. See [Notion](/home/setup/notion). | `NOTION_API_KEY` |
+
+In Google Drive, make a folder named `Onboarding` with two files:
+
+- **`Onboarding tracker`**, a Sheet with the columns `Customer`, `Seats`,
+  `Start`, `Account manager` and `Plan`, and a row for each customer.
+- **`Onboarding plan template`**, a Doc with `{{customer}}`, `{{seats}}`,
+  `{{start}}`, `{{manager}}`, `{{goal}}`, `{{champion}}` and `{{kickoff}}`
+  where the values go:
+
+  ```text
+  Onboarding plan: {{customer}}
+
+  Seats: {{seats}}
+  Start date: {{start}}
+  Account manager: {{manager}}
+
+  Goal
+  {{goal}}
+
+  Stakeholders
+  {{champion}}, champion
+
+  Milestones
+  Kickoff call by {{kickoff}}
+  Week 1: admin accounts and SSO
+  Week 2: import data and train the first team
+  Week 4: adoption review with {{champion}}
+  ```
 
 ## Installation
-
-`himalaya` needs the `email` extra in Python and three mail libraries in
-Node:
 
 <Tabs>
   <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```bash
-    pip install 'mirage-ai[monty,email]' fastapi uvicorn
+    pip install mirage-ai fastapi uvicorn
     ```
   </Tab>
   <Tab title="Express" icon="/images/typescript-logo.svg">
     ```bash
-    npm install @struktoai/mirage-node @pydantic/monty express imapflow mailparser nodemailer
+    npm install @struktoai/mirage-node express
     ```
   </Tab>
 </Tabs>
 
+## Workspace
+
+`workspace.yaml` mounts Slack and Drive read-only, keeps `/workspace` in
+memory, and installs the three CLIs. Each credential is read from the
+server's environment:
+
+```yaml workspace.yaml
+mounts:
+  /slack:
+    vfs: slack
+    mode: read
+    config:
+      token: {from: env, key: SLACK_BOT_TOKEN}
+  /gdrive:
+    vfs: gdrive
+    mode: read
+    config:
+      client_id: {from: env, key: GOOGLE_CLIENT_ID}
+      client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
+      refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
+  /workspace:
+    vfs: ram
+    mode: write
+
+clis:
+  slack:
+    cli: slack
+    machine: in_process
+    config:
+      token: {from: env, key: SLACK_BOT_TOKEN}
+  gws:
+    cli: gws
+    machine: in_process
+    config:
+      client_id: {from: env, key: GOOGLE_CLIENT_ID}
+      client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
+      refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
+  ntn:
+    cli: ntn
+    machine: in_process
+    config:
+      api_key: {from: env, key: NOTION_API_KEY}
+```
+
 ## Server
 
 This is the server from the
-[Overview](/home/examples/in-process-terminal#simple-server) with one addition: it
-registers `himalaya`, `gws` and `slack`, each with one account.
-
-To run this page you need three accounts: a mailbox the agent reads and sends
-from over IMAP and SMTP, a Google account with Calendar access that can see
-both interviewers' free and busy times, and a Slack bot that is a member of the
-hiring channel. [Email](/home/setup/email), [Google](/home/setup/google) and
-[Slack](/home/setup/slack) show how to get each credential. The server reads
-them from environment variables, and
-[Service Credentials](/home/service-credentials) shows how to keep them in a
-secret store instead:
-
-```bash
-export IMAP_HOST=imap.example.com SMTP_HOST=smtp.example.com
-export EMAIL_USERNAME=recruiting@example.com EMAIL_PASSWORD=your-app-password
-export EMAIL_SENT_FOLDER=Sent
-export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
-export SLACK_BOT_TOKEN=xoxb-...
-```
-
-`EMAIL_SENT_FOLDER` names the folder the account keeps sent mail in: `Sent`
-on most servers, `[Gmail]/Sent Mail` on Gmail and `Sent Items` on Exchange.
-`himalaya` saves each sent message there. The ports, the TLS switch and the
-two API addresses default to the services' own. Set them only for a
-self-hosted mail server or a proxy. A terminal has its own environment, not
-the server's, so the agent uses the three accounts without seeing their
-credentials.
+[Overview](/home/examples/in-process-terminal#simple-server), built from
+`workspace.yaml`. Set the five keys in its environment before you start it.
 
 <Tabs>
   <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```python app.py
-    import os
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI
     from pydantic import BaseModel
 
-    from mirage import RAMVFS, MountMode, Workspace
-    from mirage.commands.cli.builtin.gws import GWS
-    from mirage.commands.cli.builtin.himalaya import HIMALAYA
-    from mirage.commands.cli.builtin.slack import SLACK
-    from mirage.runtime.python.monty import MontyRuntime
+    from mirage import Workspace
+    from mirage.config import load_config, resolve_secrets
 
-    env = os.environ
-    ws = Workspace(
-        {"/workspace": (RAMVFS(), MountMode.EXEC)},
-        machines=[MontyRuntime(captures=["python", "python3"])],
-    )
-    ws.register_cli("himalaya", HIMALAYA, {
-        "imap_host": env["IMAP_HOST"],
-        "imap_port": int(env.get("IMAP_PORT", "993")),
-        "use_ssl": env.get("IMAP_SSL", "true") == "true",
-        "smtp_host": env["SMTP_HOST"],
-        "smtp_port": int(env.get("SMTP_PORT", "587")),
-        "username": env["EMAIL_USERNAME"],
-        "password": env["EMAIL_PASSWORD"],
-        "sent_folder": env.get("EMAIL_SENT_FOLDER", "Sent"),
-    })
-    ws.register_cli("gws", GWS, {
-        "client_id": env["GOOGLE_CLIENT_ID"],
-        "client_secret": env["GOOGLE_CLIENT_SECRET"],
-        "refresh_token": env["GOOGLE_REFRESH_TOKEN"],
-        "api_base": env.get("GOOGLE_API_BASE"),
-    })
-    ws.register_cli("slack", SLACK, {
-        "token": env["SLACK_BOT_TOKEN"],
-        "base_url": env.get("SLACK_API_URL", "https://slack.com/api"),
-    })
+    ws: Workspace
 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        global ws
+        config = await resolve_secrets(load_config("workspace.yaml"))
+        ws = Workspace(**config.to_workspace_kwargs())
         yield
         await ws.close()
 
@@ -175,30 +205,10 @@ credentials.
   <Tab title="Express" icon="/images/typescript-logo.svg">
     ```typescript app.mjs
     import express from 'express'
-    import { GWS, HIMALAYA, MontyRuntime, MountMode, RAMVFS, SLACK, Workspace } from '@struktoai/mirage-node'
+    import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 
-    const env = process.env
-    const ws = new Workspace(
-      { '/workspace': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
-    )
-    ws.registerCli('himalaya', HIMALAYA, {
-      imapHost: env.IMAP_HOST,
-      imapPort: Number(env.IMAP_PORT ?? 993),
-      useSsl: (env.IMAP_SSL ?? 'true') === 'true',
-      smtpHost: env.SMTP_HOST,
-      smtpPort: Number(env.SMTP_PORT ?? 587),
-      username: env.EMAIL_USERNAME,
-      password: env.EMAIL_PASSWORD,
-      sentFolder: env.EMAIL_SENT_FOLDER ?? 'Sent',
-    })
-    ws.registerCli('gws', GWS, {
-      clientId: env.GOOGLE_CLIENT_ID,
-      clientSecret: env.GOOGLE_CLIENT_SECRET,
-      refreshToken: env.GOOGLE_REFRESH_TOKEN,
-      apiBase: env.GOOGLE_API_BASE,
-    })
-    ws.registerCli('slack', SLACK, { token: env.SLACK_BOT_TOKEN, baseUrl: env.SLACK_API_URL })
+    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+    const ws = new Workspace(mounts, options)
 
     const app = express()
     app.use(express.json())
@@ -222,8 +232,6 @@ credentials.
   </Tab>
 </Tabs>
 
-The output below comes from sample data, so yours will differ.
-
 ## Usage
 
 Create a terminal, and define `run`, which sends commands to it and prints
@@ -240,222 +248,194 @@ run() {
 ```
 
 The commands between `SH` and `SH` in the blocks below run in the terminal
-on the server, not in the shell that calls `run`.
+on the server, not in the shell that calls `run`. Variables the agent sets,
+such as `$plan`, stay set in the terminal for the next block.
 
-## Read the inbox
+## Read the deal
 
-The agent counts the messages in the inbox, then searches for the candidates'
-replies by subject, skipping any it has already answered. It saves each reply
-to a file under `/workspace/replies`, named by its message ID, so later steps read
-the files instead of the mailbox:
+A Slack channel is a folder named after the channel and its ID, with a
+folder for each day and the day's messages in `chat.jsonl`. The agent
+finds today's deal and its timestamp, which it replies to at the end:
 
 ```bash
 run <<'SH'
-himalaya --json envelope list --page-size 0 | jq '.envelopes | length'
-mkdir -p /workspace/replies
-himalaya --json envelope search --page-size 0 subject '"interview times"' and not flag answered > /workspace/replies.json
-for id in $(jq -r '.envelopes[].id' /workspace/replies.json); do
-  himalaya message read $id > /workspace/replies/$id.eml
-done
-ls /workspace/replies | wc -l
+ls /slack/channels | grep '^deals-won__'
+grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r '"\(.ts) \(.text)"'
 SH
 ```
 
 ```text
-8
-6
+deals-won__C0CJ1LE89NV
+1794815580.678919 Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
 ```
 
-The inbox holds 8 messages. Six are replies; the other two are a note from
-Dana and a notice from a job board. `--page-size 0` returns every match
-instead of a page of 25, up to the newest 200 messages, the account's
-`max_messages`.
+## Pick the account manager
 
-## Find the offered times
-
-The recruiting team asked each candidate for two times, one per line, written
-as `2026-11-16 10:00`. A short Python script takes each candidate's name and
-address from the sender in the search results, using the address as the name
-when there is none, and the times from the reply's body. It saves them to
-`/workspace/candidates.json` and prints a table:
+Drive's folders are directories, and a Sheet is a `.gsheet.json` file, the
+Sheets API's view of it with every cell. The agent adds up the seats each
+account manager already has:
 
 ```bash
 run <<'SH'
-cat > /workspace/candidates.py <<'PY'
-import json, re
-candidates = []
-replies = json.loads(open("/workspace/replies.json").read())["envelopes"]
-for reply in sorted(replies, key=lambda r: int(r["id"])):
-    text = open("/workspace/replies/%s.eml" % reply["id"]).read()
-    sender = reply["from"][0]
-    who = sender["name"] or sender["email"]
-    times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
-    candidates.append({"id": str(reply["id"]), "name": who,
-                       "email": sender["email"], "times": times})
-    print("%-3s %-13s %s" % (reply["id"], who, ", ".join(times)))
-open("/workspace/candidates.json", "w").write(json.dumps(candidates))
-PY
-python3 /workspace/candidates.py
+ls /gdrive/Onboarding
+jq -r '[.sheets[0].data[0].rowData[1:][] | {manager: .values[3].formattedValue, seats: (.values[1].formattedValue | tonumber)}]
+  | group_by(.manager) | map("\(map(.seats) | add) \(.[0].manager)") | .[]' '/gdrive/Onboarding/Onboarding tracker.gsheet.json' | sort -n
 SH
 ```
 
 ```text
-2   Maya Chen     2026-11-16 10:00, 2026-11-17 14:00
-3   Lucas Ortega  2026-11-16 10:00, 2026-11-16 15:00
-4   Priya Raman   2026-11-17 09:00, 2026-11-19 16:00
-6   Tom Becker    2026-11-18 11:00, 2026-11-18 13:00
-7   Aisha Okafor  2026-11-19 10:00, 2026-11-19 14:00
-8   Jonas Weber   2026-11-20 09:00, 2026-11-20 14:00
+Onboarding plan template.gdoc.json
+Onboarding tracker.gsheet.json
+60 Mei Chen
+65 Dana Lee
+85 Omar Haddad
 ```
 
-The first column is the message ID, which the agent uses later to reply in
-the same thread. The candidates are in the order they replied.
+Mei Chen has the fewest seats, so Northwind Health goes to her.
 
-## Check the calendars
+## Write the plan
 
-Google Calendar's free/busy query returns the times each person is busy,
-without the details of their meetings. The agent asks for both interviewers
-for the whole week and saves the answer to a file. Monty has no network, so
-the Python script reads that file. For each candidate, in the order they
-replied, it picks the first offered hour when neither interviewer is busy.
-A booked hour counts as busy for the candidates after it:
+The agent copies the template into the folder. The IDs `gws` needs come
+from the files themselves: a Doc's `documentId` is in its `.gdoc.json`, and
+the folder's from a Drive search:
 
 ```bash
 run <<'SH'
-gws calendar freebusy query --json '{"timeMin": "2026-11-16T00:00:00Z", "timeMax": "2026-11-21T00:00:00Z",
-  "items": [{"id": "dana.lee@example.com"}, {"id": "omar.haddad@example.com"}]}' > /workspace/busy.json
-jq -r '.calendars | to_entries[] | "\(.key): \(.value.busy | length) busy blocks"' /workspace/busy.json
-cat > /workspace/plan.py <<'PY'
-import json
-from datetime import datetime, timedelta
-busy = []
-for calendar in json.loads(open("/workspace/busy.json").read())["calendars"].values():
-    for block in calendar["busy"]:
-        busy.append((datetime.fromisoformat(block["start"][:19]), datetime.fromisoformat(block["end"][:19])))
-plan = []
-for c in json.loads(open("/workspace/candidates.json").read()):
-    c["start"] = None
-    for time in c["times"]:
-        start = datetime.fromisoformat(time)
-        end = start + timedelta(hours=1)
-        if all(e <= start or s >= end for s, e in busy):
-            busy.append((start, end))
-            c["start"], c["end"] = start.isoformat(), end.isoformat()
-            break
-    plan.append(c)
-    print("%-13s %s" % (c["name"], c["start"][:16].replace("T", " ") if c["start"] else "no common time"))
-open("/workspace/plan.json", "w").write(json.dumps(plan))
-PY
-python3 /workspace/plan.py
+template=$(jq -r .documentId '/gdrive/Onboarding/Onboarding plan template.gdoc.json')
+folder=$(gws drive files list --params '{"q": "name = '\''Onboarding'\'' and mimeType = '\''application/vnd.google-apps.folder'\''", "fields": "files(id)"}' | jq -r '.files[0].id')
+plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
+  --json "{\"name\": \"Onboarding plan: Northwind Health\", \"parents\": [\"$folder\"]}" | jq -r .id)
+echo "$plan"
 SH
 ```
 
 ```text
-dana.lee@example.com: 7 busy blocks
-omar.haddad@example.com: 4 busy blocks
-Maya Chen     2026-11-16 10:00
-Lucas Ortega  2026-11-16 15:00
-Priya Raman   no common time
-Tom Becker    2026-11-18 13:00
-Aisha Okafor  2026-11-19 10:00
-Jonas Weber   2026-11-20 14:00
+14LWyxpM1xtNXYYUHdCxDgJFgmb5AfWyvMKPNrHp76_Y
 ```
 
-Google gives busy times in UTC, such as `2026-11-16T10:00:00Z`. The script
-keeps their first 19 characters, the date and the time to the second, so it
-can compare them with the candidates' times.
-Maya and Lucas both offered Monday at 10:00. Maya replied first and gets it,
-so Lucas gets his second time. Each of Priya's times clashes with at least
-one interviewer, so the agent leaves her for a person.
-
-## Book the interviews
-
-`jq` turns each booked row of the plan into a Calendar event, one per line,
-with the candidate and both interviewers as guests. The agent creates the
-events on the recruiting calendar, then lists that calendar to check them:
+Then it fills in the copy, one `replaceAllText` request for each
+placeholder, in a single Docs API call. The kickoff is five business days
+after the start:
 
 ```bash
 run <<'SH'
-jq -c '.[] | select(.start) | {
-  summary: "Interview: \(.name), Senior Backend Engineer",
-  start: {dateTime: "\(.start)Z"}, end: {dateTime: "\(.end)Z"},
-  attendees: [{email: .email}, {email: "dana.lee@example.com"}, {email: "omar.haddad@example.com"}]
-}' /workspace/plan.json > /workspace/events.jsonl
-while read -r event; do
-  gws calendar events insert --params '{"calendarId": "recruiting@example.com"}' --json "$event" > /dev/null
-done < /workspace/events.jsonl
-gws calendar events list --params '{"calendarId": "recruiting@example.com", "timeMin": "2026-11-16T00:00:00Z", "singleEvents": true, "orderBy": "startTime"}' |
-  jq -r '.items[] | "\(.start.dateTime[0:16] | sub("T"; " ")) \(.summary) (\(.attendees | length) guests)"'
+jq -n '{requests: ({
+  "{{customer}}": "Northwind Health", "{{seats}}": "120", "{{start}}": "2026-12-01",
+  "{{manager}}": "Mei Chen", "{{champion}}": "Priya Shah",
+  "{{goal}}": "Move clinic scheduling off spreadsheets", "{{kickoff}}": "2026-12-08"
+} | to_entries | map({replaceAllText: {containsText: {text: .key, matchCase: true}, replaceText: .value}}))}' > /workspace/fill.json
+gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" |
+  jq -c '[.replies[].replaceAllText.occurrencesChanged]'
 SH
 ```
 
 ```text
-2026-11-16 10:00 Interview: Maya Chen, Senior Backend Engineer (3 guests)
-2026-11-16 15:00 Interview: Lucas Ortega, Senior Backend Engineer (3 guests)
-2026-11-18 13:00 Interview: Tom Becker, Senior Backend Engineer (3 guests)
-2026-11-19 10:00 Interview: Aisha Okafor, Senior Backend Engineer (3 guests)
-2026-11-20 14:00 Interview: Jonas Weber, Senior Backend Engineer (3 guests)
+[1,1,1,1,2,1,1]
 ```
 
-## Confirm and tell the team
-
-The agent replies to each booked candidate in their own thread and, once
-the reply is sent, flags their message as answered. It then checks the sent
-folder for the five replies. `mailbox list` gives that folder the role
-`sent`. It writes the schedule to a file, posts it to the hiring channel,
-`#hiring-backend`, by its Slack channel ID, and reads the post back:
+Each placeholder was found, and `{{champion}}` twice. The agent reads the
+plan back through `/gdrive`, where a Doc is a `.gdoc.json` file and its text
+is in the first tab:
 
 ```bash
 run <<'SH'
-jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /workspace/plan.json |
-while read -r id when; do
-  himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null &&
-    himalaya flag add $id --flag answered > /dev/null
-done
-sent=$(himalaya --json mailbox list | jq -r '.mailboxes[] | select(.role == "sent") | .id')
-himalaya --json envelope list -m "$sent" | jq -r '.envelopes[].to[0].name'
-jq -r '"Senior Backend Engineer interviews with Dana and Omar (UTC):",
-  (.[] | "- \(.name): \(if .start then .start[0:16] | sub("T"; " ") else "no common time, needs a person" end)")' /workspace/plan.json > /workspace/summary.txt
-slack send-message --channel C07HB2Q9KX --text "$(cat /workspace/summary.txt)" > /dev/null
-slack read-messages --channel C07HB2Q9KX --limit 1 | jq -r '.[0].text'
+jq -r '[.tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content] | join("")' \
+  '/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json'
 SH
 ```
 
 ```text
-Jonas Weber
-Aisha Okafor
-Tom Becker
-Lucas Ortega
-Maya Chen
-Senior Backend Engineer interviews with Dana and Omar (UTC):
-- Maya Chen: 2026-11-16 10:00
-- Lucas Ortega: 2026-11-16 15:00
-- Priya Raman: no common time, needs a person
-- Tom Becker: 2026-11-18 13:00
-- Aisha Okafor: 2026-11-19 10:00
-- Jonas Weber: 2026-11-20 14:00
+Onboarding plan: Northwind Health
+
+Seats: 120
+Start date: 2026-12-01
+Account manager: Mei Chen
+
+Goal
+Move clinic scheduling off spreadsheets
+
+Stakeholders
+Priya Shah, champion
+
+Milestones
+Kickoff call by 2026-12-08
+Week 1: admin accounts and SSO
+Week 2: import data and train the first team
+Week 4: adoption review with Priya Shah
 ```
 
-The first five lines are the recipients of the replies in the sent folder,
-newest first. The rest is the post in `#hiring-backend`.
+## Add it to the tracker
 
-`himalaya message reply` without `--send` only prints the reply, which is a
-safe way for an agent to show a draft before it sends.
+```bash
+run <<'SH'
+tracker=$(jq -r .spreadsheetId '/gdrive/Onboarding/Onboarding tracker.gsheet.json')
+gws sheets append --spreadsheet "$tracker" \
+  --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
+  jq -r .updates.updatedRange
+SH
+```
 
-The `answered` flag is kept in the mailbox, so the next morning's run skips
-the five booked candidates and plans only new replies and Priya's. A reply
-that fails to send prints its error and leaves the message unflagged, so the
-next run tries that candidate again.
+```text
+Sheet1!A6:E6
+```
 
-The round ends with what the agent can report:
+## Open a project in Notion
 
-- Five interviews are booked, each on the recruiting calendar with the
-  candidate, Dana and Omar as guests, and each candidate has a confirmation
-  in their thread.
-- Lucas Ortega's first time was taken by Maya Chen, so he has his second,
-  Monday at 15:00.
-- Priya Raman cannot be scheduled: Dana or Omar is busy at each of her times.
-  A person needs to ask her for more times or move a meeting.
-- `#hiring-backend` has the full schedule.
+The agent builds the page, a summary, a link to the plan and the kickoff
+checklist, and creates it in Notion. Its parent is the workspace, so the
+page goes at the top level and there is no page to share with the
+integration first:
 
-To set up these and the other bundled CLIs, see [CLIs](/home/setup/clis).
+```bash
+run <<'SH'
+jq -n --arg plan "https://docs.google.com/document/d/$plan" '
+def text($s): [{type: "text", text: {content: $s}}];
+def todo($s): {type: "to_do", to_do: {rich_text: text($s), checked: false}};
+{
+  parent: {workspace: true},
+  properties: {title: {title: text("Onboarding: Northwind Health")}},
+  children: [
+    {type: "paragraph", paragraph: {rich_text: text("120 seats, start 2026-12-01. Account manager: Mei Chen. Champion: Priya Shah.")}},
+    {type: "paragraph", paragraph: {rich_text: [{type: "text", text: {content: "Onboarding plan", link: {url: $plan}}}]}},
+    {type: "heading_2", heading_2: {rich_text: text("Kickoff checklist")}},
+    todo("Kickoff call with Priya Shah by 2026-12-08"),
+    todo("Admin accounts and SSO"),
+    todo("Import data and train the first team"),
+    todo("Adoption review in week 4")
+  ]
+}' > /workspace/page.json
+project=$(ntn api v1/pages -d "$(cat /workspace/page.json)" | jq -r .url)
+echo "$project"
+SH
+```
+
+```text
+https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8984c1
+```
+
+## Tell the team
+
+Last, the agent replies in the deal's thread with who owns it and where
+everything is. The channel ID is the end of its folder's name:
+
+```bash
+run <<'SH'
+channel=$(ls /slack/channels | grep '^deals-won__' | sed 's/.*__//')
+slack send-message --channel "$channel" --thread-ts 1794815580.678919 \
+  --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
+  jq -c '{ok, thread_ts: .message.thread_ts}'
+SH
+```
+
+```text
+{"ok":true,"thread_ts":"1794815580.678919"}
+```
+
+The deal now has an owner, a plan, a row in the tracker and a project, and
+the team has the links in Slack. The agent read every input as a file and
+made five changes, each through the CLI for its service.
+
+For the commands and flags each CLI supports, see [gws](/python/cli/gws),
+[ntn](/python/cli/ntn) and [slack](/python/cli/slack). For the file layouts,
+see the [Slack](/python/vfs/slack) and [Google Drive](/python/vfs/gdrive)
+VFS.
