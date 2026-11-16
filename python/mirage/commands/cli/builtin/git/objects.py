@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import IO, Iterator, cast
-from weakref import WeakKeyDictionary
 
 from dulwich.object_format import SHA1
 from dulwich.object_store import PackCapableObjectStore
@@ -53,12 +54,12 @@ from mirage.workspace.files import Files
 
 PACK_SUFFIX = ".pack"
 HEX_DIGITS = frozenset(b"0123456789abcdef")
-# One rewrite of ``.git/shallow`` at a time on each event loop, so fetches
-# running side by side keep each other's cuts; an asyncio lock serves the
-# loop it first waits on only.
-SHALLOW_WRITERS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
-    WeakKeyDictionary()
-)
+# One rewrite of each ``.git/shallow`` at a time, so fetches running side
+# by side keep each other's cuts: a lock and its holders per loop and path,
+# dropped when the last holder lets go (an asyncio lock serves one loop).
+SHALLOW_WRITERS: dict[
+    tuple[asyncio.AbstractEventLoop, str], tuple[asyncio.Lock, int]
+] = {}
 
 
 def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
@@ -455,6 +456,27 @@ def _index_pack(data: bytes) -> tuple[bytes, bytes]:
     return out.getvalue(), checksum
 
 
+@asynccontextmanager
+async def _shallow_held(path: PathSpec) -> AsyncIterator[None]:
+    """Hold one ``.git/shallow`` against other rewrites of it.
+
+    Args:
+        path (PathSpec): the shallow file.
+    """
+    key = (asyncio.get_running_loop(), path.virtual)
+    lock, users = SHALLOW_WRITERS.get(key, (asyncio.Lock(), 0))
+    SHALLOW_WRITERS[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        _, users = SHALLOW_WRITERS[key]
+        if users == 1:
+            del SHALLOW_WRITERS[key]
+        else:
+            SHALLOW_WRITERS[key] = (lock, users - 1)
+
+
 async def add_shallow(
     vfs: Files, commondir: PathSpec, oids: tuple[str, ...]
 ) -> None:
@@ -470,8 +492,7 @@ async def add_shallow(
     if not oids:
         return
     path = commondir.join(SHALLOW_FILE)
-    loop = asyncio.get_running_loop()
-    async with SHALLOW_WRITERS.setdefault(loop, asyncio.Lock()):
+    async with _shallow_held(path):
         held = (await read_optional(vfs, path) or b"").decode().split()
         await write_file(
             vfs,

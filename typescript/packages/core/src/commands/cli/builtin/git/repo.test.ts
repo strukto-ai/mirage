@@ -91,3 +91,34 @@ it('keeps every cut when two shallow updates run side by side', async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('holds up no other repository behind a stalled shallow update', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-shallow-'))
+  const ws = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    native(root, ['init', '-q', '-b', 'main'])
+    native(root, ['commit', '-q', '--allow-empty', '-m', 'first'])
+    await load(ws, root)
+    const top = PathSpec.fromStrPath('/repo')
+    const gitdir = top.join('.git')
+    const repo = await openRepo(ws.vfs, {
+      gitdir,
+      commondir: gitdir,
+      worktree: top,
+      mountRoot: top,
+    })
+    const elsewhere = PathSpec.fromStrPath('/elsewhere/.git')
+    const stalled = {
+      ...repo,
+      vfs: { read: () => new Promise<never>(() => undefined) } as unknown as typeof repo.vfs,
+      location: { ...repo.location, commondir: elsewhere },
+    }
+    void addShallow(stalled, ['1'.repeat(40)])
+    await addShallow(repo, ['2'.repeat(40)])
+    const shallow = await ws.dispatch('read', '/repo/.git/shallow')
+    expect(DEC.decode(shallow as Uint8Array)).toBe(`${'2'.repeat(40)}\n`)
+  } finally {
+    await ws.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

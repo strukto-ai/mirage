@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.objects import (
     load_object_store,
     load_packs,
 )
+from mirage.types import PathSpec
 
 from .conftest import GITDIR, mounted, mounted_rw, pack_everything
 
@@ -220,3 +221,25 @@ async def test_side_by_side_shallow_updates_keep_every_cut(repo_path):
         )
     shallow = (repo_path / ".git" / "shallow").read_text()
     assert shallow == f"{first}\n{second}\n"
+
+
+class StalledFiles:
+    """Files whose reads never answer, a mount stuck mid-request."""
+
+    async def read(self, path):
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_shallow_update_holds_up_no_other_repository(
+    repo_path,
+):
+    other = PathSpec.from_str_path("/elsewhere/.git")
+    stalled = asyncio.create_task(
+        add_shallow(StalledFiles(), other, ("1" * 40,))
+    )
+    await asyncio.sleep(0)
+    with mounted_rw(repo_path) as ws:
+        await asyncio.wait_for(add_shallow(ws.vfs, GITDIR, ("2" * 40,)), 5)
+    stalled.cancel()
+    assert (repo_path / ".git" / "shallow").read_text() == "2" * 40 + "\n"
