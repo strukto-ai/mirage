@@ -50,7 +50,7 @@
     "slack:selftest": "tsx server/slack/selftest.ts",
     "slack:server": "tsx server/slack/main.ts",
     "trello:server": "tsx server/trello/main.ts",
-    "typecheck": "tsc -p tsconfig.check.json",
+    "typecheck": "node ../typescript/node_modules/typescript7/bin/tsc -p tsconfig.check.json",
     "wandb:server": "tsx server/wandb/main.ts",
     "wandb:integ": "tsx wandb/run.ts",
     "wandb:conformance": "tsx wandb/conformance.ts",

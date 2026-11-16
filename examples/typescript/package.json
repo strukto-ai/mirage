@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../typescript/node_modules/typescript7/bin/tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.42",

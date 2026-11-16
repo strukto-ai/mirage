@@ -88,9 +88,9 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json",
     "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && vitest run",
-    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
+    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && node ../../node_modules/typescript7/bin/tsc --noEmit",
     "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs"
   },
   "devDependencies": {
