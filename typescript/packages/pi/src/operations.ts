@@ -139,7 +139,8 @@ export function mirageOperations(
           ...(sessionId === undefined ? {} : { sessionId }),
         })
         try {
-          for await (const event of execution.events) options.onData(Buffer.from(event.data))
+          for await (const { data } of execution.events)
+            options.onData(Buffer.from(data.buffer, data.byteOffset, data.byteLength))
           result = await execution.wait()
         } finally {
           await execution.close()
