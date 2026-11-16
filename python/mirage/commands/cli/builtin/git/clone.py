@@ -285,7 +285,7 @@ async def clone(
     )
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
-        notes += await _populate(ctx, transport, target, stored, local)
+        notes += await _populate(ctx, transport, target, stored, local, typed)
     except GitError as exc:
         # A refused checkout leaves the clone behind, as git does.
         if not isinstance(exc, CloneCheckoutError):
@@ -308,6 +308,7 @@ async def _populate(
     target: PathSpec,
     url: str,
     local: bool,
+    typed: str | None,
 ) -> str:
     """Lay the clone out, fetch into it and check it out.
 
@@ -318,6 +319,8 @@ async def _populate(
         url (str): the remote URL as the config records it.
         local (bool): whether the remote is a plain path, which git
             copies whole whatever the depth, and prints ``done.`` after.
+        typed (str | None): ``--depth`` as typed, past ``check_depth``;
+            None for the whole history.
 
     Returns:
         str: what the clone prints to stderr after ``Cloning into``.
@@ -325,7 +328,6 @@ async def _populate(
     fl = FlagView(ctx.flags)
     vfs = ctx.vfs
     assert vfs is not None
-    typed = fl.as_str("depth")
     depth = None
     notes = ""
     if typed is not None and local:
