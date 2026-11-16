@@ -858,6 +858,11 @@ export class Dispatcher {
       }
       throw error
     } finally {
+      if (POLICY_WRITE_OPS.has(name)) {
+        const changes = this.namespace.registry.changes
+        changes.note(path.virtual)
+        if (args?.[0] instanceof PathSpec) changes.note(args[0].virtual)
+      }
       const data = args?.[0] ?? kwargs?.data
       if (
         (name === 'write' || name === 'append' || name === 'pwrite') &&

@@ -673,6 +673,7 @@ export class Workspace {
       () => this.sandboxMounts(),
       null,
       this.processTable,
+      this.registry.changes,
     )
     const [handles, entries] = splitMachines(options.machines)
     this.machineTable = new MachineTable(
@@ -1483,6 +1484,7 @@ export class Workspace {
     if (wasDefault) sessionId = this.defaultSessionId
     const session = await this.sessionManager.setProfile(sessionId, compiled)
     this.processTable.revokeSession(sessionId)
+    this.registry.changes.note('/')
     return session
   }
 
@@ -1942,7 +1944,9 @@ export class Workspace {
   setMountMode(prefix: string, mode: MountMode): void {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const parsed = parseMountMode(mode)
-    this.registry.mountForPrefix(prefix).mode = parsed
+    const entry = this.registry.mountForPrefix(prefix)
+    entry.mode = parsed
+    this.registry.changes.note(entry.prefix)
   }
 
   /**

@@ -18,6 +18,7 @@ import { boundSystemClock, systemNow } from '../utils/clock.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachinePid } from '../execution/types.ts'
 import type { MountType } from './types.ts'
+import { KERNEL_CACHE_SECONDS } from '../mount/constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -68,12 +69,17 @@ export const UNMOUNT_WAIT_SECONDS = 5
 export const PIPE_DIAGNOSTIC_BYTES = 16384
 export const PIPE_DIAGNOSTIC_WAIT_SECONDS = 1
 
-// sshfs keeps no copy of its own: every listing, stat and read asks the
-// host, so a file the host changes, or a profile now hides, shows at
-// once, and a file whose size the backend does not know reads whole
-// (direct_io), as the workspace's own FUSE mounts do.
+// sshfs keeps no copy of its own, and every read asks the host, so a file
+// whose size the backend does not know reads whole (direct_io), as the
+// workspace's own FUSE mounts do. The machine's kernel keeps what a name, its
+// absence and its attributes were for KERNEL_CACHE_SECONDS, so an import's
+// checks of its script's folder stay on the machine; a program starts only
+// once that holds nothing another changed since.
 export const SSHFS_OPTIONS =
-  'passive,dir_cache=no,direct_io,attr_timeout=0,entry_timeout=0,negative_timeout=0'
+  'passive,dir_cache=no,direct_io,' +
+  `attr_timeout=${String(KERNEL_CACHE_SECONDS)},` +
+  `entry_timeout=${String(KERNEL_CACHE_SECONDS)},` +
+  `negative_timeout=${String(KERNEL_CACHE_SECONDS)}`
 
 // Where sshfs writes its errors in the machine, one file per prefix; its
 // stdout is the SFTP stream, so its stderr cannot share the pipe.

@@ -24,6 +24,7 @@ import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
+import { SERVED_BY } from '../mount/changes.ts'
 import { FileType } from '../types.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
 import type { MountRow } from '../workspace/types.ts'
@@ -305,6 +306,9 @@ export class MachineMounts {
   private readonly directories = new Map<string, { row: MountRow | null; directory: boolean }>()
   // Each kill of an ended server's sshfs still running, which close stops.
   private readonly kills = new Set<AbortController>()
+  // When each served sshfs source's mount began keeping answers, so a change
+  // made before it is not waited out.
+  private since = new Map<string, number>()
 
   /**
    * @param provider the machine's provider, for messages.
@@ -333,7 +337,8 @@ export class MachineMounts {
    * policy refuses it (126), one the machine cannot serve because another
    * session or another sshfs holds it, or another mount covers it (1), and
    * one over a mount of the machine's own that is gone (126). Null when the
-   * line may run.
+   * line may run, which first waits out what the machine's kernel may still
+   * hold of a change another made under what it is served.
    */
   async validate(
     binding: WorkspaceBinding | null,
@@ -348,6 +353,7 @@ export class MachineMounts {
     }
     const { stop, writeHeld } = currentCaller()
     this.lines.push({ stop, writeHeld, lent: new Set() })
+    const begun = binding.changes?.now() ?? 0
     const seen = rstripSlash(cwd)
     if (
       this.mountType === 'ssh' &&
@@ -378,7 +384,7 @@ export class MachineMounts {
         `${this.provider}: mountType serves a session's view, and this line runs as none`,
       )
     }
-    return this.locked(async () => {
+    const refusal = await this.locked(async () => {
       const id = binding.processes?.workspaceId ?? ''
       if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id, this.machine)
       const served = this.session
@@ -425,6 +431,19 @@ export class MachineMounts {
           )
         : null
     })
+    const changes = binding.changes
+    if (refusal !== null || this.served.size === 0 || changes === null) return refusal
+    this.since = new Map(
+      [...this.served.values()].map(({ source }) => [source, this.since.get(source) ?? begun]),
+    )
+    await changes.waitOut(
+      new Map(
+        [...this.served].map(([prefix, { source }]) => [prefix, this.since.get(source) ?? begun]),
+      ),
+      this.machine,
+      signal,
+    )
+    return null
   }
 
   /**
@@ -488,7 +507,9 @@ export class MachineMounts {
     try {
       for (const { server } of [...this.served.values()]) {
         const failed = await runDetached(() =>
-          runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+          SERVED_BY.run(this.machine, () =>
+            runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+          ),
         )
         for (const [path, err] of failed) lost.push(`${this.provider}: ${path}: ${strerrorOf(err)}`)
       }
@@ -766,7 +787,9 @@ export class MachineMounts {
       ended: false,
       failure: null,
     }
-    entry.serving = Promise.resolve(runDetached(() => server.serve(pipe.reader, pipe.writer))).then(
+    entry.serving = Promise.resolve(
+      runDetached(() => SERVED_BY.run(this.machine, () => server.serve(pipe.reader, pipe.writer))),
+    ).then(
       () => {
         this.ended(prefix, entry)
       },

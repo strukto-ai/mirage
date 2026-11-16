@@ -42,6 +42,7 @@ from mirage.machine.constants import (
     mount_field,
 )
 from mirage.machine.types import MachinePipe, MountType
+from mirage.mount.changes import SERVED_BY
 from mirage.runtime.binding import (
     WorkspaceBinding,
     refused_run,
@@ -332,6 +333,9 @@ class MachineMounts:
         self._served: dict[
             str, tuple[MachinePipe, asyncio.Task[None], Any, str]
         ] = {}
+        # When each served sshfs source's mount began keeping answers, so
+        # a change made before it is not waited out.
+        self._since: dict[str, float] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
         # The machine's own mounts as last read, and each prefix held since.
         self._own: dict[str, tuple[str, str]] = {}
@@ -368,7 +372,9 @@ class MachineMounts:
         restrictions reach past the dispatcher, as a policy refuses it
         (126), one the machine cannot serve because another session or
         another sshfs holds it, or another mount covers it (1), and one
-        over a mount of the machine's own that is gone (126).
+        over a mount of the machine's own that is gone (126). A line that
+        may run first waits out what the machine's kernel may still hold
+        of a change another made under what it is served.
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
@@ -389,6 +395,7 @@ class MachineMounts:
         line = current_caller()
         held = Caller(stop=line.stop, write_held=line.write_held)
         self._lines.append((held, set()))
+        begun = binding.changes.now() if binding.changes is not None else 0.0
         seen = cwd.rstrip("/")
         if (
             self._mount_type == "ssh"
@@ -480,6 +487,18 @@ class MachineMounts:
                 "a mount this session restricts is not served through the "
                 "dispatcher",
             )
+        if self._served and binding.changes is not None:
+            self._since = {
+                source: self._since.get(source, begun)
+                for _, _, _, source in self._served.values()
+            }
+            await binding.changes.wait_out(
+                {
+                    prefix: self._since[source]
+                    for prefix, (_, _, _, source) in self._served.items()
+                },
+                self._machine,
+            )
         return None
 
     def guarded(self, argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -551,6 +570,7 @@ class MachineMounts:
             for _, _, server, _ in list(self._served.values()):
                 context = Context()
                 context.run(bind_caller, admitted)
+                context.run(SERVED_BY.set, self._machine)
                 syncing = asyncio.create_task(server.sync(), context=context)
                 failed += await syncing
                 syncing = None
@@ -864,8 +884,10 @@ class MachineMounts:
             f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} {path} "
             f"2>{log}"
         )
+        context = Context()
+        context.run(SERVED_BY.set, self._machine)
         task = asyncio.create_task(
-            server.serve(pipe.reader, pipe.writer), context=Context()
+            server.serve(pipe.reader, pipe.writer), context=context
         )
         self._served[prefix] = (pipe, task, server, source)
         task.add_done_callback(lambda done: self._ended(prefix, done))

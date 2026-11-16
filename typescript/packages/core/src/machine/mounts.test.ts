@@ -47,6 +47,8 @@ import {
   type PipeServer,
 } from './mounts.ts'
 import { on } from '../../tests/fixtures/machine.ts'
+import { SERVED_BY } from '../mount/changes.ts'
+import { ManualClock } from '../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -1630,6 +1632,28 @@ describe('MachineMounts', () => {
     await expect(running).rejects.toThrow()
     sandbox.hang = false
     expect((await ws.shell('python3 job.py', { sessionId: 'agent' })).exitCode).toBe(0)
+    await ws.close()
+  })
+})
+
+describe('the kernel cache', () => {
+  it('has a line wait out only what another changed under its mounts', async () => {
+    const clock = new ManualClock()
+    const sandbox = new FakeMachine('ssh')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, clock, ...on(sandbox) },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    const start = clock.monotonic()
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(clock.monotonic()).toBe(start)
+    await ws.vfs.write('/data/f', new TextEncoder().encode('x'))
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(clock.monotonic()).toBe(start + 1)
+    await SERVED_BY.run('box', () => ws.vfs.write('/data/g', new TextEncoder().encode('y')))
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(clock.monotonic()).toBe(start + 1)
     await ws.close()
   })
 })

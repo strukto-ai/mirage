@@ -26,6 +26,7 @@ from mirage.context.session_context import (
     note_decision,
 )
 from mirage.execution.process.table import ProcessTable
+from mirage.mount.changes import RecentChanges
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -62,9 +63,10 @@ class WorkspaceBinding:
     ``files`` is the workspace's ``ws.vfs``, ``get_session`` its live
     session by id and ``mount_prefixes`` every prefix a sandbox may be
     told of, whatever the session hides, for an adapter that serves the
-    mounts as files (a sandbox's SFTP), and ``processes`` the table a
-    program a runtime runs starts its process in; each is None outside
-    a workspace.
+    mounts as files (a sandbox's SFTP), ``processes`` the table a
+    program a runtime runs starts its process in, and ``changes`` the
+    file changes a sandbox's kernel may still hold of what it was
+    served; each is None outside a workspace.
     """
 
     def __init__(
@@ -76,6 +78,7 @@ class WorkspaceBinding:
         get_session: Callable[[str], SessionState] | None = None,
         mount_prefixes: Callable[[], list[str]] | None = None,
         processes: ProcessTable | None = None,
+        changes: RecentChanges | None = None,
     ) -> None:
         self.dispatch = dispatch
         self.resolver = resolver
@@ -84,6 +87,7 @@ class WorkspaceBinding:
         self.get_session = get_session
         self.mount_prefixes = mount_prefixes
         self.processes = processes
+        self.changes = changes
 
     def capture(self) -> RuntimeContext:
         return (

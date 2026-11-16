@@ -22,6 +22,7 @@ import {
   MOUNT_GUARD,
   PROCESS,
   NOT_RUNNING_STATUS,
+  SSHFS_OPTIONS,
   TOOLS_PATH,
   decodeOutput,
   mountField,
@@ -296,5 +297,19 @@ describe('ENCODE_OUTPUT', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true })
     }
+  })
+})
+
+describe('SSHFS_OPTIONS', () => {
+  it('keeps names and attributes a second and never contents', () => {
+    expect(SSHFS_OPTIONS.split(',')).toEqual(
+      expect.arrayContaining([
+        'attr_timeout=1',
+        'entry_timeout=1',
+        'negative_timeout=1',
+        'dir_cache=no',
+        'direct_io',
+      ]),
+    )
   })
 })
