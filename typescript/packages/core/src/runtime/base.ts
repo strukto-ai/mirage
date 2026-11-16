@@ -227,7 +227,10 @@ export abstract class Runtime<E = unknown> {
    * outside a process stays where it is. A child stopped
    * with its shell gets the signal the shell was stopped with, or the
    * interrupt it took; one stopped alone answers 128 plus its signal, and
-   * its shell goes on. Mirrors Python's `Runtime._as_program`.
+   * its shell goes on, whatever its engine answered once stopped (Monty's
+   * killed run exits 1). A child's files and session are captured again as
+   * it, so the calls it makes are its own, as `ps` lists it. Mirrors
+   * Python's `Runtime._as_program`.
    *
    * @param kind what is asked, which names the program.
    * @param texts the text operands.
@@ -289,7 +292,12 @@ export abstract class Runtime<E = unknown> {
         command,
         cwd: ctx.cwd,
         run: async () => {
-          done = await run({ ...ctx, signal })
+          const own = this.binding?.capture().ctx
+          const programCtx: Context = { ...ctx, signal }
+          if (own?.vfs !== undefined) programCtx.vfs = own.vfs
+          if (own?.session !== undefined) programCtx.session = own.session
+          done = await run(programCtx)
+          stop.signal.throwIfAborted()
           return done.exitCode
         },
         cancel: () => {

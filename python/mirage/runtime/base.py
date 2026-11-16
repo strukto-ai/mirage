@@ -248,7 +248,7 @@ class Runtime(ABC, Generic[E]):
                     kind,
                     list(texts),
                     run_ctx,
-                    lambda: self._run(
+                    lambda run_ctx: self._run(
                         kind,
                         engine,
                         list(paths),
@@ -268,7 +268,7 @@ class Runtime(ABC, Generic[E]):
         kind: ExecutionKind,
         texts: list[str],
         ctx: Context,
-        run: Callable[[], Awaitable[RunResult]],
+        run: Callable[[Context], Awaitable[RunResult]],
     ) -> RunResult:
         """Run a program as a process of its own, as bash forks one: the
         process started for it when it is that process's one command
@@ -284,14 +284,16 @@ class Runtime(ABC, Generic[E]):
         machine's; a run outside a process stays where it is. A child
         stopped with its shell gets the signal the shell was stopped
         with, or the interrupt it took; one stopped alone answers 128
-        plus its signal, and its shell goes on.
+        plus its signal, and its shell goes on. A child's files and
+        session are captured again as it, so the calls it makes are its
+        own, as ``ps`` lists it.
 
         Args:
             kind (ExecutionKind): what is asked, which names the program.
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
-            run (Callable[[], Awaitable[RunResult]]): the program, to its
-                end.
+            run (Callable[[Context], Awaitable[RunResult]]): the program,
+                to its end, over the context it runs with.
         """
         processes = (
             self._binding.processes if self._binding is not None else None
@@ -305,7 +307,7 @@ class Runtime(ABC, Generic[E]):
             or shell is None
             or session is None
         ):
-            return await run()
+            return await run(ctx)
         instance = (
             None
             if processes.machine_instance is None
@@ -357,11 +359,26 @@ class Runtime(ABC, Generic[E]):
         ):
             shell.one_command = True
         if shell.take(machine, instance, command, fd, argv):
-            return await run()
+            return await run(ctx)
         done: list[RunResult] = []
 
         async def program() -> int:
-            done.append(await run())
+            own = self._binding.capture().ctx if self._binding else None
+            done.append(
+                await run(
+                    ctx
+                    if own is None
+                    else replace(
+                        ctx,
+                        vfs=own.vfs,
+                        session=(
+                            own.session
+                            if own.session is not None
+                            else ctx.session
+                        ),
+                    )
+                )
+            )
             return done[0].exit_code
 
         try:

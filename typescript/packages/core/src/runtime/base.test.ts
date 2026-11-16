@@ -17,12 +17,12 @@ import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
 import type { Process } from '../execution/process/types.ts'
 import { MachineName } from '../execution/types.ts'
+import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { Runtime } from './base.ts'
 import { IN_PROCESS } from './constants.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from './mixin.ts'
-import { MontyRuntime } from './python/monty/runtime.ts'
 import type { RunResult, RuntimeReach } from './types.ts'
 
 const DEC = new TextDecoder()
@@ -79,7 +79,8 @@ describe('Runtime.close', () => {
 /**
  * A runtime past the workspace's reach, on machine `box:b1`, that keeps the
  * record of the process each program it runs runs as, and holds one named
- * `hold` until `release` or its stop.
+ * `hold` until `release` or its stop; `settle` is held the same, but answers
+ * 1 once stopped, as Monty's killed run does, and `peek` reads `/data/f`.
  */
 class SeenRuntime extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
@@ -91,7 +92,7 @@ class SeenRuntime extends Runtime implements ProcessExecutorMixin {
   })
 
   constructor(override readonly reach: RuntimeReach = 'remote') {
-    super({}, ['probe', 'hold'])
+    super({}, ['probe', 'hold', 'settle', 'peek'])
   }
 
   override get machine(): MachineName {
@@ -115,7 +116,28 @@ class SeenRuntime extends Runtime implements ProcessExecutorMixin {
       })
       await Promise.race([this.released, stopped])
     }
+    if (texts[0] === 'settle') {
+      const stopped = new Promise<number>((resolve) => {
+        ctx.signal?.addEventListener('abort', () => {
+          resolve(1)
+        })
+      })
+      const exitCode = await Promise.race([this.released.then(() => 0), stopped])
+      return { stdout: new Uint8Array(), stderr: null, exitCode }
+    }
+    if (texts[0] === 'peek') await ctx.vfs?.read('/data/f')
     return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+  }
+}
+
+/** The same, as an engine in Mirage's own process, on its `in_process` machine. */
+class EngineRuntime extends SeenRuntime {
+  constructor() {
+    super('workspace')
+  }
+
+  override get machine(): MachineName {
+    return new MachineName(IN_PROCESS, this.name)
   }
 }
 
@@ -170,7 +192,47 @@ describe('Runtime.execute', () => {
   it('runs a program the workspace reaches as a process of its own', async () => {
     const [process, line] = await seen('echo $$; probe', 'workspace')
     expect([process.parent, process.program]).toEqual([Number(line), true])
-    expect(new MontyRuntime().machine).toEqual(new MachineName(IN_PROCESS, 'monty'))
+    expect(new SlowCloseRuntime().machine).toEqual(new MachineName(IN_PROCESS, 'slow-close'))
+  })
+
+  // A program's file calls are its own process's, as ps lists it, not its
+  // shell's.
+  it("names a program's process on its file calls", async () => {
+    const runtime = new SeenRuntime('workspace')
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: [runtime] },
+    )
+    try {
+      await ws.vfs.write('/data/f', 'x\n')
+      ws.vfs.records.splice(0)
+      await ws.shell('true; peek')
+      const [program] = runtime.seen
+      const reads = ws.vfs.records.filter((r) => r.path === '/data/f')
+      expect(reads.length).toBeGreaterThan(0)
+      expect(new Set(reads.map((r) => r.process))).toEqual(new Set([program?.id.toString()]))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A process search looks at an engine's in_process machine wherever it
+  // looks at Mirage's own, and at it alone when named.
+  it("finds an engine's programs in a process search", async () => {
+    const runtime = new EngineRuntime()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
+    try {
+      const done = await ws.shell(
+        'hold & sleep 0.2; pgrep hold >/dev/null && echo found; ' +
+          'pgrep --machine seen hold >/dev/null && echo named; pkill hold; wait $!; echo $?',
+      )
+      expect(DEC.decode(done.stdout)).toBe('found\nnamed\n143\n')
+      const settled = await ws.shell('settle & sleep 0.2; kill $!; wait $!; echo $?')
+      expect(DEC.decode(settled.stdout)).toBe('143\n')
+    } finally {
+      runtime.release()
+      await ws.close()
+    }
   })
 
   // A program's process stopped with its shell ends by the shell's signal.
@@ -194,21 +256,26 @@ describe('Runtime.execute', () => {
   })
 
   // A program's process stopped alone answers 128 plus the signal, and its
-  // shell goes on.
-  it("leaves the shell running when a program's process is stopped alone", async () => {
-    const runtime = new SeenRuntime()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
-    try {
-      const line = ws.shell('true; hold; echo after $?')
-      await until(() => runtime.seen.length > 0)
-      const ran = runtime.seen[0]
-      const program = ws.processTable.live().find((p) => p.record.id.pid === ran?.id.pid)
-      expect(program?.terminate(15)).toBe(true)
-      const done = await line
-      expect([done.exitCode, DEC.decode(done.stdout)]).toEqual([0, 'after 143\n'])
-    } finally {
-      runtime.release()
-      await ws.close()
-    }
-  })
+  // shell goes on, though its engine answers 1 once stopped, as Monty does.
+  it.each(['hold', 'settle'])(
+    "leaves the shell running when a program's process is stopped alone (%s)",
+    async (held) => {
+      const runtime = new SeenRuntime()
+      const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
+      try {
+        const line = ws.shell(`true; ${held}; echo after $?`)
+        await until(() => runtime.seen.length > 0)
+        const ran = runtime.seen[0]
+        const program = ws.processTable.live().find((p) => p.record.id.pid === ran?.id.pid)
+        expect(program?.terminate(15)).toBe(true)
+        const ended = await program?.join()
+        const done = await line
+        expect([ended?.exit, ended?.signal]).toEqual([143, 15])
+        expect([done.exitCode, DEC.decode(done.stdout)]).toEqual([0, 'after 143\n'])
+      } finally {
+        runtime.release()
+        await ws.close()
+      }
+    },
+  )
 })

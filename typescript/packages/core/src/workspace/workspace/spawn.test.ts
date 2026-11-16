@@ -272,10 +272,12 @@ print('done')`
   }
 }, 60000)
 
+// The cap counts the session's shell and the python run, a process of its own,
+// so the run's first subprocess is the one past it.
 it('Pyodide subprocess meets the profile process cap as BlockingIOError', async () => {
   const ws = new Workspace({}, { mode: MountMode.EXEC, machines: [new PyodideRuntime()] })
   try {
-    ws.createSession('restricted', { profile: { processes: { max: 1 } } })
+    ws.createSession('restricted', { profile: { processes: { max: 2 } } })
     const code = `import errno, subprocess
 try:
     subprocess.Popen(['true'])
