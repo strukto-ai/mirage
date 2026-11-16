@@ -152,6 +152,13 @@ impl Zone {
         }
     }
 
+    /// The offset east of UTC, in seconds, and the abbreviation in force
+    /// at instant `t`.
+    pub(crate) fn local(&self, t: i64) -> (i64, String) {
+        let fix = self.at(t);
+        (fix.east, fix.name.as_str().to_string())
+    }
+
     /// mktime with tm_isdst of -1: the instant a wall-clock reading
     /// (seconds since the epoch as if it were UTC) names, the reading
     /// nearer UTC when it occurs twice, as glibc's mktime answers it first
@@ -509,7 +516,7 @@ fn month_days(year: i64, month: i64) -> i64 {
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date, month 1 to 12.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -519,7 +526,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 /// The date of a day count: year, month 1 to 12, day.
-fn civil(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil(days: i64) -> (i64, i64, i64) {
     let z = days + 719468;
     let era = z.div_euclid(146097);
     let doe = z - era * 146097;

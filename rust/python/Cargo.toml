@@ -15,5 +15,5 @@ test = false
 doctest = false
 
 [dependencies]
-streams = { package = "mirage-rs", path = "../mirage-rs", features = ["gh"] }
+streams = { package = "mirage-rs", path = "../mirage-rs", features = ["gh", "pdf"] }
 pyo3.workspace = true

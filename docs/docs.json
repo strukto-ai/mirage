@@ -280,6 +280,8 @@
                   "home/setup/cli/hf",
                   "home/setup/cli/git",
                   "home/setup/cli/office",
+                  "home/setup/cli/pdftotext",
+                  "home/setup/cli/pdfinfo",
                   "home/setup/cli/search"
                 ]
               }
@@ -539,6 +541,8 @@
                   "python/cli/hf",
                   "python/cli/git",
                   "python/cli/office",
+                  "python/cli/pdftotext",
+                  "python/cli/pdfinfo",
                   "python/cli/search"
                 ]
               }
@@ -732,6 +736,8 @@
                   "typescript/cli/hf",
                   "typescript/cli/git",
                   "typescript/cli/office",
+                  "typescript/cli/pdftotext",
+                  "typescript/cli/pdfinfo",
                   "typescript/cli/search"
                 ]
               }

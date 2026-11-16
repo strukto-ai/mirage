@@ -210,6 +210,17 @@ pub trait Stream: Send + Sync {
         let _ = (reply, data, out);
         Err(StreamError::new("this stream makes no requests"))
     }
+
+    /// `respond` from a host that gives up the bytes it carries, so a
+    /// stream that keeps them, a file read whole, holds no second copy.
+    fn respond_owned(
+        &mut self,
+        reply: &[u8],
+        data: Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
+        self.respond(reply, &data, out)
+    }
 }
 
 /// A count over a whole input, which a 32-bit build's `usize` cannot hold,
@@ -471,6 +482,10 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         #[cfg(feature = "gh")]
         "gh" => cli::gh::open(config),
         "office" => cli::office::open(config),
+        #[cfg(feature = "pdf")]
+        "pdfinfo" => cli::pdf::open_info(config),
+        #[cfg(feature = "pdf")]
+        "pdftotext" => cli::pdf::open_text(config),
         "xxd" => xxd::open(config),
         "zip" => zip::open_zip(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),

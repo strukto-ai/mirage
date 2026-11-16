@@ -11,6 +11,9 @@ publish = false
 [features]
 # The GitHub CLI, which the Python module and its own Wasm module carry.
 gh = []
+# pdftotext and pdfinfo, which the Python module and their own Wasm module
+# carry.
+pdf = ["dep:pdf_oxide"]
 
 [dependencies]
 blake2 = { version = "0.11", default-features = false }
@@ -25,6 +28,7 @@ libm = "0.2.16"
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "encoder", "xz"] }
 md5.workspace = true
 memchr.workspace = true
+pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto"], optional = true }
 num-derive = "0.4"
 num-bigint.workspace = true
 num-traits.workspace = true
@@ -42,3 +46,11 @@ grep-matcher.workspace = true
 [[bench]]
 name = "hot_loops"
 harness = false
+
+# The 1.88 floor pdf_oxide brings makes clippy suggest let chains,
+# `is_multiple_of` and `as_chunks` across code written for 1.85, whose forms
+# stay.
+[lints.clippy]
+collapsible_if = "allow"
+manual_is_multiple_of = "allow"
+chunks_exact_to_as_chunks = "allow"

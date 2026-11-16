@@ -2236,3 +2236,24 @@ describe('readings a spec keeps', () => {
     }
   })
 })
+
+// A word the spec declares whole is that option, never a shorter declared
+// option with the rest attached as its value (pdftotext's -layout beside its
+// -l); a word nothing declares whole still attaches.
+describe('declared words', () => {
+  const spec = new CommandSpec({
+    arguments: [
+      new Argument('-l'),
+      new Argument('-layout', { action: 'store_true' }),
+      new Argument('files', { nargs: '*' }),
+    ],
+  })
+
+  it('reads a declared word as itself, never a shorter option with a value', () => {
+    const whole = parseCommand(spec, ['-layout', '-l', '2', 'a'], '/', 'pdftotext')
+    expect({ ...parseToKwargs(whole) }).toEqual({ layout: true, args_l: '2' })
+    expect(whole.texts()).toEqual(['a'])
+    const attached = parseCommand(spec, ['-l3', 'a'], '/', 'pdftotext')
+    expect({ ...parseToKwargs(attached) }).toEqual({ args_l: '3' })
+  })
+})
