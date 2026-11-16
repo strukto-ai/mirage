@@ -664,7 +664,7 @@ def _resolve_group_paths(
     typed = [
         (name, word, slot)
         for (name, word), slot in zip(flags.occurrences, slots, strict=True)
-        if isinstance(word, str) and slot not in paths
+        if isinstance(word, str)
     ]
     if cs.base_dest is not None:
         value = flags.get(cs.base_dest)
@@ -672,7 +672,7 @@ def _resolve_group_paths(
             values: list[tuple[str, int | None]] = [
                 (word, slot)
                 for name, word, slot in typed
-                if name == cs.base_dest
+                if name == cs.base_dest and slot not in paths
             ]
             scope = PathSpec.from_str_path(".", cwd=cwd)
             for word, slot in values or [(value, None)]:
@@ -689,7 +689,10 @@ def _resolve_group_paths(
         index = seen.get(name, 0)
         seen[name] = index + 1
         value_types = cs.value_types_by_dest.get(name, ("path",))
-        if value_types[index % len(value_types)] == "path":
+        if (
+            slot not in paths
+            and value_types[index % len(value_types)] == "path"
+        ):
             paths[slot] = PathSpec.from_str_path(word, cwd=base)
     for dest, kind in cs.kind_by_dest.items():
         if kind != "path" or dest not in flags or dest == cs.base_dest:
@@ -863,6 +866,13 @@ def walk(
                 leaf=node,
                 path=path,
                 verb_positions=positions,
+                value_positions=tuple(
+                    slot
+                    for (_, word), slot in zip(
+                        flags.occurrences, slots, strict=True
+                    )
+                    if argv[slot] == word
+                ),
                 group_flags=flags,
                 value_paths=paths,
                 operand_bases=tuple(bases),

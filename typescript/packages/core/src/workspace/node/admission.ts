@@ -14,8 +14,8 @@
 
 import { walk } from '../../commands/cli/walk.ts'
 import { SPECS } from '../../commands/spec/index.ts'
-import { parseCommand } from '../../commands/spec/parser.ts'
-import type { ValueType } from '../../commands/spec/types.ts'
+import { parseCommand, wordPaths } from '../../commands/spec/parser.ts'
+import { type ValueType, WordKind } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
@@ -198,8 +198,10 @@ export class Admitted implements EntryGate {
  * (`follows`, whether `LineFacts.follows` is not NONE: rm, mv, ln, stat,
  * tar ... act on the link itself, `-L` turns following back on), the same
  * one the router applies to the operands before the handler runs, so a rule
- * sees exactly the path the command will touch. A loop is left to that later
- * step to report; here the typed paths stand. Then the operand a bare
+ * sees exactly the path the command will touch. An option's file is opened
+ * whatever that policy says, so its link target always rides along:
+ * `--attach link.csv` sends the file the link names. A loop is left to that
+ * later step to report; here the typed paths stand. Then the operand a bare
  * `ls`/`find`/`du`/`tree`/`grep -r` implies, the working directory,
  * which the executor injects after the gate and which a rule on that
  * directory has to see. Last come the statement's redirect targets:
@@ -210,6 +212,23 @@ export class Admitted implements EntryGate {
  * link targets ride along whatever the command's own follow policy
  * says.
  */
+/**
+ * The paths a builtin's options name, as its grammar reads them. Each value
+ * typed on the line keeps its spelling, so a link or a `..` in it can be
+ * walked the way the command will open it; then come the values no word
+ * typed (a default, the environment). A `-` naming stdin or stdout names no
+ * file. Mirrors Python's `_option_scopes`.
+ */
+function optionScopes(name: string, args: readonly string[], cwd: string): PathSpec[] {
+  const spec = SPECS[name]
+  if (spec === undefined) return []
+  const parsed = parseCommand(spec, [...args], cwd, name)
+  const typed = wordPaths(parsed, args, cwd).filter(
+    (path, slot): path is PathSpec => path !== null && parsed.wordRoles[slot] !== WordKind.OPERAND,
+  )
+  return [...typed, ...parsed.suppliedPathValues.map((value) => toScope(value))]
+}
+
 export function policyScopes(
   name: string,
   args: readonly string[],
@@ -225,28 +244,31 @@ export function policyScopes(
   for (const p of operands) {
     if (p instanceof PathSpec) scopes.push(p)
   }
-  const spec = SPECS[name]
-  if (spec !== undefined) {
-    for (const value of parseCommand(spec, [...args], cwd, name).pathFlagValues) {
-      if (value !== '-') scopes.push(toScope(value))
+  const options = [...optionScopes(name, args, cwd), ...treeFlags]
+  const typed = new Set(scopes.map((p) => p.virtual))
+  for (const option of options) {
+    if (!typed.has(option.virtual)) {
+      typed.add(option.virtual)
+      scopes.push(option)
     }
   }
-  const typed = new Set(scopes.map((p) => p.virtual))
-  for (const item of treeFlags.filter((p) => !typed.has(p.virtual))) scopes.push(item)
   if (name.includes('/')) {
     // A slash-carrying head word is a file the line executes, and it
     // lives in argv[0], not the operands, so a path-pattern guard would
     // never see it without this row.
     scopes.unshift(toScope(resolvePath(name, cwd)))
   }
-  if (links !== null && operands.length > 0) {
-    const followed = followPaths(links, [...operands], follows, !SLASH_KEEPS_LAST.has(name))
-    const seen = new Set(scopes.map((p) => p.virtual))
-    for (const item of followed) {
-      if (item instanceof PathSpec && !seen.has(item.virtual)) {
-        seen.add(item.virtual)
-        scopes.push(item)
-      }
+  const followed: (string | PathSpec)[] = []
+  if (links !== null) {
+    if (operands.length > 0)
+      followed.push(...followPaths(links, [...operands], follows, !SLASH_KEEPS_LAST.has(name)))
+    followed.push(...followPaths(links, options, true, true))
+  }
+  const seen = new Set(scopes.map((p) => p.virtual))
+  for (const item of followed) {
+    if (item instanceof PathSpec && !seen.has(item.virtual)) {
+      seen.add(item.virtual)
+      scopes.push(item)
     }
   }
   if (implied !== null && !scopes.some((p) => p.virtual === implied.virtual)) {

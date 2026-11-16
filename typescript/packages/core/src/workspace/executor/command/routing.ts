@@ -28,7 +28,7 @@ import {
 import { type CommandSpec, WordKind } from '../../../commands/spec/types.ts'
 import { CommandWord } from '../../../policy/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
-import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
+import { parseCommand, parseToKwargs, wordPaths } from '../../../commands/spec/parser.ts'
 import { DeviceInput, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { type MountRegistry } from '../../mount/registry.ts'
@@ -139,7 +139,9 @@ export function defaultCwdOperand(
  * group options as text. So a tree's group options and its leaf's are read
  * here, walked as the run walks them: `notes --file /data/secret show` hands
  * the leaf `/data/secret`, and a rule protecting it has to see it, as it has
- * to see `pdfinfo report.pdf` typed under `/data`. Mirrors Python's
+ * to see `pdfinfo report.pdf` typed under `/data`. A value typed on the line
+ * keeps its spelling, so a link or a `..` in it can be walked; a value no
+ * word typed (a default, the environment) follows. Mirrors Python's
  * `tree_path_scopes`.
  */
 export function treePathScopes(
@@ -160,13 +162,13 @@ export function treePathScopes(
       if (item instanceof PathSpec) found.push(item)
     }
   }
+  const seen = new Set(found.map((p) => p.virtual))
+  for (const path of result.valuePaths.values()) if (!seen.has(path.virtual)) found.push(path)
   const leaf = parseCommand(result.leaf, [...result.argv], cwd, name, env, true)
-  for (const value of leaf.pathFlagValues) {
+  for (const path of wordPaths(leaf, result.argv, cwd)) if (path !== null) found.push(path)
+  for (const value of leaf.suppliedPathValues) {
     found.push(new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }))
   }
-  leaf.wordPaths.forEach((path, slot) => {
-    if (path !== null && leaf.wordRoles[slot] === WordKind.OPERAND) found.push(path)
-  })
   return found
 }
 
@@ -372,10 +374,8 @@ function parsedWords(
     ])
   }
   const parsed = parseCommand(spec, [...argv], cwd, cmdName, env, cli)
-  return parsed.wordRoles.map((role, slot) => [
-    role ?? WordKind.OPERAND,
-    parsed.wordPaths[slot] ?? null,
-  ])
+  const paths = wordPaths(parsed, argv, cwd)
+  return parsed.wordRoles.map((role, slot) => [role ?? WordKind.OPERAND, paths[slot] ?? null])
 }
 
 /**
@@ -434,9 +434,11 @@ export function commandWords(
         .map((word, i): [WordKind, PathSpec | null] => [
           result.verbPositions.includes(i)
             ? WordKind.SUBCOMMAND
-            : word.startsWith('-')
-              ? WordKind.OPTION
-              : WordKind.VALUE,
+            : result.valuePositions.includes(i)
+              ? WordKind.VALUE
+              : word.startsWith('-')
+                ? WordKind.OPTION
+                : WordKind.VALUE,
           result.valuePaths.get(i) ?? null,
         ]),
       ...parsedWords(result.leaf, argv.slice(lead), cwd, name, env, true),

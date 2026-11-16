@@ -241,6 +241,9 @@ class WalkResult:
         path (tuple[str, ...]): canonical subcommand names below the head.
         verb_positions (tuple[int, ...]): where each of ``path`` stands
             in the walked argv.
+        value_positions (tuple[int, ...]): where each group option's
+            detached value stands in the walked argv, however it is
+            spelled (``-C -x``).
         group_flags (WalkFlagBag): group flags keyed by canonical spelling.
         value_paths (Mapping[int, PathSpec]): what each typed PATH group
             value resolved to, by the walked argv position it stands in
@@ -255,6 +258,7 @@ class WalkResult:
     leaf: "CommandSpec | None" = None
     path: tuple[str, ...] = ()
     verb_positions: tuple[int, ...] = ()
+    value_positions: tuple[int, ...] = ()
     group_flags: WalkFlagBag = field(default_factory=FlagBag)
     value_paths: Mapping[int, PathSpec] = field(default_factory=dict)
     operand_bases: tuple[PathSpec, ...] = ()

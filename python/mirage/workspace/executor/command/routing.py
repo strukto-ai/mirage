@@ -29,6 +29,7 @@ from mirage.commands.spec.constants import (
     STDIN_DASH_LEADING,
 )
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.parser import word_paths
 from mirage.commands.spec.types import CommandSpec, WordKind
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.policy.types import CommandWord
@@ -193,6 +194,9 @@ def tree_path_scopes(
     here, walked as the run walks them: ``notes --file /data/secret show``
     hands the leaf ``/data/secret``, and a rule protecting it has to see
     it, as it has to see ``pdfinfo report.pdf`` typed under ``/data``.
+    A value typed on the line keeps its spelling, so a link or a ``..``
+    in it can be walked; a value no word typed (a default, the
+    environment) follows.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs and
@@ -213,6 +217,8 @@ def tree_path_scopes(
     for value in result.group_flags.values():
         items = value if isinstance(value, list) else [value]
         found += [item for item in items if isinstance(item, PathSpec)]
+    seen = {p.virtual for p in found}
+    found += [p for p in result.value_paths.values() if p.virtual not in seen]
     leaf = parse_command(
         result.leaf,
         list(result.argv),
@@ -222,13 +228,11 @@ def tree_path_scopes(
         unknown_is_operand=True,
     )
     found += [
-        PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
-        for value in leaf.path_flag_values
+        path for path in word_paths(leaf, result.argv, cwd) if path is not None
     ]
     found += [
-        path
-        for path, role in zip(leaf.word_paths, leaf.word_roles, strict=True)
-        if path is not None and role is WordKind.OPERAND
+        PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
+        for value in leaf.supplied_path_values
     ]
     return found
 
@@ -470,7 +474,7 @@ def _parsed_words(
     return [
         (role or WordKind.OPERAND, path)
         for role, path in zip(
-            parsed.word_roles, parsed.word_paths, strict=True
+            parsed.word_roles, word_paths(parsed, argv, cwd), strict=True
         )
     ]
 
@@ -549,6 +553,8 @@ def command_words(
                 (
                     WordKind.SUBCOMMAND
                     if i in result.verb_positions
+                    else WordKind.VALUE
+                    if i in result.value_positions
                     else WordKind.OPTION
                     if word.startswith("-")
                     else WordKind.VALUE,
