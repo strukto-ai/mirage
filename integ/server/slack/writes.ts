@@ -15,7 +15,22 @@
 import { DEFAULT_RUN, DEFAULT_TENANT, RUN_QUERY, TENANT_QUERY } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import { BOT_USER_ID, POST_TS_BASE, type C } from './config.ts'
-import { channelById, messageAt, messageKey, pinKey } from './store.ts'
+import {
+  addFile,
+  addMessage,
+  addPin,
+  addUpload,
+  channelById,
+  deleteMessage,
+  deletePin,
+  deleteUpload,
+  fillUpload,
+  messageAt,
+  pinAt,
+  setMessageText,
+  setReactions,
+  uploadById,
+} from './store.ts'
 import { argsOf, fail, reactionsOf } from './wire.ts'
 
 function obj(v: JsonValue | undefined): Record<string, JsonValue> {
@@ -42,7 +57,7 @@ export async function postMessage(ctx: Ctx<C>): Promise<Reply> {
   if (channel === '') return fail('channel_not_found')
   // The row has to land somewhere real, so an unknown channel is rejected
   // rather than left as an orphan message no listing can reach.
-  const row = await channelById(ctx.db, ctx.tenant, channel)
+  const row = await channelById(ctx.sql, ctx.tenant, channel)
   if (row === null) return fail('channel_not_found')
   if (!row.isMember) return fail('not_in_channel')
   const threadTs = str(payload.thread_ts) === '' ? null : str(payload.thread_ts)
@@ -59,10 +74,10 @@ export async function chatUpdate(ctx: Ctx<C>): Promise<Reply> {
   const channel = str(payload.channel)
   const ts = str(payload.ts)
   const text = str(payload.text)
-  const msg = await messageAt(ctx.db, ctx.tenant, channel, ts)
+  const msg = await messageAt(ctx.sql, ctx.tenant, channel, ts)
   if (msg === null) return fail('message_not_found')
   if (msg.userId !== BOT_USER_ID) return fail('cant_update_message')
-  await ctx.db.message.update({ where: messageKey(ctx.tenant, channel, ts), data: { text } })
+  await setMessageText(ctx.sql, ctx.tenant, channel, ts, text)
   return {
     status: 200,
     body: { ok: true, channel, ts, text, message: { text, user: BOT_USER_ID } },
@@ -74,10 +89,10 @@ export async function chatDelete(ctx: Ctx<C>): Promise<Reply> {
   const payload = obj(ctx.json())
   const channel = str(payload.channel)
   const ts = str(payload.ts)
-  const msg = await messageAt(ctx.db, ctx.tenant, channel, ts)
+  const msg = await messageAt(ctx.sql, ctx.tenant, channel, ts)
   if (msg === null) return fail('message_not_found')
   if (msg.userId !== BOT_USER_ID) return fail('cant_delete_message')
-  await ctx.db.message.delete({ where: messageKey(ctx.tenant, channel, ts) })
+  await deleteMessage(ctx.sql, ctx.tenant, channel, ts)
   return { status: 200, body: { ok: true, channel, ts } }
 }
 
@@ -90,18 +105,7 @@ async function post(
 ): Promise<string> {
   const n = ctx.minter.next('post')
   const ts = `${String(POST_TS_BASE)}.${String(n).padStart(6, '0')}`
-  await ctx.db.message.create({
-    data: {
-      tenant: ctx.tenant,
-      channelId: channel,
-      ts,
-      userId: BOT_USER_ID,
-      text,
-      threadTs,
-      reactionsJson: null,
-      seq: n,
-    },
-  })
+  await addMessage(ctx.sql, ctx.tenant, channel, ts, BOT_USER_ID, text, threadTs, n)
   return ts
 }
 
@@ -111,7 +115,7 @@ export async function reactionsAdd(ctx: Ctx<C>): Promise<Reply> {
   const channel = str(payload.channel)
   const timestamp = str(payload.timestamp)
   const name = str(payload.name)
-  const msg = await messageAt(ctx.db, ctx.tenant, channel, timestamp)
+  const msg = await messageAt(ctx.sql, ctx.tenant, channel, timestamp)
   if (msg === null) return fail('message_not_found')
   const reactions = reactionsOf(msg.reactionsJson)
   const existing = reactions.find((r) => r.name === name)
@@ -121,10 +125,7 @@ export async function reactionsAdd(ctx: Ctx<C>): Promise<Reply> {
     existing.users.push(BOT_USER_ID)
     existing.count = existing.users.length
   }
-  await ctx.db.message.update({
-    where: messageKey(ctx.tenant, channel, timestamp),
-    data: { reactionsJson: JSON.stringify(reactions) },
-  })
+  await setReactions(ctx.sql, ctx.tenant, channel, timestamp, JSON.stringify(reactions))
   return { status: 200, body: { ok: true } }
 }
 
@@ -134,27 +135,25 @@ export function pins(add: boolean) {
     const payload = obj(ctx.json())
     const channel = str(payload.channel)
     const timestamp = str(payload.timestamp)
-    if ((await messageAt(ctx.db, ctx.tenant, channel, timestamp)) === null) {
+    if ((await messageAt(ctx.sql, ctx.tenant, channel, timestamp)) === null) {
       return fail('message_not_found')
     }
-    const key = pinKey(ctx.tenant, channel, timestamp)
-    const pinned = await ctx.db.pin.findUnique({ where: key })
+    const pinned = await pinAt(ctx.sql, ctx.tenant, channel, timestamp)
     if (add) {
       if (pinned !== null) return fail('already_pinned')
-      await ctx.db.pin.create({
-        data: {
-          tenant: ctx.tenant,
-          channelId: channel,
-          ts: timestamp,
-          createdBy: BOT_USER_ID,
-          created: Math.floor(Number(timestamp)),
-          seq: ctx.minter.next('pin'),
-        },
-      })
+      await addPin(
+        ctx.sql,
+        ctx.tenant,
+        channel,
+        timestamp,
+        BOT_USER_ID,
+        Math.floor(Number(timestamp)),
+        ctx.minter.next('pin'),
+      )
       return { status: 200, body: { ok: true } }
     }
     if (pinned === null) return fail('no_pin')
-    await ctx.db.pin.delete({ where: key })
+    await deletePin(ctx.sql, ctx.tenant, channel, timestamp)
     return { status: 200, body: { ok: true } }
   }
 }
@@ -194,15 +193,15 @@ export async function getUploadUrl(ctx: Ctx<C>): Promise<Reply> {
   if (name === '' || Number.isNaN(length) || length < 0) return fail('invalid_arguments')
   const n = ctx.minter.next('file')
   const id = `FU${String(n).padStart(6, '0')}`
-  await ctx.db.upload.create({ data: { tenant: ctx.tenant, id, name, length, body: null, seq: n } })
+  await addUpload(ctx.sql, ctx.tenant, id, name, length, n)
   return { status: 200, body: { ok: true, upload_url: uploadUrl(ctx, id), file_id: id } }
 }
 
 // The upload URL itself: the raw bytes, answered the way Slack answers them.
 export async function receiveUpload(ctx: Ctx<C>): Promise<Reply> {
-  const key = { tenant_id: { tenant: ctx.tenant, id: ctx.params.id ?? '' } }
-  if ((await ctx.db.upload.findUnique({ where: key })) === null) return { status: 404 }
-  await ctx.db.upload.update({ where: key, data: { body: new Uint8Array(ctx.body) } })
+  const id = ctx.params.id ?? ''
+  if ((await uploadById(ctx.sql, ctx.tenant, id)) === null) return { status: 404 }
+  await fillUpload(ctx.sql, ctx.tenant, id, ctx.body)
   return { status: 200, body: Buffer.from(`OK - ${String(ctx.body.length)}`) }
 }
 
@@ -235,42 +234,35 @@ export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
   const entries = asked.map(obj)
   const uploads = []
   for (const entry of entries) {
-    const row = await ctx.db.upload.findUnique({
-      where: { tenant_id: { tenant: ctx.tenant, id: str(entry.id) } },
-    })
+    const row = await uploadById(ctx.sql, ctx.tenant, str(entry.id))
     if (row === null || row.body === null) return fail('file_not_found')
     uploads.push({ row, title: str(entry.title) === '' ? row.name : str(entry.title) })
   }
   const channel = str(args.channel_id)
   let ts: string | null = null
   if (channel !== '') {
-    const target = await channelById(ctx.db, ctx.tenant, channel)
+    const target = await channelById(ctx.sql, ctx.tenant, channel)
     if (target === null) return fail('channel_not_found')
     if (!target.isMember) return fail('not_in_channel')
     const threadTs = str(args.thread_ts)
     ts = await post(ctx, channel, str(args.initial_comment), threadTs === '' ? null : threadTs)
   }
   for (const { row, title } of uploads) {
-    await ctx.db.upload.delete({ where: { tenant_id: { tenant: ctx.tenant, id: row.id } } })
+    await deleteUpload(ctx.sql, ctx.tenant, row.id)
     if (ts === null) continue
     const ext = row.name.includes('.') ? row.name.slice(row.name.lastIndexOf('.') + 1) : ''
-    await ctx.db.slackFile.create({
-      data: {
-        tenant: ctx.tenant,
-        id: row.id,
-        channelId: channel,
-        messageTs: ts,
-        name: row.name,
-        title,
-        mimetype: UPLOAD_TYPES[ext.toLowerCase()] ?? 'application/octet-stream',
-        filetype: ext === '' ? 'binary' : ext.toLowerCase(),
-        size: row.body?.length ?? 0,
-        timestamp: Math.floor(Number(ts)),
-        content: '',
-        contentPath: null,
-        blob: row.body,
-        seq: row.seq,
-      },
+    await addFile(ctx.sql, ctx.tenant, {
+      id: row.id,
+      channelId: channel,
+      messageTs: ts,
+      name: row.name,
+      title,
+      mimetype: UPLOAD_TYPES[ext.toLowerCase()] ?? 'application/octet-stream',
+      filetype: ext === '' ? 'binary' : ext.toLowerCase(),
+      size: row.body?.length ?? 0,
+      timestamp: Math.floor(Number(ts)),
+      blob: row.body,
+      seq: row.seq,
     })
   }
   return {

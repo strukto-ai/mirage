@@ -47,14 +47,21 @@ import {
   moveDir,
   moveFile,
   removeAt,
+  driveFiles,
+  dropUpload,
+  growUpload,
+  monitorPayload,
   saveMonitor,
+  saveUpload,
+  uploadAt,
+  versionBytes,
   versionsOf,
   writeFile,
 } from './store.ts'
 import type { Ctx0 } from './store.ts'
 
 function base(ctx: Ctx<C>): Ctx0 {
-  return { db: ctx.db, tenant: ctx.tenant, clock: ctx.clock, minter: ctx.minter }
+  return { db: ctx.sql, tenant: ctx.tenant, clock: ctx.clock, minter: ctx.minter }
 }
 
 function stamp(ctx: Ctx<C>): string {
@@ -87,7 +94,7 @@ async function sites(): Promise<Reply> {
 }
 
 async function siteDrives(ctx: Ctx<C>): Promise<Reply> {
-  const keys = await drives(ctx.db, ctx.tenant)
+  const keys = await drives(ctx.sql, ctx.tenant)
   const all = keys.includes(DEFAULT_DRIVE) ? keys : [DEFAULT_DRIVE, ...keys]
   return { status: 200, body: { value: all.map((key) => ({ id: key, name: key })) } }
 }
@@ -109,7 +116,7 @@ async function declareDrive(ctx: Ctx<C>): Promise<Reply> {
 // A drive's own resource: its quota facet counts the bytes every stored file
 // holds against a Basic account's storage.
 async function driveInfo(ctx: Ctx<C>, drive: string): Promise<Reply> {
-  const used = await folderSize(ctx.db, ctx.tenant, drive, '')
+  const used = await folderSize(ctx.sql, ctx.tenant, drive, '')
   return {
     status: 200,
     body: {
@@ -128,7 +135,7 @@ async function driveInfo(ctx: Ctx<C>, drive: string): Promise<Reply> {
 
 async function download(ctx: Ctx<C>): Promise<Reply> {
   const row = await fileAt(
-    ctx.db,
+    ctx.sql,
     ctx.params.tenant ?? '',
     ctx.params.drive ?? '',
     ctx.params.path ?? '',
@@ -138,12 +145,10 @@ async function download(ctx: Ctx<C>): Promise<Reply> {
 }
 
 async function monitor(ctx: Ctx<C>): Promise<Reply> {
-  const row = await ctx.db.graphMonitor.findUnique({
-    where: { tenant_token: { tenant: ctx.params.tenant ?? '', token: ctx.params.token ?? '' } },
-  })
+  const payload = await monitorPayload(ctx.sql, ctx.params.tenant ?? '', ctx.params.token ?? '')
   return {
     status: 200,
-    body: row === null ? { status: 'completed' } : (JSON.parse(row.payload) as JsonValue),
+    body: payload === null ? { status: 'completed' } : (JSON.parse(payload) as JsonValue),
   }
 }
 
@@ -153,8 +158,7 @@ async function monitor(ctx: Ctx<C>): Promise<Reply> {
 async function uploadChunk(ctx: Ctx<C>): Promise<Reply> {
   const tenant = ctx.params.tenant ?? ''
   const token = ctx.params.token ?? ''
-  const key = { tenant_token: { tenant, token } }
-  const session = await ctx.db.graphUpload.findUnique({ where: key })
+  const session = await uploadAt(ctx.sql, tenant, token)
   if (session === null) return notFound()
   const buffer = new Uint8Array(session.buffer.length + ctx.body.length)
   buffer.set(session.buffer, 0)
@@ -165,24 +169,21 @@ async function uploadChunk(ctx: Ctx<C>): Promise<Reply> {
     ? Number(contentRange.split('/').slice(-1)[0])
     : buffer.length
   if (buffer.length < total) {
-    await ctx.db.graphUpload.update({
-      where: key,
-      data: { buffer: buffer as Uint8Array<ArrayBuffer> },
-    })
+    await growUpload(ctx.sql, tenant, token, buffer)
     return { status: 202, body: { nextExpectedRanges: [`${String(buffer.length)}-`] } }
   }
-  await ctx.db.graphUpload.delete({ where: key })
+  await dropUpload(ctx.sql, tenant, token)
   // Sessions default to "fail": the conflict surfaces on the final chunk,
   // exactly like real Graph.
   const ctx0 = { ...base(ctx), tenant }
   if (
-    (await fileAt(ctx.db, tenant, session.drive, session.path)) !== null &&
+    (await fileAt(ctx.sql, tenant, session.drive, session.path)) !== null &&
     session.behavior !== 'replace'
   ) {
     return nameExists()
   }
   const row = await writeFile(ctx0, session.drive, session.path, buffer, true)
-  return { status: 201, body: await fileItem(ctx.db, tenant, ctx.url.origin, row) }
+  return { status: 201, body: await fileItem(ctx.sql, tenant, ctx.url.origin, row) }
 }
 
 async function createUpload(ctx: Ctx<C>, drive: string, path: string): Promise<Reply> {
@@ -192,16 +193,13 @@ async function createUpload(ctx: Ctx<C>, drive: string, path: string): Promise<R
   // The token must be fragment- and path-safe: a "#" would be stripped by the
   // HTTP client as a URL fragment.
   const token = `u${String(n)}`
-  await ctx.db.graphUpload.create({
-    data: {
-      tenant: ctx.tenant,
-      token,
-      drive,
-      path: norm(path),
-      buffer: new Uint8Array(0) as Uint8Array<ArrayBuffer>,
-      behavior: strOf(item['@microsoft.graph.conflictBehavior'], 'fail'),
-      seq: n,
-    },
+  await saveUpload(base(ctx), {
+    token,
+    drive,
+    path: norm(path),
+    buffer: new Uint8Array(0),
+    behavior: strOf(item['@microsoft.graph.conflictBehavior'], 'fail'),
+    seq: n,
   })
   return {
     status: 200,
@@ -211,33 +209,33 @@ async function createUpload(ctx: Ctx<C>, drive: string, path: string): Promise<R
 
 async function mkdir(ctx: Ctx<C>, drive: string, parent: string): Promise<Reply> {
   const p = norm(parent)
-  if (p !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
+  if (p !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
   const body = objOf(ctx.json())
   const name = strOf(body.name)
   const behavior = strOf(body['@microsoft.graph.conflictBehavior'], 'fail')
   let target = joinPath(p, name)
-  if (!(await conflictFree(ctx.db, ctx.tenant, drive, target))) {
-    if (behavior === 'replace' && (await dirAt(ctx.db, ctx.tenant, drive, target))) {
+  if (!(await conflictFree(ctx.sql, ctx.tenant, drive, target))) {
+    if (behavior === 'replace' && (await dirAt(ctx.sql, ctx.tenant, drive, target))) {
       // Real Graph returns the existing folder; children survive.
-      return { status: 200, body: await folderItem(ctx.db, ctx.tenant, drive, target, stamp(ctx)) }
+      return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, stamp(ctx)) }
     }
     if (behavior !== 'rename') return nameExists()
     // Real Graph inserts the counter before a file extension ("doc 1.pptx");
     // only folders are renamed here, where the plain " N" suffix matches.
     let n = 1
-    while (!(await conflictFree(ctx.db, ctx.tenant, drive, joinPath(p, `${name} ${String(n)}`)))) {
+    while (!(await conflictFree(ctx.sql, ctx.tenant, drive, joinPath(p, `${name} ${String(n)}`)))) {
       n += 1
     }
     target = joinPath(p, `${name} ${String(n)}`)
   }
   await addDir(base(ctx), drive, target)
-  return { status: 200, body: await folderItem(ctx.db, ctx.tenant, drive, target, stamp(ctx)) }
+  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, stamp(ctx)) }
 }
 
 async function patchItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
-  const isFile = (await fileAt(ctx.db, ctx.tenant, drive, p)) !== null
-  if (!isFile && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
+  const isFile = (await fileAt(ctx.sql, ctx.tenant, drive, p)) !== null
+  if (!isFile && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
   const body = objOf(ctx.json())
   const name = strOf(body.name, baseName(p))
   const ref = objOf(body.parentReference)
@@ -245,43 +243,45 @@ async function patchItem(ctx: Ctx<C>, drive: string, item: string): Promise<Repl
   const dest = joinPath(parent, name)
   if (dest !== p) {
     const behavior = conflictBehavior(ctx)
-    const free = await conflictFree(ctx.db, ctx.tenant, drive, dest)
+    const free = await conflictFree(ctx.sql, ctx.tenant, drive, dest)
     const replaceable =
-      behavior === 'replace' && isFile && (await fileAt(ctx.db, ctx.tenant, drive, dest)) !== null
+      behavior === 'replace' && isFile && (await fileAt(ctx.sql, ctx.tenant, drive, dest)) !== null
     if (!free && !replaceable) return nameExists()
     if (!free) await removeAt(base(ctx), drive, dest)
   }
   if (isFile) {
     const moved = await moveFile(base(ctx), drive, p, dest)
     if (moved === null) return notFound()
-    return { status: 200, body: await fileItem(ctx.db, ctx.tenant, ctx.url.origin, moved) }
+    return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, ctx.url.origin, moved) }
   }
   await moveDir(base(ctx), drive, p, dest)
-  return { status: 200, body: await folderItem(ctx.db, ctx.tenant, drive, dest, stamp(ctx)) }
+  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, dest, stamp(ctx)) }
 }
 
 async function copyItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
-  const src = await fileAt(ctx.db, ctx.tenant, drive, p)
+  const src = await fileAt(ctx.sql, ctx.tenant, drive, p)
   const isFile = src !== null
-  if (!isFile && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
+  if (!isFile && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
   const body = objOf(ctx.json())
   const name = strOf(body.name, baseName(p))
   const ref = objOf(body.parentReference)
   const named = strOf(ref.driveId) || (refDrive(strOf(ref.path)) ?? '')
   // A destination drive the account does not have falls back to the source
   // drive, which is what the fake this replaces did: `drives.get(key, g)`.
-  const destDrive = named === '' || !(await hasDrive(ctx.db, ctx.tenant, named)) ? drive : named
+  const destDrive = named === '' || !(await hasDrive(ctx.sql, ctx.tenant, named)) ? drive : named
   const dest = joinPath(refParent(strOf(ref.path)), name)
   // conflictBehavior on copy models OneDrive for Business / SharePoint; real
   // consumer OneDrive rejects the parameter (the client never sends it and
   // resolves conflicts itself).
   const behavior = conflictBehavior(ctx)
-  const free = await conflictFree(ctx.db, ctx.tenant, destDrive, dest)
+  const free = await conflictFree(ctx.sql, ctx.tenant, destDrive, dest)
   // replace only applies to file-onto-file; a folder conflict always fails,
   // reported through the monitor like real Graph.
   const replaceable =
-    behavior === 'replace' && isFile && (await fileAt(ctx.db, ctx.tenant, destDrive, dest)) !== null
+    behavior === 'replace' &&
+    isFile &&
+    (await fileAt(ctx.sql, ctx.tenant, destDrive, dest)) !== null
   if (!free && !replaceable) {
     const failed = await saveMonitor(base(ctx), {
       status: 'failed',
@@ -300,8 +300,8 @@ async function copyItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply
 
 async function childrenOf(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
-  if (p !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
-  const value = await childItems(ctx.db, ctx.tenant, ctx.url.origin, drive, p, stamp(ctx))
+  if (p !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
+  const value = await childItems(ctx.sql, ctx.tenant, ctx.url.origin, drive, p, stamp(ctx))
   return { status: 200, body: { value } }
 }
 
@@ -311,13 +311,9 @@ async function versionContent(
   item: string,
   versionId: string,
 ): Promise<Reply> {
-  const row = await ctx.db.graphVersion.findUnique({
-    where: {
-      tenant_drive_path_versionId: { tenant: ctx.tenant, drive, path: norm(item), versionId },
-    },
-  })
-  if (row === null) return notFound()
-  return rangeReply(ctx.headers, row.content)
+  const content = await versionBytes(ctx.sql, ctx.tenant, drive, item, versionId)
+  if (content === null) return notFound()
+  return rangeReply(ctx.headers, content)
 }
 
 const DEC = new TextDecoder()
@@ -337,13 +333,13 @@ async function searchItems(
   action: string,
 ): Promise<Reply> {
   const p = norm(item)
-  if (p !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, p))) return notFound()
+  if (p !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
   const quoted = /^search\(q='(.*)'\)$/s.exec(action)?.[1]
   if (quoted === undefined) {
     return { status: 400, body: { error: { code: 'invalidRequest', message: 'bad search' } } }
   }
   const text = quoted.replaceAll("''", "'").toLowerCase()
-  const rows = await ctx.db.graphFile.findMany({ where: { tenant: ctx.tenant, drive } })
+  const rows = await driveFiles(ctx.sql, ctx.tenant, drive)
   const value: JsonValue[] = []
   for (const row of rows) {
     if (p !== '' && !row.path.startsWith(`${p}/`)) continue
@@ -367,16 +363,16 @@ async function searchItems(
 // root lists only the changes under its folder.
 async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply> {
   const scope = norm(folder)
-  if (scope !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, scope))) return notFound()
+  if (scope !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, scope))) return notFound()
   const token = ctx.query.get('token')
-  const last = await lastChange(ctx.db, ctx.tenant, drive)
+  const last = await lastChange(ctx.sql, ctx.tenant, drive)
   const link = `${ctx.url.origin}${ctx.url.pathname}?token=${String(last)}`
   if (token === 'latest') return { status: 200, body: { value: [], '@odata.deltaLink': link } }
   if (token === null) {
     return {
       status: 200,
       body: {
-        value: await scopeItems(ctx.db, ctx.tenant, ctx.url.origin, drive, scope, stamp(ctx)),
+        value: await scopeItems(ctx.sql, ctx.tenant, ctx.url.origin, drive, scope, stamp(ctx)),
         '@odata.deltaLink': link,
       },
     }
@@ -386,7 +382,7 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
     return { status: 410, body: { error: { code: 'resyncRequired', message: 'Resync required' } } }
   }
   const latest = new Map<string, string>()
-  for (const row of await changesAfter(ctx.db, ctx.tenant, drive, after)) {
+  for (const row of await changesAfter(ctx.sql, ctx.tenant, drive, after)) {
     if (scope !== '' && row.path !== scope && !row.path.startsWith(`${scope}/`)) continue
     latest.delete(row.itemId)
     latest.set(row.itemId, row.path)
@@ -401,17 +397,17 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
 
 // An item by the id the renderer gave it, null when it is gone.
 async function itemById(ctx: Ctx<C>, drive: string, id: string): Promise<JsonValue | null> {
-  const file = await fileById(ctx.db, ctx.tenant, drive, id)
-  if (file !== null) return fileItem(ctx.db, ctx.tenant, ctx.url.origin, file)
+  const file = await fileById(ctx.sql, ctx.tenant, drive, id)
+  if (file !== null) return fileItem(ctx.sql, ctx.tenant, ctx.url.origin, file)
   let path: string | null = null
   if (id === folderId(drive, '')) path = ''
   else if (id.startsWith(`${drive}:folder:`)) path = id.slice(`${drive}:folder:`.length)
-  if (path === null || !(await dirAt(ctx.db, ctx.tenant, drive, path))) return null
-  return folderItem(ctx.db, ctx.tenant, drive, path, stamp(ctx))
+  if (path === null || !(await dirAt(ctx.sql, ctx.tenant, drive, path))) return null
+  return folderItem(ctx.sql, ctx.tenant, drive, path, stamp(ctx))
 }
 
 async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string): Promise<Reply> {
-  if (!(await hasDrive(ctx.db, ctx.tenant, drive))) return notFound()
+  if (!(await hasDrive(ctx.sql, ctx.tenant, drive))) return notFound()
   if (method === 'GET' && rest === 'root/delta') return delta(ctx, drive, '')
   if (method === 'GET' && rest.startsWith('items/')) {
     const found = await itemById(ctx, drive, decodeURIComponent(rest.slice('items/'.length)))
@@ -425,9 +421,9 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
   if (action === 'content') {
     if (method === 'PUT') {
       const row = await writeFile(base(ctx), drive, item, new Uint8Array(ctx.body), true)
-      return { status: 200, body: await fileItem(ctx.db, ctx.tenant, ctx.url.origin, row) }
+      return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, ctx.url.origin, row) }
     }
-    const row = await fileAt(ctx.db, ctx.tenant, drive, item)
+    const row = await fileAt(ctx.sql, ctx.tenant, drive, item)
     if (row === null) return notFound()
     return rangeReply(ctx.headers, row.content)
   }
@@ -439,8 +435,8 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
   }
   if (action.endsWith('/restoreVersion')) return { status: 204 }
   if (action === 'versions') {
-    if ((await fileAt(ctx.db, ctx.tenant, drive, item)) === null) return notFound()
-    return { status: 200, body: { value: await versionsOf(ctx.db, ctx.tenant, drive, item) } }
+    if ((await fileAt(ctx.sql, ctx.tenant, drive, item)) === null) return notFound()
+    return { status: 200, body: { value: await versionsOf(ctx.sql, ctx.tenant, drive, item) } }
   }
   if (method === 'DELETE') {
     if (item === '') {
@@ -452,7 +448,7 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
     return (await removeAt(base(ctx), drive, item)) ? { status: 204 } : notFound()
   }
   if (method === 'PATCH') return patchItem(ctx, drive, item)
-  const found = await itemAt(ctx.db, ctx.tenant, ctx.url.origin, drive, item, stamp(ctx))
+  const found = await itemAt(ctx.sql, ctx.tenant, ctx.url.origin, drive, item, stamp(ctx))
   return found === null ? notFound() : { status: 200, body: found }
 }
 

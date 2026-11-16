@@ -12,25 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/airtable/index.js'
-import { tenantWhere } from '../kit/typescript/index.ts'
-import { config } from './config.ts'
-import type { C } from './config.ts'
+import type { AirtableWebhook } from '../../generated/airtable/index.js'
+import { all, exec, one } from '../kit/typescript/index.ts'
+import type { Db } from './store.ts'
 import type { JsonObject } from './wire.ts'
 
-const KIND = config.tenantKind
+export const WEBHOOK =
+  'SELECT tenant, id, baseId, spec, url, expirationTime, seq FROM AirtableWebhook'
 
-export function hooksOf(db: C, tenant: string, baseId: string) {
-  return db.airtableWebhook.findMany({
-    where: { ...tenantWhere<Prisma.AirtableWebhookWhereInput>(tenant, KIND), baseId },
-    orderBy: { seq: 'asc' },
-  })
+export async function hooksOf(db: Db, tenant: string, baseId: string): Promise<AirtableWebhook[]> {
+  return all<AirtableWebhook>(
+    db,
+    `${WEBHOOK} WHERE tenant = ? AND baseId = ? ORDER BY seq`,
+    tenant,
+    baseId,
+  )
 }
 
-export async function payloadCount(db: C, tenant: string, webhookId: string): Promise<number> {
-  return db.airtableWebhookPayload.count({
-    where: { ...tenantWhere<Prisma.AirtableWebhookPayloadWhereInput>(tenant, KIND), webhookId },
-  })
+export async function payloadCount(db: Db, tenant: string, webhookId: string): Promise<number> {
+  const found = one<{ n: number }>(
+    db,
+    'SELECT COUNT(*) AS n FROM AirtableWebhookPayload WHERE tenant = ? AND webhookId = ?',
+    tenant,
+    webhookId,
+  )
+  return found?.n ?? 0
 }
 
 // What one write did to each table: its record changes in the shape a payload
@@ -40,7 +46,7 @@ export type TableChanges = Record<string, JsonObject>
 // Append one payload per webhook on the base for a write that changed records,
 // numbered after the base's last write.
 export async function notePayloads(
-  db: C,
+  db: Db,
   tenant: string,
   baseId: string,
   stamp: string,
@@ -49,14 +55,14 @@ export async function notePayloads(
   if (Object.keys(changes).length === 0) return
   const hooks = await hooksOf(db, tenant, baseId)
   if (hooks.length === 0) return
-  const last = await db.airtableWebhookPayload.aggregate({
-    where: {
-      ...tenantWhere<Prisma.AirtableWebhookPayloadWhereInput>(tenant, KIND),
-      webhookId: { in: hooks.map((h) => h.id) },
-    },
-    _max: { transaction: true },
-  })
-  const transaction = (last._max.transaction ?? 0) + 1
+  const last = one<{ n: number | null }>(
+    db,
+    'SELECT MAX("transaction") AS n FROM AirtableWebhookPayload WHERE tenant = ? AND ' +
+      'webhookId IN (SELECT value FROM json_each(?))',
+    tenant,
+    JSON.stringify(hooks.map((h) => h.id)),
+  )
+  const transaction = (last?.n ?? 0) + 1
   const body = JSON.stringify({
     timestamp: stamp,
     baseTransactionNumber: transaction,
@@ -66,8 +72,15 @@ export async function notePayloads(
   })
   for (const hook of hooks) {
     const cursor = (await payloadCount(db, tenant, hook.id)) + 1
-    await db.airtableWebhookPayload.create({
-      data: { tenant, webhookId: hook.id, cursor, transaction, body },
-    })
+    exec(
+      db,
+      'INSERT INTO AirtableWebhookPayload (tenant, webhookId, cursor, "transaction", body) ' +
+        'VALUES (?, ?, ?, ?, ?)',
+      tenant,
+      hook.id,
+      cursor,
+      transaction,
+      body,
+    )
   }
 }

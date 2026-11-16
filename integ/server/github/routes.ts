@@ -42,7 +42,7 @@ function looksTextual(data: Buffer): boolean {
 }
 
 async function rawContent(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  const files = await treeOf(ctx.db, ctx.tenant, repo, param(ctx, 'ref'))
+  const files = await treeOf(ctx.sql, ctx.tenant, repo, param(ctx, 'ref'))
   if (files === null) return fail(404, 'Not Found')
   const data = files.get(stripSlash(param(ctx, 'path')))
   if (data === undefined) return fail(404, 'Not Found')

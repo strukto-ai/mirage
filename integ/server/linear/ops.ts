@@ -12,13 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/linear/index.js'
-import type { Comment, Issue, IssueRelation, WorkflowState } from '../../generated/linear/index.js'
-import { idWhere, tenantWhere } from '../kit/typescript/tenant.ts'
+import type { SQLInputValue } from 'node:sqlite'
+import type {
+  Comment,
+  Cycle,
+  Document,
+  Issue,
+  IssueRelation,
+  Label,
+  Project,
+  Team,
+  WorkflowState,
+} from '../../generated/linear/index.js'
+import { all, exec, one } from '../kit/typescript/sql.ts'
 import { plainWords } from '../kit/typescript/words.ts'
 import type { Ctx } from '../kit/typescript/route.ts'
 import type { JsonValue, Reply } from '../kit/typescript/types.ts'
-import { ISSUE_URL_BASE, WRITE_STAMP, config } from './config.ts'
+import { ISSUE_URL_BASE, WRITE_STAMP } from './config.ts'
 import type { C } from './config.ts'
 import {
   commentNode,
@@ -38,13 +48,24 @@ import { pyDictOr, pyGe, pyInt, pyJoinPart, pyKey, pyList, pyStrOr, pyTruthy } f
 import { isNaturalInt, isNaturalString, readRaw, stage, writeRaw } from './raw.ts'
 import type { RawMap } from './raw.ts'
 import {
+  COMMENT,
+  CYCLE,
+  DOCUMENT,
+  ISSUE,
+  LABEL,
+  PROJECT,
+  RELATION,
+  STATE,
+  TEAM,
   byTeamThenSeq,
+  changeOne,
   labelsOf,
   loadLabelLinks,
   loadRefs,
   loadTeams,
   nextIssueSeq,
   teamSeqOf,
+  usersWhere,
   writeLabelLinks,
 } from './world.ts'
 
@@ -52,8 +73,6 @@ import {
 // variables of `[1]` answered 200 there and 500 in every other op; opening the
 // dict inside each op that reads one keeps that.
 export type Op = (ctx: Ctx<C>, vars: JsonValue | undefined) => Promise<Reply>
-
-const SEQ_ASC = { seq: 'asc' } as const
 
 export function dataReply(payload: Record<string, JsonValue>): Reply {
   return { status: 200, body: { data: payload } }
@@ -96,11 +115,21 @@ export async function applyLabels(
   const plain = plainLabels(labelIds)
   if (plain === null) raw.labelIds = labelIds
   else delete raw.labelIds
-  await writeLabelLinks(ctx.db, ctx.tenant, issueId, plain ?? [])
+  await writeLabelLinks(ctx.sql, ctx.tenant, issueId, plain ?? [])
 }
 
-function scope(ctx: Ctx<C>): Record<string, JsonValue> {
-  return tenantWhere(ctx.tenant, config.tenantKind)
+// The issues `where` selects within the tenant.
+function issuesWhere(ctx: Ctx<C>, where: string, ...params: SQLInputValue[]): Issue[] {
+  return all<Issue>(ctx.sql, `${ISSUE} WHERE tenant = ? AND ${where}`, ctx.tenant, ...params)
+}
+
+function relationsWhere(ctx: Ctx<C>, where: string, ...params: SQLInputValue[]): IssueRelation[] {
+  return all<IssueRelation>(
+    ctx.sql,
+    `${RELATION} WHERE tenant = ? AND ${where}`,
+    ctx.tenant,
+    ...params,
+  )
 }
 
 // A missing teamId is not an error in this fake: the old one indexed a dict
@@ -111,8 +140,12 @@ function teamIdOf(vars: JsonValue | undefined): string {
 }
 
 export const teams: Op = async (ctx) => {
-  const rows = await loadTeams(ctx.db, ctx.tenant)
-  const states = await ctx.db.workflowState.findMany({ where: scope(ctx), orderBy: SEQ_ASC })
+  const rows = await loadTeams(ctx.sql, ctx.tenant)
+  const states = all<WorkflowState>(
+    ctx.sql,
+    `${STATE} WHERE tenant = ? ORDER BY seq ASC`,
+    ctx.tenant,
+  )
   const byTeam = new Map<string, WorkflowState[]>()
   for (const state of states) {
     const live = byTeam.get(state.teamId)
@@ -123,10 +156,12 @@ export const teams: Op = async (ctx) => {
 }
 
 export const teamMembers: Op = async (ctx, vars) => {
-  const rows = await ctx.db.user.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
-    orderBy: SEQ_ASC,
-  })
+  const rows = usersWhere(
+    ctx.sql,
+    'tenant = ? AND teamId = ? ORDER BY seq ASC',
+    ctx.tenant,
+    teamIdOf(vars),
+  )
   return dataReply({ team: { members: connection(rows.map(userNode)) } })
 }
 
@@ -139,75 +174,84 @@ function projectIdsOf(vars: JsonValue | undefined): string[] | null {
 
 export const teamIssues: Op = async (ctx, vars) => {
   const projects = projectIdsOf(vars)
-  const rows = await ctx.db.issue.findMany({
-    where: {
-      ...scope(ctx),
-      teamId: teamIdOf(vars),
-      ...(projects === null ? {} : { projectId: { in: projects } }),
-    },
-    orderBy: SEQ_ASC,
-  })
-  const refs = await loadRefs(ctx.db, ctx.tenant)
-  const links = await loadLabelLinks(ctx.db, ctx.tenant)
+  const rows =
+    projects === null
+      ? issuesWhere(ctx, 'teamId = ? ORDER BY seq ASC', teamIdOf(vars))
+      : issuesWhere(
+          ctx,
+          'teamId = ? AND projectId IN (SELECT value FROM json_each(?)) ORDER BY seq ASC',
+          teamIdOf(vars),
+          JSON.stringify(projects),
+        )
+  const refs = await loadRefs(ctx.sql, ctx.tenant)
+  const links = await loadLabelLinks(ctx.sql, ctx.tenant)
   return dataReply({
     team: { issues: connection(rows.map((i) => issueNode(refs, i, labelsOf(links, i.id)))) },
   })
 }
 
 export const teamProjects: Op = async (ctx, vars) => {
-  const rows = await ctx.db.project.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
-    orderBy: SEQ_ASC,
-  })
+  const rows = all<Project>(
+    ctx.sql,
+    `${PROJECT} WHERE tenant = ? AND teamId = ? ORDER BY seq ASC`,
+    ctx.tenant,
+    teamIdOf(vars),
+  )
   return dataReply({ team: { projects: connection(rows.map(projectNode)) } })
 }
 
 export const teamCycles: Op = async (ctx, vars) => {
-  const rows = await ctx.db.cycle.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
-    orderBy: SEQ_ASC,
-  })
+  const rows = all<Cycle>(
+    ctx.sql,
+    `${CYCLE} WHERE tenant = ? AND teamId = ? ORDER BY seq ASC`,
+    ctx.tenant,
+    teamIdOf(vars),
+  )
   return dataReply({ team: { cycles: connection(rows.map(cycleNode)) } })
 }
 
 export const teamLabels: Op = async (ctx, vars) => {
-  const rows = await ctx.db.label.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
-    orderBy: SEQ_ASC,
-  })
+  const rows = all<Label>(
+    ctx.sql,
+    `${LABEL} WHERE tenant = ? AND teamId = ? ORDER BY seq ASC`,
+    ctx.tenant,
+    teamIdOf(vars),
+  )
   return dataReply({ team: { labels: connection(rows.map(labelNode)) } })
 }
 
 export const teamDocuments: Op = async (ctx, vars) => {
-  const rows = await ctx.db.document.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
-    orderBy: SEQ_ASC,
-  })
-  const refs = await loadRefs(ctx.db, ctx.tenant)
+  const rows = all<Document>(
+    ctx.sql,
+    `${DOCUMENT} WHERE tenant = ? AND teamId = ? ORDER BY seq ASC`,
+    ctx.tenant,
+    teamIdOf(vars),
+  )
+  const refs = await loadRefs(ctx.sql, ctx.tenant)
   return dataReply({ documents: connection(rows.map((d) => documentNode(refs, d))) })
 }
 
 async function issueById(ctx: Ctx<C>, id: string | null): Promise<Issue | null> {
   if (id === null) return null
-  return ctx.db.issue.findFirst({
-    where: { ...scope(ctx), OR: [{ id }, { identifier: id }] },
-  })
+  return issuesWhere(ctx, '(id = ? OR identifier = ?) LIMIT 1', id, id)[0] ?? null
 }
 
 export const issue: Op = async (ctx, vars) => {
   const row = await issueById(ctx, idOf(pyDictOr(vars).issueId ?? pyDictOr(vars).id))
   if (row === null) return dataReply({ issue: null })
-  const refs = await loadRefs(ctx.db, ctx.tenant)
-  const links = await loadLabelLinks(ctx.db, ctx.tenant)
+  const refs = await loadRefs(ctx.sql, ctx.tenant)
+  const links = await loadLabelLinks(ctx.sql, ctx.tenant)
   return dataReply({ issue: issueNode(refs, row, labelsOf(links, row.id)) })
 }
 
 export const issueComments: Op = async (ctx, vars) => {
-  const rows = await ctx.db.comment.findMany({
-    where: { ...scope(ctx), issueId: idOf(pyDictOr(vars).issueId) ?? '' },
-    orderBy: SEQ_ASC,
-  })
-  const refs = await loadRefs(ctx.db, ctx.tenant)
+  const rows = all<Comment>(
+    ctx.sql,
+    `${COMMENT} WHERE tenant = ? AND issueId = ? ORDER BY seq ASC`,
+    ctx.tenant,
+    idOf(pyDictOr(vars).issueId) ?? '',
+  )
+  const refs = await loadRefs(ctx.sql, ctx.tenant)
   return dataReply({ issue: { comments: connection(rows.map((c) => commentNode(refs, c))) } })
 }
 
@@ -219,12 +263,20 @@ export const issueLookup: Op = async (ctx, vars) => {
   const wanted = v.number
   const nodes: JsonValue[] = []
   if (teamKey !== null && wanted !== undefined && wanted !== null) {
-    const team = await ctx.db.team.findFirst({ where: { ...scope(ctx), key: teamKey } })
+    const team = one<Team>(
+      ctx.sql,
+      `${TEAM} WHERE tenant = ? AND "key" = ? LIMIT 1`,
+      ctx.tenant,
+      teamKey,
+    )
     if (team !== null) {
-      const row = await ctx.db.issue.findFirst({
-        where: { ...scope(ctx), teamId: team.id, number: pyInt(wanted) },
-        orderBy: SEQ_ASC,
-      })
+      const row =
+        issuesWhere(
+          ctx,
+          'teamId = ? AND number = ? ORDER BY seq ASC LIMIT 1',
+          team.id,
+          pyInt(wanted),
+        )[0] ?? null
       if (row !== null) nodes.push({ id: row.id, identifier: row.identifier })
     }
   }
@@ -233,9 +285,9 @@ export const issueLookup: Op = async (ctx, vars) => {
 
 export const userLookup: Op = async (ctx, vars) => {
   const email = pyDictOr(vars).email ?? null
-  const teams = await loadTeams(ctx.db, ctx.tenant)
+  const teams = await loadTeams(ctx.sql, ctx.tenant)
   const rows = byTeamThenSeq(
-    await ctx.db.user.findMany({ where: scope(ctx), orderBy: SEQ_ASC }),
+    usersWhere(ctx.sql, 'tenant = ? ORDER BY seq ASC', ctx.tenant),
     teamSeqOf(teams),
   )
   const nodes: JsonValue[] = []
@@ -263,8 +315,8 @@ export const issueSearch: Op = async (ctx, vars) => {
   const v = pyDictOr(vars)
   const term = pyStrOr(v.term).toLowerCase()
   const limit = pyTruthy(v.first) ? (v.first as JsonValue) : 50
-  const rows = await ctx.db.issue.findMany({ where: scope(ctx), orderBy: SEQ_ASC })
-  const refs = await loadRefs(ctx.db, ctx.tenant)
+  const rows = all<Issue>(ctx.sql, `${ISSUE} WHERE tenant = ? ORDER BY seq ASC`, ctx.tenant)
+  const refs = await loadRefs(ctx.sql, ctx.tenant)
   const nodes: JsonValue[] = []
   for (const row of rows) {
     const haystack = [
@@ -292,9 +344,7 @@ export const issueCreate: Op = async (ctx, vars) => {
   const team =
     teamId === null
       ? null
-      : await ctx.db.team.findUnique({
-          where: idWhere<Prisma.TeamWhereUniqueInput>(ctx.tenant, teamId, config.tenantKind),
-        })
+      : one<Team>(ctx.sql, `${TEAM} WHERE tenant = ? AND id = ?`, ctx.tenant, teamId)
   if (team === null) return errorsReply('team not found')
   // Every field is read before the first write, because a value the old fake
   // could not use raised before it appended anything. teamId is the ONLY one
@@ -319,35 +369,39 @@ export const issueCreate: Op = async (ctx, vars) => {
   const id = ctx.minter.mint('iss')
   // COALESCE(MAX(number), 0) + 1: the aggregate over a team with no issues at
   // all is null, not 0, and the first issue on an empty team is PLAT-1.
-  const top = await ctx.db.issue.aggregate({
-    where: { ...scope(ctx), teamId: team.id },
-    _max: { number: true },
-  })
-  const number = (top._max.number ?? 0) + 1
+  const top = one<{ n: number | null }>(
+    ctx.sql,
+    'SELECT MAX(number) AS n FROM Issue WHERE tenant = ? AND teamId = ?',
+    ctx.tenant,
+    team.id,
+  )
+  const number = (top?.n ?? 0) + 1
   const identifier = `${team.key}-${String(number)}`
-  await ctx.db.issue.create({
-    data: {
-      tenant: ctx.tenant,
-      id,
-      teamId: team.id,
-      identifier,
-      number,
-      title: title as string | null,
-      description: description as string | null,
-      priority: priority as number | null,
-      raw: writeRaw(raw),
-      url: `${ISSUE_URL_BASE}/${identifier}`,
-      createdAt: WRITE_STAMP,
-      updatedAt: WRITE_STAMP,
-      stateId: refIds.stateId ?? null,
-      projectId: refIds.projectId ?? null,
-      cycleId: refIds.cycleId ?? null,
-      assigneeId: refIds.assigneeId ?? null,
-      creatorId: refIds.creatorId ?? null,
-      seq: await nextIssueSeq(ctx.db, ctx.tenant),
-    },
-  })
-  await writeLabelLinks(ctx.db, ctx.tenant, id, plainLabels(labelIds) ?? [])
+  exec(
+    ctx.sql,
+    'INSERT INTO Issue (tenant, id, teamId, identifier, number, title, description, priority, ' +
+      'raw, url, createdAt, updatedAt, stateId, projectId, cycleId, assigneeId, creatorId, seq) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ctx.tenant,
+    id,
+    team.id,
+    identifier,
+    number,
+    title as string | null,
+    description as string | null,
+    priority as number | null,
+    writeRaw(raw),
+    `${ISSUE_URL_BASE}/${identifier}`,
+    WRITE_STAMP,
+    WRITE_STAMP,
+    refIds.stateId ?? null,
+    refIds.projectId ?? null,
+    refIds.cycleId ?? null,
+    refIds.assigneeId ?? null,
+    refIds.creatorId ?? null,
+    await nextIssueSeq(ctx.sql, ctx.tenant),
+  )
+  await writeLabelLinks(ctx.sql, ctx.tenant, id, plainLabels(labelIds) ?? [])
   return dataReply({ issueCreate: { success: true, issue: { id, identifier } } })
 }
 
@@ -370,25 +424,34 @@ export const issueUpdate: Op = async (ctx, vars) => {
   const input = pyDictOr(v.input)
   const requestedState =
     typeof input.stateId === 'string'
-      ? await ctx.db.workflowState.findFirst({
-          where: { ...scope(ctx), id: input.stateId, type: 'duplicate' },
-        })
+      ? one<WorkflowState>(
+          ctx.sql,
+          `${STATE} WHERE tenant = ? AND id = ? AND type = ? LIMIT 1`,
+          ctx.tenant,
+          input.stateId,
+          'duplicate',
+        )
       : null
   if (
     requestedState !== null &&
-    (await ctx.db.issueRelation.count({
-      where: { ...scope(ctx), issueId: row.id, type: 'duplicate' },
-    })) === 0
+    (one<{ n: number }>(
+      ctx.sql,
+      'SELECT COUNT(*) AS n FROM IssueRelation WHERE tenant = ? AND issueId = ? AND type = ?',
+      ctx.tenant,
+      row.id,
+      'duplicate',
+    )?.n ?? 0) === 0
   )
     return errorsReply('missing duplicate relation')
   const raw = readRaw(row.raw)
-  const data: Prisma.IssueUncheckedUpdateInput = { updatedAt: WRITE_STAMP }
+  const sets = ['updatedAt = ?']
+  const values: SQLInputValue[] = [WRITE_STAMP]
   for (const key of UPDATABLE) {
     if (!(key in input)) continue
     const natural = key === 'priority' ? isNaturalInt : isNaturalString
     const staged = stage(raw, key, input[key] ?? null, natural)
-    if (key === 'priority') data.priority = staged as number | null
-    else data[key] = staged as string | null
+    sets.push(`${key} = ?`)
+    values.push(key === 'priority' ? (staged as number | null) : (staged as string | null))
   }
   // The old fake assigned labelIds verbatim rather than list()-ing it, so an
   // update may leave a value that is not a list at all behind for the render
@@ -398,14 +461,18 @@ export const issueUpdate: Op = async (ctx, vars) => {
     if (Array.isArray(supplied)) await applyLabels(ctx, raw, row.id, supplied)
     else {
       raw.labelIds = supplied
-      await writeLabelLinks(ctx.db, ctx.tenant, row.id, [])
+      await writeLabelLinks(ctx.sql, ctx.tenant, row.id, [])
     }
   }
-  data.raw = writeRaw(raw)
-  await ctx.db.issue.update({
-    where: idWhere<Prisma.IssueWhereUniqueInput>(ctx.tenant, row.id, config.tenantKind),
-    data,
-  })
+  sets.push('raw = ?')
+  values.push(writeRaw(raw))
+  changeOne(
+    ctx.sql,
+    `UPDATE Issue SET ${sets.join(', ')} WHERE tenant = ? AND id = ?`,
+    ...values,
+    ctx.tenant,
+    row.id,
+  )
   return dataReply({
     issueUpdate: { success: true, issue: { id: row.id, identifier: row.identifier } },
   })
@@ -419,24 +486,30 @@ export const commentCreate: Op = async (ctx, vars) => {
   const identifier = row.identifier
   const raw: RawMap = {}
   const body = stage(raw, 'body', 'body' in input ? input.body : '', isNaturalString)
-  const seq = await ctx.db.comment.count({ where: { ...scope(ctx), issueId: row.id } })
-  await ctx.db.comment.create({
-    data: {
-      tenant: ctx.tenant,
-      id,
-      issueId: row.id,
-      body: body as string | null,
-      raw: writeRaw(raw),
-      // f-string, so an issue with no identifier spells Python's None here.
-      // No fixture omits one and issueCreate always mints one, but the old
-      // fake's url is the oracle and this is what it wrote.
-      url: `${ISSUE_URL_BASE}/${identifier ?? 'None'}#${id}`,
-      createdAt: WRITE_STAMP,
-      updatedAt: WRITE_STAMP,
-      userId: null,
-      seq,
-    },
-  })
+  const seq =
+    one<{ n: number }>(
+      ctx.sql,
+      'SELECT COUNT(*) AS n FROM Comment WHERE tenant = ? AND issueId = ?',
+      ctx.tenant,
+      row.id,
+    )?.n ?? 0
+  exec(
+    ctx.sql,
+    'INSERT INTO Comment (tenant, id, issueId, body, raw, url, createdAt, updatedAt, userId, seq) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)',
+    ctx.tenant,
+    id,
+    row.id,
+    body as string | null,
+    writeRaw(raw),
+    // f-string, so an issue with no identifier spells Python's None here.
+    // No fixture omits one and issueCreate always mints one, but the old
+    // fake's url is the oracle and this is what it wrote.
+    `${ISSUE_URL_BASE}/${identifier ?? 'None'}#${id}`,
+    WRITE_STAMP,
+    WRITE_STAMP,
+    seq,
+  )
   return dataReply({
     commentCreate: {
       success: true,
@@ -451,21 +524,30 @@ export const commentUpdate: Op = async (ctx, vars) => {
   const row: Comment | null =
     id === null
       ? null
-      : await ctx.db.comment.findUnique({
-          where: idWhere<Prisma.CommentWhereUniqueInput>(ctx.tenant, id, config.tenantKind),
-        })
+      : one<Comment>(ctx.sql, `${COMMENT} WHERE tenant = ? AND id = ?`, ctx.tenant, id)
   if (row === null) return errorsReply('comment not found')
   const input = pyDictOr(v.input)
   const raw = readRaw(row.raw)
-  const data: Prisma.CommentUncheckedUpdateInput = { updatedAt: WRITE_STAMP }
   if ('body' in input) {
-    data.body = stage(raw, 'body', input.body ?? null, isNaturalString) as string | null
-    data.raw = writeRaw(raw)
+    const body = stage(raw, 'body', input.body ?? null, isNaturalString) as string | null
+    changeOne(
+      ctx.sql,
+      'UPDATE Comment SET updatedAt = ?, body = ?, raw = ? WHERE tenant = ? AND id = ?',
+      WRITE_STAMP,
+      body,
+      writeRaw(raw),
+      ctx.tenant,
+      row.id,
+    )
+  } else {
+    changeOne(
+      ctx.sql,
+      'UPDATE Comment SET updatedAt = ? WHERE tenant = ? AND id = ?',
+      WRITE_STAMP,
+      ctx.tenant,
+      row.id,
+    )
   }
-  await ctx.db.comment.update({
-    where: idWhere<Prisma.CommentWhereUniqueInput>(ctx.tenant, row.id, config.tenantKind),
-    data,
-  })
   const parent = await issueById(ctx, row.issueId)
   return dataReply({
     commentUpdate: {
@@ -501,13 +583,9 @@ async function relationPage(
   const v = pyDictOr(vars)
   const parent = await issueById(ctx, idOf(v.issueId ?? v.id))
   if (parent === null) return null
-  const rows = await ctx.db.issueRelation.findMany({
-    where: {
-      ...scope(ctx),
-      ...(incoming ? { relatedIssueId: parent.id } : { issueId: parent.id }),
-    },
-    orderBy: SEQ_ASC,
-  })
+  const rows = incoming
+    ? relationsWhere(ctx, 'relatedIssueId = ? ORDER BY seq ASC', parent.id)
+    : relationsWhere(ctx, 'issueId = ? ORDER BY seq ASC', parent.id)
   const cursor = asString(v.after)
   const offset = cursor === null ? 0 : rows.findIndex((row) => row.id === cursor) + 1
   const first = typeof v.first === 'number' ? v.first : 100
@@ -552,50 +630,70 @@ export const createRelation: Op = async (ctx, vars) => {
   if (source.id === target.id) return errorsReply('an issue cannot relate to itself')
   if (type === null || !['blocks', 'related', 'duplicate'].includes(type))
     return errorsReply('invalid relation type')
-  const existing = await ctx.db.issueRelation.findFirst({
-    where: {
-      ...scope(ctx),
-      issueId: source.id,
-      type,
-      ...(type === 'duplicate' ? {} : { relatedIssueId: target.id }),
-    },
-  })
-  if (existing !== null) return errorsReply('relation already exists')
-  const top = await ctx.db.issueRelation.aggregate({ where: scope(ctx), _max: { seq: true } })
-  const seq = (top._max.seq ?? -1) + 1
+  const existing =
+    type === 'duplicate'
+      ? relationsWhere(ctx, 'issueId = ? AND type = ? LIMIT 1', source.id, type)
+      : relationsWhere(
+          ctx,
+          'issueId = ? AND type = ? AND relatedIssueId = ? LIMIT 1',
+          source.id,
+          type,
+          target.id,
+        )
+  if (existing.length > 0) return errorsReply('relation already exists')
+  const top = one<{ n: number | null }>(
+    ctx.sql,
+    'SELECT MAX(seq) AS n FROM IssueRelation WHERE tenant = ?',
+    ctx.tenant,
+  )
+  const seq = (top?.n ?? -1) + 1
   const id = `relation_${source.id}_${target.id}_${type}`
-  const row = await ctx.db.issueRelation.create({
-    data: {
-      tenant: ctx.tenant,
-      id,
-      issueId: source.id,
-      relatedIssueId: target.id,
-      type,
-      seq,
-      previousStateId: type === 'duplicate' ? source.stateId : null,
-    },
-  })
+  exec(
+    ctx.sql,
+    'INSERT INTO IssueRelation (tenant, id, issueId, relatedIssueId, type, seq, previousStateId) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ctx.tenant,
+    id,
+    source.id,
+    target.id,
+    type,
+    seq,
+    type === 'duplicate' ? source.stateId : null,
+  )
+  const row = relationsWhere(ctx, 'id = ?', id)[0]
+  if (row === undefined) throw new Error(`linear fake: relation ${id} vanished as it was made`)
   if (type === 'duplicate') {
-    let state = await ctx.db.workflowState.findFirst({
-      where: { ...scope(ctx), teamId: source.teamId, type: 'duplicate' },
-    })
-    if (state === null)
-      state = await ctx.db.workflowState.create({
-        data: {
-          tenant: ctx.tenant,
-          id: `duplicate_${source.teamId}`,
-          teamId: source.teamId,
-          name: 'Duplicate',
-          type: 'duplicate',
-          seq: 1000,
-        },
-      })
+    let stateId = one<{ id: string }>(
+      ctx.sql,
+      'SELECT id FROM WorkflowState WHERE tenant = ? AND teamId = ? AND type = ? LIMIT 1',
+      ctx.tenant,
+      source.teamId,
+      'duplicate',
+    )?.id
+    if (stateId === undefined) {
+      stateId = `duplicate_${source.teamId}`
+      exec(
+        ctx.sql,
+        'INSERT INTO WorkflowState (tenant, id, teamId, name, type, seq) VALUES (?, ?, ?, ?, ?, ?)',
+        ctx.tenant,
+        stateId,
+        source.teamId,
+        'Duplicate',
+        'duplicate',
+        1000,
+      )
+    }
     const raw = readRaw(source.raw)
     delete raw.stateId
-    await ctx.db.issue.update({
-      where: { tenant_id: { tenant: ctx.tenant, id: source.id } },
-      data: { stateId: state.id, raw: writeRaw(raw), updatedAt: WRITE_STAMP },
-    })
+    changeOne(
+      ctx.sql,
+      'UPDATE Issue SET stateId = ?, raw = ?, updatedAt = ? WHERE tenant = ? AND id = ?',
+      stateId,
+      writeRaw(raw),
+      WRITE_STAMP,
+      ctx.tenant,
+      source.id,
+    )
   }
   return dataReply({
     issueRelationCreate: { success: true, issueRelation: await relationNode(ctx, row) },
@@ -604,21 +702,25 @@ export const createRelation: Op = async (ctx, vars) => {
 
 export const deleteRelation: Op = async (ctx, vars) => {
   const id = idOf(pyDictOr(vars).id)
-  const row =
-    id === null ? null : await ctx.db.issueRelation.findFirst({ where: { ...scope(ctx), id } })
+  const row = id === null ? null : (relationsWhere(ctx, 'id = ? LIMIT 1', id)[0] ?? null)
   if (row === null) return errorsReply('relation not found')
   if (row.type === 'duplicate') {
     const source = await issueById(ctx, row.issueId)
     if (source !== null) {
       const raw = readRaw(source.raw)
       delete raw.stateId
-      await ctx.db.issue.update({
-        where: { tenant_id: { tenant: ctx.tenant, id: row.issueId } },
-        data: { stateId: row.previousStateId, raw: writeRaw(raw), updatedAt: WRITE_STAMP },
-      })
+      changeOne(
+        ctx.sql,
+        'UPDATE Issue SET stateId = ?, raw = ?, updatedAt = ? WHERE tenant = ? AND id = ?',
+        row.previousStateId,
+        writeRaw(raw),
+        WRITE_STAMP,
+        ctx.tenant,
+        row.issueId,
+      )
     }
   }
-  await ctx.db.issueRelation.delete({ where: { tenant_id: { tenant: ctx.tenant, id: row.id } } })
+  changeOne(ctx.sql, 'DELETE FROM IssueRelation WHERE tenant = ? AND id = ?', ctx.tenant, row.id)
   return dataReply({ issueRelationDelete: { success: true } })
 }
 

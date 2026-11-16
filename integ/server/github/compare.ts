@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type Db } from './store.ts'
 import { stripSlash } from '../kit/typescript/index.ts'
 import type { Ctx, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
@@ -52,7 +53,7 @@ export interface Range {
 // base, and answering "nothing changed" about it is the shape of wrongness
 // that reads as success.
 export async function rangeOf(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   base: Resolved | null,
@@ -85,7 +86,7 @@ export async function rangeOf(
 // nothing for a root. `history` is newest first from the commit, as
 // `resolveRef` answers it.
 export async function commitChanges(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   history: CommitRow[],
@@ -124,7 +125,7 @@ function sameAt(a: Tree, b: Tree, path: string): boolean {
 // `octocat/Hello-World`'s README lists the branch commit and the first, not
 // the merge, over REST and GraphQL alike (2026-10-03).
 async function pathHistory(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   head: string,
@@ -171,7 +172,7 @@ async function pathHistory(
 // `[]`). `author` is the author's login or email. `path` keeps the commits
 // pathHistory keeps for that file or anything under it.
 export async function commitHistory(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   head: string,
@@ -207,13 +208,13 @@ async function compare(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const home =
     colon < 0
       ? repo
-      : await forkOwnedBy(ctx.db, ctx.tenant, repo, headSpec.slice(0, colon), headRef)
-  const head = home === null ? null : await resolveRef(ctx.db, ctx.tenant, home, headRef)
-  const base = baseRef === '' ? null : await resolveRef(ctx.db, ctx.tenant, repo, baseRef)
+      : await forkOwnedBy(ctx.sql, ctx.tenant, repo, headSpec.slice(0, colon), headRef)
+  const head = home === null ? null : await resolveRef(ctx.sql, ctx.tenant, home, headRef)
+  const base = baseRef === '' ? null : await resolveRef(ctx.sql, ctx.tenant, repo, baseRef)
   if (home === null || head === null || (baseRef !== '' && base === null)) {
     return fail(404, 'Not Found')
   }
-  const range = await rangeOf(ctx.db, ctx.tenant, repo, base, head, home)
+  const range = await rangeOf(ctx.sql, ctx.tenant, repo, base, head, home)
   if (range === null) return fail(404, 'No common ancestor between the two commits')
   const diff = diffReply(ctx, range.changes)
   if (diff !== null) return diff
@@ -233,7 +234,7 @@ async function compare(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       ahead_by: ahead,
       behind_by: range.behind,
       total_commits: ahead,
-      commits: await commitsJson(ctx.db, ctx.tenant, home, [...range.ahead].reverse()),
+      commits: await commitsJson(ctx.sql, ctx.tenant, home, [...range.ahead].reverse()),
       files: range.changes.map((c) => changeJson(repo.fullName, c, range.before, range.after)),
     },
   }

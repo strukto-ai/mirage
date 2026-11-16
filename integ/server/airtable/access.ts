@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/airtable/index.js'
-import { RUN_QUERY, TENANT_QUERY, idWhere } from '../kit/typescript/index.ts'
+import { RUN_QUERY, TENANT_QUERY, one } from '../kit/typescript/index.ts'
 import type { Ctx } from '../kit/typescript/index.ts'
-import { config } from './config.ts'
 import type { C } from './config.ts'
 import { loadWorld, parseJson } from './store.ts'
 import type { TableRow, UserRow, World } from './store.ts'
@@ -29,8 +27,6 @@ import {
   notPermitted,
   refuse,
 } from './wire.ts'
-
-const KIND = config.tenantKind
 
 // The order every handler checks in, which is the order Airtable answers in:
 // the path's shape (404 NOT_FOUND, before any token is read), then the token
@@ -53,13 +49,19 @@ export function requireIds(ctx: Ctx<C>, wants: ReadonlyArray<readonly [string, s
 export async function authenticate(ctx: Ctx<C>): Promise<Principal> {
   const token = bearerOf(ctx.headers)
   if (token === undefined) return refuse(authRequired())
-  const row = await ctx.db.airtableToken.findUnique({
-    where: idWhere<Prisma.AirtableTokenWhereUniqueInput>(ctx.tenant, token, KIND, 'token'),
-  })
+  const row = one<{ userId: string; bases: string | null }>(
+    ctx.sql,
+    'SELECT userId, bases FROM AirtableToken WHERE tenant = ? AND token = ?',
+    ctx.tenant,
+    token,
+  )
   if (row === null) return refuse(authRequired())
-  const user = await ctx.db.airtableUser.findUnique({
-    where: idWhere<Prisma.AirtableUserWhereUniqueInput>(ctx.tenant, row.userId, KIND),
-  })
+  const user = one<UserRow>(
+    ctx.sql,
+    'SELECT id, email, name FROM AirtableUser WHERE tenant = ? AND id = ?',
+    ctx.tenant,
+    row.userId,
+  )
   if (user === null) return refuse(authRequired())
   const bases = parseJson(row.bases)
   return {
@@ -75,7 +77,7 @@ export function granted(who: Principal, baseId: string): boolean {
 
 export async function baseFor(ctx: Ctx<C>, who: Principal, baseId: string): Promise<World> {
   if (!granted(who, baseId)) return refuse(modelNotFound())
-  const world = await loadWorld(ctx.db, ctx.tenant, baseId)
+  const world = await loadWorld(ctx.sql, ctx.tenant, baseId)
   return world ?? refuse(modelNotFound())
 }
 

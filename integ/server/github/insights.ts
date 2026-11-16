@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { select } from '../kit/typescript/index.ts'
+import type {
+  GithubComment,
+  GithubIssue,
+  GithubPull,
+  GithubRelease,
+} from '../../generated/github/index.js'
+import { DMMF } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, REPO_DATE, WRITE_COMMIT_DATE } from './config.ts'
 import type { C } from './config.ts'
@@ -32,7 +40,6 @@ import {
   peeled,
   repoIsEmpty,
   repoLanguages,
-  scope,
   tagRefs,
 } from './store.ts'
 import type { RepoRow } from './store.ts'
@@ -44,7 +51,7 @@ import { everywhere, pagedReply, route, authedRoute, withRepo } from './http.ts'
 async function languages(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   return {
     status: 200,
-    body: Object.fromEntries(await repoLanguages(ctx.db, ctx.tenant, repo)),
+    body: Object.fromEntries(await repoLanguages(ctx.sql, ctx.tenant, repo)),
   }
 }
 
@@ -54,7 +61,7 @@ function listed(key: string) {
   return async (ctx: Ctx<C>, repo: RepoRow): Promise<Reply> => {
     const users: JsonValue[] = []
     for (const login of loginsOf(repo, key)) {
-      users.push(simpleUser(await accountOf(ctx.db, ctx.tenant, login)))
+      users.push(simpleUser(await accountOf(ctx.sql, ctx.tenant, login)))
     }
     return pagedReply(ctx, users)
   }
@@ -64,13 +71,13 @@ function listed(key: string) {
 // whose email is no account's is anonymous, and is listed only when `anon`
 // asks for it, as GitHub's list does; an empty repository answers 204.
 async function contributors(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return { status: 204 }
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return { status: 204 }
   const logins = new Set(
-    (await accountsOf(ctx.db, ctx.tenant)).map((account) => account.login.toLowerCase()),
+    (await accountsOf(ctx.sql, ctx.tenant)).map((account) => account.login.toLowerCase()),
   )
   const known = new Map<string, number>()
   const anonymous = new Map<string, { name: string; count: number }>()
-  for (const row of await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
+  for (const row of await branchCommits(ctx.sql, ctx.tenant, repo, repo.defaultBranch)) {
     const who = commitIdentity(row)
     if (logins.has(who.login.toLowerCase())) {
       known.set(who.login, (known.get(who.login) ?? 0) + 1)
@@ -83,7 +90,7 @@ async function contributors(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     rows.sort(([a, x], [b, y]) => count(y) - count(x) || (a < b ? -1 : 1))
   const out: JsonValue[] = []
   for (const [login, count] of byCount([...known], (n) => n)) {
-    const account = await accountOf(ctx.db, ctx.tenant, login)
+    const account = await accountOf(ctx.sql, ctx.tenant, login)
     out.push({ ...simpleUser(account), contributions: count })
   }
   const anon = ctx.query.get('anon')
@@ -108,12 +115,13 @@ interface Event {
 // and a release published. The dates are the ones those rows carry; equal
 // ones keep the order the activity happened in, newest first.
 async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  const where = { ...scope(ctx.tenant), repo: repo.fullName }
+  const where = '"tenant" = ? AND "repo" = ? ORDER BY "seq" ASC'
+  const at = [ctx.tenant, repo.fullName]
   const out: Event[] = []
   const pushed = new Set<string>()
-  const branches = await branchNames(ctx.db, ctx.tenant, repo)
+  const branches = await branchNames(ctx.sql, ctx.tenant, repo)
   for (const branch of branches) {
-    const history = await branchCommits(ctx.db, ctx.tenant, repo, branch)
+    const history = await branchCommits(ctx.sql, ctx.tenant, repo, branch)
     if (branch !== repo.defaultBranch) {
       out.push({
         type: 'CreateEvent',
@@ -128,9 +136,9 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       out.push(pushEvent(repo, branch, row))
     }
   }
-  for (const tag of await tagRefs(ctx.db, ctx.tenant, repo)) {
-    const sha = await peeled(ctx.db, ctx.tenant, repo, tag.sha)
-    const commit = (await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)).find(
+  for (const tag of await tagRefs(ctx.sql, ctx.tenant, repo)) {
+    const sha = await peeled(ctx.sql, ctx.tenant, repo, tag.sha)
+    const commit = (await branchCommits(ctx.sql, ctx.tenant, repo, repo.defaultBranch)).find(
       (row) => row.sha === sha,
     )
     out.push({
@@ -140,10 +148,7 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       payload: createPayload(repo, tag.name, 'tag'),
     })
   }
-  const issues = (await ctx.db.githubIssue.findMany({
-    where,
-    orderBy: { seq: 'asc' },
-  })) as IssueRow[]
+  const issues = select<GithubIssue>(ctx.sql, DMMF, 'GithubIssue', where, ...at) as IssueRow[]
   for (const row of issues) {
     const issue = issueJson(repo, row)
     out.push({
@@ -161,7 +166,7 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       })
     }
   }
-  const pulls = (await ctx.db.githubPull.findMany({ where, orderBy: { seq: 'asc' } })) as PullRow[]
+  const pulls = select<GithubPull>(ctx.sql, DMMF, 'GithubPull', where, ...at) as PullRow[]
   for (const row of pulls) {
     const pull = await pullJson(ctx, repo, row)
     const opened = { action: 'opened', number: row.number, pull_request: pull }
@@ -175,7 +180,7 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       })
     }
   }
-  const comments = await ctx.db.githubComment.findMany({ where, orderBy: { seq: 'asc' } })
+  const comments = select<GithubComment>(ctx.sql, DMMF, 'GithubComment', where, ...at)
   for (const row of comments) {
     out.push({
       type: 'IssueCommentEvent',
@@ -193,10 +198,13 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       },
     })
   }
-  const releases = (await ctx.db.githubRelease.findMany({
+  const releases = select<GithubRelease>(
+    ctx.sql,
+    DMMF,
+    'GithubRelease',
     where,
-    orderBy: { seq: 'asc' },
-  })) as ReleaseRow[]
+    ...at,
+  ) as ReleaseRow[]
   for (const row of releases) {
     if (row.draft) continue
     out.push({

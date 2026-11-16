@@ -84,6 +84,24 @@ export type { Headers } from './tenant.ts'
 export { SEQ_FIELD, delegateFor, delegateName, seedFixture } from './seed.ts'
 export type { Dmmf, DmmfField, DmmfModel, SeedOptions } from './seed.ts'
 export { serve, start } from './serve.ts'
+export {
+  BYTES,
+  all,
+  bytes,
+  count,
+  create,
+  exec,
+  first,
+  insert,
+  matched,
+  one,
+  remove,
+  select,
+  stmt,
+  transaction,
+  update,
+} from './sql.ts'
+export type { Cell } from './sql.ts'
 export type { Arm, Started } from './serve.ts'
 export { rstripSlash, stripSlash } from './slash.ts'
 export type {

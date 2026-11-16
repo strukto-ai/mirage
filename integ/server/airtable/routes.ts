@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/airtable/index.js'
-import { route, tenantWhere, unroutedLine } from '../kit/typescript/index.ts'
+import { all, route, unroutedLine } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { authenticate, baseFor, granted, onlyQuery, requireIds } from './access.ts'
 import { createComment, deleteComment, listComments, updateComment } from './comments.ts'
@@ -46,8 +45,6 @@ import {
   putRecords,
 } from './writes.ts'
 
-const KIND = config.tenantKind
-
 // What this fake does NOT model, so a 404 or a 422 from it reads as "not
 // built" rather than "mirage sent the wrong request":
 //   - schema writes (create/update table, field, view), bases, interfaces,
@@ -74,10 +71,11 @@ const whoami = guard(async (ctx: Ctx<C>): Promise<Reply> => {
 const listBases = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   const who = await authenticate(ctx)
   onlyQuery(ctx, (key) => key === 'offset')
-  const rows = await ctx.db.airtableBase.findMany({
-    where: tenantWhere<Prisma.AirtableBaseWhereInput>(ctx.tenant, KIND),
-    orderBy: { seq: 'asc' },
-  })
+  const rows = all<{ id: string; name: string; permissionLevel: string }>(
+    ctx.sql,
+    'SELECT tenant, id, name, permissionLevel, seq FROM AirtableBase WHERE tenant = ? ORDER BY seq',
+    ctx.tenant,
+  )
   const visible = rows.filter((b) => granted(who, b.id))
   const raw = ctx.query.get('offset')
   let start = 0

@@ -28,6 +28,8 @@ import { Prisma } from '../../../generated/selftest/index.js'
 import { clearTenants, deleteOrder, untenanted } from '../typescript/clear.ts'
 import type { Dmmf } from '../typescript/seed.ts'
 import { unroutedLine } from '../typescript/unrouted.ts'
+import { insert, select } from '../typescript/sql.ts'
+import { DatabaseSync } from 'node:sqlite'
 import { rstripSlash, stripSlash } from '../typescript/slash.ts'
 import * as core from '@struktoai/mirage-core/utils/slash'
 import type { JsonValue } from '../typescript/types.ts'
@@ -148,6 +150,67 @@ function rowsOf(payload: JsonValue, tenant: string): JsonValue {
   const seeded = (payload as { seeded: { tenant: string; rows: JsonValue }[] }).seeded
   const hit = seeded.find((s) => s.tenant === tenant)
   return hit === undefined ? null : hit.rows
+}
+
+// What `select` reads back is what was written: a String byte for byte (a
+// leading U+FEFF and a NUL included), a BigInt as a bigint ordered by its
+// number, a Boolean as a boolean, an empty Bytes value as an empty array, and
+// the columns in the schema's order.
+function sqlRoundTrip(): void {
+  const db = new DatabaseSync(':memory:')
+  db.exec(
+    'CREATE TABLE "Row" ("id" INTEGER, "text" TEXT, "big" INTEGER, "flag" INTEGER, "data" BLOB)',
+  )
+  const field = (name: string, type: string) => ({ name, kind: 'scalar', isList: false, type })
+  const dmmf: Dmmf = {
+    datamodel: {
+      models: [
+        {
+          name: 'Row',
+          fields: [
+            field('id', 'Int'),
+            field('text', 'String'),
+            field('big', 'BigInt'),
+            field('flag', 'Boolean'),
+            field('data', 'Bytes'),
+          ],
+        },
+      ],
+    },
+  }
+  const text = '\uFEFFfirst\u0000line'
+  insert(db, 'Row', { id: 1, text, big: 1000000000000000000n, flag: true, data: new Uint8Array(0) })
+  insert(db, 'Row', { id: 2, text: 'second', big: 999999999999999999n, flag: false, data: null })
+  const rows = select<{
+    id: number
+    text: string
+    big: bigint
+    flag: boolean
+    data: Uint8Array | null
+  }>(db, dmmf, 'Row', '1 = 1 ORDER BY big')
+  db.close()
+  eq(
+    'select orders a BigInt column by its number',
+    rows.map((r) => r.id),
+    [2, 1],
+  )
+  const first = rows[1]
+  check('select keeps a leading BOM and a NUL', first?.text === text, JSON.stringify(first?.text))
+  check(
+    'select answers a BigInt as a bigint and a Boolean as a boolean',
+    first?.big === 1000000000000000000n && first.flag && rows[0]?.flag === false,
+  )
+  check(
+    'an empty Bytes value reads back empty, not null',
+    first?.data instanceof Uint8Array && first.data.length === 0,
+  )
+  eq('select keeps the schema field order', Object.keys(first ?? {}), [
+    'id',
+    'text',
+    'big',
+    'flag',
+    'data',
+  ])
 }
 
 async function main(): Promise<void> {
@@ -1043,6 +1106,8 @@ async function main(): Promise<void> {
     ]
     eq('stripSlash matches core', samples.map(stripSlash), samples.map(core.stripSlash))
     eq('rstripSlash matches core', samples.map(rstripSlash), samples.map(core.rstripSlash))
+
+    sqlRoundTrip()
 
     process.stdout.write(`\nselftest: ${String(checks)} checks passed\n`)
   } finally {

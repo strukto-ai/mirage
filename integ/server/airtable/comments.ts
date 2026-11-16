@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/airtable/index.js'
-import { idWhere, tenantWhere } from '../kit/typescript/index.ts'
+import { all, exec } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import { authenticate, baseFor, onlyQuery, requireComment, requireIds, tableOf } from './access.ts'
 import type { Principal } from './access.ts'
-import { MAX_PAGE_SIZE, config } from './config.ts'
+import { MAX_PAGE_SIZE } from './config.ts'
 import type { C } from './config.ts'
-import { recordIn } from './store.ts'
+import { changeOne, recordIn } from './store.ts'
 import type { RecordRow, UserRow, World } from './store.ts'
 import {
   badOffset,
@@ -41,8 +40,6 @@ import {
 } from './wire.ts'
 import type { JsonObject } from './wire.ts'
 import { mintId } from './writes.ts'
-
-const KIND = config.tenantKind
 
 interface CommentRow {
   id: string
@@ -80,10 +77,13 @@ function commentJson(c: CommentRow, users: Map<string, UserRow>): JsonObject {
 }
 
 async function commentsOf(ctx: Ctx<C>, recordId: string): Promise<CommentRow[]> {
-  const rows = await ctx.db.airtableComment.findMany({
-    where: { ...tenantWhere<Prisma.AirtableCommentWhereInput>(ctx.tenant, KIND), recordId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = all<CommentRow>(
+    ctx.sql,
+    'SELECT id, recordId, authorId, text, parentCommentId, createdTime, lastUpdatedTime, seq ' +
+      'FROM AirtableComment WHERE tenant = ? AND recordId = ? ORDER BY seq',
+    ctx.tenant,
+    recordId,
+  )
   // Newest first, which is the vendor's order; seq breaks a tie in creation
   // order so two comments stamped the same instant still list the later one
   // first.
@@ -165,7 +165,20 @@ export const createComment = guard(async (ctx: Ctx<C>): Promise<Reply> => {
     lastUpdatedTime: null,
     seq: all.reduce((m, c) => Math.max(m, c.seq), -1) + 1,
   }
-  await ctx.db.airtableComment.create({ data: { tenant: ctx.tenant, ...row } })
+  exec(
+    ctx.sql,
+    'INSERT INTO AirtableComment (tenant, id, recordId, authorId, text, parentCommentId, ' +
+      'createdTime, lastUpdatedTime, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ctx.tenant,
+    row.id,
+    row.recordId,
+    row.authorId,
+    row.text,
+    row.parentCommentId,
+    row.createdTime,
+    row.lastUpdatedTime,
+    row.seq,
+  )
   return ok(commentJson(row, world.users))
 })
 
@@ -195,10 +208,14 @@ export const updateComment = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   const text = textOf(body)
   const { world, row } = await ownComment(ctx, who, true)
   const updated: CommentRow = { ...row, text, lastUpdatedTime: ctx.clock.nowIso() }
-  await ctx.db.airtableComment.update({
-    where: idWhere<Prisma.AirtableCommentWhereUniqueInput>(ctx.tenant, row.id, KIND),
-    data: { text: updated.text, lastUpdatedTime: updated.lastUpdatedTime },
-  })
+  changeOne(
+    ctx.sql,
+    'UPDATE AirtableComment SET text = ?, lastUpdatedTime = ? WHERE tenant = ? AND id = ?',
+    updated.text,
+    updated.lastUpdatedTime,
+    ctx.tenant,
+    row.id,
+  )
   return ok(commentJson(updated, world.users))
 })
 
@@ -207,8 +224,6 @@ export const deleteComment = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   const who = await authenticate(ctx)
   onlyQuery(ctx, () => false)
   const { row } = await ownComment(ctx, who, false)
-  await ctx.db.airtableComment.delete({
-    where: idWhere<Prisma.AirtableCommentWhereUniqueInput>(ctx.tenant, row.id, KIND),
-  })
+  changeOne(ctx.sql, 'DELETE FROM AirtableComment WHERE tenant = ? AND id = ?', ctx.tenant, row.id)
   return ok({ id: row.id, deleted: true })
 })

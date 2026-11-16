@@ -85,7 +85,7 @@ export function numberParam(ctx: Ctx<C>): number | null {
 export function withRepo(fn: (ctx: Ctx<C>, repo: RepoRow) => Promise<Reply> | Reply): Handler {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     const full = `${param(ctx, 'owner')}/${param(ctx, 'repo')}`
-    const repo = await repoByName(ctx.db, ctx.tenant, full)
+    const repo = await repoByName(ctx.sql, ctx.tenant, full)
     if (repo === null) return notFound()
     return await fn(ctx, repo)
   }

@@ -18,6 +18,7 @@ import { config } from './config.ts'
 import type { C } from './config.ts'
 import { identifierNumber } from './nodes.ts'
 import { writeLabelLinks } from './world.ts'
+import type { Db } from './world.ts'
 
 function parseLabelIds(raw: string | null): string[] {
   if (raw === null || raw === '') return []
@@ -42,7 +43,7 @@ function parseLabelIds(raw: string | null): string[] {
 // Issue.seq is renumbered across teams into one global ordinal, because the
 // old fake held every issue in one insertion-ordered dict and IssueSearch
 // pages out of it. The seeder can only count within a team's nested list.
-export async function afterSeed(db: C, tenant: string): Promise<void> {
+export async function afterSeed(db: C, tenant: string, sql: Db): Promise<void> {
   const where = tenantWhere(tenant, config.tenantKind)
   const teams = await db.team.findMany({ where, orderBy: { seq: 'asc' } })
   let ordinal = 0
@@ -62,7 +63,7 @@ export async function afterSeed(db: C, tenant: string): Promise<void> {
         where: { tenant_id: { tenant, id: issue.id } },
         data,
       })
-      await writeLabelLinks(db, tenant, issue.id, parseLabelIds(issue.labelIds))
+      await writeLabelLinks(sql, tenant, issue.id, parseLabelIds(issue.labelIds))
     }
   }
 }

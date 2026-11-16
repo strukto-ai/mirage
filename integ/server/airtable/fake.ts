@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import { Prisma, PrismaClient } from '../../generated/airtable/index.js'
 import type { Dmmf, Fake, JsonValue } from '../kit/typescript/index.ts'
 import { config } from './config.ts'
@@ -45,8 +46,11 @@ export const airtableFake: Fake<C> = {
     tenant: string,
     counts: Record<string, number>,
     extras: Record<string, JsonValue>,
+    _fixtureRoot: string,
+    _epoch: string | undefined,
+    sql: DatabaseSync,
   ): Promise<void> => {
-    await afterSeed(db, tenant, counts, extras)
+    await afterSeed(db, tenant, counts, extras, sql)
   },
   unknownTenant: (tenant: string) => {
     process.stderr.write(

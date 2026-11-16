@@ -17,10 +17,19 @@ import { join, relative, sep } from 'node:path'
 
 import { SeedError } from '../kit/typescript/index.ts'
 import type { JsonValue } from '../kit/typescript/index.ts'
+import type { DatabaseSync } from 'node:sqlite'
+import type {
+  GithubCheck,
+  GithubRun,
+  GithubSetting,
+  GithubStatus,
+  GithubTagRef,
+} from '../../generated/github/index.js'
+import { count, first, insert, select } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { workflowsOf } from './actions.ts'
-import { addBranch, allRepos, resolveRef } from './store.ts'
-import type { RepoRow } from './store.ts'
+import { DMMF, addBranch, allRepos, resolveRef } from './store.ts'
+import type { Db, RepoRow } from './store.ts'
 
 // A fixture root file naming submodule gitlink paths, one per line. It is a
 // manifest rather than repository content, so it never becomes a GithubFile.
@@ -48,7 +57,7 @@ interface TreeCounts {
 }
 
 async function loadTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   fixtureRoot: string,
@@ -66,13 +75,18 @@ async function loadTree(
       for (const line of lines) {
         const path = line.trim()
         if (path === '') continue
-        await db.githubSubmodule.create({ data: { tenant, repo: repo.fullName, path } })
+        insert(db, 'GithubSubmodule', { tenant, repo: repo.fullName, path })
         subs += 1
       }
       continue
     }
-    await db.githubFile.create({
-      data: { tenant, repo: repo.fullName, branch, path: rel, data: readFileSync(full), seq },
+    insert(db, 'GithubFile', {
+      tenant,
+      repo: repo.fullName,
+      branch,
+      path: rel,
+      data: readFileSync(full),
+      seq,
     })
     seq += 1
   }
@@ -87,7 +101,7 @@ async function loadTree(
 // through the API starts with none, as on GitHub. Workflows follow the files,
 // so a fork has its source's and a new repository has none until it holds a
 // workflow file.
-export async function initRepo(db: C, tenant: string, repo: RepoRow): Promise<void> {
+export async function initRepo(db: Db, tenant: string, repo: RepoRow): Promise<void> {
   await addBranch(db, tenant, repo.fullName, repo.defaultBranch)
 }
 
@@ -99,11 +113,13 @@ export async function initRepo(db: C, tenant: string, repo: RepoRow): Promise<vo
 // its id, and the rest take theirs in repository and path order, the same on
 // every reset rather than in whatever order requests first list them.
 export async function seedRepos(
-  db: C,
+  _db: C,
   tenant: string,
   counts: Record<string, number>,
   _extras: Record<string, JsonValue>,
   fixtureRoot: string,
+  _epoch: string | undefined,
+  db: DatabaseSync,
 ): Promise<void> {
   let files = 0
   let submodules = 0
@@ -118,7 +134,7 @@ export async function seedRepos(
   await namedCommitsExist(db, tenant, repos)
   if (files > 0) counts.GithubFile = files
   if (submodules > 0) counts.GithubSubmodule = submodules
-  const workflows = await db.githubWorkflow.count({ where: { tenant } })
+  const workflows = count(db, 'GithubWorkflow', '"tenant" = ?', tenant)
   if (workflows > 0) counts.GithubWorkflow = workflows
   const sorted = Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : 1))
   for (const key of Object.keys(counts)) delete counts[key]
@@ -129,17 +145,27 @@ export async function seedRepos(
 // repository holds, or the fixture is refused at /reset: a sha that names
 // nothing reads back as CI state no commit carries, which is how a fixture's
 // shas went stale once its tree changed.
-async function namedCommitsExist(db: C, tenant: string, repos: RepoRow[]): Promise<void> {
+async function namedCommitsExist(db: Db, tenant: string, repos: RepoRow[]): Promise<void> {
   for (const repo of repos) {
-    const where = { tenant, repo: repo.fullName }
+    const where = '"tenant" = ? AND "repo" = ?'
+    const at = [tenant, repo.fullName]
     const named: Array<[string, string]> = [
-      ...(await db.githubRun.findMany({ where })).map((r): [string, string] => ['run', r.headSha]),
-      ...(await db.githubCheck.findMany({ where })).map((r): [string, string] => ['check', r.sha]),
-      ...(await db.githubStatus.findMany({ where })).map((r): [string, string] => [
+      ...select<GithubRun>(db, DMMF, 'GithubRun', where, ...at).map((r): [string, string] => [
+        'run',
+        r.headSha,
+      ]),
+      ...select<GithubCheck>(db, DMMF, 'GithubCheck', where, ...at).map((r): [string, string] => [
+        'check',
+        r.sha,
+      ]),
+      ...select<GithubStatus>(db, DMMF, 'GithubStatus', where, ...at).map((r): [string, string] => [
         'status',
         r.sha,
       ]),
-      ...(await db.githubTagRef.findMany({ where })).map((r): [string, string] => ['tag', r.sha]),
+      ...select<GithubTagRef>(db, DMMF, 'GithubTagRef', where, ...at).map((r): [string, string] => [
+        'tag',
+        r.sha,
+      ]),
     ]
     for (const [kind, sha] of named) {
       const at = await resolveRef(db, tenant, repo, sha)
@@ -150,7 +176,7 @@ async function namedCommitsExist(db: C, tenant: string, repos: RepoRow[]): Promi
   }
 }
 
-export async function createReposAllowed(db: C, tenant: string): Promise<boolean> {
-  const row = await db.githubSetting.findUnique({ where: { tenant } })
+export async function createReposAllowed(db: Db, tenant: string): Promise<boolean> {
+  const row = first<GithubSetting>(db, DMMF, 'GithubSetting', '"tenant" = ?', tenant)
   return row === null || row.createRepos
 }

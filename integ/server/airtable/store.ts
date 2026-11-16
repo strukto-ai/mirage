@@ -12,15 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/airtable/index.js'
-import { idWhere, tenantWhere } from '../kit/typescript/index.ts'
+import type { DatabaseSync } from 'node:sqlite'
+import type {
+  AirtableBase,
+  AirtableField,
+  AirtableRecord,
+  AirtableTable,
+  AirtableView,
+} from '../../generated/airtable/index.js'
+import { all, exec, one } from '../kit/typescript/index.ts'
 import type { JsonValue } from '../kit/typescript/index.ts'
-import { DEFAULT_PAGE_CAP, config } from './config.ts'
-import type { C } from './config.ts'
+import { DEFAULT_PAGE_CAP } from './config.ts'
 import { isObject } from './wire.ts'
 import type { JsonObject } from './wire.ts'
 
-const KIND = config.tenantKind
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/airtable.prisma declares; rows keep Prisma's generated shapes.
+export type Db = DatabaseSync
+
+// Throws when nothing matched, as Prisma's update and delete did.
+export function changeOne(db: Db, sql: string, ...params: (string | number | null)[]): void {
+  if (exec(db, sql, ...params) === 0) throw new Error('airtable fake: no row matched')
+}
 
 // One base, loaded whole. A request reads or writes a single base, and every
 // computed field reaches at most across that base (a lookup follows a link
@@ -122,33 +135,69 @@ function stringList(raw: string | null): string[] | null {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : null
 }
 
-export async function pageCapOf(db: C, tenant: string): Promise<number> {
-  const meta = await db.airtableMeta.findUnique({ where: { tenant } })
+export async function pageCapOf(db: Db, tenant: string): Promise<number> {
+  const meta = one<{ pageCap: number }>(
+    db,
+    'SELECT pageCap FROM AirtableMeta WHERE tenant = ?',
+    tenant,
+  )
   return meta === null ? DEFAULT_PAGE_CAP : meta.pageCap
 }
 
-export async function usersOf(db: C, tenant: string): Promise<Map<string, UserRow>> {
-  const rows = await db.airtableUser.findMany({
-    where: tenantWhere<Prisma.AirtableUserWhereInput>(tenant, KIND),
-    orderBy: { seq: 'asc' },
-  })
+export async function usersOf(db: Db, tenant: string): Promise<Map<string, UserRow>> {
+  const rows = all<UserRow>(
+    db,
+    'SELECT id, email, name FROM AirtableUser WHERE tenant = ? ORDER BY seq',
+    tenant,
+  )
   return new Map(rows.map((u) => [u.id, { id: u.id, email: u.email, name: u.name }]))
 }
 
-export async function loadWorld(db: C, tenant: string, baseId: string): Promise<World | null> {
-  const base = await db.airtableBase.findUnique({
-    where: idWhere<Prisma.AirtableBaseWhereUniqueInput>(tenant, baseId, KIND),
-  })
+// The rows of one of a base's child tables, by table, in seq order.
+function inTables<T>(db: Db, sql: string, tenant: string, tableIds: string[]): T[] {
+  return all<T>(
+    db,
+    `${sql} WHERE tenant = ? AND tableId IN (SELECT value FROM json_each(?)) ORDER BY seq`,
+    tenant,
+    JSON.stringify(tableIds),
+  )
+}
+
+export async function loadWorld(db: Db, tenant: string, baseId: string): Promise<World | null> {
+  const base = one<AirtableBase>(
+    db,
+    'SELECT tenant, id, name, permissionLevel, seq FROM AirtableBase WHERE tenant = ? AND id = ?',
+    tenant,
+    baseId,
+  )
   if (base === null) return null
-  const tables = await db.airtableTable.findMany({
-    where: { ...tenantWhere<Prisma.AirtableTableWhereInput>(tenant, KIND), baseId },
-    orderBy: { seq: 'asc' },
-  })
+  const tables = all<AirtableTable>(
+    db,
+    'SELECT tenant, id, baseId, name, description, primaryFieldId, autoNumberNext, seq ' +
+      'FROM AirtableTable WHERE tenant = ? AND baseId = ? ORDER BY seq',
+    tenant,
+    baseId,
+  )
   const tableIds = tables.map((t) => t.id)
-  const inBase = { ...tenantWhere<{ tenant?: string }>(tenant, KIND), tableId: { in: tableIds } }
-  const fields = await db.airtableField.findMany({ where: inBase, orderBy: { seq: 'asc' } })
-  const views = await db.airtableView.findMany({ where: inBase, orderBy: { seq: 'asc' } })
-  const records = await db.airtableRecord.findMany({ where: inBase, orderBy: { seq: 'asc' } })
+  const fields = inTables<AirtableField>(
+    db,
+    'SELECT tenant, id, tableId, name, type, description, options, seq FROM AirtableField',
+    tenant,
+    tableIds,
+  )
+  const views = inTables<AirtableView>(
+    db,
+    'SELECT tenant, id, tableId, name, type, "filter", sort, visibleFieldIds, seq FROM AirtableView',
+    tenant,
+    tableIds,
+  )
+  const records = inTables<AirtableRecord>(
+    db,
+    'SELECT tenant, id, tableId, createdTime, modifiedTime, autoNumber, fields, seq ' +
+      'FROM AirtableRecord',
+    tenant,
+    tableIds,
+  )
   const rows: TableRow[] = tables.map((t) => ({
     id: t.id,
     baseId: t.baseId,
@@ -235,53 +284,58 @@ export function optString(field: FieldRow, key: string): string | undefined {
 // Everything a write request changed, in one pass per kind. Comments go with
 // their record, because relationMode="prisma" refuses to delete a record that
 // a comment still requires.
-export async function saveWorld(db: C, world: World): Promise<void> {
+export async function saveWorld(db: Db, world: World): Promise<void> {
   const tenant = world.tenant
   for (const gone of world.removed) {
-    await db.airtableComment.deleteMany({
-      where: { ...tenantWhere<Prisma.AirtableCommentWhereInput>(tenant, KIND), recordId: gone.id },
-    })
-    await db.airtableRecord.delete({
-      where: idWhere<Prisma.AirtableRecordWhereUniqueInput>(tenant, gone.id, KIND),
-    })
+    exec(db, 'DELETE FROM AirtableComment WHERE tenant = ? AND recordId = ?', tenant, gone.id)
+    changeOne(db, 'DELETE FROM AirtableRecord WHERE tenant = ? AND id = ?', tenant, gone.id)
   }
   for (const table of world.tables) {
     if (table.dirty) {
-      await db.airtableTable.update({
-        where: idWhere<Prisma.AirtableTableWhereUniqueInput>(tenant, table.id, KIND),
-        data: { autoNumberNext: table.autoNumberNext },
-      })
+      changeOne(
+        db,
+        'UPDATE AirtableTable SET autoNumberNext = ? WHERE tenant = ? AND id = ?',
+        table.autoNumberNext,
+        tenant,
+        table.id,
+      )
     }
     for (const field of table.fields) {
       if (!field.dirty) continue
-      await db.airtableField.update({
-        where: idWhere<Prisma.AirtableFieldWhereUniqueInput>(tenant, field.id, KIND),
-        data: { options: field.options === null ? null : JSON.stringify(field.options) },
-      })
+      changeOne(
+        db,
+        'UPDATE AirtableField SET options = ? WHERE tenant = ? AND id = ?',
+        field.options === null ? null : JSON.stringify(field.options),
+        tenant,
+        field.id,
+      )
     }
     for (const rec of table.records) {
       if (rec.state === 'new') {
-        await db.airtableRecord.create({
-          data: {
-            tenant,
-            id: rec.id,
-            tableId: table.id,
-            createdTime: rec.createdTime,
-            modifiedTime: rec.modifiedTime,
-            autoNumber: rec.autoNumber,
-            fields: JSON.stringify(rec.cells),
-            seq: rec.seq,
-          },
-        })
+        exec(
+          db,
+          'INSERT INTO AirtableRecord (tenant, id, tableId, createdTime, modifiedTime, ' +
+            'autoNumber, fields, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          tenant,
+          rec.id,
+          table.id,
+          rec.createdTime,
+          rec.modifiedTime,
+          rec.autoNumber,
+          JSON.stringify(rec.cells),
+          rec.seq,
+        )
       } else if (rec.state === 'dirty') {
-        await db.airtableRecord.update({
-          where: idWhere<Prisma.AirtableRecordWhereUniqueInput>(tenant, rec.id, KIND),
-          data: {
-            fields: JSON.stringify(rec.cells),
-            modifiedTime: rec.modifiedTime,
-            autoNumber: rec.autoNumber,
-          },
-        })
+        changeOne(
+          db,
+          'UPDATE AirtableRecord SET fields = ?, modifiedTime = ?, autoNumber = ? ' +
+            'WHERE tenant = ? AND id = ?',
+          JSON.stringify(rec.cells),
+          rec.modifiedTime,
+          rec.autoNumber,
+          tenant,
+          rec.id,
+        )
       }
     }
   }

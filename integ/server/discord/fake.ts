@@ -12,13 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SQLInputValue } from 'node:sqlite'
 import { Prisma, PrismaClient } from '../../generated/discord/index.js'
-import type { DiscordChannel, DiscordMessage } from '../../generated/discord/index.js'
+import type {
+  DiscordChannel,
+  DiscordGuild,
+  DiscordMember,
+  DiscordMessage,
+} from '../../generated/discord/index.js'
 import { parseConfig } from '../kit/typescript/config.ts'
 import { schemaFor } from '../kit/typescript/fixture.ts'
 import { route } from '../kit/typescript/route.ts'
 import type { Ctx, KitRoute } from '../kit/typescript/route.ts'
-import { idWhere, tenantWhere } from '../kit/typescript/tenant.ts'
+import { BYTES, all, bytes, exec, one } from '../kit/typescript/sql.ts'
 import type { Fake } from '../kit/typescript/base.ts'
 import type { Dmmf } from '../kit/typescript/seed.ts'
 import type { JsonValue, Reply } from '../kit/typescript/types.ts'
@@ -66,29 +72,102 @@ function authed(ctx: Ctx<C>): boolean {
   return typeof one === 'string' && one.startsWith('Bot ')
 }
 
-function scope(ctx: Ctx<C>): Prisma.DiscordMessageWhereInput {
-  return tenantWhere<Prisma.DiscordMessageWhereInput>(ctx.tenant, KIND)
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/discord.prisma declares, rows shaped as Prisma's generated types. A
+// BigInt column holds a snowflake past 2^53, which node:sqlite will not read
+// as a number, so it is read as text and parsed.
+const GUILD =
+  'SELECT tenant, id, seq, CAST(idNum AS TEXT) AS idNum, name, members, messages FROM DiscordGuild'
+const CHANNEL =
+  'SELECT tenant, id, guildId, seq, name, type, topic, position, lastMessageId, botHidden ' +
+  'FROM DiscordChannel'
+const MEMBER =
+  'SELECT pk, tenant, guildId, seq, userId, CAST(userIdNum AS TEXT) AS userIdNum, username, ' +
+  'nick, payloadJson FROM DiscordMember'
+const MESSAGE =
+  'SELECT tenant, id, seq, CAST(idNum AS TEXT) AS idNum, channelId, guildId, content, ' +
+  'timestamp, editedTimestamp, authorJson, attachmentsJson, pollJson, pinnedAt FROM DiscordMessage'
+
+type Text<T, K extends keyof T> = Omit<T, K> & Record<K, string>
+
+function toGuild(row: Text<DiscordGuild, 'idNum'>): DiscordGuild {
+  return { ...row, idNum: BigInt(row.idNum) }
+}
+
+function toChannel(row: Omit<DiscordChannel, 'botHidden'> & { botHidden: number }): DiscordChannel {
+  return { ...row, botHidden: row.botHidden === 1 }
+}
+
+function toMember(row: Text<DiscordMember, 'userIdNum'>): DiscordMember {
+  return { ...row, userIdNum: BigInt(row.userIdNum) }
+}
+
+function toMessage(row: Text<DiscordMessage, 'idNum'>): DiscordMessage {
+  return { ...row, idNum: BigInt(row.idNum) }
+}
+
+function messages(ctx: Ctx<C>, where: string, ...params: SQLInputValue[]): DiscordMessage[] {
+  return all<Text<DiscordMessage, 'idNum'>>(
+    ctx.sql,
+    `${MESSAGE} WHERE tenant = ? AND ${where}`,
+    ctx.tenant,
+    ...params,
+  ).map(toMessage)
+}
+
+function messageById(ctx: Ctx<C>, messageId: string): DiscordMessage {
+  const row = one<Text<DiscordMessage, 'idNum'>>(
+    ctx.sql,
+    `${MESSAGE} WHERE tenant = ? AND id = ?`,
+    ctx.tenant,
+    messageId,
+  )
+  if (row === null) throw new Error(`discord fake: message ${messageId} vanished`)
+  return toMessage(row)
+}
+
+// Throws when nothing matched, as Prisma's update and delete did; every route
+// looks the message up first.
+function changeOne(ctx: Ctx<C>, sql: string, ...params: SQLInputValue[]): void {
+  if (exec(ctx.sql, sql, ...params) === 0) throw new Error('discord fake: no row matched')
 }
 
 async function botPayload(ctx: Ctx<C>): Promise<{ [key: string]: JsonValue }> {
-  const row = await ctx.db.discordBot.findFirst({
-    where: tenantWhere<Prisma.DiscordBotWhereInput>(ctx.tenant, KIND),
-    orderBy: { seq: 'asc' },
-  })
+  const row = one<{ id: string; username: string }>(
+    ctx.sql,
+    'SELECT id, username FROM DiscordBot WHERE tenant = ? ORDER BY seq LIMIT 1',
+    ctx.tenant,
+  )
   return row === null ? {} : { id: row.id, username: row.username }
 }
 
 async function guildExists(ctx: Ctx<C>, guildId: string): Promise<boolean> {
-  const row = await ctx.db.discordGuild.findUnique({
-    where: idWhere<Prisma.DiscordGuildWhereUniqueInput>(ctx.tenant, guildId, KIND),
-  })
+  const row = one<{ id: string }>(
+    ctx.sql,
+    'SELECT id FROM DiscordGuild WHERE tenant = ? AND id = ?',
+    ctx.tenant,
+    guildId,
+  )
   return row !== null
 }
 
 async function channelRow(ctx: Ctx<C>, channelId: string): Promise<DiscordChannel | null> {
-  return ctx.db.discordChannel.findUnique({
-    where: idWhere<Prisma.DiscordChannelWhereUniqueInput>(ctx.tenant, channelId, KIND),
-  })
+  const row = one<Omit<DiscordChannel, 'botHidden'> & { botHidden: number }>(
+    ctx.sql,
+    `${CHANNEL} WHERE tenant = ? AND id = ?`,
+    ctx.tenant,
+    channelId,
+  )
+  return row === null ? null : toChannel(row)
+}
+
+function channelsOf(ctx: Ctx<C>, guildId: string): DiscordChannel[] {
+  return all<Omit<DiscordChannel, 'botHidden'> & { botHidden: number }>(
+    ctx.sql,
+    `${CHANNEL} WHERE tenant = ? AND guildId = ? ORDER BY seq`,
+    ctx.tenant,
+    guildId,
+  ).map(toChannel)
 }
 
 async function messageIn(
@@ -96,9 +175,8 @@ async function messageIn(
   channelId: string,
   messageId: string,
 ): Promise<DiscordMessage | null> {
-  return ctx.db.discordMessage.findFirst({
-    where: { ...scope(ctx), channelId, id: messageId },
-  })
+  const rows = messages(ctx, 'channelId = ? AND id = ? LIMIT 1', channelId, messageId)
+  return rows[0] ?? null
 }
 
 // Newest first, whichever cursor selected the window. The selection reads
@@ -113,14 +191,13 @@ async function currentUserGuilds(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const after = cursor(ctx.query.get('after') ?? '0')
   const limit = clamp(ctx.query.get('limit'), 200, 200)
-  const rows = await ctx.db.discordGuild.findMany({
-    where: {
-      ...tenantWhere<Prisma.DiscordGuildWhereInput>(ctx.tenant, KIND),
-      idNum: { gt: after },
-    },
-    orderBy: { idNum: 'asc' },
-    take: limit,
-  })
+  const rows = all<Text<DiscordGuild, 'idNum'>>(
+    ctx.sql,
+    `${GUILD} WHERE tenant = ? AND idNum > ? ORDER BY DiscordGuild.idNum LIMIT ?`,
+    ctx.tenant,
+    after,
+    limit,
+  ).map(toGuild)
   return { status: 200, body: rows.map(renderGuild) }
 }
 
@@ -129,10 +206,7 @@ async function guildChannels(ctx: Ctx<C>): Promise<Reply> {
   const guildId = ctx.params.guild_id ?? ''
   if (!(await guildExists(ctx, guildId))) return unknownChannel()
   // Documented as not paginated: the whole channel list comes back.
-  const rows = await ctx.db.discordChannel.findMany({
-    where: { ...tenantWhere<Prisma.DiscordChannelWhereInput>(ctx.tenant, KIND), guildId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = channelsOf(ctx, guildId)
   return { status: 200, body: rows.map(renderChannel) }
 }
 
@@ -143,15 +217,15 @@ async function guildMembers(ctx: Ctx<C>): Promise<Reply> {
   const after = cursor(ctx.query.get('after') ?? '0')
   const limit = clamp(ctx.query.get('limit'), 1, MEMBERS_MAX_LIMIT)
   // Documented as ordered by user id, ascending.
-  const rows = await ctx.db.discordMember.findMany({
-    where: {
-      ...tenantWhere<Prisma.DiscordMemberWhereInput>(ctx.tenant, KIND),
-      guildId,
-      userIdNum: { gt: after },
-    },
-    orderBy: { userIdNum: 'asc' },
-    take: limit,
-  })
+  const rows = all<Text<DiscordMember, 'userIdNum'>>(
+    ctx.sql,
+    `${MEMBER} WHERE tenant = ? AND guildId = ? AND userIdNum > ? ` +
+      'ORDER BY DiscordMember.userIdNum LIMIT ?',
+    ctx.tenant,
+    guildId,
+    after,
+    limit,
+  ).map(toMember)
   return { status: 200, body: rows.map(renderMember) }
 }
 
@@ -161,10 +235,12 @@ async function searchMembers(ctx: Ctx<C>): Promise<Reply> {
   if (!(await guildExists(ctx, guildId))) return unknownChannel()
   const needle = (ctx.query.get('query') ?? '').toLowerCase()
   const limit = clamp(ctx.query.get('limit'), 1, MEMBERS_MAX_LIMIT)
-  const rows = await ctx.db.discordMember.findMany({
-    where: { ...tenantWhere<Prisma.DiscordMemberWhereInput>(ctx.tenant, KIND), guildId },
-    orderBy: { userIdNum: 'asc' },
-  })
+  const rows = all<Text<DiscordMember, 'userIdNum'>>(
+    ctx.sql,
+    `${MEMBER} WHERE tenant = ? AND guildId = ? ORDER BY DiscordMember.userIdNum`,
+    ctx.tenant,
+    guildId,
+  ).map(toMember)
   // Documented as a prefix match on username or nickname.
   const hits = rows.filter(
     (m) =>
@@ -183,28 +259,27 @@ async function channelMessages(ctx: Ctx<C>): Promise<Reply> {
   const limit = clamp(ctx.query.get('limit'), 50, MESSAGES_MAX_LIMIT)
   const after = ctx.query.get('after')
   const before = ctx.query.get('before')
-  const where = { ...scope(ctx), channelId }
   let rows: DiscordMessage[]
   if (after !== null) {
     // `after` walks forward: the window is the oldest ids above the cursor, so
     // the caller advances with the newest id it received.
-    rows = await ctx.db.discordMessage.findMany({
-      where: { ...where, idNum: { gt: cursor(after) } },
-      orderBy: { seq: 'asc' },
-      take: limit,
-    })
+    rows = messages(
+      ctx,
+      'channelId = ? AND idNum > ? ORDER BY seq LIMIT ?',
+      channelId,
+      cursor(after),
+      limit,
+    )
   } else if (before !== null) {
-    rows = await ctx.db.discordMessage.findMany({
-      where: { ...where, idNum: { lt: cursor(before) } },
-      orderBy: { seq: 'desc' },
-      take: limit,
-    })
+    rows = messages(
+      ctx,
+      'channelId = ? AND idNum < ? ORDER BY seq DESC LIMIT ?',
+      channelId,
+      cursor(before),
+      limit,
+    )
   } else {
-    rows = await ctx.db.discordMessage.findMany({
-      where,
-      orderBy: { seq: 'desc' },
-      take: limit,
-    })
+    rows = messages(ctx, 'channelId = ? ORDER BY seq DESC LIMIT ?', channelId, limit)
   }
   const base = baseOf(ctx.url)
   const query = cdnQuery(ctx.run, ctx.tenant)
@@ -233,7 +308,14 @@ async function attachmentsOf(
     const id = postSnowflake(n)
     const filename = typeof entry.filename === 'string' ? entry.filename : 'file'
     const url = `${BASE_TOKEN}/attachments/${id}/${encodeURIComponent(filename)}`
-    await ctx.db.discordBlob.create({ data: { tenant: ctx.tenant, id, seq: n, body: part.bytes } })
+    exec(
+      ctx.sql,
+      `INSERT INTO DiscordBlob (tenant, id, seq, body) VALUES (?, ?, ?, ${BYTES})`,
+      ctx.tenant,
+      id,
+      n,
+      ...bytes(part.bytes),
+    )
     out.push({
       id,
       filename,
@@ -273,30 +355,34 @@ async function createMessage(ctx: Ctx<C>): Promise<Reply> {
     body = bodyObject(ctx.json())
   }
   const bot = await botPayload(ctx)
-  const tail = await ctx.db.discordMessage.aggregate({
-    where: { ...scope(ctx), channelId },
-    _max: { seq: true },
-  })
+  const tail = one<{ seq: number | null }>(
+    ctx.sql,
+    'SELECT MAX(seq) AS seq FROM DiscordMessage WHERE tenant = ? AND channelId = ?',
+    ctx.tenant,
+    channelId,
+  )
   const id = postSnowflake(ctx.minter.next('post'))
   const poll = body.poll
-  const row = await ctx.db.discordMessage.create({
-    data: {
-      tenant: ctx.tenant,
-      id,
-      seq: (tail._max.seq ?? -1) + 1,
-      idNum: BigInt(id),
-      channelId,
-      guildId: channel.guildId,
-      content: pyField(raw, 'content'),
-      timestamp: POST_TIMESTAMP,
-      editedTimestamp: null,
-      authorJson: JSON.stringify({ ...bot, bot: true }),
-      attachmentsJson: JSON.stringify(attachments),
-      // Discord echoes the poll object (with defaults resolved) on the created
-      // message; the fake echoes it verbatim.
-      pollJson: poll !== undefined && isObject(poll) ? JSON.stringify(poll) : null,
-    },
-  })
+  exec(
+    ctx.sql,
+    'INSERT INTO DiscordMessage (tenant, id, seq, idNum, channelId, guildId, content, ' +
+      'timestamp, editedTimestamp, authorJson, attachmentsJson, pollJson) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)',
+    ctx.tenant,
+    id,
+    (tail?.seq ?? -1) + 1,
+    BigInt(id),
+    channelId,
+    channel.guildId,
+    pyField(raw, 'content'),
+    POST_TIMESTAMP,
+    JSON.stringify({ ...bot, bot: true }),
+    JSON.stringify(attachments),
+    // Discord echoes the poll object (with defaults resolved) on the created
+    // message; the fake echoes it verbatim.
+    poll !== undefined && isObject(poll) ? JSON.stringify(poll) : null,
+  )
+  const row = messageById(ctx, id)
   if (attachments.length === 0) return { status: 200, body: renderMessage(row) }
   return {
     status: 200,
@@ -312,10 +398,15 @@ async function editMessage(ctx: Ctx<C>): Promise<Reply> {
   bodyObject(ctx.json())
   const found = await messageIn(ctx, channelId, messageId)
   if (found === null) return unknownMessage()
-  const row = await ctx.db.discordMessage.update({
-    where: idWhere<Prisma.DiscordMessageWhereUniqueInput>(ctx.tenant, messageId, KIND),
-    data: { content: pyField(ctx.body, 'content'), editedTimestamp: EDIT_TIMESTAMP },
-  })
+  changeOne(
+    ctx,
+    'UPDATE DiscordMessage SET content = ?, editedTimestamp = ? WHERE tenant = ? AND id = ?',
+    pyField(ctx.body, 'content'),
+    EDIT_TIMESTAMP,
+    ctx.tenant,
+    messageId,
+  )
+  const row = messageById(ctx, messageId)
   // Deliberately NOT base-resolved: the python fake returned the stored dict
   // here, so an edited message that carries attachments answers with the
   // literal {base} placeholder its url was seeded with.
@@ -328,9 +419,7 @@ async function deleteMessage(ctx: Ctx<C>): Promise<Reply> {
   const messageId = ctx.params.message_id ?? ''
   const found = await messageIn(ctx, channelId, messageId)
   if (found === null) return unknownMessage()
-  await ctx.db.discordMessage.delete({
-    where: idWhere<Prisma.DiscordMessageWhereUniqueInput>(ctx.tenant, messageId, KIND),
-  })
+  changeOne(ctx, 'DELETE FROM DiscordMessage WHERE tenant = ? AND id = ?', ctx.tenant, messageId)
   return { status: 204 }
 }
 
@@ -357,15 +446,14 @@ async function createThread(ctx: Ctx<C>): Promise<Reply> {
 
 async function guildInfo(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const row = await ctx.db.discordGuild.findUnique({
-    where: idWhere<Prisma.DiscordGuildWhereUniqueInput>(
-      ctx.tenant,
-      ctx.params.guild_id ?? '',
-      KIND,
-    ),
-  })
+  const row = one<Text<DiscordGuild, 'idNum'>>(
+    ctx.sql,
+    `${GUILD} WHERE tenant = ? AND id = ?`,
+    ctx.tenant,
+    ctx.params.guild_id ?? '',
+  )
   if (row === null) return unknownChannel()
-  return { status: 200, body: renderGuild(row) }
+  return { status: 200, body: renderGuild(toGuild(row)) }
 }
 
 async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
@@ -375,17 +463,11 @@ async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
   const channelFilter = ctx.query.get('channel_id')
   const base = baseOf(ctx.url)
   const query = cdnQuery(ctx.run, ctx.tenant)
-  const channels = await ctx.db.discordChannel.findMany({
-    where: { ...tenantWhere<Prisma.DiscordChannelWhereInput>(ctx.tenant, KIND), guildId },
-    orderBy: { seq: 'asc' },
-  })
+  const channels = channelsOf(ctx, guildId)
   const contexts: JsonValue[] = []
   for (const channel of channels) {
     if (channelFilter !== null && channel.id !== channelFilter) continue
-    const rows = await ctx.db.discordMessage.findMany({
-      where: { ...scope(ctx), channelId: channel.id },
-      orderBy: { seq: 'asc' },
-    })
+    const rows = messages(ctx, 'channelId = ? ORDER BY seq', channel.id)
     for (const row of rows) {
       if (needle !== '' && !row.content.includes(needle)) continue
       contexts.push([resolveBase(renderMessage(row), base, query)])
@@ -399,12 +481,16 @@ async function addReaction(ctx: Ctx<C>): Promise<Reply> {
   const channelId = ctx.params.channel_id ?? ''
   const messageId = ctx.params.message_id ?? ''
   if ((await messageIn(ctx, channelId, messageId)) === null) return unknownMessage()
-  const seq = await ctx.db.discordReaction.count({
-    where: tenantWhere<Prisma.DiscordReactionWhereInput>(ctx.tenant, KIND),
-  })
-  await ctx.db.discordReaction.create({
-    data: { tenant: ctx.tenant, seq, channelId, messageId, emoji: ctx.params.emoji ?? '' },
-  })
+  exec(
+    ctx.sql,
+    'INSERT INTO DiscordReaction (tenant, seq, channelId, messageId, emoji) ' +
+      'VALUES (?, (SELECT COUNT(*) FROM DiscordReaction WHERE tenant = ?), ?, ?, ?)',
+    ctx.tenant,
+    ctx.tenant,
+    channelId,
+    messageId,
+    ctx.params.emoji ?? '',
+  )
   return { status: 204 }
 }
 
@@ -416,10 +502,12 @@ async function getMessage(ctx: Ctx<C>): Promise<Reply> {
   const messageId = ctx.params.message_id ?? ''
   const row = await messageIn(ctx, channelId, messageId)
   if (row === null) return unknownMessage()
-  const added = await ctx.db.discordReaction.findMany({
-    where: { ...tenantWhere<Prisma.DiscordReactionWhereInput>(ctx.tenant, KIND), messageId },
-    orderBy: { seq: 'asc' },
-  })
+  const added = all<{ emoji: string }>(
+    ctx.sql,
+    'SELECT emoji FROM DiscordReaction WHERE tenant = ? AND messageId = ? ORDER BY seq',
+    ctx.tenant,
+    messageId,
+  )
   const body = renderMessage(row) as { [key: string]: JsonValue }
   const emojis = [...new Set(added.map((one) => one.emoji))]
   if (emojis.length > 0) {
@@ -443,10 +531,13 @@ async function setPin(ctx: Ctx<C>, pinnedAt: string | null): Promise<Reply> {
   const channelId = ctx.params.channel_id ?? ''
   const messageId = ctx.params.message_id ?? ''
   if ((await messageIn(ctx, channelId, messageId)) === null) return unknownMessage()
-  await ctx.db.discordMessage.update({
-    where: idWhere<Prisma.DiscordMessageWhereUniqueInput>(ctx.tenant, messageId, KIND),
-    data: { pinnedAt },
-  })
+  changeOne(
+    ctx,
+    'UPDATE DiscordMessage SET pinnedAt = ? WHERE tenant = ? AND id = ?',
+    pinnedAt,
+    ctx.tenant,
+    messageId,
+  )
   return { status: 204 }
 }
 
@@ -463,14 +554,21 @@ async function channelPins(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const limit = Number(ctx.url.searchParams.get('limit') ?? '50')
   const before = ctx.url.searchParams.get('before')
-  const rows = await ctx.db.discordMessage.findMany({
-    where: {
-      ...scope(ctx),
-      channelId: ctx.params.channel_id ?? '',
-      pinnedAt: before === null ? { not: null } : { not: null, lt: before },
-    },
-    orderBy: [{ pinnedAt: 'desc' }, { seq: 'desc' }],
-  })
+  const channelId = ctx.params.channel_id ?? ''
+  const rows =
+    before === null
+      ? messages(
+          ctx,
+          'channelId = ? AND pinnedAt IS NOT NULL ORDER BY pinnedAt DESC, seq DESC',
+          channelId,
+        )
+      : messages(
+          ctx,
+          'channelId = ? AND pinnedAt IS NOT NULL AND pinnedAt < ? ' +
+            'ORDER BY pinnedAt DESC, seq DESC',
+          channelId,
+          before,
+        )
   const items = rows
     .slice(0, limit)
     .map((row) => ({ pinned_at: row.pinnedAt ?? '', message: renderMessage(row) }))
@@ -481,13 +579,12 @@ async function channelPins(ctx: Ctx<C>): Promise<Reply> {
 // Range: a fake that answered 200 with the whole body would let a client that
 // never applies the window pass anyway.
 async function attachment(ctx: Ctx<C>): Promise<Reply> {
-  const row = await ctx.db.discordBlob.findUnique({
-    where: idWhere<Prisma.DiscordBlobWhereUniqueInput>(
-      ctx.tenant,
-      ctx.params.attachment_id ?? '',
-      KIND,
-    ),
-  })
+  const row = one<{ body: Uint8Array }>(
+    ctx.sql,
+    'SELECT body FROM DiscordBlob WHERE tenant = ? AND id = ?',
+    ctx.tenant,
+    ctx.params.attachment_id ?? '',
+  )
   // An empty Buffer would set Content-Type: application/octet-stream, and
   // aiohttp's bare `web.Response(status=404)` sends no Content-Type at all.
   if (row === null) return { status: 404 }

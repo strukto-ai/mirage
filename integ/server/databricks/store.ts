@@ -12,17 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { tenantWhere } from '../kit/typescript/index.ts'
-import { config } from './config.ts'
-import type { C } from './config.ts'
+import type { DatabaseSync } from 'node:sqlite'
+import { BYTES, all, bytes, exec, one, stmt } from '../kit/typescript/index.ts'
 
 export interface NodeRow {
   path: string
   isDirectory: boolean
-  // Prisma reads a `Bytes` column back as a Uint8Array, not a Buffer, and the
-  // kit only recognizes a Buffer as a raw body: typing this as Buffer made
-  // every file read answer a JSON object of byte values. `bytesOf` is the one
-  // place that conversion happens.
+  // SQLite reads a BLOB back as a Uint8Array, not a Buffer, and the kit only
+  // recognizes a Buffer as a raw body: typing this as Buffer made every file
+  // read answer a JSON object of byte values. `bytesOf` is the one place that
+  // conversion happens.
   data: Uint8Array | null
   lastModified: number
   seq: number
@@ -30,16 +29,6 @@ export interface NodeRow {
 
 export function bytesOf(row: NodeRow): Buffer {
   return row.data === null ? Buffer.alloc(0) : Buffer.from(row.data)
-}
-
-// Prisma types a Bytes column as Uint8Array<ArrayBuffer>, and a Buffer is a
-// Uint8Array<ArrayBufferLike>, which is wider: the two are interchangeable at
-// runtime and not assignable at compile time. Narrow once here rather than at
-// each write.
-function toBytes(data: Buffer): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(new ArrayBuffer(data.length))
-  out.set(data)
-  return out
 }
 
 // posixpath.normpath("/" + path.strip("/")), which collapses "//" and resolves
@@ -66,28 +55,34 @@ export function nameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1)
 }
 
-function where(tenant: string, path: string): { tenant_path: { tenant: string; path: string } } {
-  return { tenant_path: { tenant, path } }
+// The run's file over node:sqlite (kit sql.ts), on the table
+// prisma/databricks.prisma declares.
+type Db = DatabaseSync
+
+const NODE = 'SELECT path, isDirectory, data, lastModified, seq FROM DatabricksNode'
+
+// The seq a new row takes: one past the tenant's highest, 0 for the first.
+const NEXT_SEQ = '(SELECT COALESCE(MAX(seq) + 1, 0) FROM DatabricksNode WHERE tenant = ?)'
+
+interface Row extends Omit<NodeRow, 'isDirectory'> {
+  isDirectory: number
 }
 
-export async function nextSeq(db: C, tenant: string): Promise<number> {
-  const top = await db.databricksNode.findFirst({
-    where: tenantWhere(tenant, config.tenantKind),
-    orderBy: { seq: 'desc' },
-  })
-  return top === null ? 0 : top.seq + 1
+function toNode(row: Row): NodeRow {
+  return { ...row, isDirectory: row.isDirectory === 1 }
 }
 
-export async function nodeAt(db: C, tenant: string, path: string): Promise<NodeRow | null> {
-  return (await db.databricksNode.findUnique({ where: where(tenant, path) })) as NodeRow | null
+export async function nodeAt(db: Db, tenant: string, path: string): Promise<NodeRow | null> {
+  const row = one<Row>(db, `${NODE} WHERE tenant = ? AND path = ?`, tenant, path)
+  return row === null ? null : toNode(row)
 }
 
-export async function fileAt(db: C, tenant: string, path: string): Promise<NodeRow | null> {
+export async function fileAt(db: Db, tenant: string, path: string): Promise<NodeRow | null> {
   const row = await nodeAt(db, tenant, path)
   return row === null || row.isDirectory ? null : row
 }
 
-export async function isDir(db: C, tenant: string, path: string): Promise<boolean> {
+export async function isDir(db: Db, tenant: string, path: string): Promise<boolean> {
   const row = await nodeAt(db, tenant, path)
   return row !== null && row.isDirectory
 }
@@ -96,85 +91,96 @@ export async function isDir(db: C, tenant: string, path: string): Promise<boolea
 // python store's _add_ancestors did on both put_file and make_dir. A databricks
 // volume has no mkdir -p, so a file written three levels down has to leave the
 // two directories above it listable.
-export async function addAncestors(db: C, tenant: string, path: string): Promise<void> {
+export async function addAncestors(db: Db, tenant: string, path: string): Promise<void> {
   let current = parentOf(path)
   for (;;) {
-    let seq = 0
-    if ((await nodeAt(db, tenant, current)) === null) seq = await nextSeq(db, tenant)
-    await db.databricksNode.upsert({
-      where: where(tenant, current),
-      update: { isDirectory: true, data: null },
-      create: { tenant, path: current, isDirectory: true, data: null, lastModified: 0, seq },
-    })
+    exec(
+      db,
+      'INSERT INTO DatabricksNode (tenant, path, isDirectory, data, lastModified, seq) ' +
+        `VALUES (?, ?, 1, NULL, 0, ${NEXT_SEQ}) ` +
+        'ON CONFLICT (tenant, path) DO UPDATE SET isDirectory = 1, data = NULL',
+      tenant,
+      current,
+      tenant,
+    )
     if (current === '/') return
     current = parentOf(current)
   }
 }
 
 export async function putFile(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   data: Buffer,
   mtimeMs: number,
 ): Promise<void> {
   const at = norm(path)
-  const existing = await nodeAt(db, tenant, at)
-  const seq = existing === null ? await nextSeq(db, tenant) : existing.seq
-  await db.databricksNode.upsert({
-    where: where(tenant, at),
-    update: { isDirectory: false, data: toBytes(data), lastModified: mtimeMs },
-    create: {
-      tenant,
-      path: at,
-      isDirectory: false,
-      data: toBytes(data),
-      lastModified: mtimeMs,
-      seq,
-    },
-  })
+  exec(
+    db,
+    'INSERT INTO DatabricksNode (tenant, path, isDirectory, data, lastModified, seq) ' +
+      `VALUES (?, ?, 0, ${BYTES}, ?, ${NEXT_SEQ}) ON CONFLICT (tenant, path) DO UPDATE SET ` +
+      'isDirectory = 0, data = excluded.data, lastModified = excluded.lastModified',
+    tenant,
+    at,
+    ...bytes(data),
+    mtimeMs,
+    tenant,
+  )
   await addAncestors(db, tenant, at)
 }
 
-export async function makeDir(db: C, tenant: string, path: string): Promise<void> {
+export async function makeDir(db: Db, tenant: string, path: string): Promise<void> {
   const at = norm(path)
-  if ((await nodeAt(db, tenant, at)) === null) {
-    await db.databricksNode.create({
-      data: {
-        tenant,
-        path: at,
-        isDirectory: true,
-        data: null,
-        lastModified: 0,
-        seq: await nextSeq(db, tenant),
-      },
-    })
-  }
+  exec(
+    db,
+    'INSERT INTO DatabricksNode (tenant, path, isDirectory, data, lastModified, seq) ' +
+      `VALUES (?, ?, 1, NULL, 0, ${NEXT_SEQ}) ON CONFLICT (tenant, path) DO NOTHING`,
+    tenant,
+    at,
+    tenant,
+  )
   await addAncestors(db, tenant, at)
 }
 
-export async function deleteNode(db: C, tenant: string, path: string): Promise<void> {
-  await db.databricksNode.delete({ where: where(tenant, norm(path)) })
+// Throws on a missing row, as Prisma's delete did; every route checks first.
+function deleteOne(db: Db, tenant: string, path: string): void {
+  const done = stmt(db, 'DELETE FROM DatabricksNode WHERE tenant = ? AND path = ?').run(
+    tenant,
+    path,
+  )
+  if (done.changes === 0) throw new Error(`databricks fake: ${path} is already gone`)
+}
+
+export async function deleteNode(db: Db, tenant: string, path: string): Promise<void> {
+  deleteOne(db, tenant, norm(path))
 }
 
 // A directory delete takes the subtree with it. The prefix carries its own
-// trailing slash so "/a/bc" is not swept away with "/a/b".
-export async function deleteTree(db: C, tenant: string, path: string): Promise<void> {
+// trailing slash so "/a/bc" is not swept away with "/a/b". It is `startsWith`
+// as Prisma ran it on SQLite: LIKE with the prefix unescaped, so ASCII case is
+// ignored and `%` or `_` match as wildcards. Kept exactly.
+export async function deleteTree(db: Db, tenant: string, path: string): Promise<void> {
   const at = norm(path)
-  await db.databricksNode.deleteMany({
-    where: { ...tenantWhere(tenant, config.tenantKind), path: { startsWith: `${at}/` } },
-  })
-  await db.databricksNode.delete({ where: where(tenant, at) })
+  exec(db, 'DELETE FROM DatabricksNode WHERE tenant = ? AND path LIKE ?', tenant, `${at}/%`)
+  deleteOne(db, tenant, at)
 }
 
 // Children of one directory, files before directories and each in insertion
-// order, which is the order the two python dicts iterated in.
-export async function childrenOf(db: C, tenant: string, path: string): Promise<NodeRow[]> {
+// order, which is the order the two python dicts iterated in. Only rows under
+// the directory's own prefix are read; `parentOf` still decides.
+export async function childrenOf(db: Db, tenant: string, path: string): Promise<NodeRow[]> {
   const at = norm(path)
-  const rows = (await db.databricksNode.findMany({
-    where: tenantWhere(tenant, config.tenantKind),
-    orderBy: { seq: 'asc' },
-  })) as NodeRow[]
-  const kids = rows.filter((r) => r.path !== '/' && parentOf(r.path) === at)
+  const rows =
+    at === '/'
+      ? all<Row>(db, `${NODE} WHERE tenant = ? ORDER BY seq`, tenant)
+      : all<Row>(
+          db,
+          `${NODE} WHERE tenant = ? AND substr(path, 1, length(?)) = ? ORDER BY seq`,
+          tenant,
+          `${at}/`,
+          `${at}/`,
+        )
+  const kids = rows.map(toNode).filter((r) => r.path !== '/' && parentOf(r.path) === at)
   return [...kids.filter((r) => !r.isDirectory), ...kids.filter((r) => r.isDirectory)]
 }

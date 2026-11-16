@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { clearTenants } from '../../kit/typescript/index.ts'
+import type { SQLInputValue } from 'node:sqlite'
+import { BYTES, bytes, deleteOrder, stmt, transaction } from '../../kit/typescript/index.ts'
 import type { Dmmf, DmmfModel } from '../../kit/typescript/index.ts'
-import type { Prisma } from '../../../generated/gws/index.js'
-import type { C } from './client.ts'
+import type { Db } from './client.ts'
 import type { GwsState } from './state.ts'
 import type { DocTab } from './types.ts'
 
@@ -53,45 +53,57 @@ import type { DocTab } from './types.ts'
 // way is answered as a 500 either way, but without the transaction it would
 // also leave the tenant holding a world that is partly the new state and
 // partly nothing at all, which the next request would serve as if it were
-// real. A diff is known before anything is written, so it goes as one batch
-// rather than an interactive transaction, which paid an engine round trip per
-// statement: about 20ms of every write. Deletes go through raw SQL, as
-// `clearTenants` does: `relationMode = "prisma"` checks a required relation
-// only from the client, and a row that is deleted here and inserted again in
-// the same transaction is never missing once it commits.
+// real. Every statement is built first and the transaction runs them without
+// yielding: the run's node:sqlite connection is shared, so a read awaited in
+// the middle would run inside it and see half a world. `relationMode =
+// "prisma"` checks a required relation only from the client, and a row that
+// is deleted here and inserted again in the same transaction is never missing
+// once it commits.
 export async function saveState(
-  db: C,
+  db: Db,
   dmmf: Dmmf,
   tenant: string,
   st: GwsState,
   flushed?: Rows,
 ): Promise<Rows> {
   const rows = buildRows(tenant, st)
+  const statements: Statement[] = []
   if (flushed === undefined) {
-    await db.$transaction(
-      async (tx) => {
-        await clearTenants(tx, dmmf, [tenant])
-        for (const [name, model] of TABLES) {
-          for (const op of insert(tx, model, rows[name])) await op
-        }
-      },
-      // Large workbooks can outlive Prisma's five-second interactive default.
-      { timeout: 120_000 },
-    )
-    return rows
+    // clearTenants, in its order, as statements of this transaction.
+    for (const name of deleteOrder(dmmf)) {
+      const def = modelOf(dmmf, name)
+      statements.push({
+        sql: `DELETE FROM ${quoted(def.dbName ?? def.name)} WHERE ${column(def, 'tenant')} = ?`,
+        params: [tenant],
+      })
+    }
+    for (const [name, model] of TABLES) {
+      statements.push(...insert(modelOf(dmmf, model), rows[name]))
+    }
+  } else {
+    const inserts: Statement[] = []
+    for (const [name, model] of TABLES) {
+      const def = modelOf(dmmf, model)
+      const change = diffTable(def, flushed[name], rows[name])
+      if (change === null) continue
+      statements.push(...remove(def, tenant, change.gone), ...renumber(def, change.moved))
+      inserts.push(...insert(def, change.put))
+    }
+    statements.push(...inserts)
   }
-  const ops: Op[] = []
-  const inserts: Op[] = []
-  for (const [name, model] of TABLES) {
-    const def = modelOf(dmmf, model)
-    const change = diffTable(def, flushed[name], rows[name])
-    if (change === null) continue
-    ops.push(...remove(db, def, tenant, change.gone), ...renumber(db, def, change.moved))
-    inserts.push(...insert(db, model, change.put))
-  }
-  ops.push(...inserts)
-  if (ops.length > 0) await db.$transaction(ops)
+  if (statements.length > 0) transact(db, statements)
   return rows
+}
+
+interface Statement {
+  sql: string
+  params: SQLInputValue[]
+}
+
+function transact(db: Db, statements: readonly Statement[]): void {
+  transaction(db, () => {
+    for (const s of statements) stmt(db, s.sql).run(...s.params)
+  })
 }
 
 type Row = Readonly<Record<string, unknown>>
@@ -199,14 +211,6 @@ function diffTable(model: DmmfModel, before: readonly Row[], after: readonly Row
   return gone.length + moved.length + put.length === 0 ? null : { gone, moved, put }
 }
 
-// A statement not yet sent: a Prisma query runs when it is awaited or handed
-// to `$transaction`, so a flush can build its whole batch first.
-type Op = Prisma.PrismaPromise<unknown>
-
-interface RawClient {
-  $executeRawUnsafe(query: string, ...values: unknown[]): Op
-}
-
 function quoted(name: string): string {
   return `"${name.replaceAll('"', '""')}"`
 }
@@ -218,49 +222,71 @@ function column(model: DmmfModel, field: string): string {
 
 const DELETE_BATCH = 200
 
-function remove(tx: RawClient, model: DmmfModel, tenant: string, gone: Change['gone']): Op[] {
+// A key or seq value as SQLite takes it: the world holds strings, numbers
+// and booleans there, and a Boolean column stores 0 or 1.
+function param(value: unknown): SQLInputValue {
+  return typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue)
+}
+
+function remove(model: DmmfModel, tenant: string, gone: Change['gone']): Statement[] {
   const table = quoted(model.dbName ?? model.name)
   if (gone === 'all') {
-    return [
-      tx.$executeRawUnsafe(`DELETE FROM ${table} WHERE ${column(model, 'tenant')} = ?`, tenant),
-    ]
+    return [{ sql: `DELETE FROM ${table} WHERE ${column(model, 'tenant')} = ?`, params: [tenant] }]
   }
   const key = keyOf(model)
   const columns = key.map((f) => column(model, f)).join(', ')
   const tuple = `(${key.map(() => '?').join(', ')})`
-  const ops: Op[] = []
+  const out: Statement[] = []
   for (let offset = 0; offset < gone.length; offset += DELETE_BATCH) {
     const batch = gone.slice(offset, offset + DELETE_BATCH)
-    ops.push(
-      tx.$executeRawUnsafe(
-        `DELETE FROM ${table} WHERE (${columns}) IN (VALUES ${batch.map(() => tuple).join(', ')})`,
-        ...batch.flatMap((r) => key.map((f) => r[f])),
-      ),
-    )
+    out.push({
+      sql: `DELETE FROM ${table} WHERE (${columns}) IN (VALUES ${batch.map(() => tuple).join(', ')})`,
+      params: batch.flatMap((r) => key.map((f) => param(r[f]))),
+    })
   }
-  return ops
+  return out
 }
 
-function renumber(tx: RawClient, model: DmmfModel, moved: readonly Row[]): Op[] {
+function renumber(model: DmmfModel, moved: readonly Row[]): Statement[] {
   const key = keyOf(model)
   const where = key.map((f) => `${column(model, f)} = ?`).join(' AND ')
   const sql = `UPDATE ${quoted(model.dbName ?? model.name)} SET ${column(model, SEQ)} = ? WHERE ${where}`
-  return moved.map((row) => tx.$executeRawUnsafe(sql, row[SEQ], ...key.map((f) => row[f])))
+  return moved.map((row) => ({
+    sql,
+    params: [param(row[SEQ]), ...key.map((f) => param(row[f]))],
+  }))
 }
 
-interface CreateManyClient {
-  createMany(args: { data: readonly Row[] }): Op
-}
-
-function insert(tx: RawClient, model: string, rows: readonly Row[]): Op[] {
+// createMany, one prepared INSERT per row: a field the row leaves undefined
+// takes its column default, as it did there, and Bytes go through BYTES.
+function insert(model: DmmfModel, rows: readonly Row[]): Statement[] {
   if (rows.length === 0) return []
-  if (model === 'SheetCell') return insertCells(tx, rows)
-  const delegate = model.charAt(0).toLowerCase() + model.slice(1)
-  return [(tx as unknown as Record<string, CreateManyClient>)[delegate]!.createMany({ data: rows })]
+  if (model.name === 'SheetCell') return insertCells(rows)
+  const table = quoted(model.dbName ?? model.name)
+  return rows.map((row) => {
+    const columns: string[] = []
+    const marks: string[] = []
+    const params: SQLInputValue[] = []
+    for (const [field, value] of Object.entries(row)) {
+      if (value === undefined) continue
+      columns.push(column(model, field))
+      if (value instanceof Uint8Array) {
+        marks.push(BYTES)
+        params.push(...bytes(value))
+      } else {
+        marks.push('?')
+        params.push(param(value))
+      }
+    }
+    return {
+      sql: `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${marks.join(', ')})`,
+      params,
+    }
+  })
 }
 
-function insertCells(tx: RawClient, rows: readonly Row[]): Op[] {
-  const ops: Op[] = []
+function insertCells(rows: readonly Row[]): Statement[] {
+  const out: Statement[] = []
   for (let offset = 0; offset < rows.length; offset += 10_000) {
     const cells = JSON.stringify(
       rows
@@ -275,21 +301,19 @@ function insertCells(tx: RawClient, rows: readonly Row[]): Op[] {
           cell.props,
         ]),
     )
-    // One bound JSON value avoids constructing a Prisma query node for
-    // each field of every cell. SQLite still enforces the composite key.
-    ops.push(
-      tx.$executeRawUnsafe(
-        `INSERT INTO "SheetCell" ("tenant", "spreadsheetId", "sheetId", "row", "col", "text", "props")
+    // One bound JSON value for a whole batch of cells rather than a
+    // statement each. SQLite still enforces the composite key.
+    out.push({
+      sql: `INSERT INTO "SheetCell" ("tenant", "spreadsheetId", "sheetId", "row", "col", "text", "props")
        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
               json_extract(value, '$[2]'), json_extract(value, '$[3]'),
               json_extract(value, '$[4]'), json_extract(value, '$[5]'),
               json_extract(value, '$[6]')
        FROM json_each(?)`,
-        cells,
-      ),
-    )
+      params: [cells],
+    })
   }
-  return ops
+  return out
 }
 
 export interface Rows {

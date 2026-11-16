@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import { clearTenants } from './clear.ts'
 import { ResetBodyError } from './errors.ts'
 import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT, loadFixture } from './fixture.ts'
@@ -112,7 +113,11 @@ export async function applyReset<C extends MinimalClient>(
   // `onSeeded` is how the caller marks progress, and the template build passes
   // none: it seeds a THROWAWAY database, so marking this run's tenants there
   // would claim a world that the copy has not made yet.
-  const seedInto = async (into: C, onSeeded?: (tenant: string) => void): Promise<SeedReport[]> => {
+  const seedInto = async (
+    into: C,
+    sql: DatabaseSync,
+    onSeeded?: (tenant: string) => void,
+  ): Promise<SeedReport[]> => {
     const out: SeedReport[] = []
     for (const tenant of req.tenants) {
       const rows = await seedFixture(into, fixture, {
@@ -122,7 +127,7 @@ export async function applyReset<C extends MinimalClient>(
         ...(fake.seedRoots === undefined ? {} : { roots: fake.seedRoots }),
       })
       if (fake.afterSeed !== undefined) {
-        await fake.afterSeed(into, tenant, rows, req.extras, fixtureRoot, req.epoch)
+        await fake.afterSeed(into, tenant, rows, req.extras, fixtureRoot, req.epoch, sql)
       }
       out.push({ tenant, rows })
       onSeeded?.(tenant)
@@ -142,7 +147,7 @@ export async function applyReset<C extends MinimalClient>(
     // `fresh` means no client existed, so a cache keyed by the client has
     // nothing here to forget. Fired anyway, for a fake that keys its own some
     // other way.
-    fake.afterReset?.(made, req.tenants)
+    fake.afterReset?.(made, req.tenants, pool.sql(req.run))
     return {
       ok: true,
       run: req.run,
@@ -159,7 +164,7 @@ export async function applyReset<C extends MinimalClient>(
     for (const tenant of req.tenants) st.reset(tenant, req.epoch)
     // Marked per tenant as each one finishes, not after the loop: a later
     // tenant throwing must not unmark the ones already seeded.
-    const seeded = await seedInto(db, (tenant) => {
+    const seeded = await seedInto(db, pool.sql(req.run), (tenant) => {
       st.markSeeded(tenant)
     })
     return {
@@ -177,7 +182,7 @@ export async function applyReset<C extends MinimalClient>(
     // Reported rather than propagated: a throw here would replace the seed's
     // own exception on its way to the 500 envelope.
     try {
-      fake.afterReset?.(db, req.tenants)
+      fake.afterReset?.(db, req.tenants, pool.sql(req.run))
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       process.stderr.write(`${fake.config.service} fake: afterReset: ${message}\n`)

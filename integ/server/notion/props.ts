@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { matched, update } from '../kit/typescript/index.ts'
+import { type Db } from './store.ts'
 import { validation } from './blocks.ts'
-import type { C } from './config.ts'
 import { plainTextOf } from './text.ts'
 import { normalizeRichText } from './text.ts'
 import type { JsonValue, Minter, Reply } from '../kit/typescript/index.ts'
@@ -42,7 +43,7 @@ export function schemaOf(database: DatabaseRow | null): Json {
 // the answer carries is only usable if that lands, so the schema goes back to
 // the row whenever normalization changed it.
 export async function persistSchema(
-  db: C,
+  db: Db,
   tenant: string,
   owner: DatabaseRow | null,
   schema: Json,
@@ -50,10 +51,7 @@ export async function persistSchema(
 ): Promise<void> {
   const next = JSON.stringify(schema)
   if (owner === null || next === before) return
-  await db.notionDatabase.update({
-    where: { tenant_id: { tenant, id: owner.id } },
-    data: { propertiesJson: next },
-  })
+  matched(update(db, 'NotionDatabase', { propertiesJson: next }, { tenant, id: owner.id }))
 }
 
 export function titleColumnOf(schema: Json): string {

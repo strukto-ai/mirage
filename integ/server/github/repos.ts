@@ -12,6 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+  count,
+  create,
+  first,
+  insert,
+  matched,
+  remove,
+  select,
+  update,
+} from '../kit/typescript/index.ts'
+import type { GithubRelease, GithubRepo, GithubSubmodule } from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, INSTALLATION_ACCOUNT, REPO_DATE } from './config.ts'
 import type { C } from './config.ts'
@@ -41,7 +53,6 @@ import {
   repoLanguages,
   starsOf,
   allRepos,
-  delegateFor,
   perRepoModels,
   branchNames,
   commitList,
@@ -51,7 +62,6 @@ import {
   repoByName,
   repoIsEmpty,
   resolveRef,
-  scope,
   tagObject,
   tagRefs,
   treeOfBranch,
@@ -168,14 +178,14 @@ const TAGS = 'refs/tags/'
  * the commit it is.
  */
 async function objectNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   sha: string,
   type = 'commit',
 ): Promise<Record<string, unknown>> {
   if (type === 'tree' || type === 'blob')
     return { __typename: type === 'tree' ? 'Tree' : 'Blob', oid: sha }
-  const tag = await tagObject(ctx.db, ctx.tenant, repo, sha)
+  const tag = await tagObject(ctx.sql, ctx.tenant, repo, sha)
   if (tag !== null)
     return {
       __typename: 'Tag',
@@ -184,7 +194,7 @@ async function objectNode(
       message: tag.message,
       target: () => objectNode(ctx, repo, tag.objectSha, tag.objectType),
     }
-  const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+  const byId = await commitsBySha(ctx.sql, ctx.tenant, repo)
   return commitNode(ctx, [repo], byId.get(sha) ?? rootCommit(sha))
 }
 
@@ -194,7 +204,7 @@ async function objectNode(
  * has been committed to.
  */
 function refNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   prefix: string,
   name: string,
@@ -204,10 +214,10 @@ function refNode(
     prefix,
     target: async () => {
       if (prefix === TAGS) {
-        const tag = (await tagRefs(ctx.db, ctx.tenant, repo)).find((row) => row.name === name)
+        const tag = (await tagRefs(ctx.sql, ctx.tenant, repo)).find((row) => row.name === name)
         return tag === undefined ? null : await objectNode(ctx, repo, tag.sha)
       }
-      const [head] = await commitList(ctx.db, ctx.tenant, repo, name)
+      const [head] = await commitList(ctx.sql, ctx.tenant, repo, name)
       return head === undefined ? null : commitNode(ctx, [repo], head)
     },
   }
@@ -218,12 +228,12 @@ function refNode(
 // `heads/main` names nothing, and neither does a name no ref has (both
 // measured against GitHub, 2026-10-03).
 async function namedRef(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   qualifiedName: string,
 ): Promise<Record<string, unknown> | null> {
-  const branches = await branchNames(ctx.db, ctx.tenant, repo)
-  const tags = (await tagRefs(ctx.db, ctx.tenant, repo)).map((row) => row.name)
+  const branches = await branchNames(ctx.sql, ctx.tenant, repo)
+  const tags = (await tagRefs(ctx.sql, ctx.tenant, repo)).map((row) => row.name)
   const tries: [string, string][] = qualifiedName.startsWith(HEADS)
     ? [[HEADS, qualifiedName.slice(HEADS.length)]]
     : qualifiedName.startsWith(TAGS)
@@ -251,7 +261,7 @@ async function namedRef(
  * the repository it was forked from as `parent`.
  */
 export async function repositoryNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
 ): Promise<Record<string, unknown>> {
   const meta = metaOf(repo)
@@ -259,7 +269,8 @@ export async function repositoryNode(
     typeof meta[key] === 'string' ? (meta[key] as string) : null
   const count = (key: string): number => (typeof meta[key] === 'number' ? (meta[key] as number) : 0)
   const email = `${DEFAULT_LOGIN}@users.noreply.github.com`
-  const where = { ...scope(ctx.tenant), repo: repo.fullName }
+  const where = '"tenant" = ? AND "repo" = ?'
+  const at = [ctx.tenant, repo.fullName]
   const topics = Array.isArray(meta.topics) ? meta.topics.map(String) : []
   const owned = repo.owner === DEFAULT_LOGIN
   const user = { id: nodeId('04:User', DEFAULT_LOGIN), login: DEFAULT_LOGIN, name: DEFAULT_LOGIN }
@@ -268,7 +279,7 @@ export async function repositoryNode(
   const parentSeq = typeof meta.parent_seq === 'number' ? meta.parent_seq : null
   const parent = async (): Promise<Record<string, unknown> | null> => {
     if (parentSeq === null) return null
-    const row = (await allRepos(ctx.db, ctx.tenant)).find((each) => each.seq === parentSeq)
+    const row = (await allRepos(ctx.sql, ctx.tenant)).find((each) => each.seq === parentSeq)
     return row === undefined ? null : repositoryNode(ctx, row)
   }
   const node: Record<string, unknown> = {
@@ -333,11 +344,11 @@ export async function repositoryNode(
           : 'PUBLIC',
     repositoryTopics: { nodes: topics.map((name) => ({ topic: { name } })) },
     primaryLanguage: async () => {
-      const name = await primaryLanguage(ctx.db, ctx.tenant, repo)
+      const name = await primaryLanguage(ctx.sql, ctx.tenant, repo)
       return name === null ? null : { name }
     },
     languages: async ({ first }: { first?: number | null }) => ({
-      edges: (await repoLanguages(ctx.db, ctx.tenant, repo))
+      edges: (await repoLanguages(ctx.sql, ctx.tenant, repo))
         .slice(0, first ?? 100)
         .map(([name, size]) => ({ size, node: { name } })),
     }),
@@ -349,11 +360,24 @@ export async function repositoryNode(
     releases: releaseConnection(ctx, repo),
     rulesets: rulesetPage(ctx, repo.fullName),
     release: async ({ tagName }: { tagName: string }) => {
-      const row = await ctx.db.githubRelease.findFirst({ where: { ...where, tagName } })
+      const row = first<GithubRelease>(
+        ctx.sql,
+        DMMF,
+        'GithubRelease',
+        `${where} AND "tagName" = ?`,
+        ...at,
+        tagName,
+      )
       return row === null ? null : { databaseId: row.id, isDraft: row.draft, tagName: row.tagName }
     },
     latestRelease: async () => {
-      const rows = await ctx.db.githubRelease.findMany({ where, orderBy: { seq: 'desc' } })
+      const rows = select<GithubRelease>(
+        ctx.sql,
+        DMMF,
+        'GithubRelease',
+        `${where} ORDER BY "seq" DESC`,
+        ...at,
+      )
       const row = rows.find((release) => !release.draft && !release.prerelease)
       if (row === undefined) return null
       return {
@@ -380,16 +404,16 @@ export async function repositoryNode(
   const issue = (row: IssueRow): Promise<Record<string, unknown>> => issueNode(ctx, repo, row, node)
   return Object.assign(node, {
     issueOrPullRequest: async ({ number }: { number: number }) => {
-      const found = await issueRow(ctx.db, ctx.tenant, repo, number)
+      const found = await issueRow(ctx.sql, ctx.tenant, repo, number)
       if (found !== null) return issue(found)
-      const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+      const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
       if (row !== null) return pull(row)
       throw new Error(
         `Could not resolve to an issue or pull request with the number of ${String(number)}.`,
       )
     },
     issue: async ({ number }: { number: number }) => {
-      const found = await issueRow(ctx.db, ctx.tenant, repo, number)
+      const found = await issueRow(ctx.sql, ctx.tenant, repo, number)
       if (found === null) {
         throw new Error(`Could not resolve to an Issue with the number of ${String(number)}.`)
       }
@@ -397,7 +421,7 @@ export async function repositoryNode(
     },
     issues: (args: IssuesArgs) => issueConnection(ctx, repo, args, issue),
     pullRequest: async ({ number }: { number: number }) => {
-      const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+      const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
       if (row === null) {
         throw new Error(`Could not resolve to a PullRequest with the number of ${String(number)}.`)
       }
@@ -434,10 +458,10 @@ interface RepositoriesArgs {
  * on every request.
  */
 export async function ownedRepositories(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   login: string,
 ): Promise<Record<string, unknown>> {
-  const owned = (await allRepos(ctx.db, ctx.tenant)).filter((row) => row.owner === login)
+  const owned = (await allRepos(ctx.sql, ctx.tenant)).filter((row) => row.owner === login)
   const user = login === DEFAULT_LOGIN
   return {
     __typename: user ? 'User' : 'Organization',
@@ -474,15 +498,15 @@ export async function ownedRepositories(
 }
 
 async function branchJson(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   branch: string,
 ): Promise<JsonValue> {
-  const list = await commitList(ctx.db, ctx.tenant, repo, branch)
+  const list = await commitList(ctx.sql, ctx.tenant, repo, branch)
   return { name: branch, commit: { sha: list[0]?.sha ?? '' } }
 }
 
-async function nextRepoSeq(db: C, tenant: string): Promise<number> {
+async function nextRepoSeq(db: Db, tenant: string): Promise<number> {
   const rows = await allRepos(db, tenant)
   return rows.length === 0 ? 0 : Math.max(...rows.map((r) => r.seq)) + 1
 }
@@ -503,11 +527,11 @@ export function repoRoutes(): KitRoute<C>[] {
       `${p}/users/:owner`,
       authed(async (ctx) => {
         const login = param(ctx, 'owner').toLowerCase()
-        const found = (await accountsOf(ctx.db, ctx.tenant)).find(
+        const found = (await accountsOf(ctx.sql, ctx.tenant)).find(
           (account) => account.login.toLowerCase() === login,
         )
         if (found === undefined) return fail(404, 'Not Found')
-        const repos = await allRepos(ctx.db, ctx.tenant)
+        const repos = await allRepos(ctx.sql, ctx.tenant)
         return { status: 200, body: accountJson(found, repos) }
       }),
     ),
@@ -566,10 +590,10 @@ export function repoRoutes(): KitRoute<C>[] {
       'GET',
       `${p}/installation/repositories`,
       authed(async (ctx) => {
-        const repos = (await allRepos(ctx.db, ctx.tenant))
+        const repos = (await allRepos(ctx.sql, ctx.tenant))
           .filter((r) => r.owner === INSTALLATION_ACCOUNT)
           .sort((a, b) => (a.fullName < b.fullName ? -1 : 1))
-        const items = await Promise.all(repos.map((r) => repoJson(ctx.db, ctx.tenant, r)))
+        const items = await Promise.all(repos.map((r) => repoJson(ctx.sql, ctx.tenant, r)))
         return {
           status: 200,
           body: { total_count: items.length, repository_selection: 'all', repositories: items },
@@ -584,7 +608,7 @@ export function repoRoutes(): KitRoute<C>[] {
     route<C>(
       'GET',
       `${p}/repos/:owner/:repo`,
-      authed(withRepo(async (c, r) => ({ status: 200, body: await repoJson(c.db, c.tenant, r) }))),
+      authed(withRepo(async (c, r) => ({ status: 200, body: await repoJson(c.sql, c.tenant, r) }))),
     ),
     route<C>('PATCH', `${p}/repos/:owner/:repo`, authed(updateRepo), { write: true }),
     route<C>('GET', `${p}/repos/:owner/:repo/topics`, repoTopics),
@@ -596,7 +620,7 @@ export function repoRoutes(): KitRoute<C>[] {
       `${p}/repos/:owner/:repo/branches`,
       authed(
         withRepo(async (ctx, repo) => {
-          const names = await branchNames(ctx.db, ctx.tenant, repo)
+          const names = await branchNames(ctx.sql, ctx.tenant, repo)
           const out: JsonValue[] = []
           for (const b of names) out.push(await branchJson(ctx, repo, b))
           return { status: 200, body: out }
@@ -609,7 +633,7 @@ export function repoRoutes(): KitRoute<C>[] {
       authed(
         withRepo(async (ctx, repo) => {
           const name = param(ctx, 'branch')
-          const names = await branchNames(ctx.db, ctx.tenant, repo)
+          const names = await branchNames(ctx.sql, ctx.tenant, repo)
           if (!names.includes(name)) return fail(404, 'Branch not found')
           return { status: 200, body: await branchJson(ctx, repo, name) }
         }),
@@ -627,17 +651,17 @@ export function repoRoutes(): KitRoute<C>[] {
         // merged branch's commits are on it; it is filtered, then paged the
         // way the repository list is.
         withRepo(async (ctx, repo) => {
-          if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) {
+          if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) {
             return fail(409, 'Git Repository is empty.')
           }
-          const at = await resolveRef(ctx.db, ctx.tenant, repo, ctx.query.get('sha') ?? '')
+          const at = await resolveRef(ctx.sql, ctx.tenant, repo, ctx.query.get('sha') ?? '')
           if (at === null) return fail(404, 'Not Found')
           const head = at.history[0]
           if (head === undefined) return fail(409, 'Git Repository is empty.')
-          const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+          const byId = await commitsBySha(ctx.sql, ctx.tenant, repo)
           const page = paged(
             ctx,
-            await commitHistory(ctx.db, ctx.tenant, repo, head.sha, byId, {
+            await commitHistory(ctx.sql, ctx.tenant, repo, head.sha, byId, {
               since: ctx.query.get('since'),
               until: ctx.query.get('until'),
               author: ctx.query.get('author') ?? '',
@@ -645,7 +669,7 @@ export function repoRoutes(): KitRoute<C>[] {
             }),
           )
           if (page === null) return fail(422, 'Validation Failed')
-          const body = await commitsJson(ctx.db, ctx.tenant, repo, page.items)
+          const body = await commitsJson(ctx.sql, ctx.tenant, repo, page.items)
           return { status: 200, body, headers: page.headers }
         }),
       ),
@@ -655,11 +679,11 @@ export function repoRoutes(): KitRoute<C>[] {
 
 const listRepos: Handler = async (ctx) => {
   const owner = ctx.params.owner ?? DEFAULT_LOGIN
-  const repos = await allRepos(ctx.db, ctx.tenant)
+  const repos = await allRepos(ctx.sql, ctx.tenant)
   const owned = repos
     .filter((r) => r.owner === owner)
     .sort((a, b) => (a.fullName < b.fullName ? -1 : 1))
-  const items = await Promise.all(owned.map((r) => repoJson(ctx.db, ctx.tenant, r)))
+  const items = await Promise.all(owned.map((r) => repoJson(ctx.sql, ctx.tenant, r)))
   return pagedReply(ctx, items)
 }
 
@@ -678,7 +702,7 @@ async function addRepo(
   fields: NewRepo,
 ): Promise<RepoRow | null> {
   const fullName = `${owner}/${name}`
-  if ((await repoByName(ctx.db, ctx.tenant, fullName)) !== null) return null
+  if ((await repoByName(ctx.sql, ctx.tenant, fullName)) !== null) return null
   const meta: Record<string, JsonValue> = {
     description: fields.description,
     homepage: fields.homepage,
@@ -688,35 +712,31 @@ async function addRepo(
     updated_at: '2026-01-01T00:00:00Z',
     pushed_at: '2026-01-01T00:00:00Z',
   }
-  const created = (await ctx.db.githubRepo.create({
-    data: {
-      tenant: ctx.tenant,
-      fullName,
-      owner,
-      name,
-      defaultBranch: 'main',
-      metaJson: JSON.stringify(meta),
-      seq: await nextRepoSeq(ctx.db, ctx.tenant),
-    },
-  })) as RepoRow
-  await initRepo(ctx.db, ctx.tenant, created)
+  const created = create<GithubRepo>(ctx.sql, DMMF, 'GithubRepo', {
+    tenant: ctx.tenant,
+    fullName,
+    owner,
+    name,
+    defaultBranch: 'main',
+    metaJson: JSON.stringify(meta),
+    seq: await nextRepoSeq(ctx.sql, ctx.tenant),
+  }) as RepoRow
+  await initRepo(ctx.sql, ctx.tenant, created)
   if (fields.readme) {
-    await ctx.db.githubFile.create({
-      data: {
-        tenant: ctx.tenant,
-        repo: fullName,
-        branch: 'main',
-        path: 'README.md',
-        data: new Uint8Array(Buffer.from(`# ${name}\n`, 'utf8')),
-        seq: 0,
-      },
+    insert(ctx.sql, 'GithubFile', {
+      tenant: ctx.tenant,
+      repo: fullName,
+      branch: 'main',
+      path: 'README.md',
+      data: new Uint8Array(Buffer.from(`# ${name}\n`, 'utf8')),
+      seq: 0,
     })
   }
   return created
 }
 
 const createRepo: Handler = async (ctx) => {
-  if (!(await createReposAllowed(ctx.db, ctx.tenant))) {
+  if (!(await createReposAllowed(ctx.sql, ctx.tenant))) {
     return fail(403, 'Resource not accessible by personal access token')
   }
   const body = jsonBodyOf(ctx)
@@ -729,7 +749,7 @@ const createRepo: Handler = async (ctx) => {
     readme: body.auto_init === true,
   })
   if (created === null) return fail(422, 'Repository creation failed.')
-  return { status: 201, body: await repoJson(ctx.db, ctx.tenant, created) }
+  return { status: 201, body: await repoJson(ctx.sql, ctx.tenant, created) }
 }
 
 /** GraphQL's `createRepository`, on the same rows as the REST route. */
@@ -745,7 +765,7 @@ export function createRepositoryRoot(ctx: Ctx<C>) {
       homepageUrl?: string | null
     }
   }) => {
-    if (!(await createReposAllowed(ctx.db, ctx.tenant))) {
+    if (!(await createReposAllowed(ctx.sql, ctx.tenant))) {
       throw new Error('Resource not accessible by personal access token')
     }
     const owner =
@@ -837,10 +857,10 @@ const updateRepo: Handler = authed(
     let current = repo
     if (name !== '' && name !== repo.name) {
       const target = `${repo.owner}/${name}`
-      if ((await repoByName(ctx.db, ctx.tenant, target)) !== null) {
+      if ((await repoByName(ctx.sql, ctx.tenant, target)) !== null) {
         return fail(422, 'Repository creation failed.')
       }
-      current = (await renameRepo(ctx.db, ctx.tenant, repo, name)) as RepoRow
+      current = (await renameRepo(ctx.sql, ctx.tenant, repo, name)) as RepoRow
     }
     const data: { defaultBranch?: string; metaJson?: string } = {}
     if (branch !== '') data.defaultBranch = branch
@@ -848,12 +868,19 @@ const updateRepo: Handler = authed(
       data.metaJson = JSON.stringify({ ...metaOf(current), ...edits })
     }
     if (Object.keys(data).length > 0) {
-      current = (await ctx.db.githubRepo.update({
-        where: { tenant_fullName: { tenant: ctx.tenant, fullName: current.fullName } },
-        data,
-      })) as RepoRow
+      matched(
+        update(ctx.sql, 'GithubRepo', data, { tenant: ctx.tenant, fullName: current.fullName }),
+      )
+      current = first<GithubRepo>(
+        ctx.sql,
+        DMMF,
+        'GithubRepo',
+        '"tenant" = ? AND "fullName" = ?',
+        ctx.tenant,
+        current.fullName,
+      ) as RepoRow
     }
-    return { status: 200, body: await repoJson(ctx.db, ctx.tenant, current) }
+    return { status: 200, body: await repoJson(ctx.sql, ctx.tenant, current) }
   }),
 )
 
@@ -872,34 +899,36 @@ const setRepoTopics: Handler = authed(
     if (!Array.isArray(names) || names.some((n) => typeof n !== 'string')) {
       return fail(422, 'Invalid request.\n\n"names" wasn\'t supplied.')
     }
-    await ctx.db.githubRepo.update({
-      where: { tenant_fullName: { tenant: ctx.tenant, fullName: repo.fullName } },
-      data: { metaJson: JSON.stringify({ ...metaOf(repo), topics: names }) },
-    })
+    matched(
+      update(
+        ctx.sql,
+        'GithubRepo',
+        { metaJson: JSON.stringify({ ...metaOf(repo), topics: names }) },
+        { tenant: ctx.tenant, fullName: repo.fullName },
+      ),
+    )
     return { status: 200, body: { names } }
   }),
 )
 
 // Every child row keys on the repository's full name, so a rename is a rename
 // of that key everywhere, not just on the repository row.
-async function renameRepo(db: C, tenant: string, repo: RepoRow, name: string): Promise<RepoRow> {
+async function renameRepo(db: Db, tenant: string, repo: RepoRow, name: string): Promise<RepoRow> {
   const to = `${repo.owner}/${name}`
   const from = repo.fullName
-  const created = (await db.githubRepo.create({
-    data: {
-      tenant,
-      fullName: to,
-      owner: repo.owner,
-      name,
-      defaultBranch: repo.defaultBranch,
-      metaJson: repo.metaJson,
-      truncated: repo.truncated,
-      sourceDir: repo.sourceDir,
-      sourceBranch: repo.sourceBranch,
-      pagesJson: repo.pagesJson,
-      seq: repo.seq,
-    },
-  })) as RepoRow
+  const created = create<GithubRepo>(db, DMMF, 'GithubRepo', {
+    tenant,
+    fullName: to,
+    owner: repo.owner,
+    name,
+    defaultBranch: repo.defaultBranch,
+    metaJson: repo.metaJson,
+    truncated: repo.truncated,
+    sourceDir: repo.sourceDir,
+    sourceBranch: repo.sourceBranch,
+    pagesJson: repo.pagesJson,
+    seq: repo.seq,
+  }) as RepoRow
   // Derived from the schema, not listed here. Every relation to GithubRepo is
   // required and none cascades, so a table left behind is not a silent orphan,
   // it is a 500 on the delete below. That list went stale twice, once for
@@ -907,15 +936,15 @@ async function renameRepo(db: C, tenant: string, repo: RepoRow, name: string): P
   // down: `perRepoModels` reads the DMMF, and a model added to the schema is
   // moved without anyone remembering to say so.
   for (const model of perRepoModels()) {
-    await delegateFor(db, model).updateMany({ where: { tenant, repo: from }, data: { repo: to } })
+    update(db, model, { repo: to }, { tenant, repo: from })
   }
-  await db.githubRepo.delete({ where: { tenant_fullName: { tenant, fullName: from } } })
+  matched(remove(db, 'GithubRepo', { tenant, fullName: from }))
   return created
 }
 
 const deleteRepo: Handler = authed(
   withRepo(async (ctx, repo) => {
-    await dropRepo(ctx.db, ctx.tenant, repo)
+    await dropRepo(ctx.sql, ctx.tenant, repo)
     return { status: 204 }
   }),
 )
@@ -924,7 +953,7 @@ const deleteRepo: Handler = authed(
 // repository holding them is deleted, and that fork takes the deleted one's
 // place as parent of the rest, as GitHub hands a network to a fork. Without
 // it the forks kept heads naming commits and trees that no longer existed.
-async function handOff(db: C, tenant: string, repo: RepoRow): Promise<void> {
+async function handOff(db: Db, tenant: string, repo: RepoRow): Promise<void> {
   const network = await networkNames(db, tenant, repo)
   const rest = (await allRepos(db, tenant))
     .filter((r) => network.includes(r.fullName) && r.seq !== repo.seq)
@@ -932,12 +961,12 @@ async function handOff(db: C, tenant: string, repo: RepoRow): Promise<void> {
   const heir = rest[0]
   if (heir === undefined) return
   const moved = { tenant, repo: repo.fullName }
-  await db.githubCommit.updateMany({ where: moved, data: { repo: heir.fullName } })
-  await db.githubStagedTree.updateMany({ where: moved, data: { repo: heir.fullName } })
-  await db.githubStagedEntry.updateMany({ where: moved, data: { repo: heir.fullName } })
-  await db.githubStagedDir.updateMany({ where: moved, data: { repo: heir.fullName } })
-  await db.githubTag.updateMany({ where: moved, data: { repo: heir.fullName } })
-  await db.githubBlob.updateMany({ where: moved, data: { repo: heir.fullName } })
+  update(db, 'GithubCommit', { repo: heir.fullName }, moved)
+  update(db, 'GithubStagedTree', { repo: heir.fullName }, moved)
+  update(db, 'GithubStagedEntry', { repo: heir.fullName }, moved)
+  update(db, 'GithubStagedDir', { repo: heir.fullName }, moved)
+  update(db, 'GithubTag', { repo: heir.fullName }, moved)
+  update(db, 'GithubBlob', { repo: heir.fullName }, moved)
   const up = metaOf(repo).parent_seq
   for (const row of rest) {
     const meta = metaOf(row)
@@ -949,14 +978,11 @@ async function handOff(db: C, tenant: string, repo: RepoRow): Promise<void> {
           ? { ...kept, parent_seq: up }
           : kept
         : { ...kept, parent_seq: heir.seq }
-    await db.githubRepo.updateMany({
-      where: { tenant, fullName: row.fullName },
-      data: { metaJson: JSON.stringify(next) },
-    })
+    update(db, 'GithubRepo', { metaJson: JSON.stringify(next) }, { tenant, fullName: row.fullName })
   }
 }
 
-async function dropRepo(db: C, tenant: string, repo: RepoRow): Promise<void> {
+async function dropRepo(db: Db, tenant: string, repo: RepoRow): Promise<void> {
   await handOff(db, tenant, repo)
   const fullName = repo.fullName
   const where = { tenant, repo: fullName }
@@ -965,9 +991,9 @@ async function dropRepo(db: C, tenant: string, repo: RepoRow): Promise<void> {
   // and a staged directory carry their repository, so the walk reaches them
   // too, and never another repository's rows under the same tree sha.
   for (const model of perRepoModels()) {
-    await delegateFor(db, model).deleteMany({ where })
+    remove(db, model, where)
   }
-  await db.githubRepo.delete({ where: { tenant_fullName: { tenant, fullName } } })
+  matched(remove(db, 'GithubRepo', { tenant, fullName }))
 }
 
 const forkRepo: Handler = authed(
@@ -980,78 +1006,86 @@ const forkRepo: Handler = authed(
       str(body, 'organization').trim() === '' ? DEFAULT_LOGIN : str(body, 'organization').trim()
     const onlyDefault = body.default_branch_only === true
     const fullName = `${owner}/${name}`
-    const existing = await repoByName(ctx.db, ctx.tenant, fullName)
+    const existing = await repoByName(ctx.sql, ctx.tenant, fullName)
     if (existing !== null)
-      return { status: 202, body: await repoJson(ctx.db, ctx.tenant, existing) }
-    const fork = (await ctx.db.githubRepo.create({
-      data: {
-        tenant: ctx.tenant,
-        fullName,
-        owner,
-        name,
-        defaultBranch: source.defaultBranch,
-        metaJson: JSON.stringify({
-          ...metaOf(source),
-          fork: true,
-          parent_seq: source.seq,
-        }),
-        seq: await nextRepoSeq(ctx.db, ctx.tenant),
-      },
-    })) as RepoRow
+      return { status: 202, body: await repoJson(ctx.sql, ctx.tenant, existing) }
+    const fork = create<GithubRepo>(ctx.sql, DMMF, 'GithubRepo', {
+      tenant: ctx.tenant,
+      fullName,
+      owner,
+      name,
+      defaultBranch: source.defaultBranch,
+      metaJson: JSON.stringify({
+        ...metaOf(source),
+        fork: true,
+        parent_seq: source.seq,
+      }),
+      seq: await nextRepoSeq(ctx.sql, ctx.tenant),
+    }) as RepoRow
     // The defaults, not the source's: the python fork built a fresh FakeRepo and
     // copied only the branch trees, submodules and metadata onto it, so a fork
     // does not inherit the source's issues, releases or runs.
-    await initRepo(ctx.db, ctx.tenant, fork)
+    await initRepo(ctx.sql, ctx.tenant, fork)
     // Each branch at the commit its source's points at, and each tag, since
     // a fork shares its network's history and objects: a pull request from
     // it then has a merge base with its parent.
-    for (const branch of await branchNames(ctx.db, ctx.tenant, source)) {
+    for (const branch of await branchNames(ctx.sql, ctx.tenant, source)) {
       if (onlyDefault && branch !== source.defaultBranch) continue
-      await addBranch(ctx.db, ctx.tenant, fullName, branch)
-      const head = await headOf(ctx.db, ctx.tenant, source, branch)
+      await addBranch(ctx.sql, ctx.tenant, fullName, branch)
+      const head = await headOf(ctx.sql, ctx.tenant, source, branch)
       if (head !== '') {
-        await ctx.db.githubBranch.updateMany({
-          where: { tenant: ctx.tenant, repo: fullName, name: branch },
-          data: { headSha: head },
-        })
+        update(
+          ctx.sql,
+          'GithubBranch',
+          { headSha: head },
+          { tenant: ctx.tenant, repo: fullName, name: branch },
+        )
       }
-      const tree = await treeOfBranch(ctx.db, ctx.tenant, source, branch)
+      const tree = await treeOfBranch(ctx.sql, ctx.tenant, source, branch)
       let seq = 0
       for (const [path, data] of tree) {
-        await ctx.db.githubFile.create({
-          data: {
-            tenant: ctx.tenant,
-            repo: fullName,
-            branch,
-            path,
-            data: new Uint8Array(data),
-            seq,
-          },
+        insert(ctx.sql, 'GithubFile', {
+          tenant: ctx.tenant,
+          repo: fullName,
+          branch,
+          path,
+          data: new Uint8Array(data),
+          seq,
         })
         seq += 1
       }
     }
-    for (const tag of await tagRefs(ctx.db, ctx.tenant, source)) {
-      const count = await ctx.db.githubTagRef.count({
-        where: { tenant: ctx.tenant, repo: fullName },
-      })
-      await ctx.db.githubTagRef.create({
-        data: { tenant: ctx.tenant, repo: fullName, name: tag.name, sha: tag.sha, seq: count },
+    for (const tag of await tagRefs(ctx.sql, ctx.tenant, source)) {
+      const seq = count(
+        ctx.sql,
+        'GithubTagRef',
+        '"tenant" = ? AND "repo" = ?',
+        ctx.tenant,
+        fullName,
+      )
+      insert(ctx.sql, 'GithubTagRef', {
+        tenant: ctx.tenant,
+        repo: fullName,
+        name: tag.name,
+        sha: tag.sha,
+        seq,
       })
     }
-    const subs = await ctx.db.githubSubmodule.findMany({
-      where: { tenant: ctx.tenant, repo: source.fullName },
-      orderBy: { path: 'asc' },
-    })
+    const subs = select<GithubSubmodule>(
+      ctx.sql,
+      DMMF,
+      'GithubSubmodule',
+      '"tenant" = ? AND "repo" = ? ORDER BY "path" ASC',
+      ctx.tenant,
+      source.fullName,
+    )
     for (const s of subs) {
-      await ctx.db.githubSubmodule.create({
-        data: { tenant: ctx.tenant, repo: fullName, path: s.path },
-      })
+      insert(ctx.sql, 'GithubSubmodule', { tenant: ctx.tenant, repo: fullName, path: s.path })
     }
     return {
       status: 202,
       body: {
-        ...((await repoJson(ctx.db, ctx.tenant, fork)) as Record<string, JsonValue>),
+        ...((await repoJson(ctx.sql, ctx.tenant, fork)) as Record<string, JsonValue>),
         created_at: new Date().toISOString(),
       },
     }

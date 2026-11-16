@@ -26,10 +26,15 @@ import {
 import {
   blobAt,
   blobsAt,
+  addTag,
   commitChanges,
   commitTime,
+  commitsOf,
   createRepo,
+  deleteRef,
+  deleteRepo,
   headSha,
+  refAt,
   refsOf,
   reposOfKind,
   repoOf,
@@ -91,7 +96,7 @@ async function locate(ctx: Ctx<C>): Promise<Located | Reply> {
   if (!KINDS.includes(kind)) return repoNotFound()
   const namespace = namespaceOf(ctx)
   const name = ctx.params.name ?? ''
-  const repo = await repoOf(ctx.db, ctx.tenant, kind, namespace, name)
+  const repo = await repoOf(ctx.sql, ctx.tenant, kind, namespace, name)
   if (repo === null) return repoNotFound()
   return { repo, key: repoKey(kind, namespace, name) }
 }
@@ -182,12 +187,12 @@ async function listRepos(kind: string, ctx: Ctx<C>): Promise<Reply> {
   const withCard = truthy(ctx.query.get('cardData'))
 
   const ranked: Ranked[] = []
-  for (const repo of await reposOfKind(ctx.db, ctx.tenant, kind)) {
+  for (const repo of await reposOfKind(ctx.sql, ctx.tenant, kind)) {
     if (author !== '' && repo.namespace !== author) continue
     if (search !== '' && !repoId(repo).toLowerCase().includes(search)) continue
     const key = repoKey(repo.kind, repo.namespace, repo.name)
-    const sha = await headSha(ctx.db, ctx.tenant, key)
-    const blobs = sha === '' ? [] : await blobsAt(ctx.db, ctx.tenant, key, sha)
+    const sha = await headSha(ctx.sql, ctx.tenant, key)
+    const blobs = sha === '' ? [] : await blobsAt(ctx.sql, ctx.tenant, key, sha)
     const readme = blobs.find((b) => b.path === 'README.md')
     const tags = repoTags(
       repo,
@@ -196,7 +201,7 @@ async function listRepos(kind: string, ctx: Ctx<C>): Promise<Reply> {
     // Every filter must match, which is the Hub's rule: `?filter=a&filter=b`
     // narrows rather than widens.
     if (!filters.every((f) => tags.includes(f))) continue
-    const when = await commitTime(ctx.db, ctx.tenant, key, sha)
+    const when = await commitTime(ctx.sql, ctx.tenant, key, sha)
     ranked.push({ repo, sha, blobs, lastModified: when === '' ? repo.createdAt : when, tags })
   }
 
@@ -318,10 +323,10 @@ async function repoInfo(ctx: Ctx<C>): Promise<Reply> {
   if (isReply(found)) return found
   const { repo, key } = found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, key, revision)
   if (sha === null) return revisionNotFound(revision)
-  const blobs = await blobsAt(ctx.db, ctx.tenant, key, sha)
-  const when = await commitTime(ctx.db, ctx.tenant, key, sha)
+  const blobs = await blobsAt(ctx.sql, ctx.tenant, key, sha)
+  const when = await commitTime(ctx.sql, ctx.tenant, key, sha)
   return { status: 200, body: repoBody(repo, sha, blobs, when === '' ? repo.createdAt : when) }
 }
 
@@ -370,7 +375,7 @@ function repoBody(repo: Repo, sha: string, blobs: HfBlobRow[], lastModified: str
 async function refs(ctx: Ctx<C>): Promise<Reply> {
   const found = await locate(ctx)
   if (isReply(found)) return found
-  const rows = await refsOf(ctx.db, ctx.tenant, found.key)
+  const rows = await refsOf(ctx.sql, ctx.tenant, found.key)
   return {
     status: 200,
     body: {
@@ -457,7 +462,7 @@ async function tree(ctx: Ctx<C>): Promise<Reply> {
   if (isReply(found)) return found
   const { key } = found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, key, revision)
   if (sha === null) return revisionNotFound(revision)
 
   const expand = truthy(ctx.query.get('expand'))
@@ -479,7 +484,7 @@ async function tree(ctx: Ctx<C>): Promise<Reply> {
 
   const prefix = stripSlash(ctx.params.path ?? '')
   const under = prefix === '' ? '' : `${prefix}/`
-  const blobs = (await blobsAt(ctx.db, ctx.tenant, key, sha)).filter((b) =>
+  const blobs = (await blobsAt(ctx.sql, ctx.tenant, key, sha)).filter((b) =>
     prefix === '' ? true : b.path.startsWith(under),
   )
   const kept = recursive ? blobs : blobs.filter((b) => !b.path.slice(under.length).includes('/'))
@@ -511,11 +516,11 @@ async function blobFor(ctx: Ctx<C>): Promise<Found | Reply> {
   const kind = ctx.params.kind ?? 'models'
   const namespace = namespaceOf(ctx)
   const name = ctx.params.name ?? ''
-  const repo = await repoOf(ctx.db, ctx.tenant, kind, namespace, name)
+  const repo = await repoOf(ctx.sql, ctx.tenant, kind, namespace, name)
   if (repo === null) return repoNotFound()
   const key = repoKey(kind, namespace, name)
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, key, revision)
   if (sha === null) return revisionNotFound(revision)
   // Not decoded here. The kit router already decodes every captured
   // parameter, `*path` included, so a second pass is a second decode:
@@ -525,7 +530,7 @@ async function blobFor(ctx: Ctx<C>): Promise<Found | Reply> {
   // is requested as `a%2520b.txt`, arrives as `a%20b.txt`, and decodes
   // again to `a b.txt` -- a DIFFERENT file, served with a 200.
   const path = ctx.params.path ?? ''
-  const blob = await blobAt(ctx.db, ctx.tenant, key, sha, path)
+  const blob = await blobAt(ctx.sql, ctx.tenant, key, sha, path)
   if (blob === null) return entryNotFound()
   return { sha, blob }
 }
@@ -555,7 +560,7 @@ async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   if (isReply(found)) return found
   const { key } = found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, key, revision)
   if (sha === null) return revisionNotFound(revision)
   if (!contentType(ctx).includes('json')) return { status: 400, body: { error: INVALID_PATHS } }
   let body: Record<string, JsonValue> | null
@@ -567,7 +572,7 @@ async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   const named = body?.paths
   if (!Array.isArray(named)) return { status: 400, body: { error: INVALID_PATHS } }
   const expand = body?.expand === true
-  const blobs = await blobsAt(ctx.db, ctx.tenant, key, sha)
+  const blobs = await blobsAt(ctx.sql, ctx.tenant, key, sha)
   const date = blobs[0]?.lastModified ?? ''
   const rows: JsonValue[] = []
   for (const raw of named) {
@@ -656,10 +661,10 @@ async function preupload(ctx: Ctx<C>): Promise<Reply> {
   const found = await locate(ctx)
   if (isReply(found)) return found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, found.key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, found.key, revision)
   if (sha === null) return revisionNotFound(revision)
   const existing = new Map(
-    (await blobsAt(ctx.db, ctx.tenant, found.key, sha)).map((blob) => [blob.path, blob]),
+    (await blobsAt(ctx.sql, ctx.tenant, found.key, sha)).map((blob) => [blob.path, blob]),
   )
   const body = obj(ctx.json())
   const files = Array.isArray(body.files) ? body.files : []
@@ -742,7 +747,7 @@ async function commit(ctx: Ctx<C>): Promise<Reply> {
     return hubError(400, 'BadRequest', `Unknown commit operation: ${str(row.key)}`)
   }
   const sha = await commitChanges(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     key,
     revision,
@@ -868,7 +873,7 @@ async function createRepoRoute(ctx: Ctx<C>): Promise<Reply> {
   const kind = `${str(body.type, 'model')}s`
   if (!KINDS.includes(kind)) return hubError(400, 'BadRequest', `Invalid repo type: ${kind}`)
   if (name === '') return hubError(400, 'BadRequest', 'name is required')
-  const existing = await repoOf(ctx.db, ctx.tenant, kind, namespace, name)
+  const existing = await repoOf(ctx.sql, ctx.tenant, kind, namespace, name)
   if (existing !== null) {
     // The Hub answers 409 for a repository that is already there, which is
     // what --exist-ok turns back into success. Answering 200 here instead
@@ -893,7 +898,7 @@ async function createRepoRoute(ctx: Ctx<C>): Promise<Reply> {
     return hubError(400, 'BadRequest', 'Spaces require an sdk')
   }
   await createRepo(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     kind,
     namespace,
@@ -920,15 +925,9 @@ async function deleteRepoRoute(ctx: Ctx<C>): Promise<Reply> {
   const name = str(body.name)
   const namespace = str(body.organization) || ctx.tenant
   const kind = `${str(body.type, 'model')}s`
-  const repo = await repoOf(ctx.db, ctx.tenant, kind, namespace, name)
+  const repo = await repoOf(ctx.sql, ctx.tenant, kind, namespace, name)
   if (repo === null) return repoNotFound()
-  const key = repoKey(kind, namespace, name)
-  await ctx.db.hfBlob.deleteMany({ where: { tenant: ctx.tenant, repo: key } })
-  await ctx.db.hfRef.deleteMany({ where: { tenant: ctx.tenant, repo: key } })
-  await ctx.db.hfCommit.deleteMany({ where: { tenant: ctx.tenant, repo: key } })
-  await ctx.db.hfRepo.delete({
-    where: { tenant_kind_namespace_name: { tenant: ctx.tenant, kind, namespace, name } },
-  })
+  await deleteRepo(ctx.sql, ctx.tenant, kind, namespace, name)
   return { status: 200, body: {} }
 }
 
@@ -938,27 +937,14 @@ async function createTag(ctx: Ctx<C>): Promise<Reply> {
   if (isReply(found)) return found
   const { key } = found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  const sha = await resolveRevision(ctx.db, ctx.tenant, key, revision)
+  const sha = await resolveRevision(ctx.sql, ctx.tenant, key, revision)
   if (sha === null) return revisionNotFound(revision)
   const body = obj(ctx.json())
   const tag = str(body.tag)
   if (tag === '') return hubError(400, 'BadRequest', 'tag is required')
-  const existing = await ctx.db.hfRef.findUnique({
-    where: {
-      tenant_repo_refType_name: { tenant: ctx.tenant, repo: key, refType: 'tag', name: tag },
-    },
-  })
+  const existing = await refAt(ctx.sql, ctx.tenant, key, 'tag', tag)
   if (existing !== null) return hubError(409, 'TagExists', `Tag ${tag} already exists`)
-  await ctx.db.hfRef.create({
-    data: {
-      tenant: ctx.tenant,
-      repo: key,
-      refType: 'tag',
-      name: tag,
-      sha,
-      message: str(body.message),
-    },
-  })
+  await addTag(ctx.sql, ctx.tenant, key, tag, sha, str(body.message))
   return { status: 200, body: {} }
 }
 
@@ -967,16 +953,10 @@ async function deleteTag(ctx: Ctx<C>): Promise<Reply> {
   const found = await locate(ctx)
   if (isReply(found)) return found
   const tag = ctx.params.rev ?? ''
-  const where = {
-    tenant_repo_refType_name: {
-      tenant: ctx.tenant,
-      repo: found.key,
-      refType: 'tag',
-      name: tag,
-    },
+  if ((await refAt(ctx.sql, ctx.tenant, found.key, 'tag', tag)) === null) {
+    return revisionNotFound(tag)
   }
-  if ((await ctx.db.hfRef.findUnique({ where })) === null) return revisionNotFound(tag)
-  await ctx.db.hfRef.delete({ where })
+  await deleteRef(ctx.sql, ctx.tenant, found.key, 'tag', tag)
   return { status: 200, body: {} }
 }
 
@@ -1000,13 +980,10 @@ async function commits(ctx: Ctx<C>): Promise<Reply> {
   const found = await locate(ctx)
   if (isReply(found)) return found
   const revision = ctx.params.rev ?? DEFAULT_REVISION
-  if ((await resolveRevision(ctx.db, ctx.tenant, found.key, revision)) === null) {
+  if ((await resolveRevision(ctx.sql, ctx.tenant, found.key, revision)) === null) {
     return revisionNotFound(revision)
   }
-  const rows = await ctx.db.hfCommit.findMany({
-    where: { tenant: ctx.tenant, repo: found.key },
-    orderBy: { seq: 'desc' },
-  })
+  const rows = await commitsOf(ctx.sql, ctx.tenant, found.key)
   return {
     status: 200,
     body: rows.map((c) => ({
