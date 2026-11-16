@@ -84,17 +84,38 @@ function quoted(name: string): string {
   return `"${name.replaceAll('"', '""')}"`
 }
 
+// How one column is read back: a String through its bytes, a BigInt through
+// its text, a Boolean from 0 or 1, anything else as SQLite answers it.
+type Read = 'text' | 'wide' | 'flag' | 'plain'
+
+interface Column {
+  name: string
+  read: Read
+}
+
 interface Shape {
   head: string
-  texts: string[]
-  flags: string[]
-  wide: string[]
+  columns: Column[]
 }
 
 const SHAPES = new WeakMap<Dmmf, Map<string, Shape>>()
 
 function columnOf(field: DmmfField): string {
   return field.dbName ?? field.name
+}
+
+function readOf(field: DmmfField): Read {
+  if (field.type === 'String') return 'text'
+  if (field.type === 'BigInt') return 'wide'
+  if (field.type === 'Boolean') return 'flag'
+  return 'plain'
+}
+
+// A cast column's result name. It differs from the column's own name, because
+// SQLite resolves a name in ORDER BY to a result alias before the table's
+// column: aliasing `CAST(idNum AS TEXT)` as `idNum` sorted snowflakes as text.
+function castName(name: string): string {
+  return `${name}:read`
 }
 
 // The SELECT list for one model, worked out once per schema.
@@ -108,31 +129,44 @@ function shapeOf(dmmf: Dmmf, model: string): Shape {
   if (known !== undefined) return known
   const def = dmmf.datamodel.models.find((m) => m.name === model)
   if (def === undefined) throw new Error(`kit sql: no model ${model} in the schema`)
-  const fields = def.fields.filter((f) => f.kind === 'scalar' || f.kind === 'enum')
-  const columns = fields.map((f) => {
-    const name = quoted(columnOf(f))
-    if (f.type === 'String') return `CAST(${name} AS BLOB) AS ${name}`
-    if (f.type === 'BigInt') return `CAST(${name} AS TEXT) AS ${name}`
-    return name
+  const columns = def.fields
+    .filter((f) => f.kind === 'scalar' || f.kind === 'enum')
+    .map((f) => ({ name: columnOf(f), read: readOf(f) }))
+  const list = columns.map(({ name, read }) => {
+    if (read === 'text') return `CAST(${quoted(name)} AS BLOB) AS ${quoted(castName(name))}`
+    if (read === 'wide') return `CAST(${quoted(name)} AS TEXT) AS ${quoted(castName(name))}`
+    return quoted(name)
   })
   const shape = {
-    head: `SELECT ${columns.join(', ')} FROM ${quoted(def.dbName ?? def.name)}`,
-    texts: fields.filter((f) => f.type === 'String').map(columnOf),
-    flags: fields.filter((f) => f.type === 'Boolean').map(columnOf),
-    wide: fields.filter((f) => f.type === 'BigInt').map(columnOf),
+    head: `SELECT ${list.join(', ')} FROM ${quoted(def.dbName ?? def.name)}`,
+    columns,
   }
   byModel.set(model, shape)
   return shape
 }
 
-const UTF8 = new TextDecoder()
+// `ignoreBOM` keeps a leading U+FEFF, which the default decoder strips, so a
+// stored string reads back unchanged.
+const UTF8 = new TextDecoder('utf-8', { ignoreBOM: true })
+
+function readBack(column: Column, raw: Record<string, SQLOutputValue>): Cell | bigint {
+  if (column.read === 'plain') return raw[column.name]
+  if (column.read === 'flag') {
+    const value = raw[column.name]
+    return value === null || value === undefined ? null : value !== 0
+  }
+  const value = raw[castName(column.name)]
+  if (column.read === 'text') return value instanceof Uint8Array ? UTF8.decode(value) : value
+  return typeof value === 'string' ? BigInt(value) : value
+}
 
 /**
  * The rows of `model` that `where` (the SQL after WHERE, with `?` marks)
- * selects, every scalar column as Prisma's findMany returned it: a Boolean
- * back from 0 or 1 and a BigInt parsed from its text, since a snowflake
- * passes 2^53. A String is read as its bytes and decoded, because node:sqlite
- * ends a TEXT value at its first NUL.
+ * selects, every scalar column as Prisma's findMany returned it and in the
+ * schema's order: a Boolean back from 0 or 1 and a BigInt parsed from its
+ * text, since a snowflake passes 2^53. A String is read as its bytes and
+ * decoded, because node:sqlite ends a TEXT value at its first NUL. A name in
+ * `where` reaches the stored column, never a cast.
  */
 export function select<T>(
   db: DatabaseSync,
@@ -142,23 +176,16 @@ export function select<T>(
   ...params: Exclude<Cell, undefined>[]
 ): T[] {
   const shape = shapeOf(dmmf, model)
-  const rows = all<Record<string, SQLOutputValue | boolean | bigint>>(
+  const rows = all<Record<string, SQLOutputValue>>(
     db,
     `${shape.head} WHERE ${where}`,
     ...params.map(bound),
   )
-  for (const row of rows) {
-    for (const name of shape.texts) {
-      const value = row[name]
-      if (value instanceof Uint8Array) row[name] = UTF8.decode(value)
-    }
-    for (const name of shape.flags) if (row[name] !== null) row[name] = row[name] !== 0
-    for (const name of shape.wide) {
-      const value = row[name]
-      if (typeof value === 'string') row[name] = BigInt(value)
-    }
-  }
-  return rows as unknown as T[]
+  return rows.map((raw) => {
+    const row: Record<string, Cell | bigint> = {}
+    for (const column of shape.columns) row[column.name] = readBack(column, raw)
+    return row as T
+  })
 }
 
 /** How many rows of `table` `where` selects. */
@@ -188,6 +215,19 @@ export function remove(
     `DELETE FROM ${quoted(table)} WHERE ${terms.join(' AND ')}`,
     ...Object.values(where).map(bound),
   )
+}
+
+/** Run `body` as one transaction on `db`, rolled back when it throws. */
+export function transaction<T>(db: DatabaseSync, body: () => T): T {
+  db.exec('BEGIN')
+  try {
+    const out = body()
+    db.exec('COMMIT')
+    return out
+  } catch (err: unknown) {
+    db.exec('ROLLBACK')
+    throw err
+  }
 }
 
 /**

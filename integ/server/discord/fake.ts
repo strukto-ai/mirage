@@ -193,7 +193,7 @@ async function currentUserGuilds(ctx: Ctx<C>): Promise<Reply> {
   const limit = clamp(ctx.query.get('limit'), 200, 200)
   const rows = all<Text<DiscordGuild, 'idNum'>>(
     ctx.sql,
-    `${GUILD} WHERE tenant = ? AND idNum > ? ORDER BY idNum LIMIT ?`,
+    `${GUILD} WHERE tenant = ? AND idNum > ? ORDER BY DiscordGuild.idNum LIMIT ?`,
     ctx.tenant,
     after,
     limit,
@@ -219,7 +219,8 @@ async function guildMembers(ctx: Ctx<C>): Promise<Reply> {
   // Documented as ordered by user id, ascending.
   const rows = all<Text<DiscordMember, 'userIdNum'>>(
     ctx.sql,
-    `${MEMBER} WHERE tenant = ? AND guildId = ? AND userIdNum > ? ORDER BY userIdNum LIMIT ?`,
+    `${MEMBER} WHERE tenant = ? AND guildId = ? AND userIdNum > ? ` +
+      'ORDER BY DiscordMember.userIdNum LIMIT ?',
     ctx.tenant,
     guildId,
     after,
@@ -236,7 +237,7 @@ async function searchMembers(ctx: Ctx<C>): Promise<Reply> {
   const limit = clamp(ctx.query.get('limit'), 1, MEMBERS_MAX_LIMIT)
   const rows = all<Text<DiscordMember, 'userIdNum'>>(
     ctx.sql,
-    `${MEMBER} WHERE tenant = ? AND guildId = ? ORDER BY userIdNum`,
+    `${MEMBER} WHERE tenant = ? AND guildId = ? ORDER BY DiscordMember.userIdNum`,
     ctx.tenant,
     guildId,
   ).map(toMember)

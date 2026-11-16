@@ -40,6 +40,7 @@ import {
   select,
   stripSlash,
   tenantWhere,
+  transaction,
 } from '../kit/typescript/index.ts'
 import type { Dmmf, JsonValue } from '../kit/typescript/index.ts'
 import { DEFAULT_LOGIN, REPO_DATE, SEARCH_SIZE_LIMIT, config } from './config.ts'
@@ -731,34 +732,37 @@ export async function stageTree(
     sha,
   )
   if (already !== null) return sha
-  const seq = count(db, 'GithubStagedTree', '"tenant" = ? AND "repo" = ?', tenant, repo.fullName)
-  insert(db, 'GithubStagedTree', { tenant, repo: repo.fullName, sha, seq })
-  // The tree's entries and directories, in the order Prisma's nested create
-  // wrote them.
-  const tree = { tenant, repo: repo.fullName, treeSha: sha }
-  for (const [at, [path, data]] of [...files].entries()) {
-    insert(db, 'GithubStagedEntry', {
-      ...tree,
-      path,
-      data: new Uint8Array(data),
-      sha: blobSha(data),
-      mode: BLOB_MODE,
-      seq: at,
-    })
-  }
-  for (const [at, [path, commit]] of [...links].entries()) {
-    insert(db, 'GithubStagedEntry', {
-      ...tree,
-      path,
-      data: new Uint8Array(0),
-      sha: commit,
-      mode: LINK_MODE,
-      seq: files.size + at,
-    })
-  }
-  for (const [path, id] of directoryIds(files, links)) {
-    insert(db, 'GithubStagedDir', { ...tree, path, sha: id })
-  }
+  // One transaction, as Prisma's nested create was: a tree whose entries
+  // failed to land would otherwise stay, and `already` would trust it.
+  transaction(db, () => {
+    const seq = count(db, 'GithubStagedTree', '"tenant" = ? AND "repo" = ?', tenant, repo.fullName)
+    insert(db, 'GithubStagedTree', { tenant, repo: repo.fullName, sha, seq })
+    // Its entries and directories, in the order the nested create wrote them.
+    const tree = { tenant, repo: repo.fullName, treeSha: sha }
+    for (const [at, [path, data]] of [...files].entries()) {
+      insert(db, 'GithubStagedEntry', {
+        ...tree,
+        path,
+        data: new Uint8Array(data),
+        sha: blobSha(data),
+        mode: BLOB_MODE,
+        seq: at,
+      })
+    }
+    for (const [at, [path, commit]] of [...links].entries()) {
+      insert(db, 'GithubStagedEntry', {
+        ...tree,
+        path,
+        data: new Uint8Array(0),
+        sha: commit,
+        mode: LINK_MODE,
+        seq: files.size + at,
+      })
+    }
+    for (const [path, id] of directoryIds(files, links)) {
+      insert(db, 'GithubStagedDir', { ...tree, path, sha: id })
+    }
+  })
   return sha
 }
 

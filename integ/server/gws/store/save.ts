@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SQLInputValue } from 'node:sqlite'
-import { BYTES, bytes, deleteOrder, stmt } from '../../kit/typescript/index.ts'
+import { BYTES, bytes, deleteOrder, stmt, transaction } from '../../kit/typescript/index.ts'
 import type { Dmmf, DmmfModel } from '../../kit/typescript/index.ts'
 import type { Db } from './client.ts'
 import type { GwsState } from './state.ts'
@@ -101,14 +101,9 @@ interface Statement {
 }
 
 function transact(db: Db, statements: readonly Statement[]): void {
-  db.exec('BEGIN')
-  try {
+  transaction(db, () => {
     for (const s of statements) stmt(db, s.sql).run(...s.params)
-    db.exec('COMMIT')
-  } catch (err: unknown) {
-    db.exec('ROLLBACK')
-    throw err
-  }
+  })
 }
 
 type Row = Readonly<Record<string, unknown>>

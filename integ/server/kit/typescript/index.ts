@@ -98,6 +98,7 @@ export {
   remove,
   select,
   stmt,
+  transaction,
   update,
 } from './sql.ts'
 export type { Cell } from './sql.ts'

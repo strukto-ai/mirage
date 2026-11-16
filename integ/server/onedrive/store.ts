@@ -617,17 +617,17 @@ export async function versionsFor(
   drive: string,
   paths: string[],
 ): Promise<Map<string, { id: string; lastModifiedDateTime: string }[]>> {
-  const wanted = new Set(paths)
   const out = new Map<string, { id: string; lastModifiedDateTime: string }[]>()
-  if (wanted.size === 0) return out
+  if (paths.length === 0) return out
   const rows = all<{ path: string; versionId: string; modified: string }>(
     db,
-    'SELECT path, versionId, modified FROM GraphVersion WHERE tenant = ? AND drive = ? ORDER BY seq',
+    'SELECT path, versionId, modified FROM GraphVersion WHERE tenant = ? AND drive = ? ' +
+      'AND path IN (SELECT value FROM json_each(?)) ORDER BY seq',
     tenant,
     drive,
+    JSON.stringify(paths),
   )
   for (const v of rows) {
-    if (!wanted.has(v.path)) continue
     const list = out.get(v.path) ?? []
     list.push({ id: v.versionId, lastModifiedDateTime: v.modified })
     out.set(v.path, list)
