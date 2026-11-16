@@ -26,7 +26,6 @@ import {
   children,
   copyTree,
   eventsAfter,
-  isDescendant,
   folderItem,
   itemById,
   recordEvent,
@@ -403,20 +402,35 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
       : ancestorIds.split(',').filter((s) => s !== '')
   const matchName = contentTypes.includes('name')
   const matchContent = contentTypes.includes('file_content')
+  // Every item is already read, so ancestry walks these rather than the store:
+  // isDescendant and ancestors queried once per level, per item, which made
+  // one search some 4,000 queries.
+  const items = await allItems(ctx.db, ctx.tenant)
+  const byId = new Map(items.map((item) => [item.id, item]))
+  const under = (item: Item, folderId: string): boolean => {
+    let cur: Item | undefined = item
+    while (cur !== undefined && cur.parentId !== null) {
+      if (cur.parentId === folderId) return true
+      cur = byId.get(cur.parentId)
+    }
+    return false
+  }
+  const chainOf = (item: Item): Item[] => {
+    const chain: Item[] = []
+    let cur = item
+    while (cur.parentId !== null) {
+      const parent = byId.get(cur.parentId)
+      if (parent === undefined) break
+      chain.push(parent)
+      cur = parent
+    }
+    return chain.reverse()
+  }
   const hits: Item[] = []
-  for (const item of await allItems(ctx.db, ctx.tenant)) {
+  for (const item of items) {
     if (item.id === ROOT_ID) continue
     if (wanted !== null && item.type !== wanted) continue
-    if (scope !== null) {
-      let inScope = false
-      for (const sid of scope) {
-        if (await isDescendant(ctx.db, ctx.tenant, item.id, sid)) {
-          inScope = true
-          break
-        }
-      }
-      if (!inScope) continue
-    }
+    if (scope !== null && !scope.some((sid) => under(item, sid))) continue
     let matched = matchName && item.name.toLowerCase().includes(query)
     if (!matched && matchContent && item.type === 'file' && item.content !== null) {
       matched = wholeWordHit(query, DEC.decode(item.content).toLowerCase())
@@ -425,10 +439,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
   }
   hits.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   const page = hits.slice(offset, offset + limit)
-  const entries: JsonValue[] = []
-  for (const item of page) {
-    entries.push(searchEntry(item, await ancestors(ctx.db, ctx.tenant, item)))
-  }
+  const entries = page.map((item) => searchEntry(item, chainOf(item)))
   return { status: 200, body: { total_count: hits.length, entries, offset, limit } }
 }
 

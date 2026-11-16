@@ -114,11 +114,22 @@ export async function listChildren(
     const at = await db.dropboxItem.findUnique({ where: key(tenant, path) })
     if (at === null || !at.isFolder) return null
   }
-  const rows = await db.dropboxItem.findMany({ where: where(tenant), orderBy: { seq: 'asc' } })
   const prefix = `${path}/`
-  const out = rows
-    .filter((r) => (recursive ? r.path.startsWith(prefix) : dirname(r.path) === path))
-    .map(toItem)
+  // Paths first, then whole rows for the ones listed: reading every item's
+  // content to list one folder cost 11ms a listing. SQLite's LIKE behind
+  // `startsWith` ignores ASCII case, so the filter below still decides.
+  const under = await db.dropboxItem.findMany({
+    where: { tenant, path: { startsWith: prefix } },
+    select: { path: true },
+  })
+  const listed = under
+    .map((r) => r.path)
+    .filter((p) => (recursive ? p.startsWith(prefix) : dirname(p) === path))
+  const rows =
+    listed.length === 0
+      ? []
+      : await db.dropboxItem.findMany({ where: { tenant, path: { in: listed } } })
+  const out = rows.map(toItem)
   // A recursive listing is ordered parent-before-child, which is what the
   // vendor guarantees and what a consumer building a tree from the stream
   // relies on; a shallow one is ordered by name, which is what it renders.

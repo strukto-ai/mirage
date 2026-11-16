@@ -19,6 +19,7 @@ import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { HfBucketsVFS } from '@struktoai/mirage-node'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
+import { treeEntries, treeFiles } from './wire.ts'
 
 // mirage reads a bucket file over paths-info and resolve rather than through
 // opendal, and stamps the download's ETag as the token stat reports. Every
@@ -88,7 +89,26 @@ function resolveUrl(endpoint: string, path: string): string {
   return `${endpoint}/buckets/${BUCKET}/resolve/${path}`
 }
 
+// A folder named `file` at the root once read as the marker for a file entry,
+// so a shallow listing returned `file/a.txt` in place of the folder.
+function folderNamedFile(): void {
+  const rows = [
+    { path: 'file/a.txt', modified: 'm' },
+    { path: 'top.txt', modified: 'm' },
+  ]
+  const files = treeFiles(rows, '', false)
+  check('a root folder named file lists no nested file', files.join() === 'top.txt', files.join())
+  const entries = treeEntries(rows, new Map(), '', false)
+  check(
+    'a root folder named file is a directory entry',
+    JSON.stringify(entries) ===
+      JSON.stringify([{ type: 'directory', path: 'file', uploadedAt: 'm' }]),
+    JSON.stringify(entries),
+  )
+}
+
 async function main(): Promise<void> {
+  folderNamedFile()
   const fake = await launch()
   try {
     const reset = await fetch(`${fake.endpoint}/reset`, {
