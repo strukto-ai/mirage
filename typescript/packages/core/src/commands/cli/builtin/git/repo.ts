@@ -246,6 +246,18 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
   await git.indexPack({ ...repoArgs(repo), dir: dir.virtual, filepath: name })
 }
 
+/** List more commits in `.git/shallow`, one id a line, sorted; none writes nothing. */
+export async function addShallow(repo: Repo, oids: readonly string[]): Promise<void> {
+  if (!oids.length) return
+  const path = repo.location.commondir.join(SHALLOW_FILE)
+  const held = new TextDecoder()
+    .decode((await readOptional(repo.vfs, path)) ?? new Uint8Array())
+    .split(/\s+/)
+    .filter(Boolean)
+  const lines = [...new Set([...held, ...oids])].sort(compareCodePoints)
+  await writeFile(repo.vfs, path, new TextEncoder().encode(lines.map((oid) => `${oid}\n`).join('')))
+}
+
 /**
  * Open a repository living in a mount.
  *
