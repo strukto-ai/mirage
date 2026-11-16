@@ -88,8 +88,7 @@
                 "pages": [
                   "home/examples/in-process-terminal",
                   "home/examples/in-process-terminal/code-review",
-                  "home/examples/in-process-terminal/co-work",
-                  "home/examples/in-process-terminal/release-notes"
+                  "home/examples/in-process-terminal/co-work"
                 ]
               },
               "home/examples/policy-security",
