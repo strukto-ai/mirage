@@ -335,6 +335,48 @@
         "stdout": "pinned\ntag\nrc=1\n8ef25423772bbfe671c8e285ae1d63991d59db19\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_clone_of_a_shallow_clone_stays_shallow",
+      "seq": 568075,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone -q --depth 2 file:///repo s && git clone -q file:///repo/s t && cat t/.git/shallow && git -C t log --oneline; git clone -q s u; cat u/.git/shallow; git -C u log --oneline; rm -rf s t u)",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\n8ef2542 add two\n225f39c add docs\n225f39c50d27e015653a38d589474ce2880399e6\n8ef2542 add two\n225f39c add docs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_clone_depth_counts_a_tagged_commit_from_its_tag",
+      "seq": 568076,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com git tag -a -m mid mid HEAD~1 && git clone -q --depth 2 --no-single-branch file:///repo c; cat c/.git/shallow; git -C c log --oneline --all; git tag -d mid >/dev/null; rm -rf c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3adb16a0c90ad09a180687677927b9d7b7f\n8ef2542 add two\n225f39c add docs\n265ec3a add delta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_clone_of_a_detached_head_takes_the_branch_it_matches",
+      "seq": 568077,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git checkout -q --detach HEAD~1 && git clone -q --single-branch file:///repo c; git -C c branch -a; git -C c config remote.origin.fetch; git clone -q file:///repo d; git -C d branch -a; git -C d status | head -1; git checkout -q main; rm -rf c d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "* topic\n  remotes/origin/HEAD -> origin/topic\n  remotes/origin/topic\n+refs/heads/topic:refs/remotes/origin/topic\n* topic\n  remotes/origin/HEAD -> origin/topic\n  remotes/origin/main\n  remotes/origin/topic\nOn branch topic\n",
+        "stderr": ""
+      }
     }
   ]
 }

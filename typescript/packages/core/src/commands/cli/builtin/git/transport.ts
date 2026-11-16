@@ -26,7 +26,15 @@ import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
-import { grafted, objectType, openRepo, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
+import {
+  readCommit,
+  objectType,
+  openRepo,
+  refOid,
+  repoArgs,
+  storedItems,
+  type Repo,
+} from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
@@ -163,8 +171,10 @@ export function displayUrl(url: string): string {
  * are what it already holds, so their contents are left out as upload-pack's
  * edge does. Gitlinks name another repository and are never followed. A depth
  * keeps only the commits that many steps from a want, the want counting as one,
- * walked breadth first so each commit is counted at its nearest; one at the
- * limit that has parents is cut there, shallow, as `deepen` cuts it.
+ * walked breadth first so each commit is counted at its nearest, a tag's target
+ * at the tag's own step; one at the limit that has parents is cut there,
+ * shallow, as `deepen` cuts it. A commit the sender itself holds shallow is cut
+ * there too, so a clone of a shallow repository is shallow where it is.
  */
 export async function missingObjects(
   repo: Repo,
@@ -179,6 +189,10 @@ export async function missingObjects(
   const seen = new Set<string>()
   const queue: [string, number][] = wants.map((want) => [want, 1])
   const take = (): [string, number] | undefined => (depth === null ? queue.pop() : queue.shift())
+  const now = (item: [string, number]): void => {
+    if (depth === null) queue.push(item)
+    else queue.unshift(item)
+  }
   for (let next = take(); next !== undefined; next = take()) {
     const [oid, level] = next
     if (seen.has(oid)) continue
@@ -189,20 +203,19 @@ export async function missingObjects(
     }
     const type = await objectType(repo, oid)
     sending.push(oid)
-    if (type === 'tag')
-      queue.push([(await git.readTag({ ...repoArgs(repo), oid })).tag.object, level])
+    if (type === 'tag') now([(await git.readTag({ ...repoArgs(repo), oid })).tag.object, level])
     else if (type === 'commit') {
-      const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+      const commit = await readCommit(repo, oid)
       trees.push(commit.tree)
-      const parents = grafted(repo, oid, commit.parent)
-      if (depth !== null && level >= depth && parents.length > 0) shallow.push(oid)
-      else for (const item of parents) queue.push([item, level + 1])
+      if (repo.shallow.has(oid) || (depth !== null && level >= depth && commit.parent.length > 0))
+        shallow.push(oid)
+      else for (const item of commit.parent) queue.push([item, level + 1])
     }
   }
   const held = new Set<string>()
   for (const oid of boundary) {
     if ((await objectType(repo, oid)) !== 'commit') continue
-    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+    const commit = await readCommit(repo, oid)
     await walkTree(repo, commit.tree, held, null)
   }
   for (const tree of trees) await walkTree(repo, tree, held, sending)

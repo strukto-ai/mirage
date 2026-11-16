@@ -1,4 +1,3 @@
-import git from 'isomorphic-git'
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -8,7 +7,7 @@ import { diff } from './diff.ts'
 import { GitError } from './errors.ts'
 import { readOptional } from './io.ts'
 
-import { grafted, repoArgs } from './repo.ts'
+import { readCommit } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
 
@@ -65,10 +64,9 @@ export async function stashShow(
     selector = selected
   }
   const oid = await resolveCommit(repo, selector)
-  const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-  const parents = grafted(repo, oid, commit.parent)
-  const parent = parents[0]
-  if (parent === undefined || parents.length < 2)
+  const commit = await readCommit(repo, oid)
+  const parent = commit.parent[0]
+  if (parent === undefined || commit.parent.length < 2)
     throw new GitError(`'${selector}' is not a stash-like commit`)
   const flags = { ...ctx.flags }
   const view = new FlagView(flags)

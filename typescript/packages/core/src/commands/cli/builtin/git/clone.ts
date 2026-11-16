@@ -39,6 +39,7 @@ import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 // How C's atoi and strtol(..., 0) read a number, which is how git reads
@@ -101,6 +102,22 @@ function config(
       ['merge', `${BRANCH_PREFIX}${branch}`],
     ])
   return text
+}
+
+/**
+ * The branch a remote's detached HEAD stands for, as git guesses it: a remote
+ * that names no symbolic HEAD is read as the branch pointing where HEAD points,
+ * the default branch when it does, else the first such branch by name; none
+ * leaves HEAD detached (git 2.47.3). `kept` is the refs the clone takes.
+ */
+export function guessedHead(adv: Advertisement, kept: ReadonlySet<string>): string | null {
+  const oid = adv.refs.get('HEAD')
+  const branches = [...kept].filter((ref) => ref.startsWith(BRANCH_PREFIX)).sort(compareCodePoints)
+  return (
+    [`${BRANCH_PREFIX}${DEFAULT_BRANCH}`, ...branches].find(
+      (ref) => oid !== undefined && kept.has(ref) && adv.refs.get(ref) === oid,
+    ) ?? null
+  )
 }
 
 /** The branch a clone checks out and the commit it starts at. */
@@ -253,7 +270,12 @@ async function populate(
   const adv: Advertisement = {
     refs: new Map([...advertised.refs].filter(([ref]) => kept.has(ref) || ref === 'HEAD')),
     peeled: new Map([...advertised.peeled].filter(([ref]) => kept.has(ref))),
-    head: advertised.head !== null && kept.has(advertised.head) ? advertised.head : null,
+    head:
+      advertised.head === null
+        ? guessedHead(advertised, kept)
+        : kept.has(advertised.head)
+          ? advertised.head
+          : null,
   }
   const chosen = fl.asStr('branch') ?? null
   const picked = remoteHead(adv, chosen)

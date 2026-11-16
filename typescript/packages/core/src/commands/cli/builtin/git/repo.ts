@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git, { Errors } from 'isomorphic-git'
+import git, { Errors, type CommitObject } from 'isomorphic-git'
 
 import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
@@ -324,8 +324,18 @@ export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array
  * raw bytes `cat-file` prints keep their `parent` lines. Mirrors Python's
  * VfsObjectStore graft.
  */
-export function grafted(repo: Repo, oid: string, parents: readonly string[]): string[] {
+function grafted(repo: Repo, oid: string, parents: readonly string[]): string[] {
   return repo.shallow.has(oid) ? [] : [...parents]
+}
+
+/**
+ * One commit read through isomorphic-git, its parents as git reads them: every
+ * commit read that walks history goes through here, so none follows a parent a
+ * shallow repository does not hold.
+ */
+export async function readCommit(repo: Repo, oid: string): Promise<CommitObject> {
+  const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+  return { ...commit, parent: grafted(repo, oid, commit.parent) }
 }
 
 /**

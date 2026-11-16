@@ -34,7 +34,7 @@ import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { BRANCH_PREFIX, loadRefs, mapped, parseRefspec, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
 import {
   commitFacts,
-  grafted,
+  readCommit,
   rawObject,
   refOid,
   repoArgs,
@@ -134,8 +134,8 @@ function splitOperators(revision: string): [string, RevOp[]] {
 /** Load one commit's parents by object id, or report the revision as unknown. */
 async function parentsOf(repo: Repo, oid: string, revision: string): Promise<string[]> {
   try {
-    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-    return grafted(repo, oid, commit.parent)
+    const commit = await readCommit(repo, oid)
+    return commit.parent
   } catch (err) {
     if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
       throw new AmbiguousArgumentError(revision)
@@ -592,7 +592,7 @@ async function peeled(
   let { oid, type } = want === TAG ? found : await unwrapped(repo, found, revision)
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
-    oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
+    oid = (await readCommit(repo, oid)).tree
     rooted(repo, oid, revision)
     type = TREE
   }
@@ -621,7 +621,7 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   // `v1:a.txt` does.
   let holder = await unwrapped(repo, named, revision)
   if (holder.type === COMMIT) {
-    const tree = (await git.readCommit({ ...repoArgs(repo), oid: holder.oid })).commit.tree
+    const tree = (await readCommit(repo, holder.oid)).tree
     rooted(repo, tree)
     holder = { oid: tree, type: TREE }
   }
