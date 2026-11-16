@@ -4,6 +4,7 @@ icon: users
 description: An agent kicks off a new customer's onboarding from a won deal in Slack, with Google Drive, Docs, Sheets and Notion, with no sandbox.
 ---
 
+import { Run } from "/snippets/run-block.jsx"
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
@@ -251,9 +252,11 @@ run() {
 }
 ```
 
-The commands between `SH` and `SH` in the blocks below run in the terminal
-on the server, not in the shell that calls `run`. Variables the agent sets,
-such as `$plan`, stay set in the terminal for the next block.
+The blocks titled **Agent terminal** below run in the terminal on the
+server, not in your shell. Their copy button adds the `run` call around the
+commands, as `run <<'SH'` … `SH`, so a pasted block runs there.
+Variables the agent sets, such as `$plan`, stay set in the terminal for the next
+block.
 
 ## 1. Read the deal
 
@@ -261,12 +264,12 @@ A Slack channel is a folder named after the channel and its ID, with a
 folder for each day and the day's messages in `chat.jsonl`. The agent
 finds today's deal and its timestamp, which it replies to at the end:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 ls /slack/channels | grep '^deals-won__'
 grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r '"\(.ts) \(.text)"'
-SH
 ```
+</Run>
 
 ```text
 deals-won__C0CJ1LE89NV
@@ -279,13 +282,13 @@ Drive's folders are directories, and a Sheet is a `.gsheet.json` file, the
 Sheets API's view of it with every cell. The agent adds up the seats each
 account manager already has:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 ls /gdrive/Onboarding
 jq -r '[.sheets[0].data[0].rowData[1:][] | {manager: .values[3].formattedValue, seats: (.values[1].formattedValue | tonumber)}]
   | group_by(.manager) | map("\(map(.seats) | add) \(.[0].manager)") | .[]' '/gdrive/Onboarding/Onboarding tracker.gsheet.json' | sort -n
-SH
 ```
+</Run>
 
 ```text
 Onboarding plan template.gdoc.json
@@ -303,15 +306,15 @@ The agent copies the template into the folder. The IDs `gws` needs come
 from the files themselves: a Doc's `documentId` is in its `.gdoc.json`, and
 the folder's from a Drive search:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 template=$(jq -r .documentId '/gdrive/Onboarding/Onboarding plan template.gdoc.json')
 folder=$(gws drive files list --params '{"q": "name = '\''Onboarding'\'' and mimeType = '\''application/vnd.google-apps.folder'\''", "fields": "files(id)"}' | jq -r '.files[0].id')
 plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
   --json "{\"name\": \"Onboarding plan: Northwind Health\", \"parents\": [\"$folder\"]}" | jq -r .id)
 echo "$plan"
-SH
 ```
+</Run>
 
 ```text
 14LWyxpM1xtNXYYUHdCxDgJFgmb5AfWyvMKPNrHp76_Y
@@ -321,8 +324,8 @@ Then it fills in the copy, one `replaceAllText` request for each
 placeholder, in a single Docs API call. The kickoff is five business days
 after the start:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 jq -n '{requests: ({
   "{{customer}}": "Northwind Health", "{{seats}}": "120", "{{start}}": "2026-12-01",
   "{{manager}}": "Mei Chen", "{{champion}}": "Priya Shah",
@@ -330,8 +333,8 @@ jq -n '{requests: ({
 } | to_entries | map({replaceAllText: {containsText: {text: .key, matchCase: true}, replaceText: .value}}))}' > /workspace/fill.json
 gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" |
   jq -c '[.replies[].replaceAllText.occurrencesChanged]'
-SH
 ```
+</Run>
 
 ```text
 [1,1,1,1,2,1,1]
@@ -341,12 +344,12 @@ Each placeholder was found, and `{{champion}}` twice. The agent reads the
 plan back through `/gdrive`, where a Doc is a `.gdoc.json` file and its text
 is in the first tab:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 jq -r '[.tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content] | join("")' \
   '/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json'
-SH
 ```
+</Run>
 
 ```text
 Onboarding plan: Northwind Health
@@ -370,14 +373,14 @@ Week 4: adoption review with Priya Shah
 
 ## 4. Add it to the tracker
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 tracker=$(jq -r .spreadsheetId '/gdrive/Onboarding/Onboarding tracker.gsheet.json')
 gws sheets append --spreadsheet "$tracker" \
   --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
   jq -r .updates.updatedRange
-SH
 ```
+</Run>
 
 ```text
 Sheet1!A6:E6
@@ -390,8 +393,8 @@ checklist, and creates it in Notion. Its parent is the workspace, so the
 page goes at the top level and there is no page to share with the
 integration first:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 jq -n --arg plan "https://docs.google.com/document/d/$plan" '
 def text($s): [{type: "text", text: {content: $s}}];
 def todo($s): {type: "to_do", to_do: {rich_text: text($s), checked: false}};
@@ -410,8 +413,8 @@ def todo($s): {type: "to_do", to_do: {rich_text: text($s), checked: false}};
 }' > /workspace/page.json
 project=$(ntn api v1/pages -d "$(cat /workspace/page.json)" | jq -r .url)
 echo "$project"
-SH
 ```
+</Run>
 
 ```text
 https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8984c1
@@ -422,14 +425,14 @@ https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8
 Last, the agent replies in the deal's thread with who owns it and where
 everything is. The channel ID is the end of its folder's name:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 channel=$(ls /slack/channels | grep '^deals-won__' | sed 's/.*__//')
 slack send-message --channel "$channel" --thread-ts 1794815580.678919 \
   --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
   jq -c '{ok, thread_ts: .message.thread_ts}'
-SH
 ```
+</Run>
 
 ```text
 {"ok":true,"thread_ts":"1794815580.678919"}

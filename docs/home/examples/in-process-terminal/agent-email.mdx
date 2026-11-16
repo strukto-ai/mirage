@@ -4,6 +4,7 @@ icon: envelope
 description: An agent answers a customer's email with a report it builds from what the team posted in Slack, saves it as a draft, and sends only once a person approves, with no sandbox.
 ---
 
+import { Run } from "/snippets/run-block.jsx"
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
@@ -411,10 +412,11 @@ run() {
 }
 ```
 
-The commands between `SH` and `SH` in the blocks below run in the terminal
-on the server, not in the shell that calls `run`. Variables the agent sets,
-such as `$report`, stay set in the terminal for the next block.
-
+The blocks titled **Agent terminal** below run in the terminal on the
+server, not in your shell. Their copy button adds the `run` call around the
+commands, as `run <<'SH'` … `SH`, so a pasted block runs there.
+Variables the agent sets, such as `$report`, stay set in the terminal for the next
+block.
 
 Each step below starts with what the agent knows at that point and why it
 runs what it runs, then the commands, what they print, and what the agent
@@ -429,12 +431,12 @@ then opens the new message to find out who wrote and what they need:
   date. `*` marks one nobody has read.
 - `himalaya message read 1` prints message 1 in full.
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya envelope list
 himalaya message read 1
-SH
 ```
+</Run>
 
 ```text
 ┌────┬───────┬───────────────────────────────────────┬────────────┬────────────────────────┬───────┐
@@ -473,13 +475,13 @@ morning", so the agent looks in that day's folder:
 - The note says the affected events are attached, so `ls` finds the CSV in
   the same day's `files/`. The agent keeps its path in `$events`.
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text
 events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*)
 echo "$events"
-SH
 ```
+</Run>
 
 ```text
 Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
@@ -507,16 +509,16 @@ and keeps only Northwind Health's rows:
   against the note, and the last `awk` counts the events per clinic for the
   reply.
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 mkdir -p /workspace/outbox
 report=/workspace/outbox/northwind-health-affected.csv
 awk -F, 'NR == 1 || $1 == "Northwind Health"' "$events" > "$report"
 head -4 "$report"
 tail -n +2 "$report" | wc -l
 awk -F, 'NR > 1 { n[$2]++ } END { for (c in n) print n[c], c }' "$report"
-SH
 ```
+</Run>
 
 ```text
 customer,clinic,event_id,starts_at
@@ -547,8 +549,8 @@ the reply as a draft:
   over IMAP. Nothing leaves the mailbox.
 - `himalaya envelope list -m Drafts` checks that the draft is there.
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 cat > /workspace/reply.txt <<'EOF'
 Hi Priya,
 
@@ -567,8 +569,8 @@ EOF
 himalaya message reply 1 --body-file /workspace/reply.txt \
   --attach "$report" --save Drafts
 himalaya envelope list -m Drafts
-SH
 ```
+</Run>
 
 ```text
 Message successfully saved
@@ -593,12 +595,12 @@ the reason the server returned.
 
 Copy someone else in:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya message reply 1 --save Drafts \
   --cc ceo@other.example
-SH
 ```
+</Run>
 
 ```text
 himalaya: Permission denied
@@ -607,12 +609,12 @@ himalaya: Permission denied
 
 Attach the export straight from Slack:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya message reply 1 --save Drafts \
   --attach "$events"
-SH
 ```
+</Run>
 
 ```text
 himalaya: Permission denied
@@ -621,13 +623,13 @@ himalaya: Permission denied
 
 Copy the whole export into the outbox and attach it:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 cat "$events" > /workspace/outbox/all.csv
 himalaya message reply 1 --save Drafts \
   --attach /workspace/outbox/all.csv
-SH
 ```
+</Run>
 
 ```text
 himalaya: Permission denied
@@ -636,11 +638,11 @@ himalaya: Permission denied
 
 Delete the email:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya message delete 1
-SH
 ```
+</Run>
 
 ```text
 himalaya: Permission denied
@@ -658,12 +660,12 @@ The draft is ready, so the agent tries to send it: the same command, with
 `--send` in place of `--save Drafts`. `guard.py` answers with an ask, so the
 command does not run, and the server records it for a person:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya message reply 1 --body-file /workspace/reply.txt \
   --attach "$report" --send
-SH
 ```
+</Run>
 
 ```text
 himalaya: Permission denied
@@ -706,12 +708,12 @@ curl -X POST localhost:3000/asks/316ec6bc7e20 \
 The agent runs the same command again. The approval covers it, so this
 time it runs: `himalaya` sends over SMTP and keeps a copy in `Sent`:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 himalaya message reply 1 --body-file /workspace/reply.txt \
   --attach "$report" --send
-SH
 ```
+</Run>
 
 ```text
 Message successfully saved and sent
