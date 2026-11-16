@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 def build_file_cache(
     cache: CacheConfig | None,
-    cache_limit: str | int,
     clock: Clock | None = None,
     workspace_id: str | None = None,
 ) -> FileCacheMixin:
@@ -35,9 +34,7 @@ def build_file_cache(
 
     Args:
         cache (CacheConfig | None): the cache config; None keeps the
-            RAM store sized by ``cache_limit``.
-        cache_limit (str | int): the legacy size knob, used only when
-            no config is given.
+            default RAM store.
         clock (Clock | None): the workspace's clock, handed to the RAM
             store, which ages its entries itself. The redis store expires
             keys server-side and reads no time.
@@ -66,8 +63,9 @@ def build_file_cache(
             ),
             max_drain_bytes=cache.max_drain_bytes,
         )
-    limit = cache.limit if cache is not None else cache_limit
-    max_drain = cache.max_drain_bytes if cache is not None else None
+    config = cache if cache is not None else CacheConfig()
     return RAMFileCacheStore(
-        cache_limit=limit, max_drain_bytes=max_drain, clock=clock
+        cache_limit=config.limit,
+        max_drain_bytes=config.max_drain_bytes,
+        clock=clock,
     )

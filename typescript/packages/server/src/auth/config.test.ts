@@ -283,7 +283,6 @@ describe('resolveAuthConfig config table', () => {
     expect(CONFIG_ENV_KEYS.auth_token).toBeUndefined()
     expect(CONFIG_ENV_KEYS.jwt_pubkey).toBe('MIRAGE_JWT_PUBKEY')
     expect(CONFIG_ENV_KEYS.jwt_clock_skew_seconds).toBe('MIRAGE_JWT_CLOCK_SKEW_SECONDS')
-    expect(ALLOWED_KEYS.has('jwt_clock_skew')).toBe(false)
   })
 })
 

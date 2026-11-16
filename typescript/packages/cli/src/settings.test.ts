@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { resolveAuthConfig } from '@struktoai/mirage-server/auth/config'
-import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/daemon_config'
+import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
 import { loginPath } from './credentials.ts'
 import { writeLogin, type Login } from './credentials.ts'
 import {
@@ -369,25 +369,6 @@ describe('config writer', () => {
         table: { ...readDaemonTable(dir), auth_mode: 'jwt', jwt_alg: 'RS256' },
       })
       expect(cfg.jwt?.key).toBe(pem.trim())
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('names the new key for the old clock skew key', () => {
-    const { dir, path } = tmpConfigPath()
-    try {
-      writeFileSync(path, '[daemon]\njwt_clock_skew = 9\n')
-      expect(() => {
-        setConfig('jwt_clock_skew', '9', path)
-      }).toThrow(/jwt_clock_skew_seconds/)
-      expect(() => {
-        getConfig('jwt_clock_skew', path)
-      }).toThrow(/jwt_clock_skew_seconds/)
-      unsetConfig('jwt_clock_skew', path)
-      validateDaemonTable(readDaemonTable(dir))
-      setConfig('jwt_clock_skew_seconds', '9', path)
-      expect(getConfig('jwt_clock_skew_seconds', path)).toBe('9')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -23,8 +23,6 @@ import {
   NUMERIC_KEYS,
   parseDaemonTable,
   readDaemonTable,
-  RENAMED_KEYS,
-  renamedKeyMessage,
 } from '@struktoai/mirage-server/daemon_config'
 import {
   ENV_ALLOWED_HOSTS,
@@ -310,7 +308,6 @@ export function resolvedConfig(
 }
 
 function checkKey(key: string): void {
-  if (Object.hasOwn(RENAMED_KEYS, key)) throw new DaemonConfigError(renamedKeyMessage(key))
   if (!ALLOWED_KEYS.has(key)) {
     throw new DaemonConfigError(
       `unknown config key: '${key}'; allowed: ${[...ALLOWED_KEYS].sort(compareCodePoints).join(', ')}`,

@@ -40,10 +40,8 @@ from mirage.server.daemon_config import (
     ALLOWED_KEYS,
     DEFAULT_RATE_LIMITS,
     NUMERIC_KEYS,
-    RENAMED_KEYS,
     DaemonConfigError,
     read_daemon_table,
-    renamed_key_message,
 )
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
@@ -356,8 +354,6 @@ def resolved_config() -> dict[str, tuple[str, str]]:
 
 
 def _check_key(key: str) -> None:
-    if key in RENAMED_KEYS:
-        raise DaemonConfigError(renamed_key_message(key))
     if key not in ALLOWED_KEYS:
         raise DaemonConfigError(
             f"unknown config key: {key!r}; allowed: "

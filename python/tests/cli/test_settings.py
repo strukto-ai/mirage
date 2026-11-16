@@ -42,11 +42,7 @@ from mirage.cli.settings import (
     unset_config,
 )
 from mirage.server.auth.config import resolve_auth_config
-from mirage.server.daemon_config import (
-    DaemonConfigError,
-    read_daemon_table,
-    validate_daemon_table,
-)
+from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import ENV_HOME
 
 
@@ -211,21 +207,6 @@ def test_a_multi_line_key_round_trips_through_the_file(tmp_path):
     )
     assert cfg.jwt is not None
     assert cfg.jwt.key == pem.strip()
-
-
-def test_the_old_clock_skew_key_names_the_new_one(tmp_path):
-    p = tmp_path / "config.toml"
-    p.write_text("[daemon]\njwt_clock_skew = 9\n")
-    for call in (
-        lambda: set_config("jwt_clock_skew", "9", path=p),
-        lambda: get_config("jwt_clock_skew", path=p),
-    ):
-        with pytest.raises(DaemonConfigError, match="jwt_clock_skew_seconds"):
-            call()
-    unset_config("jwt_clock_skew", path=p)
-    validate_daemon_table(read_daemon_table(tmp_path))
-    set_config("jwt_clock_skew_seconds", "9", path=p)
-    assert get_config("jwt_clock_skew_seconds", path=p) == "9"
 
 
 def test_unset_config_accepts_unknown_key(tmp_path):

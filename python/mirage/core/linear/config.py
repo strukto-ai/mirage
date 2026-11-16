@@ -22,8 +22,6 @@ class LinearConfig(TimeoutConfig):
 
     api_key: SecretStr
     """Linear personal API key."""
-    workspace: str | None = None
-    """Accepted for compatibility; not read."""
     team_ids: list[str] | None = None
     """Only these teams are listed or readable. Unset shows every team the
     key can reach."""

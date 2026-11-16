@@ -259,7 +259,6 @@ def test_only_the_raw_token_has_no_config_key():
         CONFIG_ENV_KEYS["jwt_clock_skew_seconds"]
         == "MIRAGE_JWT_CLOCK_SKEW_SECONDS"
     )
-    assert "jwt_clock_skew" not in ALLOWED_KEYS
 
 
 JWT_TABLE = {"auth_mode": "jwt", "jwt_alg": "RS256"}

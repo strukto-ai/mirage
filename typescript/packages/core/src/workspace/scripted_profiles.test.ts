@@ -309,21 +309,12 @@ describe('profile policies', () => {
     }
   }, 120000)
 
-  it('the old script and runtime keys are told the new block', () => {
-    // Shipped first as `script` with `runtime` beside it, a word for
-    // what the file is rather than what it does and an engine that
-    // read as the profile's own; the refusal says where they went.
-    expect(() =>
-      build({ release: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } }),
-    ).toThrow(/now a policy block/)
-  })
-
   it('names its programs per method', async () => {
     expect(() =>
       build({
         release: { policy: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } },
       }),
-    ).toThrow(/per method/)
+    ).toThrow(/names runtime, script/)
     const program = { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' }
     expect(() => build({ release: { policy: { onRead: [program] } } })).toThrow(/names onRead/)
     const ws = build({ release: { policy: { postVfs: [program], preVfs: [program] } } })

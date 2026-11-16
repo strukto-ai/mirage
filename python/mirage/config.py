@@ -294,26 +294,6 @@ class StoreBlock(BaseModel):
     sessions: StoreGroupBlock | None = None
     execution: StoreGroupBlock | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _renamed_groups(cls, data: Any) -> Any:
-        """Name the new key for a group block under its old name.
-
-        ``extra="forbid"`` would refuse ``observer`` and ``workspace`` as
-        unknown keys; the shared document check says what they became.
-
-        Args:
-            data (Any): the raw store block.
-
-        Raises:
-            ValueError: the block uses ``observer`` or ``workspace``.
-        """
-        if isinstance(data, dict) and (
-            "observer" in data or "workspace" in data
-        ):
-            validate_document("config", data, "store", names="store")
-        return data
-
     @model_validator(mode="after")
     def _s3_hosts_only_the_sessions_group(self) -> "StoreBlock":
         """Refuse an override on a plane its store cannot host.

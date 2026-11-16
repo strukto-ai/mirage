@@ -391,7 +391,7 @@ export class Workspace {
         this.jobTable.store.note(record)
       },
     )
-    this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
+    this.cache = buildFileCache(options.cache, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
       write: this.writeDefault,
@@ -1387,15 +1387,7 @@ export class Workspace {
   setProfile(name: string, profile: SessionProfile): void {
     checkName('profile name', name)
     // A typed caller does not pass the parser, so this entry point repeats
-    // its two checks: the old keys are told where they went, and a
-    // policy block is whole.
-    const legacy = profile as { script?: unknown; runtime?: unknown }
-    if (legacy.script !== undefined || legacy.runtime !== undefined) {
-      throw new PolicyError(
-        `profile '${name}': script and runtime are now a policy block, ` +
-          `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
-      )
-    }
+    // its check that a policy block is whole.
     if (profile.policy != null) {
       parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
     }

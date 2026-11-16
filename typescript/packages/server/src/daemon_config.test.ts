@@ -98,16 +98,6 @@ describe('validateDaemonTable', () => {
     }).toThrow(/typo_key/)
   })
 
-  it('names the new key for a renamed one', () => {
-    expect(() => {
-      validateDaemonTable({ jwt_clock_skew: '9', typo_key: 'x' })
-    }).toThrow(
-      new DaemonConfigError(
-        'config.toml: `daemon.jwt_clock_skew` is now `daemon.jwt_clock_skew_seconds`; rename the key',
-      ),
-    )
-  })
-
   it('accepts the jwt keys', () => {
     validateDaemonTable({ jwt_clock_skew_seconds: '9', jwt_pubkey: '-----BEGIN' })
     expect(() => {

@@ -26,7 +26,7 @@ from mirage.workspace.workspace.cache import build_file_cache
 @pytest.mark.asyncio
 async def test_built_cache_ages_entries_on_the_given_clock():
     clock = ManualClock(start=1000.0)
-    cache = build_file_cache(None, "1MB", clock)
+    cache = build_file_cache(CacheConfig(limit="1MB"), clock)
     await cache.set("/f.txt", b"hello", ttl=10)
     clock.advance(9)
     assert await cache.exists("/f.txt") is True
@@ -37,7 +37,7 @@ async def test_built_cache_ages_entries_on_the_given_clock():
 @pytest.mark.asyncio
 async def test_a_cache_config_does_not_lose_the_clock():
     clock = ManualClock(start=1000.0)
-    cache = build_file_cache(CacheConfig(limit="2MB"), "1MB", clock)
+    cache = build_file_cache(CacheConfig(limit="2MB"), clock)
     assert cache.cache_limit == 2 * 1024 * 1024
     await cache.set("/f.txt", b"hello", ttl=10)
     clock.advance(10)

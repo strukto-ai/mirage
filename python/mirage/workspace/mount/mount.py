@@ -2935,7 +2935,7 @@ class MountEntry:
         Args:
             path (str): virtual path.
         """
-        accessor = getattr(self.vfs, "accessor", None)
+        accessor = self.vfs.accessor
         if not isinstance(accessor, RAMAccessor):
             return None
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
@@ -2947,7 +2947,7 @@ class MountEntry:
         Args:
             path (str): virtual path.
         """
-        accessor = getattr(self.vfs, "accessor", None)
+        accessor = self.vfs.accessor
         if not isinstance(accessor, RAMAccessor):
             return False
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))

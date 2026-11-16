@@ -434,12 +434,6 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
     throw new Error(`${where} must be a mapping of method to programs`)
   }
   const obj = asObject(raw, where)
-  if ('script' in obj || 'runtime' in obj) {
-    throw new Error(
-      `${where} names its programs per method, policy: ` +
-        `{pre_command: [{script: <file>, runtime: <runtime>}]}`,
-    )
-  }
   const unknown = Object.keys(obj).filter((key) => !keys.includes(key))
   if (unknown.length > 0) {
     throw new Error(
@@ -564,16 +558,6 @@ export function compileProgram(program: ProfilePolicySpec, profile: string): Pro
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */
 export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile {
   const obj = asObject(raw, where)
-  // The keys this was first shipped under, a `script` named for what
-  // the file is rather than what it does and a `runtime` beside it
-  // that read as the profile's own; refused with the new spelling
-  // rather than as two more unknown keys.
-  if (obj.script !== undefined || obj.runtime !== undefined) {
-    throw new Error(
-      `${where}: script and runtime are now a policy block, ` +
-        `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
-    )
-  }
   rejectUnknownKeys(
     obj,
     [
