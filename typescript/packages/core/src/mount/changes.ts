@@ -14,6 +14,7 @@
 
 import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
 import type { Clock } from '../utils/clock.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 /**
  * The machine whose served mount makes the file ops running now, unbound for
@@ -27,8 +28,8 @@ export const SERVED_BY = createAsyncContext<string>()
  * under it, or above it.
  */
 function overlaps(path: string, prefix: string): boolean {
-  const a = path.replace(/\/+$/, '')
-  const b = prefix.replace(/\/+$/, '')
+  const a = rstripSlash(path)
+  const b = rstripSlash(prefix)
   return a === b || b.startsWith(`${a}/`) || a.startsWith(`${b}/`)
 }
 
