@@ -279,13 +279,15 @@ export class ProcessHandle {
   /**
    * Have a program that acts on signals itself take what is sent to this
    * runner, which goes on or ends as the program decides. Only a runner
-   * started for that one command is the program's: another's signals are the
-   * shell's. KILL and STOP are never the program's. Answers what ends it.
+   * started for that one command, or the process a runtime runs its program
+   * as (`take`, or a child of its own), is the program's: another's signals
+   * are the shell's. KILL and STOP are never the program's. Answers what
+   * ends it.
    *
    * @param take told each signal sent.
    */
   onSignal(take: (signal: number) => void): () => void {
-    if (!this.oneCommand) return () => undefined
+    if (!this.oneCommand && !this.current.program) return () => undefined
     this.taker = take
     return () => {
       this.taker = null
