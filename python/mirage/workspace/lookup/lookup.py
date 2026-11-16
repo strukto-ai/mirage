@@ -279,7 +279,8 @@ def wrapper_program_words(
     """A wrapper's words with each program it runs that a ``/usr/bin``
     path spells named instead (``nice /usr/bin/gcc`` hands ``nice gcc``),
     as the plain path runs that program by name: a runtime cannot read a
-    workspace link.
+    workspace link. A name the wrapper would read as an option keeps its
+    path.
 
     Args:
         name (str): expanded command name.
@@ -297,7 +298,8 @@ def wrapper_program_words(
             break
         at += start
         head = path_program(words[at], session, registry, links) or words[at]
-        words[at] = head
+        if not head.startswith("-"):
+            words[at] = head
         start = at + 1
     return words
 

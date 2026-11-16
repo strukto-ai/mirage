@@ -632,6 +632,22 @@ async def test_a_wrapper_hands_its_runtime_the_program_a_path_names():
         await ws.close()
 
 
+class DashBox(Box):
+    captures = ("--help",)
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_keeps_the_path_of_a_program_named_like_an_option():
+    box = DashBox()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        r = await ws.shell("nice /usr/bin/--help")
+        assert r.exit_code == 0
+        assert box.ran == [["nice", "/usr/bin/--help"]]
+    finally:
+        await ws.close()
+
+
 class OtherBox(Box):
     name = "other"
     captures = ("hostname",)

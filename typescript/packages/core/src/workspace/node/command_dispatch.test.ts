@@ -651,6 +651,18 @@ it('a wrapper hands its runtime the program a path names', async () => {
   }
 })
 
+it('a wrapper keeps the path of a program named like an option', async () => {
+  const box = new Box(['--help'])
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+  try {
+    const io = await ws.shell('nice /usr/bin/--help')
+    expect(io.exitCode).toBe(0)
+    expect(box.ran).toEqual([['nice', '/usr/bin/--help']])
+  } finally {
+    await ws.close()
+  }
+})
+
 class OtherBox extends Box {
   override readonly name: string = 'other'
   constructor() {

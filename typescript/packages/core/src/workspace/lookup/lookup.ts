@@ -238,8 +238,9 @@ export function withoutCapture(
 /**
  * A wrapper's words with each program it runs that a `/usr/bin` path spells
  * named instead (`nice /usr/bin/gcc` hands `nice gcc`), as the plain path
- * runs that program by name: a runtime cannot read a workspace link. Mirrors
- * Python's `wrapper_program_words`.
+ * runs that program by name: a runtime cannot read a workspace link. A name
+ * the wrapper would read as an option keeps its path. Mirrors Python's
+ * `wrapper_program_words`.
  */
 export function wrapperProgramWords(
   name: string,
@@ -257,7 +258,7 @@ export function wrapperProgramWords(
     const at = start + found
     const word = words[at] ?? ''
     head = pathProgram(word, session, registry, links) ?? word
-    words[at] = head
+    if (!head.startsWith('-')) words[at] = head
     start = at + 1
   }
   return words
