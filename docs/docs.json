@@ -88,7 +88,8 @@
                 "pages": [
                   "home/examples/in-process-terminal",
                   "home/examples/in-process-terminal/code-review",
-                  "home/examples/in-process-terminal/cowork"
+                  "home/examples/in-process-terminal/cowork",
+                  "home/examples/in-process-terminal/agent-email"
                 ]
               },
               "home/examples/policy-security",
