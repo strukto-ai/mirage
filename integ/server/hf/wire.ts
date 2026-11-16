@@ -112,13 +112,18 @@ export interface TreeRow {
 }
 
 // What `row` is in the listing of `baseSlash`: a file entry, the immediate
-// child folder it lies under, or nothing at all.
-function placeOf(row: TreeRow, baseSlash: string, recursive: boolean): 'file' | string | null {
+// child folder it lies under, or nothing at all. The kind is its own field:
+// a folder can be named `file`.
+type Place = { kind: 'file' } | { kind: 'folder'; path: string } | null
+
+const FILE: Place = { kind: 'file' }
+
+function placeOf(row: TreeRow, baseSlash: string, recursive: boolean): Place {
   if (baseSlash !== '' && !row.path.startsWith(baseSlash)) return null
-  if (recursive) return 'file'
+  if (recursive) return FILE
   const rest = row.path.slice(baseSlash.length)
   const cut = rest.indexOf('/')
-  return cut === -1 ? 'file' : baseSlash + rest.slice(0, cut)
+  return cut === -1 ? FILE : { kind: 'folder', path: baseSlash + rest.slice(0, cut) }
 }
 
 function baseOf(prefix: string): string {
@@ -136,7 +141,9 @@ function baseOf(prefix: string): string {
  */
 export function treeFiles(rows: TreeRow[], prefix: string, recursive: boolean): string[] {
   const baseSlash = baseOf(prefix)
-  return rows.filter((row) => placeOf(row, baseSlash, recursive) === 'file').map((row) => row.path)
+  return rows
+    .filter((row) => placeOf(row, baseSlash, recursive)?.kind === 'file')
+    .map((row) => row.path)
 }
 
 /**
@@ -163,12 +170,12 @@ export function treeEntries(
   for (const row of rows) {
     const place = placeOf(row, baseSlash, recursive)
     if (place === null) continue
-    if (place === 'file') {
+    if (place.kind === 'file') {
       const file = files.get(row.path)
       if (file !== undefined) entries.set(row.path, fileEntry(file))
       continue
     }
-    if (!entries.has(place)) entries.set(place, dirEntry(place, row.modified))
+    if (!entries.has(place.path)) entries.set(place.path, dirEntry(place.path, row.modified))
   }
   return [...entries.values()].sort((a, b) =>
     String(a.path) < String(b.path) ? -1 : String(a.path) > String(b.path) ? 1 : 0,
