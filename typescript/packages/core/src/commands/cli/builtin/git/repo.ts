@@ -22,7 +22,6 @@ import { entryName } from '../../../../utils/remnants.ts'
 
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { KeyLock } from '../../../../cache/lock.ts'
 import { gitBool } from './util.ts'
 import {
   GITLINK_MODE,
@@ -46,9 +45,9 @@ const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
-// One rewrite of a repository's `.git/shallow` at a time, so fetches running
-// side by side keep each other's cuts.
-const SHALLOW_WRITERS = new KeyLock()
+// One rewrite of `.git/shallow` at a time, so fetches running side by side
+// keep each other's cuts: each update waits for the one before it settles.
+const SHALLOW_WRITERS: { last: Promise<unknown> } = { last: Promise.resolve() }
 
 /**
  * A repository living in a mount, opened for reading.
@@ -254,7 +253,7 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
 export async function addShallow(repo: Repo, oids: readonly string[]): Promise<void> {
   if (!oids.length) return
   const path = repo.location.commondir.join(SHALLOW_FILE)
-  await SHALLOW_WRITERS.withLock(path.virtual, async () => {
+  const update = SHALLOW_WRITERS.last.then(async () => {
     const held = new TextDecoder()
       .decode((await readOptional(repo.vfs, path)) ?? new Uint8Array())
       .split(/\s+/)
@@ -266,6 +265,11 @@ export async function addShallow(repo: Repo, oids: readonly string[]): Promise<v
       new TextEncoder().encode(lines.map((oid) => `${oid}\n`).join('')),
     )
   })
+  SHALLOW_WRITERS.last = update.then(
+    () => undefined,
+    () => undefined,
+  )
+  await update
 }
 
 /**
