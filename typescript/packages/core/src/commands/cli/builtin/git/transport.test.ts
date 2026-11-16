@@ -259,6 +259,25 @@ it('clones shallow over smart http as git does', async () => {
   expect(DEC.decode(result.stdout)).toBe(git(['config', 'remote.origin.fetch']))
 })
 
+it('fetches what lies past the cut into a shallow clone', async () => {
+  const ws = workspace()
+  let result = await ws.shell(`cd /w && git clone -q --depth 1 ${url} f`)
+  expect(result.exitCode).toBe(0)
+  execFileSync(
+    'bash',
+    [
+      '-ec',
+      'echo one > a && git commit -qam back && git push -q ../srv/repo.git main && ' +
+        'git -C ../srv/repo.git repack -adbq',
+    ],
+    { cwd: join(tmp, 'work'), env: ENV, stdio: 'ignore' },
+  )
+  result = await ws.shell('cd /w/f && git fetch -q')
+  expect(result.exitCode).toBe(0)
+  result = await ws.shell('cd /w/f && git show origin/main:a')
+  expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'one\n'])
+})
+
 it('says a missing http repository is not found and removes the clone', async () => {
   const ws = workspace()
   const result = await ws.shell(`cd /w && git clone ${url}/nope.git m`)

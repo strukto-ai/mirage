@@ -314,6 +314,7 @@ class LocalTransport:
         haves: list[str],
         has: Callable[[ObjectID], bool],
         depth: int | None = None,
+        shallow: tuple[str, ...] = (),
     ) -> Fetched:
         """A pack of everything reachable from ``wants`` the receiver lacks.
 
@@ -325,6 +326,8 @@ class LocalTransport:
                 an id.
             depth (int | None): how many commits deep to fetch, None
                 for all of them.
+            shallow (tuple[str, ...]): the receiver's shallow commits;
+                unused here, where ``has`` answers directly.
         """
         return await asyncio.to_thread(self._packed, wants, has, depth)
 
@@ -432,12 +435,15 @@ class HttpTransport:
         haves: list[str],
         has: Callable[[ObjectID], bool],
         depth: int | None = None,
+        shallow: tuple[str, ...] = (),
     ) -> Fetched:
         """POST the wants and haves to upload-pack; return the pack.
 
-        A depth asks for the ``shallow`` capability and sends ``deepen``;
-        the server names each commit it cut in a ``shallow`` line ahead
-        of the pack.
+        A shallow receiver names its shallow commits, so the server does
+        not count what lies past them as held, and a depth sends
+        ``deepen``; both ask for the ``shallow`` capability, and the
+        server names each commit it cut in a ``shallow`` line ahead of
+        the pack.
 
         Args:
             wants (list[str]): the object ids asked for.
@@ -447,12 +453,18 @@ class HttpTransport:
                 works out what to leave out from ``haves``.
             depth (int | None): how many commits deep to fetch, None
                 for all of them.
+            shallow (tuple[str, ...]): the receiver's shallow commits.
         """
         if not wants:
             return Fetched()
-        caps = CAPABILITIES if depth is None else f"{CAPABILITIES} shallow"
+        caps = (
+            CAPABILITIES
+            if depth is None and not shallow
+            else f"{CAPABILITIES} shallow"
+        )
         body = [pkt_line(f"want {wants[0]} {caps}\n".encode())]
         body += [pkt_line(f"want {want}\n".encode()) for want in wants[1:]]
+        body += [pkt_line(f"shallow {oid}\n".encode()) for oid in shallow]
         if depth is not None:
             body.append(pkt_line(f"deepen {depth}\n".encode()))
         body.append(FLUSH)
@@ -468,12 +480,12 @@ class HttpTransport:
             b"".join(body),
         )
         pack = bytearray()
-        shallow: list[str] = []
+        cut: list[str] = []
         for line in pkt_lines(reply):
             if line is None or line.startswith((b"NAK", b"ACK ")):
                 continue
             if line.startswith(SHALLOW_LINE):
-                shallow.append(line[len(SHALLOW_LINE) :].strip().decode())
+                cut.append(line[len(SHALLOW_LINE) :].strip().decode())
                 continue
             band, payload = line[0], line[1:]
             if band == PACK_BAND:
@@ -483,7 +495,7 @@ class HttpTransport:
                     "remote error: "
                     + payload.decode("utf-8", "replace").strip()
                 )
-        return Fetched(bytes(pack), tuple(shallow))
+        return Fetched(bytes(pack), tuple(cut))
 
 
 def _credentials(url: str) -> tuple[str, dict[str, str]]:
