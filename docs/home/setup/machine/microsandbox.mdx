@@ -5,8 +5,8 @@ description: Run captured programs in an existing microsandbox microVM.
 ---
 
 The `microsandbox` machine provider reaches a running
-[microsandbox](https://microsandbox.dev) microVM, by name, and the `machine`
-runtime runs captured programs in it. You create and start the sandbox; Mirage runs programs in
+[microsandbox](https://microsandbox.dev) microVM, by name, and
+runs the programs it captures in it. You create and start the sandbox; Mirage runs programs in
 it through the `msb` CLI. Python SDK and Node.
 
 ## Installation
@@ -21,34 +21,31 @@ msb create my-registry/mirage-fuse:latest --name mirage-box
 
 ## Usage
 
-`captures` defaults to [`@external`](/home/setup/runtime/overview#captures).
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures).
 Add `@python` to run Python programs in the guest too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"box": {"provider": "microsandbox", "sandbox": "mirage-box"}},
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+        machines={"box": {"provider": "microsandbox", "sandbox": "mirage-box", "captures": ["@python", "@external"]}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'microsandbox', sandbox: 'mirage-box' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'microsandbox', sandbox: 'mirage-box', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -61,10 +58,7 @@ Add `@python` to run Python programs in the guest too.
       box:
         provider: microsandbox
         sandbox: mirage-box
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram
@@ -87,6 +81,25 @@ msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
 
 Matching paths alone does not share data; configure both workspaces to use
 the same backend.
+
+## Pausing the sandbox
+
+To pause the sandbox when the workspace pauses, set `on_pause: pause` on the
+machine:
+
+```yaml
+machines:
+  box:
+    provider: microsandbox
+    sandbox: mirage-box
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `msb pause`: the sandbox
+is suspended and its memory stays on the host. The next line resumes it with
+`msb resume`. Without `on_pause`, `workspace.pause()` leaves the sandbox
+running unless the call names the machine. See
+[Pause](/home/setup/machine/overview#pause).
 
 ## Notes
 

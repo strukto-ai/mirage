@@ -3,12 +3,15 @@
     {
       "id": "public_process_capability",
       "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          }
+        },
         "register_runtimes": {
           "processbox": "processbox"
-        },
-        "runtimes": [
-          "processbox"
-        ]
+        }
       },
       "steps": [
         {
@@ -30,18 +33,19 @@
     {
       "id": "external_capture_path_policy",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "cat",
               "grep"
             ]
           }
-        ],
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -106,12 +110,15 @@
     {
       "id": "external_wrapper_admits_its_program",
       "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          }
+        },
         "register_runtimes": {
           "processbox": "processbox"
         },
-        "runtimes": [
-          "processbox"
-        ],
         "profiles": {
           "default": {
             "commands": {
@@ -195,18 +202,19 @@
     {
       "id": "external_capture_expands_text_slot_globs",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "grep",
               "python3"
             ]
           }
-        ],
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -292,12 +300,10 @@
       "id": "interpreter_script_path_policy",
       "note": "An interpreter's script operand is a file the runtime reads on its own machine, so the gate types it as a path and a path rule refuses it before the line is handed over, whatever option run precedes it. The words after the script, and every operand once -c, -m or -e named the program, are the program's argv and reach the runtime as typed. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "python",
               "python3",
@@ -305,7 +311,10 @@
               "node"
             ]
           }
-        ],
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "mounts": {
           "/vault": {
             "vfs": "ram"
@@ -483,12 +492,10 @@
     {
       "id": "native_captures_preserve_shell_builtins",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "cd",
               "export",
@@ -500,7 +507,10 @@
               "node"
             ]
           }
-        ]
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        }
       },
       "steps": [
         {
@@ -529,24 +539,25 @@
     {
       "id": "a_wrapper_runs_where_the_program_it_runs_is_captured",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "@external"
             ]
           },
-          {
-            "name": "echobox",
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "gcc"
             ]
-          },
-          "workspace"
-        ]
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        }
       },
       "steps": [
         {
@@ -575,18 +586,18 @@
     {
       "id": "a_wrapper_around_a_mirage_command_runs_it_in_mirage",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "@external"
             ]
-          },
-          "workspace"
-        ],
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -669,18 +680,19 @@
       "id": "a_group_takes_both_interpreter_names",
       "note": "@python is python3 and python, so one entry moves both to the runtime; a tool such as pip is no interpreter name and reaches the runtime through @external.",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
             "captures": [
               "@python",
               "@external"
             ]
           }
-        ]
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        }
       },
       "steps": [
         {
@@ -709,23 +721,27 @@
     {
       "id": "external_wrapper_goes_where_its_program_is_placed",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          "processbox",
-          {
-            "name": "echobox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          },
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@external"
             ]
           }
-        ],
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "policies": [
           {
             "name": "place_command",
             "contains": "native-tool",
-            "runtime": "echobox"
+            "machine": "echobox"
           }
         ]
       },
@@ -770,12 +786,15 @@
     {
       "id": "external_path_mirage_has_no_file_for",
       "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          }
+        },
         "register_runtimes": {
           "processbox": "processbox"
-        },
-        "runtimes": [
-          "processbox"
-        ]
+        }
       },
       "steps": [
         {
@@ -812,28 +831,32 @@
     {
       "id": "external_wrapper_routes_that_disagree_refuse",
       "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          "processbox",
-          {
-            "name": "echobox",
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox"
+          },
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@external"
             ]
           }
-        ],
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
         "policies": [
           {
             "name": "place_command",
             "contains": "native-tool",
-            "runtime": "echobox"
+            "machine": "echobox"
           },
           {
             "name": "place_command",
             "contains": "nohup",
-            "runtime": "processbox"
+            "machine": "processbox"
           }
         ]
       },

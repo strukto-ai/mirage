@@ -27,10 +27,19 @@ pub(super) enum Atom {
     Class(Class),
 }
 
+fn fold(unit: u32) -> u32 {
+    char::from_u32(unit).map_or(unit, |ch| u32::from(ch.to_lowercase().next().unwrap_or(ch)))
+}
+
+pub(super) fn equal(a: u32, b: u32, nocase: bool) -> bool {
+    a == b || (nocase && fold(a) == fold(b))
+}
+
 impl Atom {
-    pub(super) fn contains(self, cp: u32) -> bool {
+    pub(super) fn contains(self, cp: u32, nocase: bool) -> bool {
         match self {
-            Self::Literal(unit) => unit == cp,
+            Self::Literal(unit) => equal(unit, cp, nocase),
+            Self::Range(lo, hi) if nocase => (fold(lo)..=fold(hi)).contains(&fold(cp)),
             Self::Range(lo, hi) => lo <= cp && cp <= hi,
             Self::Class(class) => class.contains(cp),
         }
@@ -110,6 +119,7 @@ pub(super) struct Program {
     pub(super) units: Vec<u32>,
     pub(super) dialect: Dialect,
     pub(super) extglob: bool,
+    pub(super) nocase: bool,
     pub(super) brackets: HashMap<usize, Bracket>,
     pub(super) groups: HashMap<usize, Group>,
     pub(super) transitions: HashMap<usize, Vec<usize>>,
@@ -187,11 +197,12 @@ enum CompilePhase {
     Done,
 }
 impl Compiler {
-    pub(super) fn new(units: Vec<u32>, dialect: Dialect, extglob: bool) -> Self {
+    pub(super) fn new(units: Vec<u32>, dialect: Dialect, extglob: bool, nocase: bool) -> Self {
         Self {
             program: Program {
                 units,
                 dialect,
+                nocase,
                 extglob: extglob && dialect == Dialect::Shell,
                 brackets: HashMap::new(),
                 groups: HashMap::new(),

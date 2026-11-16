@@ -85,7 +85,6 @@ async def run_external(
         env=env_snapshot(session),
         stdin=stdin,
         flags={} if process else {"c": command},
-        machine=routing.machine,
     )
     node = ExecutionNode(command=command, exit_code=0)
     said: list[bytes] = []

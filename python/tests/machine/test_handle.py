@@ -94,7 +94,7 @@ async def test_version_commands_reach_the_remote_environment(line):
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell(line)
@@ -105,13 +105,81 @@ async def test_version_commands_reach_the_remote_environment(line):
         await ws.close()
 
 
+class FifoBox(RecordingMachine):
+    async def connect(self) -> None:
+        await super().connect()
+        self.execs.append(("connect", None, "/"))
+
+    async def exec_line(self, line, stdin, env, cwd):
+        data = None if stdin is None else await materialize(stdin)
+        if "rm -f" in line and self.lost:
+            raise ConnectionError("gone")
+        return await super().exec_line(line, data, env, cwd)
+
+    lost = False
+
+
+# A process substitution a program reads by path becomes a named pipe on
+# the program's machine, only its owner's, made once the machine is
+# reached, fed what the substitution writes, then removed; one it writes
+# to stays its word.
+@pytest.mark.asyncio
+async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
+    box = FifoBox(captures=("node",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("node read.js <(echo hi) /dev/fd/9 >(cat)")
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+    lines = [line for line, _, _ in box.execs]
+    [made] = [line for line in lines if line.startswith("mkfifo ")]
+    fifo = made.removeprefix("mkfifo -m 600 ")
+    assert fifo.startswith("/tmp/.mirage-fd-")
+    ran = lines.index(f"node read.js {fifo} /dev/fd/9 /dev/fd/62")
+    assert lines.index("connect") < lines.index(made) < ran
+    fed = [(line, data) for line, data, _ in box.execs if "exec cat" in line]
+    assert fed == [(f"[ -p {fifo} ] && exec cat > {fifo}", b"hi\n")]
+    assert lines.index(f"exec 3<>{fifo}; exec 3>&-; rm -f {fifo}") > ran
+
+
+# A function's program reads the substitution its call was given.
+@pytest.mark.asyncio
+async def test_a_functions_program_reads_its_calls_substitution():
+    box = FifoBox(captures=("node",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell('f() { node read.js "$1"; }; f <(echo hi)')
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+    [made] = [line for line, _, _ in box.execs if line.startswith("mkfifo ")]
+    fifo = made.removeprefix("mkfifo -m 600 ")
+    assert f"node read.js {fifo}" in [line for line, _, _ in box.execs]
+
+
+# A pipe that cannot be removed, the machine gone, leaves the program's
+# output as it ran.
+@pytest.mark.asyncio
+async def test_a_pipe_left_behind_keeps_the_programs_output():
+    box = FifoBox(captures=("node",))
+    box.lost = True
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("node read.js <(echo hi)")
+        assert io.exit_code == 0
+        assert (await materialize(io.stdout)).startswith(b"ran:node read.js ")
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_first_line_connects_once():
     box = RecordingMachine(captures=("python3",))
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 x")
@@ -136,7 +204,7 @@ async def test_failed_connect_retries_on_the_next_line():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 x")
@@ -156,7 +224,7 @@ async def test_a_handle_another_workspace_takes_connects_again():
         ws = Workspace(
             {"/data": RAMVFS()},
             mode=MountMode.EXEC,
-            **on(box, "workspace"),
+            **on(box),
         )
         try:
             assert (await ws.shell("python3 x")).exit_code == 0
@@ -185,7 +253,7 @@ async def test_stdin_bytes_reach_exec_line():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         await ws.shell("wc -l", stdin=b"a\nb\n")
@@ -224,7 +292,7 @@ async def test_line_timeout_answers_124():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     try:
@@ -494,7 +562,7 @@ async def test_line_output_caps_truncate_with_notice():
     ws = Workspace(
         {"/data": (RAMVFS(), MountMode.EXEC, guards)},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 train.py")
@@ -511,7 +579,7 @@ async def test_remote_line_invalidates_local_read_caches():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         mount = next(m for m in ws._registry.mounts() if m.prefix == "/data/")
@@ -568,7 +636,7 @@ async def test_a_program_gets_the_system_time_through_the_sandboxs_libfaketime(
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         system_time=system_time,
     )
     try:
@@ -618,7 +686,7 @@ async def test_a_machine_is_asked_once_and_again_after_a_failed_probe():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         system_time="2026-03-02T09:00:00Z",
     )
     try:
@@ -718,9 +786,26 @@ async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
     try:
         io = await ws.shell("train")
         assert await materialize(io.stdout) == stdout
-        [program] = [p for p in await ws.processes() if p.runtime]
+        [program] = [p for p in await ws.processes() if p.program]
         assert program.machine_pid is not None
         assert program.machine_pid.pid == 812
         assert program.machine_instance == "box"
     finally:
         await ws.close()
+
+
+class HungBox(RecordingMachine):
+    async def connect(self) -> None:
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_close_never_waits_for_a_hung_connect_on_a_machine_that_cannot_pause():
+    box = HungBox()
+    connecting = asyncio.ensure_future(box.ensure_connected())
+    await asyncio.sleep(0)
+    try:
+        async with asyncio.timeout(1):
+            await box.close()
+    finally:
+        connecting.cancel()

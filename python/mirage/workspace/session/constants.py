@@ -39,6 +39,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "pipe_status",
     "function_names",
     "call_lines",
+    "source_files",
     "shell_options",
     "shopts",
     "aliases",

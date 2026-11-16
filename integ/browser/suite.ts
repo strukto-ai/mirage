@@ -23,6 +23,7 @@ import {
   buildRuntime,
   JobConsole,
   MountMode,
+  OFFICE,
   RAMVFS,
   S3VFS,
   Workspace,
@@ -54,6 +55,7 @@ import printfBasic from '../bash/printf/basic.json'
 import printfAssignments from '../bash/printf/vflag.json'
 import printfShared from '../bash/printf/shared.json'
 import printfOptions from '../unix/printf/unknown_option.json'
+import officeCorpus from '../cli/office.json'
 import { POLICY_CHECKS } from './policy.ts'
 
 export interface Outcome {
@@ -132,6 +134,35 @@ function battery(): [string, Check][] {
       },
     ]),
   )
+}
+
+/**
+ * The office CLI's corpus cases, each on a workspace of its own with its
+ * target's mounts and the Office files the page's server serves seeded.
+ */
+function officeBattery(): [string, Check][] {
+  return (officeCorpus.cases as unknown as Case[]).map((c): [string, Check] => [
+    c.id,
+    async () => {
+      const ws = new Workspace(
+        { '/scratch': new RAMVFS(), '/docs': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
+      try {
+        ws.registerCli('office', OFFICE)
+        for (const name of ['deck.pptx', 'lines.xlsx', 'memo.docx']) {
+          const response = await fetch(`/office/${name}`)
+          if (!response.ok) throw new Error(`/office/${name} answered ${String(response.status)}`)
+          const stdin = new Uint8Array(await response.arrayBuffer())
+          equal(await shell(ws, `tee /docs/${name} > /dev/null`, { stdin }), [0, '', ''])
+        }
+        const run = await runCase(ws as unknown as ExecWorkspace, c)
+        equal(compare(c, run.exitCode, run.out, run.err, run.elapsed, run.checkOut), [])
+      } finally {
+        await ws.close()
+      }
+    },
+  ])
 }
 
 const CHECKS: [string, Check][] = [
@@ -654,6 +685,7 @@ const CHECKS: [string, Check][] = [
     },
   ],
   ...battery(),
+  ...officeBattery(),
 ]
 
 /**
@@ -667,7 +699,7 @@ async function quickjsCheck(home: string): Promise<void> {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [buildRuntime('quickjs', { config: { home } }), 'workspace'],
+      machines: [buildRuntime('quickjs', { config: { home } })],
     },
   )
   try {

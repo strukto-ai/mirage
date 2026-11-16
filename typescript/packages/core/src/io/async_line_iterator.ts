@@ -65,7 +65,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   holders = 0
   private released = false
 
-  constructor(private readonly input: ByteSource | AsyncIterator<Uint8Array>) {
+  constructor(readonly input: ByteSource | AsyncIterator<Uint8Array>) {
     const s = this.input as AsyncIterable<Uint8Array>
     if (this.input instanceof Uint8Array) {
       this.source = chunks(this.input)
@@ -427,11 +427,13 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           const width = charWidth(buf, at)
           if (room !== null && size + at + width > room) throw new MemoryExhausted()
           at += width
-          taken++
+          if (buf[at - width] !== 0) taken++
         }
         if (at > 0) {
-          out.push(buf.subarray(0, at))
-          size += at
+          const piece = buf.subarray(0, at)
+          const data = piece.includes(0) ? piece.filter((byte) => byte !== 0) : piece
+          out.push(data)
+          size += data.length
           this.buf = buf.subarray(at)
         }
         if (taken < count && delim !== null && this.buf[0] === delim) {

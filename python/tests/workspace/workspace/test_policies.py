@@ -38,6 +38,7 @@ from mirage.policy.profile import (
 )
 from mirage.policy.script import script_context
 from mirage.policy.types import RouteContext
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.monty import runtime as monty_runtime
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
@@ -109,7 +110,7 @@ async def test_policies_add_wins_over_runtime_placement():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         ws.policies.add(NoInterpreters())
@@ -1140,7 +1141,7 @@ async def test_a_profile_script_runs_in_a_world_with_no_evaluator():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        runtimes=["workspace"],
+        machines=[],
         profiles=_scripted(),
     )
     try:

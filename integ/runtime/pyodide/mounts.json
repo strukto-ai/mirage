@@ -6,10 +6,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/cold": {
             "vfs": "ram",
@@ -54,10 +56,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/": {
             "vfs": "ram",
@@ -122,10 +126,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/lib": {
             "vfs": "ram",
@@ -160,10 +166,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/lib/app": {
             "vfs": "ram",

@@ -50,17 +50,26 @@ def get_text(node: TSNodeLike) -> str:
 
 
 def ends_line(node: TSNodeLike) -> bool:
-    """Whether nothing but a separator follows ``node`` on its line,
-    so bash runs it last, as the shell.
+    """Whether bash runs ``node`` last in its shell, in the shell's
+    place: the last statement of a line, of a subshell or of a
+    substitution's body, or the last command of a ``&&``/``||`` list
+    that is, with no redirect or ``!`` of its own and no ``&`` job in
+    the shell before it.
 
     Args:
         node (TSNodeLike): the command.
     """
-    root = node
-    while root.parent is not None:
-        root = root.parent
-    rest = (root.text or b"")[node.end_byte - root.start_byte :]
-    return not rest.strip(b" \t\r\n;")
+    child, above = node, node.parent
+    while above is not None and above.type == NT.LIST:
+        if above.named_children[-1].id != child.id:
+            return False
+        child, above = above, above.parent
+    if above is None or above.type not in (NT.PROGRAM, NT.SUBSHELL):
+        return False
+    statements = [c for c in above.named_children if c.type != NT.COMMENT]
+    return statements[-1].id == child.id and all(
+        c.type != NT.BACKGROUND for c in above.children
+    )
 
 
 def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
@@ -667,11 +676,16 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             fd = int(get_text(c))
         elif c.type in _REDIRECT_OPERATORS:
             op = c.type
-        elif c.type == NT.NUMBER:
+        elif (
+            c.type == NT.NUMBER
+            and op in _DUP_OPERATORS
+            and get_text(c).isascii()
+            and get_text(c).isdecimal()
+        ):
             dup_fd = int(get_text(c))
 
     for c in child.named_children:
-        if c.type in _TARGET_TYPES:
+        if c.type in _TARGET_TYPES or (c.type == NT.NUMBER and dup_fd is None):
             target = get_text(c)
             target_node = c
             break
@@ -690,23 +704,27 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             else (len(decode_text(document.body[: fails[0]])), fails[1]),
         )
 
-    # `>&word` with a word rather than a number is bash's other spelling
-    # of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
-    # too, pinned on bash 5.2). On any other explicit descriptor bash
-    # refuses it as `word: ambiguous redirect`, before the command runs
-    # and before any file opens, so the parse keeps the word for the
-    # message rather than turning `3>&foo` into a both-streams file.
-    word_dup = (
-        op == NT.REDIRECT_STDERR and dup_fd is None and target_node is not None
-    )
-    if word_dup and fd is not None and fd != FD_STDOUT:
+    if op in _DUP_OPERATORS and dup_fd is None and target_node is not None:
+        reading = op == NT.REDIRECT_DUP_IN
+        if fd is None:
+            fd = FD_STDIN if reading else FD_STDOUT
+        source = str(target).removesuffix("-")
+        if source != target and source.isascii() and source.isdecimal():
+            return Redirect(
+                fd=fd,
+                target=int(source),
+                kind=RedirectKind.STDIN if reading else RedirectKind.STDOUT,
+                move=True,
+            )
         return Redirect(
             fd=fd,
             target=target,
             target_node=target_node,
-            kind=RedirectKind.AMBIGUOUS,
+            kind=RedirectKind.DUP_INPUT
+            if reading
+            else RedirectKind.DUP_OUTPUT,
         )
-    if op in _BOTH_OPERATORS or word_dup:
+    if op in _BOTH_OPERATORS:
         return Redirect(
             fd=FD_BOTH,
             target=target,

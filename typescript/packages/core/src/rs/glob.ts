@@ -64,12 +64,14 @@ function config(
   extglob: boolean,
   period: boolean,
   dialect: Dialect,
+  nocase = false,
 ): Readonly<Record<string, util.JSONType>> {
   return {
     pattern: Array.from(pattern, (ch) => ch.codePointAt(0) ?? 0),
     extglob,
     period,
     dialect,
+    nocase,
     operation: { kind: 'matches' },
   }
 }
@@ -163,8 +165,14 @@ export class GlobMatcher {
   private readonly stream: MovableStream
   private readonly literal: string | null
 
-  constructor(pattern: string, extglob = false, period = false, dialect: Dialect = 'shell') {
-    this.stream = new MovableStream('glob', config(pattern, extglob, period, dialect))
+  constructor(
+    pattern: string,
+    extglob = false,
+    period = false,
+    dialect: Dialect = 'shell',
+    nocase = false,
+  ) {
+    this.stream = new MovableStream('glob', config(pattern, extglob, period, dialect, nocase))
     const stream = this.stream.live
     stream.begin({ kind: 'literal' })
     const literal = units.nullable().parse(reply(stream))
@@ -222,6 +230,7 @@ export function globMatcher(
   extglob = false,
   period = false,
   dialect: Dialect = 'shell',
+  nocase = false,
 ): GlobMatcher {
   let kinds = matchers.get(pattern)
   if (kinds === undefined) {
@@ -230,6 +239,7 @@ export function globMatcher(
     kinds = []
     matchers.set(pattern, kinds)
   }
-  const kind = (dialect === 'python' ? 4 : 0) + (extglob ? 2 : 0) + (period ? 1 : 0)
-  return (kinds[kind] ??= new GlobMatcher(pattern, extglob, period, dialect))
+  const kind =
+    (nocase ? 8 : 0) + (dialect === 'python' ? 4 : 0) + (extglob ? 2 : 0) + (period ? 1 : 0)
+  return (kinds[kind] ??= new GlobMatcher(pattern, extglob, period, dialect, nocase))
 }

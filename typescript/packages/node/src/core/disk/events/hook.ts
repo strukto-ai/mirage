@@ -19,6 +19,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core/types'
 import { eventAt, textField } from '@struktoai/mirage-core/events/index'
+import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 import { DISK_KINDS } from './constants.ts'
@@ -57,11 +58,18 @@ export class DiskEventHook {
    * A watcher may be rooted above the mount, so an event for a sibling
    * directory is not this mount's to report.
    */
-  private relative(hostPath: string): string | null {
-    const root = path.resolve(this.accessor.root)
-    const resolved = path.resolve(hostPath)
+  private async relative(hostPath: string): Promise<string | null> {
+    const [root, resolved] = await Promise.all([
+      this.physical(this.accessor.root, false),
+      this.physical(hostPath, true),
+    ])
     if (resolved === root) return '/'
-    if (!resolved.startsWith(root + path.sep)) return null
+    if (!resolved.startsWith(root + path.sep)) {
+      // A link to the root itself is the root: kept as written it names the
+      // link's own directory, outside the mount. A link inside the mount is
+      // never asked, so one pointing back at the root keeps its own name.
+      return (await this.physical(hostPath, false)) === root ? '/' : null
+    }
     return (
       '/' +
       resolved
@@ -69,6 +77,42 @@ export class DiskEventHook {
         .split(path.sep)
         .join('/')
     )
+  }
+
+  /**
+   * A host path with its symlinks resolved, as the mount's root is.
+   *
+   * The mount keeps the real path of its root, while a watcher reports paths
+   * as it was asked to watch them, so a root spelled through a link (`/tmp`
+   * on macOS) would otherwise drop every event. For an event's entry only the
+   * directories above it are resolved, so a link created in the mount reports
+   * as itself; and the deepest ancestor that resolves is resolved, so a path
+   * already gone, or a link that loops, keeps the rest as written.
+   *
+   * @param hostPath an absolute host path.
+   * @param entry whether the last component is kept as written.
+   * @returns the physical path.
+   */
+  private async physical(hostPath: string, entry: boolean): Promise<string> {
+    const resolved = path.resolve(hostPath)
+    const rest: string[] = []
+    let head = resolved
+    if (entry && path.dirname(resolved) !== resolved) {
+      rest.push(path.basename(resolved))
+      head = path.dirname(resolved)
+    }
+    for (;;) {
+      try {
+        return path.join(await realpath(head), ...rest)
+      } catch (err) {
+        const code = (err as { code?: unknown }).code
+        if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') throw err
+      }
+      const parent = path.dirname(head)
+      if (parent === head) return resolved
+      rest.unshift(path.basename(head))
+      head = parent
+    }
   }
 
   /**
@@ -80,13 +124,13 @@ export class DiskEventHook {
    * neither (which discarding the event on an out-of-mount source does) leaves
    * a file sitting in the mount that no listing knows about.
    */
-  private moved(
+  private async moved(
     root: PathSpec,
     source: string | null,
     target: string | null,
-  ): readonly FileEvent[] {
-    const movedFrom = source === null ? null : this.relative(source)
-    const movedTo = target === null ? null : this.relative(target)
+  ): Promise<readonly FileEvent[]> {
+    const movedFrom = source === null ? null : await this.relative(source)
+    const movedTo = target === null ? null : await this.relative(target)
     if (movedTo === null) {
       if (movedFrom === null) return []
       return [eventAt(root, movedFrom, FileChangeKind.DELETE)]
@@ -103,16 +147,18 @@ export class DiskEventHook {
    * delivers that child's own event, so re-inventorying the subtree on every
    * write inside a directory would throw away the whole cache for nothing.
    */
-  toEvents(root: PathSpec, eventType: string, payload: JsonValue): Promise<readonly FileEvent[]> {
+  async toEvents(
+    root: PathSpec,
+    eventType: string,
+    payload: JsonValue,
+  ): Promise<readonly FileEvent[]> {
     const source = textField(payload, 'src_path')
-    if (eventType === 'moved') {
-      return Promise.resolve(this.moved(root, source, textField(payload, 'dest_path')))
-    }
-    if (source === null) return Promise.resolve([])
-    const relative = this.relative(source)
-    if (relative === null) return Promise.resolve([])
+    if (eventType === 'moved') return this.moved(root, source, textField(payload, 'dest_path'))
+    if (source === null) return []
+    const relative = await this.relative(source)
+    if (relative === null) return []
     const kind = DISK_KINDS[eventType]
-    if (kind === undefined) return Promise.resolve([])
-    return Promise.resolve([eventAt(root, relative, kind)])
+    if (kind === undefined) return []
+    return [eventAt(root, relative, kind)]
   }
 }

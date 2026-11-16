@@ -30,6 +30,7 @@ from mirage.io.types import Rows, materialize
 from mirage.policy import Deny, Policy, RouteContext
 from mirage.policy.match import Outcome
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.call import vfs_call
@@ -77,7 +78,7 @@ def ws():
     workspace = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     yield workspace
 
@@ -214,7 +215,11 @@ async def test_yaml_clis_section_installs_through_load_config():
             {
                 "mounts": {"/data": {"vfs": "ram"}},
                 "clis": {
-                    "sl": {"cli": "slackish", "config": {"token": "yaml"}}
+                    "sl": {
+                        "cli": "slackish",
+                        "machine": "in_process",
+                        "config": {"token": "yaml"},
+                    }
                 },
             }
         )
@@ -250,7 +255,11 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "sl": {"cli": f"{script}:TREE", "config": {"token": "ref"}}
+                "sl": {
+                    "cli": f"{script}:TREE",
+                    "machine": "in_process",
+                    "config": {"token": "ref"},
+                }
             },
         }
     )
@@ -265,7 +274,7 @@ async def test_yaml_unknown_cli_key_fails_loud():
     cfg = load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "clis": {"x": {"cli": "nope"}},
+            "clis": {"x": {"cli": "nope", "machine": "in_process"}},
         }
     )
     with pytest.raises(ValueError, match="unknown cli 'nope'"):
@@ -485,6 +494,7 @@ def pager_spec(source: str, language: str = "python") -> CLI:
     return CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource(source, language=language),
+        machine="in_process",
     )
 
 
@@ -551,11 +561,11 @@ async def test_shell_function_shadows_a_script_cli(ws):
 async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
     # sys.argv only exists on a host interpreter (monty has no sys
     # bridge), so output proves the runtime: pin escalated to local.
-    ws.add_runtime("local")
+    ws.add_machine("local", {"provider": "host"})
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("import sys\nprint('local', sys.argv[1])"),
-        runtime="local",
+        machine="host",
     )
     ws.register_cli("pager", spec)
     code, out, _ = await run(ws, "pager report.txt")
@@ -566,7 +576,7 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
 @live_quickjs
 async def test_script_cli_js_runs_on_quickjs(ws):
     # scriptArgs[0] is the installed name, like a qjs script's path.
-    ws.add_runtime("quickjs")
+    ws.add_machine("quickjs", {"provider": "in_process", "runtime": "quickjs"})
     ws.register_cli(
         "pager",
         pager_spec(
@@ -614,9 +624,15 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "clis": {
-                "pager": {"script": str(script), "config": {"width": 80}}
+                "pager": {
+                    "script": str(script),
+                    "machine": "in_process",
+                    "config": {"width": 80},
+                }
             },
-            "runtimes": ["monty", "workspace"],
+            "machines": {
+                "monty": {"provider": "in_process", "runtime": "monty"}
+            },
         }
     )
     ws = Workspace(**cfg.to_workspace_kwargs())

@@ -13,9 +13,12 @@
     {
       "id": "external_fallback_preserves_vfs_pipeline",
       "world": {
-        "runtimes": [
-          "sandlock"
-        ]
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {}
+          }
+        }
       },
       "steps": [
         {

@@ -14,7 +14,7 @@
 
 import type { EntryKind, ResourceKind } from './types.ts'
 
-export const ENTRY_KINDS: readonly EntryKind[] = ['vfs', 'cli', 'runtime', 'machine', 'store']
+export const ENTRY_KINDS: readonly EntryKind[] = ['vfs', 'cli', 'machine', 'store']
 
 /** The one scope a local daemon serves; a hosted server keeps one per team. */
 export const DEFAULT_SCOPE = 'local'
@@ -32,7 +32,6 @@ export const STRUKTO = 'strukto'
 export const NOUN: Readonly<Record<ResourceKind, string>> = {
   vfs: 'VFS',
   cli: 'CLI',
-  runtime: 'runtime',
   machine: 'machine',
   store: 'secret store',
   policy: 'policy',

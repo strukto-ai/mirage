@@ -1,0 +1,410 @@
+---
+title: Release Notes
+icon: scroll
+description: An agent turns a week of merged pull requests and closed Linear issues into release notes and publishes them to Notion, with no sandbox.
+---
+
+import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
+
+<UseCaseTerminal
+  services={[
+    { cli: "gh", name: "GitHub", detail: "the pull requests merged in the week" },
+    { cli: "linear", name: "Linear", detail: "the issues closed in the week" },
+    { cli: "ntn", name: "Notion", detail: "the release notes page", dir: "out" },
+  ]}
+  steps={[
+    { cmd: "gh search prs --merged-at 2025-12-29..2026-01-04 …", cli: "gh", out: "10 pull requests" },
+    { cmd: "linear issue list --team BILL | jq …", cli: "linear", out: "3 issues" },
+    { cmd: "python3 /work/group.py", cli: "python3", out: "Breaking 1, New 3, Improved 1, Fixed 2" },
+    { cmd: "python3 /work/notes.py", cli: "python3", out: "/work/release-notes.md" },
+    { cmd: "ntn pages create --parent \"page:$parent\" …", cli: "ntn", out: "Week of December 29, 2025" },
+  ]}
+  extras={[
+    { text: "/work in memory" },
+    { text: "python3 on Monty", cli: "python3" },
+  ]}
+/>
+
+An agent drafts a team's weekly release notes. It lists the pull requests
+merged in the week and the Linear issues closed, sorts them into groups, and
+publishes the draft to Notion for a person to review. A cron job can start it
+every Monday.
+
+A job this small needs no VM or sandbox. It runs in a
+[lightweight terminal](/home/examples/lightweight-terminal) inside one
+FastAPI or Express server:
+
+- **Files:** `/work`, mounted in [memory](/home/setup/ram) for the agent's
+  scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
+  [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
+  instead.
+- **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
+- **CLIs:** [`gh`](/python/cli/gh), [`linear`](/python/cli/linear) and
+  [`ntn`](/python/cli/ntn) call GitHub, Linear and Notion with tokens the
+  server holds, so the agent never sees one.
+
+The commands below are what the agent runs in its terminal. They write the
+notes for the week of December 29, 2025 in `example/billing`, a sample
+repository whose team tracks its work in the Linear team `BILL`.
+
+## Server
+
+This is the server from the
+[Overview](/home/examples/lightweight-terminal#server) with three additions:
+it registers `gh`, `linear` and `ntn`, each with a credential read from an
+environment variable.
+
+Before you start the server, set `GITHUB_TOKEN`, `LINEAR_API_KEY` and
+`NOTION_API_KEY`. [GitHub](/home/setup/github), [Linear](/home/setup/linear)
+and [Notion](/home/setup/notion) say how to create each one, and
+[Service Credentials](/home/service-credentials) says how to read them from a
+secret store instead. The GitHub token needs read access to the repository,
+and the Notion integration needs access to the page the notes go under. The
+three `*_API_URL` variables are optional: leave them unset to call the public
+APIs, or set them for GitHub Enterprise or a proxy.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    import os
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.commands.cli.builtin.gh import GH
+    from mirage.commands.cli.builtin.linear import LINEAR
+    from mirage.commands.cli.builtin.ntn import NTN
+    from mirage.core.github.config import GhConfig
+    from mirage.core.linear.config import LinearConfig
+    from mirage.core.notion.config import NotionConfig
+    from mirage.runtime.python.monty import MontyRuntime
+
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC)},
+        machines=[MontyRuntime(captures=["python", "python3"])],
+    )
+    ws.register_cli("gh", GH, GhConfig(
+        token=os.environ["GITHUB_TOKEN"],
+        base_url=os.environ.get("GITHUB_API_URL"),
+    ))
+    ws.register_cli("linear", LINEAR, LinearConfig(
+        api_key=os.environ["LINEAR_API_KEY"],
+        base_url=os.environ.get("LINEAR_API_URL", "https://api.linear.app/graphql"),
+    ))
+    ws.register_cli("ntn", NTN, NotionConfig(
+        api_key=os.environ["NOTION_API_KEY"],
+        base_url=os.environ.get("NOTION_API_URL", "https://api.notion.com/v1"),
+    ))
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { GH, LINEAR, MontyRuntime, MountMode, NTN, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/work': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    ws.registerCli('gh', GH, {
+      token: process.env.GITHUB_TOKEN,
+      baseUrl: process.env.GITHUB_API_URL,
+    })
+    ws.registerCli('linear', LINEAR, {
+      apiKey: process.env.LINEAR_API_KEY,
+      baseUrl: process.env.LINEAR_API_URL,
+    })
+    ws.registerCli('ntn', NTN, {
+      apiKey: process.env.NOTION_API_KEY,
+      baseUrl: process.env.NOTION_API_URL,
+    })
+
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+Create a terminal, and define `run`, which sends commands to it and prints
+what they print. It needs [`jq`](https://jqlang.org):
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+```
+
+The commands between `SH` and `SH` in the blocks below run in the terminal
+on the server, not in the shell that calls `run`. The output shown comes from
+the sample repository; yours will list your own work.
+
+## List merged pull requests
+
+The agent asks GitHub for the pull requests merged from Monday, December 29,
+to Sunday, January 4. The dates are in the command, so a run on Tuesday
+still covers that week. It saves the list as JSON in a file and prints only
+the count and the titles:
+
+```bash
+run <<'SH'
+gh search prs --repo example/billing --merged-at 2025-12-29..2026-01-04 \
+  --json number,title,body,url --limit 100 > /work/prs.json
+jq length /work/prs.json
+jq -r 'sort_by(.number)[] | "#\(.number) \(.title)"' /work/prs.json
+SH
+```
+
+```text
+10
+#141 feat!: remove the v1 invoices API
+#142 feat: export invoices as CSV
+#143 fix: wrong totals for currencies without decimals, such as JPY
+#144 perf: the invoice list loads twice as fast
+#145 chore: upgrade eslint to 9.39
+#146 build(deps): bump axios from 1.12.0 to 1.13.2
+#147 ci: cache the pnpm store
+#148 fix: unreadable text on the billing page in dark mode
+#149 feat: email a receipt after each payment
+#150 test: cover partial refunds
+```
+
+Ten pull requests were merged. `--limit 100` caps the list, so raise it for a
+busier repository. The team starts each title with its kind of change:
+`feat`, `fix` and `perf` are changes a customer sees; `chore`, `build`, `ci`
+and `test` are not; a `!` marks a breaking change.
+
+## List closed issues
+
+The agent lists the team's Linear issues and keeps the ones in the `Done`
+state that were last updated during the same week:
+
+```bash
+run <<'SH'
+linear issue list --team BILL |
+  jq '[.[] | select(.state_name == "Done" and .updated_at >= "2025-12-29" and .updated_at < "2026-01-05")]' > /work/issues.json
+jq length /work/issues.json
+jq -r '.[] | "\(.issue_key) \(.label_names[0]) \(.title)"' /work/issues.json
+SH
+```
+
+```text
+3
+BILL-31 Feature Export invoices to CSV
+BILL-34 Bug JPY invoice totals are off by 100x
+BILL-37 Feature Show the customer's tax ID on PDF invoices
+```
+
+`linear issue list` prints every issue of the team as JSON, and `jq` does
+the filtering. The JSON has no completion date, so the last update stands in
+for it. An issue that was finished earlier, or is still in progress, is left
+out.
+
+## Group the changes
+
+Some of these describe the same change: pull request #142 says `Closes
+BILL-31` in its description, and #143 says `Fixes BILL-34`. A short Python
+file, which runs on Monty inside the server, joins the two lists:
+
+- A pull request goes into New, Improved or Fixed by its title. A breaking
+  change goes into its own group, first, and uses the first line of its
+  description, which tells customers what to do, or its title when the
+  description is empty.
+- An issue that a pull request names becomes a second link on that pull
+  request's entry.
+- An issue that no pull request names gets its own entry, grouped by its
+  label.
+- Everything else, such as chores and dependency bumps, is dropped.
+
+```bash
+run <<'SH'
+cat > /work/group.py <<'PY'
+import json
+import re
+
+prs = json.load(open("/work/prs.json"))
+issues = {i["issue_key"]: i for i in json.load(open("/work/issues.json"))}
+kinds = {"feat": "New", "perf": "Improved", "fix": "Fixed"}
+labels = {"Feature": "New", "Improvement": "Improved", "Bug": "Fixed"}
+groups = {"Breaking": [], "New": [], "Improved": [], "Fixed": []}
+dropped = 0
+
+for pr in sorted(prs, key=lambda p: p["number"]):
+    m = re.match(r"(\w+)(\(.*\))?(!?): (.*)", pr["title"])
+    kind = m and ("Breaking" if m.group(3) else kinds.get(m.group(1)))
+    if not kind:
+        dropped += 1
+        continue
+    body = pr["body"] or ""
+    text = (body.splitlines() or [m.group(4)])[0] if kind == "Breaking" else m.group(4)
+    links = [f"[#{pr['number']}]({pr['url']})"]
+    for key in re.findall(r"[A-Z]+-\d+", body):
+        if key in issues:
+            links.append(f"[{key}]({issues.pop(key)['url']})")
+    groups[kind].append({"text": text[0].upper() + text[1:], "links": links})
+
+for key, issue in issues.items():
+    found = [labels[n] for n in issue["label_names"] if n in labels]
+    if found:
+        groups[found[0]].append({"text": issue["title"], "links": [f"[{key}]({issue['url']})"]})
+
+json.dump(groups, open("/work/groups.json", "w"))
+for kind, entries in groups.items():
+    print(kind, len(entries))
+print("Dropped", dropped)
+PY
+python3 /work/group.py
+SH
+```
+
+```text
+Breaking 1
+New 3
+Improved 1
+Fixed 2
+Dropped 4
+```
+
+Thirteen items became seven entries: four pull requests were chores, and two
+issues joined the pull requests that closed them.
+
+## Write the release notes
+
+The next file turns the groups into Markdown, one heading per group that has
+entries, and the agent prints the result:
+
+```bash
+run <<'SH'
+cat > /work/notes.py <<'PY'
+import json
+
+groups = json.load(open("/work/groups.json"))
+lines = ["# Week of December 29, 2025", ""]
+for kind, entries in groups.items():
+    if entries:
+        lines.append(f"## {kind}")
+        lines += [f"- {e['text']} ({', '.join(e['links'])})" for e in entries]
+open("/work/release-notes.md", "w").write("\n".join(lines) + "\n")
+PY
+python3 /work/notes.py
+cat /work/release-notes.md
+SH
+```
+
+```text
+# Week of December 29, 2025
+
+## Breaking
+- The v1 invoices API is removed. Use /v2/invoices instead. ([#141](https://github.com/example/billing/pull/141))
+## New
+- Export invoices as CSV ([#142](https://github.com/example/billing/pull/142), [BILL-31](https://linear.app/example/issue/BILL-31))
+- Email a receipt after each payment ([#149](https://github.com/example/billing/pull/149))
+- Show the customer's tax ID on PDF invoices ([BILL-37](https://linear.app/example/issue/BILL-37))
+## Improved
+- The invoice list loads twice as fast ([#144](https://github.com/example/billing/pull/144))
+## Fixed
+- Wrong totals for currencies without decimals, such as JPY ([#143](https://github.com/example/billing/pull/143), [BILL-34](https://linear.app/example/issue/BILL-34))
+- Unreadable text on the billing page in dark mode ([#148](https://github.com/example/billing/pull/148))
+```
+
+The notes are a draft. The agent can rewrite a line in plainer words with
+one more write to `/work/release-notes.md` before it publishes.
+
+## Publish to Notion
+
+The team keeps its notes under a Notion page called Release Notes. The agent
+finds that page's ID with Notion's search API, creates a page under it from
+the Markdown file, and prints the new page's link to hand to a reviewer. If
+no page or more than one has that title, `jq` stops with an error and the
+agent creates nothing, so it can ask which page to use:
+
+```bash
+run <<'SH'
+parent=$(ntn api v1/search -d '{"query": "Release Notes"}' |
+  jq -r '[.results[] | select((.properties.title.title // [] | map(.plain_text) | join("")) == "Release Notes") | .id] |
+    if length == 1 then .[0] else error("\(length) pages are titled Release Notes") end') &&
+page=$(ntn pages create --parent "page:$parent" < /work/release-notes.md) &&
+ntn api "v1/pages/$page" | jq -r .url
+SH
+```
+
+The first heading of the file becomes the page's title. `$page` holds the new
+page's ID for the rest of the session, so the agent can read the page back
+and check that every entry arrived:
+
+```bash
+run <<'SH'
+ntn pages get "$page" | head -3
+ntn pages get "$page" | grep -c '^- '
+SH
+```
+
+```text
+---
+title: Week of December 29, 2025
+---
+7
+```
+
+The agent can then report:
+
+- Ten pull requests were merged in the week, and three Linear issues were
+  closed. Seven entries are customer-facing; four chores were left out.
+- One change is breaking: the v1 invoices API is gone, and the notes say to
+  use `/v2/invoices`. It is listed first.
+- The draft is a Notion page under Release Notes, with a link to every pull
+  request and issue, and is waiting for review.
+
+For the commands and flags each CLI supports, see [gh](/python/cli/gh),
+[linear](/python/cli/linear) and [ntn](/python/cli/ntn).

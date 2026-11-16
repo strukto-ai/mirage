@@ -440,7 +440,7 @@ export async function handleTimeout(
     killAfter,
     foreground,
     ignored: process.ignores.has(signal),
-    onMachine: () => process.record.runtime !== null || process.takesSignals,
+    onMachine: () => process.record.program || process.takesSignals,
     held: () => {
       const job = ownJob(processes, process, syntax, session)
       return job?.paused === true ? job.resumed() : null

@@ -1142,7 +1142,7 @@ describe('Pyodide run cwd', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [rt, 'workspace'],
+        machines: [rt],
       },
     )
     const dec = new TextDecoder()

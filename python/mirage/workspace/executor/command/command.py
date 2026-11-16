@@ -1119,7 +1119,6 @@ async def handle_command(
             replace(
                 cli_context(),
                 entries=registry.runtime_entries,
-                routing=context.frame.routing,
                 settle=registry.settle,
             ),
             drop_caches=(

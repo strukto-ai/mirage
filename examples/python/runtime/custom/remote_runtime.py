@@ -47,7 +47,7 @@ from mirage.runtime.types import OutputFn
 
 @dataclass(frozen=True, slots=True)
 class RemoteConfig(RuntimeConfig):
-    """The yaml entry's ``config`` block; an unknown key fails at load.
+    """The machine entry's fields; an unknown key fails at load.
 
     Args:
         url (str): the execution service's run endpoint.

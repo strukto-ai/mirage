@@ -70,6 +70,8 @@ export class ShellVars {
   /**
    * A new shell holding `table`; `ids` is where a fresh `$RANDOM` seeds,
    * the platform's randomness until a session binds its own source.
+   * Restoring GLOBIGNORE sets no `dotglob`: the saved options already hold
+   * what its assignment did.
    */
   static of(
     table: Iterable<readonly [string, ShellVar]> | Readonly<Record<string, ShellVar>>,
@@ -81,6 +83,7 @@ export class ShellVars {
     for (const [name, v] of entries) {
       out.shell.place(name, recordOf(v))
     }
+    out.shell.takeDotglob()
     return out
   }
 

@@ -39,7 +39,7 @@ ws = Workspace(
         "/work/": (mem, MountMode.EXEC),
     },
     mode=MountMode.EXEC,
-    runtimes=["monty", "workspace"],
+    machines={"py": {"provider": "in_process", "runtime": "monty"}},
 )
 
 SCRIPT = r"""

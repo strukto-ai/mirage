@@ -15,6 +15,15 @@
 import shlex
 import uuid
 
+from mirage.machine.types import PauseAction
+
+# The state a paused sandbox reports; the next connect starts it again.
+PAUSED_STATE = "paused"
+
+# What ``on_pause`` takes for a sandbox: pause it, keeping its disk and
+# memory (Daytona's VM sandboxes only).
+ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
+
 # Providers whose exec API has no stdin stream (Daytona) upload
 # piped bytes to a per-invocation file and redirect it into the line.
 STDIN_PREFIX = "/tmp/.mirage_stdin"

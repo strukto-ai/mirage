@@ -26,6 +26,9 @@ export const config = parseConfig({
 
 export const DEFAULT_BRANCH = 'main'
 export const DEFAULT_LOGIN = 'integ-user'
+// The account the one GitHub App installation is on. Not DEFAULT_LOGIN, so a
+// line that reads its owner off the installation shows it did not ask /user.
+export const INSTALLATION_ACCOUNT = 'integ'
 // Fixture branches seeded with files have a synthetic root commit. Its date
 // is fixed rather than now, because a golden renders it.
 export const ROOT_COMMIT_DATE = '1970-01-01T00:00:00Z'

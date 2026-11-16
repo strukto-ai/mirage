@@ -41,7 +41,7 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
 
 ## Usage
 
-Name QuickJS in `runtimes` to run `node` on it once its engine is found:
+Declare an `in_process` machine that runs QuickJS to run `node` on it once its engine is found:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -52,20 +52,20 @@ Name QuickJS in `runtimes` to run `node` on it once its engine is found:
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[QuickJsRuntime(config={"home": "/path/to/quickjs"})],
+        machines={"js": QuickJsRuntime(config={"home": "/path/to/quickjs"})},
     )
     await ws.shell("node -e 'console.log(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { buildRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [buildRuntime('quickjs', { config: { home: '/path/to/quickjs' } })],
+        machines: { js: { provider: 'in_process', runtime: 'quickjs', home: '/path/to/quickjs' } },
       },
     )
     await ws.shell("node -e 'console.log(1 + 1)'")
@@ -74,10 +74,11 @@ Name QuickJS in `runtimes` to run `node` on it once its engine is found:
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
-    runtimes:
-      - name: quickjs
-        config:
-          home: /path/to/quickjs
+    machines:
+      js:
+        provider: in_process
+        runtime: quickjs
+        home: /path/to/quickjs
     mounts:
       /data:
         vfs: ram

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Mirage",
+    "description": "Runs dsh's file tools, bash and spills on a Mirage workspace, so S3, Slack, Gmail, databases and disk mount as one filesystem."
+  }
+}

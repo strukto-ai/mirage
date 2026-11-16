@@ -15,7 +15,7 @@
 import type { LostPaths, OpRecord } from '../../../src/observe/record.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
 import { type CacheFacts, MountMode, type PolicyDecision } from '../../../src/types.ts'
-import type { RuntimeEntry } from '../../../src/runtime/base.ts'
+import type { MachineSpecs } from '../../../src/runtime/table.ts'
 import type { SessionProfile } from '../../../src/policy/profile.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
 import { describeDecision } from '../../../src/policy/index.ts'
@@ -72,7 +72,7 @@ function putDir(res: RAMVFS, path: string): void {
 
 export function makeWorkspace(
   extra: {
-    runtimes?: RuntimeEntry[]
+    machines?: MachineSpecs
     profiles?: Record<string, SessionProfile>
     profile?: string
   } = {},

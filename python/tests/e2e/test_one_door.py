@@ -26,6 +26,7 @@ from mirage.commands.config import Context, command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -246,7 +247,7 @@ async def test_a_builtin_reaches_its_files_only_through_the_dispatcher(
     ws = Workspace(
         dict(zip(prefixes, toys)),
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         for prefix in prefixes:

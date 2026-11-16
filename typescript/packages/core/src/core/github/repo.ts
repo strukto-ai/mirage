@@ -115,7 +115,31 @@ export function parseRepo(spec: string): RepoRef {
   return { owner, repo }
 }
 
-export async function login(transport: GitHubTransport): Promise<string> {
+/**
+ * The authenticated account's login name: for an App, the account the
+ * installation is on, read off a repository it reaches, since an
+ * installation token cannot ask `/user`.
+ *
+ * Args:
+ *   transport (GitHubTransport): the API client.
+ *   app (boolean): whether the transport rides an App installation.
+ *
+ * Returns:
+ *   string: the login, empty when the account reports none.
+ */
+export async function login(transport: GitHubTransport, app = false): Promise<string> {
+  if (app) {
+    const listed = (await transport.get('/installation/repositories', { per_page: '1' })) as {
+      repositories?: { owner?: { login?: unknown } }[]
+    } | null
+    const name = listed?.repositories?.[0]?.owner?.login
+    if (typeof name !== 'string') {
+      throw new Error(
+        'a GitHub App installation that reaches no repository has no owner to clone from; use the "OWNER/REPO" format',
+      )
+    }
+    return name
+  }
   const me = (await transport.get('/user')) as { login?: string }
   return me.login ?? ''
 }

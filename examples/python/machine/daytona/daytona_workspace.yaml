@@ -41,9 +41,4 @@ machines:
     provider: daytona
     sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
     api_key: ${DAYTONA_API_KEY}
-
-runtimes:
-  - name: remote
     captures: ["python3", "pip"]
-    machine: daytona
-  - workspace

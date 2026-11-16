@@ -115,11 +115,13 @@ export class ProcessTable {
    * turn; a fresh one when absent or when a live runner holds it.
    * `ownGroup` leads a process group of its own, as timeout's command does,
    * instead of joining its parent's. `machine` is where its program runs,
-   * the table's when absent, and `runtime` what Mirage runs it with, none
-   * for Mirage itself. `oneCommand` marks a runner that runs exactly one
+   * the table's when absent, and `program` whether a runtime starts its
+   * program there, false for Mirage itself. `oneCommand` marks a runner that runs exactly one
    * command, whose program it is (`ProcessHandle.take`), and
    * `programIgnores` what that program ignores as well, where `ignores` is
-   * more than a shell's.
+   * more than a shell's. `stdin` is the pid whose stdout is its stdin, `fd`
+   * the pid writing each descriptor a `<( )` gave it, by number, and `argv`
+   * the pids whose output became its arguments.
    */
   start(init: {
     sessionId: string
@@ -135,10 +137,13 @@ export class ProcessTable {
     pid?: number | null
     ownGroup?: boolean
     machine?: MachineName | null
-    runtime?: string | null
+    program?: boolean
     oneCommand?: boolean
     background?: boolean
     programIgnores?: ReadonlySet<number>
+    stdin?: number | null
+    fd?: Readonly<Record<number, number>>
+    argv?: readonly number[]
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -147,7 +152,7 @@ export class ProcessTable {
       [...this.runners.values()].filter(
         ({ handle }) =>
           handle.record.sessionId === init.sessionId &&
-          (handle.record.runtime !== null || handle.record.machinePid === null),
+          (handle.record.program || handle.record.machinePid === null),
       ).length >= limit
     )
       throw Object.assign(new Error('Resource temporarily unavailable'), { code: 'EAGAIN' })
@@ -169,7 +174,7 @@ export class ProcessTable {
         cwd: init.cwd,
         machine: init.machine ?? this.machine,
         startedAt: this.now(),
-        runtime: init.runtime ?? null,
+        program: init.program ?? false,
         machinePid: null,
         state: 'running',
         endedAt: null,
@@ -178,6 +183,9 @@ export class ProcessTable {
         error: null,
         ancestors: ancestry,
         machineInstance: this.machineInstance?.(init.machine ?? this.machine) ?? null,
+        stdin: init.stdin ?? null,
+        fd: init.fd ?? {},
+        argv: init.argv ?? [],
       },
       init.run,
       () => {

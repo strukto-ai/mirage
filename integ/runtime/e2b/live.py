@@ -21,6 +21,7 @@ import shlex
 import tempfile
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import asyncssh
@@ -32,7 +33,6 @@ from websockets.exceptions import ConnectionClosedError
 from mirage import Context, Limit, MountMode, PathSpec, Workspace
 from mirage.machine.e2b import E2BMachine
 from mirage.machine.ssh import SSHMachine
-from mirage.runtime.machine import RemoteRuntime
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -154,6 +154,17 @@ async def wait_for_remote(machine, command):
     )
 
 
+def _capturing(machine, *captures):
+    """``machine``, capturing ``captures`` from here on.
+
+    Args:
+        machine (MachineHandle): the live machine the checks share.
+        captures (str): what it captures.
+    """
+    machine.config = replace(machine.config, captures=captures)
+    return machine
+
+
 async def exercise_cancellation(machine):
     workspace = Workspace(
         {
@@ -161,11 +172,7 @@ async def exercise_cancellation(machine):
         },
         mode=MountMode.EXEC,
         command_limits={"@line": Limit(timeout_seconds=5)},
-        machines={machine.name: machine},
-        runtimes=[
-            RemoteRuntime(["@line"], machine=machine.name),
-            "workspace",
-        ],
+        machines={machine.name: _capturing(machine, "@line")},
     )
     try:
         for mode in ("caller", "timeout"):
@@ -301,11 +308,7 @@ async def main():
             workspace = Workspace(
                 {"/home/user/work": vfs},
                 mode=MountMode.EXEC,
-                machines={"ssh": machine},
-                runtimes=[
-                    RemoteRuntime(["python3"], machine="ssh"),
-                    "workspace",
-                ],
+                machines={"ssh": _capturing(machine, "python3")},
             )
             result = await workspace.shell(
                 "cat > /home/user/work/output.txt", stdin=b"old"

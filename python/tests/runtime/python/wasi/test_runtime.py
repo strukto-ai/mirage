@@ -83,7 +83,7 @@ async def test_a_mount_over_the_stdlib_refuses_the_run(tmp_path, prefix):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     (tmp_path / "lib" / "python3.12").mkdir(parents=True)
     runtime = WasiRuntime(config={"home": str(tmp_path)})
-    ws = Workspace({prefix: RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    ws = Workspace({prefix: RAMVFS()}, mode=MountMode.EXEC, machines=[runtime])
     try:
         r = await ws.shell("python3 -c 'print(1)'")
         assert r.exit_code == 126
@@ -116,7 +116,7 @@ def test_only_a_mount_over_the_stdlib_is_refused(prefixes, hiding):
 @pytest.mark.asyncio
 async def test_a_mount_beside_the_stdlib_runs():
     ws = Workspace(
-        {"/lib/app": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"]
+        {"/lib/app": RAMVFS()}, mode=MountMode.EXEC, machines=[WasiRuntime()]
     )
     try:
         r = await ws.shell("python3 -c 'print(1)'")
@@ -216,7 +216,9 @@ def test_wasi_runs_a_program(args, exit_code, stdout, stderr):
 async def test_wasi_python3_command_end_to_end():
     ram = RAMVFS()
     ram._store.files["/calc.py"] = b"import sys\nprint(int(sys.argv[1]) * 6)\n"
-    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, runtimes=["wasi"])
+    ws = Workspace(
+        {"/ram": ram}, mode=MountMode.EXEC, machines=[WasiRuntime()]
+    )
     r = await ws.shell("python3 -c \"print('wasi says', 6 * 7)\"")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "wasi says 42\n"
@@ -261,7 +263,9 @@ def test_wasi_reuses_compiled_module():
 async def test_wasi_session_narrowing_reaches_the_guest():
     # A session narrowed to read on the mount denies guest writes at
     # open() and still serves reads; the default session is unaffected.
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"])
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[WasiRuntime()]
+    )
     await ws.shell("echo seeded > /data/f0.txt")
     ws.create_session("narrow", {"/data": "read"})
     code = (
@@ -320,7 +324,7 @@ async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     )
     try:
         assert (

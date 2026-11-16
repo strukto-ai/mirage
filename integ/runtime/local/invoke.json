@@ -3,9 +3,11 @@
     {
       "id": "host_script_is_named_after_its_workspace_path",
       "world": {
-        "runtimes": [
-          "local"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -53,9 +55,11 @@
     {
       "id": "init_switches_reach_the_interpreter",
       "world": {
-        "runtimes": [
-          "local"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -92,9 +96,11 @@
     {
       "id": "module_flag_runs_a_module_or_names_the_missing_one",
       "world": {
-        "runtimes": [
-          "local"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -123,9 +129,11 @@
     {
       "id": "argv0_and_file_follow_cpython",
       "world": {
-        "runtimes": [
-          "local"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -180,10 +188,11 @@
     {
       "id": "command_and_unset_restore_the_handoff",
       "world": {
-        "runtimes": [
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

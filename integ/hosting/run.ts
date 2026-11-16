@@ -186,7 +186,6 @@ async function run(
           config: {
             mode: 'write',
             mounts: { '/work': { vfs: 'ram', mode: 'write' } },
-            runtimes: [],
           },
         },
         201,
@@ -208,7 +207,6 @@ async function run(
           config: {
             mode: 'write',
             mounts: { '/work': { vfs: 'ram', mode: 'write' } },
-            runtimes: [],
             profiles: {
               denied: { commands: { deny: [{ commands: ['rm'], reason: 'no deletes' }] } },
               approval: { commands: { ask: [{ commands: ['rm'], reason: 'needs approval' }] } },

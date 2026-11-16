@@ -13,30 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { isAbsolute, posix, relative, resolve, sep } from 'node:path'
+import { posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
+  FsDeleteOutcome,
   FsDirEntry,
   FsEditOutcome,
   FsEditRequest,
   FsInfo,
+  FsMoveOutcome,
   FsPathInfo,
   FsTarget,
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
-import { DiskVFS } from '@struktoai/mirage-node'
-import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
+import { applyHunks } from '@deepseek-ai/dsh-fs-patch'
+import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
-import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
-import { FileType } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { makeStorageKey } from '@struktoai/mirage-core/workspace/mount/storage'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
+import type { RemoteFiles } from '@struktoai/mirage-core/remote/client'
 import {
   applyLiteralEdit,
   decodeStrictText,
@@ -50,6 +53,54 @@ import {
 // transitive dependency of dsh-fs, and naming a fourth exact-pinned peer to
 // spell one parameter would couple the adapter to a package it never calls.
 type SandboxPolicy = Parameters<FileSystem['writeText']>[4]
+
+/**
+ * The fields of a dsh Session the working-directory bridge reads and
+ * writes. Structural, like the approval channel in `approval.ts`: the
+ * session and working-directory packages stay out of this one's
+ * dependencies, and any composition's Session satisfies it.
+ */
+interface WorkingDirectorySession {
+  readonly header: { readonly cwd?: string | null }
+  append(type: 'working-directory/change', data: { cwd: string }): unknown
+}
+
+/** What dsh's working-directory service asks its access listeners. */
+interface WorkingDirectoryAccess {
+  agent: { session: WorkingDirectorySession }
+  path: string | null
+  signal: AbortSignal
+}
+
+/** dsh's `ctx.workingDirectory`, narrowed to what the bridge reads. */
+interface WorkingDirectoryOwner {
+  readonly defaultDirectory: string
+  get(session: WorkingDirectorySession): string
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'working-directory/access'(
+      request: WorkingDirectoryAccess,
+      next: () => Promise<string>,
+    ): Promise<string>
+  }
+}
+
+/**
+ * dsh's working-directory owner, or null when the composition has none.
+ * Read through `ctx.get` for the reason `approverOf` gives: the bridge
+ * must not make the service a load requirement.
+ *
+ * @param ctx the cordis context to read.
+ * @returns the owner, or null when nothing provides one.
+ */
+function workingDirectoryOf(ctx: Context): WorkingDirectoryOwner | null {
+  const held: unknown = ctx.get('workingDirectory')
+  if (held === null || typeof held !== 'object') return null
+  const { get } = held as { get?: unknown }
+  return typeof get === 'function' ? (held as WorkingDirectoryOwner) : null
+}
 
 const DEFAULT_DIFF_BASIS_MAX_BYTES = 10 * 1024 * 1024
 
@@ -95,71 +146,24 @@ async function* singleChunk(text: string): AsyncGenerator<string, void, void> {
   yield await Promise.resolve(text)
 }
 
+function patched(target: FsTarget, text: string, hunks: readonly PatchHunk[]): string {
+  const result = applyHunks(text, hunks)
+  if (!result.ok) {
+    const { hunkLineNumber, stage } = result.failure
+    throw new FsError(
+      `cannot patch "${target.displayPath}": hunk at patch line ${String(hunkLineNumber)} (${stage}) does not match`,
+      'FS_PATCH_MISMATCH',
+    )
+  }
+  return result.after
+}
+
 function tooLarge(displayPath: string, maxBytes: number, size?: number): FsError {
   const found = size === undefined ? '' : `${String(size)} bytes `
   return new FsError(
     `cannot read "${displayPath}": ${found}exceeds the ${String(maxBytes)} byte cap`,
     'FS_TOO_LARGE',
   )
-}
-
-/**
- * Whether a `relative()` result leaves the directory it was taken from.
- *
- * Only a bare `..` or a leading `..` SEGMENT escapes: a name may itself
- * begin with two dots (`..draft`), and testing the prefix alone reads
- * that ordinary file as an escape.
- *
- * @param rel the result of `relative(root, target)`.
- * @returns true when the target lies outside the root.
- */
-function escapesRoot(rel: string): boolean {
-  // An absolute answer means there was no relative route at all, which on
-  // win32 is a different drive.
-  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)
-}
-
-/**
- * The prefix of the mount a virtual path actually dispatches to.
- *
- * The deepest mount whose prefix covers the path wins, which is the rule
- * dispatch itself follows; a mount nested inside another's tree owns its
- * subtree outright.
- *
- * @param virtual an absolute virtual path.
- * @param mounts the workspace's mount table.
- * @returns the winning mount's prefix, or undefined when none covers it.
- */
-function ownerPrefixOf(virtual: string, mounts: readonly MountEntry[]): string | undefined {
-  const probe = virtual.endsWith('/') ? virtual : `${virtual}/`
-  let winner: string | undefined
-  for (const mount of mounts) {
-    if (!probe.startsWith(mount.prefix)) continue
-    if (winner === undefined || mount.prefix.length > winner.length) winner = mount.prefix
-  }
-  return winner
-}
-
-/**
- * Whether a namespace symlink stands between a virtual path and the backend.
- *
- * `follow` resolves link components including the final one, so a path it
- * rewrites is one an ordinary read would send somewhere else. A chain it
- * refuses to resolve (a cycle) is not mappable either, and is declined
- * rather than raised: this is a lookup, and the honest answer to "does
- * this host file have a virtual path" is then no.
- *
- * @param links the namespace link table, or null when none is wired.
- * @param virtual the candidate virtual path.
- * @returns true when the path must not be offered.
- */
-function shadowedByLink(links: NamespaceLinks | null, virtual: string): boolean {
-  if (links === null) return false
-  try {
-    return links.follow(virtual) !== virtual
-  } catch {
-    return true
-  }
 }
 
 /**
@@ -176,10 +180,60 @@ function shadowedByLink(links: NamespaceLinks | null, virtual: string): boolean 
  * read from a remote backend therefore runs to completion after the
  * signal fires, and the caller learns of the abort when it returns.
  */
+/**
+ * The file calls this adapter makes: a workspace's own `Files` here, or the
+ * same calls made over a Mirage server's API.
+ */
+const MAX_LINK_HOPS = 40
+
+/**
+ * A path on a remote world with every link in it resolved, one component at
+ * a time, through the server's `readlink`. A component that is not a link,
+ * or does not exist yet, is kept as written.
+ *
+ * @param files the remote file calls.
+ * @param path an absolute workspace path.
+ * @returns the path with its links resolved.
+ */
+async function remoteRealpath(files: RemoteFiles, path: string): Promise<string> {
+  let resolved = '/'
+  let rest = path.split('/').filter((part) => part !== '')
+  let hops = 0
+  for (let name = rest.shift(); name !== undefined; name = rest.shift()) {
+    const candidate = posix.join(resolved, name)
+    const target = await files.readlink(candidate)
+    if (target === null) {
+      resolved = candidate
+      continue
+    }
+    hops += 1
+    if (hops > MAX_LINK_HOPS) {
+      throw new FsError(
+        `cannot resolve "${path}": too many levels of symbolic links`,
+        'FS_IO_ERROR',
+      )
+    }
+    rest = [
+      ...posix
+        .resolve(resolved, target)
+        .split('/')
+        .filter((part) => part !== ''),
+      ...rest,
+    ]
+    resolved = '/'
+  }
+  return resolved
+}
+
+type FsOps = Pick<Files, 'stat' | 'read' | 'write' | 'unlink' | 'isDir' | 'readdir'> | RemoteFiles
+
 export class MirageFileSystem extends FileSystem {
   static readonly inject = ['mirage']
 
-  private fsOps: Files | null = null
+  private fsOps: FsOps | null = null
+  // The local `Files` behind `fsOps`, whose reader follows namespace links;
+  // null for a remote world, where the server follows them on every call.
+  private localFiles: Files | null = null
   private readonly cwd: string
   private readonly sessionId: string | undefined
   private readonly diffBasisMaxBytes: number
@@ -193,6 +247,58 @@ export class MirageFileSystem extends FileSystem {
     this.cwd = config.cwd ?? '/'
     this.sessionId = config.sessionId
     this.diffBasisMaxBytes = config.diffBasisMaxBytes ?? DEFAULT_DIFF_BASIS_MAX_BYTES
+    ctx.on('working-directory/access', async (request, next) => {
+      await this.placeInWorld(request.agent.session, request.signal)
+      return next()
+    })
+  }
+
+  /**
+   * Keep a dsh Session's working directory a directory of this world.
+   *
+   * dsh records the directory the harness was launched in, a path on
+   * its own machine, and validates it through this seam before every
+   * bash, file and search call. Here it names nothing, so left alone
+   * every call fails as an unavailable directory. Before dsh looks, a
+   * recorded directory this world cannot enter is replaced: by the
+   * original project's twin when a disk mount holds it, so launching in
+   * a mounted project lands in its mount, else by this adapter's `cwd`.
+   * A directory the agent moved to inside this world is kept, and so is
+   * dsh's own handling of every other access.
+   *
+   * @param session the Session whose directory is being accessed.
+   * @param signal the access's cancellation.
+   */
+  private async placeInWorld(session: WorkingDirectorySession, signal: AbortSignal): Promise<void> {
+    const owner = workingDirectoryOf(this.ctx)
+    if (owner === null) return
+    const recorded = owner.get(session)
+    if (await this.isWorldDirectory(recorded, signal)) return
+    const twin = this.processPathFromHostPath(session.header.cwd ?? owner.defaultDirectory)
+    const place =
+      twin !== undefined && (await this.isWorldDirectory(twin, signal)) ? twin : this.cwd
+    if (place !== recorded) session.append('working-directory/change', { cwd: place })
+  }
+
+  /**
+   * Whether a path is a directory this world can enter. A path that
+   * cannot be resolved or entered (a parent replaced by a file, a link
+   * cycle) is not one; only the caller's own cancellation is raised.
+   *
+   * @param path the candidate absolute path.
+   * @param signal the access's cancellation.
+   * @returns true for a directory.
+   */
+  private async isWorldDirectory(path: string, signal: AbortSignal): Promise<boolean> {
+    if (!posix.isAbsolute(path)) return false
+    let target: FsTarget
+    try {
+      target = await this.resolve(path, { signal })
+    } catch (err) {
+      if (err instanceof FsError && err.code !== 'FS_ABORTED') return false
+      throw err
+    }
+    return (await this.files(signal, 'stat')).isDir(String(target.targetKey))
   }
 
   // The workspace may still be building (declarative mounts resolve
@@ -206,12 +312,20 @@ export class MirageFileSystem extends FileSystem {
   // until its first op loads both. This adapter reads the links off the
   // dispatcher's reader outside a dispatch, so it hydrates before they are
   // consulted, or a persisted hide would be judged by the wrong session.
-  private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
+  private async files(signal?: AbortSignal, operation = 'ready'): Promise<FsOps> {
     if (this.fsOps === null) {
-      const host = await this.ctx.mirage.ready
-      await host.ensureSessionsLoaded()
-      await host.namespace.ensureLoaded()
-      this.fsOps = this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
+      const remote = this.ctx.mirage.remote
+      if (remote !== null) {
+        this.fsOps = remote.files(this.sessionId)
+      } else {
+        const host = await this.ctx.mirage.ready
+        await host.ensureSessionsLoaded()
+        await host.namespace.ensureLoaded()
+        const files =
+          this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
+        this.localFiles = files
+        this.fsOps = files
+      }
     }
     assertNotAborted(signal, operation)
     return this.fsOps
@@ -223,11 +337,25 @@ export class MirageFileSystem extends FileSystem {
    * (the typed path reaches the dispatcher and is refused as absent, not
    * resolved to the visible target it points at), and never listed.
    */
-  private get reader(): ReturnType<typeof readerOf> {
+  private get reader(): ReturnType<typeof readerOf> | null {
     if (this.fsOps === null) {
       throw new Error('mirage: filesystem used before the workspace is ready')
     }
-    return readerOf(this.fsOps)
+    return this.localFiles === null ? null : readerOf(this.localFiles)
+  }
+
+  /**
+   * The target of a link at `path`, read as this adapter's session sees it,
+   * or null when no link is there.
+   *
+   * @param path a path whose parent is already followed.
+   * @returns the link's target, or null.
+   */
+  private async readlink(path: string): Promise<string | null> {
+    const reader = this.reader
+    if (reader !== null) return reader.readlink(path)
+    const ops = this.fsOps as RemoteFiles
+    return ops.readlink(path)
   }
 
   /**
@@ -292,9 +420,13 @@ export class MirageFileSystem extends FileSystem {
     return posix.resolve(base, path)
   }
 
+  // A remote world's links are followed by the server on every call, so a
+  // path is its own target here.
   private follow(path: string): string {
+    const reader = this.reader
+    if (reader === null) return posixNormpath(path)
     try {
-      return posixNormpath(this.reader.follow(path))
+      return posixNormpath(reader.follow(path))
     } catch (err) {
       throw mapMirageError(err, 'resolve', path)
     }
@@ -344,34 +476,7 @@ export class MirageFileSystem extends FileSystem {
    *   mount maps it.
    */
   override processPathFromHostPath(hostPath: string): string | undefined {
-    if (!isAbsolute(hostPath)) return undefined
-    const workspace = this.ctx.mirage.workspaceIfReady
-    if (workspace === null) return undefined
-    const host = resolve(hostPath)
-    const mounts = workspace.mounts()
-    for (const entry of mounts) {
-      const { vfs } = entry
-      if (!(vfs instanceof DiskVFS)) continue
-      const rel = relative(vfs.root, host)
-      if (escapesRoot(rel)) continue
-      // `prefix` always carries a trailing slash, and `rel` is empty for
-      // the root itself, so the join is a concatenation and the slash is
-      // trimmed back off unless the mount is the workspace root.
-      const joined = `${entry.prefix}${rel.split(sep).join('/')}`
-      const virtual = joined.length > 1 && joined.endsWith('/') ? joined.slice(0, -1) : joined
-      // A mount nested under this one owns its own subtree, and dispatch
-      // routes the path there, so the disk file at this host location is
-      // not what the virtual path reads. Keep looking rather than name a
-      // path that answers with another VFS's bytes.
-      if (ownerPrefixOf(virtual, mounts) !== entry.prefix) continue
-      // A namespace symlink at or above this path is followed before
-      // dispatch, so a read would land on the link's target rather than
-      // the disk file the caller named. Links are namespace state, so the
-      // disk mount cannot see one and only this table can say.
-      if (shadowedByLink(workspace.namespace, virtual)) continue
-      return virtual
-    }
-    return undefined
+    return this.ctx.mirage.hostPathToVirtual(hostPath)
   }
 
   fileUrl(target: FsTarget): string {
@@ -420,7 +525,7 @@ export class MirageFileSystem extends FileSystem {
         : posix.join(this.follow(posix.dirname(normalized)), posix.basename(normalized))
     // The leaf is read off the dispatcher's reader: a link the session cannot
     // see is not a link here, and the stat below reports it absent.
-    const linkTarget = this.reader.readlink(parentFollowed)
+    const linkTarget = await this.readlink(parentFollowed)
     if (linkTarget !== null) {
       return {
         version: FsVersion(`link:${linkTarget}`),
@@ -560,7 +665,7 @@ export class MirageFileSystem extends FileSystem {
     }
     // Namespace symlinks live above every backend, so a listing merges
     // them in here exactly as mirage's own ls does.
-    for (const name of this.reader.linkNamesUnder(key)) names.add(name)
+    for (const name of this.reader?.linkNamesUnder(key) ?? []) names.add(name)
     const entries: FsDirEntry[] = []
     for (const name of [...names].sort(compareCodePoints)) {
       // Per entry, not just at the entry point: a listing is one classification
@@ -622,37 +727,16 @@ export class MirageFileSystem extends FileSystem {
     return this.withLock(target.targetKey, async () => {
       assertNotAborted(signal, 'write')
       this.assertMutable(sandboxPolicy, target.displayPath)
-      const key = String(target.targetKey)
-      const existing = await this.stat(target, signal)
-      if (existing !== undefined && existing.type !== 'file') {
-        throw new FsError(
-          `cannot write "${target.displayPath}": not a regular file`,
-          'FS_NOT_REGULAR_FILE',
-        )
-      }
-      if (expected?.kind === 'createIfAbsent' && existing !== undefined) {
-        throw new FsError(
-          `cannot write "${target.displayPath}": file already exists`,
-          'FS_NOT_OBSERVED',
-        )
-      }
-      if (expected?.kind === 'replaceIfVersion') {
-        if (existing?.version !== expected.version) {
-          throw new FsError(
-            `cannot write "${target.displayPath}": file changed since it was read`,
-            'FS_STALE_VERSION',
-          )
-        }
-      }
-      const before = existing === undefined ? null : await this.diffBasis(target, content)
+      const existing = await this.writeTarget(target, expected, signal)
+      const before =
+        existing === undefined || this.overBasis(content) ? null : await this.diffBasis(target)
       const crlf = before !== null && detectsCrlf(before)
-      try {
-        await (
-          await this.files(signal, 'write')
-        ).write(key, restoreLineEndings(normalizeLineEndings(content), crlf))
-      } catch (err) {
-        throw mapMirageError(err, 'write', target.displayPath)
-      }
+      await this.store(
+        target,
+        restoreLineEndings(normalizeLineEndings(content), crlf),
+        'write',
+        signal,
+      )
       return {
         operation: existing === undefined ? ('create' as const) : ('update' as const),
         version: await this.versionAfterWrite(target),
@@ -662,14 +746,321 @@ export class MirageFileSystem extends FileSystem {
     })
   }
 
-  // The overwrite-diff basis: the prior content when it is text and both
-  // sides fit the exclusive limit, else null (dsh renders a whole-file
-  // diff then). Never fails the write itself.
-  private async diffBasis(target: FsTarget, content: string): Promise<string | null> {
-    if (Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes) return null
+  async editText(
+    target: FsTarget,
+    edit: FsEditRequest,
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsEditOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'edit')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'edit', signal)
+      const raw = await this.readEditable(target, 'edit', signal)
+      const original = normalizeLineEndings(raw)
+      const edited = applyLiteralEdit(
+        original,
+        normalizeLineEndings(edit.oldString),
+        normalizeLineEndings(edit.newString),
+        edit.replaceAll,
+        target.displayPath,
+      )
+      await this.store(target, restoreLineEndings(edited, detectsCrlf(raw)), 'edit', signal)
+      return {
+        version: await this.versionAfterWrite(target),
+        before: original,
+        after: edited,
+      }
+    })
+  }
+
+  async patchText(
+    target: FsTarget,
+    hunks: readonly PatchHunk[],
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsEditOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'patch')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'patch', signal)
+      const raw = await this.readEditable(target, 'patch', signal)
+      const original = normalizeLineEndings(raw)
+      const after = patched(target, original, hunks)
+      await this.store(target, restoreLineEndings(after, detectsCrlf(raw)), 'patch', signal)
+      return { version: await this.versionAfterWrite(target), before: original, after }
+    })
+  }
+
+  async deleteFile(
+    target: FsTarget,
+    expected?: { version: FsVersion },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsDeleteOutcome> {
+    return this.withLock(target.targetKey, async () => {
+      assertNotAborted(signal, 'delete')
+      this.assertMutable(sandboxPolicy, target.displayPath)
+      await this.requireFile(target, expected, 'delete', signal)
+      const before = await this.diffBasis(target)
+      assertNotAborted(signal, 'delete')
+      try {
+        await (await this.files(signal, 'delete')).unlink(String(target.targetKey))
+      } catch (err) {
+        throw mapMirageError(err, 'delete', target.displayPath)
+      }
+      return { before: before === null ? null : normalizeLineEndings(before) }
+    })
+  }
+
+  /**
+   * Publish the source, optionally patched, at the destination, then
+   * unlink the source.
+   *
+   * Two workspace ops rather than one rename, because the destination
+   * may sit on another mount (a rename there is EXDEV) and the contract
+   * is a text move: the hunks apply to the normalized text and the
+   * source's line endings carry over. Two paths that address one stored
+   * file (mounts over nested roots) are the same target, as for `mv`,
+   * or the unlink would delete the only copy. Past the last abort check
+   * both effects run, and a source the unlink could not remove, or one
+   * that changed while the destination was written, is reported as
+   * retained rather than raised, since the destination is published.
+   *
+   * @param source the resolved regular file to move.
+   * @param destination where its text is published.
+   * @param options the hunks to apply and the guard on each side.
+   * @param signal aborts before the destination is written.
+   * @param sandboxPolicy the call's mode; `read-only` refuses the move.
+   * @returns the source basis, the destination outcome and whether the
+   *   source is gone.
+   */
+  async moveFile(
+    source: FsTarget,
+    destination: FsTarget,
+    options: {
+      hunks?: readonly PatchHunk[]
+      expectedSource?: { version: FsVersion }
+      expectedDestination?: FsWriteIntent
+    },
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxPolicy,
+  ): Promise<FsMoveOutcome> {
+    if (await this.sameStored(source, destination, signal)) {
+      throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
+    }
+    return this.withLocks([source.targetKey, destination.targetKey], async () => {
+      assertNotAborted(signal, 'move')
+      this.assertMutable(sandboxPolicy, source.displayPath)
+      const read = await this.requireFile(source, options.expectedSource, 'move', signal)
+      const existing = await this.writeTarget(destination, options.expectedDestination, signal)
+      const raw = await this.readEditable(source, 'move', signal)
+      const original = normalizeLineEndings(raw)
+      const after =
+        options.hunks === undefined ? original : patched(source, original, options.hunks)
+      const content = restoreLineEndings(after, detectsCrlf(raw))
+      const replaced =
+        existing === undefined || this.overBasis(content) ? null : await this.diffBasis(destination)
+      assertNotAborted(signal, 'move')
+      await this.store(destination, content, 'move')
+      const published: FsWriteOutcome = {
+        operation: existing === undefined ? 'create' : 'update',
+        version: await this.versionAfterWrite(destination),
+        before: replaced === null ? null : normalizeLineEndings(replaced),
+        after,
+      }
+      const sourceBefore = this.overBasis(original) ? null : original
+      const retained = (failure: FsError): FsMoveOutcome => ({
+        sourceBefore,
+        destination: published,
+        sourceDeleted: false,
+        sourceFailure: { code: failure.code, message: failure.message },
+      })
+      let now: FsInfo | undefined
+      try {
+        now = await this.stat(source)
+      } catch (err) {
+        return retained(mapMirageError(err, 'stat', source.displayPath))
+      }
+      if (now?.version !== read.version) {
+        return retained(
+          new FsError(
+            `cannot delete "${source.displayPath}": file changed since it was read`,
+            'FS_STALE_VERSION',
+          ),
+        )
+      }
+      try {
+        await (await this.files()).unlink(String(source.targetKey))
+      } catch (err) {
+        return retained(mapMirageError(err, 'delete', source.displayPath))
+      }
+      return { sourceBefore, destination: published, sourceDeleted: true }
+    })
+  }
+
+  /**
+   * Whether two targets reach the same stored file, so moving one onto the
+   * other would write the file and then delete it.
+   *
+   * Here the registry's storage keys say so. On a server, whose storage is
+   * not visible, both paths are resolved through its links first: a target
+   * that reaches the source through a link, at its leaf or above it, is the
+   * source.
+   *
+   * @param source the file being moved.
+   * @param destination where it is going.
+   * @param signal aborts the resolution.
+   * @returns true when both reach one file.
+   */
+  private async sameStored(
+    source: FsTarget,
+    destination: FsTarget,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (this.ctx.mirage.remote === null) {
+      const storageKey = makeStorageKey((await this.ctx.mirage.ready).registry)
+      const sourceKey = storageKey(PathSpec.fromStrPath(String(source.targetKey)))
+      return sourceKey === storageKey(PathSpec.fromStrPath(String(destination.targetKey)))
+    }
+    const ops = (await this.files(signal, 'move')) as RemoteFiles
+    const from = await remoteRealpath(ops, String(source.targetKey))
+    return from === (await remoteRealpath(ops, String(destination.targetKey)))
+  }
+
+  /**
+   * Hold the per-target locks of every key, taken in one canonical
+   * order so two moves over the same pair cannot each hold the lock the
+   * other waits for.
+   *
+   * @param keys the targets the body mutates.
+   * @param body the work done under every lock.
+   * @returns what the body resolved with.
+   */
+  private withLocks<T>(keys: readonly FsTargetKey[], body: () => Promise<T>): Promise<T> {
+    const [first, ...rest] = [...keys].sort((a, b) => compareCodePoints(String(a), String(b)))
+    if (first === undefined) return body()
+    return this.withLock(first, () => this.withLocks(rest, body))
+  }
+
+  /**
+   * Stat a mutation's target and refuse it unless it is the regular
+   * file the caller last observed.
+   *
+   * @param target the resolved target about to be changed.
+   * @param expected the version guard; omitted for an unconditional change.
+   * @param verb the operation named in a refusal.
+   * @param signal aborts the stat.
+   * @returns the file's row as observed.
+   */
+  private async requireFile(
+    target: FsTarget,
+    expected: { version: FsVersion } | undefined,
+    verb: string,
+    signal: AbortSignal | undefined,
+  ): Promise<FsInfo> {
+    const existing = await this.stat(target, signal)
+    if (existing === undefined) {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    if (existing.type !== 'file') {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": not a regular file`,
+        'FS_NOT_REGULAR_FILE',
+      )
+    }
+    if (expected !== undefined && existing.version !== expected.version) {
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    return existing
+  }
+
+  /**
+   * Stat a write's destination and check it against the write intent.
+   *
+   * @param target the resolved destination.
+   * @param expected the intent; omitted for an unconditional write.
+   * @param signal aborts the stat.
+   * @returns the existing file's row, or undefined when there is none.
+   */
+  private async writeTarget(
+    target: FsTarget,
+    expected: FsWriteIntent | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<FsInfo | undefined> {
+    const existing = await this.stat(target, signal)
+    if (existing !== undefined && existing.type !== 'file') {
+      throw new FsError(
+        `cannot write "${target.displayPath}": not a regular file`,
+        'FS_NOT_REGULAR_FILE',
+      )
+    }
+    if (expected?.kind === 'createIfAbsent' && existing !== undefined) {
+      throw new FsError(
+        `cannot write "${target.displayPath}": file already exists`,
+        'FS_NOT_OBSERVED',
+      )
+    }
+    if (expected?.kind === 'replaceIfVersion' && existing?.version !== expected.version) {
+      throw new FsError(
+        `cannot write "${target.displayPath}": file changed since it was read`,
+        'FS_STALE_VERSION',
+      )
+    }
+    return existing
+  }
+
+  private async readEditable(
+    target: FsTarget,
+    verb: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
     let bytes: Uint8Array
     try {
-      bytes = await (await this.files()).read(String(target.targetKey))
+      bytes = await (await this.files(signal, verb)).read(String(target.targetKey))
+    } catch (err) {
+      throw mapMirageError(err, verb, target.displayPath)
+    }
+    return decodeStrictText(bytes, target.displayPath)
+  }
+
+  private async store(
+    target: FsTarget,
+    content: string,
+    verb: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await (await this.files(signal, verb)).write(String(target.targetKey), content)
+    } catch (err) {
+      throw mapMirageError(err, verb, target.displayPath)
+    }
+  }
+
+  private overBasis(content: string): boolean {
+    return Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes
+  }
+
+  // The diff basis of a file about to change: its prior content when it
+  // is text under the exclusive limit, else null (dsh renders a
+  // whole-file diff then). Only the limit's window is read, so a large
+  // file costs no more than that. Never fails the mutation itself.
+  private async diffBasis(target: FsTarget): Promise<string | null> {
+    let bytes: Uint8Array
+    try {
+      bytes = await (
+        await this.files()
+      ).read(String(target.targetKey), {
+        size: this.diffBasisMaxBytes,
+      })
     } catch {
       return null
     }
@@ -684,67 +1075,5 @@ export class MirageFileSystem extends FileSystem {
   private async versionAfterWrite(target: FsTarget): Promise<FsVersion> {
     const after = await this.stat(target)
     return after?.version ?? FsVersion(`missing:${String(target.targetKey)}`)
-  }
-
-  async editText(
-    target: FsTarget,
-    edit: FsEditRequest,
-    expected?: { version: FsVersion },
-    signal?: AbortSignal,
-    sandboxPolicy?: SandboxPolicy,
-  ): Promise<FsEditOutcome> {
-    return this.withLock(target.targetKey, async () => {
-      assertNotAborted(signal, 'edit')
-      this.assertMutable(sandboxPolicy, target.displayPath)
-      const key = String(target.targetKey)
-      const existing = await this.stat(target, signal)
-      // Stale guard before literal matching: an edit based on an old read
-      // reports FS_STALE_VERSION, not a match failure against newer content.
-      if (existing === undefined) {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": file changed since it was read`,
-          'FS_STALE_VERSION',
-        )
-      }
-      if (existing.type !== 'file') {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": not a regular file`,
-          'FS_NOT_REGULAR_FILE',
-        )
-      }
-      if (expected !== undefined && existing.version !== expected.version) {
-        throw new FsError(
-          `cannot edit "${target.displayPath}": file changed since it was read`,
-          'FS_STALE_VERSION',
-        )
-      }
-      let bytes: Uint8Array
-      try {
-        bytes = await (await this.files(signal, 'edit')).read(key)
-      } catch (err) {
-        throw mapMirageError(err, 'edit', target.displayPath)
-      }
-      const raw = decodeStrictText(bytes, target.displayPath)
-      const original = normalizeLineEndings(raw)
-      const edited = applyLiteralEdit(
-        original,
-        normalizeLineEndings(edit.oldString),
-        normalizeLineEndings(edit.newString),
-        edit.replaceAll,
-        target.displayPath,
-      )
-      try {
-        await (
-          await this.files(signal, 'edit')
-        ).write(key, restoreLineEndings(edited, detectsCrlf(raw)))
-      } catch (err) {
-        throw mapMirageError(err, 'edit', target.displayPath)
-      }
-      return {
-        version: await this.versionAfterWrite(target),
-        before: original,
-        after: edited,
-      }
-    })
   }
 }

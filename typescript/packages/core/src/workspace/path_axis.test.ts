@@ -20,6 +20,7 @@ import { SessionProfile } from '../policy/profile.ts'
 import { type FileStat, MountMode, type PathSpec } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 const DEC = new TextDecoder()
 
@@ -84,7 +85,7 @@ async function seeded(mode: MountMode = MountMode.WRITE): Promise<Workspace> {
   const repo = new RAMVFS()
   const ws = new Workspace(
     { '/repo': [repo, mode] as const },
-    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+    { mode: MountMode.WRITE, machines: [buildRuntime('monty')] },
   )
   open.push(ws)
   const io = await ws.shell(

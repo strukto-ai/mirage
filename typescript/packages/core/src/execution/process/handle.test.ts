@@ -73,7 +73,7 @@ function info(): Process {
     cwd: PathSpec.fromStrPath('/'),
     machine: LOCAL_MACHINE,
     startedAt: 0,
-    runtime: null,
+    program: false,
     machinePid: null,
     state: 'running',
     endedAt: null,
@@ -294,7 +294,7 @@ describe('ProcessHandle', () => {
     handle.oneCommand = true
     handle.programIgnores = new Set([2])
     expect(handle.ignores.has(3)).toBe(true)
-    expect(handle.take(null, 'local')).toBe(true)
+    expect(handle.take(null)).toBe(true)
     expect([...handle.ignores]).toEqual([2])
   })
 
@@ -303,20 +303,20 @@ describe('ProcessHandle', () => {
   // and a host program's pid lands on the record.
   it('is the program of the one command it was started for, once', () => {
     const handle = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
-    expect(handle.take(null, 'docker')).toBe(false)
+    expect(handle.take(null)).toBe(false)
     handle.oneCommand = true
-    expect(handle.take(new MachineName('docker', 'tools'), 'docker')).toBe(true)
-    expect(handle.take(null, 'local')).toBe(false)
-    expect([handle.record.machine.toString(), handle.record.runtime]).toEqual([
+    expect(handle.take(new MachineName('docker', 'tools'))).toBe(true)
+    expect(handle.take(null)).toBe(false)
+    expect([handle.record.machine.toString(), handle.record.program]).toEqual([
       'docker:tools',
-      'docker',
+      true,
     ])
     handle.setMachinePid({ pid: 41, started: 5 })
     expect(handle.record.machinePid).toEqual({ pid: 41, started: 5 })
     const other = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
     other.oneCommand = true
-    expect(other.take(null, 'local')).toBe(true)
-    expect([other.record.machine, other.record.runtime]).toEqual([LOCAL_MACHINE, 'local'])
+    expect(other.take(null)).toBe(true)
+    expect([other.record.machine, other.record.program]).toEqual([LOCAL_MACHINE, true])
   })
 
   // What a program the runner started exited with after handling the

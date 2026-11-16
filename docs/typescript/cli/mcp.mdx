@@ -72,6 +72,7 @@ mounts:
 clis:
   issues:
     cli: mcp
+    machine: in_process
     config:
       url: https://mcp.example.com/mcp
       auth:
@@ -138,6 +139,7 @@ A create body or a template points at the saved fields:
 clis:
   issues:
     cli: mcp
+    machine: in_process
     config:
       url: {from: strukto, ref: issues, key: url}
       auth:

@@ -168,7 +168,7 @@ joins an account with its `mirage-account` option.
 
 <Warning>
   Accounts keep workspaces apart, not the host: a workspace config can still
-  mount a host directory or run the `local` runtime, unless a
+  mount a host directory or run a `host` machine, unless a
   [server policy](#server-policies) refuses it. In `local` and `token` mode,
   any accepted token can use every route and every workspace, including
   `POST /v1/daemon/shutdown`.

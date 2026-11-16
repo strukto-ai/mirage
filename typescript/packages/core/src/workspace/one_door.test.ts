@@ -32,6 +32,7 @@ import { type VFSOptions } from '../vfs/base.ts'
 import { Dispatcher } from './dispatcher/dispatcher.ts'
 import { Files } from './files.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -87,7 +88,10 @@ function markedWorkspace(
       return marked(bind.call(this, arg))
     })
   }
-  const ws = new Workspace(mounts, { mode, runtimes: ['monty', 'quickjs', 'workspace'] })
+  const ws = new Workspace(mounts, {
+    mode,
+    machines: [buildRuntime('monty'), buildRuntime('quickjs')],
+  })
   marked((ws as unknown as { dispatcher: Dispatcher }).dispatcher)
   return ws
 }

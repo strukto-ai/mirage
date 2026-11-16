@@ -62,7 +62,7 @@ export function processToFields(record: Process): RecordFields {
     machine: record.machine.toString(),
     machine_instance: record.machineInstance ?? null,
     started_at: record.startedAt,
-    runtime: record.runtime,
+    program: record.program,
     machine_pid:
       found === null
         ? null
@@ -73,6 +73,9 @@ export function processToFields(record: Process): RecordFields {
     signal: record.signal,
     error: record.error,
     ancestors: [...record.ancestors],
+    stdin: record.stdin ?? null,
+    fd: { ...record.fd },
+    argv: [...(record.argv ?? [])],
   }
 }
 
@@ -98,7 +101,7 @@ export function processFromFields(fields: RecordFields): Process {
     machine: MachineName.parse(fields.machine as string),
     machineInstance: (fields.machine_instance as string | null | undefined) ?? null,
     startedAt: fields.started_at as number,
-    runtime: (fields.runtime as string | null | undefined) ?? null,
+    program: fields.program === true,
     machinePid:
       found === null || found === undefined
         ? null
@@ -109,5 +112,12 @@ export function processFromFields(fields: RecordFields): Process {
     signal: (fields.signal as number | null | undefined) ?? null,
     error: (fields.error as string | null | undefined) ?? null,
     ancestors: (fields.ancestors as number[] | null | undefined) ?? [],
+    stdin: (fields.stdin as number | null | undefined) ?? null,
+    fd: Object.fromEntries(
+      Object.entries((fields.fd as Record<string, number> | null | undefined) ?? {}).map(
+        ([fd, pid]) => [Number(fd), pid],
+      ),
+    ),
+    argv: (fields.argv as number[] | null | undefined) ?? [],
   }
 }

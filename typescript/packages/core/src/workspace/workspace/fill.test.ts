@@ -1719,7 +1719,7 @@ describe('fillEnv through execute', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new NiceBox(), 'workspace'],
+        machines: [new NiceBox()],
         env: { TOKEN: { from: 'fake-nice-box', ref: 'r' } },
         profiles: { p: SessionProfile({ commands: { allow: ['nice'] } }) },
         profile: 'p',

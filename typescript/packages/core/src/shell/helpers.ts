@@ -25,10 +25,22 @@ export function getText(node: TSNodeLike): string {
   return node.text
 }
 
-/** Whether nothing but a separator follows `node` on its line, so bash runs it last, as the shell. */
+/**
+ * Whether bash runs `node` last in its shell, in the shell's place: the last statement of a line, of
+ * a subshell or of a substitution's body, or the last command of a `&&`/`||` list that is, with no
+ * redirect or `!` of its own and no `&` job in the shell before it.
+ */
 export function endsLine(node: TSNodeLike): boolean {
-  const root = treeRoot(node)
-  return /^[\s;]*$/.test(root.text.slice((node.endIndex ?? 0) - (root.startIndex ?? 0)))
+  let child = node
+  let above = node.parent ?? null
+  while (above?.type === NT.LIST) {
+    if (above.namedChildren.at(-1)?.id !== child.id) return false
+    child = above
+    above = above.parent ?? null
+  }
+  if (above == null || (above.type !== NT.PROGRAM && above.type !== NT.SUBSHELL)) return false
+  const statements = above.namedChildren.filter((c) => c.type !== NT.COMMENT)
+  return statements.at(-1)?.id === child.id && above.children.every((c) => c.type !== NT.BACKGROUND)
 }
 
 /** The root of the tree `node` belongs to. */
@@ -549,13 +561,18 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       fd = parseInt(getText(c), 10)
     } else if (REDIRECT_OPERATORS.has(c.type)) {
       op = c.type
-    } else if (c.type === NT.NUMBER) {
+    } else if (
+      c.type === NT.NUMBER &&
+      op !== null &&
+      DUP_OPERATORS.has(op) &&
+      /^[0-9]+$/.test(getText(c))
+    ) {
       dupFd = parseInt(getText(c), 10)
     }
   }
 
   for (const c of child.namedChildren) {
-    if (TARGET_TYPES.has(c.type)) {
+    if (TARGET_TYPES.has(c.type) || (c.type === NT.NUMBER && dupFd === null)) {
       target = getText(c)
       targetNode = c
       break
@@ -572,17 +589,26 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       deferred: child.heredoc.deferred,
     })
   }
-  // `>&word` with a word rather than a number is bash's other spelling
-  // of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
-  // too, pinned on bash 5.2). On any other explicit descriptor bash
-  // refuses it as `word: ambiguous redirect`, before the command runs and
-  // before any file opens, so the parse keeps the word for the message
-  // rather than turning `3>&foo` into a both-streams file.
-  const wordDup = op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null
-  if (wordDup && fd !== null && fd !== FD_STDOUT) {
-    return new Redirect({ fd, target, targetNode, kind: RedirectKind.AMBIGUOUS })
+  if (op !== null && DUP_OPERATORS.has(op) && dupFd === null && targetNode !== null) {
+    const reading = op === NT.REDIRECT_DUP_IN
+    fd ??= reading ? FD_STDIN : FD_STDOUT
+    const moved = /^([0-9]+)-$/.exec(target)
+    if (moved !== null) {
+      return new Redirect({
+        fd,
+        target: Number(moved[1]),
+        kind: reading ? RedirectKind.STDIN : RedirectKind.STDOUT,
+        move: true,
+      })
+    }
+    return new Redirect({
+      fd,
+      target,
+      targetNode,
+      kind: reading ? RedirectKind.DUP_INPUT : RedirectKind.DUP_OUTPUT,
+    })
   }
-  if ((op !== null && BOTH_OPERATORS.has(op)) || wordDup) {
+  if (op !== null && BOTH_OPERATORS.has(op)) {
     return new Redirect({
       fd: FD_BOTH,
       target,

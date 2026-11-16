@@ -4,8 +4,8 @@ icon: /images/docker-logo.svg
 description: Run captured programs in a Docker container you started.
 ---
 
-The `docker` machine provider reaches a running container, by name, and the
-`remote` runtime runs captured programs in it. You start
+The `docker` machine provider reaches a running container, by name, and
+runs the programs it captures in it. You start
 and stop the container; Mirage only runs programs in it. Python SDK and
 Node.
 
@@ -36,7 +36,7 @@ docker exec my-sandbox sh -c 'apt-get update && apt-get install -y sshfs'
 
 ## Usage
 
-`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
 every program Mirage does not have itself. Name `@python` to run
 Python in the container too.
 
@@ -44,7 +44,6 @@ Python in the container too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -54,23 +53,22 @@ Python in the container too.
                 "provider": "docker",
                 "container": "my-sandbox",
                 "mount_type": "ssh",
+                "captures": ["@python", "@external"],
             }
         },
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'docker', container: 'my-sandbox', mountType: 'ssh' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'docker', container: 'my-sandbox', mountType: 'ssh', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -84,10 +82,7 @@ Python in the container too.
         provider: docker
         container: my-sandbox
         mount_type: ssh
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram
@@ -115,6 +110,25 @@ Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). Wi
 docker cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
 docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ```
+
+## Pausing the container
+
+To pause the container when the workspace pauses, set `on_pause: pause` on the
+machine:
+
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `docker pause`: the
+container's processes are frozen and use no CPU, but it keeps its memory. The
+next line's connect runs `docker unpause`. Without `on_pause`,
+`workspace.pause()` leaves the container running unless the call names the
+machine. See [Pause](/home/setup/machine/overview#pause).
 
 ## Notes
 

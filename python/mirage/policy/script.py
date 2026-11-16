@@ -389,10 +389,9 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
     ``null`` (the function returned ``None``) is no opinion. Anything
     else is one JSON answer (``Answer``): ``{"kind": "deny", "reason":
     ...}``, ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
-    and ``pre_command`` ``{"kind": "route", "runtime": ..., "machine":
-    ..., "reason": ...}``, naming a runtime, a machine or both, its
-    reason optional. A deny or an ask without a reason carries the document's
-    default one.
+    and ``pre_command`` ``{"kind": "route", "machine": ..., "reason":
+    ...}``, naming a machine, its reason optional. A deny or an ask
+    without a reason carries the document's default one.
 
     Args:
         output (bytes): what the program wrote to stdout.
@@ -419,7 +418,7 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
         return Deny(answer.reason or DEFAULT_DENY_REASON)
     if answer.kind == Ask.kind:
         return Ask(answer.reason or DEFAULT_ASK_REASON)
-    return Route(answer.runtime, answer.reason or "", machine=answer.machine)
+    return Route(answer.machine, answer.reason or "")
 
 
 class ScriptPolicy(Policy, SessionScopedMixin):

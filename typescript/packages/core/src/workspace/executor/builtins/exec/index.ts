@@ -14,9 +14,11 @@
 
 export { CLOSED } from './constants.ts'
 export {
+  descriptorName,
   divertStatement,
   divertedFile,
   handleExecCommand,
   installExecRedirects,
+  ForkRoute,
   routeRebound,
 } from './exec.ts'

@@ -17,10 +17,13 @@ from typing import Any, Callable
 from mirage.context import voice_name
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import FD_BOTH, FD_CLOSE, FD_STDIN, FD_STDOUT
+from mirage.shell.descriptors import bad_descriptor_line
 from mirage.shell.errors import ExitSignal
 from mirage.shell.parse import parse, syntax_refusal
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.shell.voice import shell_voice
+from mirage.types import word_text
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
@@ -145,6 +148,29 @@ async def _expand_target(
                 kind=RedirectKind.AMBIGUOUS,
             )
         target_scope = targets[0]
+        if r.kind in (RedirectKind.DUP_INPUT, RedirectKind.DUP_OUTPUT):
+            word = word_text(target_scope)
+            if not word:
+                default = (
+                    FD_STDIN if r.kind == RedirectKind.DUP_INPUT else FD_STDOUT
+                )
+                label = r.target if r.fd == default else r.fd
+                return Redirect(
+                    fd=r.fd,
+                    target=ExitSignal(1, stderr=bad_descriptor_line(label)),
+                    kind=RedirectKind.UNEXPANDED,
+                )
+            if word == "-" or (word.isascii() and word.isdecimal()):
+                return Redirect(
+                    fd=r.fd,
+                    target=FD_CLOSE if word == "-" else int(word),
+                    kind=RedirectKind.STDIN
+                    if r.kind == RedirectKind.DUP_INPUT
+                    else RedirectKind.STDOUT,
+                )
+            if r.kind == RedirectKind.DUP_OUTPUT and r.fd == FD_STDOUT:
+                return Redirect(fd=FD_BOTH, target=target_scope)
+            return Redirect(fd=r.fd, target=word, kind=RedirectKind.AMBIGUOUS)
     return Redirect(
         fd=r.fd,
         target=target_scope,

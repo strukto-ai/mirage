@@ -43,7 +43,8 @@ import type {
   ExecuteOptions,
   ExecuteResult,
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { Workspace } from '@struktoai/mirage-node'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { type MirageClient, MirageRemoteError } from '@struktoai/mirage-core/remote/client'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 
@@ -59,6 +60,20 @@ const STDERR_MARKER = new TextEncoder().encode('\n--- stderr ---\n')
 // Monotonic within the process, so concurrent background commands never
 // collide on a spill filename. Not reset, so it needs no time or randomness.
 let spillCounter = 0
+
+// The lines every mirage executor in this process runs in a session, by
+// workspace. A line run with a sink is not listed in the workspace's own
+// line table, so two executors bound to one session see each other here.
+const RUNNING = new WeakMap<Workspace | MirageClient, Map<string, number>>()
+
+function runningIn(ws: Workspace | MirageClient): Map<string, number> {
+  let running = RUNNING.get(ws)
+  if (running === undefined) {
+    running = new Map()
+    RUNNING.set(ws, running)
+  }
+  return running
+}
 
 // The mount whose writability a `read-only` policy keeps, because dsh's
 // own definition of that mode keeps it: "permits only required sinks such
@@ -93,23 +108,25 @@ export interface MirageShellConfig {
    * Bind every command to this named workspace session. By default each
    * command runs in an ephemeral fork of the workspace's default session,
    * so nothing persists between calls, which is the one-shot contract of
-   * dsh's bash tool. With a session bound, `cd`, `export`, and function
+   * dsh's bash tool. With a session bound, `export` and function
    * definitions persist across calls, the persistent-shell contract. The
    * session is created on first use if the workspace does not have it; an
    * existing session is adopted as is. While one command still runs in the
    * session (one left running in the background), the next runs on a copy
    * of the session beside it rather than waiting for it to end, so its
-   * `cd` and `export` last for that command alone.
+   * `export` lasts for that command alone.
    *
-   * A spec carrying an explicit `env`, or a `workdir` that names a real
-   * directory in this world, still runs as a one-call subshell of the
-   * bound session, per mirage's `ExecuteOptions` semantics: both say
-   * "just for this command". The two things dsh injects on every call
-   * are deliberately not read that way, since neither carries that
-   * intent and either would fork every command and leave the binding
-   * with nothing to persist. A workdir resolved on the harness's own
-   * machine names nothing here and is dropped; the managed `DSH_*`
-   * snapshot is seeded into the session instead.
+   * dsh owns the directory: its bash tool sends the Session's working
+   * directory (or the call's own `workdir`) with every call, so the bound
+   * session moves there before the command runs, and a `cd` lasts until
+   * the next call. The `working_directory` tool is how an agent moves for
+   * good. A workdir is not a one-call subshell here, as it is for
+   * mirage's `ExecuteOptions`: dsh sends one on every call, and reading
+   * it that way would fork every command and leave the binding with
+   * nothing to persist. A workdir that names nothing in this world (one
+   * resolved on the harness's own machine) is dropped. An explicit `env`
+   * still runs as a one-call subshell; the managed `DSH_*` snapshot dsh
+   * injects on every call is seeded into the session instead.
    */
   sessionId?: string
   /**
@@ -147,10 +164,10 @@ function executeOptions(
   // fork: isolation must not hinge on a spec happening to carry a workdir,
   // and a read-only call runs in a *named* twin session, so without a cwd
   // its `cd` and exports would persist into the next nominally one-shot
-  // call. Bound, an absent workdir runs in the session itself, which is
-  // what lets its state persist. Either way the decision is the binding's,
-  // never the session this particular call happens to land in.
-  const cwd = workdir !== '' ? workdir : bound ? undefined : fallbackWorkdir
+  // call. Bound, the command runs in the session itself, which `execute`
+  // moves to the workdir first, so its state persists. Either way the
+  // decision is the binding's, never the session this call lands in.
+  const cwd = bound ? undefined : workdir !== '' ? workdir : fallbackWorkdir
   return {
     signal,
     ...(sessionId !== undefined ? { sessionId } : {}),
@@ -163,10 +180,17 @@ function executeOptions(
 
 /** Where and as whom one command runs, settled before it starts. */
 interface Prepared {
-  ws: Workspace
+  /** The workspace in this process; null for a remote world. */
+  ws: Workspace | null
   sessionId: string | undefined
   bound: boolean
   workdir: string
+  /**
+   * False when the call carries a managed snapshot its bound remote session
+   * did not take, because a line was running there; the command then runs on
+   * a fork that carries the snapshot itself.
+   */
+  seeded: boolean
 }
 
 /**
@@ -187,6 +211,62 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
       signal.removeEventListener('abort', abort)
     })
   })
+}
+
+/**
+ * A word the shell reads back as exactly `value`.
+ *
+ * @param value the text to quote.
+ * @returns the single-quoted word.
+ */
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+/**
+ * A command line run on a remote workspace with `env` set for it alone.
+ *
+ * The server's shell request has no environment, so the variables are
+ * exported ahead of the line, on its first line so every line number the
+ * shell reports is the one the caller wrote. The caller runs it with a
+ * `cwd`, which the server runs as a subshell, so the exports end with the
+ * line, as a per-call `env` does on a local workspace.
+ *
+ * @param command the line as the caller wrote it.
+ * @param env the variables for this line.
+ * @param unset the variables this line must not inherit.
+ * @returns the line with its exports ahead of it.
+ */
+function withEnv(
+  command: string,
+  env: Record<string, string> | undefined,
+  unset: readonly string[] = [],
+): string {
+  const entries = Object.entries(env ?? {})
+  const head: string[] = []
+  if (unset.length > 0) head.push(`unset ${unset.map(shellName).join(' ')}; `)
+  if (entries.length > 0) {
+    const exports = entries.map(([key, value]) => `${shellName(key)}=${shellWord(value)}`)
+    head.push(`export ${exports.join(' ')}; `)
+  }
+  return `${head.join('')}${command}`
+}
+
+const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+/**
+ * A variable name, refused unless the shell reads it as one: a remote line
+ * spells its environment as shell text, so a name carrying `=`, `;` or a
+ * space would run as a command of its own.
+ *
+ * @param key the name as the caller gave it.
+ * @returns the name, unchanged.
+ */
+function shellName(key: string): string {
+  if (!SHELL_NAME.test(key)) {
+    throw new Error(`mirage: environment name \`${key}\` is not a shell variable name`)
+  }
+  return key
 }
 
 /** How a settled execution ended, read once it has: the first cause wins. */
@@ -507,7 +587,9 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly seeding = new Map<string, Promise<unknown>>()
   private issued = 0
   private readonly seeded = new Map<string, number>()
-  private readonly inSession = new Map<string, number>()
+  // The managed variables this executor exported into each remote session,
+  // so the next snapshot can unset the ones it no longer carries.
+  private readonly remoteManaged = new Map<string, Set<string>>()
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
@@ -543,8 +625,12 @@ export class MirageShellExecutor extends ShellExecutor {
    */
   private async worldWorkdir(spec: ShellExecSpec): Promise<string> {
     if (spec.workdir === '') return ''
-    const ws = await this.workspace()
-    if (await ws.vfs.isDir(spec.workdir)) return spec.workdir
+    const remote = this.ctx.mirage.remote
+    const isDir =
+      remote !== null
+        ? await remote.isDir(spec.workdir)
+        : await (await this.workspace()).vfs.isDir(spec.workdir)
+    if (isDir) return spec.workdir
     return this.sessionId === undefined ? this.workdir : ''
   }
 
@@ -554,20 +640,32 @@ export class MirageShellExecutor extends ShellExecutor {
   private newSpill(): SpillSink | null {
     const dir = this.spillDir
     if (dir === undefined) return null
-    const target: SpillTarget = {
-      ensureDir: async (d) => {
-        const ws = await this.workspace()
-        await ensureDirPath({ exists: (p) => ws.vfs.exists(p), mkdir: (p) => ws.vfs.mkdir(p) }, d)
-      },
-      write: async (p, bytes) => {
-        const ws = await this.workspace()
-        await ws.vfs.write(p, bytes)
-      },
-      append: async (p, bytes) => {
-        const ws = await this.workspace()
-        await ws.vfs.append(p, bytes)
-      },
-    }
+    const remote = this.ctx.mirage.remote
+    const target: SpillTarget =
+      remote !== null
+        ? {
+            ensureDir: (d) =>
+              ensureDirPath({ exists: (p) => remote.exists(p), mkdir: (p) => remote.mkdir(p) }, d),
+            write: (p, bytes) => remote.write(p, bytes),
+            append: (p, bytes) => remote.append(p, bytes),
+          }
+        : {
+            ensureDir: async (d) => {
+              const ws = await this.workspace()
+              await ensureDirPath(
+                { exists: (p) => ws.vfs.exists(p), mkdir: (p) => ws.vfs.mkdir(p) },
+                d,
+              )
+            },
+            write: async (p, bytes) => {
+              const ws = await this.workspace()
+              await ws.vfs.write(p, bytes)
+            },
+            append: async (p, bytes) => {
+              const ws = await this.workspace()
+              await ws.vfs.append(p, bytes)
+            },
+          }
     spillCounter += 1
     const log = this.ctx.logger('mirage-dsh')
     return new SpillSink(target, dir, `mirage-shell-${spillCounter.toString()}`, (err: unknown) => {
@@ -732,6 +830,59 @@ export class MirageShellExecutor extends ShellExecutor {
     for (const [key, value] of Object.entries(managed)) await view.set(key, value)
   }
 
+  /**
+   * Seed a managed snapshot into a remote session: the variables an earlier
+   * snapshot set and this one drops are unset, then this one is exported.
+   *
+   * A remote session's environment is not readable here, so the keys this
+   * executor set are what it remembers; a `DSH_*` variable the agent
+   * exported itself is never unset, the same promise the local seed keeps.
+   *
+   * @param remote the server's client.
+   * @param sessionId the session this call runs in.
+   * @param managed the call's managed snapshot.
+   */
+  private async applyRemoteManagedEnv(
+    remote: MirageClient,
+    sessionId: string,
+    managed: Record<string, string>,
+  ): Promise<void> {
+    const before = this.remoteManaged.get(sessionId) ?? new Set<string>()
+    const stale = [...before].filter((key) => !(key in managed))
+    const lines: string[] = []
+    if (stale.length > 0) lines.push(`unset ${stale.map(shellName).join(' ')}`)
+    const set = Object.entries(managed).map(
+      ([key, value]) => `${shellName(key)}=${shellWord(value)}`,
+    )
+    if (set.length > 0) lines.push(`export ${set.join(' ')}`)
+    if (lines.length > 0) await this.remoteSilently(remote, lines.join('\n'), sessionId)
+    this.remoteManaged.set(sessionId, new Set(Object.keys(managed)))
+  }
+
+  /**
+   * Run a housekeeping line in a remote session, kept out of its history,
+   * and fail loudly if it did not succeed.
+   *
+   * @param remote the server's client.
+   * @param command the line.
+   * @param sessionId the session to run it in.
+   * @param signal aborts the request, as the command it prepares is aborted.
+   */
+  private async remoteSilently(
+    remote: MirageClient,
+    command: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const call = { sessionId, record: false, ...(signal !== undefined ? { signal } : {}) }
+    const result = await remote.shell(command, call)
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `mirage: \`${command}\` failed in session ${sessionId}: ${result.stderrText.trim()}`,
+      )
+    }
+  }
+
   private readOnlySession(): Promise<string> {
     this.readOnlyReady ??= this.provisionReadOnly().catch((err: unknown) => {
       this.readOnlyReady = null
@@ -794,6 +945,20 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   private async provisionSession(sessionId: string): Promise<void> {
+    const remote = this.ctx.mirage.remote
+    if (remote !== null) {
+      if ((await remote.sessions()).some((s) => s.sessionId === sessionId)) return
+      try {
+        await remote.createSession(sessionId)
+      } catch (err) {
+        // Another client made it between the listing and this create: adopt
+        // it, as an existing session is adopted, and leave it where it is.
+        if (err instanceof MirageRemoteError && err.status === 409) return
+        throw err
+      }
+      await this.remoteSilently(remote, `cd -- ${shellWord(this.workdir)}`, sessionId)
+      return
+    }
     const ws = await this.workspace()
     await ws.ensureSessionsLoaded()
     if (ws.listSessions().some((s) => s.sessionId === sessionId)) return
@@ -820,11 +985,14 @@ export class MirageShellExecutor extends ShellExecutor {
   private async prepare(spec: ShellExecSpec): Promise<Prepared> {
     const ticket = ++this.issued
     await this.ensureSession()
-    const ws = await this.workspace()
+    const remote = this.ctx.mirage.remote
+    const ws = remote !== null ? null : await this.workspace()
     const sessionId = await this.sessionFor(spec)
     const bound = this.sessionId !== undefined
     const workdir = await this.worldWorkdir(spec)
     const managed = spec.dshEnv as Record<string, string> | undefined
+    // A newer snapshot seeded first counts as seeded, as it does locally.
+    let seeded = true
     if (bound && sessionId !== undefined) {
       const running = this.seeding.get(sessionId) ?? Promise.resolve()
       if (managed === undefined) {
@@ -832,7 +1000,18 @@ export class MirageShellExecutor extends ShellExecutor {
       } else {
         const seed = running.then(async () => {
           if (ticket < (this.seeded.get(sessionId) ?? 0)) return
-          await this.applyManagedEnv(ws, sessionId, managed)
+          if (remote !== null) {
+            // A line of this process still runs in the session, so this call
+            // runs on a fork beside it and carries the snapshot itself: an
+            // export sent to the session now would queue behind that line.
+            // The fork is taken even if that line ends before this one starts,
+            // since the session still holds the old snapshot.
+            if ((runningIn(remote).get(sessionId) ?? 0) > 0) {
+              seeded = false
+              return
+            }
+            await this.applyRemoteManagedEnv(remote, sessionId, managed)
+          } else if (ws !== null) await this.applyManagedEnv(ws, sessionId, managed)
           this.seeded.set(sessionId, ticket)
         })
         this.seeding.set(
@@ -842,7 +1021,7 @@ export class MirageShellExecutor extends ShellExecutor {
         await seed
       }
     }
-    return { ws, sessionId, bound, workdir }
+    return { ws, sessionId, bound, workdir, seeded }
   }
 
   async execute(spec: ShellExecSpec): Promise<ShellExecution> {
@@ -902,6 +1081,14 @@ export class MirageShellExecutor extends ShellExecutor {
       return new MirageShellExecution(null, parts)
     }
     const { ws, sessionId, bound, workdir } = prepared
+    const remote = this.ctx.mirage.remote
+    if (ws === null && remote !== null) {
+      return new MirageShellExecution(
+        (sink) => this.launchRemote(remote, spec, prepared, controller.signal, sink),
+        parts,
+      )
+    }
+    if (ws === null) throw new Error('mirage: no workspace to run in')
     return new MirageShellExecution((sink) => {
       const options = executeOptions(
         spec,
@@ -912,20 +1099,98 @@ export class MirageShellExecutor extends ShellExecutor {
         this.workdir,
         sink,
       )
-      if (sessionId === undefined || options.cwd !== undefined || options.env !== undefined) {
-        return ws.shell(spec.command, options)
-      }
+      if (!bound || sessionId === undefined) return ws.shell(spec.command, options)
+      const session = ws.getSession(sessionId)
+      const place = workdir !== '' ? workdir : session.cwd
+      if (options.env !== undefined) return ws.shell(spec.command, { ...options, cwd: place })
       // The command runs in the bound session itself, where a session runs
       // one line at a time. While another still runs there, it runs on a
       // copy of the session instead, beside that one.
-      const running = this.inSession.get(sessionId) ?? 0
-      if (running > 0) {
-        return ws.shell(spec.command, { ...options, cwd: ws.getSession(sessionId).cwd })
+      const running = runningIn(ws)
+      const ours = running.get(sessionId) ?? 0
+      if (ours > 0) return ws.shell(spec.command, { ...options, cwd: place })
+      // Moving the session changes the directory of any line already in
+      // it, so a line run outside these executors (listed in the line
+      // table until it ends) keeps it where it is and this one runs on a
+      // copy beside it.
+      if (session.cwd !== place) {
+        const busy = ws.lineTable.lines(sessionId).some((line) => line.endedAt === null)
+        if (busy) return ws.shell(spec.command, { ...options, cwd: place })
+        setCwd(session, place)
       }
-      this.inSession.set(sessionId, running + 1)
+      running.set(sessionId, ours + 1)
       return ws.shell(spec.command, options).finally(() => {
-        this.inSession.set(sessionId, (this.inSession.get(sessionId) ?? 1) - 1)
+        running.set(sessionId, (running.get(sessionId) ?? 1) - 1)
       })
     }, parts)
+  }
+
+  /**
+   * Run one command on the remote workspace, streaming its output into the
+   * execution's console as the server sends it.
+   *
+   * The placement is the local one, spelled in the server's terms. Unbound,
+   * every line runs with a `cwd`, which the server runs as a subshell, so
+   * nothing persists. Bound, the line runs in the session itself, moved to
+   * the workdir first so a `cd` lasts until the next call; a per-call `env`,
+   * or another line of this process still running in the session, runs it
+   * as a subshell instead, beside that one.
+   *
+   * @param remote the server's client.
+   * @param spec the resolved spec.
+   * @param prepared where and as whom it runs.
+   * @param signal aborts the request, which cancels the line on the server.
+   * @param sink the execution's console.
+   * @returns the line's result.
+   */
+  private async launchRemote(
+    remote: MirageClient,
+    spec: ShellExecSpec,
+    prepared: Prepared,
+    signal: AbortSignal,
+    sink: JobConsole,
+  ): Promise<ExecuteResult> {
+    const { sessionId, bound, workdir, seeded } = prepared
+    const snapshot = spec.dshEnv as Record<string, string> | undefined
+    const managed = snapshot ?? {}
+    const perCall = { ...(spec.env ?? {}) }
+    const call = {
+      signal,
+      ...(spec.stdin !== undefined ? { stdin: new TextEncoder().encode(spec.stdin) } : {}),
+      onOutput: (channel: 'stdout' | 'stderr', data: Uint8Array) =>
+        sink
+          .emit(channel === 'stderr' ? Channel.STDERR : Channel.STDOUT, data)
+          .then(() => undefined),
+    }
+    if (!bound || sessionId === undefined) {
+      const command = withEnv(spec.command, { ...perCall, ...managed })
+      const cwd = workdir !== '' ? workdir : this.workdir
+      return remote.shell(command, {
+        ...call,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        cwd,
+      })
+    }
+    const running = runningIn(remote)
+    const ours = running.get(sessionId) ?? 0
+    // The managed snapshot is seeded into the session and so never decides a
+    // fork, or every call would fork; a fork carries it, since a busy session
+    // was not seeded for this call. The keys the session still holds from the
+    // last snapshot it took, and this one drops, are unset in the fork.
+    if (Object.keys(perCall).length > 0 || ours > 0 || !seeded) {
+      const cwd = workdir !== '' ? workdir : (await remote.session(sessionId, signal)).cwd
+      const held = snapshot !== undefined ? (this.remoteManaged.get(sessionId) ?? []) : []
+      const dropped = [...held].filter((key) => !(key in managed))
+      const command = withEnv(spec.command, { ...perCall, ...managed }, dropped)
+      return remote.shell(command, { ...call, sessionId, cwd })
+    }
+    running.set(sessionId, ours + 1)
+    try {
+      if (workdir !== '')
+        await this.remoteSilently(remote, `cd -- ${shellWord(workdir)}`, sessionId, signal)
+      return await remote.shell(spec.command, { ...call, sessionId })
+    } finally {
+      running.set(sessionId, (running.get(sessionId) ?? 1) - 1)
+    }
   }
 }

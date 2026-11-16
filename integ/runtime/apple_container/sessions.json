@@ -11,19 +11,12 @@
         "machines": {
           "box": {
             "provider": "apple_container",
-            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-          }
-        },
-        "runtimes": [
-          {
-            "name": "remote",
+            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}",
             "captures": [
               "printenv"
-            ],
-            "machine": "box"
-          },
-          "workspace"
-        ]
+            ]
+          }
+        }
       },
       "steps": [
         {

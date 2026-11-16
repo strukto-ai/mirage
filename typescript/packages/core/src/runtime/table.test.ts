@@ -21,12 +21,13 @@ import { PythonRuntime } from './python/base.ts'
 import type { Language, RunResult } from './types.ts'
 import {
   bindCommands,
+  buildEntry,
   buildRuntime,
-  checkRuntimeOptions,
-  DEFAULT_ENTRIES,
+  builtFrom,
   knownRuntimes,
+  machineBindingsFor,
+  placement,
   registerRuntime,
-  runtimeBindingsFor,
   shadowedCaptures,
 } from './table.ts'
 import { WorkspaceRuntime } from './workspace.ts'
@@ -117,10 +118,6 @@ describe('runtime table', () => {
     expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
   })
 
-  it('the default world is the workspace alone', () => {
-    expect(DEFAULT_ENTRIES).toEqual(['workspace'])
-  })
-
   it('buildRuntime builds pyodide by name', () => {
     expect(buildRuntime('pyodide')).toBeInstanceOf(PyodideRuntime)
   })
@@ -128,7 +125,6 @@ describe('runtime table', () => {
   it.each<[string, RegExp]>([
     ['ghost', /unknown runtime: 'ghost'/],
     ['nope', /unknown runtime/],
-    ['docker', /machine provider, not a runtime/],
     ['wasi', /Python-only/],
     ['local', /mirage-node/],
   ])('buildRuntime refuses %s, naming why', (name, refusal) => {
@@ -137,8 +133,6 @@ describe('runtime table', () => {
 
   it('buildRuntime builds the workspace runtime by name', () => {
     expect(buildRuntime('workspace')).toBeInstanceOf(WorkspaceRuntime)
-    const restricted = buildRuntime('workspace', { captures: ['grep', 'cat'] })
-    expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 })
 
@@ -170,7 +164,7 @@ describe('bindCommands', () => {
     [() => new JsEngine(['python3']), 'jsengine', 'python3'],
     [() => new PyEngine(['@js']), 'pyengine', 'node'],
   ] as const)('refuses a capture a language runtime does not run: %#', (make, name, capture) => {
-    expect(() => bindCommands([make()])).toThrow(`runtime '${name}' does not run '${capture}'`)
+    expect(() => bindCommands([make()])).toThrow(`machine '${name}' does not run '${capture}'`)
   })
 
   // Twin of test_bind_commands_lets_a_language_runtime_that_runs_processes_take_any_name.
@@ -223,20 +217,20 @@ describe('bindCommands', () => {
 
   it('rejects duplicate names', () => {
     expect(() => bindCommands([new FakeRuntime(), new FakeRuntime()])).toThrow(
-      /duplicate runtime entry: 'fake'/,
+      /duplicate machine: 'fake'/,
     )
   })
 
-  it('takes a remote entry per machine', () => {
-    const a = new RemoteRuntime({ machine: 'a' })
-    const b = new RemoteRuntime({ captures: ['node'], machine: 'b' })
-    expect([a.name, b.name, new RemoteRuntime().name]).toEqual(['remote:a', 'remote:b', 'remote'])
+  it('takes a remote runtime per machine', () => {
+    const a = new RemoteRuntime('a')
+    const b = new RemoteRuntime('b', { captures: ['node'] })
+    expect([a.name, b.name]).toEqual(['a', 'b'])
     const bindings = bindCommands([a, b])
     expect(bindings['@external']).toBe(a)
     expect(bindings.node).toBe(b)
-    expect(() =>
-      bindCommands([a, new RemoteRuntime({ captures: ['node'], machine: 'a' })]),
-    ).toThrow(/duplicate runtime entry: 'remote:a'/)
+    expect(() => bindCommands([a, new RemoteRuntime('a', { captures: ['node'] })])).toThrow(
+      /duplicate machine: 'a'/,
+    )
   })
 
   it('captures named after Object.prototype members bind like any other', () => {
@@ -254,24 +248,21 @@ describe('bindCommands', () => {
       record[name]
     expect(bound(bindings, 'toString')).toBe(rt)
     expect(bound(bindings, 'constructor')).toBe(rt)
-    expect(bound(runtimeBindingsFor([rt], 'proto'), 'toString')).toBe(rt)
+    expect(bound(machineBindingsFor([rt], 'proto'), 'toString')).toBe(rt)
   })
 })
 
-describe('buildRuntime option validation', () => {
-  it('rejects unknown option keys with the entry name', () => {
-    expect(() => buildRuntime('pyodide', { homee: '/typo-key' })).toThrow(
-      /unknown pyodide runtime option 'homee'/,
-    )
-    expect(() => buildRuntime('quickjs', { home: '/x' })).toThrow(
-      /unknown quickjs runtime option 'home'/,
-    )
-  })
-
-  it('every runtime takes the uniform entry keys', () => {
+describe('buildRuntime options', () => {
+  it('every runtime takes the uniform options', () => {
     expect(() => buildRuntime('pyodide', { config: { home: '/assets/pyodide' } })).not.toThrow()
     expect(() => buildRuntime('quickjs', { config: { home: '/x' } })).not.toThrow()
     expect([...buildRuntime('monty', { captures: ['python3'] }).captures]).toEqual(['python3'])
+  })
+
+  it('unknown options fail loud', () => {
+    expect(() => buildRuntime('monty', { captuers: [] })).toThrow(
+      /unknown monty runtime option 'captuers' \(expected: 'captures', 'config'\)/,
+    )
   })
 
   it('unknown config keys fail loud inside the runtime', () => {
@@ -282,53 +273,69 @@ describe('buildRuntime option validation', () => {
       /unknown runtime config key 'home'/,
     )
   })
-
-  it('the key check stands alone, so a referenced class gets the same refusal', () => {
-    expect(() => {
-      checkRuntimeOptions('./box.mjs:EchoBox', { captuers: ['nvidia-smi'] })
-    }).toThrow(
-      /unknown \.\/box\.mjs:EchoBox runtime option 'captuers' \(expected: 'captures', 'config'\)/,
-    )
-    expect(() => {
-      checkRuntimeOptions('./box.mjs:EchoBox', { captures: ['nvidia-smi'], config: {} })
-    }).not.toThrow()
-  })
 })
 
-describe('runtimeBindingsFor', () => {
-  it('maps only the named runtime captures', () => {
+describe('machineBindingsFor', () => {
+  it('maps only the named captures', () => {
     const fake = new FakeRuntime()
-    const bindings = runtimeBindingsFor([fake, new WorkspaceRuntime()], 'fake')
+    const bindings = machineBindingsFor([fake, new WorkspaceRuntime()], 'fake')
     expect(bindings).toEqual({ python3: fake, 'made-up': fake })
   })
 
-  it("takes a runtime's name while it has one entry", () => {
-    const a = new RemoteRuntime({ machine: 'a' })
-    const b = new RemoteRuntime({ captures: ['node'], machine: 'b' })
-    expect(runtimeBindingsFor([a, new WorkspaceRuntime()], 'remote')['@external']).toBe(a)
-    expect(runtimeBindingsFor([a, b], 'remote:b').node).toBe(b)
-    expect(() =>
-      runtimeBindingsFor([new RemoteRuntime({ machine: 'gpu:prod' })], 'remote:gpu'),
-    ).toThrow(/unknown runtime: 'remote:gpu'/)
-    expect(() => runtimeBindingsFor([a, b], 'remote')).toThrow(
-      /ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a', 'remote:b'\)/,
-    )
-  })
-
-  it('takes no other name a class is registered as', () => {
-    registerRuntime('cpython-alias', FakeRuntime)
-    expect(() =>
-      runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'cpython-alias'),
-    ).toThrow(/unknown runtime: 'cpython-alias'/)
-  })
-
   it.each<[string, RegExp]>([
-    ['workspace', /not a runtime you can select/],
-    ['nope', /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'workspace'\)/],
+    ['workspace', /not a machine you can select/],
+    ['nope', /unknown machine: 'nope' \(workspace machines: 'fake'\)/],
   ])('refuses %s, naming why', (name, refusal) => {
-    expect(() => runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], name)).toThrow(
+    expect(() => machineBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], name)).toThrow(
       refusal,
     )
+  })
+
+  it('says none when there is no machine', () => {
+    expect(() => machineBindingsFor([new WorkspaceRuntime()], 'nope')).toThrow(
+      /\(workspace machines: none\)/,
+    )
+  })
+
+  it('takes no name a class is registered as', () => {
+    registerRuntime('cpython-alias', FakeRuntime)
+    expect(() =>
+      machineBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'cpython-alias'),
+    ).toThrow(/unknown machine: 'cpython-alias'/)
+  })
+})
+
+describe('buildEntry', () => {
+  it.each<[Record<string, unknown>, string]>([
+    [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
+    [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
+    [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
+  ])('builds the runtime its provider runs: %j', (spec, cls) => {
+    const [handle, runtime] = buildEntry('py', spec)
+    expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])
+    expect(builtFrom(runtime)).toEqual(spec)
+  })
+
+  it.each<[string, Record<string, unknown>, RegExp]>([
+    ['py', { provider: 'worker' }, /unknown machine provider/],
+    ['py', { provider: 'in_process', runtime: 'local' }, /runs on host/],
+    ['py', { provider: 'host', runtime: 'monty' }, /not a runtime/],
+    ['py', { provider: 'in_process', runtime: 'monty', sandbox: {} }, /only a host/],
+    ['py', { provider: 'host', sandbox: null }, /must be a mapping/],
+    ['workspace', { provider: 'in_process', runtime: 'monty' }, /reserved for the workspace/],
+    ['workspace', { provider: 'docker' }, /reserved for the workspace/],
+    ['py', { provider: 'in_process' }, /names its runtime/],
+    ['py', { provider: 'in_process', runtime: WorkspaceRuntime }, /not a machine/],
+    ['py', { provider: 'in_process', runtime: 'workspace' }, /not a machine/],
+    ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
+    ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
+    ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
+  ])('refuses what its provider does not run: %s %j', (name, spec, refusal) => {
+    expect(() => buildEntry(name, spec)).toThrow(refusal)
+  })
+
+  it('refuses the workspace runtime as a machine', () => {
+    expect(() => buildEntry('x', new WorkspaceRuntime())).toThrow(/not a machine/)
   })
 })
 
@@ -364,13 +371,21 @@ describe('registerRuntime', () => {
 
   it('says where an unregistered shipped runtime lives', () => {
     expect(() => buildRuntime('local')).toThrow(/@struktoai\/mirage-node/)
-    expect(() => buildRuntime('daytona')).toThrow(/machine provider, not a runtime/)
   })
 
   it('replaces a custom name', () => {
     registerRuntime('fake-replaced', FakeRuntime)
     registerRuntime('fake-replaced', Other)
     expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
+  })
+
+  it('keeps the name an entry was built with', () => {
+    registerRuntime('fake-first', FakeRuntime)
+    registerRuntime('fake-second', FakeRuntime)
+    const [, built] = buildEntry('py', { provider: 'in_process', runtime: 'fake-second' })
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
+    registerRuntime('fake-second', Other)
+    expect(placement(built)).toEqual(['in_process', 'fake-second'])
   })
 })
 

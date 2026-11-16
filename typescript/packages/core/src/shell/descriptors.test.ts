@@ -42,7 +42,7 @@ describe('redirect parser keeps the descriptor as typed', () => {
     ['echo x 3>&1', 3, 1, RedirectKind.STDOUT],
     ['echo x 3>&-', 3, FD_CLOSE, RedirectKind.STDOUT],
     ['echo x &> f', FD_BOTH, 'f', RedirectKind.STDOUT],
-    ['echo x >& f', FD_BOTH, 'f', RedirectKind.STDOUT],
+    ['echo x >& f', 1, 'f', RedirectKind.DUP_OUTPUT],
   ]
   for (const [line, fd, target, kind] of cases) {
     it(line, () => {

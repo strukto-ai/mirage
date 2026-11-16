@@ -285,32 +285,32 @@ def test_a_program_that_takes_a_runner_ignores_only_what_it_inherits():
     handle.one_command = True
     handle.program_ignores = frozenset({2})
     assert 3 in handle.ignores
-    assert handle.take(None, "local")
+    assert handle.take(None)
     assert handle.ignores == frozenset({2})
 
 
 # A runner started for one command is its program once, on the program's
-# machine and runtime; one started for more, or taken already, is not, and
+# machine; one started for more, or taken already, is not, and
 # a host program's pid lands on the record.
 def test_a_runner_started_for_one_command_is_its_program_once():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
-    assert not handle.take(None, "docker")
+    assert not handle.take(None)
     handle.one_command = True
-    assert handle.take(MachineName("docker", "tools"), "docker")
-    assert not handle.take(None, "local")
+    assert handle.take(MachineName("docker", "tools"))
+    assert not handle.take(None)
     record = handle.record
-    assert (record.machine, record.runtime) == (
+    assert (record.machine, record.program) == (
         MachineName("docker", "tools"),
-        "docker",
+        True,
     )
     handle.set_machine_pid(MachinePid(41, 5.0))
     assert handle.record.machine_pid == MachinePid(41, 5.0)
     other = ProcessHandle(_info(), _exits_3, lambda _pid: None)
     other.one_command = True
-    assert other.take(None, "local")
-    assert (other.record.machine, other.record.runtime) == (
+    assert other.take(None)
+    assert (other.record.machine, other.record.program) == (
         LOCAL_MACHINE,
-        "local",
+        True,
     )
 
 

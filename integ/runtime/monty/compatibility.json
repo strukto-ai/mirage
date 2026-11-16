@@ -7,10 +7,12 @@
     {
       "id": "assert_message",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -34,10 +36,12 @@
     {
       "id": "append_position",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -61,10 +65,12 @@
     {
       "id": "system_exit",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -88,10 +94,12 @@
     {
       "id": "system_exit_message",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -115,10 +123,12 @@
     {
       "id": "strict_text",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -142,10 +152,12 @@
     {
       "id": "bom_text",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",

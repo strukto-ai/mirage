@@ -6,10 +6,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/w": {
             "vfs": "ram",
@@ -91,17 +93,15 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          {
-            "name": "pyodide",
-            "config": {
-              "sys_path": [
-                "/w/vendor"
-              ]
-            }
-          },
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide",
+            "sys_path": [
+              "/w/vendor"
+            ]
+          }
+        },
         "mounts": {
           "/w": {
             "vfs": "ram",
@@ -219,10 +219,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/w": {
             "vfs": "ram",
@@ -266,10 +268,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -320,10 +324,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -369,10 +375,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "steps": [
         {
@@ -407,10 +415,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "steps": [
         {
@@ -457,10 +467,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

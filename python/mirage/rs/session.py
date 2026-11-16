@@ -109,7 +109,9 @@ class ShellVars(MutableMapping[str, ShellVar]):
         table: Mapping[str, ShellVar],
         ids: Callable[[], int] | None = None,
     ) -> "ShellVars":
-        """A new shell holding ``table``.
+        """A new shell holding ``table``. Restoring ``GLOBIGNORE`` sets
+        no ``dotglob``: the saved options already hold what its
+        assignment did.
 
         Args:
             table (Mapping[str, ShellVar]): the records.
@@ -120,6 +122,7 @@ class ShellVars(MutableMapping[str, ShellVar]):
         out = cls(Shell(ids or SystemIdSource().random_u32))
         for name, var in table.items():
             out.shell.place(name, record_of(var))
+        out.shell.take_dotglob()
         return out
 
     def __getitem__(self, name: str) -> ShellVar:

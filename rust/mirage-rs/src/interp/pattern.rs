@@ -51,18 +51,22 @@ pub fn units(text: &[u8], utf8: bool) -> (Vec<u32>, Vec<usize>) {
 
 /// A pattern being built from a word's live and quoted runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Pattern(pub Vec<u32>);
+pub struct Pattern {
+    units: Vec<u32>,
+    pub nocase: bool,
+}
 
 impl Pattern {
     /// Append text, its special characters live or, `quoted`, literal.
     pub fn push(&mut self, text: &[u8], quoted: bool, utf8: bool) {
         for unit in units(text, utf8).0 {
-            self.0.push(if quoted { glob::quote(unit) } else { unit });
+            self.units
+                .push(if quoted { glob::quote(unit) } else { unit });
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.units.is_empty()
     }
 }
 
@@ -75,9 +79,9 @@ const COMPILED_KEPT: usize = 16;
 /// is not kept, so what the shell keeps stays small.
 const FEED_UNITS: usize = 4096;
 
-/// A compiled pattern kept: its units, whether extglob read them, and the
+/// A compiled pattern kept: the pattern, whether extglob read it, and the
 /// matcher.
-type Kept = (Vec<u32>, bool, Box<dyn Stream>);
+type Kept = (Pattern, bool, Box<dyn Stream>);
 
 thread_local! {
     /// The patterns value operations compiled last, most recent first: a
@@ -92,7 +96,7 @@ fn lend(pattern: &Pattern, extglob: bool, operation: &Json) -> Option<Box<dyn St
     let kept = COMPILED.with_borrow_mut(|kept| {
         let at = kept
             .iter()
-            .position(|(units, ext, _)| *ext == extglob && *units == pattern.0)?;
+            .position(|(units, ext, _)| *ext == extglob && units == pattern)?;
         Some(kept.remove(at).2)
     });
     match kept {
@@ -106,18 +110,19 @@ fn lend(pattern: &Pattern, extglob: bool, operation: &Json) -> Option<Box<dyn St
 
 /// Keep a matcher an operation finished with for the next that asks.
 fn keep(pattern: &Pattern, extglob: bool, glob: Box<dyn Stream>) {
-    if pattern.0.len() > FEED_UNITS {
+    if pattern.units.len() > FEED_UNITS {
         return;
     }
     COMPILED.with_borrow_mut(|kept| {
-        kept.insert(0, (pattern.0.clone(), extglob, glob));
+        kept.insert(0, (pattern.clone(), extglob, glob));
         kept.truncate(COMPILED_KEPT);
     });
 }
 
 fn glob_config(pattern: &Pattern, extglob: bool, operation: Json) -> Vec<u8> {
     json!({
-        "pattern": pattern.0,
+        "pattern": pattern.units,
+        "nocase": pattern.nocase,
         "extglob": extglob,
         "operation": operation,
     })

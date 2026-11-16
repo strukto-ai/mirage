@@ -16,14 +16,14 @@ import { feed } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { abortable } from '../../utils/abort.ts'
 import { currentCaller } from '../../context/session_context.ts'
-import { MachineHandle } from '../handle.ts'
+import { MachineHandle, logger } from '../handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
 import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
-import { requireId } from '../config.ts'
+import { checkOnPause, requireId } from '../config.ts'
 import { ConnectionLostError } from '../errors.ts'
 import {
   decodeOutput,
@@ -35,7 +35,7 @@ import {
   stopSignal,
   wrapLine,
 } from '../constants.ts'
-import { CLOSED_INPUT, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
+import { CLOSED_INPUT, ON_PAUSE, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type { E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -139,7 +139,9 @@ class PtyWriter implements PipeWriter {
  * command runs until mirage's limits stop it. A `mountType` serves the
  * workspace over a PTY, since E2B's exec decodes output as text.
  *
- * The sandbox is yours: Mirage never extends or kills it. Once the SDK
+ * The sandbox is yours: Mirage never kills it, and pauses it only when the
+ * workspace pauses and its config says `onPause: 'pause'` or the call names
+ * it. Once the SDK
  * says it is gone, connecting fails with how to replace it, and a line it
  * cut short loses its connection (129) with the same advice; the next line
  * connects again.
@@ -148,12 +150,14 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'e2b'
+  protected override readonly pauses = true
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
+    checkOnPause('e2b', this.config.onPause, ON_PAUSE)
   }
 
   /** The sandbox's id at E2B. */
@@ -185,6 +189,26 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     } catch (error) {
       const hint = this.gone(sdk, error)
       throw hint === null ? error : new Error(hint, { cause: error })
+    }
+    this.reached = true
+  }
+
+  /** Whether the config says `onPause: 'pause'`. */
+  override configAsksToPause(): boolean {
+    return this.config.onPause === 'pause'
+  }
+
+  /**
+   * Pause the sandbox, keeping its disk and memory; the next connect resumes
+   * it. A sandbox already gone has nothing to pause.
+   */
+  protected override async pauseMachine(): Promise<void> {
+    const sdk = await this.ensureSdk()
+    try {
+      await sdk.Sandbox.pause(this.config.sandboxId, this.apiParams())
+    } catch (error) {
+      if (!(error instanceof sdk.SandboxNotFoundError)) throw error
+      logger.debug?.(`${this.machine.toString()}: sandbox already gone, nothing to pause`)
     }
   }
 

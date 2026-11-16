@@ -26,7 +26,6 @@ import { MicrosandboxMachine, MountMode, PathSpec, RAMVFS, Workspace } from '@st
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 const sandbox = process.env.MIRAGE_E2E_SANDBOX!
 assert.ok(sandbox, 'set MIRAGE_E2E_SANDBOX')
@@ -119,14 +118,14 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
     [prefix + '/ro']: [readonly, MountMode.READ],
   }
   if (mountType === 'both') mounts[guest] = new RAMVFS()
-  const runtime = new MicrosandboxMachine('msb', { sandbox, mountType })
+  const runtime = new MicrosandboxMachine('msb', {
+    sandbox,
+    mountType,
+    captures: ['python3', 'dash', 'sleep'],
+  })
   const ws = new Workspace(mounts, {
     mode: MountMode.EXEC,
     machines: { msb: runtime },
-    runtimes: [
-      new RemoteRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }),
-      'workspace',
-    ],
     profiles: { hidden: { paths: { hide: [prefix + '/secret.txt'] } } },
   })
   const agent = await ws.session('agent', mountType === 'fuse' ? {} : { profile: 'hidden' })
@@ -276,8 +275,9 @@ async function cycles() {
       { [host]: new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
-        runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
+        machines: {
+          msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh', captures: ['python3'] }),
+        },
       },
     )
     try {
@@ -494,8 +494,9 @@ async function lifecycleChecks() {
       { '/missing-fuse': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
-        runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
+        machines: {
+          msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh', captures: ['python3'] }),
+        },
       },
     )
     const moved = await raw(

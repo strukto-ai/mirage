@@ -418,8 +418,8 @@ class ProfilePolicy(BaseModel):
             as a string when the workspace reads it means the config
             layer never saw it, and is refused there.
         runtime (str | dict[str, Any]): the runtime the program runs on:
-            a name, or ``{name, config}`` for one that needs settings,
-            the shape a ``runtimes`` entry has. Monty when the program
+            a name, or ``{name, config}`` for one that needs settings.
+            Monty when the program
             names none; without the ``monty`` extra installed, such a
             program fails closed with the extra's install hint.
         env (dict[str, str | SecretRef]): variables the program runs

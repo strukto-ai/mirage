@@ -15,21 +15,22 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
-import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
-import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import type { Runtime } from '@struktoai/mirage-core/runtime/base'
+import { buildEntry, type MachineSpecs } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { NodeWorkspaceOptions } from '@struktoai/mirage-node'
-import { buildVfs, SessionProfile, Workspace } from '@struktoai/mirage-node'
+import { buildVfs, Workspace } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    mirage: MirageService
-  }
-}
+import { hostPathToVirtual } from './host_path.ts'
+import { MirageClient, type MirageRemote } from '@struktoai/mirage-core/remote/client'
+import { remoteOnly } from './remote/service.ts'
+import type { MirageWorld } from './world.ts'
 
 /**
  * A declarative mount, YAML-friendly: the VFS is named by its
@@ -52,33 +53,31 @@ const MOUNT_BLOCK_KEYS = ['vfs', 'mode', 'config']
 /** One mount entry: a live spec or instance, or a declarative block. */
 export type MirageMount = MountSpec | Mount | MirageMountBlock
 
-/** A runtime entry, YAML-friendly: a name, or a name with its options. */
-export interface MirageRuntimeBlock {
-  /** Runtime registry name (`monty`, `pyodide`, `quickjs`, ...). */
-  name: string
-  /** Command words this runtime captures (e.g. `['python', 'python3']`). */
-  captures?: string[]
-  /** The runtime's own config block; a key it does not have is refused. */
-  config?: Record<string, unknown>
-}
-
 /**
  * Configuration for the shared mirage execution world. Exactly one of
- * `workspace` (adopt a live workspace the embedder owns and closes) or
+ * `workspace` (adopt a live workspace the embedder owns and closes),
  * `mounts` (construct a workspace here; the service closes it when its
- * plugin unloads) must be given.
+ * plugin unloads) or `remote` (a workspace a Mirage server holds) must be
+ * given.
  */
 export interface MirageConfig {
   /** A live workspace to adopt; its lifecycle stays with the embedder. */
   workspace?: Workspace
+  /**
+   * A workspace on a Mirage server, reached over its HTTP API. The server
+   * owns its mounts, machines and roles, so none of the options that build
+   * a workspace here go with it.
+   */
+  remote?: MirageRemote
   /** Mounts for a service-owned workspace, keyed by mount prefix. */
   mounts?: Record<string, MirageMount>
   /**
-   * Runtimes for a service-owned workspace, built via `buildRuntime`.
-   * The YAML-friendly twin of `workspaceOptions.runtimes`; pass one or
-   * the other, not both.
+   * Machines for a service-owned workspace, by name, each a `machines:`
+   * entry as a workspace file spells it (`{ provider: 'in_process', runtime:
+   * 'monty' }`). The YAML-friendly twin of `workspaceOptions.machines`;
+   * pass one or the other, not both.
    */
-  runtimes?: (string | MirageRuntimeBlock)[]
+  machines?: Record<string, Record<string, unknown>>
   /**
    * The roles (`profiles:` in mirage config), each a whole permission
    * document: its `commands.allow` list, its `commands.ask` and
@@ -146,20 +145,28 @@ function camelKeys(block: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(block).map(([key, value]) => [snakeToCamel(key), value]))
 }
 
-function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
-  if (typeof entry === 'string') return entry
-  const { name, config, ...options } = entry
-  return buildRuntime(
-    name,
-    config === undefined ? options : { ...options, config: camelKeys(config) },
-  )
-}
-
-// A name shorthand builds exactly as the workspace would build it; holding
-// the instance early is what lets `vfsOnly` classify the world before the
-// (asynchronous) mounts finish resolving.
-function builtEntry(entry: RuntimeEntry): Runtime {
-  return typeof entry === 'string' ? buildRuntime(entry) : entry
+// A machine is built once, here, so `vfsOnly` can classify the world
+// before the (asynchronous) mounts finish resolving; the workspace takes
+// the built handle or runtime as it is.
+function builtMachines(
+  machines: MachineSpecs,
+): [Record<string, MachineHandle | Runtime>, Runtime[]] {
+  const built: Record<string, MachineHandle | Runtime> = {}
+  const runtimes: Runtime[] = []
+  const items = Array.isArray(machines)
+    ? (machines as readonly (MachineHandle | Runtime)[]).map((m) => [m.name, m] as const)
+    : Object.entries(machines)
+  for (const [name, entry] of items) {
+    let spec = entry
+    if (isPlainObject(entry)) {
+      spec = camelKeys(entry)
+      if (isPlainObject(spec.sandbox)) spec.sandbox = camelKeys(spec.sandbox)
+    }
+    const [handle, runtime] = buildEntry(name, spec)
+    built[name] = handle ?? runtime
+    runtimes.push(runtime)
+  }
+  return [built, runtimes]
 }
 
 /**
@@ -174,37 +181,56 @@ function builtEntry(entry: RuntimeEntry): Runtime {
  * adapters do) and `workspace` throws until it resolves, mirroring how
  * the E2B service owner exposes its sandbox.
  */
-export class MirageService extends Service {
+export class MirageService extends Service implements MirageWorld {
   static readonly provide = 'mirage'
 
   /** Resolves to the shared workspace once every mount is built. */
   readonly ready: Promise<Workspace>
+
+  /** The server's client when the world is remote; null when it is in this process. */
+  readonly remote: MirageClient | null = null
 
   private built: Workspace | null = null
   private readonly plannedRuntimes: readonly Runtime[] | undefined
 
   constructor(ctx: Context, config: MirageConfig = {}) {
     super(ctx, 'mirage')
-    if (config.workspace !== undefined && config.mounts !== undefined) {
-      throw new Error('mirage: pass either workspace or mounts, not both')
+    const worlds = [config.workspace, config.mounts, config.remote].filter((w) => w !== undefined)
+    if (worlds.length > 1) {
+      throw new Error('mirage: pass one of workspace, mounts or remote')
+    }
+    if (config.remote !== undefined) {
+      if (
+        config.machines !== undefined ||
+        config.workspaceOptions !== undefined ||
+        config.profiles !== undefined ||
+        config.profile !== undefined
+      ) {
+        throw new Error(
+          'mirage: machines, profiles, profile and workspaceOptions configure a service-owned workspace, not a remote one',
+        )
+      }
+      this.remote = new MirageClient(config.remote)
+      this.ready = remoteOnly()
+      return
     }
     if (config.workspace !== undefined) {
-      // An adopted workspace is already built, so runtimes and constructor
+      // An adopted workspace is already built, so machines and constructor
       // options can no longer reach it. Saying so beats accepting a config
-      // whose runtimes silently never load, which is what the workspace and
+      // whose machines silently never load, which is what the workspace and
       // mounts pair above already refuses to do.
       // `profiles` and `profile` join them for the same reason, and one
       // more: an adopted workspace's roles and its `onAsk` are the
       // embedder's own, so silently re-answering its asks through
       // `ctx.approval` would take over a seam it may already have filled.
       if (
-        config.runtimes !== undefined ||
+        config.machines !== undefined ||
         config.workspaceOptions !== undefined ||
         config.profiles !== undefined ||
         config.profile !== undefined
       ) {
         throw new Error(
-          'mirage: runtimes, profiles, profile and workspaceOptions configure a service-owned workspace, not an adopted workspace',
+          'mirage: machines, profiles, profile and workspaceOptions configure a service-owned workspace, not an adopted workspace',
         )
       }
       this.built = config.workspace
@@ -212,14 +238,14 @@ export class MirageService extends Service {
       return
     }
     if (config.mounts === undefined) {
-      throw new Error('mirage: one of workspace or mounts is required')
+      throw new Error('mirage: one of workspace, mounts or remote is required')
     }
     const options = { ...(config.workspaceOptions ?? {}) }
-    if (config.runtimes !== undefined) {
-      if (options.runtimes !== undefined) {
-        throw new Error('mirage: pass runtimes or workspaceOptions.runtimes, not both')
+    if (config.machines !== undefined) {
+      if (options.machines !== undefined) {
+        throw new Error('mirage: pass machines or workspaceOptions.machines, not both')
       }
-      options.runtimes = config.runtimes.map(toRuntimeEntry)
+      options.machines = config.machines
     }
     if (config.profiles !== undefined) {
       if (options.profiles !== undefined) {
@@ -240,8 +266,11 @@ export class MirageService extends Service {
     // what finds an approver composed after this plugin. An explicit
     // `workspaceOptions.onAsk` is the embedder's decision and stands.
     options.onAsk ??= askThroughApproval(ctx)
-    this.plannedRuntimes = options.runtimes?.map(builtEntry)
-    if (this.plannedRuntimes !== undefined) options.runtimes = [...this.plannedRuntimes]
+    if (options.machines !== undefined) {
+      const [machines, runtimes] = builtMachines(options.machines)
+      options.machines = machines
+      this.plannedRuntimes = runtimes
+    }
     const blocks = Object.values(config.mounts).some(isMountBlock)
     if (blocks) {
       this.ready = this.open(config.mounts, options)
@@ -268,6 +297,7 @@ export class MirageService extends Service {
 
   /** The live workspace; throws until `ready` resolves. */
   get workspace(): Workspace {
+    if (this.remote !== null) throw new Error('mirage: the workspace is on a Mirage server')
     if (this.built === null) {
       throw new Error('mirage: workspace is not ready yet; await ctx.mirage.ready')
     }
@@ -317,8 +347,24 @@ export class MirageService extends Service {
    * @returns the line's explanation.
    */
   async explain(line: string, sessionId = ''): Promise<ShellExplanation> {
+    if (this.remote !== null) return this.remote.explain(line, sessionId)
     const ws = await this.ready
     return ws.explain(line, sessionId)
+  }
+
+  /**
+   * The workspace path naming the same file as a path on this machine.
+   *
+   * A disk mount is the one place the two hold the same file, so only a
+   * workspace in this process can answer; a remote one, and one still
+   * building, decline.
+   *
+   * @param hostPath an absolute path on this machine.
+   * @returns the virtual path, or undefined when no mount maps it.
+   */
+  hostPathToVirtual(hostPath: string): string | undefined {
+    if (this.built === null) return undefined
+    return hostPathToVirtual(this.built, hostPath)
   }
 
   /**
@@ -330,11 +376,12 @@ export class MirageService extends Service {
    * the bridged engines, while the host `local` python or a remote
    * sandbox can act around the gate. Answers before `ready` from the
    * constructor-resolved entries (mounts resolve asynchronously,
-   * runtimes never do) and from the live workspace afterwards, so a
-   * later `addRuntime` or `removeRuntime` is seen.
+   * machines never do) and from the live workspace afterwards, so a
+   * later `addMachine` or `removeMachine` is seen.
    */
   get vfsOnly(): boolean {
-    const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.runtimes()
+    if (this.remote !== null) return false
+    const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.engines()
     return entries.every((entry) => entry.reach === 'workspace')
   }
 

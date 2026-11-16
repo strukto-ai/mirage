@@ -32,6 +32,7 @@ import {
 } from '../../../tests/vfs/s3/mock.ts'
 import { s3Vfs } from '../../../tests/test-utils.ts'
 import { Workspace } from '../../workspace.ts'
+import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 
 const STALE = 'changed since it was read; read it again before writing'
 const ENC = new TextEncoder()
@@ -1011,7 +1012,7 @@ describe('conditional writes on an S3 mount', () => {
       // The runtime's truncating open carries the version the agent read.
       const ws = new Workspace(
         { '/s3': new Mount(s3Vfs(), { mode: MountMode.WRITE, write }) },
-        { mode: MountMode.EXEC, runtimes: ['quickjs', 'workspace'] },
+        { mode: MountMode.EXEC, machines: [buildRuntime('quickjs')] },
       )
       built.push(ws)
       await run(ws, 'cat /s3/f')

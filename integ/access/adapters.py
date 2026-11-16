@@ -58,7 +58,6 @@ CLI_GROUPS = (
     "policy",
     "vfs",
     "cli",
-    "runtime",
     "machine",
 )
 # A group inside a group: its commands are three words.

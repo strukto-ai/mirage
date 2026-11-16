@@ -30,25 +30,24 @@ function routePolicy(route: RouteRule): RoutePolicy {
 const ROUTE_HEAVY = [
   'def pre_execute(ctx):',
   '    if "heavy" in ctx["line"]:',
-  '        return {"kind": "route", "runtime": "beta"}',
+  '        return {"kind": "route", "machine": "beta"}',
   '',
 ].join('\n')
 
 describe('RoutePolicy', () => {
-  it('places the line on a runtime name and says nothing on null', async () => {
+  it('places the line on a machine name and says nothing on null', async () => {
     const policy = routePolicy((ctx) => (ctx.line.includes('heavy') ? 'beta' : null))
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
-      runtime: 'beta',
+      machine: 'beta',
     })
     expect(await policy.preExecute(line('echo hi'))).toBeNull()
   })
 
   it.each([
-    { kind: 'route', runtime: 'beta' },
-    { kind: 'route', machine: 'box' },
-    { kind: 'route', runtime: 'beta', machine: 'box' },
-  ] as const)('places the line on a runtime, a machine or both: %j', async (route) => {
+    { kind: 'route', machine: 'beta' },
+    { kind: 'route', machine: 'box', reason: 'heavy' },
+  ] as const)('places the line on a machine: %j', async (route) => {
     expect(await routePolicy(() => route).preExecute(line('python3 heavy'))).toEqual(route)
   })
 
@@ -59,7 +58,7 @@ describe('RoutePolicy', () => {
       // policy that answers anything else is misconfigured, not a refusal.
       await expect(
         routePolicy((() => verdict) as unknown as RouteRule).preExecute(line('echo hi')),
-      ).rejects.toThrow(/a runtime name, a Route or None/)
+      ).rejects.toThrow(/a machine name, a Route or None/)
     },
   )
 
@@ -70,7 +69,7 @@ describe('RoutePolicy', () => {
     })
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
-      runtime: 'beta',
+      machine: 'beta',
     })
     expect(await policy.preExecute(line('echo hi'))).toBeNull()
   })

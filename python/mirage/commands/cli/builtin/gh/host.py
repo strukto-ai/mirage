@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from mirage.accessor.github import GitHubAccount
 from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
+    APP_TOKEN_MASK,
     CONNECT_HINT,
     GITHUB_HOST,
 )
@@ -55,6 +56,7 @@ from mirage.rs.stream import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, PathSpec
+from mirage.utils.abort import sleep
 from mirage.utils.clock import system_now
 from mirage.version import __version__
 
@@ -262,6 +264,9 @@ class GhHost:
             return await self._jq(request, data)
         if op == "now":
             return Served({"now": system_now()})
+        if op == "sleep":
+            await sleep(float(cast(int, request["seconds"])))
+            return Served({})
         if op == "memory":
             check_memory(cast(int, request["size"]))
             return Served({})
@@ -314,7 +319,11 @@ async def run_leaf(
             "texts": list(texts),
             "repo": config.repo,
             "branch": config.branch,
-            "token_mask": masked_token(config.token.get_secret_value()),
+            "token_mask": (
+                APP_TOKEN_MASK
+                if config.token is None
+                else masked_token(config.token.get_secret_value())
+            ),
             "base_url": config.base_url,
             "version": __version__,
             "argv_len": len(ctx.argv),

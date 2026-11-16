@@ -16,9 +16,9 @@ mounts:
     config:
       root: ${ARCHIVE_DIR}
 
-runtimes:
-  - name: ./remote_runtime.mjs:RemoteRuntime
-    config:
-      url: ${EXEC_URL}
-      token: ${EXEC_TOKEN}
-  - workspace
+machines:
+  exec:
+    provider: in_process
+    runtime: ./remote_runtime.mjs:RemoteRuntime
+    url: ${EXEC_URL}
+    token: ${EXEC_TOKEN}

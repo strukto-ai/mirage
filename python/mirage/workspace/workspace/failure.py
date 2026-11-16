@@ -18,7 +18,7 @@ from mirage.commands.errors import UsageError
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.errors import MemoryExhausted
+from mirage.io.errors import MemoryExhausted, PipeClosed
 from mirage.policy import (
     Deny,
     Pending,
@@ -27,7 +27,7 @@ from mirage.policy import (
 )
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.shell.bytes import encode_text
-from mirage.shell.constants import TIMEOUT_STATUS
+from mirage.shell.constants import SIGPIPE_STATUS, TIMEOUT_STATUS
 from mirage.workspace.workspace.utils import command_name
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,8 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
         exc (BaseException): the exception the line raised.
         command (str): the raw command line, for the diagnostic name.
     """
+    if isinstance(exc, PipeClosed):
+        return IOResult(exit_code=SIGPIPE_STATUS)
     if isinstance(exc, CommandTimeoutError):
         return IOResult(
             exit_code=TIMEOUT_STATUS, stderr=encode_text(str(exc) + "\n")

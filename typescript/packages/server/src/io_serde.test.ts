@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/index'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { Route } from '@struktoai/mirage-core/policy/types'
@@ -34,7 +35,7 @@ const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 
 class OnMonty implements Policy {
   preExecute(): Promise<Route> {
-    return Promise.resolve({ kind: 'route', runtime: 'monty', reason: 'plain arithmetic' })
+    return Promise.resolve({ kind: 'route', machine: 'monty', reason: 'plain arithmetic' })
   }
 }
 
@@ -113,7 +114,7 @@ describe('checked and answered', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: ['monty', 'workspace'],
+        machines: [new MontyRuntime()],
         policies: [new OnMonty()],
       },
     )
@@ -122,8 +123,7 @@ describe('checked and answered', () => {
       expect(said.answers).toEqual([
         {
           kind: 'route',
-          runtime: 'monty',
-          machine: null,
+          machine: 'monty',
           reason: 'plain arithmetic',
           policy: 'OnMonty',
         },

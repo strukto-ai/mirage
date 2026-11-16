@@ -51,7 +51,7 @@ describe('LocalRuntime', () => {
   it('waits for an exited native child without requiring stdin to close', async () => {
     const ws = new Workspace(
       {},
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['uname'] }), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime({ captures: ['uname'] })] },
     )
     try {
       const child = ws.spawn({ argv: ['uname'] })
@@ -132,7 +132,7 @@ describe('LocalRuntime', () => {
       const baseline = await rt.version({})
       const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
       expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: null })
-      const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [rt, 'workspace'] })
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode, machines: [rt] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
           const io = await ws.shell(line, { env: session })
@@ -217,10 +217,7 @@ describe('LocalRuntime', () => {
     )
     const env = { PYTHONPATH: dir }
     const rt = new LocalRuntime({ config: { home: python } })
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.READ, runtimes: [rt, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.READ, machines: [rt] })
     try {
       for (const line of ['python --version', 'python3 -V', 'python -VV']) {
         const io = await ws.shell(line, { env })
@@ -246,7 +243,7 @@ describe('LocalRuntime', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new LocalRuntime({ captures: ['python3'] })],
+        machines: [new LocalRuntime({ captures: ['python3'] })],
         systemTime: '2026-03-02T09:00:00Z',
       },
     )
@@ -318,7 +315,7 @@ describe('LocalRuntime', () => {
     // Mirrors Python's test_dash_o_strips_asserts_on_a_cpython_runtime.
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
     )
     try {
       const io = await ws.shell(`python3 -O -c 'assert False, "boom"; print("ok")'`)
@@ -335,7 +332,7 @@ describe('LocalRuntime', () => {
   it('stops an endless printer once its reader has enough', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
     )
     try {
       const io = await ws.shell("python3 -c 'while True: print(1)' | head -n 2")
@@ -348,7 +345,7 @@ describe('LocalRuntime', () => {
   it('hands unbuffered output to its reader before the program ends', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
     )
     try {
       const io = await ws.shell("python3 -u -c 'import time; print(1); time.sleep(60)' | head -n 1")
@@ -607,10 +604,7 @@ it.each(["yes | perl -ne 'print; exit'", 'perl -e \'$|=1; print "y\\n" while 1\'
   'streams infinite pipes and closes children: %s',
   async (line) => {
     const rt = new LocalRuntime({ captures: ['@external'] })
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
     try {
       const result = await ws.shell(line)
       expect(result.exitCode, DEC.decode(result.stderr)).toBe(0)
@@ -628,7 +622,7 @@ it.skipIf(process.platform === 'win32')(
     const root = await realpath(await mkdtemp(join(tmpdir(), 'mirage-local-')))
     const ws = new Workspace(
       { [root]: new DiskVFS({ root }) },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
     )
     try {
       expect(DEC.decode((await ws.shell(`ls ${root}`)).stdout)).toBe('')
@@ -663,7 +657,7 @@ it.each(RESTRICTIONS)('refuses every program under a session restriction', async
   const root = await mkdtemp(join(tmpdir(), 'mirage-local-'))
   const ws = new Workspace(
     { '/data': new DiskVFS({ root }) },
-    { mode: MountMode.EXEC, profiles: { agent: profile }, runtimes: [runtime, 'workspace'] },
+    { mode: MountMode.EXEC, profiles: { agent: profile }, machines: [runtime] },
   )
   try {
     const agent = await ws.session('agent', { profile: 'agent' })

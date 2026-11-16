@@ -222,7 +222,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         { '/data': new RAMVFS() },
         {
           mode: MountMode.EXEC,
-          runtimes: [rt, 'workspace'],
+          machines: [rt],
           profiles: { short: { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.1 }) } } },
         },
       )

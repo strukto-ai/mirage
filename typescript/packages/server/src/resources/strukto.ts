@@ -63,7 +63,7 @@ function inline(value: unknown, plain: ReadonlyMap<string, Fields>): unknown {
  * `env` entry at any field, reads it from the `strukto` source, declared here
  * with each entry's fields and the sealed ones opened, as mirage reads any
  * secret's. A saved field never points at a store, since a save refuses one. Throws a ResourceError for a name not saved as a VFS, CLI
- * or runtime, or a saved value its field cannot take.
+ * or machine, or a saved value its field cannot take.
  */
 export async function withEntries(
   store: ResourceStore,
@@ -79,7 +79,7 @@ export async function withEntries(
   for (const ref of refs) {
     const kind = kinds.get(ref)
     if (kind === undefined) {
-      throw new ResourceError('invalid', `${ref} is not saved as a VFS, CLI, runtime or machine`)
+      throw new ResourceError('invalid', `${ref} is not saved as a VFS, CLI or machine`)
     }
     const entry = await store.revealEntry(kind, ref)
     plain.set(ref, entry.fields)

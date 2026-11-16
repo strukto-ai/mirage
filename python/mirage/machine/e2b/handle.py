@@ -142,8 +142,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     it. A ``mount_type`` serves the workspace over a PTY, since E2B's
     exec decodes output as text.
 
-    The sandbox is yours: Mirage never extends or kills it. Once the SDK
-    says it is gone, connecting fails with how to replace it, and a line
+    The sandbox is yours: Mirage never kills it, and pauses it only when
+    the workspace pauses and its config says ``on_pause: pause`` or the
+    call names it. Once
+    the SDK says it is gone, connecting fails with how to replace it, and a line
     it cut short loses its connection (129) with the same advice; the
     next line connects again.
 
@@ -153,6 +155,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     """
 
     provider = "e2b"
+    pauses = True
     config_cls = E2BConfig
     config: E2BConfig
 
@@ -178,6 +181,25 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             if (hint := self._gone(exc)) is None:
                 raise
             raise RuntimeError(hint) from exc
+        self._reached = True
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the config says ``on_pause: pause``."""
+        return self.config.on_pause == "pause"
+
+    async def _pause_machine(self) -> None:
+        """Pause the sandbox, keeping its disk and memory; the next connect
+        resumes it. A sandbox already gone has nothing to pause."""
+        try:
+            await sdk.AsyncSandbox.pause(
+                self.config.sandbox_id, **self._api_params()
+            )
+        except sdk.SandboxNotFoundException:
+            logger.debug(
+                "%s: sandbox already gone, nothing to pause",
+                self.machine,
+                exc_info=True,
+            )
 
     def _gone(self, exc: BaseException) -> str | None:
         """How to replace the sandbox when ``exc`` says it is gone, else

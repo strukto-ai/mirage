@@ -97,7 +97,7 @@ class PipeInput:
 
 class AsyncLineIterator:
     def __init__(self, source: ByteSource) -> None:
-        self._input = source
+        self.input = source
         self._started = False
         self._source: AsyncGenerator[bytes, None] | PipeInput = (
             source if isinstance(source, PipeInput) else chunks(source)
@@ -321,7 +321,7 @@ class AsyncLineIterator:
             self._closing = True
         else:
             await self._source.aclose()
-        close = getattr(self._input, "aclose", None)
+        close = getattr(self.input, "aclose", None)
         if not self._started and close is not None:
             await close()
 
@@ -421,6 +421,9 @@ class AsyncLineIterator:
                     self._pos += len(delim)
                     self._trim()
                     return bytes(out), True
+                if self._buf[self._pos] == 0:
+                    self._pos += 1
+                    continue
                 width = char_width(self._buf, self._pos)
                 if room is not None and len(out) + width > room:
                     raise MemoryExhausted()

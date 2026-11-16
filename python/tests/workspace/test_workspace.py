@@ -21,6 +21,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy import PolicyError, SessionProfile
 from mirage.runtime.python import LocalRuntime
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import FileType, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -69,7 +70,7 @@ def _ws():
             "/disk/": (disk, MountMode.EXEC),
             "/ram/": (ram, MountMode.EXEC),
         },
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     ws.get_session(ws.default_session_id).cwd = "/s3"
     return ws

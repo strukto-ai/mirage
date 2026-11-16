@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING
 from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
-    from mirage.runtime.routing.decide import runtime_for_language
+    from mirage.runtime.routing.decide import runtime_for_script
     from mirage.runtime.routing.errors import RouteError
     from mirage.runtime.routing.types import RouteRule
     from mirage.runtime.types import RouteDecision
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.runtime.routing.decide": ("runtime_for_language",),
+    "mirage.runtime.routing.decide": ("runtime_for_script",),
     "mirage.runtime.routing.errors": ("RouteError",),
     "mirage.runtime.routing.types": ("RouteRule",),
     "mirage.runtime.types": ("RouteDecision",),
@@ -33,7 +33,7 @@ __all__ = [
     "RouteDecision",
     "RouteRule",
     "RouteError",
-    "runtime_for_language",
+    "runtime_for_script",
 ]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

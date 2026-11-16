@@ -269,7 +269,7 @@ export default {
       },
       {
         mode: MountMode.EXEC,
-        runtimes: ['workspace', 'monty'],
+        machines: { py: { provider: 'in_process', runtime: 'monty' } },
         ...(run.maxMemory !== undefined ? { maxMemory: run.maxMemory } : {}),
         ...(run.lineSeconds !== undefined
           ? { commandLimits: { '@line': new Limit({ timeoutSeconds: run.lineSeconds }) } }

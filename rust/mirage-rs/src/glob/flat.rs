@@ -8,12 +8,12 @@ enum Token {
 }
 
 impl Token {
-    fn accepts(&self, cp: u32) -> bool {
+    fn accepts(&self, cp: u32, nocase: bool) -> bool {
         match self {
             Self::Star | Self::Any => true,
-            Self::Literal(unit) => *unit == cp,
+            Self::Literal(unit) => super::compile::equal(*unit, cp, nocase),
             Self::Bracket { negate, atoms } => {
-                atoms.iter().any(|atom| atom.contains(cp)) != *negate
+                atoms.iter().any(|atom| atom.contains(cp, nocase)) != *negate
             }
         }
     }
@@ -22,7 +22,10 @@ impl Token {
 /// A pattern with no extglob group, as the evaluator reads it: every token
 /// but a star takes one character, so a whole match needs no allocation
 /// and only the last star seen as a point to retry from.
-pub(super) struct Flat(Vec<Token>);
+pub(super) struct Flat {
+    tokens: Vec<Token>,
+    nocase: bool,
+}
 
 impl Flat {
     pub(super) fn new(program: &Program) -> Option<Self> {
@@ -53,13 +56,19 @@ impl Flat {
             });
             state += 1;
         }
-        Some(Self(tokens))
+        Some(Self {
+            tokens,
+            nocase: program.nocase,
+        })
     }
 
     /// The one subject the pattern matches, when every token is a literal:
     /// a host compares names against it without a call.
     pub(super) fn literal(&self) -> Option<Vec<u32>> {
-        self.0
+        if self.nocase {
+            return None;
+        }
+        self.tokens
             .iter()
             .map(|token| match token {
                 Token::Literal(unit) => Some(*unit),
@@ -71,7 +80,7 @@ impl Flat {
     /// Whether `subject` matches whole; `period` keeps every wildcard off
     /// its first character.
     pub(super) fn matches(&self, subject: &[u32], period: bool) -> bool {
-        let tokens = &self.0;
+        let tokens = &self.tokens;
         if period
             && tokens
                 .first()
@@ -88,7 +97,11 @@ impl Flat {
                     at += 1;
                     continue;
                 }
-                Some(token) if subject.get(next).is_some_and(|&cp| token.accepts(cp)) => {
+                Some(token)
+                    if subject
+                        .get(next)
+                        .is_some_and(|&cp| token.accepts(cp, self.nocase)) =>
+                {
                     at += 1;
                     next += 1;
                     continue;

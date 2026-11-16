@@ -182,7 +182,7 @@ async def handle_mapfile(
         if seen <= skip:
             continue
         record = data + delim if found and not strip else data
-        text = decode_text(record)
+        text = decode_text(record.partition(b"\0")[0])
         if callback is not None and (stored + 1) % quantum == 0:
             # bash runs the callback before the record lands, on the
             # array as read so far, and keeps what the callback did to

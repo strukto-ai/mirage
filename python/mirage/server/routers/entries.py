@@ -36,7 +36,6 @@ from mirage.types import JsonValue
 ROUTES: dict[EntryKind, str] = {
     "vfs": "/v1/vfs",
     "cli": "/v1/clis",
-    "runtime": "/v1/runtimes",
     "machine": "/v1/machines",
 }
 
@@ -66,8 +65,6 @@ def present(
         "builtin": False,
         "config": entry.fields,
     }
-    if kind == "runtime":
-        out["captures"] = []
     out.update(created_by=None, created_at=None, updated_at=None)
     if used_by is not None:
         out["used_by"] = used_by

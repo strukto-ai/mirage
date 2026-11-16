@@ -27,14 +27,15 @@ from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.table import (
     BUILTIN_RUNTIMES,
-    DEFAULT_ENTRIES,
     NAMED,
     bind_commands,
+    build_entry,
     build_runtime,
     built_from,
     known_runtimes,
+    machine_bindings_for,
+    placement,
     register_runtime,
-    runtime_bindings_for,
     shadowed_captures,
     whole_line_runtime,
 )
@@ -71,10 +72,6 @@ class DirectEngine(LanguageRuntime):
 
     async def interpret(self, engine, program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
-
-
-def test_default_world_is_the_workspace_alone():
-    assert DEFAULT_ENTRIES == ("workspace",)
 
 
 @pytest.mark.parametrize(
@@ -128,7 +125,7 @@ def test_bind_commands_refuses_a_capture_a_language_runtime_does_not_run(
     with pytest.raises(ValueError) as refused:
         bind_commands([entry(captures=[capture])])
     assert str(refused.value) == (
-        f"runtime {entry.name!r} does not run "
+        f"machine {entry.name!r} does not run "
         f"{('node' if capture == '@js' else capture)!r}"
     )
 
@@ -180,23 +177,17 @@ def test_build_runtime_workspace_is_a_named_runtime():
 
 
 def test_bind_commands_rejects_duplicate_names():
-    with pytest.raises(ValueError, match="duplicate runtime entry: 'local'"):
+    with pytest.raises(ValueError, match="duplicate machine: 'local'"):
         bind_commands([LocalRuntime(), LocalRuntime()])
 
 
-def test_bind_commands_takes_a_remote_entry_per_machine():
-    a, b = RemoteRuntime(machine="a"), RemoteRuntime(["node"], machine="b")
-    assert [a.name, b.name, RemoteRuntime().name] == [
-        "remote:a",
-        "remote:b",
-        "remote",
-    ]
+def test_bind_commands_takes_a_remote_runtime_per_machine():
+    a, b = RemoteRuntime("a"), RemoteRuntime("b", ["node"])
+    assert [a.name, b.name] == ["a", "b"]
     bindings = bind_commands([a, b])
     assert (bindings["@external"], bindings["node"]) == (a, b)
-    with pytest.raises(
-        ValueError, match="duplicate runtime entry: 'remote:a'"
-    ):
-        bind_commands([a, RemoteRuntime(["node"], machine="a")])
+    with pytest.raises(ValueError, match="duplicate machine: 'a'"):
+        bind_commands([a, RemoteRuntime("a", ["node"])])
 
 
 def test_every_runtime_declares_captures():
@@ -204,50 +195,95 @@ def test_every_runtime_declares_captures():
         assert cls.captures or cls is WorkspaceRuntime
 
 
-def test_runtime_bindings_for_maps_only_the_named_captures():
+def test_machine_bindings_for_maps_only_the_named_captures():
     fake = FakeRuntime()
-    bindings = runtime_bindings_for([fake, WorkspaceRuntime()], "fake")
+    bindings = machine_bindings_for([fake, WorkspaceRuntime()], "fake")
     assert bindings == {"python3": fake, "made-up": fake}
 
 
 @pytest.mark.parametrize(
     ("name", "refusal"),
     [
-        ("workspace", "not a runtime you can select"),
-        ("nope", "'fake', 'workspace'"),
+        ("workspace", "not a machine you can select"),
+        ("nope", r"unknown machine: 'nope' \(workspace machines: 'fake'\)"),
     ],
 )
-def test_runtime_bindings_for_refuses_a_name_it_cannot_bind(name, refusal):
+def test_machine_bindings_for_refuses_a_name_it_cannot_bind(name, refusal):
     with pytest.raises(ValueError, match=refusal):
-        runtime_bindings_for([FakeRuntime(), WorkspaceRuntime()], name)
+        machine_bindings_for([FakeRuntime(), WorkspaceRuntime()], name)
 
 
-def test_runtime_bindings_for_takes_a_runtimes_name_while_it_has_one_entry():
-    a, b = RemoteRuntime(machine="a"), RemoteRuntime(["node"], machine="b")
-    assert runtime_bindings_for([a, WorkspaceRuntime()], "remote") == {
-        "@external": a
-    }
-    assert runtime_bindings_for([a, b], "remote:b") == {"node": b}
-    prod = RemoteRuntime(machine="gpu:prod")
-    with pytest.raises(ValueError, match="unknown runtime: 'remote:gpu'"):
-        runtime_bindings_for([prod], "remote:gpu")
-    with pytest.raises(
-        ValueError,
-        match=r"ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a',"
-        r" 'remote:b'\)",
-    ):
-        runtime_bindings_for([a, b], "remote")
+def test_machine_bindings_for_says_none_when_there_is_no_machine():
+    with pytest.raises(ValueError, match=r"\(workspace machines: none\)"):
+        machine_bindings_for([WorkspaceRuntime()], "nope")
 
 
-def test_runtime_bindings_for_takes_no_other_name_a_class_is_registered_as():
+def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
     try:
         register_runtime("cpython", FakeRuntime)
-        with pytest.raises(ValueError, match="unknown runtime: 'cpython'"):
-            runtime_bindings_for(
+        with pytest.raises(ValueError, match="unknown machine: 'cpython'"):
+            machine_bindings_for(
                 [FakeRuntime(), WorkspaceRuntime()], "cpython"
             )
     finally:
         NAMED.pop("cpython", None)
+
+
+@pytest.mark.parametrize(
+    ("spec", "cls"),
+    [
+        ({"provider": "in_process", "runtime": "monty"}, "MontyRuntime"),
+        ({"provider": "host"}, "LocalRuntime"),
+        ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
+        ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
+    ],
+)
+def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
+    handle, runtime = build_entry("py", spec)
+    assert (handle, type(runtime).__name__, runtime.name) == (None, cls, "py")
+    assert built_from(runtime) == spec
+
+
+@pytest.mark.parametrize(
+    ("name", "spec", "refusal"),
+    [
+        ("py", {"provider": "worker"}, "unknown machine provider"),
+        ("py", {"provider": "in_process", "runtime": "local"}, "runs on host"),
+        ("py", {"provider": "host", "runtime": "monty"}, "not a runtime"),
+        (
+            "py",
+            {"provider": "in_process", "runtime": "monty", "sandbox": {}},
+            "only a host",
+        ),
+        ("py", {"provider": "host", "sandbox": None}, "must be a mapping"),
+        (
+            "workspace",
+            {"provider": "in_process", "runtime": "monty"},
+            "reserved for the workspace",
+        ),
+        ("workspace", {"provider": "docker"}, "reserved for the workspace"),
+        ("py", {"provider": "in_process"}, "names its runtime"),
+        ("py", WorkspaceRuntime(), "not a machine"),
+        (
+            "py",
+            {"provider": "in_process", "runtime": WorkspaceRuntime},
+            "not a machine",
+        ),
+        (
+            "py",
+            {"provider": "in_process", "runtime": "workspace"},
+            "not a machine",
+        ),
+        ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
+        ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
+        ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),
+    ],
+)
+def test_build_entry_refuses_what_its_provider_does_not_run(
+    name, spec, refusal
+):
+    with pytest.raises(ValueError, match=refusal):
+        build_entry(name, spec)
 
 
 class _LineRuntime(Runtime, LineExecutorMixin):
@@ -270,7 +306,7 @@ def test_only_a_line_capture_takes_the_whole_line():
 
 
 def test_whole_line_runtime_skips_stage_engines_and_workspace():
-    vfs = WorkspaceRuntime(captures=["grep"])
+    vfs = WorkspaceRuntime()
     monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
     assert whole_line_runtime(bindings) is None
@@ -288,13 +324,6 @@ def test_workspace_runtime_is_a_pure_routing_marker():
 
 def test_workspace_runtime_reach_is_workspace():
     assert WorkspaceRuntime.reach == "workspace"
-
-
-def test_default_world_reaches_only_the_workspace():
-    # The default world's sandbox story rests on every entry keeping
-    # its effects behind the workspace gate; `local` (process reach)
-    # is deliberately not a default entry.
-    assert all(NAMED[name].reach == "workspace" for name in DEFAULT_ENTRIES)
 
 
 def test_register_runtime_makes_a_host_class_buildable_by_name():
@@ -328,6 +357,21 @@ def test_register_runtime_replaces_a_custom_name():
         NAMED.pop("fake", None)
 
 
+def test_placement_keeps_the_name_an_entry_was_built_with():
+    try:
+        register_runtime("fake-first", FakeRuntime)
+        register_runtime("fake-second", FakeRuntime)
+        _, built = build_entry(
+            "py", {"provider": "in_process", "runtime": "fake-second"}
+        )
+        assert placement(built) == ("in_process", "fake-second")
+        NAMED.pop("fake-second")
+        assert placement(built) == ("in_process", "fake-second")
+    finally:
+        NAMED.pop("fake-first", None)
+        NAMED.pop("fake-second", None)
+
+
 class Named(Runtime):
     def __init__(self, name: str, *captures: str) -> None:
         super().__init__(captures=captures)
@@ -354,11 +398,12 @@ class _Unhashable(FakeRuntime):
     __hash__ = None  # type: ignore[assignment]
 
 
-def test_a_runtime_built_by_name_need_not_be_hashable():
+def test_a_runtime_built_from_an_entry_need_not_be_hashable():
+    spec = {"provider": "in_process", "runtime": "unhashable"}
     try:
         register_runtime("unhashable", _Unhashable)
-        built = build_runtime("unhashable")
-        assert built_from(built) == "unhashable"
+        _, built = build_entry("u", spec)
+        assert built_from(built) == spec
         assert built_from(_Unhashable()) is None
     finally:
         NAMED.pop("unhashable", None)

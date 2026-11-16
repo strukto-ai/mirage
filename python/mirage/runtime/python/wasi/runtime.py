@@ -41,9 +41,9 @@ _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
     "plus lib/): download one from "
     "https://github.com/brettcannon/cpython-wasi-build/releases, unzip it, "
-    "and point the runtime entry's config `home` (yaml `runtimes: [{name: "
-    f"wasi, config: {{home: ...}}}}]`) or the {WASI_HOME_ENV} environment "
-    "variable at the directory"
+    "and point the machine's `home` (yaml `machines: {py: {provider: "
+    f"in_process, runtime: wasi, home: ...}}}}`) or the {WASI_HOME_ENV} "
+    "environment variable at the directory"
 )
 
 

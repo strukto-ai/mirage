@@ -9,10 +9,12 @@
     {
       "id": "s3_read",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/s3": {
             "vfs": "s3"
@@ -32,10 +34,12 @@
     {
       "id": "s3_cache_invalidate",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/s3": {
             "vfs": "s3"
@@ -68,10 +72,12 @@
     {
       "id": "s3_warm_read",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/s3": {
             "vfs": "s3"
@@ -113,10 +119,12 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/s3": {
             "vfs": "s3"
@@ -151,10 +159,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/s3": {
             "vfs": "s3"

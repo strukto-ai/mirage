@@ -6,15 +6,13 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          {
-            "name": "wasi",
-            "config": {
-              "homee": "/x"
-            }
-          },
-          "workspace"
-        ]
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi",
+            "homee": "/x"
+          }
+        }
       },
       "build_error": {
         "contains": "homee"
@@ -26,15 +24,13 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          {
-            "name": "pyodide",
-            "config": {
-              "homee": "/x"
-            }
-          },
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide",
+            "homee": "/x"
+          }
+        }
       },
       "build_error": {
         "contains": "unknown runtime config key 'homee'"
@@ -46,15 +42,13 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          {
-            "name": "wasi",
-            "config": {
-              "home": "/nonexistent-wasi-build"
-            }
-          },
-          "workspace"
-        ]
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi",
+            "home": "/nonexistent-wasi-build"
+          }
+        }
       },
       "build_error": {
         "contains": "cpython-wasi-build",

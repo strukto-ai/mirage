@@ -203,6 +203,7 @@ async def test_a_cli_config_reads_a_pointer_too():
             "clis": {
                 "demo": {
                     "cli": "git",
+                    "machine": "in_process",
                     "config": {"token": BOT.model_dump(by_alias=True)},
                 }
             },

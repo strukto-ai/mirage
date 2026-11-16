@@ -68,6 +68,7 @@ pub const RANDOM: &str = "RANDOM";
 pub const LINENO: &str = "LINENO";
 pub const BASHPID: &str = "BASHPID";
 pub const BASH_LINENO: &str = "BASH_LINENO";
+pub const BASH_SOURCE: &str = "BASH_SOURCE";
 pub const PIPESTATUS: &str = "PIPESTATUS";
 /// The stored attribute letters, in print order.
 pub fn letters(attrs: u8) -> String {
@@ -137,11 +138,15 @@ pub struct Store {
     held: usize,
     /// A fresh stamp on every change to the records or the hidden names.
     stamp: u64,
+    /// The dotglob change from the last assignment to GLOBIGNORE, until the host applies it.
+    pending_dotglob: Option<bool>,
     /// `${PIPESTATUS[@]}`: each stage's status in the last pipeline.
     pipe_status: Vec<i32>,
     /// `${FUNCNAME[@]}`: the running functions, innermost first; None
     /// once `unset FUNCNAME` made it an ordinary name.
     function_names: Option<Vec<Vec<u8>>>,
+    /// The file defining each active function or sourced script, innermost first.
+    pub(crate) source_files: Vec<Vec<u8>>,
     /// `${BASH_LINENO[@]}`: the line each running function and sourced
     /// file was called from, innermost first.
     call_lines: Vec<usize>,
@@ -182,8 +187,10 @@ impl Store {
             ids,
             held: 0,
             stamp: fresh_stamp(),
+            pending_dotglob: None,
             pipe_status: Vec::new(),
             function_names: Some(Vec::new()),
+            source_files: Vec::new(),
             call_lines: Vec::new(),
             line: 0,
             bash_pid: 0,
@@ -276,6 +283,7 @@ impl Store {
                     .map(|status| status.to_string().into_bytes()),
             ),
             ("FUNCNAME", Some(names)) => Indexed::dense(names.iter().cloned()),
+            (BASH_SOURCE, _) => Indexed::dense(self.source_files.iter().cloned()),
             (BASH_LINENO, _) => Indexed::dense(
                 self.call_lines
                     .iter()
@@ -288,8 +296,8 @@ impl Store {
 
     /// The names set now whose value the shell computes at each read, which
     /// `${!prefix@}` lists beside the stored ones: `PIPESTATUS` once a
-    /// command has run, `FUNCNAME` inside a function, `BASH_LINENO` even
-    /// empty, and `RANDOM`, `LINENO` and `BASHPID` until each is no longer
+    /// command has run, `FUNCNAME` inside a function, `BASH_LINENO` and
+    /// `BASH_SOURCE` even empty, and `RANDOM`, `LINENO` and `BASHPID` until each is no longer
     /// special.
     pub fn computed(&self) -> impl Iterator<Item = &'static str> + '_ {
         [
@@ -299,14 +307,15 @@ impl Store {
             "PIPESTATUS",
             "FUNCNAME",
             BASH_LINENO,
+            BASH_SOURCE,
         ]
         .into_iter()
         .filter(|&name| {
             self.random_special(name)
                 || self.dynamic(name).is_some()
-                || self
-                    .special(name)
-                    .is_some_and(|array| !array.is_empty() || name == BASH_LINENO)
+                || self.special(name).is_some_and(|array| {
+                    !array.is_empty() || name == BASH_LINENO || name == BASH_SOURCE
+                })
         })
     }
 
@@ -336,6 +345,14 @@ impl Store {
     pub fn hide(&mut self, matcher: Option<Arc<VisibilityMatcher>>) {
         self.hidden = matcher;
         self.stamp = fresh_stamp();
+    }
+
+    /// The `dotglob` setting the last write to GLOBIGNORE made, once: a
+    /// non-empty value turns it on and `unset` turns it off.
+    pub fn take_dotglob(&mut self) -> Option<bool> {
+        self.pending_dotglob
+            .take()
+            .filter(|_| !self.hidden("GLOBIGNORE"))
     }
 
     /// The stamp the records and the names hidden from them carry now: a
@@ -431,6 +448,15 @@ impl Store {
             return None;
         }
         self.stamp = fresh_stamp();
+        if name == "GLOBIGNORE" {
+            match &var {
+                None => self.pending_dotglob = Some(false),
+                Some(var) if var.text().is_some_and(|v| !v.is_empty()) => {
+                    self.pending_dotglob = Some(true)
+                }
+                _ => {}
+            }
+        }
         let vars = Arc::make_mut(&mut self.vars);
         let old = match var {
             Some(var) => {
@@ -707,9 +733,11 @@ impl Store {
         forked.vars = self.vars.clone();
         forked.held = self.held;
         forked.stamp = self.stamp;
+        forked.pending_dotglob = self.pending_dotglob;
         forked.hidden = self.hidden.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
+        forked.source_files = self.source_files.clone();
         forked.call_lines = self.call_lines.clone();
         forked.line = self.line;
         forked.bash_pid = self.bash_pid;

@@ -78,12 +78,12 @@ class ShellProbe extends Runtime {
     }
   }
 }
-function world(runtimes?: Runtime[]): Workspace {
+function world(machines?: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      ...(runtimes === undefined ? {} : { runtimes }),
+      ...(machines === undefined ? {} : { machines }),
     },
   )
 }
@@ -108,7 +108,7 @@ describe('execution bindings', () => {
     const runtime = new EagerProbe()
     const data = new RAMVFS()
     data.loadState({ type: 'ram', files: { '/file': enc.encode('ready') } })
-    const ws = new Workspace({ '/data': data }, { runtimes: [runtime] })
+    const ws = new Workspace({ '/data': data }, { machines: [runtime] })
     try {
       expect(runtime.prefixes).toEqual(['/data/', '/dev/'])
       expect(runtime.links).toEqual([])
@@ -208,7 +208,7 @@ describe('execution bindings', () => {
     try {
       const ok = await runtime.execute([], [], context({ flags: { c: 'ok' } }))
       expect(dec.decode(ok.stdout)).toBe('ok')
-      expect(() => second.addRuntime(runtime)).toThrow('another workspace')
+      expect(() => second.addMachine(runtime.name, runtime)).toThrow('another workspace')
     } finally {
       await first.close()
       await second.close()
@@ -288,7 +288,7 @@ it('command execution supplies its active workspace context', async () => {
 })
 
 it('does not share session processes by profile or follow reused session IDs', async () => {
-  const ws = new Workspace({}, { runtimes: [], profiles: { agent: {} } })
+  const ws = new Workspace({}, { machines: [], profiles: { agent: {} } })
   try {
     ws.createSession('one', { profile: 'agent' })
     ws.createSession('two', { profile: 'agent' })
@@ -348,7 +348,7 @@ it.each<[string, NetworkSetting, boolean, boolean]>([
     const runtime = new ShellProbe({ captures: ['@line'] })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [runtime], network },
+      { mode: MountMode.EXEC, machines: [runtime], network },
     )
     if (listening) ws.policies.add({ preNetwork: () => null })
     try {
@@ -375,7 +375,7 @@ it.each([
   ],
   [['/data/*'], ['/data/']],
 ])('maps restrictions to their owning mount: %s', async (hide, expected) => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [] })
   try {
     ws.createSession('agent', { profile: { paths: { hide } } })
     expect(ws.runtimeContext('agent').restrictedMounts).toEqual(expected)

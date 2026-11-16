@@ -16,6 +16,7 @@ import {
   trace,
   type Attributes,
   type Context,
+  type Link,
   type Span,
   type SpanContext,
   type SpanOptions,
@@ -25,7 +26,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { CHECK_MARK, RUN_PID_MARK, isRun } from '../machine/constants.ts'
 import { MachineHandle } from '../machine/handle.ts'
-import { RemoteRuntime } from '../runtime/machine/runtime.ts'
 import type { RunResult } from '../runtime/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { MountMode, PathSpec } from '../types.ts'
@@ -37,7 +37,6 @@ import {
   TRACE_CONTENT_ENV,
   TRACE_CONTENT_MAX_BYTES,
   TRACE_CONTENT_MAX_BYTES_ENV,
-  TRACE_MAX_SPANS_ENV,
 } from './constants.ts'
 import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
@@ -56,6 +55,7 @@ interface Seen {
   end?: unknown
   parent: SpanContext | undefined
   context: SpanContext
+  links: Link[]
 }
 
 /**
@@ -77,6 +77,7 @@ function exported(): Seen[] {
           spanId: String(spans.length + 1).padStart(16, '0'),
           traceFlags: 1,
         },
+        links: [],
       }
       spans.push(seen)
       const span = {
@@ -87,6 +88,10 @@ function exported(): Seen[] {
         },
         end: (time?: unknown) => {
           seen.end = time
+        },
+        addLink: (link: Link) => {
+          seen.links.push(link)
+          return span
         },
         spanContext: () => seen.context,
       }
@@ -526,7 +531,7 @@ describe('a damaged history file', () => {
     expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
   })
 
-  it('sends a finished line as a span over its vfs calls', async () => {
+  it('sends a finished line as one span its vfs calls stay out of', async () => {
     const spans = exported()
     const clock = new ManualClock(NEW_YEAR)
     const o = new Observer(new RAMObserverStore(), clock, 'w')
@@ -548,9 +553,10 @@ describe('a damaged history file', () => {
     })
     // The line ends in another cwd; the span keeps the one it started in.
     await o.logResult(io, [rec], 's1', '/', 'L')
-    const [line, call] = spans
+    expect(spans).toHaveLength(1)
+    const [line] = spans
     expect([line?.name, line?.attributes, line?.startTime, line?.end]).toEqual([
-      'command',
+      'shell',
       {
         'mirage.line.id': 'L',
         'mirage.session.id': 's1',
@@ -566,21 +572,10 @@ describe('a damaged history file', () => {
       start,
       start + 1000,
     ])
-    expect([call?.name, call?.attributes, call?.startTime, call?.end]).toEqual([
-      'vfs.read',
-      {
-        'mirage.vfs.path': '/d/a',
-        'mirage.vfs.source': 's3',
-        'mirage.vfs.bytes': 6,
-        'mirage.vfs.timestamp': start + 5,
-        'mirage.vfs.duration_ms': 12,
-      },
-      start - 7,
-      start + 5,
-    ])
-    expect(call?.parent).toBeDefined()
-    // The history keeps its own, shorter cut.
-    const results = (await o.events()).filter((e) => e.type === 'result')
+    // The history keeps the call, and its own, shorter cut.
+    const events = await o.events()
+    expect(events.filter((e) => e.type === 'vfs').map((e) => e.path)).toEqual(['/d/a'])
+    const results = events.filter((e) => e.type === 'result')
     expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
   })
 
@@ -594,31 +589,6 @@ describe('a damaged history file', () => {
     const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
     await o.logResult(io, [], 's1', '/', 'L')
     expect(spans[0]?.attributes['mirage.stdout']).toBe('éé')
-  })
-
-  it('sends at most its span cap a line and counts the rest', async () => {
-    vi.stubEnv(TRACE_MAX_SPANS_ENV, '2')
-    const spans = exported()
-    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
-    const recs = Array.from(
-      { length: 5 },
-      (_, i) =>
-        new OpRecord({
-          op: 'stat',
-          path: `/d/${String(i)}`,
-          source: 'ram',
-          bytes: 0,
-          timestamp: NEW_YEAR * 1000,
-          durationMs: 0,
-        }),
-    )
-    await o.logCommand('find /d', 's1', '/', 'L')
-    await o.logResult(new IOResult(), recs, 's1', '/', 'L')
-    const [line, ...calls] = spans
-    expect(calls.map((c) => c.attributes['mirage.vfs.path'])).toEqual(['/d/0', '/d/1'])
-    expect(line?.attributes['mirage.vfs.dropped']).toBe(3)
-    // The history still records every call.
-    expect((await o.events()).filter((e) => e.type === 'vfs')).toHaveLength(5)
   })
 
   it('keeps span output that is not UTF-8 within its bytes', async () => {
@@ -645,7 +615,7 @@ describe('a damaged history file', () => {
     } finally {
       await ws.close()
     }
-    const lines = spans.filter((s) => s.name === 'command')
+    const lines = spans.filter((s) => s.name === 'shell')
     expect(lines.map((s) => s.attributes['mirage.cwd'])).toEqual(['/data'])
     expect(history.map((e) => e.cwd)).toEqual(['/data', '/data'])
   })
@@ -661,14 +631,14 @@ describe('a damaged history file', () => {
     } finally {
       await ws.close()
     }
-    const lines = spans.filter((s) => s.name === 'command')
+    const lines = spans.filter((s) => s.name === 'shell')
     expect(lines.map((s) => String(s.attributes['mirage.stdout']).length)).toEqual([20000])
     // The history keeps its own cut.
     const results = history.filter((e) => e.type === 'result')
     expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
   })
 
-  it('keeps output and vfs calls out of spans when told to', async () => {
+  it('keeps output out of spans when told to', async () => {
     vi.stubEnv(TRACE_CONTENT_ENV, 'false')
     const spans = exported()
     const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR), 'w')
@@ -685,7 +655,7 @@ describe('a damaged history file', () => {
     await o.logResult(io, [rec], 's1', '/d', 'L')
     expect(spans.map((s) => [s.name, s.attributes])).toEqual([
       [
-        'command',
+        'shell',
         {
           'mirage.line.id': 'L',
           'mirage.session.id': 's1',
@@ -729,8 +699,8 @@ it('ends the span of a line whose route is refused', async () => {
   const spans = exported()
   const ws = new Workspace({ '/data': new RAMVFS() })
   try {
-    await expect(ws.shell('echo hi', { runtime: 'nope' })).rejects.toBeInstanceOf(RouteError)
-    const [command] = spans.filter((s) => s.name === 'command')
+    await expect(ws.shell('echo hi', { machine: 'nope' })).rejects.toBeInstanceOf(RouteError)
+    const [command] = spans.filter((s) => s.name === 'shell')
     expect(command?.end).toBeDefined()
     expect(command?.attributes['mirage.exit_code']).not.toBe(0)
   } finally {
@@ -766,7 +736,7 @@ it('sends an ended job and process as spans', async () => {
     const machine = ws.processTable.machine
     expect(sleep?.attributes['host.name']).toBe(machine.name)
     expect(spanMachine(sleep)).toEqual(['host', machine.name, machine.name])
-    const [command] = spans.filter((s) => s.name === 'command')
+    const [command] = spans.filter((s) => s.name === 'shell')
     expect(command?.attributes['mirage.line.id']).toBe(line?.id.value)
     expect(command?.attributes['host.name']).toBe(machine.name)
     expect(command?.attributes['mirage.machine.ids']).toBeUndefined()
@@ -822,8 +792,7 @@ it("names the machine a span's work ran on", async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a') },
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+      machines: { a: new Box('a', { captures: ['train'] }) },
     },
   )
   try {
@@ -832,7 +801,7 @@ it("names the machine a span's work ran on", async () => {
     await ws.shell('echo a\ntrain 2')
     const name = ws.processTable.machine.name
     expect(
-      spans.filter((s) => s.name === 'command').map((s) => s.attributes['mirage.machine.ids']),
+      spans.filter((s) => s.name === 'shell').map((s) => s.attributes['mirage.machine.ids']),
     ).toEqual([undefined, undefined, undefined, undefined])
     const ran = spans
       .filter((s) => s.name === 'job' || s.name === 'process')
@@ -904,7 +873,7 @@ it('puts a child of a stopping parent under it', async () => {
     command: '(train) &',
     machine: new MachineName('host', 'h'),
     startedAt: 1,
-    runtime: null,
+    program: false,
     state: 'stopping',
     endedAt: null,
     exit: null,
@@ -916,7 +885,7 @@ it('puts a child of a stopping parent under it', async () => {
     command: 'train',
     machine: new MachineName('box', 'a'),
     startedAt: 2,
-    runtime: 'remote',
+    program: true,
     state: 'exited',
     endedAt: 3,
     exit: 143,
@@ -931,7 +900,7 @@ it('puts a child of a stopping parent under it', async () => {
       spans.map((s) => [(s.attributes['process.command_line'] as string | undefined) ?? s.name, s]),
     )
     expect(named.get('train')?.parent).toEqual(named.get('(train) &')?.context)
-    expect(named.get('(train) &')?.parent).toEqual(named.get('command')?.context)
+    expect(named.get('(train) &')?.parent).toEqual(named.get('shell')?.context)
   } finally {
     trace.disable()
   }
@@ -946,8 +915,7 @@ it("puts a nested job's process under its job", async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a') },
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+      machines: { a: new Box('a', { captures: ['train'] }) },
     },
   )
   try {
@@ -968,6 +936,66 @@ it("puts a nested job's process under its job", async () => {
     'process (train 1 & wait)',
     'job (train 1 & wait)',
     'process (train 1 & wait) & wait',
-    'command (train 1 & wait) & wait',
+    'shell (train 1 & wait) & wait',
   ])
+})
+
+// A process links to each it read from, `mirage.input` naming where: its
+// stdin, the `/dev/fd` path a `<( )` gave it, or its arguments.
+it('links a process to each it read from', async () => {
+  const spans = exported()
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Box('a', { captures: ['train'] }) },
+    },
+  )
+  try {
+    await ws.shell('train 1 | train 2')
+    await ws.shell('train 3 <(train 4); true')
+    await ws.shell('train 5 "$(train 6)"; true')
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+  const byId = new Map(spans.map((s) => [s.context.spanId, s]))
+  const links = spans
+    .flatMap((s) =>
+      s.links.map((link) => [
+        spanName(s),
+        link.attributes?.['mirage.input'],
+        spanName(byId.get(link.context.spanId) ?? s),
+      ]),
+    )
+    .sort()
+  expect(links).toEqual([
+    ['process train 2', 'stdin', 'process train 1'],
+    ['process train 3 /dev/fd/63', '/dev/fd/63', 'process train 4'],
+    [`process train 5 ${CHECK_MARK}`, 'argv', 'process train 6'],
+  ])
+})
+
+// A call the caller makes to a mount itself is a `vfs.<call>` span of its own;
+// a typed line is a `shell` span whose calls to mounts send none.
+it('sends a call made through vfs as a span, and none for a line', async () => {
+  const spans = exported()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/data/a.txt', new TextEncoder().encode('hello'))
+    await ws.vfs.read('/data/a.txt')
+    await ws.shell('wc -l /data/a.txt')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+  expect(spans.map((s) => s.name).sort()).toEqual(['process', 'shell', 'vfs.read', 'vfs.write'])
+  const read = spans.find((s) => s.name === 'vfs.read')
+  expect(read?.parent).toBeUndefined()
+  expect([
+    read?.attributes['mirage.vfs.path'],
+    read?.attributes['mirage.vfs.source'],
+    read?.attributes['mirage.vfs.bytes'],
+  ]).toEqual(['/data/a.txt', 'ram', 5])
 })

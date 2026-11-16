@@ -573,6 +573,7 @@ impl<H: Host + Runs> Walk<'_, H> {
                 }
                 let runs = self.expander().pattern_runs(node).await?;
                 let mut compiled = Pattern::default();
+                compiled.nocase = self.shell.shopt("nocasematch");
                 for (text, quoted) in &runs {
                     compiled.push(text, *quoted, utf8);
                 }

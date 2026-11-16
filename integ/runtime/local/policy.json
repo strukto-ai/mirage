@@ -4,10 +4,11 @@
       "id": "stdin_operand_keeps_program_arguments",
       "note": "A stdin script keeps the program arguments and flags after it.",
       "world": {
-        "runtimes": [
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -45,10 +46,11 @@
       "id": "native_run_refused_under_path_rules",
       "note": "Native execution is refused when its file access cannot enforce the session path rules.",
       "world": {
-        "runtimes": [
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

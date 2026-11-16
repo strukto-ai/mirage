@@ -17,7 +17,9 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
 import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
+import type { Runtime } from './base.ts'
 import { MontyRuntime } from './python/monty/index.ts'
+import { buildRuntime } from './table.ts'
 
 // One world, three surfaces, one dispatcher: the TS half of the conformance
 // worlds (python/tests/runtime/test_conformance_worlds.py). The suite
@@ -39,10 +41,7 @@ import { MontyRuntime } from './python/monty/index.ts'
 async function structureWorld(): Promise<Workspace> {
   const base = new RAMVFS()
   const inner = new RAMVFS()
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, runtimes: [new MontyRuntime(), 'workspace'] },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, machines: [new MontyRuntime()] })
   ws.addMount('/base', base, MountMode.WRITE)
   ws.addMount('/base/inner', inner, MountMode.WRITE)
   // Seeded through `ws.vfs`, not the shell: a shell line would be
@@ -62,12 +61,10 @@ async function structureWorld(): Promise<Workspace> {
  * so hiding is how a deployment puts a mount out of reach, and it
  * answers ENOENT rather than a refusal naming what the profile cannot see.
  */
-async function scopedWorld(
-  runtime: string | MontyRuntime = new MontyRuntime(),
-): Promise<Workspace> {
+async function scopedWorld(runtime: Runtime = new MontyRuntime()): Promise<Workspace> {
   const open = new RAMVFS()
   const closed = new RAMVFS()
-  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] })
+  const ws = new Workspace({}, { mode: MountMode.EXEC, machines: [runtime] })
   ws.addMount('/open', open, MountMode.WRITE)
   ws.addMount('/closed', closed, MountMode.WRITE)
   await ws.vfs.write('/open/pub.txt', 'public')
@@ -153,7 +150,7 @@ describe('structure world', () => {
       {},
       {
         mode: MountMode.EXEC,
-        runtimes: [new MontyRuntime(), 'workspace'],
+        machines: [new MontyRuntime()],
       },
     )
     ws.addMount('/base', base, MountMode.WRITE)
@@ -261,7 +258,7 @@ describe('scoped world', () => {
       {},
       {
         mode: MountMode.EXEC,
-        runtimes: [new MontyRuntime(), 'workspace'],
+        machines: [new MontyRuntime()],
       },
     )
     ws.addMount('/base', base, MountMode.WRITE)
@@ -287,7 +284,7 @@ describe('scoped world', () => {
   ])(
     'a confined %s guest cannot read a hidden mount',
     async (runtime, line) => {
-      const ws = await scopedWorld(runtime)
+      const ws = await scopedWorld(buildRuntime(runtime))
       try {
         const [code, out] = await run(ws, line, 'agent')
         expect(code).not.toBe(0)
@@ -306,7 +303,7 @@ describe('scoped world', () => {
   ])(
     'a confined %s guest cannot write a hidden mount',
     async (runtime, line) => {
-      const ws = await scopedWorld(runtime)
+      const ws = await scopedWorld(buildRuntime(runtime))
       try {
         await run(ws, line, 'agent')
         // Read back through the unrestricted default session: the

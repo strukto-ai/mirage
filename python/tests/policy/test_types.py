@@ -10,12 +10,12 @@ def test_an_answer_is_its_kind_and_its_own_fields():
     )
     assert Answer.model_validate({"kind": "ask"}).reason is None
     assert (
-        Answer.model_validate({"kind": "route", "runtime": "docker"}).runtime
+        Answer.model_validate({"kind": "route", "machine": "docker"}).machine
         == "docker"
     )
     assert Answer.model_validate(
-        {"kind": "route", "runtime": "docker", "reason": "x"}
-    ) == Answer(kind="route", runtime="docker", reason="x")
+        {"kind": "route", "machine": "docker", "reason": "x"}
+    ) == Answer(kind="route", machine="docker", reason="x")
 
 
 @pytest.mark.parametrize(
@@ -23,7 +23,8 @@ def test_an_answer_is_its_kind_and_its_own_fields():
     [
         {"kind": "allow"},
         {"kind": "route"},
-        {"kind": "deny", "runtime": "docker"},
+        {"kind": "deny", "machine": "docker"},
+        {"kind": "route", "runtime": "docker"},
         {"kind": "ask", "policy": "Mine"},
         {"deny": "x"},
     ],

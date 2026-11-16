@@ -91,6 +91,7 @@ export function handleSet(
   while (i < args.length) {
     const tok = args[i] ?? ''
     if (tok === '--') {
+      if (callStack !== null) callStack.current.replacedArgs = true
       setPositionalParams(session, callStack, args.slice(i + 1))
       return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
     }
@@ -105,6 +106,7 @@ export function handleSet(
     }
     const word = parseOptionWord(tok, args[i + 1] ?? null)
     if (word === null) {
+      if (callStack !== null) callStack.current.replacedArgs = true
       setPositionalParams(session, callStack, args.slice(i))
       break
     }

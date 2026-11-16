@@ -22,6 +22,7 @@ NPM_PACKAGES = (
     "openai-agents",
     "opencode",
     "pi",
+    "pi-durable",
     "server",
     "vercel",
 )

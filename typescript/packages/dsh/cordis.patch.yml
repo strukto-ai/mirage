@@ -64,10 +64,12 @@
 #     policy's `workspaceRoot` is a directory on the host and is never
 #     consulted: the mounts and their modes are the boundary here.
 #
-#   * A workdir dsh resolved on its own machine (an unspecified one
-#     comes from the calling session's cwd) names nothing in this world,
-#     so it is ignored in favour of the workspace default rather than
-#     run in a directory the agent cannot reach.
+#   * dsh's working directory is a directory of this world. dsh records
+#     the directory it was launched in, a host path, and checks it
+#     through ctx.fs before every bash, file and search call; the mirage
+#     fs moves it to that directory's disk mount when one holds it, else
+#     to its own cwd (`/`). The `working_directory` tool then moves
+#     between mounts, and a bash call runs where it points.
 #
 # ctx.subprocess shares the workspace's argv admission and process supervisor.
 # Termination covers managed Mirage runners. Native OS descendant tracking and
@@ -83,9 +85,10 @@
 - id: bash-sandbox
   disabled: true
 
-# PowerShell and the ripgrep-based search tool run host subprocesses,
-# which the mirage world does not contain; the bash tool's grep covers
-# search inside the workspace.
+# PowerShell runs a host subprocess, and the glob and grep tools spawn
+# dsh's packaged ripgrep by its host path, which names no program in the
+# mirage world; the bash tool's rg, grep and find cover search inside
+# the workspace.
 - id: pwsh-sandbox
   disabled: true
 

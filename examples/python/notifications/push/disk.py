@@ -58,7 +58,7 @@ def write_behind_mirage(root: Path) -> list[tuple[str, dict[str, str]]]:
 
 
 async def main() -> None:
-    tmp = Path(tempfile.mkdtemp()).resolve()
+    tmp = Path(tempfile.mkdtemp())
     seed(tmp)
 
     vfs = DiskVFS(root=str(tmp))

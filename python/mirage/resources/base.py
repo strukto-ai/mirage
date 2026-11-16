@@ -27,7 +27,7 @@ from mirage.resources.types import (
 
 
 class ResourceStore(ABC):
-    """One scope's saved configs: vfs, cli, runtime and store entries,
+    """One scope's saved configs: vfs, cli, machine and store entries,
     policies and templates. Every backend answers the same way: lists
     sort by name, an entry's sealed values leave only through
     ``reveal_entry`` and deleting an entry wipes them. A missing name

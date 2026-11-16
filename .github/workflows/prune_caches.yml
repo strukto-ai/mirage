@@ -44,3 +44,26 @@ jobs:
                 echo "deleting cache $id"
                 gh cache delete "$id"
               done
+
+  pnpm-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # setup-node-pnpm saves a store per lockfile, about 1 GB, and seeds it
+      # from the newest one, so the newest holds every package the older
+      # ones do and they are only weight once the lockfile moves on. Only
+      # main's are pruned: a pull request's entry is all that branch reads.
+      - name: Keep the newest pnpm store per runner and Node version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh cache list --key pnpm-store- --ref refs/heads/main \
+            --sort created_at --order desc --limit 100 --json id,key \
+            --jq '.[] | [.id, (.key | sub("-[0-9a-f]{64}$"; ""))] | @tsv' \
+            | awk -F'\t' '++seen[$2] > 1 { print $1 }' \
+            | while read -r id; do
+                echo "deleting cache $id"
+                gh cache delete "$id"
+              done

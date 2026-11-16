@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../workspace.ts'
+import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 
 interface ProcessCase {
   id: string
@@ -23,7 +24,7 @@ describe('Pyodide processes', { timeout: 120_000 }, () => {
     async (_id, testCase) => {
       const ws = new Workspace(
         { '/ram': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: ['pyodide', 'workspace'] },
+        { mode: MountMode.EXEC, machines: [buildRuntime('pyodide')] },
       )
       try {
         for (const [name, content] of Object.entries(testCase.world.mounts['/ram'].files))

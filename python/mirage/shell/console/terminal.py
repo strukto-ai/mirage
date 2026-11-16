@@ -20,6 +20,7 @@ from typing import Any
 
 from mirage.concurrency.limiter import owned_task
 from mirage.io.memory import check_memory
+from mirage.io.pipe import BytePipe
 from mirage.observe.observer import kept_output_bytes
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
@@ -70,6 +71,11 @@ class Terminal(JobConsole):
     def _remember(self, channel: Channel, data: bytes) -> None:
         kept = self._prefix if channel == Channel.STDOUT else self._err_prefix
         kept.extend(data[: max(0, self._kept - len(kept))])
+
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        return (
+            self.reader.pipe_for(channel) if self.reader is not None else None
+        )
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         """Take what the line wrote.

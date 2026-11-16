@@ -136,10 +136,13 @@ class ProcessTable:
         pid: int | None = None,
         own_group: bool = False,
         machine: MachineName | None = None,
-        runtime: str | None = None,
+        program: bool = False,
         one_command: bool = False,
         program_ignores: frozenset[int] = frozenset(),
         background: bool = False,
+        stdin: int | None = None,
+        fd: dict[int, int] | None = None,
+        argv: tuple[int, ...] = (),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -154,7 +157,7 @@ class ProcessTable:
                 this one included, held under ``ceiling``; None for no
                 cap. Stopping runners count until they finish cleanup and
                 leave the live registry. A process a scan found on a
-                machine (no runtime, a machine pid) counts against its
+                machine (no program, a machine pid) counts against its
                 machine's own limits, not this one.
             line (LineId | None): the line the runner runs for; None
                 takes its parent's.
@@ -176,7 +179,7 @@ class ProcessTable:
                 timeout's command does, instead of joining its parent's.
             machine (MachineName | None): where its program runs; None for
                 the table's machine.
-            runtime (str | None): what Mirage runs its program with; None
+            program (bool): a runtime starts its program there; False
                 for Mirage itself.
             one_command (bool): it runs exactly one command, whose
                 program it is (``ProcessHandle.take``).
@@ -184,6 +187,11 @@ class ProcessTable:
                 as well, where ``ignores`` is more than a shell's.
             background (bool): it is a background job, as what it starts
                 is too.
+            stdin (int | None): the pid whose stdout is its stdin.
+            fd (dict[int, int] | None): the pid writing each descriptor a
+                ``<( )`` gave it, by number.
+            argv (tuple[int, ...]): the pids whose output became its
+                arguments.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -200,7 +208,7 @@ class ProcessTable:
                     for _, handle in self._live.values()
                     if handle.record.session_id == session_id
                     and (
-                        handle.record.runtime is not None
+                        handle.record.program
                         or handle.record.machine_pid is None
                     )
                 )
@@ -239,13 +247,16 @@ class ProcessTable:
                     cwd,
                     machine or self.machine,
                     self._now(),
-                    runtime,
+                    program,
                     ancestors=ancestry,
                     machine_instance=(
                         None
                         if self.machine_instance is None
                         else self.machine_instance(machine or self.machine)
                     ),
+                    stdin=stdin,
+                    fd=fd or {},
+                    argv=argv,
                 ),
                 run,
                 lambda done: self._retire(done, handle),

@@ -253,7 +253,13 @@ impl Frame {
                             index: 0,
                             found: false,
                         };
-                    } else if is(cp, b'?') || program.literal(cp) == character(self.position) {
+                    } else if is(cp, b'?')
+                        || super::compile::equal(
+                            program.literal(cp),
+                            character(self.position),
+                            program.nocase,
+                        )
+                    {
                         self.schedule(state + 1, self.position + 1);
                     }
                 }
@@ -277,7 +283,7 @@ impl Frame {
                     return Progress::Continue;
                 }
                 if let Some(&atom) = bracket.atoms.get(index) {
-                    found |= atom.contains(character(self.position));
+                    found |= atom.contains(character(self.position), program.nocase);
                     self.phase = Phase::Bracket {
                         state,
                         index: index + 1,
@@ -465,7 +471,7 @@ mod tests {
 
     #[test]
     fn boolean_match_retains_bounded_run_history() {
-        let mut compiler = Compiler::new(vec![u32::from(b'*')], Dialect::Shell, false);
+        let mut compiler = Compiler::new(vec![u32::from(b'*')], Dialect::Shell, false, false);
         while !compiler.done() {
             compiler.step();
         }

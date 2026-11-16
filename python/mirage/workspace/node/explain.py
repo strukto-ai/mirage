@@ -1935,7 +1935,7 @@ def explained_line(
     line: str,
     judged: Sequence[Judged],
     verdicts: Sequence[Judged],
-    placed_of: Callable[[Judged], tuple[str, str]],
+    placed_of: Callable[[Judged], str],
     whole_line: bool = False,
     aliases: frozenset[str] = frozenset(),
 ) -> ShellExplanation:
@@ -1964,9 +1964,8 @@ def explained_line(
             line on: the profile's rules alone (``every=False``), or
             ``judged`` itself for a runtime that takes the line whole,
             whose gate asks every policy.
-        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
-            the machine that would run a
-            command, empty for the workspace.
+        placed_of (Callable[[Judged], str]): the machine that would run
+            a command, empty for the workspace.
         whole_line (bool): whether a runtime takes the line whole.
         aliases (frozenset[str]): the alias names the session expands,
             which each scope is parsed with.
@@ -2065,7 +2064,7 @@ def _scope_node(
     kind: str,
     key: tuple[Occurrence | None, str],
     scopes: dict[tuple[Occurrence | None, str], list[Judged]],
-    placed_of: Callable[[Judged], tuple[str, str]],
+    placed_of: Callable[[Judged], str],
     aliases: frozenset[str],
 ) -> ShellNode:
     """One scope of a line as a node: its text parsed, the commands
@@ -2078,9 +2077,8 @@ def _scope_node(
             its text was evaluated from, and the text.
         scopes (dict[tuple[Occurrence | None, str], list[Judged]]): every
             scope's judgments.
-        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
-            the machine that would run a
-            command.
+        placed_of (Callable[[Judged], str]): the machine that would run
+            a command.
         aliases (frozenset[str]): the alias names each scope is parsed
             with.
     """
@@ -2161,7 +2159,7 @@ def _command_of(
     one: Judged,
     text: str,
     children: tuple[ShellNode, ...],
-    placed_of: Callable[[Judged], tuple[str, str]],
+    placed_of: Callable[[Judged], str],
 ) -> CommandExplanation:
     """One command's public explanation.
 
@@ -2169,12 +2167,12 @@ def _command_of(
         one (Judged): the command's judgment and place.
         text (str): its source text.
         children (tuple[ShellNode, ...]): the scopes it runs in turn.
-        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
-            the machine that would run it.
+        placed_of (Callable[[Judged], str]): the machine that would run
+            it, empty for the workspace.
     """
     judgment = one.judgment
     outcome, reason, source = _verdict_of(judgment)
-    runtime, machine = placed_of(one)
+    machine = placed_of(one)
     return CommandExplanation(
         command=judgment.command,
         words=judgment.words,
@@ -2185,7 +2183,6 @@ def _command_of(
         source=source,
         answers=judgment.answers,
         decision=judgment.decision,
-        runtime=runtime,
         machine=machine,
         text=text,
         children=children,

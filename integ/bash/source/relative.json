@@ -32,6 +32,76 @@
         "stdout": "sourced-ok\nsourced-ok\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "source_path_and_definition_stack",
+      "seq": 1380022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(declare -p BASH_SOURCE; D={mount}/source_path_and_definition_stack; mkdir -p $D/lib; printf '%s\\n' 'echo wrong' > $D/helper; printf '%s\\n' 'f() { printf \"<%s>\\n\" \"${BASH_SOURCE[@]}\"; }; f' > $D/lib/helper; cd $D; PATH=lib; set -u; source helper; f; shopt -u sourcepath; source helper)",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -a BASH_SOURCE=()\n<lib/helper>\n<lib/helper>\n<lib/helper>\nwrong\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "source_arguments_and_set_replace_parameters",
+      "seq": 1380029,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf '%s\\n' 'set -- x y; echo \"in:$#\"' > {mount}/source_set_args; set -- a b c; source {mount}/source_set_args p q; echo \"top:$# $*\"; f() { source {mount}/source_set_args p q; echo \"fn:$# $*\"; }; f 1 2; source {mount}/source_set_args; echo \"bare:$# $*\"; printf '%s\\n' '. {mount}/source_set_args inner; echo \"outer:$*\"' > {mount}/source_set_outer; printf '%s\\n' '. {mount}/source_set_args; echo \"outer2:$*\"' > {mount}/source_set_outer2; set -- original; . {mount}/source_set_outer arg; echo \"nested:$*\"; . {mount}/source_set_outer2 arg; echo \"nested2:$*\"; rm {mount}/source_set_args {mount}/source_set_outer {mount}/source_set_outer2)",
+      "expect": {
+        "exit": 0,
+        "stdout": "in:2\ntop:2 x y\nin:2\nfn:2 1 2\nin:2\nbare:2 x y\nin:2\nouter:x y\nnested:original\nin:2\nouter2:x y\nnested2:x y\n",
+        "stderr": ""
+      }
     }
   ]
 }

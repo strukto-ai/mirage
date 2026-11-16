@@ -51,7 +51,9 @@ describe('MirageService', () => {
         '/scratch': { vfs: 'ram', mode: 'write' },
         '/live': [new RAMVFS(), MountMode.WRITE],
       },
-      runtimes: [{ name: 'monty', captures: ['python', 'python3'] }],
+      machines: {
+        py: { provider: 'in_process', runtime: 'monty', captures: ['python', 'python3'] },
+      },
     })
     await fiber.await()
     expect(() => ctx.mirage.workspace).toThrow('not ready')
@@ -90,26 +92,24 @@ describe('MirageService', () => {
     )
   })
 
-  it('hands a runtime block its config and refuses a key no runtime takes', async () => {
+  it('hands a machine its config and refuses a key its runtime does not take', async () => {
     const ctx = new Context()
     const mounts = { '/x': new RAMVFS() }
     await expect(
       ctx
-        .plugin(MirageService, { mounts, runtimes: [{ name: 'monty', config: { nope: 1 } }] })
+        .plugin(MirageService, {
+          mounts,
+          machines: { py: { provider: 'in_process', runtime: 'monty', nope: 1 } },
+        })
         .await(),
     ).rejects.toThrow(/nope/)
-    await expect(
-      ctx
-        .plugin(MirageService, { mounts, runtimes: [{ name: 'monty', confg: {} } as never] })
-        .await(),
-    ).rejects.toThrow(/unknown monty runtime option 'confg'/)
   })
 
-  it('reads a runtime config block in snake_case, as a workspace file does', async () => {
+  it('reads a machine entry in snake_case, as a workspace file does', async () => {
     const ctx = new Context()
     const fiber = ctx.plugin(MirageService, {
       mounts: { '/x': new RAMVFS() },
-      runtimes: [{ name: 'pyodide', config: { deny_packages: ['numpy'] } }],
+      machines: { py: { provider: 'in_process', runtime: 'pyodide', deny_packages: ['numpy'] } },
     })
     await fiber.await()
     await expect(ctx.mirage.ready).resolves.toBeDefined()
@@ -125,14 +125,14 @@ describe('MirageService', () => {
     await expect(ctx.mirage.ready).rejects.toThrow('unknown VFS')
   })
 
-  it('refuses runtimes in both config keys', async () => {
+  it('refuses machines in both config keys', async () => {
     const ctx = new Context()
     await expect(
       ctx
         .plugin(MirageService, {
           mounts: { '/x': new RAMVFS() },
-          runtimes: ['monty'],
-          workspaceOptions: { runtimes: ['monty'] },
+          machines: { py: { provider: 'in_process', runtime: 'monty' } },
+          workspaceOptions: { machines: { py: { provider: 'in_process', runtime: 'monty' } } },
         })
         .await(),
     ).rejects.toThrow('not both')
@@ -143,12 +143,12 @@ describe('MirageService', () => {
     const ctx = new Context()
     await ctx.plugin(MirageService, { workspace: ws }).await()
     expect(ctx.mirage.vfsOnly).toBe(true)
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     expect(ctx.mirage.vfsOnly).toBe(false)
     await ws.close()
   })
 
-  it('classifies declared runtimes before the mounts resolve', async () => {
+  it('classifies declared machines before the mounts resolve', async () => {
     // The executor runs synchronously, so release is assigned by here.
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
@@ -161,7 +161,7 @@ describe('MirageService', () => {
     const ctx = new Context()
     const fiber = ctx.plugin(MirageService, {
       mounts: { '/scratch': { vfs: 'gated-ram' } },
-      runtimes: ['local'],
+      machines: { box: { provider: 'host' } },
     })
     await fiber.await()
     expect(() => ctx.mirage.workspace).toThrow('not ready')
@@ -172,12 +172,12 @@ describe('MirageService', () => {
     await fiber.dispose()
   })
 
-  it('refuses both and neither of workspace/mounts', async () => {
+  it('refuses more than one world and none', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
     const ctx = new Context()
     await expect(
       ctx.plugin(MirageService, { workspace: ws, mounts: { '/x': new RAMVFS() } }).await(),
-    ).rejects.toThrow('not both')
+    ).rejects.toThrow('pass one of workspace, mounts or remote')
     await expect(ctx.plugin(MirageService, {}).await()).rejects.toThrow('required')
     await ws.close()
   })
@@ -208,11 +208,16 @@ describe('MirageService', () => {
     await fiber.dispose()
   })
 
-  it('refuses runtimes or workspace options beside an adopted workspace', async () => {
+  it('refuses machines or workspace options beside an adopted workspace', async () => {
     const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     const ctx = new Context()
     await expect(
-      ctx.plugin(MirageService, { workspace: ws, runtimes: ['monty'] }).await(),
+      ctx
+        .plugin(MirageService, {
+          workspace: ws,
+          machines: { py: { provider: 'in_process', runtime: 'monty' } },
+        })
+        .await(),
     ).rejects.toThrow(/adopted workspace/)
     await expect(
       ctx.plugin(MirageService, { workspace: ws, workspaceOptions: {} }).await(),

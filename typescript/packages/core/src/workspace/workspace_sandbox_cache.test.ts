@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -33,7 +34,7 @@ function makeCachingWorkspace(): { ws: Workspace; ram: RAMVFS } {
     { '/r': ram },
     {
       mode: MountMode.EXEC,
-      runtimes: ['quickjs', 'workspace'],
+      machines: [buildRuntime('quickjs')],
     },
   )
   return { ws, ram }

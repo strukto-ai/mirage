@@ -759,6 +759,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
         script=ScriptSource(
             "import os\nprint(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"
         ),
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     path = tmp_path / "snap.tar"
@@ -770,7 +771,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     assert entry[CLIKey.SCRIPT][ScriptKey.LANGUAGE] == "python"
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is False
 
-    restored = await Workspace.load(str(path), runtimes=["monty", "workspace"])
+    restored = await Workspace.load(str(path), machines=[MontyRuntime()])
     io = await restored.shell("pager b.txt")
     assert io.exit_code == 0
     assert io.stdout == b'b.txt {"width": 80}\n'
@@ -786,10 +787,12 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
-        runtimes=["monty", "workspace"],
+        machines={"monty": {"provider": "in_process", "runtime": "monty"}},
     )
     spec = CLI(
-        spec=CommandSpec(name="pager"), script=ScriptSource("print('hi')")
+        spec=CommandSpec(name="pager"),
+        script=ScriptSource("print('hi')"),
+        machine="in_process",
     )
     ws.register_cli("pager", spec, config={"width": 80})
     state = await to_state_dict(ws)
@@ -804,7 +807,7 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
 
 
 @pytest.mark.asyncio
-async def test_script_cli_runtime_pin_and_module_bit_round_trip():
+async def test_script_cli_machine_runtime_and_module_bit_round_trip():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     spec = CLI(
         spec=CommandSpec(name="pager"),
@@ -814,10 +817,12 @@ async def test_script_cli_runtime_pin_and_module_bit_round_trip():
     ws.register_cli("pager", spec, config=None)
     state = await to_state_dict(ws)
     entry = state[StateKey.CLIS][0]
+    assert entry[CLIKey.MACHINE] == "in_process"
     assert entry[CLIKey.RUNTIME] == "quickjs"
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is True
     restored = await Workspace.from_state(state)
     install = restored.clis()["pager"]
+    assert install.cli.machine == "in_process"
     assert install.cli.runtime == "quickjs"
     assert install.cli.script.module is True
     assert install.cli.script.language == "js"
@@ -926,11 +931,17 @@ async def test_a_copy_of_an_mcp_cli_still_authenticates():
 
 
 @pytest.mark.asyncio
-async def test_copy_keeps_the_runtimes_named_by_string():
+async def test_copy_rebuilds_the_machines_built_from_an_entry():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines={
+            "py": {
+                "provider": "in_process",
+                "runtime": "monty",
+                "captures": ["@python"],
+            }
+        },
     )
     clone = await ws.copy()
     try:
@@ -946,12 +957,12 @@ class _AliasedMonty(MontyRuntime):
 
 
 @pytest.mark.asyncio
-async def test_copy_rebuilds_a_runtime_by_the_key_it_was_named_by():
+async def test_copy_rebuilds_a_registered_runtime_by_the_key_it_names():
     register_runtime("py-engine", _AliasedMonty)
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["py-engine", "workspace"],
+        machines={"py": {"provider": "in_process", "runtime": "py-engine"}},
     )
     try:
         clone = await ws.copy()

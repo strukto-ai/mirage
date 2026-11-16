@@ -187,6 +187,11 @@ class RedirectKind(StrEnum):
     STDERR_TO_STDOUT = "stderr_to_stdout"
     HEREDOC = "heredoc"
     HERESTRING = "herestring"
+    # `N<&word` and `N>&word` before the word expands: a number
+    # duplicates and `-` closes; `>&word` on descriptor 1 is bash's other
+    # spelling of `&>word`, and any other word is AMBIGUOUS.
+    DUP_INPUT = "dup_input"
+    DUP_OUTPUT = "dup_output"
     # `N>&word` with a word that is neither a number nor `-` on a
     # descriptor other than 1: bash refuses it as `word: ambiguous
     # redirect` before the command runs, so the target is kept for the
@@ -214,6 +219,8 @@ class Redirect:
         deferred (tuple[int, int] | None): for a heredoc, where expanding
             its body fails (an index into the body and the row the body
             starts on), bash reading what opens there only as it expands it.
+        move (bool): whether the operator was `N>&M-` or `N<&M-`, which
+            closes descriptor M once N duplicates it.
     """
 
     fd: int
@@ -224,6 +231,7 @@ class Redirect:
     clobber: bool = False
     expand_vars: bool = True
     deferred: tuple[int, int] | None = None
+    move: bool = False
 
 
 @dataclass(frozen=True, slots=True)

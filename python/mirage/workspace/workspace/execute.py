@@ -272,6 +272,7 @@ async def recurse(
     """
     records = opts.pop("records", None)
     read = opts.pop("read", None)
+    began = opts.pop("started", None)
     if handed is None:
         inner = None
     elif node is None:
@@ -453,6 +454,8 @@ async def recurse(
             def started(process: ProcessHandle) -> None:
                 session.process_id = process.record.pid
                 context.frame.shell = process
+                if began is not None:
+                    began(process, session)
 
             process = start_shell(
                 opts["job_table"].processes,
@@ -554,7 +557,6 @@ async def execute_line(
     env: dict[str, str] | None,
     cancel: asyncio.Event | None,
     record: bool,
-    runtime: str | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
@@ -648,7 +650,6 @@ async def execute_line(
         env=env,
         cancel=cancel,
         record=record,
-        runtime=runtime,
         machine=machine,
         routing_decision=routing_decision,
         handed=handed,
@@ -1047,7 +1048,6 @@ async def _run_on_line_runtime(
                 ws.registry.memory,
                 run_whole_line(
                     line_runtime,
-                    decision.machine,
                     command,
                     stdin,
                     effective_session,
@@ -1283,7 +1283,6 @@ async def run_prepared_line(
     env: dict[str, str] | None,
     cancel: asyncio.Event | None,
     record: bool,
-    runtime: str | None,
     machine: str | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None,
@@ -1488,7 +1487,6 @@ async def run_prepared_line(
         try:
             placed = await ws.router.decide(
                 command,
-                runtime,
                 machine,
                 effective_session,
                 routing_decision,

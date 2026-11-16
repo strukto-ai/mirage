@@ -17,6 +17,18 @@ import type { FsCondition } from '../errors/index.ts'
 /** Capture unresolved program names without taking over the workspace shell. */
 export const EXTERNAL_COMMANDS = '@external'
 
+/**
+ * The provider of a machine whose programs run natively on the host Mirage
+ * runs on; every such machine is that one host. Mirrors Python's HOST.
+ */
+export const HOST = 'host'
+
+/** The provider of the machine that is Mirage's own process. Mirrors Python's IN_PROCESS. */
+export const IN_PROCESS = 'in_process'
+
+/** The machines a script CLI may run on: those whose runtime Mirage hands the script to. */
+export const SCRIPT_MACHINES: readonly string[] = [IN_PROCESS, HOST]
+
 /** Capture the whole line, Mirage's own commands included (a line executor). Mirrors Python's WHOLE_LINE. */
 export const WHOLE_LINE = '@line'
 

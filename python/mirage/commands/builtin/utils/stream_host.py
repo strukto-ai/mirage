@@ -56,7 +56,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
-from mirage.utils.dates import stat_epoch
+from mirage.utils.dates import clock_reply, stat_epoch
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
@@ -317,6 +317,8 @@ class StreamHost:
             )
         if op == "run":
             return await self._run(request)
+        if op == "clock":
+            return Served({}, clock_reply())
         raise ValueError(f"unknown stream request: {op}")
 
     def _open(

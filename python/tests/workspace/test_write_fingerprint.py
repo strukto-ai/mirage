@@ -19,6 +19,7 @@ from contextlib import contextmanager
 import pytest
 
 from mirage.io.stream import yield_bytes
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
@@ -61,7 +62,7 @@ def _workspace(
             {"/s3": (S3VFS(config), mode)},
             mode=mode,
             read=read,
-            runtimes=["monty", "workspace"],
+            machines=[MontyRuntime()],
         )
         yield ws, session._client
 

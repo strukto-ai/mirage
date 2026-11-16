@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.machine.config import MachineConfig
+from mirage.machine.config import MachineConfig, check_on_pause
 from mirage.machine.docker import DockerConfig
 from mirage.machine.e2b import E2BConfig
 from mirage.machine.registry import build_machine
@@ -66,3 +66,18 @@ def test_a_blank_required_id_is_refused(provider, field, blank):
         ValueError, match=f"{provider} config needs a nonblank"
     ):
         build_machine("box", {"provider": provider, field: blank})
+
+
+def test_an_unset_on_pause_is_left_alone():
+    check_on_pause("x", None, ("pause",))
+
+
+def test_on_pause_takes_one_of_the_providers_own_options():
+    check_on_pause("x", "pause", ("pause",))
+
+
+def test_on_pause_refuses_any_other_value_naming_the_options():
+    with pytest.raises(
+        ValueError, match="x on_pause must be one of pause, not 'stop'"
+    ):
+        check_on_pause("x", "stop", ("pause",))

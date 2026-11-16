@@ -24,6 +24,9 @@ const GITHUB = {
   fields: { owner: 'strukto-ai', repo: 'mirage', token: 'ghp_x' },
 }
 
+// A GitHub App's fields as an entry writes them, its block's as `app.<field>`.
+const APP = { 'app.app_id': '7', 'app.private_key': 'k', 'app.installation_id': 42 }
+
 type App = ReturnType<typeof buildApp>
 let open: App | null = null
 
@@ -124,7 +127,7 @@ describe('entries router', () => {
     })
     expect(required).toMatchObject({
       status: 400,
-      body: { error: { message: 'token is required' } },
+      body: { error: { message: 'github takes exactly one of token or app; got neither' } },
     })
     await call(app, 'POST', '/v1/clis', {
       name: 'mcp1',
@@ -142,7 +145,18 @@ describe('entries router', () => {
     const { app } = setup()
     const cases: [unknown, string][] = [
       [{ type: 'nope', fields: {} }, 'type must be a vfs: '],
-      [{ type: 'github', fields: { owner: 'o', repo: 'r' } }, 'token is required'],
+      [
+        { type: 'github', fields: { owner: 'o', repo: 'r' } },
+        'github takes exactly one of token or app; got neither',
+      ],
+      [
+        { type: 'github', fields: { ...GITHUB.fields, ...APP } },
+        'github takes exactly one of token or app; got both',
+      ],
+      [
+        { type: 'github', fields: { owner: 'o', repo: 'r', 'app.app_id': '7' } },
+        'app.private_key is required',
+      ],
       [{ type: 'github', fields: { ...GITHUB.fields, x: 1 } }, 'github has no field x; it takes '],
       [{ type: 'github', fields: { ...GITHUB.fields, timeout: '1' } }, 'timeout must be a number'],
       [{ type: 'github', fields: [] }, 'fields must be an object'],
@@ -161,6 +175,12 @@ describe('entries router', () => {
     const id = await call(app, 'POST', '/v1/vfs', { ...GITHUB, name: 'sec_x' })
     expect(id.status).toBe(400)
     expect(id.body.error.message).toContain('not look like an id')
+    const asApp = await call(app, 'POST', '/v1/vfs', {
+      name: 'app',
+      type: 'github',
+      fields: { owner: 'o', repo: 'r', ...APP },
+    })
+    expect(asApp.status).toBe(201)
   })
 
   it('refuses a pointer until its store is saved', async () => {
@@ -223,15 +243,18 @@ describe('entries router', () => {
     const { app } = setup()
     const vfs = await types(app, '/v1/vfs/types')
     const token = vfs.github?.find((f) => f.name === 'token')
-    expect(token).toMatchObject({ name: 'token', type: 'string', secret: true, required: true })
+    // Neither credential is required alone: the pair's rule is checked on a write.
+    expect(token).toMatchObject({ name: 'token', type: 'string', secret: true, required: false })
+    const key = vfs.github?.find((f) => f.name === 'app.private_key')
+    expect(key).toMatchObject({ group: 'app', secret: true, required: true })
     expect(vfs.ram).toBeUndefined()
     const clis = await types(app, '/v1/clis/types')
     expect(clis.git).toBeUndefined()
     const auth = clis.mcp?.find((f) => f.name === 'auth.type')
     expect(auth).toMatchObject({ group: 'auth', options: ['bearer', 'header'] })
     const machines = await types(app, '/v1/machines/types')
-    const key = machines.daytona?.find((f) => f.name === 'api_key')
-    expect(key?.secret).toBe(true)
+    const apiKey = machines.daytona?.find((f) => f.name === 'api_key')
+    expect(apiKey?.secret).toBe(true)
     const ssh = Object.fromEntries((machines.ssh ?? []).map((f) => [f.name, f]))
     expect(ssh.host).toMatchObject({ type: 'string', required: true })
     expect(ssh.port).toMatchObject({ type: 'number', required: false })
@@ -239,6 +262,9 @@ describe('entries router', () => {
     expect(ssh.mount_type?.options).toEqual(['ssh', 'fuse', 'both'])
     expect(ssh.private_key?.secret).toBe(true)
     expect(ssh.env).toBeUndefined()
+    expect(ssh.on_pause).toBeUndefined()
+    const e2b = Object.fromEntries((machines.e2b ?? []).map((f) => [f.name, f]))
+    expect(e2b.on_pause).toMatchObject({ options: ['pause'], required: false })
   })
 
   it('checks a machine against its field types', async () => {
@@ -258,6 +284,24 @@ describe('entries router', () => {
     expect(hostless.status).toBe(400)
   })
 
+  it("saves a machine's runtime and sandbox settings", async () => {
+    const { app } = setup()
+    const engine = await call(app, 'POST', '/v1/machines', {
+      name: 'js',
+      type: 'in_process',
+      fields: { runtime: 'quickjs', home: '/opt/qjs' },
+    })
+    expect(engine.status).toBe(201)
+    expect(engine.body.config).toEqual({ runtime: 'quickjs', home: '/opt/qjs' })
+    const host = await call(app, 'POST', '/v1/machines', {
+      name: 'box',
+      type: 'host',
+      fields: { 'sandbox.fs_writable': ['/tmp/w'] },
+    })
+    expect(host.status).toBe(201)
+    expect(host.body.config).toEqual({ 'sandbox.fs_writable': ['/tmp/w'] })
+  })
+
   it('keeps a machine credential sealed', async () => {
     const { app } = setup()
     const r = await call(app, 'POST', '/v1/machines', {
@@ -267,12 +311,5 @@ describe('entries router', () => {
     })
     expect(r.status).toBe(201)
     expect(r.body.config).toEqual({ sandbox_id: 's1' })
-  })
-
-  it('answers a runtime with its captures', async () => {
-    const { app } = setup()
-    const r = await call(app, 'POST', '/v1/runtimes', { name: 'py', type: 'monty', fields: {} })
-    expect(r.status).toBe(201)
-    expect(r.body.captures).toEqual([])
   })
 })

@@ -151,7 +151,7 @@ function processOf(pid: number, sessionId = 's'): Process {
     cwd: PathSpec.fromStrPath('/'),
     machine: new MachineName('host', 'box'),
     startedAt: 1,
-    runtime: null,
+    program: false,
     machinePid: null,
     state: 'running',
     endedAt: null,

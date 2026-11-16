@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   await controlled()
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, runtimes: ['pyodide'] },
+    { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } },
   )
   try {
     await run(ws, "python3 -c 'import sys; print(sys.version.split()[0])'")

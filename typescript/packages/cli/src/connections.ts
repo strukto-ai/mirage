@@ -39,7 +39,6 @@ interface Kind {
 const KINDS: readonly Kind[] = [
   { name: 'vfs', route: '/v1/vfs', noun: 'VFS' },
   { name: 'cli', route: '/v1/clis', noun: 'CLI' },
-  { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
   { name: 'machine', route: '/v1/machines', noun: 'machine' },
 ]
 
@@ -259,10 +258,42 @@ async function typeFields(client: DaemonClient, kind: Kind, type: string): Promi
 }
 
 /**
- * Read the sealed values, then the required fields still missing: prompted
- * for in a terminal, else refused, all named at once.
+ * The credentials an entry takes exactly one of, by `kind/type`: a field, or
+ * a block by its group. No one of them is required, so the field spec alone
+ * would prompt for none. GitHub authenticates with a token or as an App.
  */
-async function fill(draft: Draft, name: string, spec: Spec): Promise<void> {
+const ONE_CREDENTIAL: Readonly<Record<string, readonly string[]>> = {
+  'vfs/github': ['token', 'app'],
+  'cli/gh': ['token', 'app'],
+}
+
+// A PEM key spans lines, which a prompt cannot take, so its prompt also
+// reads `@PATH`.
+const FILE_PROMPTS = new Set(['app.private_key'])
+
+/** Whether a credential, a field or a block's group, is given. */
+function credentialGiven(credential: string, given: ReadonlySet<string>): boolean {
+  return given.has(credential) || [...given].some((key) => key.startsWith(`${credential}.`))
+}
+
+/** A prompted answer as its field types it: a number field's as a number. */
+function typedAnswer(field: Spec[number] | undefined, answer: string): unknown {
+  if (field?.type !== 'number') return answer
+  const n = Number(answer)
+  return answer.trim() === '' || Number.isNaN(n) ? answer : n
+}
+
+/**
+ * Read the sealed values, then the required fields still missing: prompted
+ * for in a terminal, else refused, all named at once. An entry that takes one
+ * of several credentials and names none is asked which one first.
+ */
+async function fill(
+  draft: Draft,
+  name: string,
+  spec: Spec,
+  credentials: readonly string[] = [],
+): Promise<void> {
   const stdin = new StdinLines()
   for (const [key, path] of draft.secrets)
     draft.fields[key] = await readSecret(key, path, name, stdin)
@@ -271,11 +302,30 @@ async function fill(draft: Draft, name: string, spec: Spec): Promise<void> {
       .filter(([, v]) => v !== null && v !== undefined && v !== '')
       .map(([k]) => k),
   )
+  const unchosen = credentials.length > 0 && !credentials.some((c) => credentialGiven(c, given))
   const missing = missingRequired(spec, given)
-  if (missing.length === 0) return
-  if (!process.stdin.isTTY) fail(`missing required fields: ${missing.join(', ')}`, 2)
-  const secret = new Set(spec.filter((f) => f.secret === true).map((f) => f.name))
-  for (const key of missing) draft.fields[key] = await prompt(label(key, name), secret.has(key))
+  if (!unchosen && missing.length === 0) return
+  if (!process.stdin.isTTY) {
+    const named = unchosen ? [credentials.join(' or '), ...missing] : missing
+    fail(`missing required fields: ${named.join(', ')}`, 2)
+  }
+  if (unchosen) {
+    let choice = ''
+    while (!credentials.includes(choice)) {
+      choice = (await prompt(`Authenticate ${name} with ${credentials.join(' or ')}`, false)).trim()
+    }
+    const block = spec.filter((f) => f.group === choice && f.required === true)
+    missing.unshift(...(block.length > 0 ? block.map((f) => f.name) : [choice]))
+  }
+  for (const key of missing) {
+    const field = spec.find((f) => f.name === key)
+    const hint = FILE_PROMPTS.has(key) ? ' (@PATH reads it from a file)' : ''
+    const answer = await prompt(`${label(key, name)}${hint}`, field?.secret === true)
+    draft.fields[key] =
+      FILE_PROMPTS.has(key) && answer.startsWith('@') && answer.length > 1
+        ? oneLine(readFile(answer.slice(1)))
+        : typedAnswer(field, answer)
+  }
 }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value))
@@ -430,7 +480,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
     await c.ensureRunning({ allowSpawn: true })
     const spec = await typeFields(c, kind, type)
     refuseArgvSecrets(draft, spec)
-    await fill(draft, entry, spec)
+    await fill(draft, entry, spec, ONE_CREDENTIAL[`${kind.name}/${type}`])
     const r = await c.request('POST', kind.route, {
       body: JSON.stringify({ name: entry, type, fields: draft.fields }),
     })
@@ -482,7 +532,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
     })
 }
 
-/** `mirage vfs|cli|runtime`, the saved connections, as the HTTP routes name them. */
+/** `mirage vfs|cli|machine`, the saved connections, as the HTTP routes name them. */
 export function registerConnectionCommands(program: Command): void {
   for (const kind of KINDS) registerKindCommands(program, kind)
 }

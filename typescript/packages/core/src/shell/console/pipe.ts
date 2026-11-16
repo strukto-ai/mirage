@@ -40,6 +40,10 @@ export class PipeConsole extends JobConsole {
     }
   }
 
+  override pipeFor(channel: Channel): BytePipe | null {
+    return channel === Channel.STDOUT || this.pipeStderr ? this.pipe : null
+  }
+
   async drain(): Promise<void> {
     await this.pipe.drain()
   }

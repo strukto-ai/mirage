@@ -740,6 +740,19 @@ jobs:
           tar -xzf /tmp/himalaya-real/himalaya.tgz -C /tmp/himalaya-real himalaya
           HIMALAYA_BIN=/tmp/himalaya-real/himalaya pnpm exec tsx himalaya_conformance.ts
 
+      # Runs every cli-office case through the REAL OfficeCLI, so the goldens
+      # are by construction what the upstream program prints, but for the
+      # divergences each skipped case names. Pinned by version and checksum.
+      - name: Run office CLI conformance against the real binary
+        working-directory: integ
+        run: |
+          mkdir -p /tmp/officecli-real
+          curl -sSfL --retry 3 -o /tmp/officecli-real/officecli \
+            https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.161/officecli-linux-x64
+          echo "ed551216f7a62c562d8d231c0416374566684fcc6163176f2ba4ad721c62900a  /tmp/officecli-real/officecli" | sha256sum -c -
+          chmod +x /tmp/officecli-real/officecli
+          OFFICECLI_BIN=/tmp/officecli-real/officecli pnpm exec tsx office_conformance.ts
+
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
         env:
@@ -1330,13 +1343,24 @@ jobs:
           ref: ${{ env.DRIVE9_REF }}
           path: drive9
 
+      # The server, not Go's module and build caches: those were a 563 MB
+      # entry for one binary that only changes with DRIVE9_REF.
+      - name: Cache drive9-server
+        id: drive9
+        uses: actions/cache@v6
+        with:
+          path: drive9/bin/drive9-server
+          key: drive9-server-${{ runner.os }}-${{ runner.arch }}-${{ env.DRIVE9_REF }}
+
       - name: Set up Go
+        if: steps.drive9.outputs.cache-hit != 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: drive9/go.mod
-          cache-dependency-path: drive9/go.sum
+          cache: false
 
       - name: Build drive9-server
+        if: steps.drive9.outputs.cache-hit != 'true'
         working-directory: drive9
         run: make build-server
 
@@ -1995,11 +2019,12 @@ jobs:
                 jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "s3"))' "$f" >/dev/null; then
               minio_suites+=("$n")
             fi
-            # A case naming a runtime, through a `runtimes` matrix or its
-            # world, needs what that runtime runs on wherever it lands.
+            # A case naming a runtime, through a `runtimes` matrix or a
+            # world machine's `runtime` or `provider`, needs what that
+            # runtime runs on wherever it lands.
             named() {
-              jq -e --arg r "$1" 'any(.cases[]?; any(((.runtimes // []) + (.world.runtimes // []))[];
-                (if type == "object" then .name else . end) == $r))' "$f" >/dev/null
+              jq -e --arg r "$1" 'any(.cases[]?; any(((.runtimes // [])
+                + [(.world.machines // {})[] | (.runtime // .provider)])[]; . == $r))' "$f" >/dev/null
             }
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi

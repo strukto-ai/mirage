@@ -179,13 +179,13 @@ async function liveAsks(): Promise<void> {
 }
 
 async function liveRoutes(): Promise<void> {
-  const first: Route = { kind: 'route', runtime: 'node', reason: 'first', policy: 'first' }
+  const first: Route = { kind: 'route', machine: 'node', reason: 'first', policy: 'first' }
   const policies = new Policies([
     { preExecute: () => first },
     {
       preExecute() {
-        first.runtime = 'ssh'
-        return { kind: 'route', runtime: 'node', reason: 'second', policy: 'second' }
+        first.machine = 'ssh'
+        return { kind: 'route', machine: 'node', reason: 'second', policy: 'second' }
       },
     },
   ])
@@ -199,7 +199,7 @@ export const POLICY_CHECKS: [string, () => Promise<void>][] = [
   [
     'standalone route settlement preserves the original action',
     async () => {
-      const route: Route = { kind: 'route', runtime: 'node', reason: 'keep this reason' }
+      const route: Route = { kind: 'route', machine: 'node', reason: 'keep this reason' }
       if (agreed([route]) !== route || settled([route]) !== route)
         throw new Error('route settlement did not preserve the original action')
     },

@@ -507,7 +507,21 @@ function pr(): CommandSpec {
       new CommandSpec({
         name: 'checks',
         description: 'Show CI checks for a pull request',
-        arguments: [REPO, JSON_FIELDS, JQ, NUMBER, TEMPLATE],
+        arguments: [
+          REPO,
+          JSON_FIELDS,
+          JQ,
+          NUMBER,
+          TEMPLATE,
+          flag({ long: '--watch', description: 'Watch checks until they finish' }),
+          flag({ long: '--fail-fast', description: 'Exit watch mode on first check failure' }),
+          new Argument(['-i', '--interval'], {
+            type: 'int',
+            default: '10',
+            help: 'Refresh interval in seconds in watch mode',
+          }),
+          flag({ long: '--required', description: 'Only show checks that are required' }),
+        ],
       }),
       new CommandSpec({
         name: 'lock',
@@ -946,6 +960,12 @@ function run(): CommandSpec {
           JSON_FIELDS,
           JQ,
           flag({ long: '--exit-status', description: 'Exit with non-zero status if run failed' }),
+          new Argument(['-j', '--job'], { help: 'View a specific job ID from a run' }),
+          new Argument(['-a', '--attempt'], {
+            metavar: 'uint',
+            help: 'The attempt number of the workflow run',
+          }),
+          flag({ short: '-v', long: '--verbose', description: 'Show job steps' }),
           flag({ long: '--log', description: 'View full log for either a run or specific job' }),
           flag({
             long: '--log-failed',
@@ -953,6 +973,21 @@ function run(): CommandSpec {
           }),
           new Argument('RUN-ID', { metavar: '[<run-id>]' }),
           TEMPLATE,
+        ],
+      }),
+      new CommandSpec({
+        name: 'watch',
+        description: 'Watch a run until it completes, showing its progress',
+        arguments: [
+          REPO,
+          flag({ long: '--compact', description: 'Show only relevant/failed steps' }),
+          flag({ long: '--exit-status', description: 'Exit with non-zero status if run fails' }),
+          new Argument(['-i', '--interval'], {
+            type: 'int',
+            default: '3',
+            help: 'Refresh interval in seconds',
+          }),
+          new Argument('RUN-ID', { metavar: '<run-id>', nargs: '?' }),
         ],
       }),
       new CommandSpec({
@@ -1116,6 +1151,7 @@ const READS = [
   'release view',
   'run list',
   'run view',
+  'run watch',
   'workflow list',
   'workflow view',
   'cache list',

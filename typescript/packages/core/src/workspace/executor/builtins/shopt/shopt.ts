@@ -51,6 +51,7 @@ export function handleShopt(
   session: SessionState,
   mark: AliasMark | null = null,
 ): RedirectResult {
+  session.syncShopts()
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
     return fail(

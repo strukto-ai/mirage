@@ -43,12 +43,17 @@ def _pieces(text: str) -> Iterator[bytes]:
 
 
 def _config(
-    pattern: str, extglob: bool, period: bool, dialect: _Dialect
+    pattern: str,
+    extglob: bool,
+    period: bool,
+    dialect: _Dialect,
+    nocase: bool = False,
 ) -> bytes:
     return json.dumps(
         {
             "pattern": [ord(ch) for ch in pattern],
             "dialect": dialect,
+            "nocase": nocase,
             "extglob": extglob,
             "period": period,
             "operation": {"kind": "matches"},
@@ -165,12 +170,13 @@ class GlobMatcher:
         extglob: bool = False,
         period: bool = False,
         dialect: _Dialect = "shell",
+        nocase: bool = False,
     ) -> None:
         # A cached matcher answers every thread, and its test runs with the
         # GIL released: one test goes through the stream at a time.
         self._lock = threading.Lock()
         self._stream = Stream(
-            "glob", _config(pattern, extglob, period, dialect)
+            "glob", _config(pattern, extglob, period, dialect, nocase)
         )
         self._stream.begin(b'{"kind":"literal"}')
         literal = _reply(self._stream)
@@ -190,6 +196,7 @@ def glob_matcher(
     extglob: bool = False,
     period: bool = False,
     dialect: _Dialect = "shell",
+    nocase: bool = False,
 ) -> GlobMatcher:
     """A compiled ``GlobMatcher``, shared by every caller asking the same.
 
@@ -199,7 +206,7 @@ def glob_matcher(
         period (bool): require an explicit leading pathname dot.
         dialect (str): shell or Python fnmatchcase grammar.
     """
-    return GlobMatcher(pattern, extglob, period, dialect)
+    return GlobMatcher(pattern, extglob, period, dialect, nocase)
 
 
 class AnyTailMatcher:

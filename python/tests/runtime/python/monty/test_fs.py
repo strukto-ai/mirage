@@ -481,7 +481,7 @@ def test_monty_scan_ends_at_a_stopped_run_instead_of_reading_on():
 
 async def _walk_a_link_to_an_ancestor() -> str:
     ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]
     )
     try:
         await ws.shell("mkdir -p /data/sub && ln -s /data /data/sub/up")

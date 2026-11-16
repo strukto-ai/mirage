@@ -15,7 +15,6 @@
 import { homedir } from 'node:os'
 import {
   MountMode,
-  RemoteRuntime,
   S3VFS,
   SSHVFS,
   Workspace,
@@ -92,9 +91,9 @@ async function main(): Promise<void> {
           hostname: HOSTNAME,
           username: 'ubuntu',
           identityFile: IDENTITY,
+          captures: ['python3'],
         },
       },
-      runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'box' }), 'workspace'],
     },
   )
 

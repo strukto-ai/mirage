@@ -234,7 +234,6 @@ const jobsOnTheBox: Policy = {
 
 `python3 /jobs/train.py` runs on the workspace's `box`
 [machine](/home/setup/machine/overview). See
-[Route Runtime](/home/policy/route-runtime) and
 [Route Machine](/home/policy/route-machine).
 
 ### post_execute
@@ -442,7 +441,7 @@ const budget: Policy = {
 
 </CodeGroup>
 
-A runtime that starts a process on this machine (`local`, Sandlock) would
+A `host` machine, which starts a process on this machine, would
 connect around the gateway, so while a policy judges connections it refuses
 to run. A program on a [machine](/home/setup/machine/overview) connects from
 that machine, and no policy sees its connections.
@@ -473,8 +472,8 @@ class NoHostFiles(Policy):
         mounts = ctx.config.get("mounts") or {}
         if any(block.get("vfs") == "disk" for block in mounts.values()):
             return Deny("disk mounts are not offered here")
-        if "runtimes" in ctx.config:
-            return Deny("runtimes are set by the operator")
+        if "machines" in ctx.config:
+            return Deny("machines are set by the operator")
         return None
 ```
 
@@ -485,8 +484,8 @@ const noHostFiles: Policy = {
     if (Object.values(mounts).some((block) => block.vfs === 'disk')) {
       return { kind: 'deny', reason: 'disk mounts are not offered here' }
     }
-    if ('runtimes' in ctx.config) {
-      return { kind: 'deny', reason: 'runtimes are set by the operator' }
+    if ('machines' in ctx.config) {
+      return { kind: 'deny', reason: 'machines are set by the operator' }
     }
     return null
   },
@@ -505,12 +504,12 @@ The create answers 403 with the reason, and nothing is built.
 | `Deny(reason)` | refuses the action |
 | `Deny(reason, path=p)` | fails the command with `p`'s own error; the rest of the line still runs |
 | `Ask(reason)` | asks the host; see [Asks](#asks) |
-| `Route(runtime)` | chooses the underlying runtime |
+| `Route(machine)` | chooses the machine that runs it |
 | `Limit(max_lines=, max_bytes=)` | cuts the output at the bound, with a notice on stderr; with `on_exceed` set to error, no output and exit 1 |
 
 TypeScript returns `{ kind: 'deny', reason }`, with
 `path` for a path, `{ kind: 'ask', reason }`,
-`{ kind: 'route', runtime }` and `new Limit({ maxLines })`. A method that
+`{ kind: 'route', machine }` and `new Limit({ maxLines })`. A method that
 raises refuses too. What the agent reads for each is on
 [Explain](/home/policy/explain#what-the-agent-reads).
 
@@ -544,7 +543,7 @@ held, and the approved retry runs it again.
 - Every Ask is put to the host, and the action runs once all are
   approved.
 - Limits merge to the tightest value of each field.
-- Two Routes to different runtimes refuse the line.
+- Two Routes to different machines refuse the line.
 - A policy may give several answers at once, a tuple in Python or an
   array in TypeScript; each counts as if a policy of its own gave it.
 

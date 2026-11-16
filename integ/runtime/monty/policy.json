@@ -3,10 +3,12 @@
     {
       "id": "cwd_relative_write_obeys_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -57,10 +59,12 @@
     {
       "id": "script_operand_obeys_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -129,10 +133,12 @@
     {
       "id": "script_rule_reads_the_operand_as_typed",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

@@ -13,10 +13,10 @@
     {
       "id": "granted_path_is_writable",
       "world": {
-        "runtimes": [
-          {
-            "name": "sandlock",
-            "config": {
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {
               "fs_writable": [
                 "/tmp"
               ]
@@ -27,7 +27,7 @@
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {
@@ -42,10 +42,10 @@
     {
       "id": "ungranted_write_is_refused",
       "world": {
-        "runtimes": [
-          {
-            "name": "sandlock",
-            "config": {
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {
               "fs_writable": [
                 "/tmp"
               ]
@@ -56,7 +56,7 @@
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {
@@ -71,10 +71,10 @@
     {
       "id": "mirage_environment_is_not_inherited",
       "world": {
-        "runtimes": [
-          {
-            "name": "sandlock",
-            "config": {
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {
               "env": {
                 "BOX_MARKER": "from-config"
               }
@@ -85,7 +85,7 @@
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {

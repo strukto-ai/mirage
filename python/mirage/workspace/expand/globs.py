@@ -27,6 +27,7 @@ from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal, TooManyMatches
 from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import (
     glob_name_matches,
     glob_parts,
@@ -45,6 +46,7 @@ from mirage.view.types import NamespaceLinks
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.state import visible_env
 
 # How deep a `**` descends. bash has no cap, but every level here is one
 # listing per directory, so an accidental `**` over a large tree is
@@ -67,18 +69,27 @@ class GlobOptions:
         globstar (bool): a `**` segment matches zero or more directory
             levels instead of reading as `*`.
         extglob (bool): expand extended groups before dispatching a command.
+        ignore (tuple[str, ...]): the GLOBIGNORE patterns, each matched
+            against a whole spelled match.
     """
 
     nullglob: bool = False
     failglob: bool = False
     globstar: bool = False
     extglob: bool = False
+    ignore: tuple[str, ...] = ()
 
     @property
     def needs_shell(self) -> bool:
         """Whether a mount command's glob has to expand here rather than
         be pushed down to the backend, which knows none of these."""
-        return self.nullglob or self.failglob or self.globstar or self.extglob
+        return (
+            self.nullglob
+            or self.failglob
+            or self.globstar
+            or self.extglob
+            or bool(self.ignore)
+        )
 
 
 def glob_options(session: SessionState) -> GlobOptions:
@@ -87,11 +98,15 @@ def glob_options(session: SessionState) -> GlobOptions:
     Args:
         session (SessionState): the session holding the `shopt` table.
     """
+    session.sync_shopts()
     return GlobOptions(
         nullglob=session.shopts.get("nullglob", SHOPT_DEFAULTS["nullglob"]),
         failglob=session.shopts.get("failglob", SHOPT_DEFAULTS["failglob"]),
         globstar=session.shopts.get("globstar", SHOPT_DEFAULTS["globstar"]),
         extglob=session.shopts.get("extglob", SHOPT_DEFAULTS["extglob"]),
+        ignore=tuple(
+            filter(None, visible_env(session).get("GLOBIGNORE", "").split(":"))
+        ),
     )
 
 
@@ -562,6 +577,30 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
     return dataclasses.replace(match, raw_path=spelled)
 
 
+def _ignored(spelling: str, options: GlobOptions) -> bool:
+    """Whether a GLOBIGNORE pattern matches a spelled match. A pattern
+    matches component by component, as a pathname does, but one ending
+    in `*` takes any components left too: bash hides `d/a` under `*`
+    and `d*`, not under `*a` or `d`.
+
+    Args:
+        spelling (str): the match as the word spells it.
+        options (GlobOptions): the expansion options, with the patterns.
+    """
+    parts = spelling.split("/")
+    for pattern in options.ignore:
+        pats = glob_parts(pattern)
+        open_end = pattern.endswith("*") and not pattern.endswith("\\*")
+        if (
+            len(pats) == len(parts) or (open_end and len(pats) < len(parts))
+        ) and all(
+            fnmatch(part, pat, extglob=options.extglob)
+            for part, pat in zip(parts, pats)
+        ):
+            return True
+    return False
+
+
 async def _is_directory(
     registry: MountRegistry,
     mount: MountEntry,
@@ -762,6 +801,12 @@ async def resolve_globs(
                             unmark_globs(typed.raw_path), limit
                         )
                         raise TooManyMatches(str(refused))
+                if opts.ignore:
+                    resolved = [
+                        p
+                        for p in resolved
+                        if not _ignored(_match_raw(item, p).raw_path, opts)
+                    ]
                 if not resolved:
                     # bash's three answers to a zero-match glob: the
                     # literal word (default), nothing at all under

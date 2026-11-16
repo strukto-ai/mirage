@@ -17,8 +17,17 @@ export {
   type MirageConfig,
   type MirageMount,
   type MirageMountBlock,
-  type MirageRuntimeBlock,
 } from './service.ts'
+export {
+  MirageClient,
+  MirageRemoteError,
+  type MirageRemote,
+  type RemoteFiles,
+  type RemoteSession,
+  type RemoteShellCall,
+} from '@struktoai/mirage-core/remote/client'
+export { RemoteMirageService, type RemoteMirageConfig } from './remote/service.ts'
+export type { MirageWorld } from './world.ts'
 export { MirageFileSystem, type MirageFsConfig } from './fs.ts'
 export { MirageSubprocess, type MirageSubprocessConfig } from './subprocess.ts'
 export { MirageShellExecutor, type MirageShellConfig } from './shell.ts'

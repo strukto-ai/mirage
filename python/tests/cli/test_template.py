@@ -143,7 +143,7 @@ def test_create_rebases_a_relative_script_but_keeps_policy_names(
     folder.mkdir()
     path = folder / "ws.yaml"
     path.write_text(
-        "clis:\n  tally:\n    script: ./tally.py\n"
+        "clis:\n  tally:\n    script: ./tally.py\n    machine: in_process\n"
         "profiles:\n  reviewer:\n    policy:\n"
         "      pre_command:\n        - script: guard.py\n"
     )

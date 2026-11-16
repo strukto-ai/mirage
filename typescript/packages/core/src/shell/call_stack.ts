@@ -18,6 +18,7 @@ import { NESTING_MAX } from './constants.ts'
 import { DiscardSignal } from './errors.ts'
 
 export class CallFrame {
+  replacedArgs = false
   positional: string[]
   functionName: string
   loopLevel: number

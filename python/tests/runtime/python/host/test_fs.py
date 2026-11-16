@@ -35,6 +35,7 @@ from mirage.runtime.python.host.constants import (
     ROUTED_CALLS,
 )
 from mirage.runtime.python.host.fs import HostFs, os_routing
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.disk import DiskVFS
@@ -889,7 +890,7 @@ class TestProcessPatch:
         ws = Workspace(
             {"/mem/": RAMVFS()},
             mode=MountMode.EXEC,
-            runtimes=["monty", "workspace"],
+            machines=[MontyRuntime()],
         )
         with ws:
             Path("/mem/host.txt").write_text("from host")

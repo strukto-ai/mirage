@@ -315,11 +315,14 @@ describe('Workspace.snapshot / Workspace.load', () => {
   })
 })
 
-// Twin of test_copy_keeps_the_runtimes_named_by_string.
-it('a copy keeps the runtimes named by string', async () => {
+// Twin of test_copy_rebuilds_the_machines_built_from_an_entry.
+it('a copy rebuilds the machines built from an entry', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] },
+    {
+      mode: MountMode.EXEC,
+      machines: { py: { provider: 'in_process', runtime: 'monty', captures: ['@python'] } },
+    },
   )
   const copied = await ws.copy()
   try {
@@ -330,7 +333,7 @@ it('a copy keeps the runtimes named by string', async () => {
   }
 })
 
-// Twin of test_copy_rebuilds_a_runtime_by_the_key_it_was_named_by.
+// Twin of test_copy_rebuilds_a_registered_runtime_by_the_key_it_names.
 it('a copy rebuilds a runtime by the key it was named by', async () => {
   class Aliased extends PythonRuntime {
     readonly name: string = 'aliased-python'
@@ -345,7 +348,7 @@ it('a copy rebuilds a runtime by the key it was named by', async () => {
   registerRuntime('py-engine', Aliased)
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, runtimes: ['py-engine', 'workspace'] },
+    { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'py-engine' } } },
   )
   const copied = await ws.copy()
   try {
@@ -815,12 +818,13 @@ describe('cli registry snapshot', () => {
     const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
     expect(install?.cli.script?.source).toBe("print('hi')")
+    expect(install?.cli.machine).toBe('in_process')
     expect(install?.cli.runtime).toBeNull()
     await ws.close()
     await restored.close()
   })
 
-  it('carries the runtime pin and the module bit through a snapshot', async () => {
+  it('carries the machine, the runtime and the module bit through a snapshot', async () => {
     const ws = buildWorkspace()
     ws.registerCli(
       'pager',
@@ -832,10 +836,12 @@ describe('cli registry snapshot', () => {
       null,
     )
     const state = await toStateDict(ws)
+    expect(state.clis?.[0]?.machine).toBe('in_process')
     expect(state.clis?.[0]?.runtime).toBe('quickjs')
     expect(state.clis?.[0]?.script?.module).toBe(true)
     const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
+    expect(install?.cli.machine).toBe('in_process')
     expect(install?.cli.runtime).toBe('quickjs')
     expect(install?.cli.script?.module).toBe(true)
     expect(install?.cli.script?.language).toBe('js')

@@ -30,6 +30,7 @@ import { fill, runGenerator } from './mcp_to_cli.ts'
 //   clis:
 //     grafana:
 //       cli: ./grafana_cli.ts:GRAFANA
+//       machine: in_process
 //       config:
 //         env: {GRAFANA_URL: "${GRAFANA_URL}"}
 

@@ -9,10 +9,12 @@
     {
       "id": "load_file",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -36,10 +38,12 @@
     {
       "id": "helper_names",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -63,10 +67,12 @@
     {
       "id": "exit_is_uncatchable",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -90,10 +96,12 @@
     {
       "id": "exit_flushes",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -117,10 +125,12 @@
     {
       "id": "file_eof",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -144,10 +154,12 @@
     {
       "id": "file_peer_refresh",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -171,10 +183,12 @@
     {
       "id": "printf_byte_count",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -198,10 +212,12 @@
     {
       "id": "stdin_cursor",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",

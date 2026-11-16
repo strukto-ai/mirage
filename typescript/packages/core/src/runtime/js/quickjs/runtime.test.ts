@@ -31,7 +31,7 @@ describe('QuickJS cwd', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [rt, 'workspace'],
+        machines: [rt],
       },
     )
     const code = 'console.log(os.getcwd()[0])'
@@ -71,7 +71,7 @@ it.each([
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new QuickJsRuntime(), 'workspace'],
+        machines: [new QuickJsRuntime()],
       },
     )
     try {
@@ -112,7 +112,7 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
     { '/data': new SlowRAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new QuickJsRuntime(), 'workspace'],
+      machines: [new QuickJsRuntime()],
     },
   )
   try {
@@ -146,7 +146,7 @@ it('a deadline joins an open still under way', async () => {
     { '/data': new SlowCreateRAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [new QuickJsRuntime(), 'workspace'],
+      machines: [new QuickJsRuntime()],
     },
   )
   try {
@@ -174,10 +174,7 @@ it('reports a failed landing at the close of the FILE that wrote it', async () =
     override write = full
   }
   const rt = new QuickJsRuntime()
-  const ws = new Workspace(
-    { '/data': new FullVFS() },
-    { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
-  )
+  const ws = new Workspace({ '/data': new FullVFS() }, { mode: MountMode.EXEC, machines: [rt] })
   try {
     const result = await execute(
       rt,
@@ -194,10 +191,7 @@ it('reports a failed landing at the close of the FILE that wrote it', async () =
 // count or -errno, and os.seek the offset, a bigint for a bigint.
 it('answers the descriptor and byte calls as qjs on WASI does', async () => {
   const rt = new QuickJsRuntime()
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
   try {
     const result = await execute(
       rt,

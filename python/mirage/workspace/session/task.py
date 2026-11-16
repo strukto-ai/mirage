@@ -195,7 +195,9 @@ async def drive(
                     answer = partial(task.answer_substituted, out, err, status)
                 case ("process", _, node):
                     path = await host.process(ask[1], node)
-                    answer = partial(task.answer_path, path)
+                    answer = partial(
+                        task.answer_path, path, host.session.last_bg_job_id
+                    )
                 case ("subscript", shell, text):
                     answer = partial(
                         task.answer_subscript,

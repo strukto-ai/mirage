@@ -406,6 +406,9 @@ export const HELP_TOPICS: Record<string, string> = {
 
 export const GIST_ORIGIN = 'https://gist.github.com'
 export const GITHUB_HOST = 'github.com'
+// What `gh auth status` shows for an App: an installation token is `ghs_`
+// and 36 characters, and showing one would mean minting one.
+export const APP_TOKEN_MASK = `ghs_${'*'.repeat(36)}`
 // How gh 2.46 refuses a list verb's --limit under 1, before any request:
 // `invalid limit: 0`, and `invalid value for --limit: 0` from pr list.
 export const CONNECT_HINT = 'check your internet connection or https://githubstatus.com'

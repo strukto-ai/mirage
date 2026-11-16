@@ -31,6 +31,7 @@ from mirage.policy import resolve_producer
 from mirage.policy.base import Policy
 from mirage.policy.builtin import output_cap as sg
 from mirage.runtime.python import LocalRuntime
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.shell.console import Channel
 from mirage.types import Limit, OnExceed
 from mirage.utils.abort import MirageAbortError
@@ -404,7 +405,7 @@ async def test_the_line_deadline_cuts_a_local_python3():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LocalRuntime()],
+        machines=[LocalRuntime()],
         command_limits=_line(0.2),
     )
     r = await ws.shell('python3 -c "import time; time.sleep(5)"')
@@ -421,7 +422,7 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         {"/data": ram},
         mode=MountMode.EXEC,
         command_limits=_line(0.2),
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     start = time.monotonic()
     r = await ws.shell("python3 /data/spin.py")

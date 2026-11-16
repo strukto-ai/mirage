@@ -958,11 +958,7 @@ async def _run_argv(
                 return
             try:
                 context.frame.routing = routed(
-                    registry.runtime_entries,
-                    here.bindings,
-                    route.runtime,
-                    route.machine,
-                    here.machine,
+                    registry.runtime_entries, here.bindings, route.machine
                 )
             except ValueError as exc:
                 raise RouteError(str(exc)) from exc

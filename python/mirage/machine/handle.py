@@ -191,6 +191,9 @@ class MachineHandle:
 
     provider: ClassVar[str]
     config_cls: ClassVar[type[MachineConfig]] = MachineConfig
+    # Whether ``_pause_machine`` pauses; only then does close wait for a
+    # connect under way, which an unbounded connect would otherwise hold.
+    pauses: ClassVar[bool] = False
     config: MachineConfig
 
     def __init__(
@@ -205,6 +208,10 @@ class MachineHandle:
         # retries.
         self._connected = False
         self._connect_lock = asyncio.Lock()
+        # Set by a provider's connect that reached the machine; close hands
+        # it to ``_pausable`` for the pause after.
+        self._reached = False
+        self._pausable = False
         self._mounts: MachineMounts | None = None
         # The libfaketime the machine holds, asked once the first program
         # runs there under a system_time: None for none. Its first runs
@@ -308,7 +315,7 @@ class MachineHandle:
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        await self._ensure_connected()
+        await self.ensure_connected()
         run = argv
         if self._mounts is not None:
             refusal = await self._mounts.validate(binding, ctx.cwd.virtual)
@@ -649,7 +656,7 @@ class MachineHandle:
         """
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
-                await self._ensure_connected()
+                await self.ensure_connected()
                 done = await self._exec_argv(
                     ("/bin/sh", "-c", stop_line(tag, signum)),
                     None,
@@ -751,10 +758,12 @@ class MachineHandle:
             wait (float): how long connecting and running may take.
         """
         async with asyncio.timeout(wait):
-            await self._ensure_connected()
+            await self.ensure_connected()
             return await self._setup(line)
 
-    async def _ensure_connected(self) -> None:
+    async def ensure_connected(self) -> None:
+        """Connect once; after a disconnect the next call connects
+        again."""
         async with self._connect_lock:
             if not self._connected:
                 await self.connect()
@@ -816,14 +825,40 @@ class MachineHandle:
     async def close(self) -> None:
         """Unmount what the machine was served; the machine is the user's.
         The next run connects again, so a workspace that takes the handle
-        after this one reaches the machine anew."""
+        after this one reaches the machine anew. On a machine that pauses, a
+        connect still under way settles first, and what this workspace
+        reached, cleanup included, is handed to the pause after."""
+        if self.pauses:
+            async with self._connect_lock:
+                pass
         try:
             if self._spent:
                 await self._remove_spent()
             if self._mounts is not None:
                 await self._mounts.close()
         finally:
+            self._pausable = self._reached
+            self._reached = False
             self._disconnected()
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the machine's config asks to pause it when its
+        workspace pauses without naming the machines to pause."""
+        return False
+
+    async def pause(self) -> None:
+        """Pause the machine after its workspace closed to pause, when that
+        workspace reached it; by default the machine is only
+        disconnected."""
+        pausable = self._pausable
+        self._pausable = False
+        if pausable:
+            await self._pause_machine()
+
+    async def _pause_machine(self) -> None:
+        """Pause the machine a closed workspace reached. A provider that
+        can pause overrides this, and its next connect resumes the
+        machine; a machine already gone counts as paused."""
 
 
 def _parse_status(first: str, second: str) -> RunStatus | None:

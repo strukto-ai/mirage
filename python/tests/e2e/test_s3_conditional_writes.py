@@ -30,6 +30,7 @@ from mirage.errors.types import StaleWriteError
 from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
 from mirage.runtime.handles.mode import open_mode
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import ScriptSource
 from mirage.types import PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.abort import MirageAbortError
@@ -75,7 +76,7 @@ def _workspace(
         "/ram": (RAMVFS(), MountMode.WRITE),
     }
     table.update(mounts)
-    return Workspace(table, mode=mode, runtimes=["monty", "workspace"])
+    return Workspace(table, mode=mode, machines=[MontyRuntime()])
 
 
 @pytest_asyncio.fixture

@@ -14,7 +14,6 @@
 
 import { Limit, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 import { exerciseCancellation, runLine } from './e2b_cancel.ts'
 
@@ -25,7 +24,7 @@ function check(condition: boolean, message: string): asserts condition {
 }
 
 export async function exercise(config: { sandboxId: string; apiKey: string }): Promise<string[]> {
-  const machine = new E2BMachine('e2b', config)
+  const machine = new E2BMachine('e2b', { ...config, captures: ['python3', 'node'] })
   const checks: string[] = []
   try {
     // Concurrent first calls also exercise the shared connection latch.
@@ -85,10 +84,6 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
       {
         mode: MountMode.EXEC,
         machines: { e2b: machine },
-        runtimes: [
-          new RemoteRuntime({ captures: ['python3', 'node'], machine: 'e2b' }),
-          'workspace',
-        ],
       },
     )
     try {
@@ -114,13 +109,12 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
   } finally {
     await machine.close()
   }
-  const cancellable = new E2BMachine('e2b', config)
+  const cancellable = new E2BMachine('e2b', { ...config, captures: ['@line'] })
   const cancelWorkspace = new Workspace(
     { '/home/user': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       machines: { e2b: cancellable },
-      runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )

@@ -32,7 +32,7 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import Channel, JobConsole, JobOutput, OwnedStream
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -49,6 +49,7 @@ from mirage.shell.descriptors import (
     Inherited,
     Recorder,
     bad_descriptor_line,
+    redirect_operations,
     unsupported_descriptor,
 )
 from mirage.shell.errors import ExitSignal
@@ -213,6 +214,7 @@ async def install_exec_redirects(
         raise
     if err is None:
         await session.release_inputs(before + owned)
+        _settle_holds(session)
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     try:
         return await _roll_back(dispatch, session, saved, err)
@@ -231,11 +233,12 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
-        error = await _install_descriptor(
-            owned, dispatch, session, redirect, stdin
-        )
-        if error is not None:
-            return error
+        for operation in redirect_operations(redirect):
+            error = await _install_descriptor(
+                owned, dispatch, session, operation, stdin
+            )
+            if error is not None:
+                return error
     return None
 
 
@@ -248,6 +251,10 @@ async def _install_descriptor(
 ) -> bytes | None:
     fd = redirect.fd
     target = redirect.target
+    if redirect.kind == RedirectKind.UNEXPANDED and isinstance(
+        target, ExitSignal
+    ):
+        return target.stderr
     if redirect.kind == RedirectKind.AMBIGUOUS:
         word = target.raw_path if isinstance(target, PathSpec) else str(target)
         return encode_text(f"{word}: ambiguous redirect\n")
@@ -463,6 +470,111 @@ def _identity(session: SessionState, fd: int) -> tuple[str, bool]:
         TO_STDOUT if session.exec_stdout is None else session.exec_stdout,
         session.exec_stdout_append,
     )
+
+
+def descriptor_name(session: SessionState, fd: int) -> str:
+    """What a writing descriptor of a shell points at, named as a dup
+    copies it (``_identity``): ``&1`` or ``&2`` for the terminal's own
+    streams, a path, or ``CLOSED``.
+
+    Args:
+        session (SessionState): the shell.
+        fd (int): the descriptor.
+    """
+    return _identity(session, fd)[0]
+
+
+def _settle_holds(session: SessionState) -> None:
+    """Let go of each capture the shell holds open as a child once none
+    of its descriptors leads into it any more (``exec 2>/dev/null``): fd
+    0 too (``exec 0>&1``), and the ones a running redirect shadows.
+
+    Args:
+        session (SessionState): the shell, its descriptors just rebound.
+    """
+    if not session.holds:
+        return
+    named = {
+        descriptor_name(session, fd)
+        for fd in {FD_STDIN, FD_STDOUT, FD_STDERR, *session.descriptors}
+    }
+    named.update(session.shadowed)
+    for hold in session.holds:
+        hold.settle(named)
+
+
+def _passed(at: JobConsole, channel: Channel) -> bool:
+    """Whether every level on the way from ``at`` passes ``channel`` on
+    as it is, so no redirect between a child and its shell's terminal
+    routes it.
+
+    Args:
+        at (JobConsole): where the child writes.
+        channel (Channel): stdout or stderr.
+    """
+    left: set[Channel | OwnedStream] = {channel}
+    while isinstance(at, JobOutput):
+        left = at.passes(left)
+        at = at.target
+    return left == {channel}
+
+
+class ForkRoute(JobOutput):
+    """Where a child a shell starts (a job, a process substitution)
+    writes: the shell's stdout and stderr as they stood then. A later
+    ``exec`` moves the shell's own streams, not the child's, which goes on
+    writing the terminal stream it was given (``cmd & exec 2>log`` leaves
+    the job's stderr on the terminal), as a forked child keeps its
+    descriptors. A channel a redirect on the way routes (``JobRoute``) is
+    left to it.
+
+    Args:
+        target (JobConsole): where the shell's jobs write.
+        session (SessionState): the shell.
+    """
+
+    def __init__(self, target: JobConsole, session: SessionState) -> None:
+        super().__init__(target)
+        self.session = session
+        self.given = {
+            channel: descriptor_name(session, fd)
+            for fd, channel in (
+                (FD_STDOUT, Channel.STDOUT),
+                (FD_STDERR, Channel.STDERR),
+            )
+            if _passed(target, channel)
+        }
+
+    def _moved(self, channel: Channel) -> Inherited | None:
+        """The terminal stream the child was given on ``channel`` once the
+        shell has pointed its own elsewhere; None while it has not, or
+        when the child was given no terminal stream there.
+
+        Args:
+            channel (Channel): stdout or stderr.
+        """
+        name = self.given.get(channel)
+        fd = FD_STDOUT if channel == Channel.STDOUT else FD_STDERR
+        if name is None or descriptor_name(self.session, fd) == name:
+            return None
+        if name == TO_STDOUT:
+            return Inherited(self.session.terminal, Channel.STDOUT)
+        if name == TO_STDERR:
+            return Inherited(self.session.terminal, Channel.STDERR)
+        return None
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        """Write what the child wrote on the stream it was given.
+
+        Args:
+            channel (Channel): stdout or stderr.
+            data (bytes): the bytes.
+        """
+        stream = self._moved(channel)
+        if stream is None:
+            await super().emit(channel, data)
+        else:
+            await super().emit_to(stream, data)
 
 
 def _read_end(

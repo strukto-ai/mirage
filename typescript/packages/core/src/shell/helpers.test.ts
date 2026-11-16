@@ -18,6 +18,7 @@ import {
   aliasRewrite,
   braceExpands,
   byteOffset,
+  endsLine,
   getCommandName,
   getDeclarationKeyword,
   getCaseItems,
@@ -660,5 +661,35 @@ describe('aliasRewrite', () => {
 
   it('reads a word of digits after a value ending in a blank', () => {
     expect(rewrite('a 1 b', { a: 'echo ', 1: 'one' })?.[0]).toBe('echo  one b')
+  })
+})
+
+// bash runs a shell's last command in the shell's place, as bash 5.2's
+// `ps -o pid,ppid,args --forest` shows: not one under a redirect, a `!`, a
+// group or a function, nor one after a `&` job.
+describe('endsLine', () => {
+  const commands = (node: TSNodeLike): TSNodeLike[] => [
+    ...(node.type === NT.COMMAND ? [node] : []),
+    ...node.children.flatMap(commands),
+  ]
+  it.each([
+    ['true; ps', ['ps']],
+    ['ps; true', ['true']],
+    ['true && ps', ['ps']],
+    ['false || ps', ['ps']],
+    ['x=1 ps', ['x=1 ps']],
+    ['(true; ps); true', ['ps', 'true']],
+    ['ps 2>/dev/null', []],
+    ['! ps', []],
+    ['sleep 1 & ps', []],
+    ['{ ps; }', []],
+    ['if true; then ps; fi', []],
+    ['a | ps', []],
+    ['ps &', []],
+  ])('%j runs %j last in its shell', (line, last) => {
+    const found = commands(parse(line))
+      .filter(endsLine)
+      .map((c) => c.text)
+    expect(found).toEqual(last)
   })
 })

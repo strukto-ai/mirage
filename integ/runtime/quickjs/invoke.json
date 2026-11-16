@@ -9,10 +9,12 @@
     {
       "id": "version_names_quickjs_for_both_aliases",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -60,10 +62,12 @@
     {
       "id": "stdin_and_module_mode",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -103,10 +107,12 @@
     {
       "id": "errors_and_the_sandbox",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ]
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        }
       },
       "steps": [
         {
@@ -160,10 +166,12 @@
     {
       "id": "a_classic_script_is_sloppy_in_any_directory",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -204,10 +212,12 @@
       "id": "a_max_memory_below_its_start_refuses_the_run",
       "note": "QuickJS starts on 4 wasm pages (256 KiB), so a workspace with less left refuses the run rather than lending it more.",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "max_memory": "200KB",
         "mounts": {
           "/ram": {

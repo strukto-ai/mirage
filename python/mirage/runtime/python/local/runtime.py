@@ -22,6 +22,7 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
+from mirage.execution.types import MachineName
 from mirage.io.types import ByteSource
 from mirage.machine.program import (
     Children,
@@ -31,6 +32,7 @@ from mirage.machine.program import (
     system_time_env,
 )
 from mirage.runtime.config import RuntimeConfig, resolve_home
+from mirage.runtime.constants import HOST
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
@@ -116,7 +118,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the runtime entry's config `home` or "
+                    "(from the machine's `home` or "
                     f"{LOCAL_HOME_ENV})"
                 )
             # Absolute: the program's env has no host PATH to resolve a
@@ -126,6 +128,11 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             self._python = sys.executable
         self._children: Children = {}
         self._closed = False
+
+    @property
+    def machine(self) -> MachineName:
+        """The host, under the name of the machine entry that runs it."""
+        return MachineName(HOST, self.name)
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.

@@ -19,6 +19,8 @@ import { access, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
+import { MachineName } from '@struktoai/mirage-core/execution/types'
+import { HOST } from '@struktoai/mirage-core/runtime/constants'
 import {
   resolveHome,
   type ConfigFields,
@@ -144,11 +146,16 @@ export class LocalRuntime
         accessSync(home, constants.X_OK)
       } catch (cause) {
         throw new Error(
-          `local python interpreter not found: ${home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `local python interpreter not found: ${home} (from the machine's \`home\` or ${LOCAL_HOME_ENV})`,
           { cause },
         )
       }
     }
+  }
+
+  /** The host, under the name of the machine entry that runs it. Mirrors Python's `machine`. */
+  override get machine(): MachineName {
+    return new MachineName(HOST, this.name)
   }
 
   override async version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
@@ -229,7 +236,7 @@ export class LocalRuntime
     if (!(await isExecutable(found)))
       throw new Error(
         `local python interpreter not found: '${name}' (set the ` +
-          `runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `machine's \`home\` or ${LOCAL_HOME_ENV})`,
       )
     return found
   }

@@ -1,11 +1,12 @@
 import { Context } from '@deepseek-ai/cordis'
+import { SubprocessError, SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
 import { MirageSubprocess } from './subprocess.ts'
 
 async function attach() {
-  const ws = new Workspace({}, { runtimes: [] })
+  const ws = new Workspace({}, { machines: [] })
   const ctx = new Context()
   await ctx.plugin(MirageService, { workspace: ws }).await()
   await ctx.plugin(MirageSubprocess).await()
@@ -14,7 +15,7 @@ async function attach() {
 
 describe('workspace subprocess', () => {
   it('uses the configured session profile for child admission', async () => {
-    const ws = new Workspace({}, { runtimes: [] })
+    const ws = new Workspace({}, { machines: [] })
     ws.createSession('limited', {
       profile: { commands: { deny: [{ commands: ['printf'], reason: 'restricted' }] } },
     })
@@ -109,6 +110,29 @@ describe('workspace subprocess', () => {
           stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
         }),
       ).toThrow('argv')
+    } finally {
+      await ws.close()
+    }
+  })
+  it('reports lookup and argv failures with their subprocess codes', async () => {
+    const { ws, provider } = await attach()
+    try {
+      await expect(provider.resolveExecutable('no-such-program')).rejects.toBeInstanceOf(
+        SubprocessExecutableNotFoundError,
+      )
+      let thrown: unknown
+      try {
+        provider.spawn({
+          argv: ['printf', 'a\0b'],
+          cwd: '/',
+          graceMs: 100,
+          stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+        })
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeInstanceOf(SubprocessError)
+      expect((thrown as SubprocessError).code).toBe('SUBPROCESS_INVALID_ARGV')
     } finally {
       await ws.close()
     }

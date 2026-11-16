@@ -3,10 +3,12 @@
     {
       "id": "cpython_surface_known_gaps_1077",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -85,10 +87,12 @@
     {
       "id": "monty_023_python_surface",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        }
       },
       "steps": [
         {
@@ -104,10 +108,12 @@
     {
       "id": "os_urandom",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -152,10 +158,12 @@
       "id": "file_modules_reach_the_mount",
       "note": "csv, tomllib, hashlib and os.path read and write workspace files through the same calls open() makes.",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",

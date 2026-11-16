@@ -109,7 +109,7 @@ describe('resolve', () => {
 
   it('claims no confinement once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     expect(shell.sandboxMode).toBeUndefined()
   })
 
@@ -295,7 +295,7 @@ describe('sandbox policy', () => {
 
   it('makes no sandbox claim once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     const result = await runOn(
       shell,
       shell.resolve({ command: 'echo written > /data/x.txt', sandboxPolicy: READ_ONLY }),
@@ -689,13 +689,26 @@ describe('session binding', () => {
     expect(out.stdout.text).toBe('/data\n/data\n')
   })
 
-  it('treats an explicit workdir as a one-call subshell', async () => {
+  it('leaves a line already in the session where it is', async () => {
+    const { shell, ws } = await makeShell({}, { sessionId: 's5' })
+    await runOn(shell, shell.resolve({ command: 'true' }))
+    const other = ws.shell('sleep 0.2; pwd', { sessionId: 's5' })
+    const moved = await runOn(shell, shell.resolve({ command: 'pwd', workdir: '/data' }))
+    expect(moved.stdout.text).toBe('/data\n')
+    expect((await other).stdoutText).toBe('/\n')
+    expect(ws.getSession('s5').cwd).toBe('/')
+  })
+
+  it('moves the session to the workdir dsh sends and keeps its exports', async () => {
     const { shell } = await makeShell({}, { sessionId: 's2' })
-    await runOn(shell, shell.resolve({ command: 'cd /data' }))
-    const sub = await runOn(shell, shell.resolve({ command: 'pwd', workdir: '/' }))
-    expect(sub.stdout.text.trim()).toBe('/')
-    const back = await runOn(shell, shell.resolve({ command: 'pwd' }))
-    expect(back.stdout.text.trim()).toBe('/data')
+    await runOn(shell, shell.resolve({ command: 'export KEPT=yes; cd /data' }))
+    const moved = await runOn(
+      shell,
+      shell.resolve({ command: 'pwd; echo "$KEPT"; export LATER=too', workdir: '/' }),
+    )
+    expect(moved.stdout.text).toBe('/\nyes\n')
+    const after = await runOn(shell, shell.resolve({ command: 'pwd; echo "$LATER"' }))
+    expect(after.stdout.text).toBe('/\ntoo\n')
   })
 
   it('keeps a per-call env override out of the session', async () => {
@@ -940,7 +953,7 @@ describe('sandbox facts', () => {
 
   it('omits the sandbox once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     const result = await runOn(shell, shell.resolve({ command: 'true' }))
     expect(result.sandbox).toBeUndefined()
   })

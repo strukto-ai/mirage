@@ -747,6 +747,25 @@ def _pr() -> CommandSpec:
                     JSON,
                     JQ,
                     TEMPLATE,
+                    _flag(
+                        long="--watch",
+                        description="Watch checks until they finish",
+                    ),
+                    _flag(
+                        long="--fail-fast",
+                        description="Exit watch mode on first check failure",
+                    ),
+                    Argument(
+                        "-i",
+                        "--interval",
+                        type="int",
+                        default="10",
+                        help="Refresh interval in seconds in watch mode",
+                    ),
+                    _flag(
+                        long="--required",
+                        description="Only show checks that are required",
+                    ),
                 ),
             ),
             CommandSpec(
@@ -1367,7 +1386,8 @@ def _release() -> CommandSpec:
     )
 
 
-# `gh run view`'s flags: the summary's, and gh 2.85's two log views.
+# `gh run view`'s flags: the summary's, one job's or attempt's, and gh 2.85's
+# two log views.
 RUN_VIEW_OPTIONS = (
     REPO,
     JSON,
@@ -1376,6 +1396,14 @@ RUN_VIEW_OPTIONS = (
         long="--exit-status",
         description="Exit with non-zero status if run failed",
     ),
+    Argument("-j", "--job", help="View a specific job ID from a run"),
+    Argument(
+        "-a",
+        "--attempt",
+        metavar="uint",
+        help="The attempt number of the workflow run",
+    ),
+    _flag(short="-v", long="--verbose", description="Show job steps"),
     _flag(
         long="--log",
         description="View full log for either a run or specific job",
@@ -1471,6 +1499,31 @@ def _run() -> CommandSpec:
                     Argument("RUN-ID", metavar="[<run-id>]"),
                     *RUN_VIEW_OPTIONS,
                     TEMPLATE,
+                ),
+            ),
+            CommandSpec(
+                name="watch",
+                description=(
+                    "Watch a run until it completes, showing its progress"
+                ),
+                arguments=(
+                    Argument("RUN-ID", metavar="<run-id>", nargs="?"),
+                    REPO,
+                    _flag(
+                        long="--compact",
+                        description="Show only relevant/failed steps",
+                    ),
+                    _flag(
+                        long="--exit-status",
+                        description="Exit with non-zero status if run fails",
+                    ),
+                    Argument(
+                        "-i",
+                        "--interval",
+                        type="int",
+                        default="3",
+                        help="Refresh interval in seconds",
+                    ),
                 ),
             ),
             CommandSpec(
@@ -1700,6 +1753,7 @@ _READS = (
     "release view",
     "run list",
     "run view",
+    "run watch",
     "workflow list",
     "workflow view",
     "cache list",

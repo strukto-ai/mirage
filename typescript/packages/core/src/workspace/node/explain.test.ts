@@ -789,7 +789,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: { r: PROFILE },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(w)
@@ -826,7 +826,7 @@ describe('prejudge', () => {
         {
           mode: MountMode.EXEC,
           profiles: { r: profile },
-          ...(whole ? { runtimes: [new LineBox(), 'workspace'] } : {}),
+          ...(whole ? { machines: [new LineBox()] } : {}),
         },
       )
       open.push(w)
@@ -849,7 +849,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: { r: SessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
-        runtimes: [new LineBox(), 'workspace'],
+        machines: [new LineBox()],
       },
     )
     open.push(w)
@@ -894,7 +894,7 @@ describe('prejudge', () => {
             },
           }),
         },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(w)
@@ -938,7 +938,7 @@ describe('prejudge', () => {
             },
           }),
         },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(w)
@@ -977,7 +977,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         policies: [new SealedSecret()],
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(w)
@@ -1025,7 +1025,7 @@ describe('prejudge', () => {
             },
           }),
         },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(w)
@@ -1048,7 +1048,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: { r: PROFILE },
-        runtimes: [new LineBox(), 'workspace'],
+        machines: [new LineBox()],
         routePolicy: () => 'workspace',
       },
     )
@@ -1071,14 +1071,14 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: { r: PROFILE },
-        runtimes: [new LineBox(), 'workspace'],
+        machines: [new LineBox()],
       },
     )
     open.push(w)
     w.createSession('s', { profile: 'r' })
     const said = await w.explain(line, 's')
     expect(said.outcome).toBe(outcome)
-    expect(commands(said.node).map((c) => c.runtime)).toEqual(Array(count).fill('sandbox'))
+    expect(commands(said.node).map((c) => c.machine)).toEqual(Array(count).fill('sandbox'))
   })
 
   it('leaves a path the pass cannot read to the gate', async () => {

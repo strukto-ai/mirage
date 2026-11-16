@@ -16,8 +16,11 @@ from dataclasses import dataclass
 
 from mirage.machine.config import (
     MachineConfig,
+    check_on_pause,
     require_id,
 )
+from mirage.machine.microsandbox.constants import ON_PAUSE
+from mirage.machine.types import PauseAction
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -28,9 +31,13 @@ class MicrosandboxConfig(MachineConfig):
         sandbox (str): name of a running sandbox created and started
             by the user. Serve the workspace inside the guest at the
             same mount paths as the host.
+        on_pause (PauseAction | None): ``pause`` pauses the sandbox when
+            the workspace pauses; None leaves it as it is.
     """
 
     sandbox: str
+    on_pause: PauseAction | None = None
 
     def __post_init__(self) -> None:
         require_id("microsandbox", "sandbox", self.sandbox)
+        check_on_pause("microsandbox", self.on_pause, ON_PAUSE)

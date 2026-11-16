@@ -103,6 +103,7 @@ This list is generated from Mirage's registered command tree.
 | `gh release edit` | Edit a release |
 | `gh run list` | List workflow runs. Aliases: `ls`. |
 | `gh run view` | View a workflow run |
+| `gh run watch` | Watch a run until it completes, showing its progress |
 | `gh run rerun` | Rerun a workflow run |
 | `gh run cancel` | Cancel a workflow run |
 | `gh run delete` | Delete a workflow run |
@@ -152,13 +153,15 @@ gh pr view 17 --json files,commits,reviews --jq '.files[].path'
 gh pr checks 17 --json name,bucket,state
 gh run list --workflow ci.yml --json databaseId,status,conclusion
 gh run view 123456 --log-failed
+gh run view 123456 --json jobs --jq '.jobs[] | select(.conclusion=="failure")'
+gh run view --job 654321 --log-failed
 gh workflow view ci.yml --yaml --ref release
 ```
 
 Use `-R/--repo [HOST/]OWNER/REPO` where supported to override the configured
 repository. Typed `--jq` requires `--json`. List commands paginate up to
-`-L/--limit`. Typed `--json` fields follow upstream's for each command, except
-`jobs` on `run view`; use `gh api` for additional data.
+`-L/--limit`. Typed `--json` fields follow upstream's for each command; use
+`gh api` for additional data.
 
 ```bash
 gh issue create --title 'Broken build' --body-file /work/issue.md --label bug
@@ -174,7 +177,8 @@ gh run rerun 123456 --failed
 Commands are noninteractive: supply titles, bodies, branches and confirmation
 flags explicitly. Body/notes files and `--input` files use the workspace VFS;
 `-` selects stdin. Workflow YAML is read at the selected ref. Run logs are
-available only after completion; `--log-failed` selects failed steps.
+available only after completion; `--log-failed` selects failed steps,
+`-j/--job` one job, whose run it names, and `-a/--attempt` one attempt.
 
 ## Repositories
 
@@ -255,7 +259,8 @@ invalidate mounted caches; read API methods leave them intact.
 | Pull-request creation | Requires a title and a body or body file. `--head` defaults to `branch` and `--base` to the repository's default branch. |
 | Forks | `--clone` is refused; `--remote` without a repository is refused. |
 | Repository operations | No `repo set-default`. `repo sync` acts on a repository on GitHub, never a local checkout. |
-| Release assets and live runs | `release upload`, `release download`, `run watch` and `run download` are absent. |
+| Release assets and run artifacts | `release upload`, `release download` and `run download` are absent. |
+| Watching | `run watch` and `pr checks --watch` print every refresh, as gh does where stdout is no terminal, and deliver them when the watch ends. |
 | Raw API | REST pagination only; no verbose, cache, hostname, preview or template flags. |
 | Help topics | `environment` and `exit-codes` are supported, alongside command help. |
 | HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |

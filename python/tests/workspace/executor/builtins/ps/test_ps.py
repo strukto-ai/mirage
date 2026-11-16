@@ -258,10 +258,10 @@ async def test_ps_shows_where_a_program_runs(host):
         assert job is not None and job.process is not None
         job.process.one_command = True
         if host:
-            assert job.process.take(None, "local")
+            assert job.process.take(None)
             job.process.set_machine_pid(MachinePid(4242, 1.0))
         else:
-            assert job.process.take(MachineName("docker", "tools"), "docker")
+            assert job.process.take(MachineName("docker", "tools"))
         machine = str(ws.process_table.machine) if host else "docker:tools"
         own = (await ws.shell("ps", session_id="s")).stdout.decode()
         lines = own.splitlines()

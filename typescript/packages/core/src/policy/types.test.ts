@@ -21,10 +21,10 @@ describe('Answer', () => {
   it('is its kind and its own fields', () => {
     expect(Answer.parse({ kind: 'deny', reason: 'no' })).toEqual({ kind: 'deny', reason: 'no' })
     expect(Answer.parse({ kind: 'ask' }).reason).toBeUndefined()
-    expect(Answer.parse({ kind: 'route', runtime: 'docker' }).runtime).toBe('docker')
-    expect(Answer.parse({ kind: 'route', runtime: 'docker', reason: 'x' })).toEqual({
+    expect(Answer.parse({ kind: 'route', machine: 'docker' }).machine).toBe('docker')
+    expect(Answer.parse({ kind: 'route', machine: 'docker', reason: 'x' })).toEqual({
       kind: 'route',
-      runtime: 'docker',
+      machine: 'docker',
       reason: 'x',
     })
   })
@@ -32,7 +32,8 @@ describe('Answer', () => {
   it.each([
     { kind: 'allow' },
     { kind: 'route' },
-    { kind: 'deny', runtime: 'docker' },
+    { kind: 'deny', machine: 'docker' },
+    { kind: 'route', runtime: 'docker' },
     { kind: 'ask', policy: 'Mine' },
     { deny: 'x' },
   ])('refuses any other shape: %j', (data) => {

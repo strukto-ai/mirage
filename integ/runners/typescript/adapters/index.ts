@@ -85,6 +85,7 @@ import {
   NotionVFS,
   NTN,
   OCIVFS,
+  OFFICE,
   OneDriveVFS,
   PathSpec,
   PostgresVFS,
@@ -117,7 +118,7 @@ import { configToWorkspaceArgs, loadWorkspaceConfig } from '@struktoai/mirage-no
 import { commit as hubCommit } from '@struktoai/mirage-core/core/hf_hub/commit'
 import { ChromaClient } from 'chromadb'
 import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
@@ -177,11 +178,11 @@ type MountMap = ConstructorParameters<typeof Workspace>[0]
 // What a target's workspace opens with. The corpus pins what the real tools
 // print, and they run under no workspace cap, so max_memory is lifted; the
 // cap has its own cases in runtime/policy/limits. Its python3 cases run on
-// Monty, named since no runtime is a default.
+// Monty, named since no machine runs it by default.
 const WORKSPACE_OPTIONS = {
   mode: MountMode.WRITE,
   maxMemory: null,
-  runtimes: ['monty', 'workspace'],
+  machines: { monty: { provider: 'in_process', runtime: 'monty' } },
 }
 
 interface OpenedWorkspaces {
@@ -288,9 +289,9 @@ export function runId(): string {
 /**
  * Install the CLIs a mount-backed target declares.
  *
- * `git` and `search` talk to no API: git reads a repository out of a mount and
- * search asks a mount's own search, which is what makes them installable from a
- * bare name with no config at all, where every other one needs its mock service
+ * `git`, `search` and `office` talk to no API: git reads a repository out of
+ * a mount, search asks a mount's own search and office edits workbooks on
+ * one, which is what makes them installable from a bare name with no config at all, where every other one needs its mock service
  * to hand over both the tree and the credentials pointing at itself.
  */
 function installLocalClis(
@@ -299,6 +300,7 @@ function installLocalClis(
 ): void {
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
   if (target.clis?.includes('search') === true) ws.registerCli('search', SEARCH)
+  if (target.clis?.includes('office') === true) ws.registerCli('office', OFFICE)
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
@@ -312,7 +314,10 @@ async function installMcpClis(ws: Workspace, target: Target): Promise<void> {
   if (target.cli_door === 'yaml') {
     const auth = { type: 'header', name: 'X-Api-Key', token: 'integ-token' }
     const clis = Object.fromEntries(
-      (target.clis ?? []).map((name) => [name, { cli: 'mcp', config: { url, auth } }]),
+      (target.clis ?? []).map((name) => [
+        name,
+        { cli: 'mcp', machine: 'in_process', config: { url, auth } },
+      ]),
     )
     const { options } = await configToWorkspaceArgs(loadWorkspaceConfig({ mounts: {}, clis }))
     for (const [name, [cli, config]] of Object.entries(options.clis ?? {})) {
@@ -2102,6 +2107,20 @@ async function openSlack(target: Target): Promise<Open> {
 // git remote real gh reads. Seeded by the fake alongside the mounted one.
 const GH_CLI_REPO = 'integ/repo-cli'
 
+// The credential a `gh` install rides: the fixed token, or, for a target
+// with `auth: 'app'`, a GitHub App installation, its key PKCS#1 as GitHub
+// downloads one. The fake checks a JWT's shape, not its signature, so a key
+// made for the run serves.
+function ghCredential(target: Target): Record<string, unknown> {
+  if (target.auth !== 'app') return { token: 'ghp-integ' }
+  const { privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+  })
+  return { app: { app_id: 1, private_key: privateKey, installation_id: 1 } }
+}
+
 // Mounts, CLI requests and consistency mutations share one run's URL.
 // Each target seeds its own fixture without resetting another host.
 async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> {
@@ -2143,7 +2162,7 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
   const register = (ws: ExecWorkspace): void => {
     if (target.clis?.includes('gh') !== true) return
     ;(ws as unknown as Workspace).registerCli('gh', GH, {
-      token: 'ghp-integ',
+      ...ghCredential(target),
       base_url: base,
       repo: GH_CLI_REPO,
       // Not the default branch, so a line that falls back on it shows which

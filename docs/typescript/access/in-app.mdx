@@ -153,7 +153,7 @@ ws.cancel(sessionId?): Promise<number>
 ws.kill(sessionId?): Promise<number>
 ```
 
-Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and resolves once they have ended; each rejects with an `AbortError`. `kill` kills the background jobs (`cmd &`) and the processes runtimes started. Each answers how many it stopped.
+Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and resolves once they have ended; each rejects with an `AbortError`. `kill` kills the background jobs (`cmd &`) and the programs machines started. Each answers how many it stopped.
 
 ```ts
 await ws.cancel('agent')
@@ -256,7 +256,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it runs un
 
 ```ts
 session.shell(
-  command, { stdin?, cwd?, env?, signal?, record?, runtime?, sink?, stream? },
+  command, { stdin?, cwd?, env?, signal?, record?, machine?, sink?, stream? },
 ): Promise<ExecuteResult | ShellExecution>
 ```
 
@@ -277,8 +277,8 @@ Runs a shell line as the session. With `stream: false` (the default), it collect
 <ResponseField name="record" type="boolean" default="true">
   `false` keeps the line out of history.
 </ResponseField>
-<ResponseField name="runtime" type="string">
-  Run the line on this workspace [runtime](/home/setup/runtime/overview) entry, by name, instead of the one routing picks. Throws for a name the workspace does not have.
+<ResponseField name="machine" type="string">
+  Run the commands this workspace [machine](/home/setup/machine/overview) captures on it, by name, instead of where routing puts them. Throws for a name the workspace does not have.
 </ResponseField>
 <ResponseField name="sink" type="JobConsole">
   Write the line's output to this console as each statement finishes. Cannot be combined with `stream: true`. The result then carries the exit code with empty `stdout` and `stderr`. The caller calls `finish()` on the console.

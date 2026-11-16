@@ -165,7 +165,7 @@ async def test_version_commands_report_the_quickjs_engine():
         argv=["qjs", "--version"], stdin=None, env=[], fs=WasmView()
     )
     assert code == 0
-    ws = Workspace({"/": RAMVFS()}, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/": RAMVFS()}, machines=[runtime])
     try:
         for line in ["js --version", "node --version", "js -v", "node -v"]:
             io = await ws.shell(line)
@@ -259,7 +259,9 @@ async def test_quickjs_node_command_end_to_end():
     ram._store.files["/calc.mjs"] = (
         b"export const k = 6;\nconsole.log(Number(scriptArgs[0]) * k)\n"
     )
-    ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, runtimes=["quickjs"])
+    ws = Workspace(
+        {"/ram": ram}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
+    )
     r = await ws.shell("node -e \"console.log('js says', 6 * 7)\"")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "js says 42\n"
@@ -308,7 +310,7 @@ async def test_quickjs_cancelled_run_waits_for_the_write_its_sink_holds():
 @pytest.mark.asyncio
 async def test_quickjs_endless_writer_stops_once_its_reader_has_enough():
     ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+        {"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
     )
     try:
         r = await asyncio.wait_for(
@@ -348,7 +350,7 @@ async def test_quickjs_cancellation_stops_the_run():
 )
 async def test_a_deadline_stops_a_guest_that_never_yields(line, code):
     ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
     )
     try:
         io = await ws.shell(line)
@@ -375,7 +377,7 @@ async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
     # a moment: timeout answers once that write has landed. A first run has
     # the engine up, so the deadline lands in the loop, not in a cold start.
     ws = Workspace(
-        {"/data": _SlowRAM()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+        {"/data": _SlowRAM()}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
     )
     try:
         await ws.shell("node -e 0")
@@ -392,7 +394,7 @@ async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
 @pytest.mark.asyncio
 async def test_descriptor_and_byte_calls_answer_as_the_shim_mirrors():
     ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
     )
     program = "\n".join(
         [
@@ -441,7 +443,7 @@ async def test_quickjs_session_narrowing_reaches_the_guest():
     # A session narrowed to read denies guest writes at open() and no
     # file materializes in the mount.
     ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[QuickJsRuntime()]
     )
     ws.create_session("narrow", {"/data": "read"})
     r = await ws.shell(
@@ -467,7 +469,7 @@ async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     )
     try:
         assert (

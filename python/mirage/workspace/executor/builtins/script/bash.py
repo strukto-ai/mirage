@@ -266,6 +266,9 @@ async def handle_bash(
         # A script file names its diagnostics, and the functions it
         # defines, as a sourced one does.
         session._parse_name = parsed.path if parsed.script is None else None
+        session.source_files = (
+            (session._parse_name,) if session._parse_name is not None else ()
+        )
         session._parse_head = (
             None if session._parse_name is None else f"{session._parse_name}: "
         )

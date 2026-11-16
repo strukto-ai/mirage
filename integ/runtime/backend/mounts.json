@@ -9,10 +9,12 @@
     {
       "id": "multi_mount_script",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -39,10 +41,12 @@
     {
       "id": "link_read_is_never_cut_by_the_target_mounts_limit",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -75,10 +79,12 @@
     {
       "id": "xmount_rename_refused",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/a": {
             "vfs": "ram"

@@ -24,6 +24,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterable,
     Mapping,
     Sequence,
 )
@@ -93,7 +94,6 @@ from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.machine.handle import MachineHandle
 from mirage.machine.program import (
     host_resources,
     scan_host,
@@ -130,10 +130,17 @@ from mirage.runtime.binding import (
     capture_binding,
     restricted_mounts_for,
 )
+from mirage.runtime.constants import HOST
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteRule
-from mirage.runtime.table import whole_line_runtime
+from mirage.runtime.table import (
+    MachineSpec,
+    MachineSpecs,
+    split_machines,
+    whole_line_runtime,
+)
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -358,9 +365,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: NamespaceStore | None = None,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         route_policy: RouteRule | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
@@ -441,6 +446,7 @@ class Workspace:
         self._closing = False
         self._async_closed = False
         self._state_dropped = False
+        self._machines_paused: frozenset[str] | None = None
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
         self._meta_lock = asyncio.Lock()
@@ -453,7 +459,7 @@ class Workspace:
         # A line binds the system clock only once its process has started.
         self.process_table = ProcessTable(
             self._workspace_id,
-            MachineName("host", socket.gethostname()),
+            MachineName(HOST, socket.gethostname()),
             bind=run_as_process,
             changed=lambda: self.job_table.processes_changed(),
             now=lambda: (
@@ -672,8 +678,14 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
         )
+        handles, entries = split_machines(machines)
         self.machine_table = MachineTable(
-            machines, scan_host, signal_host, stop_host_run, host_resources
+            handles,
+            scan_host,
+            signal_host,
+            stop_host_run,
+            host_resources,
+            host=self.process_table.machine,
         )
         self._wire_machines()
         if route_policy is not None:
@@ -683,7 +695,7 @@ class Workspace:
         self._runtimes = Runtimes(
             self._registry, self._runtime_binding, self.machine_table
         )
-        self._runtimes.resolve(runtimes)
+        self._runtimes.resolve(entries)
         self._router = Router(self._registry, self._runtimes)
 
         self._start_installs(clis, specs)
@@ -877,7 +889,8 @@ class Workspace:
             self.machine_table.send(self.process_table, handle, signum)
         )
         self.process_table.machine_names = lambda: [
-            str(handle.machine) for handle in self.machine_table.handles()
+            *(str(handle.machine) for handle in self.machine_table.handles()),
+            *(str(machine) for machine in self._host_entries()),
         ]
         self.process_table.machine_resources = self.machine_table.resources
         self.process_table.machine_instance = self.machine_table.instance
@@ -1031,7 +1044,7 @@ class Workspace:
                         ),
                     )
                     if whole_line
-                    else ("", "")
+                    else ""
                 ),
                 whole_line,
                 aliases,
@@ -1059,7 +1072,7 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda one: ("", ""), aliases=aliases
+                line, judged, verdicts, lambda one: "", aliases=aliases
             )
             return dataclasses.replace(
                 said,
@@ -1665,7 +1678,6 @@ class Workspace:
                     env=None,
                     cancel=None,
                     record=True,
-                    runtime=None,
                     routing_decision=None,
                     argv=argv,
                     sink=output,
@@ -1701,30 +1713,38 @@ class Workspace:
 
         return ChildProcess(process, input_stream, output, cancel)
 
-    def runtimes(self) -> list[Runtime[Any]]:
-        """The ordered runtime world, first capturer first."""
-        return list(self._runtimes.entries)
+    def engines(self) -> list[Runtime[Any]]:
+        """The engine each machine runs, first capturer first, each
+        named for its machine. Mirage's own command engine is no
+        machine, so it is not among them."""
+        return [
+            entry
+            for entry in self._runtimes.entries
+            if not isinstance(entry, WorkspaceRuntime)
+        ]
 
-    def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Add a runtime entry to the workspace's ordered set;
+    def add_machine(self, name: str, spec: MachineSpec) -> Runtime[Any]:
+        """Add a machine to the workspace's ordered set;
         ``Runtimes.add`` places it.
 
         Args:
-            runtime (Runtime | str): a Runtime instance or a registry
-                runtime name (built like a config entry).
+            name (str): the machine's name.
+            spec (MachineSpec): an engine, or the entry as YAML spells
+                it (``{provider: in_process, runtime: monty}``).
 
         Raises:
-            ValueError: unknown name or duplicate entry.
+            ValueError: an entry ``build_entry`` refuses, a machine
+                provider, or a duplicate name.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        return self._runtimes.add(runtime)
+        return self._runtimes.add(name, spec)
 
-    async def remove_runtime(self, name: str) -> None:
-        """Remove a runtime entry, closing it once its runs finish.
+    async def remove_machine(self, name: str) -> None:
+        """Remove a machine, closing its engine once its runs finish.
 
         Args:
-            name (str): the entry's name; ``workspace`` is permanent.
+            name (str): the machine's name; ``workspace`` is permanent.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -1955,10 +1975,55 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
+    async def pause(self, machines: Iterable[str] | None = None) -> None:
+        """Close the workspace as ``close`` does, then pause its machines;
+        the others are only disconnected, and the state is kept.
+
+        Args:
+            machines (Iterable[str] | None): the machines to pause, by
+                their ``machines:`` names, whatever their config says;
+                None pauses those whose config asks
+                (``on_pause: pause``).
+
+        Raises:
+            ValueError: ``machines`` names a machine the workspace lacks;
+                nothing is closed.
+            RuntimeError: the workspace was closed first, which left its
+                machines running, or an earlier pause closed it without
+                pausing a machine this one names.
+        """
+        table = self.machine_table
+        if machines is None:
+            names = frozenset(
+                name
+                for name in table.names()
+                if table.get(name).config_asks_to_pause()
+            )
+        else:
+            names = frozenset(machines)
+            for name in names:
+                table.get(name)
+        try:
+            await self._sync_bridge.close(
+                partial(self._close, drop_state=False, pause=names)
+            )
+        finally:
+            await self._sync_bridge.ashutdown()
+        if self._machines_paused is None:
+            raise RuntimeError(
+                "workspace was closed before pause; its machines are running"
+            )
+        if missed := names - self._machines_paused:
+            listed = ", ".join(repr(name) for name in sorted(missed))
+            raise RuntimeError(
+                f"workspace already paused without pausing {listed}"
+            )
+
     async def _close(
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        pause: frozenset[str] | None = None,
     ) -> None:
         """Release everything the workspace owns, exactly once
         (``close_workspace``); a later call answers as the first did.
@@ -1971,6 +2036,8 @@ class Workspace:
                 sync ``with`` block is exiting inside; its runners are
                 cancelled but not joined, and a metadata write there is
                 not waited for, since neither can run until this returns.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -2001,6 +2068,7 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
+            self._machines_paused = pause
             failures = [
                 result
                 for result in execution_results
@@ -2009,7 +2077,7 @@ class Workspace:
             try:
                 failures.extend(
                     await close_workspace(
-                        self._close_deps(drop_state, blocked_loop)
+                        self._close_deps(drop_state, blocked_loop, pause)
                     )
                 )
             finally:
@@ -2030,6 +2098,7 @@ class Workspace:
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        pause: frozenset[str] | None = None,
     ) -> CloseDeps:
         """What closing releases (``close_workspace``).
 
@@ -2037,6 +2106,8 @@ class Workspace:
             drop_state (bool): delete the workspace's state too.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -2048,7 +2119,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                self.machine_table.close,
+                partial(self.machine_table.close, pause=pause),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,
@@ -2114,9 +2185,7 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2168,12 +2237,9 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes (list[Runtime[Any] | str] | None): the runtimes to
-                build the workspace with; a snapshot carries none, so a
-                profile policy naming one needs it here.
-            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
-                None): the machines its programs run on, by name; a
-                snapshot carries none.
+            machines (MachineSpecs | None): the machines to build the
+                workspace with; a snapshot carries none, so a profile
+                policy or route naming one needs it here.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2226,7 +2292,6 @@ class Workspace:
                 clis=clis,
                 secrets=secrets,
                 drift_policy=drift_policy,
-                runtimes=runtimes,
                 machines=machines,
                 policies=policies,
                 policy_functions=policy_functions,
@@ -2248,9 +2313,7 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2283,12 +2346,9 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes (list[Runtime[Any] | str] | None): the runtimes to
-                build the workspace with; a snapshot carries none, so a
-                profile policy naming one needs it here.
-            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
-                None): the machines its programs run on, by name; a
-                snapshot carries none.
+            machines (MachineSpecs | None): the machines to build the
+                workspace with; a snapshot carries none, so a profile
+                policy or route naming one needs it here.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2319,7 +2379,6 @@ class Workspace:
             mounts=mounts,
             clis=clis,
             secrets=secrets,
-            runtimes=runtimes,
             machines=machines,
             policies=policies,
             policy_functions=policy_functions,
@@ -2378,14 +2437,13 @@ class Workspace:
         # first read with "unknown secrets source". Policy instances
         # and the route policy stay behind: a policy is a live host
         # object whose state two workspaces must not share, and the
-        # route names runtime instances the copy does not carry; the
-        # entries named by string are rebuilt. The policy functions
+        # route names machines the copy does not carry; the engines
+        # built from a machines: entry are rebuilt. The policy functions
         # travel, the host's code as a CLI's spec is.
-        named: list[Runtime[Any] | str] = [*self._runtimes.named()]
         return await type(self)._from_state(
             state,
             mounts=mounts,
-            runtimes=named,
+            machines=self._runtimes.specs(),
             clis=reusable_clis(self),
             secrets=self._declared_sources,
             policy_functions=self._policy_functions,
@@ -2403,9 +2461,7 @@ class Workspace:
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2442,7 +2498,6 @@ class Workspace:
             profile=args.profile if built_for_state else profile,
             processes=args.processes,
             ceilings=ceilings,
-            runtimes=runtimes,
             machines=machines,
             policies=policies,
             policy_functions=policy_functions,
@@ -2904,23 +2959,38 @@ class Workspace:
                 return record
         return await self.job_table.store.get_process(process_id)
 
+    def _host_entries(self) -> list[MachineName]:
+        """The machine each ``host`` entry names, the host under the
+        entry's name, once each in entry order."""
+        return list(
+            dict.fromkeys(
+                entry.machine
+                for entry in self._runtimes.entries
+                if entry.machine is not None and entry.machine.provider == HOST
+            )
+        )
+
     async def machines(
         self, machine: MachineName | None = None
     ) -> list[Machine]:
         """The machines the workspace runs programs on, each as a check
         of it finds it now: its own host first, which Mirage always
-        manages, then every machine ``machines:`` names, checked at once.
+        manages, and each ``host`` machine, the host under its entry's
+        name, then every other machine ``machines:`` names, checked at
+        once.
 
         Args:
             machine (MachineName | None): only this machine; None for every
                 one.
         """
-        host = self.process_table.machine
-        found = (
-            [Machine(host, MachineState.MANAGED, self._clock.now())]
-            if machine is None or machine == host
-            else []
+        hosts = dict.fromkeys(
+            [self.process_table.machine, *self._host_entries()]
         )
+        found = [
+            Machine(each, MachineState.MANAGED, self._clock.now())
+            for each in hosts
+            if machine is None or machine == each
+        ]
         return found + await self.machine_table.check(
             self._clock.now, None if machine is None else str(machine)
         )
@@ -3473,7 +3543,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3496,7 +3565,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3519,7 +3587,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3541,7 +3608,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3585,17 +3651,12 @@ class Workspace:
                 internal evaluations and available to SDK callers that
                 need an unrecorded run. Nested lines inherit the typed
                 line's routing decision and never re-route.
-            runtime: Explicit runtime for this line, naming a workspace
-                runtime entry. Stages the named runtime captures rebind
-                to it for this line only (nested evals inherit it);
-                everything else keeps its normal binding, so the
-                argument overrides policy, never capability. Raises
-                ValueError for a name that is not a workspace entry.
             machine: Explicit machine for this line, by its ``machines:``
-                name: the remote runtime runs what it serves on it, over
-                its entry's own machine, for this line only (nested evals
-                inherit it). Raises ValueError for a name that is not a
-                workspace machine.
+                name. Stages the machine captures rebind to it for this
+                line only (nested evals inherit it); everything else
+                keeps its normal binding, so the argument overrides
+                policy, never capability. Raises ValueError for a name
+                that is not a workspace machine.
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
@@ -3646,7 +3707,6 @@ class Workspace:
                 env,
                 cancel,
                 record,
-                runtime,
                 routing_decision,
                 handed,
                 sink,
@@ -3654,6 +3714,7 @@ class Workspace:
                 line_handle,
                 job_table,
                 session=session,
+                machine=machine,
             )
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -3669,7 +3730,6 @@ class Workspace:
                 env,
                 stop,
                 record,
-                runtime,
                 routing_decision,
                 handed,
                 output,
@@ -3716,7 +3776,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3764,7 +3823,6 @@ class Workspace:
                     env,
                     cancel,
                     record,
-                    runtime,
                     routing_decision,
                     handed,
                     frame,
@@ -3903,7 +3961,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: Literal[True],
         machine: str | None = None,
@@ -3918,7 +3975,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: Literal[False] = False,
         machine: str | None = None,
@@ -3933,7 +3989,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: bool,
         machine: str | None = None,
@@ -3947,7 +4002,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: bool = False,
         machine: str | None = None,
@@ -3964,8 +4018,7 @@ class Session:
                 an ephemeral clone of the session.
             cancel (asyncio.Event | None): abort signal.
             record (bool): whether the line enters history.
-            runtime (str | None): the runtime to route the line to.
-            machine (str | None): the machine to run the line on.
+            machine (str | None): the machine to route the line to.
             stream (bool): return bounded live events and a final status handle.
         """
         return await self._ws.shell(
@@ -3976,7 +4029,6 @@ class Session:
             env=env,
             cancel=cancel,
             record=record,
-            runtime=runtime,
             stream=stream,
             machine=machine,
         )

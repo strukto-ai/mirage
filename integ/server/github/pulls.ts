@@ -869,6 +869,7 @@ export function commitNode(
     },
     statusCheckRollup: {
       contexts: async ({ first, after }: PageArgs) => {
+        const required = new Set(JSON.parse(repos[0]?.requiredChecksJson ?? '[]') as string[])
         const checks = await ctx.db.githubCheck.findMany({ where, orderBy: { pk: 'asc' } })
         const statuses = (await combinedStatus(ctx, repos, row.sha)).rows
         const contexts = [
@@ -881,7 +882,7 @@ export function commitNode(
             completedAt: check.completedAt,
             detailsUrl: check.detailsUrl,
             checkSuite: { workflowRun: { event: 'pull_request', workflow: { name: 'CI' } } },
-            isRequired: false,
+            isRequired: required.has(check.name),
           })),
           ...statuses.map((status) => ({
             __typename: 'StatusContext',
@@ -890,7 +891,7 @@ export function commitNode(
             targetUrl: status.targetUrl,
             createdAt: status.createdAt,
             description: status.description,
-            isRequired: false,
+            isRequired: required.has(status.context),
           })),
         ]
         return page(contexts, first, after)

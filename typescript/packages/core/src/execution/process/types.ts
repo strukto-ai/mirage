@@ -21,7 +21,7 @@ export interface ProcessUsage {
 /**
  * One managed runner, as every instance on its store reads it: not an OS
  * process or a shell job number. Its machine is where its program runs and
- * its runtime what Mirage runs it with; a native program's own pid there is
+ * `program` whether a runtime started it there; a native program's own pid there is
  * `machinePid`, and what the last scan read of its use of the machine
  * `usage`.
  *
@@ -31,6 +31,11 @@ export interface ProcessUsage {
  * process stays under an ancestor whose own record has gone. `stages` are the
  * pids of the pipeline a background job runs; bash starts those from its
  * shell, so the job's own process has no row in `ps`.
+ *
+ * What it reads from other processes names their pids: `stdin` the one whose
+ * stdout is its stdin (the stage before it in a pipeline), `fd` the one
+ * writing each descriptor a `<( )` gave it, by number, and `argv` each whose
+ * output a `$( )` made its arguments of.
  */
 export interface Process {
   readonly id: ProcessId
@@ -42,7 +47,7 @@ export interface Process {
   readonly cwd: PathSpec
   readonly machine: MachineName
   readonly startedAt: number
-  readonly runtime: string | null
+  readonly program: boolean
   readonly machinePid: MachinePid | null
   readonly state: ProcessState
   readonly endedAt: number | null
@@ -55,11 +60,14 @@ export interface Process {
   readonly usage?: ProcessUsage | null
   /** What its machine's provider called the machine when it ran there. */
   readonly machineInstance?: string | null
+  readonly stdin?: number | null
+  readonly fd?: Readonly<Record<number, number>>
+  readonly argv?: readonly number[]
 }
 
 /** Whether a process is a program on a machine, not Mirage's own. */
 export function isProgram(process: Process): boolean {
-  return process.runtime !== null || process.machinePid !== null
+  return process.program || process.machinePid !== null
 }
 
 /** The pid the agent sees: its program's on its machine, else Mirage's own. */

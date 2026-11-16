@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import socket
+from dataclasses import replace
 
 import pytest
 
@@ -20,10 +22,9 @@ from mirage import Workspace
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
-from mirage.execution.types import MachinePid
+from mirage.execution.types import MachineName, MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -129,12 +130,26 @@ async def _started(box: _Sleeper) -> None:
             await asyncio.sleep(0.01)
 
 
+def _capturing(
+    boxes: dict[str, MachineHandle], *captures: str
+) -> dict[str, MachineHandle]:
+    """``boxes``, each capturing ``captures``, so the first listed takes
+    them and a line can name another.
+
+    Args:
+        boxes (dict[str, MachineHandle]): the machines, by name.
+        captures (str): what each one captures.
+    """
+    for box in boxes.values():
+        box.config = replace(box.config, captures=captures)
+    return boxes
+
+
 def _sleepers(**boxes: MachineHandle) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines=boxes,
-        runtimes=[RemoteRuntime(["train"], machine=next(iter(boxes)))],
+        machines=_capturing(boxes, "train"),
     )
 
 
@@ -159,7 +174,7 @@ async def test_a_scan_shows_what_a_program_started_on_its_machine():
         ]
         assert rows[2][0] == "412" and rows[3][0] == "413"
         program, found = ws.process_table.records()[-2:]
-        assert (found.runtime, found.parent) == (None, program.pid)
+        assert (found.program, found.parent) == (False, program.pid)
         killed = await ws.shell(f"kill -USR1 413; kill -0 {pid}; echo $?")
         assert killed.stdout == b"0\n"
         assert box.sent == [(MachinePid(413, 101.0), 10)]
@@ -344,7 +359,7 @@ async def test_what_a_scan_found_leaves_the_session_room_to_fork():
             for p in ws.process_table.live()
             if p.record.session_id == "capped"
         ]
-        found = [p.machine_pid for p in held if p.runtime is None]
+        found = [p.machine_pid for p in held if not p.program]
         assert [m.pid for m in found if m is not None] == [413]
         said = await ws.shell("(echo room)", session_id="capped")
         assert (said.stdout, said.exit_code) == (b"room\n", 0)
@@ -399,7 +414,9 @@ async def test_a_session_reusing_a_closed_ones_id_finds_none_of_its_own():
 @pytest.mark.asyncio
 async def test_a_host_scan_finds_what_an_ended_program_left_running():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["local", "workspace"]
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"laptop": {"provider": "host"}},
     )
     spawn = (
         "import subprocess as s; "
@@ -408,13 +425,69 @@ async def test_a_host_scan_finds_what_an_ended_program_left_running():
     )
     try:
         assert (await ws.shell(f'python3 -c "{spawn}"')).exit_code == 0
-        said = await ws.shell("ps -o machine=,pid=,args=")
+        said = await ws.shell("ps --machine=laptop -o machine=,pid=,args=")
         rows = [line.split() for line in said.stdout.decode().splitlines()]
         held = [row for row in rows if row[2:] == ["sleep", "30"]]
-        assert len(held) == 1 and held[0][0].startswith("host:")
+        assert [row[0] for row in held] == ["host:laptop"]
+        ran = [
+            (str(p.machine), p.machine_instance)
+            for p in ws.process_table.records()
+            if p.machine_pid is not None
+        ]
+        assert set(ran) == {("host:laptop", socket.gethostname())}
+        assert [str(m.name) for m in await ws.machines()] == [
+            f"host:{socket.gethostname()}",
+            "host:laptop",
+        ]
         assert (await ws.shell(f"kill -9 {held[0][1]}")).exit_code == 0
     finally:
         await ws.close()
+
+
+# Every host entry is in a search's scope, not only the one that wins a
+# command: a program a line ran on the second is found by name.
+@pytest.mark.asyncio
+async def test_a_search_finds_a_program_on_any_host_entry():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"one": {"provider": "host"}, "two": {"provider": "host"}},
+    )
+    program = "python3 -c 'import time; time.sleep(30)'"
+    try:
+        await ws.shell(f"{program} &", machine="two")
+        found = (await ws.shell("pgrep -a python3")).stdout.decode()
+        assert program in found and found.split()[-1] == "host:two"
+        said = await ws.shell("ps --machine=two -o machine=,args=")
+        assert said.stdout.decode().split()[0] == "host:two"
+        assert (await ws.shell("pkill -x python3")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+# A lapsed workspace's program on a host entry is stopped by its pid when
+# the host its record names is this one, whatever the entry was called.
+@pytest.mark.asyncio
+async def test_a_lapsed_host_entrys_program_is_stopped_on_its_host():
+    stopped: list[tuple[int, int]] = []
+
+    async def stop_host(target: MachinePid, seen, signum: int) -> bool:
+        stopped.append((target.pid, signum))
+        return True
+
+    host = MachineName("host", "h")
+    table = MachineTable(stop_host=stop_host, host=host)
+    processes = ProcessTable("w", host)
+    record = {
+        "pid": 2,
+        "machine": "host:laptop",
+        "machine_instance": "h",
+        "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
+    }
+    assert await table.stop(processes, record, 15)
+    elsewhere = {**record, "machine_instance": "other"}
+    assert not await table.stop(processes, elsewhere, 15)
+    assert stopped == [(41, 15)]
 
 
 @pytest.mark.asyncio
@@ -816,13 +889,158 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
             mode=MountMode.EXEC,
             machines={"a": box, "b": {"provider": "nope"}},
         )
-    with pytest.raises(ValueError, match="unknown machine: 'c'"):
-        Workspace(
-            {"/": RAMVFS()},
-            mode=MountMode.EXEC,
-            machines={"a": box},
-            runtimes=[RemoteRuntime(machine="c"), "workspace"],
-        )
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
     ).close()
+
+
+class _Napper(_Box):
+    """A box that can pause, recording its close and pause in ``log``;
+    ``refused`` is why another table could not take it while it paused,
+    or None if it could."""
+
+    def __init__(
+        self,
+        name: str,
+        log: list[str],
+        fail_close: bool = False,
+        fail_pause: bool = False,
+        gate: asyncio.Event | None = None,
+    ) -> None:
+        super().__init__(name, 0)
+        self.log = log
+        self.fail_close = fail_close
+        self.fail_pause = fail_pause
+        self.gate = gate
+        self.refused: str | None = None
+
+    async def close(self) -> None:
+        await super().close()
+        self.log.append(f"close {self.name}")
+        if self.fail_close:
+            raise RuntimeError(f"close {self.name} failed")
+
+    async def pause(self) -> None:
+        self.log.append(f"pause {self.name}")
+        try:
+            MachineTable({self.name: self})
+        except ValueError as exc:
+            self.refused = str(exc)
+        if self.gate is not None:
+            await self.gate.wait()
+            self.log.append(f"paused {self.name}")
+        if self.fail_pause:
+            raise RuntimeError(f"pause {self.name} failed")
+
+
+_BOTH = frozenset({"a", "b"})
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_closes_every_handle_then_pauses_each_it_held():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Box("b", 0)})
+    table.hold_handles()
+    await table.close(pause=_BOTH)
+    assert log == ["close a", "pause a"]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_pauses_only_the_held_handles_it_names():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Napper("b", log)})
+    table.hold_handles()
+    await table.close(pause=frozenset({"b"}))
+    assert log == ["close a", "close b", "pause b"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_close_pauses_nothing():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    await table.close()
+    assert log == ["close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_whose_close_failed_is_still_paused():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log, fail_close=True)})
+    table.hold_handles()
+    with pytest.raises(RuntimeError, match="close a failed"):
+        await table.close(pause=_BOTH)
+    assert log == ["close a", "pause a"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_close_and_a_failed_pause_are_both_raised():
+    log: list[str] = []
+    table = MachineTable(
+        {
+            "a": _Napper("a", log, fail_close=True),
+            "b": _Napper("b", log, fail_pause=True),
+        }
+    )
+    table.hold_handles()
+    with pytest.raises(BaseExceptionGroup) as raised:
+        await table.close(pause=_BOTH)
+    assert sorted(str(e) for e in raised.value.exceptions) == [
+        "close a failed",
+        "pause b failed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_pauses_no_handle_another_table_took():
+    log: list[str] = []
+    a = _Napper("a", log)
+    first = MachineTable({"a": a})
+    first.hold_handles()
+    await first.close()
+    again = MachineTable({"a": a})
+    again.hold_handles()
+    await first.close(pause=_BOTH)
+    assert log == ["close a", "close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_is_held_until_it_has_paused():
+    a = _Napper("a", [])
+    table = MachineTable({"a": a})
+    table.hold_handles()
+    await table.close(pause=_BOTH)
+    assert a.refused == "machine 'a' is already in another workspace"
+    MachineTable({"a": a})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_pausing_close_still_pauses_its_machines():
+    log: list[str] = []
+    gate = asyncio.Event()
+    table = MachineTable({"a": _Napper("a", log, gate=gate)})
+    table.hold_handles()
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
+    while "pause a" not in log:
+        await asyncio.sleep(0)
+    closing.cancel()
+    gate.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert log == ["close a", "pause a", "paused a"]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_waits_for_the_signals_queued_for_its_machines():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    signal = table._signaling["box:a"]
+    await signal.acquire()
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert log == []
+    signal.release()
+    await closing
+    assert log == ["close a", "pause a"]

@@ -5,8 +5,8 @@ description: Run captured programs in a smolvm microVM with its own kernel.
 ---
 
 The `smolvm` machine provider reaches a running
-[smolvm](https://smolmachines.com) microVM, by name, and the `remote` runtime
-runs captured programs in it. Each machine has its own guest kernel, on macOS, Linux and
+[smolvm](https://smolmachines.com) microVM, by name, and runs the programs it
+captures in it. Each machine has its own guest kernel, on macOS, Linux and
 Windows. You create and start the machine; Mirage only runs programs in it.
 Python SDK and Node.
 
@@ -22,7 +22,7 @@ smolvm machine start --name mirage-box
 
 ## Usage
 
-`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
 every program Mirage does not have itself. Name `@python` to run
 Python in the machine too.
 
@@ -30,27 +30,24 @@ Python in the machine too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"box": {"provider": "smolvm", "machine": "mirage-box"}},
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+        machines={"box": {"provider": "smolvm", "machine": "mirage-box", "captures": ["@python", "@external"]}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'smolvm', machine: 'mirage-box' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'smolvm', machine: 'mirage-box', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -63,10 +60,7 @@ Python in the machine too.
       box:
         provider: smolvm
         machine: mirage-box
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram
@@ -84,12 +78,35 @@ put `sandbox.yaml` in the machine, in its image or a directory passed with
 smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.yaml
 ```
 
+## Pausing the machine
+
+To pause the machine when the workspace pauses, set `on_pause: pause` on it:
+
+```yaml
+machines:
+  box:
+    provider: smolvm
+    machine: mirage-box
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `smolvm machine pause`,
+which saves the machine's memory and disks to its data directory and stops
+its VM. The next line resumes it with `smolvm machine resume`, running
+processes included. This needs smolvm 1.18 or later, and a host that can
+take smolvm's portable checkpoints; where smolvm refuses the pause,
+`workspace.pause()` raises smolvm's error and the machine keeps running.
+Without `on_pause`,
+`workspace.pause()` leaves the machine running unless the call names it. See
+[Pause](/home/setup/machine/overview#pause).
+
 ## Notes
 
 - Host files reach the machine only through directories passed with
   `--volume` at boot.
-- The machine must be `running`. Start a `stopped` or `created` machine,
-  or clone a `frozen` machine before using it. Mirage cannot run commands
+- The machine must be `running` or `paused`; Mirage resumes a `paused`
+  one. Start a `stopped` or `created` machine, or clone a `frozen` machine
+  before using it. Mirage cannot run commands
   while a machine is `unreachable`.
 - Lines sent to one machine share its files and processes. Give each tenant
   its own machine.

@@ -39,7 +39,7 @@ describe('PythonRuntime version defaults', () => {
     async (mode) => {
       const runtime = new ProcessRuntime()
       expect(runtime.reach).toBe('process')
-      const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [runtime, 'workspace'] })
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode, machines: [runtime] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
           const io = await ws.shell(line, { env: { PYTHONPATH: '/startup' } })

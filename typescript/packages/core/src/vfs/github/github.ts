@@ -81,11 +81,11 @@ export class GitHubVFS extends BaseVFS {
   }
 
   static async create(config: GitHubConfig): Promise<GitHubVFS> {
-    const account = new GitHubAccount(
-      config.baseUrl === undefined
-        ? { token: config.token }
-        : { token: config.token, baseUrl: config.baseUrl },
-    )
+    const account = new GitHubAccount({
+      ...(config.token === undefined ? {} : { token: config.token }),
+      ...(config.app === undefined ? {} : { app: config.app }),
+      ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
+    })
     const defaultBranch = await fetchDefaultBranch(account.transport, config.owner, config.repo)
     const ref = config.ref ?? defaultBranch
     const { tree, truncated } = await fetchGitHubTree(

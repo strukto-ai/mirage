@@ -71,7 +71,10 @@ YML
 EXEC_YAML=/tmp/parity-exec.yaml
 cat > "$EXEC_YAML" <<'YML'
 mode: WRITE
-runtimes: [monty, workspace]
+machines:
+  monty:
+    provider: in_process
+    runtime: monty
 mounts:
   /data:
     vfs: ram

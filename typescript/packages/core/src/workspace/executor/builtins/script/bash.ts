@@ -229,6 +229,7 @@ export async function handleBash(
   // A script file names its diagnostics, and the functions it defines, as a
   // sourced one does.
   session.parseName = parsed.script === null ? parsed.path : null
+  session.sourceFiles = session.parseName === null ? [] : [session.parseName]
   session.parseHead = session.parseName === null ? null : `${session.parseName}: `
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and

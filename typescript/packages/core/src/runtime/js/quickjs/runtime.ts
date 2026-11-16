@@ -39,8 +39,8 @@ const WASM_NAME = 'qjs-wasi.wasm'
 
 const BUILD_HINT =
   `the quickjs runtime needs a ${WASM_NAME} module: download a WASI build of quickjs-ng ` +
-  'from https://github.com/quickjs-ng/quickjs/releases, and point the runtime entry’s ' +
-  'config `home` (yaml `runtimes: [{name: quickjs, config: {home: ...}}]`) or the ' +
+  "from https://github.com/quickjs-ng/quickjs/releases, and point the machine's `home` " +
+  '(yaml `machines: {js: {provider: in_process, runtime: quickjs, home: ...}}`) or the ' +
   `${QUICKJS_HOME_ENV} environment variable at the directory (a URL on a page) holding it`
 
 const ENC = new TextEncoder()

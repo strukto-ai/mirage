@@ -23,7 +23,7 @@ import {
   getCurrentSession,
   lineRunning,
 } from '../context/session_context.ts'
-import { edquot } from '../errors/fs.ts'
+import { edquot, enoent } from '../errors/fs.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -307,7 +307,7 @@ function workspace(
     {
       mode: MountMode.WRITE,
       profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
-      ...on(sandbox, 'workspace'),
+      ...on(sandbox),
       ...(commandLimits === undefined ? {} : { commandLimits }),
       ...(workspaceId === undefined ? {} : { workspaceId }),
     },
@@ -493,7 +493,7 @@ describe('MachineMounts', () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
       { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
-      { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+      { mode: MountMode.WRITE, ...on(sandbox) },
     )
     expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
@@ -505,6 +505,45 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
+  it('leaves a file mounted at a path of its own off the machine', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.vfsMd('/VFS.md')
+    const result = await ws.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+    expect(sandbox.pipes.map((p) => (p.split(' 2>')[0] ?? '').split(' ').at(-1))).toEqual([
+      "'/data'",
+      "notes'",
+    ])
+    await ws.close()
+  })
+
+  it('serves a directory mounted where a file was', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.vfsMd('/asset')
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
+    await ws.unmount('/asset')
+    ws.addMount('/asset', new RAMVFS(), MountMode.WRITE)
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/asset'])
+    await ws.close()
+  })
+
+  it('runs a line on a prefix the machine mounts itself when the workspace cannot stat it', async () => {
+    const sandbox = new FakeMachine('both', ['/data'])
+    const gone = new RAMVFS()
+    gone.stat = (path) => Promise.reject(enoent(path))
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': gone, '/my notes': new RAMVFS() },
+      { mode: MountMode.WRITE, ...on(sandbox) },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/my notes'])
+    await ws.close()
+  })
+
   it('refuses a line while the session restricts /tmp', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
@@ -512,7 +551,7 @@ describe('MachineMounts', () => {
       {
         mode: MountMode.WRITE,
         profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
-        ...on(sandbox, 'workspace'),
+        ...on(sandbox),
       },
     )
     const agent = await ws.session('agent', { profile: 'agent' })
@@ -754,6 +793,7 @@ describe('MachineMounts', () => {
         mode: MountMode.WRITE,
         workspaceId: 'w1',
         ...on(first),
+        ...on(second),
         machines: { box: first, box2: second },
       },
     )
@@ -1367,7 +1407,7 @@ describe('MachineMounts', () => {
       const sandbox = new FakeMachine(mountType, ['/tmp'])
       const ws = new Workspace(
         { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
-        { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+        { mode: MountMode.WRITE, ...on(sandbox) },
       )
       expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
       sandbox.table.delete('/tmp')

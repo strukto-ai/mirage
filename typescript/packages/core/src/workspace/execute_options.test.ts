@@ -704,7 +704,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new Answers(), 'workspace'],
+        machines: [new Answers()],
         observe: new Stalled(),
       },
     )
@@ -804,7 +804,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     }
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Hanging(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new Hanging()] },
     )
     await expect(
       ws.shell('hangcmd now', { signal: AbortSignal.timeout(50) }),

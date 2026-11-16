@@ -97,7 +97,7 @@ mirage workspace create workspace.yaml --id work
 mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 ```
 
-`clis`, `runtimes`, `profiles` and the other top-level keys are in
+`clis`, `machines`, `profiles` and the other top-level keys are in
 [Workspace configuration](/home/configuration/workspace).
 
 ## Exit codes
@@ -133,7 +133,6 @@ options.
 | Option | Does |
 | --- | --- |
 | `--cwd PATH` | Run the line in this directory. |
-| `--runtime NAME` | Run its programs on this [runtime](/home/setup/runtime/overview). |
 | `--machine NAME` | Run its programs on this [machine](/home/setup/machine/overview). |
 | `--no-record` | Keep the line out of the session's [command logs](/home/infrastructure/command-logs). |
 | `--json` | Print one `{exit_code, stdout, stderr, decision}` result instead of streaming. |
@@ -301,9 +300,9 @@ Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
 
 ## Saved connections
 
-`mirage vfs`, `mirage cli`, `mirage runtime` and `mirage machine` keep
+`mirage vfs`, `mirage cli` and `mirage machine` keep
 connections on the server: a type, its settings and its credentials, saved
-once under a name. They are the [`/v1/vfs`, `/v1/clis`, `/v1/runtimes` and
+once under a name. They are the [`/v1/vfs`, `/v1/clis` and
 `/v1/machines`](/api/reference) routes, and work the same
 against the local daemon and the hosted API. `ID` is an entry's ID or its
 name: a name is unique, so it works as an ID. On the local daemon an entry's

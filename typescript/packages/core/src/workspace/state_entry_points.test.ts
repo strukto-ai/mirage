@@ -1624,7 +1624,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: { default: COMMANDS_DOC, reviewer: REVIEWER },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(ws)
@@ -1672,7 +1672,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: { after: afterEcho() } as never,
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(ws)
@@ -1721,7 +1721,7 @@ describe('command permissions end to end', () => {
             },
           }),
         },
-        runtimes: [box, 'workspace'],
+        machines: [box],
       },
     )
     open.push(ws)

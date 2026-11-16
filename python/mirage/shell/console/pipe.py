@@ -38,6 +38,13 @@ class PipeConsole(JobConsole):
         else:
             await self._pipe.write(data)
 
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        return (
+            self._pipe
+            if channel == Channel.STDOUT or self._pipe_stderr
+            else None
+        )
+
     async def drain(self) -> None:
         await self._pipe.drain()
 

@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 
 from mirage.cache.versions import VersionHistory
 from mirage.execution.job.table import JobTable
-from mirage.execution.job.waits import JobWaits
+from mirage.execution.job.waits import Hold, JobWaits
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
@@ -365,6 +365,7 @@ class SessionState:
     # called from, innermost first (`CallStack.call_lines`), written
     # beside `function_names`; `unset` cannot end it.
     call_lines: tuple[int, ...] = ()
+    source_files: tuple[str, ...] = ()
     # Which line stamped the two fields above, so a cancelled line puts
     # back only what it overwrote. Two `execute()` calls can share one
     # session, and a restore of a snapshot older than a concurrent
@@ -454,6 +455,13 @@ class SessionState:
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
+    # The captures this shell holds open as a child of the shell that
+    # started it, which its `exec` lets go of; a fork starts with none.
+    holds: list[Hold] = field(default_factory=list, repr=False)
+    # What the descriptors a running redirect of this shell shadows point
+    # at, which it puts back when it ends: they stay open meanwhile, as
+    # bash keeps a copy of each, so a capture they lead into stays held.
+    shadowed: list[str] = field(default_factory=list, repr=False)
     # A per-call line's jobs, which a callback in it reaches; None otherwise.
     job_table: JobTable | None = field(default=None, repr=False)
     # Transient `set -e` marker: True when the failure just returned
@@ -706,6 +714,12 @@ class SessionState:
             data["managed"] = refs
         return data
 
+    def sync_shopts(self) -> None:
+        """Apply the ``dotglob`` setting a write to GLOBIGNORE made."""
+        dotglob = self.vars.shell.take_dotglob()
+        if dotglob is not None:
+            self.shopts["dotglob"] = dotglob
+
     def to_dict(self, variables: bool = True) -> dict[str, Any]:
         """The session's record.
 
@@ -714,6 +728,7 @@ class SessionState:
                 leaves them out, for a flush that compares their store's
                 version instead of reading them.
         """
+        self.sync_shopts()
         data: dict[str, Any] = {
             "session_id": self.session_id,
             "cwd": self.cwd,
@@ -736,13 +751,19 @@ class SessionState:
         # Each function's body runs the aliases its definition saw, not
         # the ones defined since, so the view goes with it.
         views = {}
+        files = {}
         for name, source in self.functions.items():
             site = self._function_sites.get(name)
-            if site is not None and site.aliases is not None:
-                if site.source == source:
-                    views[name] = dict(site.aliases)
+            if site is None or site.source != source:
+                continue
+            if site.aliases is not None:
+                views[name] = dict(site.aliases)
+            if site.name != "environment":
+                files[name] = site.name
         if views:
             data["function_aliases"] = views
+        if files:
+            data["function_files"] = files
         if self.shell_options:
             data["shell_options"] = dict(self.shell_options)
         if self.shopts:
@@ -867,7 +888,8 @@ class SessionState:
         for table in ("aliases", "shell_options", "shopts"):
             if data.get(table) is not None:
                 data = {**data, table: dict(data[table])}
-        views = data.get("function_aliases")
+        views = data.get("function_aliases") or {}
+        files = function_sources(data.get("function_files") or {})
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -887,6 +909,7 @@ class SessionState:
                 "shown_paths",
                 "hidden_vars",
                 "function_aliases",
+                "function_files",
             )
         }
         if modes is not None:
@@ -959,12 +982,14 @@ class SessionState:
         if "vars" in data:
             data["vars"] = ShellVars.of(data["vars"])
         session = cls(**data)
-        # A function's alias view comes back as its site; where on its line
-        # the definition stood went with the line.
-        for name, view in (views or {}).items():
-            if name in session.functions:
+        for name, source in session.functions.items():
+            if name in views or name in files:
                 session._function_sites[name] = FunctionSite(
-                    session.functions[name], (0, 0), None, dict(view)
+                    source,
+                    (0, 0),
+                    None,
+                    dict(views[name]) if name in views else None,
+                    files.get(name, "environment"),
                 )
         if recorded is not None:
             # A recorded session comes back as it was written, so a
@@ -1248,6 +1273,7 @@ class SessionState:
             last_bg_job_id=None,
             function_names=(),
             call_lines=(),
+            source_files=(),
             _getopts_pos=0,
             _getopts_optind=None,
             errexit_ignored=False,

@@ -105,6 +105,9 @@ export class ExpandHost implements TaskHost {
       {
         records: new ShellVars(shell),
         ...(read === null ? {} : { read }),
+        started: (process) => {
+          context.frame.writers.push([null, process.record.id.pid])
+        },
       },
     )
     const stdout = await io.materializeStdout()

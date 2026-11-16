@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { runtimeForLanguage } from './decide.ts'
+export { runtimeForScript } from './decide.ts'
 export { RouteError } from './errors.ts'
 export type { RouteRule } from './types.ts'
 export type { RouteDecision } from '../types.ts'

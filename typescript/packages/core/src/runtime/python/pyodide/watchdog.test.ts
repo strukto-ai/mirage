@@ -42,7 +42,7 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new PyodideRuntime({ config: { maxMemory: '128M' } }), 'workspace'],
+        machines: [new PyodideRuntime({ config: { maxMemory: '128M' } })],
       },
     )
     try {
@@ -63,7 +63,7 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new PyodideRuntime({ config: { maxMemory: '128M' } }), 'workspace'],
+        machines: [new PyodideRuntime({ config: { maxMemory: '128M' } })],
       },
     )
     try {

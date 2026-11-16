@@ -36,7 +36,6 @@ describe('mirage CLI program', () => {
         'mcp',
         'policy',
         'rpc',
-        'runtime',
         'shell',
         'ssh-proxy',
         'template',

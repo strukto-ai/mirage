@@ -118,8 +118,6 @@ struct Response {
 #[serde(deny_unknown_fields)]
 struct RouteValue {
     action: u32,
-    runtime: Text,
-    #[serde(default)]
     machine: Text,
 }
 
@@ -635,19 +633,16 @@ impl Composition {
                 }
                 let mut result = evaluation.fold.result();
                 for route in &response.routes {
-                    if route
-                        .runtime
-                        .iter()
-                        .chain(&route.machine)
-                        .any(|point| *point > 0x10ffff)
-                    {
+                    if route.machine.iter().any(|point| *point > 0x10ffff) {
                         return Err(error("invalid route text"));
                     }
                 }
                 if let Some(first) = response.routes.first() {
-                    if response.routes.iter().any(|route| {
-                        (&route.runtime, &route.machine) != (&first.runtime, &first.machine)
-                    }) {
+                    if response
+                        .routes
+                        .iter()
+                        .any(|route| route.machine != first.machine)
+                    {
                         result.conflict = routes;
                         result.action = None;
                     } else {
@@ -1070,7 +1065,7 @@ mod tests {
             engine.request(&mut Vec::new()).unwrap();
             let routes = references
                 .into_iter()
-                .map(|action| json!({"action":action,"runtime":[97]}))
+                .map(|action| json!({"action":action,"machine":[97]}))
                 .collect::<Vec<_>>();
             let reply = json!({"evaluation":"a","effect":1,"routes":routes,"limits":[]});
             assert!(

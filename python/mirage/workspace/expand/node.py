@@ -17,6 +17,7 @@ from functools import partial
 from typing import Any
 
 from mirage._rs import Shell, ShellNode, ShellTask
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.rs.session import ShellVars
@@ -31,6 +32,7 @@ from mirage.utils.glob_walk import mark_globs
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.types import ExecuteFn
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import frame
 from mirage.workspace.session.task import drive
 
@@ -47,6 +49,7 @@ async def child_line(
     read: list[str] | None = None,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
+    started: Callable[[ProcessHandle, SessionState], None] | None = None,
 ) -> IOResult:
     """Run a substitution's line in a child shell.
 
@@ -74,6 +77,9 @@ async def child_line(
         stdin (ByteSource | None): the line's stdin, a process
             substitution's pipe for ``>(...)``.
         sink (JobConsole | None): where the line writes as it runs.
+        started (Callable[[ProcessHandle, SessionState], None] | None):
+            called with the child shell's process and session as it
+            starts.
     """
     session = context.session
     return await execute_fn(
@@ -87,6 +93,7 @@ async def child_line(
         read=read,
         stdin=stdin,
         sink=sink,
+        started=started,
         call_stack=(call_stack or CallStack()).fork(paren=False),
     )
 
@@ -150,6 +157,9 @@ class ExpandHost:
             span,
             records=ShellVars(shell),
             read=read,
+            started=lambda process, _: context.frame.writers.append(
+                (None, process.record.pid)
+            ),
         )
         stdout = await io.materialize_stdout()
         stderr = await io.materialize_stderr()

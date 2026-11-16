@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // The TypeScript twin of box_runtimes.py: the same two runtimes, one per
-// tier, loaded from yaml through `runtimes: [{name: ./box_runtimes.mjs:EchoBox}]`.
+// tier, loaded from yaml through `machines: {box: {runtime: ./box_runtimes.mjs:EchoBox}}`.
 import { LanguageRuntime, LINE_EXECUTOR, Runtime } from '@struktoai/mirage-node'
 
 const ENC = new TextEncoder()

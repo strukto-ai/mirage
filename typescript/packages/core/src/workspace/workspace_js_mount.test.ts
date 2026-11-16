@@ -14,12 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 // The quickjs runtime's `std.open`/`os.readdir` bridge to the workspace
 // dispatch, so sandboxed JS reaches mounts the same way python3 does.
 describe('node/js: workspace mount access', () => {
   it('a session narrowed to read denies writes (std.open returns null)', async () => {
-    const { ws } = makeWorkspace({ runtimes: ['quickjs', 'workspace'] })
+    const { ws } = makeWorkspace({ machines: [buildRuntime('quickjs')] })
     await ws.shell('echo seeded > /ram/seed.txt')
     ws.createSession('narrow', { mounts: { '/ram': 'read' } })
     const io = await ws.shell(

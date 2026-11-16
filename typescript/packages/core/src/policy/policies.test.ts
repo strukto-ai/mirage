@@ -27,6 +27,8 @@ import { SessionState } from '../workspace/session/session.ts'
 import { runWithEvaluation } from '../context/session_context.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
+import type { Runtime } from '../runtime/base.ts'
+import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { ebusy } from '../errors/fs.ts'
 import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
@@ -228,7 +230,7 @@ function recordPaths(node: Record<string, unknown>): unknown[] {
 function executableWorkspace(
   deny?: readonly CommandRule[],
   policies?: readonly Policy[],
-  runtimes?: string[],
+  machines?: Runtime[],
 ): Workspace {
   const ram = new RAMVFS()
   return new Workspace(
@@ -237,7 +239,7 @@ function executableWorkspace(
       mode: MountMode.WRITE,
       ...(deny ? { profiles: { default: { commands: { allow: null, ask: [], deny } } } } : {}),
       ...(policies ? { policies } : {}),
-      ...(runtimes ? { runtimes } : {}),
+      ...(machines ? { machines } : {}),
     },
   )
 }
@@ -549,7 +551,7 @@ describe('workspace policies', () => {
   it('ws.policies.add wins over runtime placement', async () => {
     // python3 is bound to monty; the preCommand method fires ahead of
     // runtime resolution, so the refusal wins.
-    const ws = executableWorkspace(undefined, undefined, ['monty', 'workspace'])
+    const ws = executableWorkspace(undefined, undefined, [new MontyRuntime()])
     try {
       ws.policies.add(new NoInterpreters())
       const refused = await ws.shell("python3 -c 'print(1)'")
@@ -958,7 +960,7 @@ describe('Ask in the chain', () => {
   it('preExecute routes agree and an ask holds the line', async () => {
     class OnBeta implements Policy {
       preExecute(): Route {
-        return { kind: 'route', runtime: 'beta' }
+        return { kind: 'route', machine: 'beta' }
       }
     }
     class AskToPlace implements Policy {
@@ -971,15 +973,15 @@ describe('Ask in the chain', () => {
       commands: [],
       sessionId: '',
     }
-    // Two policies naming one runtime agree; the first names the line.
+    // Two policies naming one machine agree; the first names the line.
     expect(await new Policies([new OnBeta(), new OnBeta()]).preExecute(line)).toEqual([
       null,
-      { kind: 'route', runtime: 'beta', policy: 'OnBeta' },
+      { kind: 'route', machine: 'beta', policy: 'OnBeta' },
     ])
     // An Ask comes back beside the Route, for the entry point to put.
     expect(await new Policies([new AskToPlace(), new OnBeta()]).preExecute(line)).toEqual([
       { kind: 'ask', reason: 'where?', policy: 'AskToPlace' },
-      { kind: 'route', runtime: 'beta', policy: 'OnBeta' },
+      { kind: 'route', machine: 'beta', policy: 'OnBeta' },
     ])
   })
 
@@ -1777,9 +1779,9 @@ it('composition does not inspect unreachable action fields', async () => {
 })
 
 it('standalone composition keeps first agreed route and ask precedence', () => {
-  const first: Route = { kind: 'route', runtime: 'node', reason: 'first placement' }
-  const same: Route = { kind: 'route', runtime: 'node', reason: 'second placement' }
-  const other: Route = { kind: 'route', runtime: 'python', reason: 'other placement' }
+  const first: Route = { kind: 'route', machine: 'node', reason: 'first placement' }
+  const same: Route = { kind: 'route', machine: 'node', reason: 'second placement' }
+  const other: Route = { kind: 'route', machine: 'python', reason: 'other placement' }
   const question: Ask = { kind: 'ask', reason: 'review' }
   const decision: Deny = { kind: 'deny', reason: 'refused' }
   expect(agreed([first])).toBe(first)
@@ -1858,13 +1860,13 @@ it('composition merges ask rules from their current values', async () => {
 })
 
 it('composition reconciles routes after later callbacks mutate them', async () => {
-  const first: Route = { kind: 'route', runtime: 'node', policy: 'First' }
+  const first: Route = { kind: 'route', machine: 'node', policy: 'First' }
   const policies = new Policies([
     { preExecute: () => first },
     {
       preExecute() {
-        first.runtime = 'ssh'
-        return { kind: 'route', runtime: 'node', policy: 'Second' }
+        first.machine = 'ssh'
+        return { kind: 'route', machine: 'node', policy: 'Second' }
       },
     },
   ])
@@ -1877,7 +1879,7 @@ it('pure settlement does not read route values after a question', () => {
   const question: Ask = { kind: 'ask', reason: 'review' }
   const route: Route = {
     kind: 'route',
-    get runtime(): string {
+    get machine(): string {
       throw new Error('suppressed route read')
     },
   }
@@ -1916,7 +1918,7 @@ it('composition answers leave route values unread', async () => {
   const route: Route = {
     kind: 'route',
     policy: 'Named',
-    get runtime(): string {
+    get machine(): string {
       throw new Error('answers route read')
     },
   }
@@ -1957,7 +1959,7 @@ it('composition compares current nested rules at each ask merge', async () => {
 it('pure route agreement leaves diagnostic policy names unread', () => {
   const route: Route = {
     kind: 'route',
-    runtime: 'node',
+    machine: 'node',
     get policy(): string {
       throw new Error('unused policy name')
     },
@@ -1982,7 +1984,7 @@ it('pure settlement reads a winning denial kind once', () => {
 
 it('pure agreement leaves route kinds unread', () => {
   const route: Route = {
-    runtime: 'node',
+    machine: 'node',
     get kind(): 'route' {
       throw new Error('unused route kind')
     },
@@ -2023,7 +2025,7 @@ it('composition merges many asks without recounting prior rules', async () => {
 
 class RouteOnPython implements Policy {
   preExecute(ctx: RouteContext): Action | null {
-    return ctx.line.startsWith('python3') ? { kind: 'route', runtime: 'beta' } : null
+    return ctx.line.startsWith('python3') ? { kind: 'route', machine: 'beta' } : null
   }
 }
 

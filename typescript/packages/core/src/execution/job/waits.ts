@@ -13,16 +13,44 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Channel, type JobConsole, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
-import type { JobHandle } from './handle.ts'
 
 /**
- * The background jobs started inside a capture (`$( )`, a pipe stage),
- * which the capture waits for before it ends: bash reads the pipe until
- * every writer has closed it, and a job holds it open for as long as one
- * of its streams leads into it.
+ * What a child holds open of a capture: what its descriptors that lead into
+ * the capture named as it started (`&1`, `&2`, a copy), until its shell
+ * points every descriptor elsewhere (`exec 2>/dev/null`), as bash's capture
+ * ends once each writer has closed the pipe. Mirrors Python's Hold.
+ */
+export class Hold {
+  readonly released: Promise<void>
+  private release: () => void = () => undefined
+
+  /** @param named what those descriptors named. */
+  constructor(readonly named: ReadonlySet<string>) {
+    this.released = new Promise((resolve) => {
+      this.release = resolve
+    })
+  }
+
+  /**
+   * Let go of the capture once none of the shell's descriptors names what
+   * led into it.
+   *
+   * @param named what the shell's descriptors name now.
+   */
+  settle(named: ReadonlySet<string>): void {
+    for (const name of this.named) if (named.has(name)) return
+    this.release()
+  }
+}
+
+/**
+ * The background jobs and process substitutions started inside a capture
+ * (`$( )`, a pipe stage), which the capture waits for before it ends: bash
+ * reads the pipe until every writer has closed it, and a child holds it
+ * open for as long as one of its streams leads into it.
  */
 export class JobWaits {
-  readonly jobs: JobHandle[] = []
+  readonly ends: (() => Promise<void>)[] = []
 
   /**
    * @param output where the capture's jobs write, at its edge.
@@ -53,20 +81,39 @@ export class JobWaits {
     return false
   }
 
-  /** Count a job the capture has to outlast. */
-  add(job: JobHandle): void {
-    this.jobs.push(job)
+  /**
+   * Count a child the capture has to outlast, until it ends or lets go of
+   * the capture (`Hold`).
+   *
+   * @param ended resolves once the child has ended.
+   * @param named what the child's descriptors that lead into the capture
+   *   named as it started.
+   */
+  add(ended: () => Promise<void>, named: ReadonlySet<string>): Hold {
+    const hold = new Hold(named)
+    this.ends.push(() => {
+      const finished = ended()
+      // A wait that fails before the child lets go fails the join; one that
+      // fails after is no longer the capture's.
+      void hold.released.then(() =>
+        finished.catch((error: unknown) => {
+          console.debug('waiting for a child that let go failed', error)
+        }),
+      )
+      return Promise.race([finished, hold.released])
+    })
+    return hold
   }
 
   /**
-   * Return once every job writing into the capture has ended; what the
-   * capture's other jobs write from then on goes to `rest`, where the
+   * Return once every child writing into the capture has ended; what the
+   * capture's other children write from then on goes to `rest`, where the
    * capture's caller writes.
    */
   async join(rest: JobConsole): Promise<void> {
-    // A job added while this waits is still reached: the loop reads the
+    // A child added while this waits is still reached: the loop reads the
     // list as it grows.
-    for (const job of this.jobs) await job.console.waitFinished()
+    for (const ended of this.ends) await ended()
     this.output.target = rest
   }
 }

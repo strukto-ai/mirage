@@ -3,12 +3,12 @@
     {
       "id": "captured_program_pipeline",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox"
-          },
-          "workspace"
-        ],
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -42,14 +42,15 @@
     {
       "id": "external_fallback_keeps_mirage_commands",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox",
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {
@@ -78,15 +79,16 @@
     {
       "id": "external_fallback_is_no_program",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox",
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "gcc",
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {

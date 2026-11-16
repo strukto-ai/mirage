@@ -186,12 +186,27 @@ pub(crate) async fn list_runs(
 }
 
 /// A run with its workflow's current name, as gh's GetRun reads one.
-pub(crate) async fn get_run(account: &Account, target: &RepoRef, run: &str) -> Result<Json> {
+/// A run's path, or one attempt's when `attempt` is past 0.
+fn run_path(run: &str, attempt: u64) -> String {
+    if attempt > 0 {
+        format!("runs/{run}/attempts/{attempt}")
+    } else {
+        format!("runs/{run}")
+    }
+}
+
+/// A run, or one of its attempts, whose URL then names that attempt.
+pub(crate) async fn get_run(
+    account: &Account,
+    target: &RepoRef,
+    run: &str,
+    attempt: u64,
+) -> Result<Json> {
     let query = vec![("exclude_pull_requests".to_owned(), "true".to_owned())];
     let mut row = github_request_response(
         account,
         "GET",
-        &actions(target, &format!("runs/{run}")),
+        &actions(target, &run_path(run, attempt)),
         None,
         &query,
         &[],
@@ -199,6 +214,15 @@ pub(crate) async fn get_run(account: &Account, target: &RepoRef, run: &str) -> R
     .await?
     .data
     .into_json();
+    if attempt > 0 {
+        let url = format!(
+            "{}/attempts/{attempt}",
+            row.get("html_url").text().trim_end_matches('/')
+        );
+        if let Json::Obj(fields) = &mut row {
+            fields.set("html_url", url);
+        }
+    }
     let workflow = github_request(
         account,
         "GET",
@@ -290,10 +314,18 @@ pub(crate) async fn dispatch_workflow(
     .await
 }
 
-pub(crate) async fn list_jobs(account: &Account, target: &RepoRef, run: i128) -> Result<Vec<Json>> {
+pub(crate) async fn list_jobs(
+    account: &Account,
+    target: &RepoRef,
+    run: i128,
+    attempt: u64,
+) -> Result<Vec<Json>> {
     github_pages(
         account,
-        &actions(target, &format!("runs/{run}/jobs")),
+        &actions(
+            target,
+            &format!("{}/jobs", run_path(&run.to_string(), attempt)),
+        ),
         &[],
         i64::MAX,
         Some("jobs"),
@@ -315,8 +347,51 @@ pub(crate) async fn run_log_archive(
     account: &Account,
     target: &RepoRef,
     run: i128,
+    attempt: u64,
 ) -> Result<Vec<u8>> {
-    bytes_at(account, &actions(target, &format!("runs/{run}/logs"))).await
+    bytes_at(
+        account,
+        &actions(
+            target,
+            &format!("{}/logs", run_path(&run.to_string(), attempt)),
+        ),
+    )
+    .await
+}
+
+/// A run's artifacts, every page of them.
+pub(crate) async fn list_artifacts(
+    account: &Account,
+    target: &RepoRef,
+    run: i128,
+) -> Result<Vec<Json>> {
+    github_pages(
+        account,
+        &actions(target, &format!("runs/{run}/artifacts")),
+        &[],
+        i64::MAX,
+        Some("artifacts"),
+        |_| true,
+    )
+    .await
+}
+
+/// A job's check-run annotations, the one page gh reads.
+pub(crate) async fn job_annotations(
+    account: &Account,
+    target: &RepoRef,
+    job: i128,
+) -> Result<Json> {
+    github_request(
+        account,
+        "GET",
+        &format!(
+            "/repos/{}/{}/check-runs/{job}/annotations",
+            target.owner, target.repo
+        ),
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn job_log(account: &Account, target: &RepoRef, job: i128) -> Result<Vec<u8>> {

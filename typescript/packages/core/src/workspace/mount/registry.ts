@@ -136,7 +136,7 @@ export class MountRegistry {
   >
   // The ordered runtime world, set by Runtimes at construction (the
   // live array, so add() keeps it fresh). The CLI script arm selects
-  // an interpreter from it (a runtime: pin or the script's language),
+  // an interpreter from it (a machine: pin or the script's language),
   // which the bindings map cannot answer: an entry behind another
   // capturer never binds a command.
   runtimeEntries: readonly Runtime[] = []

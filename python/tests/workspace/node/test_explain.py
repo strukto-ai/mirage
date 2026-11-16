@@ -990,7 +990,7 @@ async def test_a_whole_line_keeps_its_first_answer_while_its_second_waits():
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"r": PROFILE},
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         await ws.vfs.write("/data/secret.txt", b"s\n")
@@ -1031,7 +1031,7 @@ async def test_an_expanded_name_is_explained_as_the_route_reads_it():
             {"/data/": RAMVFS()},
             mode=MountMode.EXEC,
             profiles={"r": profile},
-            runtimes=[_LineBox(), "workspace"] if whole else None,
+            machines=[_LineBox()] if whole else None,
         )
         try:
             ws.create_session("s", profile="r")
@@ -1054,7 +1054,7 @@ async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"r": {"commands": {"allow": ["bash", "source", "rm"]}}},
-        runtimes=[_LineBox(), "workspace"],
+        machines=[_LineBox()],
     )
     try:
         ws.create_session("s", profile="r")
@@ -1103,7 +1103,7 @@ async def test_explain_says_what_a_whole_line_gate_refuses_past_the_chain():
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"r": SEALED_READS},
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         ws.create_session("s", profile="r")
@@ -1145,7 +1145,7 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
                 }
             }
         },
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         ws.create_session("s", profile="r")
@@ -1191,7 +1191,7 @@ async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         policies=[_SealedSecret()],
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         ws.get_session(ws.default_session_id).cwd = "/data"
@@ -1245,7 +1245,7 @@ async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
                 }
             }
         },
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         ws.create_session("s", profile="r")
@@ -1286,7 +1286,7 @@ async def test_explain_reads_a_line_as_the_runtime_it_is_placed_on():
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"r": PROFILE},
-        runtimes=[_LineBox(), "workspace"],
+        machines=[_LineBox()],
         route_policy=lambda ctx: "workspace",
     )
     try:
@@ -1318,14 +1318,14 @@ async def test_explain_names_the_line_runtime_for_every_command_it_takes(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"r": PROFILE},
-        runtimes=[_LineBox(), "workspace"],
+        machines=[_LineBox()],
     )
     try:
         ws.create_session("s", profile="r")
         said = await ws.explain(line, "s")
-        runtimes = [c.runtime for c in _commands(said.node)]
+        machines = [c.machine for c in _commands(said.node)]
         assert said.outcome == outcome
-        assert runtimes == ["sandbox"] * count
+        assert machines == ["sandbox"] * count
     finally:
         await ws.close()
 

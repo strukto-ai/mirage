@@ -15,7 +15,7 @@
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } })
 
   console.log('python3 + session env (os.environ passthrough)\n')
 
@@ -32,8 +32,8 @@ async function main(): Promise<void> {
   )
 
   console.log('=== isolation across workspaces — each command has its own Pyodide ===')
-  const wsA = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
-  const wsB = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+  const wsA = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } })
+  const wsB = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } })
   await wsA.shell('export NAME=alice')
   await wsB.shell('export NAME=bob')
 

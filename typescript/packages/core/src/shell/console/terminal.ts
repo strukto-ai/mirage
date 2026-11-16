@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { BytePipe } from '../../io/pipe.ts'
 import { concat } from '../../utils/bytes.ts'
 import { keptOutputBytes } from '../../observe/observer.ts'
 import { checkMemory } from '../../io/memory.ts'
@@ -83,6 +84,10 @@ export class Terminal extends JobConsole {
       this.errPrefix = prefix
       this.errPrefixSize = size + part.byteLength
     }
+  }
+
+  override pipeFor(channel: Channel): BytePipe | null {
+    return this.reader?.pipeFor(channel) ?? null
   }
 
   /** Take what the line wrote. */

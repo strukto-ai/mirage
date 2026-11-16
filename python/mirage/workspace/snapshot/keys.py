@@ -116,6 +116,7 @@ class CLIKey(StrEnum):
     SPEC = "spec"
     CONFIG = "config"
     SCRIPT = "script"
+    MACHINE = "machine"
     RUNTIME = "runtime"
     MCP = "mcp"
 

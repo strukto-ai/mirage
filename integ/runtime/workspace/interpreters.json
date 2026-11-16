@@ -3,9 +3,7 @@
     {
       "id": "no_language_runtime_leaves_no_interpreter_on_path",
       "world": {
-        "runtimes": [
-          "workspace"
-        ]
+        "machines": {}
       },
       "steps": [
         {
@@ -45,9 +43,7 @@
     {
       "id": "no_language_runtime_names_each_alias",
       "world": {
-        "runtimes": [
-          "workspace"
-        ]
+        "machines": {}
       },
       "steps": [
         {
@@ -63,9 +59,7 @@
     {
       "id": "no_language_runtime_answers_before_reading_the_script",
       "world": {
-        "runtimes": [
-          "workspace"
-        ]
+        "machines": {}
       },
       "steps": [
         {

@@ -112,7 +112,7 @@ function workspace(probe: Runtime, others: Runtime[] = []): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [probe, ...others],
+      machines: [probe, ...others],
     },
   )
 }
@@ -138,7 +138,7 @@ describe('external program capture', () => {
     const probe = new ProcessProbe({ captures: ['python3'] })
     const ws = workspace(new InProcessPython(), [probe])
     try {
-      const result = await ws.shell("python3 -c 'print(1)' arg", { runtime: 'probe' })
+      const result = await ws.shell("python3 -c 'print(1)' arg", { machine: 'probe' })
       expect(result.exitCode).toBe(0)
       expect(probe.requests[0]?.argv).toEqual(['python3', '-c', 'print(1)', 'arg'])
     } finally {
@@ -265,7 +265,7 @@ function lineWs(probe: Runtime, seconds = 0.05): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [probe],
+      machines: [probe],
       commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
     },
   )
@@ -371,7 +371,7 @@ describe('external command routing regressions', () => {
           '/base/inner': new RAMVFS(),
           '/base/other': new RAMVFS(),
         },
-        { mode: MountMode.EXEC, runtimes: [probe] },
+        { mode: MountMode.EXEC, machines: [probe] },
       )
       registerBoardList(ws)
       // Leave the glob pending so command dispatch owns boundary expansion.
@@ -404,7 +404,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
     const ws = new Workspace(
       { '/work': new RAMVFS() },
       {
-        runtimes: [probe],
+        machines: [probe],
         mode: MountMode.EXEC,
         policies: [
           profileRule({
@@ -463,7 +463,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
     const probe = kind === 'process' ? new ProcessProbe({ captures }) : new ShellProbe({ captures })
     const ws = new Workspace(
       { '/work': new RAMVFS() },
-      { runtimes: [probe], mode: MountMode.EXEC, policies },
+      { machines: [probe], mode: MountMode.EXEC, policies },
     )
     return [ws, probe]
   }
@@ -551,7 +551,7 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
     const ws = new Workspace(
       { '/work': new RAMVFS() },
       {
-        runtimes: [probe],
+        machines: [probe],
         mode: MountMode.EXEC,
         policies: [profileRule({ reason: 'protected', paths: ['/work/*'] })],
       },
@@ -731,7 +731,7 @@ describe('streamed stderr', () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
-        runtimes: [new ErringProbe()],
+        machines: [new ErringProbe()],
         mode: MountMode.EXEC,
         policies: [seen],
       },
@@ -773,7 +773,7 @@ describe('streamed stderr', () => {
       const ws = new Workspace(
         { '/': new RAMVFS() },
         {
-          runtimes: [new WarnsThenFails()],
+          machines: [new WarnsThenFails()],
           mode: MountMode.EXEC,
           policies: [seen],
         },
@@ -804,7 +804,7 @@ class EndlessProbe extends ProcessProbe {
 it('exits 141 when its reader stopped it', async () => {
   const ws = new Workspace(
     { '/': new RAMVFS() },
-    { runtimes: [new EndlessProbe()], mode: MountMode.EXEC },
+    { machines: [new EndlessProbe()], mode: MountMode.EXEC },
   )
   try {
     const io = await ws.shell('endless-tool | head -n 1; echo "${PIPESTATUS[@]}"')
@@ -828,7 +828,7 @@ it('records a program its cap stopped as 141', async () => {
   const ws = new Workspace(
     { '/': new RAMVFS() },
     {
-      runtimes: [new EndlessProbe()],
+      machines: [new EndlessProbe()],
       mode: MountMode.EXEC,
       policies: [seen],
     },

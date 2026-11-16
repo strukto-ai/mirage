@@ -1,0 +1,58 @@
+---
+title: In Process
+icon: cube
+description: Run Python or JavaScript on a runtime inside Mirage.
+---
+
+An `in_process` machine runs a [runtime](/home/setup/runtime/overview)
+inside Mirage, so Python or JavaScript runs where Mirage runs, with no
+container or host of its own. Each entry names its `runtime`:
+
+```yaml
+machines:
+  py:
+    provider: in_process
+    runtime: monty
+```
+
+| `runtime` | Runs | SDK |
+| --- | --- | --- |
+| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | both |
+| [`wasi`](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Python |
+| [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython with packages such as numpy | TypeScript |
+| [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js` | both, not on Cloudflare Workers |
+| A [custom runtime](/home/setup/runtime/custom) | what you write | both |
+
+`runtime` also takes a runtime you registered in code, or a
+`./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference. The
+entry's other keys are the runtime's settings.
+
+## Files
+
+A runtime here reaches the workspace's mounts directly, under the same mount
+modes, permissions and policies as `cat`. Monty, WASI and QuickJS have no host
+files or network; Pyodide's access depends on where it runs, see its
+[containment](/typescript/runtime/python#containment); a custom runtime reaches
+what its code reaches. For hostile code, prefer a machine with a kernel
+boundary: a [`host`](/home/setup/machine/host) with a `sandbox`, or a
+[machine provider](/home/setup/machine/overview#providers).
+
+## CLIs
+
+Every [`clis` entry](/home/configuration/workspace#cli-entries) names its
+`machine`. A registered CLI, such as `slack`, or one made from an MCP server
+runs only here. A script runs here on the first entry that runs its
+language, or on the `runtime` it names:
+
+```yaml
+clis:
+  slack:
+    cli: slack
+    machine: in_process
+    config:
+      token: {from: env, key: SLACK_TOKEN}
+  report:
+    script: report.py
+    machine: in_process
+    runtime: monty
+```

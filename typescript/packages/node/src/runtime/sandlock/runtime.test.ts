@@ -117,7 +117,7 @@ else {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
-        runtimes: [new SandlockRuntime({ captures: ['node'] })],
+        machines: [new SandlockRuntime({ captures: ['node'] })],
         systemTime: '2026-03-02T09:00:00Z',
       },
     )
@@ -197,7 +197,7 @@ else {
     const runtime = new SandlockRuntime({ captures: ['tool'] })
     const ws = new Workspace(
       { '/data': new DiskVFS({ root: dir }) },
-      { mode: MountMode.EXEC, profiles: { agent: profile }, runtimes: [runtime, 'workspace'] },
+      { mode: MountMode.EXEC, profiles: { agent: profile }, machines: [runtime] },
     )
     try {
       const agent = await ws.session('agent', { profile: 'agent' })

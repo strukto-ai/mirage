@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DiskVFS, MountMode, PathSpec, Workspace } from '@struktoai/mirage-node'
@@ -44,7 +44,7 @@ function writeBehindMirage(root: string): [string, { src_path: string }][] {
 }
 
 async function main(): Promise<void> {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'mirage-disk-events-')))
+  const tmp = mkdtempSync(join(tmpdir(), 'mirage-disk-events-'))
   seed(tmp)
 
   const vfs = new DiskVFS({ root: tmp })

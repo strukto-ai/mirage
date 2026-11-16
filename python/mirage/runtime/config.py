@@ -46,8 +46,7 @@ class RuntimeConfig:
     differs between runtimes lives here. Each runtime class names its
     own config subclass (config_cls), so an option the runtime does not
     have is simply not a field there and fails loud at construction. In
-    yaml this is the runtime entry's ``config`` block, mirroring a
-    mount's.
+    yaml these are a machine entry's fields beside its ``provider``.
     """
 
     @classmethod

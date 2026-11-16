@@ -836,7 +836,7 @@ class _StoppedBox(MachineHandle):
 
 
 def _box_process(pid: int, machine: str = "stopbox:b1") -> dict:
-    return {"pid": pid, "session": "s", "machine": machine, "runtime": "x"}
+    return {"pid": pid, "session": "s", "machine": machine, "program": True}
 
 
 # A lapsed workspace's programs are stopped by whatever reaches them

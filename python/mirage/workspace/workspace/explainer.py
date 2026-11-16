@@ -141,16 +141,19 @@ class VfsExplainer:
         )
 
     async def stat(
-        self, path: str, *, nofollow: bool = False
+        self, path: str, *, nofollow: bool = False, fresh: bool = False
     ) -> VfsExplanation:
         """Explain ``session.vfs.stat``.
 
         Args:
             path (str): the path.
             nofollow (bool): stat a link itself, not its target.
+            fresh (bool): ask the backend past its cache.
         """
         return await _dry(
-            "stat", (path,), lambda: self._vfs.stat(path, nofollow=nofollow)
+            "stat",
+            (path,),
+            lambda: self._vfs.stat(path, nofollow=nofollow, fresh=fresh),
         )
 
     async def readdir(self, path: str) -> VfsExplanation:

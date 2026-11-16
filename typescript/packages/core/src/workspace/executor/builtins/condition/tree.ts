@@ -91,11 +91,13 @@ async function regexStatus(
   // POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
   let found
   try {
-    found = await posixRegex(byteView(node.right, utf8), true, 'posix', false, utf8).search(
-      left,
-      0,
-      ctx.signal,
-    )
+    found = await posixRegex(
+      byteView(node.right, utf8),
+      true,
+      'posix',
+      ctx.session.shopts.nocasematch ?? false,
+      utf8,
+    ).search(left, 0, ctx.signal)
   } catch (err) {
     if (!(err instanceof RegexError)) throw err
     return 2
@@ -119,11 +121,9 @@ async function evalCondBinary(
   // == and != always fnmatch: the builder already rendered the right
   // side into the glob dialect, quoted segments escaped, so a
   // wholly-literal pattern matches exactly itself.
-  if (node.op === '=' || node.op === '==') {
-    return fnmatch(node.left, node.right, true)
-  }
-  if (node.op === '!=') {
-    return !fnmatch(node.left, node.right, true)
+  if (node.op === '=' || node.op === '==' || node.op === '!=') {
+    const nocase = ctx.session.shopts.nocasematch ?? false
+    return fnmatch(node.left, node.right, true, false, nocase) !== (node.op === '!=')
   }
   if (node.op === '<') return compareCodePoints(node.left, node.right) < 0
   if (node.op === '>') return compareCodePoints(node.left, node.right) > 0

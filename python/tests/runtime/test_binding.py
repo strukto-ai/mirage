@@ -162,7 +162,7 @@ async def test_callbacks_retain_session_and_gate_after_capture():
 async def test_context_keeps_namespace_live_and_matches_native_projection():
     probe = Probe()
     with Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe, "workspace"]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[probe]
     ) as ws:
         await ws.shell("echo shared > /data/a; chmod 600 /data/a")
         context = ws.runtime_context()
@@ -195,14 +195,14 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
 @pytest.mark.asyncio
 async def test_binding_prevents_cross_workspace_reuse():
     runtime = Probe()
-    with Workspace({}, runtimes=[runtime, "workspace"]) as first:
+    with Workspace({}, machines=[runtime]) as first:
         with Workspace({}) as second:
-            assert first.runtimes()[0] is runtime
+            assert first.engines()[0] is runtime
             assert (
                 await runtime.execute([], [], Context(flags={"c": "ok"}))
             ).stdout == b"ok"
             with pytest.raises(ValueError, match="another workspace"):
-                second.add_runtime(runtime)
+                second.add_machine(runtime.name, runtime)
 
 
 @pytest.mark.asyncio
@@ -211,7 +211,7 @@ async def test_command_execution_supplies_its_active_workspace_context():
     with Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     ) as ws:
         ws.create_session("agent")
         await ws.shell("export PUBLIC=agent; cd /data", session_id="agent")
@@ -260,7 +260,7 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
     with Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     ) as ws:
         await ws.shell("echo shared > /data/file; ln -s /data/file /data/link")
         one, two = ws.create_session("one"), ws.create_session("two")
@@ -298,7 +298,7 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
 
 @pytest.mark.asyncio
 async def test_session_processes_do_not_share_by_profile_or_follow_reused_sessions():
-    with Workspace({}, runtimes=[], profiles={"agent": {}}) as ws:
+    with Workspace({}, machines=[], profiles={"agent": {}}) as ws:
         ws.create_session("one", profile="agent")
         ws.create_session("two", profile="agent")
         one = ws.runtime_context("one").ctx.processes
@@ -384,7 +384,7 @@ async def test_context_vfs_of_a_bare_launch_stays_unscoped_and_unrecorded():
 async def test_native_runtime_refused_before_running_with_hidden_files():
     runtime = ShellProbe(captures=["@line"])
     with Workspace(
-        {"/data": RAMVFS()}, runtimes=[runtime], mode=MountMode.EXEC
+        {"/data": RAMVFS()}, machines=[runtime], mode=MountMode.EXEC
     ) as ws:
         ws.create_session(
             "restricted", profile={"paths": {"hide": ["/data/secret"]}}
@@ -420,7 +420,7 @@ async def test_native_runtime_refused_where_the_network_is_judged(
     runtime = ShellProbe(captures=["@line"])
     with Workspace(
         {"/data": RAMVFS()},
-        runtimes=[runtime],
+        machines=[runtime],
         mode=MountMode.EXEC,
         network=network,
     ) as ws:
@@ -448,7 +448,7 @@ async def test_native_runtime_refused_where_the_network_is_judged(
     ],
 )
 def test_restrictions_belong_to_the_longest_mount(hidden, expected):
-    with Workspace({"/data": RAMVFS()}, runtimes=[]) as ws:
+    with Workspace({"/data": RAMVFS()}, machines=[]) as ws:
         ws.create_session("agent", profile={"paths": {"hide": hidden}})
         assert ws.runtime_context("agent").restricted_mounts == expected
 

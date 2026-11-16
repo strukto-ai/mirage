@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `runtimes: [{name: <ref>}]` battery: a workspace routes lines to runtimes
+# `machines: {<name>: {runtime: <ref>}}` battery: a workspace routes lines to runtimes
 # that live in a file on disk, with no host program calling
 # register_runtime, one per tier the workspace can route to. EchoBox takes
 # whole lines (the entry point every sandbox provider uses) and ShoutPython is an
@@ -52,11 +52,14 @@ mode: EXEC
 mounts:
   /ram:
     vfs: ram
-runtimes:
-  - name: $ref_file:ShoutPython
+machines:
+  shout:
+    provider: in_process
+    runtime: $ref_file:ShoutPython
     captures: [python3]
-  - $ref_file:$box_attr
-  - workspace
+  box:
+    provider: in_process
+    runtime: $ref_file:$box_attr
 YML
 }
 

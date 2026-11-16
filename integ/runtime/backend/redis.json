@@ -6,10 +6,12 @@
     {
       "id": "redis_read",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/redis": {
             "vfs": "redis"
@@ -35,10 +37,12 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
         "mounts": {
           "/redis": {
             "vfs": "redis"
@@ -79,10 +83,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/redis": {
             "vfs": "redis"

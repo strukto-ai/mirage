@@ -9,10 +9,12 @@
     {
       "id": "puts_print_raw",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ]
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        }
       },
       "steps": [
         {
@@ -28,10 +30,12 @@
     {
       "id": "printf",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ]
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        }
       },
       "steps": [
         {
@@ -67,10 +71,12 @@
     {
       "id": "printf_more_conversions",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ]
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        }
       },
       "steps": [
         {

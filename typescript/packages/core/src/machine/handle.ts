@@ -176,7 +176,12 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // Connect-once latch: the first run connects; later runs just execute.
   // Single-flight so concurrent first runs share one connect, and a failed
   // connect clears the slot so the next run retries.
-  private connecting: Promise<void> | null = null
+  protected connecting: Promise<void> | null = null
+  // Whether `pauseMachine` pauses; only then does close wait for a connect under way, which an unbounded connect would otherwise hold.
+  protected readonly pauses: boolean = false
+  // Set by a provider's connect that reached the machine; close hands it to `pausable` for the pause after.
+  protected reached = false
+  private pausable = false
   private mounts: MachineMounts | null = null
   // The libfaketime the machine holds, asked once the first program runs
   // there under a system_time: null for none. Concurrent first runs share
@@ -684,7 +689,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return library === null ? {} : faketimeEnv(library, env)
   }
 
-  protected async ensureConnected(signal?: AbortSignal): Promise<void> {
+  /** Connect once; after a disconnect the next call connects again. */
+  async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
@@ -741,15 +747,47 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * Unmount what the machine was served; the machine itself is the user's.
    * The next run connects again, so a workspace that takes the handle after
-   * this one reaches the machine anew.
+   * this one reaches the machine anew. On a machine that pauses, a connect
+   * still under way settles first, and what this workspace reached, cleanup
+   * included, is handed to the pause after.
    */
   async close(): Promise<void> {
+    if (this.pauses) await Promise.allSettled([this.connecting])
     try {
       if (this.spent.length > 0) await this.removeSpent()
       await this.mounts?.close()
     } finally {
+      this.pausable = this.reached
+      this.reached = false
       this.disconnected()
     }
+  }
+
+  /**
+   * Whether the machine's config asks to pause it when its workspace pauses
+   * without naming the machines to pause.
+   */
+  configAsksToPause(): boolean {
+    return false
+  }
+
+  /**
+   * Pause the machine after its workspace closed to pause, when that
+   * workspace reached it; by default the machine is only disconnected.
+   */
+  async pause(): Promise<void> {
+    const pausable = this.pausable
+    this.pausable = false
+    if (pausable) await this.pauseMachine()
+  }
+
+  /**
+   * Pause the machine a closed workspace reached. A provider that can pause
+   * overrides this, and its next connect resumes the machine; a machine
+   * already gone counts as paused.
+   */
+  protected pauseMachine(): Promise<void> {
+    return Promise.resolve()
   }
 }
 
