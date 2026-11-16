@@ -204,7 +204,6 @@ uv add 'mirage-ai[monty]'     # Monty, die In-Process-Python-Laufzeitumgebung de
 ```bash
 npm install @struktoai/mirage-node      # Node.js-Server und CLI
 npm install @struktoai/mirage-browser   # Browser- und Edge-Laufzeitumgebungen
-npm install @struktoai/mirage-vercel    # Vercel-AI-Adapter; jedes Agent-Framework hat ein eigenes Paket
 ```
 
 Beide Runtime-Pakete installieren `@struktoai/mirage-core` automatisch mit.

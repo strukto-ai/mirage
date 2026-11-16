@@ -204,7 +204,6 @@ uv add 'mirage-ai[monty]'     # Monty：示例所用的进程内 Python 运行�
 ```bash
 npm install @struktoai/mirage-node      # Node.js 服务器和 CLI
 npm install @struktoai/mirage-browser   # 浏览器 / edge 运行时
-npm install @struktoai/mirage-vercel    # Vercel AI 适配器；每个 agent 框架各有一个包
 ```
 
 两个运行时包都会自动引入 `@struktoai/mirage-core`。

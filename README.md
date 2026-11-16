@@ -228,7 +228,6 @@ uv add 'mirage-ai[monty]'     # Monty, the in-process Python runtime the example
 ```bash
 npm install @struktoai/mirage-node      # Node.js servers and CLIs
 npm install @struktoai/mirage-browser   # browser / edge runtimes
-npm install @struktoai/mirage-vercel    # Vercel AI adapter; each agent framework has its own package
 ```
 
 Both runtime packages pull in `@struktoai/mirage-core` automatically.
