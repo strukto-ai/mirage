@@ -4,6 +4,7 @@ icon: code-pull-request
 description: An agent reviews a pull request against a read-only clone in memory, scores it and writes line comments, with no sandbox.
 ---
 
+import { Run } from "/snippets/run-block.jsx"
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
@@ -252,16 +253,17 @@ run() {
 }
 ```
 
-The commands between `SH` and `SH` in the blocks below run in the terminal
-on the server, not in the shell that calls `run`. The terminal starts in
-`/repo`, on the commit the server checked out:
+The blocks titled **Agent terminal** below run in the terminal on the
+server, not in your shell. Their copy button adds the `run` call around the
+commands, as `run <<'SH'` … `SH`, so a pasted block runs there.
+The terminal starts in `/repo`, on the commit the server checked out:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 pwd
 git log --oneline -1
-SH
 ```
+</Run>
 
 ```text
 /repo
@@ -273,13 +275,13 @@ SH
 First the agent reads what the pull request is, which files it touches, and
 the issue it closes:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 gh pr view 880 --json title,state,changedFiles,additions,deletions,closingIssuesReferences \
   --jq '"\(.title)\n\(.state): \(.changedFiles) files, +\(.additions) -\(.deletions), fixes #\(.closingIssuesReferences[0].number)"'
 gh pr diff 880 --name-only
-SH
 ```
+</Run>
 
 ```text
 Fix `signal` replacement when extending instances
@@ -293,11 +295,11 @@ test/main.ts
 The issue says what the fix has to do. The agent prints its title and the
 lines that name `null`:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 gh issue view 879 --json title,body --jq '.title, (.body | split("\n") | map(select(test("null"))) | .[])'
-SH
 ```
+</Run>
 
 ```text
 Bug: `replaceOption` and `undefined` do not work with `signal` option in `ky.extend()`
@@ -310,13 +312,13 @@ The fix has to reset the parent's signals for three values: a
 in `source/`. `awk` prints from each matching file's `diff --git` line to
 the next one:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 gh pr diff 880 | awk '/^diff --git/ {show = /source\/utils/} show'
-SH
 ```
+</Run>
 
-```text
+```diff
 diff --git a/source/utils/merge.ts b/source/utils/merge.ts
 index aa046c40..922f0175 100644
 --- a/source/utils/merge.ts
@@ -369,12 +371,12 @@ A diff shows only the lines that changed. To know what a `null` does next,
 the agent reads the rest of the function in `/repo`: how the signals it
 collected become the request's signal.
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 sed -n 312,317p source/utils/merge.ts
 grep -n "interface Options" source/types/options.ts
-SH
 ```
+</Run>
 
 ```text
 	if (signals.length > 0) {
@@ -392,12 +394,12 @@ passes neither of the two new checks, the parent's signal stays in
 `signals`, and the code above sets it again as the request's signal. Last,
 the agent lists the tests the change adds and reads the result of CI:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 gh pr diff 880 | grep -E "^\+test\("
 gh pr checks 880 --json bucket --jq 'map(.bucket) | group_by(.) | map("\(length) \(.[0])") | join(", ")'
-SH
 ```
+</Run>
 
 ```text
 +test('ky.extend() with replaceOption replaces signal instead of merging', async t => {
@@ -414,8 +416,8 @@ for `null`. CI passed.
 The agent writes the review in two files: the summary, with its score, a
 diagram and a table of the files, and one comment on the line that needs it:
 
-````bash
-run <<'SH'
+<Run>
+````bash Agent terminal · copies as run <<'SH'
 cat > /workspace/review.md <<'MD'
 ## Confidence score: 4/5
 
@@ -447,16 +449,16 @@ cat > /workspace/comment.md <<'MD'
 `null` as well. A `null` passes neither check above, so the parent's signal
 is still combined. Clear the signals on `null` too, and add a test.
 MD
-SH
 ````
+</Run>
 
 Then it puts both into the body of GitHub's
 [create a review](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request)
 request. A line comment names the file and the line on the new side of the
 diff, and the commit it was written against:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 jq -n --rawfile body /workspace/review.md --rawfile comment /workspace/comment.md \
   --arg sha "$(gh pr view 880 --json headRefOid --jq .headRefOid)" '{
     commit_id: $sha,
@@ -465,8 +467,8 @@ jq -n --rawfile body /workspace/review.md --rawfile comment /workspace/comment.m
     comments: [{path: "source/utils/merge.ts", line: 228, side: "RIGHT", body: $comment}]
   }' > /workspace/review.json
 jq '{commit_id, event, comments: (.comments | map("\(.path):\(.line)"))}' /workspace/review.json
-SH
 ```
+</Run>
 
 ```json
 {
@@ -501,15 +503,15 @@ the agent's last command; one that keeps a person in the loop shows
 The `reviewer` profile is checked before each command runs, and the mount
 mode on every write:
 
-```bash
-run <<'SH'
+<Run>
+```bash Agent terminal · copies as run <<'SH'
 rm -rf /repo/source
 echo hi >> /repo/readme.md
 git commit --allow-empty -m test
 gh pr merge 880
 curl https://example.com
-SH
 ```
+</Run>
 
 ```text
 rm: Permission denied

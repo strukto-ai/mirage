@@ -43,37 +43,85 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
     const step = pos.step < steps.length ? steps[pos.step] : null
     return (step && step.cli === service.cli && step.dir) || service.dir || "in"
   }
+  const tokens = (text) => {
+    const out = []
+    let command = true
+    for (const part of text.match(/"[^"]*"?|'[^']*'?|\$\w+|\s+|[;&|>]+|[^\s;&|>"']+/g) || []) {
+      let kind = "plain"
+      if (/^\s+$/.test(part)) kind = "plain"
+      else if (part.startsWith('"') || part.startsWith("'")) kind = "string"
+      else if (part.startsWith("$")) kind = "variable"
+      else if (/^[;&|>]+$/.test(part)) {
+        kind = "operator"
+        command = true
+      } else if (part.startsWith("-")) kind = "flag"
+      else if (command) {
+        kind = "command"
+        command = false
+      }
+      out.push([part, kind])
+    }
+    return out
+  }
+  const colored = (text, key) =>
+    tokens(text).map(([part, kind], index) => (
+      <span key={`${key}-${index}`} className={`uct-${kind}`}>
+        {part}
+      </span>
+    ))
 
   return (
-    <div className="use-case-terminal not-prose my-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
+    <div className="use-case-terminal not-prose my-6 rounded-2xl">
       <style>{`
-        .use-case-terminal { --uct-accent: #2a78d6; --uct-line: #d4d4d8; }
-        html.dark .use-case-terminal { --uct-accent: #3987e5; --uct-line: #3f3f46; }
+        .use-case-terminal {
+          --uct-paper: #f0ece2; --uct-surface: #faf8f2; --uct-edge: #cec6b3;
+          --uct-ink: #0a0a0a; --uct-muted: #5b5647; --uct-accent: #047857; --uct-on: #b08a2e;
+          background: var(--uct-paper); color: var(--uct-ink); padding: 28px 14px;
+        }
+        html.dark .use-case-terminal {
+          --uct-paper: #0e0e10; --uct-surface: #1a1a1d; --uct-edge: #3f3f46;
+          --uct-ink: #ffffff; --uct-muted: #a1a1aa; --uct-accent: #34d399; --uct-on: #c9a03e;
+        }
+        .use-case-terminal img { margin: 0; display: block; }
+        .use-case-terminal .uct-box { background: var(--uct-surface); border: 1px solid var(--uct-edge); }
+        .use-case-terminal .uct-muted { color: var(--uct-muted); }
         .use-case-terminal .uct-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
         .use-case-terminal .uct-server { order: -1; }
         .use-case-terminal .uct-wire { display: none; }
-        .use-case-terminal .uct-card { transition: border-color .25s, background-color .25s, box-shadow .25s; }
-        .use-case-terminal .uct-card.uct-on {
-          border-color: var(--uct-accent);
-          box-shadow: 0 0 0 1px var(--uct-accent);
-          background-color: color-mix(in srgb, var(--uct-accent) 8%, transparent);
-        }
-        .use-case-terminal .uct-tag.uct-on { background-color: var(--uct-accent); color: #fff; }
-        .use-case-terminal .uct-wire-line { position: absolute; left: 0; right: 0; top: 50%; border-top: 1.5px dashed var(--uct-line); transition: border-color .25s; }
-        .use-case-terminal .uct-wire.uct-on .uct-wire-line { border-top-style: solid; border-color: var(--uct-accent); }
-        .use-case-terminal .uct-dot { position: absolute; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 9999px; background: var(--uct-accent); opacity: 0; }
+        .use-case-terminal .uct-card { transition: border-color .25s; }
+        .use-case-terminal .uct-card.uct-on { border-color: var(--uct-on); }
+        .use-case-terminal .uct-chip { border: 1px solid var(--uct-edge); color: var(--uct-muted); transition: color .25s, border-color .25s; }
+        .use-case-terminal .uct-chip.uct-on { border-color: var(--uct-on); color: var(--uct-on); }
+        .use-case-terminal .uct-wire-line { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--uct-edge); transition: border-color .25s; }
+        .use-case-terminal .uct-wire.uct-on .uct-wire-line { border-color: var(--uct-on); }
+        .use-case-terminal .uct-dot { position: absolute; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 9999px; background: var(--uct-on); opacity: 0; }
         .use-case-terminal .uct-wire.uct-on.uct-in .uct-dot { animation: uct-in .7s linear infinite; }
         .use-case-terminal .uct-wire.uct-on.uct-out .uct-dot { animation: uct-out .7s linear infinite; }
-        @keyframes uct-in { 0% { left: 0; opacity: 1; } 100% { left: calc(100% - 8px); opacity: 1; } }
-        @keyframes uct-out { 0% { left: calc(100% - 8px); opacity: 1; } 100% { left: 0; opacity: 1; } }
-        .use-case-terminal .uct-caret { display: inline-block; width: 7px; height: 14px; margin-left: 1px; vertical-align: -2px; background: #e4e4e7; animation: uct-blink 1s steps(1) infinite; }
+        @keyframes uct-in { 0% { left: 0; opacity: 1; } 100% { left: calc(100% - 6px); opacity: 1; } }
+        @keyframes uct-out { 0% { left: calc(100% - 6px); opacity: 1; } 100% { left: 0; opacity: 1; } }
+        .use-case-terminal .uct-bar { border-bottom: 1px solid var(--uct-edge); }
+        .use-case-terminal .uct-light { width: 8px; height: 8px; border-radius: 9999px; border: 1px solid var(--uct-edge); }
+        .use-case-terminal .uct-prompt { color: var(--uct-accent); }
+        .use-case-terminal .uct-caret { display: inline-block; width: 7px; height: 14px; margin-left: 1px; vertical-align: -2px; background: var(--uct-ink); animation: uct-blink 1s steps(1) infinite; }
         @keyframes uct-blink { 50% { opacity: 0; } }
         .use-case-terminal .uct-later { visibility: hidden; }
-        .use-case-terminal .uct-extra { transition: background-color .25s, color .25s; }
-        .use-case-terminal .uct-extra.uct-on { background-color: var(--uct-accent); color: #fff; }
-        .use-case-terminal .uct-none { display: flex; flex-direction: column; gap: 2px; }
-        .use-case-terminal .uct-none-name { white-space: nowrap; }
+        .use-case-terminal .uct-operator { color: #cf222e; }
+        .use-case-terminal .uct-command { color: #953800; }
+        .use-case-terminal .uct-flag { color: #0550ae; }
+        .use-case-terminal .uct-string { color: #0a3069; }
+        .use-case-terminal .uct-variable { color: #8250df; }
+        html.dark .use-case-terminal .uct-operator { color: #ff7b72; }
+        html.dark .use-case-terminal .uct-command { color: #ffa657; }
+        html.dark .use-case-terminal .uct-flag { color: #79c0ff; }
+        html.dark .use-case-terminal .uct-string { color: #a5d6ff; }
+        html.dark .use-case-terminal .uct-variable { color: #d2a8ff; }
+        .use-case-terminal .uct-dark-only { display: none; }
+        html.dark .use-case-terminal .uct-dark-only { display: block; }
+        html.dark .use-case-terminal .uct-light-only { display: none; }
+        .use-case-terminal .uct-none { display: flex; flex-direction: column; gap: 2px; border: 1px dashed var(--uct-edge); }
+        .use-case-terminal .uct-none-name { white-space: nowrap; text-decoration: line-through; }
         @media (min-width: 640px) {
+          .use-case-terminal { padding: 36px 28px; }
           .use-case-terminal .uct-grid {
             grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.75fr);
             grid-auto-rows: auto;
@@ -89,50 +137,48 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
       `}</style>
 
       <div className="uct-grid">
-        <div className="uct-head mb-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          {reads}
-        </div>
-        {services.map((service, index) => (
-          [
-            <div
-              key={service.cli + "-card"}
-              className={"uct-card rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-2" + (running === service.cli ? " uct-on" : "")}
-              style={{ "--uct-row": index + 2 }}
-            >
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{service.name}</span>
-                <span className={"uct-tag rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" + (typing === service.cli ? " uct-on" : "")}>
-                  {service.cli}
-                </span>
-              </div>
-              <div className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
-                {service.text || (service.dir === "out" ? "writes " : "reads ") + service.detail}
-              </div>
-            </div>,
-            <div
-              key={service.cli + "-wire"}
-              className={"uct-wire " + (flow(service) === "out" ? "uct-out" : "uct-in") + (running === service.cli ? " uct-on" : "")}
-              style={{ "--uct-row": index + 2 }}
-              aria-hidden="true"
-            >
-              <div className="uct-wire-line" />
-              <div className="uct-dot" />
-            </div>,
-          ]
-        ))}
-
-        <div className="uct-server rounded-xl border-2 p-3" style={{ borderColor: "var(--uct-accent)", "--uct-span": services.length + 1 }}>
-          <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{terminal}</span>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">{server}</span>
-          </div>
-          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 dark:bg-black">
-            <div className="flex items-center gap-1.5 border-b border-zinc-800 px-3 py-1.5">
-              <span className="h-2 w-2 rounded-full bg-zinc-600" />
-              <span className="h-2 w-2 rounded-full bg-zinc-600" />
-              <span className="h-2 w-2 rounded-full bg-zinc-600" />
+        <div className="uct-head uct-muted mb-1 text-xs font-medium">{reads}</div>
+        {services.map((service, index) => [
+          <div
+            key={service.cli + "-card"}
+            className={"uct-card uct-box rounded-lg px-3 py-2" + (running === service.cli ? " uct-on" : "")}
+            style={{ "--uct-row": index + 2 }}
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-sm font-medium">{service.name}</span>
+              <span className={"uct-chip rounded px-1.5 font-mono text-xs" + (typing === service.cli ? " uct-on" : "")}>
+                {service.cli}
+              </span>
             </div>
-            <div className="px-3 py-2 font-mono text-xs leading-5 text-zinc-100">
+            <div className="uct-muted mt-0.5 text-xs">
+              {service.text || (service.dir === "out" ? "writes " : "reads ") + service.detail}
+            </div>
+          </div>,
+          <div
+            key={service.cli + "-wire"}
+            className={"uct-wire " + (flow(service) === "out" ? "uct-out" : "uct-in") + (running === service.cli ? " uct-on" : "")}
+            style={{ "--uct-row": index + 2 }}
+            aria-hidden="true"
+          >
+            <div className="uct-wire-line" />
+            <div className="uct-dot" />
+          </div>,
+        ])}
+
+        <div className="uct-server uct-box rounded-xl p-3" style={{ "--uct-span": services.length + 1 }}>
+          <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <img src="/logo/light.svg" alt="mirage" className="uct-light-only" style={{ height: 18, width: "auto" }} />
+            <img src="/logo/dark.svg" alt="mirage" className="uct-dark-only" style={{ height: 18, width: "auto" }} />
+            <span className="text-sm font-medium">{terminal}</span>
+            <span className="uct-muted text-xs">{server}</span>
+          </div>
+          <div className="uct-box overflow-hidden rounded-lg">
+            <div className="uct-bar flex items-center gap-1.5 px-3 py-1.5">
+              <span className="uct-light" />
+              <span className="uct-light" />
+              <span className="uct-light" />
+            </div>
+            <div className="px-3 py-2 font-mono text-xs leading-5">
               {steps.map((step, index) => {
                 const later = index > pos.step
                 const current = index === pos.step
@@ -141,11 +187,11 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
                 return (
                   <div key={step.cmd} className={later ? "uct-later" : ""}>
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap">
-                      <span className="select-none text-zinc-500">$ </span>
-                      {later ? step.cmd : text}
+                      <span className="uct-prompt select-none">$ </span>
+                      {colored(later ? step.cmd : text, index)}
                       {current && !pos.output && <span className="uct-caret" />}
                     </div>
-                    <div className={"overflow-hidden text-ellipsis whitespace-nowrap text-zinc-400" + (showOut || later ? "" : " uct-later")}>
+                    <div className={"uct-muted overflow-hidden text-ellipsis whitespace-nowrap" + (showOut || later ? "" : " uct-later")}>
                       {step.out}
                     </div>
                   </div>
@@ -158,7 +204,7 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
               {extras.map((extra) => (
                 <span
                   key={extra.text}
-                  className={"uct-extra rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" + (extra.cli && running === extra.cli ? " uct-on" : "")}
+                  className={"uct-chip rounded px-1.5 font-mono text-xs" + (extra.cli && running === extra.cli ? " uct-on" : "")}
                 >
                   {extra.text}
                 </span>
@@ -168,9 +214,9 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
         </div>
       </div>
 
-      <div className="uct-none mt-4 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 px-3 py-2">
-        <span className="uct-none-name text-sm text-zinc-400 line-through dark:text-zinc-500">Sandbox, container or VM</span>
-        <span className="text-xs text-zinc-600 dark:text-zinc-400">Not needed: the terminal runs inside the server process.</span>
+      <div className="uct-none mt-4 rounded-lg px-3 py-2">
+        <span className="uct-none-name uct-muted text-sm">Sandbox, container or VM</span>
+        <span className="uct-muted text-xs">Not needed: the terminal runs inside the server process.</span>
       </div>
     </div>
   )
