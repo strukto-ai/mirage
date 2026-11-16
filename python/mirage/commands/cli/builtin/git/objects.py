@@ -30,6 +30,7 @@ from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.cache.lock import KeyLock
 from mirage.commands.cli.builtin.git.constants import (
     FANOUT_LEN,
     IDX_SUFFIX,
@@ -52,6 +53,9 @@ from mirage.workspace.files import Files
 
 PACK_SUFFIX = ".pack"
 HEX_DIGITS = frozenset(b"0123456789abcdef")
+# One rewrite of a repository's ``.git/shallow`` at a time, so fetches
+# running side by side keep each other's cuts.
+SHALLOW_WRITERS = KeyLock()
 
 
 def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
@@ -463,12 +467,13 @@ async def add_shallow(
     if not oids:
         return
     path = commondir.join(SHALLOW_FILE)
-    held = (await read_optional(vfs, path) or b"").decode().split()
-    await write_file(
-        vfs,
-        path,
-        "".join(f"{oid}\n" for oid in sorted({*held, *oids})).encode(),
-    )
+    async with SHALLOW_WRITERS.with_lock(path.virtual):
+        held = (await read_optional(vfs, path) or b"").decode().split()
+        await write_file(
+            vfs,
+            path,
+            "".join(f"{oid}\n" for oid in sorted({*held, *oids})).encode(),
+        )
 
 
 async def store_pack(vfs: Files, commondir: PathSpec, data: bytes) -> None:

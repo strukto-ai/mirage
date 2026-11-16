@@ -20,11 +20,12 @@ from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.objects import (
     LooseObjects,
+    add_shallow,
     load_object_store,
     load_packs,
 )
 
-from .conftest import GITDIR, mounted, pack_everything
+from .conftest import GITDIR, mounted, mounted_rw, pack_everything
 
 
 async def loose_of(workspace) -> LooseObjects:
@@ -207,3 +208,15 @@ async def test_a_shallow_commit_reads_parentless_with_its_bytes_kept(
     assert commit.id == head
     assert commit.as_raw_string() == raw
     assert b"parent " + parent in raw
+
+
+@pytest.mark.asyncio
+async def test_side_by_side_shallow_updates_keep_every_cut(repo_path):
+    first, second = "1" * 40, "2" * 40
+    with mounted_rw(repo_path) as ws:
+        await asyncio.gather(
+            add_shallow(ws.vfs, GITDIR, (first,)),
+            add_shallow(ws.vfs, GITDIR, (second,)),
+        )
+    shallow = (repo_path / ".git" / "shallow").read_text()
+    assert shallow == f"{first}\n{second}\n"

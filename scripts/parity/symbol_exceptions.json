@@ -914,6 +914,7 @@
     "overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
    },
    "typescript_only": {
+    "SHALLOW_WRITERS": "Serializes addShallow's read and rewrite of .git/shallow; Python's twin sits in objects.py beside add_shallow, a module TypeScript folds into repo.ts.",
     "addShallow": "Lists the commits a fetch cut in .git/shallow; Python's add_shallow sits in objects.py beside store_pack and the store that reads the file, a module TypeScript folds into repo.ts.",
     "grafted": "A shallow repository's boundary commit read parentless, for readCommit and commitFacts; Python grafts it once where its object store parses the commit (objects.GraftedCommit).",
     "readCommit": "Every isomorphic-git commit read that walks history goes through it, so a shallow repository's boundary commit reads parentless; Python grafts it once where its object store parses the commit (objects.GraftedCommit).",

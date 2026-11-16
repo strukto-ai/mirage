@@ -147,21 +147,18 @@ def _config(
         remote (str): the remote's name.
         branch (str | None): the branch checked out, None when detached.
         single (Wanted | None): the one ref a single-branch clone takes,
-            which its fetch refspec names; None fetches every branch.
+            which its fetch refspec names, none for a detached HEAD;
+            None fetches every branch.
     """
-    refspec = (
-        f"+refs/heads/*:refs/remotes/{remote}/*"
-        if single is None
-        else f"+{single.remote}:{single.local}"
-    )
+    fields = [("url", url)]
+    if single is None:
+        fields.append(("fetch", f"+refs/heads/*:refs/remotes/{remote}/*"))
+    elif single.local is not None:
+        fields.append(("fetch", f"+{single.remote}:{single.local}"))
     text = (
         "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
         "\tbare = false\n\tlogallrefupdates = true\n"
-        + config_section(
-            "remote",
-            remote,
-            [("url", url), ("fetch", refspec)],
-        )
+        + config_section("remote", remote, fields)
     )
     if branch is not None:
         text += config_section(
@@ -395,6 +392,10 @@ async def _populate(
         )
     )
     narrowed = next((want for want in wanted if want.remote == taken), None)
+    # A detached HEAD no branch stands for is taken alone, into no ref,
+    # and no fetch refspec records it, as git's single-branch clone.
+    if narrowed is None and commit is not None:
+        narrowed = Wanted("HEAD", commit, None)
     if single and narrowed is not None:
         wanted = [narrowed]
     if not advertised.refs:
@@ -416,8 +417,8 @@ async def _populate(
         vfs, location, transport, adv, wanted, one is not None, depth
     )
     for want in wanted:
-        assert want.local is not None
-        await write_ref(vfs, gitdir, want.local, want.oid.encode())
+        if want.local is not None:
+            await write_ref(vfs, gitdir, want.local, want.oid.encode())
     reason = f"clone: from {url}"
     now = int(system_now())
     fetched = {want.remote for want in wanted}
