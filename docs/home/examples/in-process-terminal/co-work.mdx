@@ -14,15 +14,15 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
   ]}
   steps={[
     { cmd: "himalaya --json envelope search subject '\"interview times\"' …", cli: "himalaya", out: "6 replies" },
-    { cmd: "python3 /work/candidates.py", cli: "python3", out: "6 candidates, 2 times each" },
+    { cmd: "python3 /workspace/candidates.py", cli: "python3", out: "6 candidates, 2 times each" },
     { cmd: "gws calendar freebusy query --json '{…}'", cli: "gws", out: "Dana: 7 busy blocks, Omar: 4" },
-    { cmd: "python3 /work/plan.py", cli: "python3", out: "5 booked, 1 with no common time" },
+    { cmd: "python3 /workspace/plan.py", cli: "python3", out: "5 booked, 1 with no common time" },
     { cmd: "gws calendar events insert …", cli: "gws", dir: "out", out: "5 interviews on the calendar" },
     { cmd: "himalaya message reply $id --send …", cli: "himalaya", dir: "out", out: "5 confirmations sent" },
     { cmd: "slack send-message --channel C07HB2Q9KX …", cli: "slack", out: "the schedule in #hiring-backend" },
   ]}
   extras={[
-    { text: "/work in memory" },
+    { text: "/workspace in memory" },
     { text: "python3 on Monty", cli: "python3" },
   ]}
 />
@@ -34,10 +34,10 @@ and posts the schedule to the hiring channel. A cron job can start it each
 morning while a role is open.
 
 A job this small needs no VM or sandbox. It runs in a
-[lightweight terminal](/home/examples/lightweight-terminal) inside one
+[in-process terminal](/home/examples/in-process-terminal) inside one
 FastAPI or Express server:
 
-- **Files:** `/work`, mounted in [memory](/home/setup/ram) for the agent's
+- **Files:** `/workspace`, mounted in [memory](/home/setup/ram) for the agent's
   scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
   [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
   instead.
@@ -74,7 +74,7 @@ Node:
 ## Server
 
 This is the server from the
-[Overview](/home/examples/lightweight-terminal#server) with one addition: it
+[Overview](/home/examples/in-process-terminal#simple-server) with one addition: it
 registers `himalaya`, `gws` and `slack`, each with one account.
 
 To run this page you need three accounts: a mailbox the agent reads and sends
@@ -119,7 +119,7 @@ credentials.
 
     env = os.environ
     ws = Workspace(
-        {"/work": (RAMVFS(), MountMode.EXEC)},
+        {"/workspace": (RAMVFS(), MountMode.EXEC)},
         machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("himalaya", HIMALAYA, {
@@ -179,7 +179,7 @@ credentials.
 
     const env = process.env
     const ws = new Workspace(
-      { '/work': new RAMVFS() },
+      { '/workspace': new RAMVFS() },
       { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('himalaya', HIMALAYA, {
@@ -246,18 +246,18 @@ on the server, not in the shell that calls `run`.
 
 The agent counts the messages in the inbox, then searches for the candidates'
 replies by subject, skipping any it has already answered. It saves each reply
-to a file under `/work/replies`, named by its message ID, so later steps read
+to a file under `/workspace/replies`, named by its message ID, so later steps read
 the files instead of the mailbox:
 
 ```bash
 run <<'SH'
 himalaya --json envelope list --page-size 0 | jq '.envelopes | length'
-mkdir -p /work/replies
-himalaya --json envelope search --page-size 0 subject '"interview times"' and not flag answered > /work/replies.json
-for id in $(jq -r '.envelopes[].id' /work/replies.json); do
-  himalaya message read $id > /work/replies/$id.eml
+mkdir -p /workspace/replies
+himalaya --json envelope search --page-size 0 subject '"interview times"' and not flag answered > /workspace/replies.json
+for id in $(jq -r '.envelopes[].id' /workspace/replies.json); do
+  himalaya message read $id > /workspace/replies/$id.eml
 done
-ls /work/replies | wc -l
+ls /workspace/replies | wc -l
 SH
 ```
 
@@ -277,25 +277,25 @@ The recruiting team asked each candidate for two times, one per line, written
 as `2026-11-16 10:00`. A short Python script takes each candidate's name and
 address from the sender in the search results, using the address as the name
 when there is none, and the times from the reply's body. It saves them to
-`/work/candidates.json` and prints a table:
+`/workspace/candidates.json` and prints a table:
 
 ```bash
 run <<'SH'
-cat > /work/candidates.py <<'PY'
+cat > /workspace/candidates.py <<'PY'
 import json, re
 candidates = []
-replies = json.loads(open("/work/replies.json").read())["envelopes"]
+replies = json.loads(open("/workspace/replies.json").read())["envelopes"]
 for reply in sorted(replies, key=lambda r: int(r["id"])):
-    text = open("/work/replies/%s.eml" % reply["id"]).read()
+    text = open("/workspace/replies/%s.eml" % reply["id"]).read()
     sender = reply["from"][0]
     who = sender["name"] or sender["email"]
     times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
     candidates.append({"id": str(reply["id"]), "name": who,
                        "email": sender["email"], "times": times})
     print("%-3s %-13s %s" % (reply["id"], who, ", ".join(times)))
-open("/work/candidates.json", "w").write(json.dumps(candidates))
+open("/workspace/candidates.json", "w").write(json.dumps(candidates))
 PY
-python3 /work/candidates.py
+python3 /workspace/candidates.py
 SH
 ```
 
@@ -323,17 +323,17 @@ A booked hour counts as busy for the candidates after it:
 ```bash
 run <<'SH'
 gws calendar freebusy query --json '{"timeMin": "2026-11-16T00:00:00Z", "timeMax": "2026-11-21T00:00:00Z",
-  "items": [{"id": "dana.lee@example.com"}, {"id": "omar.haddad@example.com"}]}' > /work/busy.json
-jq -r '.calendars | to_entries[] | "\(.key): \(.value.busy | length) busy blocks"' /work/busy.json
-cat > /work/plan.py <<'PY'
+  "items": [{"id": "dana.lee@example.com"}, {"id": "omar.haddad@example.com"}]}' > /workspace/busy.json
+jq -r '.calendars | to_entries[] | "\(.key): \(.value.busy | length) busy blocks"' /workspace/busy.json
+cat > /workspace/plan.py <<'PY'
 import json
 from datetime import datetime, timedelta
 busy = []
-for calendar in json.loads(open("/work/busy.json").read())["calendars"].values():
+for calendar in json.loads(open("/workspace/busy.json").read())["calendars"].values():
     for block in calendar["busy"]:
         busy.append((datetime.fromisoformat(block["start"][:19]), datetime.fromisoformat(block["end"][:19])))
 plan = []
-for c in json.loads(open("/work/candidates.json").read()):
+for c in json.loads(open("/workspace/candidates.json").read()):
     c["start"] = None
     for time in c["times"]:
         start = datetime.fromisoformat(time)
@@ -344,9 +344,9 @@ for c in json.loads(open("/work/candidates.json").read()):
             break
     plan.append(c)
     print("%-13s %s" % (c["name"], c["start"][:16].replace("T", " ") if c["start"] else "no common time"))
-open("/work/plan.json", "w").write(json.dumps(plan))
+open("/workspace/plan.json", "w").write(json.dumps(plan))
 PY
-python3 /work/plan.py
+python3 /workspace/plan.py
 SH
 ```
 
@@ -380,10 +380,10 @@ jq -c '.[] | select(.start) | {
   summary: "Interview: \(.name), Senior Backend Engineer",
   start: {dateTime: "\(.start)Z"}, end: {dateTime: "\(.end)Z"},
   attendees: [{email: .email}, {email: "dana.lee@example.com"}, {email: "omar.haddad@example.com"}]
-}' /work/plan.json > /work/events.jsonl
+}' /workspace/plan.json > /workspace/events.jsonl
 while read -r event; do
   gws calendar events insert --params '{"calendarId": "recruiting@example.com"}' --json "$event" > /dev/null
-done < /work/events.jsonl
+done < /workspace/events.jsonl
 gws calendar events list --params '{"calendarId": "recruiting@example.com", "timeMin": "2026-11-16T00:00:00Z", "singleEvents": true, "orderBy": "startTime"}' |
   jq -r '.items[] | "\(.start.dateTime[0:16] | sub("T"; " ")) \(.summary) (\(.attendees | length) guests)"'
 SH
@@ -407,7 +407,7 @@ folder for the five replies. `mailbox list` gives that folder the role
 
 ```bash
 run <<'SH'
-jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /work/plan.json |
+jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /workspace/plan.json |
 while read -r id when; do
   himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null &&
     himalaya flag add $id --flag answered > /dev/null
@@ -415,8 +415,8 @@ done
 sent=$(himalaya --json mailbox list | jq -r '.mailboxes[] | select(.role == "sent") | .id')
 himalaya --json envelope list -m "$sent" | jq -r '.envelopes[].to[0].name'
 jq -r '"Senior Backend Engineer interviews with Dana and Omar (UTC):",
-  (.[] | "- \(.name): \(if .start then .start[0:16] | sub("T"; " ") else "no common time, needs a person" end)")' /work/plan.json > /work/summary.txt
-slack send-message --channel C07HB2Q9KX --text "$(cat /work/summary.txt)" > /dev/null
+  (.[] | "- \(.name): \(if .start then .start[0:16] | sub("T"; " ") else "no common time, needs a person" end)")' /workspace/plan.json > /workspace/summary.txt
+slack send-message --channel C07HB2Q9KX --text "$(cat /workspace/summary.txt)" > /dev/null
 slack read-messages --channel C07HB2Q9KX --limit 1 | jq -r '.[0].text'
 SH
 ```
