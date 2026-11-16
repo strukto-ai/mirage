@@ -51,7 +51,7 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage ist **ein virtuelles Terminal für KI-Agenten**. Es trennt die Terminal-Schnittstelle, den Datenspeicher und die Rechenmaschinen voneinander. Mirage leitet jeden Befehl an die Maschine weiter, die zu ihm passt, über heterogene Maschinen wie Container, microVMs, Cloud-Sandboxes und SSH-Hosts hinweg. Dateien, CLIs und Maschinen werden ihm getrennt hinzugefügt. Das hält es flexibel und die Infrastrukturkosten niedrig und lässt Agenten so effizient und sicher wie möglich arbeiten.
+KI-Agenten arbeiten in einem Terminal. Mirage ist **ein virtuelles Terminal**, das die Terminal-Schnittstelle, den Datenspeicher und die Rechenmaschinen voneinander trennt. Mirage leitet jeden Befehl an die Maschine weiter, die zu ihm passt, über heterogene Maschinen wie Container, microVMs, Cloud-Sandboxes und SSH-Hosts hinweg. Dateien, CLIs und Maschinen werden ihm getrennt hinzugefügt. Das hält es flexibel und die Infrastrukturkosten niedrig und lässt Agenten so effizient und sicher wie möglich arbeiten.
 
 <p align="center">
   <picture>
@@ -167,7 +167,7 @@ Diese Kommandozeilenwerkzeuge sind virtualisiert: [Mirage](https://www.strukto.a
 
 Maschinen werden auf dieselbe Weise virtualisiert, und nicht nur für Programmiersprachen. Jeder Befehl auf der Zeile kann an eine konfigurierte Maschine gehen: Python läuft etwa im Prozess mit [Monty](https://pydantic.dev/articles/pydantic-monty), während ein anderer Befehl, sagen wir `kubectl`, per SSH auf einer entfernten Maschine läuft. Welche Maschine eine Zeile bedient, kann ein [geskripteter Maschinen-Router](https://docs.mirage.strukto.ai/home/policy/route-machine) entscheiden.
 
-|                | Maschinen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|                | Maschinen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -269,37 +269,12 @@ python3: Permission denied
 
 Die übrigen Stufen, an denen ein Skript antworten kann, beschreiben die [Policy-Skripte](https://docs.mirage.strukto.ai/home/policy/scripts).
 
-## Eingebettetes Terminal
+## Beispiele
 
-Meist braucht ein Agent keine Sandbox, sondern nur eine terminalartige Schnittstelle, und Mirage bettet eine in einen Anwendungsserver ein. Jedes Terminal ist eine Mirage-Session mit eigenem Arbeitsverzeichnis, eigener Umgebung und History, und Python läuft im Prozess auf Monty, sodass ein Terminal ohne Container oder VM startet. Hier mit Express; die FastAPI-Version steht in der [Dokumentation](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** Ein Terminal für Agenten in deiner Anwendung, sogar in einem FastAPI- oder Express-Server, ohne feste Maschine oder Sandbox.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** Ein einheitliches virtuelles Terminal über verschiedene Maschinen, das jede Aufgabe auf der passenden Maschine ausführt, sodass KI-Agenten effizienter und günstiger arbeiten.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** Lege in einer Workspace-Konfiguration fest, welche Dateien ein Agent sieht, welche Befehle und CLIs er ausführt und welche Zugangsdaten seine Werkzeuge nutzen.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** Ein virtuelles Terminal, das an keine feste Infrastruktur gebunden ist und Dateien, Sessions und Befehlsprotokolle auf den bereits vorhandenen Backends ablegt.
 
 ## Mitwirkende
 

@@ -65,10 +65,8 @@ the `gh` and `slack` CLIs. Their credentials come from AWS Secrets Manager,
           hide: ["/data/secrets", "*.pem"]
           show: ["/data/secrets/README.md"]
         commands:
-          allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3, gh, slack]
-          deny:
-            - {commands: ["slack send-message", "slack delete-message"], reason: the analyst only reads Slack}
-            - {commands: ["gh pr merge", "gh repo delete"], reason: merges and deletes go through a person}
+          allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
+                  "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
     ```
   </Accordion>
   <Accordion title="Load the workspace">
@@ -169,10 +167,11 @@ VFS calls:
 ## Commands Control
 
 `commands.allow` lists the only commands the session runs, so everything an
-analyst does not need, such as `rm`, `sed` or `curl`, is off. `commands.deny`
-then refuses single CLI verbs, each with its reason, so `slack` reads but never
-posts. The agent reads the shell's own `Permission denied` and exit 126; the
-reason reaches the host on the result's `decision`, shown under each line:
+analyst does not need, such as `rm`, `sed` or `curl`, is off. For a CLI the
+list names single verbs, so `slack` reads messages and members but never posts,
+edits or uploads, and `gh` lists and views pull requests but cannot merge one or
+call `gh api`. The agent reads the shell's own `Permission denied` and exit 126;
+the reason reaches the host on the result's `decision`, shown under each line:
 
 ```bash
 slack list-members | jq length
@@ -188,10 +187,10 @@ curl -s https://example.com
 # decision: deny, curl is not allowed
 slack send-message --channel general --text hi
 # slack: Permission denied
-# decision: deny, the analyst only reads Slack
+# decision: deny, slack send-message is not allowed
 gh pr merge 1 -R strukto-ai/mirage
 # gh: Permission denied
-# decision: deny, merges and deletes go through a person
+# decision: deny, gh pr merge is not allowed
 ```
 
 ## Agent Profile
@@ -214,7 +213,8 @@ profiles:
       hide: ["/data/secrets", "*.pem"]
       show: ["/data/secrets/README.md"]
     commands:
-      allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3, gh, slack]
+      allow: [cd, pwd, echo, ls, cat, head, grep, find, jq, wc, python3,
+              "gh pr list", "gh pr view", "slack read-messages", "slack list-members"]
 ```
 
 - `cwd` and `env` start the session in `/data` with `TEAM` set.

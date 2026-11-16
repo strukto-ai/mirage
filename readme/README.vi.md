@@ -51,7 +51,7 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage là **terminal ảo cho AI Agent**. Nó tách riêng giao diện terminal, nơi lưu trữ dữ liệu và các máy tính toán. Mirage định tuyến mỗi lệnh tới máy phù hợp với nó, trên các máy không đồng nhất như container, microVM, sandbox đám mây và máy chủ SSH. File, CLI và máy được thêm vào riêng rẽ, nhờ đó Mirage linh hoạt, chi phí hạ tầng thấp, và agent làm việc theo cách hiệu quả và an toàn nhất.
+AI Agent làm việc trong terminal. Mirage là **một terminal ảo** tách riêng giao diện terminal, nơi lưu trữ dữ liệu và các máy tính toán. Mirage định tuyến mỗi lệnh tới máy phù hợp với nó, trên các máy không đồng nhất như container, microVM, sandbox đám mây và máy chủ SSH. File, CLI và máy được thêm vào riêng rẽ, nhờ đó Mirage linh hoạt, chi phí hạ tầng thấp, và agent làm việc theo cách hiệu quả và an toàn nhất.
 
 <p align="center">
   <picture>
@@ -167,7 +167,7 @@ Các công cụ dòng lệnh này được ảo hóa: [Mirage](https://www.struk
 
 Máy được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ lập trình. Bất kỳ lệnh nào trên dòng đều có thể được gửi tới một máy đã cấu hình, nên Python có thể chạy trong tiến trình với [Monty](https://pydantic.dev/articles/pydantic-monty) trong khi một lệnh khác, chẳng hạn `kubectl`, chạy trên máy từ xa qua SSH. Máy nào phục vụ một dòng lệnh có thể do một [bộ định tuyến máy viết bằng script](https://docs.mirage.strukto.ai/home/policy/route-machine) quyết định.
 
-|                | Máy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|                | Máy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -269,37 +269,12 @@ python3: Permission denied
 
 Xem [script chính sách](https://docs.mirage.strukto.ai/home/policy/scripts) để biết các giai đoạn khác mà script có thể trả lời.
 
-## Terminal nhúng
+## Ví dụ
 
-Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** Một terminal cho agent ngay trong ứng dụng của bạn, kể cả trong máy chủ FastAPI hay Express, không cần máy hay sandbox cố định.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** Một terminal ảo hợp nhất trên nhiều máy khác nhau, chạy mỗi tác vụ trên máy phù hợp với nó, để AI Agent làm việc hiệu quả hơn và rẻ hơn.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** Quyết định trong một cấu hình workspace những file mà agent thấy, những lệnh và CLI mà nó chạy, và những thông tin xác thực mà công cụ của nó dùng.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** Một terminal ảo không gắn với hạ tầng cố định nào, giữ file, phiên và nhật ký lệnh trên các backend sẵn có.
 
 ## Người đóng góp
 

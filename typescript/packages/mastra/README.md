@@ -50,7 +50,7 @@
   <a href="https://github.com/strukto-ai/mirage/blob/main/readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
-Mirage is **a Virtual Terminal for AI Agents**. It separates the terminal interface, the data storage and the computing machines. Mirage routes each command to the machine that fits it, across heterogeneous machines such as containers, microVMs, cloud sandboxes and SSH hosts. Files, CLIs and machines are added to it separately, which keeps it flexible and its infrastructure cost low, and lets agents work in the most efficient and safest way.
+AI agents work in a terminal. Mirage is **a virtual terminal** that separates the terminal interface, the data storage and the computing machines. Mirage routes each command to the machine that fits it, across heterogeneous machines such as containers, microVMs, cloud sandboxes and SSH hosts. Files, CLIs and machines are added to it separately, which keeps it flexible and its infrastructure cost low, and lets agents work in the most efficient and safest way.
 
 <p align="center">
   <picture>
@@ -298,42 +298,12 @@ python3: Permission denied
 See [policy scripts](https://docs.mirage.strukto.ai/home/policy/scripts) for
 the other stages a script can answer at.
 
-## Embedded Terminal
+## Examples
 
-Most of the time an agent does not need a sandbox, only a terminal-like
-interface, and Mirage embeds one in an application server. Each terminal is a
-Mirage session with its own working directory, environment and history, and Python
-runs in-process on Monty, so a terminal starts with no container or VM. Here
-it is in Express; the FastAPI version is in the
-[docs](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** A terminal for agents inside your application, even within a FastAPI or Express server, without a fixed machine or sandbox.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** A unified virtual terminal across different machines that runs each task on the machine that fits it, so AI agents perform tasks more efficiently and at lower cost.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** Decide which files an agent sees, which commands and CLIs it runs and which credentials its tools use, in one workspace config.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** A virtual terminal not tied to any fixed infrastructure, keeping its files, sessions and command logs on whichever backends are already in place.
 
 ## Contributors
 

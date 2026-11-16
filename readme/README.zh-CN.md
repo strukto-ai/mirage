@@ -51,7 +51,7 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage 是 **面向 AI Agent 的虚拟终端**。它把终端接口、数据存储和计算机器彼此分开。Mirage 把每条命令路由到适合它的机器上，覆盖容器、microVM、云沙箱和 SSH 主机等异构机器。文件、CLI 和机器分别加入，因此它保持灵活、基础设施成本低，并让 Agent 以最高效、最安全的方式工作。
+AI Agent 在终端中工作。Mirage 是一个**虚拟终端**，它把终端接口、数据存储和计算机器彼此分开。Mirage 把每条命令路由到适合它的机器上，覆盖容器、microVM、云沙箱和 SSH 主机等异构机器。文件、CLI 和机器分别加入，因此它保持灵活、基础设施成本低，并让 Agent 以最高效、最安全的方式工作。
 
 <p align="center">
   <picture>
@@ -167,7 +167,7 @@ Agent 可以通过 Python 和 TypeScript SDK、`mirage` CLI，或基于 FUSE 和
 
 机器以同样的方式虚拟化，而且不只针对编程语言。命令行上的任何命令都可以发送到所配置的机器，例如 Python 可以借助 [Monty](https://pydantic.dev/articles/pydantic-monty) 在进程内运行，而另一个命令（比如 `kubectl`）则通过 SSH 在远程机器上运行。某一行由哪台机器处理，可以交给[脚本化的机器路由器](https://docs.mirage.strukto.ai/home/policy/route-machine)决定。
 
-|                | 机器                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|                | 机器                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -269,37 +269,12 @@ python3: Permission denied
 
 脚本还能在哪些其他阶段作答，参见[策略脚本](https://docs.mirage.strukto.ai/home/policy/scripts)。
 
-## 嵌入式终端
+## 示例
 
-大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/in-process-terminal)。
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** 在你的应用中为 Agent 提供终端，即使在 FastAPI 或 Express 服务器里也行，无需固定的机器或沙箱。
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** 跨不同机器的统一虚拟终端，把每个任务放到适合它的机器上运行，让 AI Agent 更高效、更低成本地完成任务。
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** 在一份工作区配置中决定 Agent 能看到哪些文件、能运行哪些命令和 CLI，以及它的工具使用哪些凭据。
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** 不绑定任何固定基础设施的虚拟终端，把文件、会话和命令日志放在已有的后端上。
 
 ## 贡献者
 

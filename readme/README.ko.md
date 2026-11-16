@@ -51,7 +51,7 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 터미널 인터페이스, 데이터 저장소, 컴퓨팅 머신을 서로 분리합니다. Mirage는 각 명령을 알맞은 머신으로 라우팅하며, 컨테이너, microVM, 클라우드 샌드박스, SSH 호스트 같은 이기종 머신을 아우릅니다. 파일, CLI, 머신은 각각 따로 추가되므로 유연하고 인프라 비용이 낮으며, 에이전트는 가장 효율적이고 안전한 방식으로 일할 수 있습니다.
+AI 에이전트는 터미널에서 일합니다. Mirage는 터미널 인터페이스, 데이터 저장소, 컴퓨팅 머신을 서로 분리하는 **가상 터미널**입니다. Mirage는 각 명령을 알맞은 머신으로 라우팅하며, 컨테이너, microVM, 클라우드 샌드박스, SSH 호스트 같은 이기종 머신을 아우릅니다. 파일, CLI, 머신은 각각 따로 추가되므로 유연하고 인프라 비용이 낮으며, 에이전트는 가장 효율적이고 안전한 방식으로 일할 수 있습니다.
 
 <p align="center">
   <picture>
@@ -167,7 +167,7 @@ slack: Permission denied
 
 머신도 같은 방식으로 가상화되며, 프로그래밍 언어에만 해당하지 않습니다. 명령줄의 어떤 명령이든 설정된 머신으로 보낼 수 있어서, Python은 [Monty](https://pydantic.dev/articles/pydantic-monty)로 프로세스 안에서 실행하고 다른 명령, 예를 들어 `kubectl`은 SSH로 원격 머신에서 실행할 수 있습니다. 어떤 줄을 어떤 머신이 처리할지는 [스크립트 머신 라우터](https://docs.mirage.strukto.ai/home/policy/route-machine)가 결정할 수 있습니다.
 
-|                | 머신                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|                | 머신                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -269,37 +269,12 @@ python3: Permission denied
 
 스크립트가 응답할 수 있는 다른 단계는 [정책 스크립트](https://docs.mirage.strukto.ai/home/policy/scripts)를 참고하세요.
 
-## 임베디드 터미널
+## 예제
 
-대부분의 경우 에이전트에게 필요한 것은 샌드박스가 아니라 터미널 같은 인터페이스뿐이며, Mirage는 이를 애플리케이션 서버에 내장합니다. 각 터미널은 고유한 작업 디렉터리, 환경, 히스토리를 가진 Mirage 세션이고 Python은 Monty로 프로세스 안에서 실행되므로, 컨테이너나 VM 없이 터미널이 시작됩니다. 다음은 Express 예시이며, FastAPI 버전은 [문서](https://docs.mirage.strukto.ai/home/examples/in-process-terminal)에 있습니다.
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** 애플리케이션 안에서, 심지어 FastAPI나 Express 서버 안에서도 고정된 머신이나 샌드박스 없이 에이전트에게 터미널을 제공합니다.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** 여러 머신에 걸친 하나의 통합 가상 터미널로, 각 작업을 알맞은 머신에서 실행해 AI 에이전트가 더 효율적이고 저렴하게 일하게 합니다.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** 에이전트가 보는 파일, 실행하는 명령과 CLI, 도구가 쓰는 자격 증명을 하나의 워크스페이스 설정에서 정합니다.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** 고정된 인프라에 묶이지 않는 가상 터미널로, 파일, 세션, 명령 로그를 이미 갖춘 백엔드에 보관합니다.
 
 ## 기여자
 
