@@ -715,9 +715,9 @@ export class Policies {
    */
   async wantsFor(method: PolicyMethod, sessionId: string, userOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    const kept = userOnly
-      ? policies.filter((p) => !(p instanceof PermissionsPolicy || p instanceof MountRootPolicy))
-      : policies
+    const kept = policies.filter(
+      (p) => !(userOnly && (p instanceof PermissionsPolicy || p instanceof MountRootPolicy)),
+    )
     for (const policy of kept) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
