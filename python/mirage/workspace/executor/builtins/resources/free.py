@@ -26,6 +26,7 @@ from mirage.execution.types import MachineResources
 from mirage.io import IOResult
 from mirage.io.memory import MemoryBudget, memory_budget
 from mirage.io.types import ByteSource, OutputState
+from mirage.runtime.constants import IN_PROCESS
 from mirage.shell.bytes import encode_text
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import job_result
@@ -247,18 +248,22 @@ def _one_line(row: MachineResources, options: FreeOptions) -> str:
     )
 
 
-def _workspace_row(memory: MemoryBudget | None) -> MachineResources:
+def _workspace_row(
+    memory: MemoryBudget | None, machine: str = WORKSPACE_MACHINE
+) -> MachineResources:
     """The workspace's own row: its ``max_memory``, what it holds of
     that and what is left, and never a figure of the server it runs on.
-    With no ``max_memory`` it has no size to say (``_shown``).
+    With no ``max_memory`` it has no size to say (``_shown``). An
+    engine's ``in_process`` machine runs in it and answers the same.
 
     Args:
         memory (MemoryBudget | None): its budget, None for no cap.
+        machine (str): the machine the row is about.
     """
     limit = 0 if memory is None else memory.limit
     room = 0 if memory is None else memory.room()
     return MachineResources(
-        machine=WORKSPACE_MACHINE,
+        machine=machine,
         cpus=CPUS,
         all_cpus=CPUS,
         epoch=0.0,
@@ -283,7 +288,10 @@ def _shown(row: MachineResources, options: FreeOptions) -> FreeOptions:
         row (MachineResources): what it holds.
         options (FreeOptions): how to print.
     """
-    uncapped = row.machine == WORKSPACE_MACHINE and row.mem_total == 0
+    inside = row.machine == WORKSPACE_MACHINE or row.machine.startswith(
+        f"{IN_PROCESS}:"
+    )
+    uncapped = inside and row.mem_total == 0
     return replace(options, blank=True) if uncapped else options
 
 
@@ -298,7 +306,14 @@ async def _read(
         memory (MemoryBudget | None): the workspace's budget.
     """
     rows, errors = await read_machines(processes, scope, "free")
-    return [_workspace_row(memory), *rows] if scope.workspace else rows, errors
+    own = [WORKSPACE_MACHINE] if scope.workspace else []
+    return [
+        *(
+            _workspace_row(memory, machine)
+            for machine in (*own, *scope.engines)
+        ),
+        *rows,
+    ], errors
 
 
 def _render(

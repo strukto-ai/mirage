@@ -51,6 +51,6 @@ async def handle_hostname(
     if scope is None:
         return job_result(cmd_str, f"hostname: {named}: no such machine\n", 1)
     rows, errors = await read_machines(processes, scope, "hostname")
-    names = [HOSTNAME] if scope.workspace else []
+    names = [HOSTNAME] * (scope.workspace + len(scope.engines))
     names += [row.hostname for row in rows]
     return rows_result(cmd_str, names, errors)

@@ -96,7 +96,7 @@ gcs      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 oci      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 
 # --- network / remote ---
-ssh      = ["asyncssh>=2.23.0"]
+ssh      = ["asyncssh>=2.24.1"]
 nextcloud = ["opendal>=0.47.1"]
 
 # --- huggingface ---

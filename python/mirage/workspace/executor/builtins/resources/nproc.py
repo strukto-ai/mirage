@@ -80,9 +80,11 @@ async def handle_nproc(
     rows, errors = await read_machines(processes, scope, "nproc")
     env = session.env if session is not None else {}
     every = parse.flags.get("all") is True
-    figures = [(row.machine, row.cpus, row.all_cpus) for row in rows]
-    if scope.workspace:
-        figures.insert(0, (WORKSPACE_MACHINE, CPUS, CPUS))
+    own = [WORKSPACE_MACHINE] if scope.workspace else []
+    figures = [
+        *((machine, CPUS, CPUS) for machine in (*own, *scope.engines)),
+        *((row.machine, row.cpus, row.all_cpus) for row in rows),
+    ]
     counts = [
         max(
             1,

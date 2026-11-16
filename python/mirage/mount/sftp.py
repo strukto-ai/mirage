@@ -485,6 +485,38 @@ class PipeReader:
         return default
 
 
+class PipeChannel:
+    """What asyncssh's SFTP handler writes answers to, over a pipe.
+
+    asyncssh writes to an SSH channel's writer and asks the channel
+    before each answer whether it is closing; this gives it the three
+    calls it makes: write, close, and the channel's ``is_closing``, the
+    pipe's own when it has one.
+
+    Args:
+        writer (PipeWriter): where the answers go.
+    """
+
+    def __init__(self, writer: PipeWriter) -> None:
+        self._writer = writer
+        self._closing = False
+
+    @property
+    def channel(self) -> "PipeChannel":
+        return self
+
+    def write(self, data: bytes) -> None:
+        self._writer.write(data)
+
+    def close(self) -> None:
+        self._closing = True
+        self._writer.close()
+
+    def is_closing(self) -> bool:
+        closing = getattr(self._writer, "is_closing", None)
+        return self._closing or (callable(closing) and bool(closing()))
+
+
 class PipeServer:
     """SFTP on a byte pipe as ``session``, for a sandbox's sshfs.
 
@@ -537,7 +569,7 @@ class PipeServer:
                     on_lost=self._lose,
                 ),
                 cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
-                cast("asyncssh.SSHWriter[bytes]", writer),
+                cast("asyncssh.SSHWriter[bytes]", PipeChannel(writer)),
                 SFTP_VERSION,
             )
         except EOFError as exc:

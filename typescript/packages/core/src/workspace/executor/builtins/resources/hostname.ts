@@ -37,6 +37,10 @@ export async function handleHostname(
   const scope = machineScope(processes, named, true)
   if (scope === null) return jobResult(cmdStr, `hostname: ${named ?? ''}: no such machine\n`, 1)
   const [rows, errors] = await readMachines(processes, scope, 'hostname')
-  const names = [...(scope.workspace ? [HOSTNAME] : []), ...rows.map((row) => row.hostname)]
+  const names = [
+    ...(scope.workspace ? [HOSTNAME] : []),
+    ...scope.engines.map(() => HOSTNAME),
+    ...rows.map((row) => row.hostname),
+  ]
   return rowsResult(cmdStr, names, errors)
 }
