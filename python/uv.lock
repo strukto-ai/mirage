@@ -2854,7 +2854,7 @@ requires-dist = [
     { name = "botocore", marker = "extra == 's3'", specifier = ">=1.40.61" },
     { name = "chromadb-client", marker = "extra == 'chroma'", specifier = ">=1.0.0" },
     { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.2.174" },
-    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.227.0" },
+    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.227.0,<1" },
     { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.7.32" },
     { name = "dulwich", specifier = ">=1.2.9" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.62.0" },
