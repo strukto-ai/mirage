@@ -81,6 +81,20 @@ def test_page_numbers_read_a_sign_and_digits(text, value):
     assert page_number(text) == value
 
 
+@pytest.mark.parametrize(
+    "text,value",
+    [
+        ("2147483648", -2147483648),
+        ("4294967299", 3),
+        ("99999999999", 1215752191),
+        ("9223372036854775808", -1),
+        ("-9223372036854775809", 0),
+    ],
+)
+def test_a_page_number_past_an_int_keeps_its_low_bits(text, value):
+    assert page_number(text) == value
+
+
 @pytest.mark.parametrize("text", ["x", "2x", " 2", "1.5"])
 def test_a_page_number_that_is_no_number_is_refused(text):
     with pytest.raises(Refused):

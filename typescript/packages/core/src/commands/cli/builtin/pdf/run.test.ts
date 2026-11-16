@@ -87,6 +87,16 @@ describe('page numbers', () => {
     expect(pageNumber(text)).toBe(value)
   })
 
+  it.each([
+    ['2147483648', -2147483648],
+    ['4294967299', 3],
+    ['99999999999', 1215752191],
+    ['9223372036854775808', -1],
+    ['-9223372036854775809', 0],
+  ])('keeps the low bits of %j past an int', (text, value) => {
+    expect(pageNumber(text)).toBe(value)
+  })
+
   it.each(['x', '2x', ' 2', '1.5'])('refuses %j', (text) => {
     expect(() => pageNumber(text)).toThrow(Refused)
   })

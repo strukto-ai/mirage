@@ -56,18 +56,20 @@ def rc4(key: bytes, data: bytes) -> bytes:
 
 class Lock:
     """Revision 2 of the standard security handler: an owner password,
-    the empty user password, and the permissions `p` grants.
+    a user password, and the permissions `p` grants.
 
     Args:
         owner (bytes): the owner password.
         p (int): the permission bits, as a signed 32-bit value.
+        user (bytes): the user password; empty opens without one.
     """
 
-    def __init__(self, owner: bytes, p: int) -> None:
+    def __init__(self, owner: bytes, p: int, user: bytes = b"") -> None:
         self.p = p
-        self.o = rc4(hashlib.md5((owner + PAD)[:32]).digest()[:5], PAD)
+        padded = (user + PAD)[:32]
+        self.o = rc4(hashlib.md5((owner + PAD)[:32]).digest()[:5], padded)
         self.key = hashlib.md5(
-            PAD + self.o + p.to_bytes(4, "little", signed=True) + FILE_ID
+            padded + self.o + p.to_bytes(4, "little", signed=True) + FILE_ID
         ).digest()[:5]
         self.u = rc4(self.key, PAD)
 
@@ -299,6 +301,11 @@ LOCKED = {
     "pages": [{"text": lines(72, 720, ["This memo may be read but not copied."])}],
 }
 
+SECRET = {
+    "info": {"Title": "Salary bands", "Author": "People"},
+    "pages": [{"text": lines(72, 720, ["Only the password opens this page."])}],
+}
+
 
 def main() -> None:
     OUT.mkdir(exist_ok=True)
@@ -306,6 +313,9 @@ def main() -> None:
     (OUT / "cjk.pdf").write_bytes(build(CJK_DOC))
     (OUT / "scan.pdf").write_bytes(build(SCAN))
     (OUT / "locked.pdf").write_bytes(build(LOCKED, Lock(b"owner", -3900)))
+    (OUT / "secret.pdf").write_bytes(
+        build(SECRET, Lock(b"keeper", -4, b"reader"))
+    )
     (OUT / "notes.pdf").write_bytes(b"These are plain notes, not a PDF.\n")
 
 

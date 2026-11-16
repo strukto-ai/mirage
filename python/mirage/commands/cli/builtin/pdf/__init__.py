@@ -14,7 +14,7 @@
 
 from mirage.commands.cli.builtin.pdf.run import run_pdfinfo, run_pdftotext
 from mirage.commands.cli.types import CLI, CLIHandler
-from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
 FIRST = Argument("-f", metavar="int", help="First page to read (default: 1)")
 LAST = Argument(
@@ -46,6 +46,7 @@ PDFTOTEXT = CLI(
             "output when the text file is '-'. Pages end in a form feed."
         ),
         add_help=False,
+        usage_style=UsageStyle.POPPLER,
         arguments=(
             FIRST,
             LAST,
@@ -92,7 +93,7 @@ PDFTOTEXT = CLI(
             ),
         ),
     ),
-    handlers={"": CLIHandler(fn=run_pdftotext)},
+    handlers={"": CLIHandler(fn=run_pdftotext, write=True)},
 )
 
 PDFINFO = CLI(
@@ -103,6 +104,7 @@ PDFINFO = CLI(
             "count, page size and PDF version."
         ),
         add_help=False,
+        usage_style=UsageStyle.POPPLER,
         arguments=(
             Argument(
                 "-f", metavar="int", help="First page whose size to list"

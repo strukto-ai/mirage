@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { Argument, CommandSpec, UsageStyle } from '../../../spec/types.ts'
 import { CLI, CLIHandler } from '../../types.ts'
 import { runPdfinfo, runPdftotext } from './run.ts'
 
@@ -44,6 +44,7 @@ export const PDFTOTEXT = new CLI({
     description:
       "Write the text of a PDF file to a text file, or to standard output when the text file is '-'. Pages end in a form feed.",
     addHelp: false,
+    usageStyle: UsageStyle.POPPLER,
     arguments: [
       FIRST,
       LAST,
@@ -77,7 +78,7 @@ export const PDFTOTEXT = new CLI({
       }),
     ],
   }),
-  handlers: { '': new CLIHandler({ fn: runPdftotext }) },
+  handlers: { '': new CLIHandler({ fn: runPdftotext, write: true }) },
 })
 
 export const PDFINFO = new CLI({
@@ -86,6 +87,7 @@ export const PDFINFO = new CLI({
     description:
       "Print a PDF file's document information: its metadata, page count, page size and PDF version.",
     addHelp: false,
+    usageStyle: UsageStyle.POPPLER,
     arguments: [
       new Argument('-f', { metavar: 'int', help: 'First page whose size to list' }),
       new Argument('-l', { metavar: 'int', help: 'Last page whose size to list' }),

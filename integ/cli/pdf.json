@@ -571,6 +571,175 @@
         "stdout": "exit 99\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pdf_text_missing_value_exit",
+      "seq": 13650044,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/report.pdf - -l 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_first_past_int",
+      "seq": 13650045,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 4294967299 /docs/report.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Metric\nRevenue\nChurn\nTickets\n\nValue\n4.2M\n1.8%\n1,204\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_first_past_int_refused",
+      "seq": 13650046,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -f 99999999999 /docs/report.pdf -",
+      "expect": {
+        "exit": 99,
+        "stdout": "",
+        "stderr": "Command Line Error: Wrong page range given: the first page (1215752191) can not be after the last page (3).\n"
+      }
+    },
+    {
+      "id": "pdf_text_last_past_long",
+      "seq": 13650047,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -l 9223372036854775808 /docs/report.pdf - | grep -c .",
+      "expect": {
+        "exit": 0,
+        "stdout": "22\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_password_needed",
+      "seq": 13650048,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext /docs/secret.pdf -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Command Line Error: Incorrect password\n"
+      }
+    },
+    {
+      "id": "pdf_text_user_password",
+      "seq": 13650049,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -upw reader /docs/secret.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Only the password opens this page.\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_owner_password",
+      "seq": 13650050,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -opw keeper /docs/secret.pdf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "Only the password opens this page.\n\n\f",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_text_wrong_password",
+      "seq": 13650051,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdftotext -upw wrong /docs/secret.pdf -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Command Line Error: Incorrect password\n"
+      }
+    },
+    {
+      "id": "pdf_info_missing_value_exit",
+      "seq": 13650052,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo /docs/report.pdf -upw 2>/dev/null; echo \"exit $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit 99\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_last_past_int",
+      "seq": 13650053,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -f 1 -l 4294967298 /docs/report.pdf | grep '^Page '",
+      "expect": {
+        "exit": 0,
+        "stdout": "Page    1 size:  612 x 792 pts (letter)\nPage    1 rot:   0\nPage    2 size:  612 x 792 pts (letter)\nPage    2 rot:   0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_user_password",
+      "seq": 13650054,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -upw reader /docs/secret.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Salary bands\nAuthor:          People\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       yes (print:yes copy:yes change:yes addNotes:yes algorithm:RC4)\nPage size:       612 x 792 pts (letter)\nPage rot:        0\nFile size:       1060 bytes\nOptimized:       no\nPDF version:     1.4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_owner_password",
+      "seq": 13650055,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -opw keeper /docs/secret.pdf | grep -E '^(Title|Encrypted):'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Title:           Salary bands\nEncrypted:       yes (print:yes copy:yes change:yes addNotes:yes algorithm:RC4)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pdf_info_wrong_password",
+      "seq": 13650056,
+      "targets": [
+        "cli-pdf"
+      ],
+      "command": "pdfinfo -opw wrong /docs/secret.pdf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Command Line Error: Incorrect password\n"
+      }
     }
   ]
 }

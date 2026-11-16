@@ -63,8 +63,8 @@ keeps the order the page draws its text.
 | `-opw`, `-upw` | Owner or user password of an encrypted file |
 | `-q` | No messages or errors; the exit code still reports them |
 
-Encrypted files that open without a user password are read as poppler reads
-them. Pages without a text layer, such as scans, give empty text: there is no
+Encrypted files are read as poppler reads them; one that needs a password
+opens with `-upw` or `-opw`. Pages without a text layer, such as scans, give empty text: there is no
 OCR.
 
 ## Differences from poppler

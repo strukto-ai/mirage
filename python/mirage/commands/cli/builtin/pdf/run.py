@@ -22,6 +22,7 @@ from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
     hosted_stream,
 )
+from mirage.commands.cli.constants import POPPLER_EXIT
 from mirage.commands.cli.walk import node_help
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -30,11 +31,12 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec
 
-# The exit status of a refused command line.
-USAGE = 99
-
 # A page number as the reader takes one: a sign, then digits.
 PAGE = re.compile(r"[+-]?[0-9]*")
+
+# The reader holds a page number in a 64-bit long, kept at its bounds,
+# and pages by the low 32 bits of it.
+LONG = 2**63
 
 
 class Refused(Exception):
@@ -42,7 +44,9 @@ class Refused(Exception):
 
 
 def page_number(text: str | None) -> int | None:
-    """A page option's value, or None when not given.
+    """A page option's value, or None when not given: a number past a
+    64-bit long is held at its bound, then read as its low 32 bits, so
+    99999999999 is page 1215752191 and 9223372036854775808 is -1.
 
     Args:
         text (str | None): the value as typed.
@@ -56,7 +60,10 @@ def page_number(text: str | None) -> int | None:
         raise Refused(text)
     digits = text.lstrip("+-")
     value = int(digits) if digits else 0
-    return -value if text.startswith("-") else value
+    if text.startswith("-"):
+        value = -value
+    value = min(max(value, -LONG), LONG - 1)
+    return (value + 2**31) % 2**32 - 2**31
 
 
 def usage(spec: CommandSpec, status: int) -> tuple[None, IOResult]:
@@ -127,9 +134,9 @@ async def run_pdftotext(
         first = page_number(flags.as_str("f"))
         last = page_number(flags.as_str("args_l"))
     except Refused:
-        return usage(spec, USAGE)
+        return usage(spec, POPPLER_EXIT)
     if not 1 <= len(paths) <= 2:
-        return usage(spec, USAGE)
+        return usage(spec, POPPLER_EXIT)
     document = paths[0]
     config: dict[str, JsonValue] = {
         "file": byte_view(document.raw_path),
@@ -172,9 +179,9 @@ async def run_pdfinfo(
         first = page_number(flags.as_str("f"))
         last = page_number(flags.as_str("args_l"))
     except Refused:
-        return usage(spec, USAGE)
+        return usage(spec, POPPLER_EXIT)
     if len(paths) != 1:
-        return usage(spec, USAGE)
+        return usage(spec, POPPLER_EXIT)
     document = paths[0]
     config: dict[str, JsonValue] = {
         "file": byte_view(document.raw_path),

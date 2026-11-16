@@ -26,6 +26,10 @@ HELP_EXIT = 0
 # too, and the walk cannot import a module that reaches the workspace.
 CLAP_EXIT = 2
 
+# poppler-utils' readers exit 99 for a command line they refuse, and
+# print their help page on stderr (poppler 25.03.0).
+POPPLER_EXIT = 99
+
 # The environment variable carrying an install's config to a script CLI
 # (JSON). Deliberately not MIRAGE_CONFIG: that one already names the
 # workspace config file for the server and mcp entry points, and a

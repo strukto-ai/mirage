@@ -184,7 +184,14 @@ function pdfBattery(): [string, Check][] {
       try {
         ws.registerCli('pdftotext', PDFTOTEXT)
         ws.registerCli('pdfinfo', PDFINFO)
-        for (const name of ['cjk.pdf', 'locked.pdf', 'notes.pdf', 'report.pdf', 'scan.pdf']) {
+        for (const name of [
+          'cjk.pdf',
+          'locked.pdf',
+          'notes.pdf',
+          'report.pdf',
+          'scan.pdf',
+          'secret.pdf',
+        ]) {
           const response = await fetch(`/pdf/${name}`)
           if (!response.ok) throw new Error(`/pdf/${name} answered ${String(response.status)}`)
           const stdin = new Uint8Array(await response.arrayBuffer())

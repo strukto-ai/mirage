@@ -47,6 +47,10 @@ class UsageStyle(Enum):
     and exits 1, while handlers own missing positional refusals. Its
     ``--help`` keeps the standard layout rather than Cobra's full page.
 
+    POPPLER answers every option error the way poppler-utils' readers
+    answer a command line they refuse: the help page on stderr and exit
+    99. Its help keeps the standard layout.
+
     It lives in the spec layer, not beside the CLI tree, because the
     help renderer is the spec's and cannot import upward to reach it.
     """
@@ -55,6 +59,7 @@ class UsageStyle(Enum):
     GIT = "git"
     CLAP = "clap"
     COBRA = "cobra"
+    POPPLER = "poppler"
 
 
 class CommandName(StrEnum):

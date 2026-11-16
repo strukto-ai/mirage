@@ -75,7 +75,9 @@ def notices(manifest: str) -> str:
 
 def append(path: pathlib.Path, lead: str, manifest: str) -> None:
     """Rewrite a package's notices after its hand-kept sections: `lead`,
-    then the crates its binding compiles in.
+    then the crates its binding compiles in. The generated part starts at
+    the rule before the lead's opening words, which name the binding and
+    stay when the modules listed after them change.
 
     Args:
         path (pathlib.Path): the package's THIRD_PARTY_NOTICES.
@@ -83,7 +85,7 @@ def append(path: pathlib.Path, lead: str, manifest: str) -> None:
         manifest (str): the binding's Cargo.toml, relative to rust/.
     """
     text = path.read_text()
-    at = text.find(lead)
+    at = text.find(lead.split(" (", 1)[0])
     if at >= 0:
         text = text[: text.rfind(RULE, 0, at)].rstrip("\n") + "\n"
     path.write_text(f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest)}")

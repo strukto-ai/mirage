@@ -275,7 +275,7 @@ export function nodeHelp(
   node: CommandSpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
 ): string {
-  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA)
+  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA || style === UsageStyle.POPPLER)
     return argparseHelp(name, listedNode(node, style), subcommandRows(node))
   return renderHelp(name, listedNode(node, style), subcommandRows(node), style)
 }
@@ -300,7 +300,7 @@ export function listedNode(
   if (!node.addHelp || node.arguments.some((argument) => argument.names.includes('--help')))
     return node
   const names =
-    (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
+    (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA || style === UsageStyle.POPPLER) &&
     !node.arguments.some((argument) => argument.names.includes('-h'))
       ? ['-h', '--help']
       : ['--help']
@@ -707,7 +707,9 @@ export function walk(
         !optionsEnded &&
         node.addHelp &&
         token === '-h' &&
-        (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
+        (style === UsageStyle.ARGPARSE ||
+          style === UsageStyle.COBRA ||
+          style === UsageStyle.POPPLER) &&
         !cs.dest.has('-h')
       ) {
         return new WalkResult({

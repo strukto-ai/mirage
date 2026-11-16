@@ -320,7 +320,7 @@ def node_help(
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
     """
-    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
+    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER):
         return argparse_help(
             name, listed_node(node, style), subcommand_rows(node)
         )
@@ -368,7 +368,7 @@ def listed_node(
         return node
     names = (
         ("-h", "--help")
-        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
+        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
         and not any("-h" in arg.names for arg in node.arguments)
         else ("--help",)
     )
@@ -837,7 +837,8 @@ def walk(
                 not options_ended
                 and token == "-h"
                 and node.add_help
-                and style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
+                and style
+                in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
                 and "-h" not in cs.dest
             ):
                 return WalkResult(

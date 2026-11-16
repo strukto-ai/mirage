@@ -22,26 +22,34 @@ import { StreamHost, hostedStream } from '../../../builtin/utils/stream_host.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { CommandSpec } from '../../../spec/types.ts'
+import { POPPLER_EXIT } from '../../constants.ts'
 import { nodeHelp } from '../../walk.ts'
-
-/** The exit status of a refused command line. */
-export const USAGE = 99
 
 /** A page number as the reader takes one: a sign, then digits. */
 export const PAGE = /^[+-]?[0-9]*$/
+
+/** The reader holds a page number in a 64-bit long, kept at its bounds, and pages by the low 32 bits of it. */
+export const LONG = 2n ** 63n
 
 const ENCODER = new TextEncoder()
 
 /** A page number that is no number. */
 export class Refused extends Error {}
 
-/** A page option's value, or undefined when not given; throws Refused for one that is no number. */
+/**
+ * A page option's value, or undefined when not given; throws Refused for one
+ * that is no number. A number past a 64-bit long is held at its bound, then
+ * read as its low 32 bits, so 99999999999 is page 1215752191 and
+ * 9223372036854775808 is -1.
+ */
 export function pageNumber(text: string | undefined): number | undefined {
   if (text === undefined) return undefined
   if (!PAGE.test(text)) throw new Refused(text)
   const digits = text.replace(/^[+-]/, '')
-  const value = digits === '' ? 0 : Number.parseInt(digits, 10)
-  return text.startsWith('-') ? -value : value
+  const magnitude = digits === '' ? 0n : BigInt(digits)
+  const value = text.startsWith('-') ? -magnitude : magnitude
+  const held = value < -LONG ? -LONG : value >= LONG ? LONG - 1n : value
+  return Number(BigInt.asIntN(32, held))
 }
 
 /** The help page on standard error, the way the reader answers a request for it and a command line it refuses. */
@@ -101,11 +109,11 @@ export function runPdftotext(
     first = pageNumber(flags.asStr('f'))
     last = pageNumber(flags.asStr('args_l'))
   } catch (err) {
-    if (err instanceof Refused) return Promise.resolve(usage(spec, USAGE))
+    if (err instanceof Refused) return Promise.resolve(usage(spec, POPPLER_EXIT))
     throw err
   }
   const [document, output] = paths
-  if (document === undefined || paths.length > 2) return Promise.resolve(usage(spec, USAGE))
+  if (document === undefined || paths.length > 2) return Promise.resolve(usage(spec, POPPLER_EXIT))
   const config: Record<string, util.JSONType> = {
     file: byteView(document.rawPath),
     output: output === undefined ? null : byteView(output.rawPath),
@@ -144,11 +152,12 @@ export function runPdfinfo(
     first = pageNumber(flags.asStr('f'))
     last = pageNumber(flags.asStr('args_l'))
   } catch (err) {
-    if (err instanceof Refused) return Promise.resolve(usage(spec, USAGE))
+    if (err instanceof Refused) return Promise.resolve(usage(spec, POPPLER_EXIT))
     throw err
   }
   const [document] = paths
-  if (document === undefined || paths.length !== 1) return Promise.resolve(usage(spec, USAGE))
+  if (document === undefined || paths.length !== 1)
+    return Promise.resolve(usage(spec, POPPLER_EXIT))
   const config: Record<string, util.JSONType> = {
     file: byteView(document.rawPath),
     first: first ?? null,
