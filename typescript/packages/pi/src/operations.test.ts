@@ -153,6 +153,32 @@ describe('mirageOperations.bash', () => {
     expect(Buffer.concat(chunks).toString()).toBe('hello\n')
   })
 
+  it('streams output while the command is still running', async () => {
+    const ops = mirageOperations(mkWs())
+    const chunks: string[] = []
+    let finished = false
+    let firstChunk!: () => void
+    const first = new Promise<void>((resolve) => {
+      firstChunk = resolve
+    })
+    const run = ops.bash
+      .exec('echo first; sleep 0.3; echo second', '/', {
+        onData: (data) => {
+          chunks.push(data.toString())
+          firstChunk()
+        },
+      })
+      .finally(() => {
+        finished = true
+      })
+    await first
+    expect(finished).toBe(false)
+    expect(chunks.join('')).toBe('first\n')
+    const result = await run
+    expect(result.exitCode).toBe(0)
+    expect(chunks.join('')).toBe('first\nsecond\n')
+  })
+
   it('reports non-zero exit code', async () => {
     const ops = mirageOperations(mkWs())
     const noop = (_: Buffer): void => undefined

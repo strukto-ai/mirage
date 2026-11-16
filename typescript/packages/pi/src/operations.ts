@@ -132,11 +132,18 @@ export function mirageOperations(
           : (options.signal ?? timeoutSignal)
       let result: ExecuteResult
       try {
-        result = await ws.shell(command, {
+        const execution = await ws.shell(command, {
+          stream: true,
           cwd,
           ...(signal === undefined ? {} : { signal }),
           ...(sessionId === undefined ? {} : { sessionId }),
         })
+        try {
+          for await (const event of execution.events) options.onData(Buffer.from(event.data))
+          result = await execution.wait()
+        } finally {
+          await execution.close()
+        }
       } catch (error) {
         if (options.signal?.aborted === true) {
           throw new Error('aborted')
@@ -145,12 +152,6 @@ export function mirageOperations(
           throw new Error('timeout:' + String(options.timeout))
         }
         throw error
-      }
-      if (result.stdout.length > 0) {
-        options.onData(Buffer.from(result.stdout))
-      }
-      if (result.stderr.length > 0) {
-        options.onData(Buffer.from(result.stderr))
       }
       // The record, described once, after what was just streamed.
       const why = decisionLine(result.decision)
