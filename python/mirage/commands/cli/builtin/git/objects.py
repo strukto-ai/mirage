@@ -42,6 +42,7 @@ from mirage.commands.cli.builtin.git.io import (
     read_file,
     read_names,
     read_optional,
+    write_file,
     write_once,
 )
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
@@ -446,6 +447,29 @@ def _index_pack(data: bytes) -> tuple[bytes, bytes]:
     out = BytesIO()
     write_pack_index(out, pack.sorted_entries(), checksum)
     return out.getvalue(), checksum
+
+
+async def add_shallow(
+    vfs: Files, commondir: PathSpec, oids: tuple[str, ...]
+) -> None:
+    """List more commits in ``.git/shallow``, one id a line, sorted.
+
+    Args:
+        vfs (Files): the session's files.
+        commondir (PathSpec): absolute virtual path of the shared git
+            directory.
+        oids (tuple[str, ...]): the commits a fetch cut; none writes
+            nothing.
+    """
+    if not oids:
+        return
+    path = commondir.join(SHALLOW_FILE)
+    held = (await read_optional(vfs, path) or b"").decode().split()
+    await write_file(
+        vfs,
+        path,
+        "".join(f"{oid}\n" for oid in sorted({*held, *oids})).encode(),
+    )
 
 
 async def store_pack(vfs: Files, commondir: PathSpec, data: bytes) -> None:

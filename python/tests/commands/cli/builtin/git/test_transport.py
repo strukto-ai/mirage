@@ -276,6 +276,42 @@ async def test_clone_and_fetch_over_smart_http(served):
 
 
 @pytest.mark.asyncio
+async def test_a_shallow_clone_over_smart_http_matches_git(served, tmp_path):
+    pytest.importorskip("httpx")
+    _, url = served
+    native = tmp_path / "native"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", url, str(native)],
+        check=True,
+        capture_output=True,
+        env=ENV,
+    )
+    refs = subprocess.run(
+        ["git", "-C", str(native), "for-each-ref", "--format=%(refname)"],
+        check=True,
+        capture_output=True,
+        env=ENV,
+    ).stdout
+    with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        result = await ws.shell(f"cd /w && git clone -q --depth 1 {url} c")
+        assert (result.exit_code, result.stderr or b"") == (0, b"")
+        result = await ws.shell("cat /w/c/.git/shallow")
+        assert result.stdout == (native / ".git" / "shallow").read_bytes()
+        result = await ws.shell("cd /w/c && git log --format=%s%d")
+        assert (
+            result.stdout
+            == b"second (grafted, HEAD -> main, origin/main, origin/HEAD)\n"
+        )
+        result = await ws.shell(
+            "cd /w/c && git for-each-ref --format='%(refname)'"
+        )
+        assert result.stdout == refs
+        result = await ws.shell("cd /w/c && git config remote.origin.fetch")
+        assert result.stdout == b"+refs/heads/main:refs/remotes/origin/main\n"
+
+
+@pytest.mark.asyncio
 async def test_a_missing_http_repository_is_not_found(served):
     pytest.importorskip("httpx")
     _, url = served

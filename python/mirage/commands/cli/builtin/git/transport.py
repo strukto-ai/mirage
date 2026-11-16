@@ -16,6 +16,7 @@ import asyncio
 import base64
 import logging
 import re
+from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -64,6 +65,7 @@ SCP_LIKE = re.compile(r"^[^/:]+:")
 REPO_SUFFIXES = ("/.git", "", ".git/.git", ".git")
 SYMREF_HEAD = "symref=HEAD:"
 PEELED = "^{}"
+SHALLOW_LINE = b"shallow "
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,20 @@ class Advertisement:
     peeled: dict[str, str] = field(default_factory=dict)
     head: str | None = None
     symrefs: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Fetched:
+    """What one fetch brought back.
+
+    Args:
+        pack (bytes): the packfile, empty for none.
+        shallow (tuple[str, ...]): the commits whose parents were left
+            out, which a shallow repository lists in ``.git/shallow``.
+    """
+
+    pack: bytes = b""
+    shallow: tuple[str, ...] = ()
 
 
 def pkt_line(data: bytes) -> bytes:
@@ -161,27 +177,40 @@ def display_url(url: str) -> str:
 
 
 def missing_objects(
-    repo: BaseRepo, wants: list[str], has: Callable[[ObjectID], bool]
-) -> list[ShaFile]:
+    repo: BaseRepo,
+    wants: list[str],
+    has: Callable[[ObjectID], bool],
+    depth: int | None = None,
+) -> tuple[list[ShaFile], list[bytes]]:
     """Every object reachable from ``wants`` that the other side lacks.
 
     Commits the other side has stop the walk; the trees of those boundary
     commits are what it already holds, so their contents are left out as
     upload-pack's edge does. Gitlinks name another repository and are
-    never followed.
+    never followed. A depth keeps only the commits that many steps from a
+    want, the want counting as one, walked breadth first so each commit
+    is counted at its nearest; one at the limit that has parents is cut
+    there, shallow, as ``deepen`` cuts it.
 
     Args:
         repo (BaseRepo): the repository sending objects.
         wants (list[str]): the object ids asked for.
         has (Callable[[bytes], bool]): whether the receiver holds an id.
+        depth (int | None): ``--depth``, None for the whole history.
+
+    Returns:
+        tuple[list[ShaFile], list[bytes]]: the objects to send, and the
+        commits cut shallow.
     """
     sending: list[ShaFile] = []
     boundary: list[bytes] = []
+    shallow: list[bytes] = []
     seen: set[bytes] = set()
-    stack = [want.encode() for want in wants]
+    queue = deque((want.encode(), 1) for want in wants)
+    take = queue.pop if depth is None else queue.popleft
     trees: list[bytes] = []
-    while stack:
-        oid = stack.pop()
+    while queue:
+        oid, level = take()
         if oid in seen:
             continue
         seen.add(oid)
@@ -191,10 +220,13 @@ def missing_objects(
         obj = repo.object_store[ObjectID(oid)]
         sending.append(obj)
         if isinstance(obj, Tag):
-            stack.append(obj.object[1])
+            queue.append((obj.object[1], level))
         elif isinstance(obj, Commit):
             trees.append(obj.tree)
-            stack.extend(obj.parents)
+            if depth is not None and level >= depth and obj.parents:
+                shallow.append(oid)
+            else:
+                queue.extend((parent, level + 1) for parent in obj.parents)
     held: set[bytes] = set()
     for oid in boundary:
         obj = repo.object_store[ObjectID(oid)]
@@ -202,7 +234,7 @@ def missing_objects(
             _walk_tree(repo, obj.tree, held, None)
     for tree in trees:
         _walk_tree(repo, tree, held, sending)
-    return sending
+    return sending, shallow
 
 
 def _walk_tree(
@@ -281,7 +313,8 @@ class LocalTransport:
         wants: list[str],
         haves: list[str],
         has: Callable[[ObjectID], bool],
-    ) -> bytes:
+        depth: int | None = None,
+    ) -> Fetched:
         """A pack of everything reachable from ``wants`` the receiver lacks.
 
         Args:
@@ -290,18 +323,24 @@ class LocalTransport:
                 where ``has`` answers directly.
             has (Callable[[bytes], bool]): whether the receiver holds
                 an id.
+            depth (int | None): how many commits deep to fetch, None
+                for all of them.
         """
-        return await asyncio.to_thread(self._packed, wants, has)
+        return await asyncio.to_thread(self._packed, wants, has, depth)
 
     def _packed(
-        self, wants: list[str], has: Callable[[ObjectID], bool]
-    ) -> bytes:
-        objects = missing_objects(self._repo, wants, has)
+        self,
+        wants: list[str],
+        has: Callable[[ObjectID], bool],
+        depth: int | None,
+    ) -> Fetched:
+        objects, shallow = missing_objects(self._repo, wants, has, depth)
+        cut = tuple(oid.decode() for oid in shallow)
         if not objects:
-            return b""
+            return Fetched(shallow=cut)
         out = BytesIO()
         write_pack_objects(out, objects, SHA1, deltify=False)
-        return out.getvalue()
+        return Fetched(out.getvalue(), cut)
 
 
 class HttpTransport:
@@ -392,8 +431,13 @@ class HttpTransport:
         wants: list[str],
         haves: list[str],
         has: Callable[[ObjectID], bool],
-    ) -> bytes:
+        depth: int | None = None,
+    ) -> Fetched:
         """POST the wants and haves to upload-pack; return the pack.
+
+        A depth asks for the ``shallow`` capability and sends ``deepen``;
+        the server names each commit it cut in a ``shallow`` line ahead
+        of the pack.
 
         Args:
             wants (list[str]): the object ids asked for.
@@ -401,11 +445,16 @@ class HttpTransport:
                 leaves out what they reach.
             has (Callable[[bytes], bool]): unused here, where the server
                 works out what to leave out from ``haves``.
+            depth (int | None): how many commits deep to fetch, None
+                for all of them.
         """
         if not wants:
-            return b""
-        body = [pkt_line(f"want {wants[0]} {CAPABILITIES}\n".encode())]
+            return Fetched()
+        caps = CAPABILITIES if depth is None else f"{CAPABILITIES} shallow"
+        body = [pkt_line(f"want {wants[0]} {caps}\n".encode())]
         body += [pkt_line(f"want {want}\n".encode()) for want in wants[1:]]
+        if depth is not None:
+            body.append(pkt_line(f"deepen {depth}\n".encode()))
         body.append(FLUSH)
         body += [pkt_line(f"have {have}\n".encode()) for have in haves]
         body.append(pkt_line(b"done\n"))
@@ -419,8 +468,12 @@ class HttpTransport:
             b"".join(body),
         )
         pack = bytearray()
+        shallow: list[str] = []
         for line in pkt_lines(reply):
             if line is None or line.startswith((b"NAK", b"ACK ")):
+                continue
+            if line.startswith(SHALLOW_LINE):
+                shallow.append(line[len(SHALLOW_LINE) :].strip().decode())
                 continue
             band, payload = line[0], line[1:]
             if band == PACK_BAND:
@@ -430,7 +483,7 @@ class HttpTransport:
                     "remote error: "
                     + payload.decode("utf-8", "replace").strip()
                 )
-        return bytes(pack)
+        return Fetched(bytes(pack), tuple(shallow))
 
 
 def _credentials(url: str) -> tuple[str, dict[str, str]]:

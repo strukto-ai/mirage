@@ -49,6 +49,7 @@ const SCP_LIKE = /^[^/:]+:/
 const REPO_SUFFIXES = ['/.git', '', '.git/.git', '.git']
 const SYMREF_HEAD = 'symref=HEAD:'
 export const PEELED = '^{}'
+const SHALLOW_LINE = 'shallow '
 
 /** What a remote publishes before anything is fetched. */
 export interface Advertisement {
@@ -62,15 +63,27 @@ export interface Advertisement {
   readonly symrefs?: ReadonlyMap<string, string>
 }
 
+/** What one fetch brought back. */
+export interface Fetched {
+  /** The packfile, empty for none. */
+  readonly pack: Uint8Array
+  /** The commits whose parents were left out, for `.git/shallow`. */
+  readonly shallow: readonly string[]
+}
+
 /** A remote a fetch or clone reads from. */
 export interface Transport {
   advertise(): Promise<Advertisement>
-  /** `has` says whether the receiver already holds an object. */
+  /**
+   * `has` says whether the receiver already holds an object; `depth` is how
+   * many commits deep to fetch, null for the whole history.
+   */
   fetchPack(
     wants: readonly string[],
     haves: readonly string[],
     has: (oid: string) => Promise<boolean>,
-  ): Promise<Uint8Array>
+    depth?: number | null,
+  ): Promise<Fetched>
 }
 
 /** One pkt-line: four hex digits of length, then the payload. */
@@ -141,23 +154,31 @@ export function displayUrl(url: string): string {
 }
 
 /**
- * Every object reachable from `wants` that the other side lacks.
+ * Every object reachable from `wants` that the other side lacks, and the
+ * commits a depth cut shallow.
  *
  * Commits the other side has stop the walk; the trees of those boundary commits
  * are what it already holds, so their contents are left out as upload-pack's
- * edge does. Gitlinks name another repository and are never followed.
+ * edge does. Gitlinks name another repository and are never followed. A depth
+ * keeps only the commits that many steps from a want, the want counting as one,
+ * walked breadth first so each commit is counted at its nearest; one at the
+ * limit that has parents is cut there, shallow, as `deepen` cuts it.
  */
 export async function missingObjects(
   repo: Repo,
   wants: readonly string[],
   has: (oid: string) => Promise<boolean>,
-): Promise<string[]> {
+  depth: number | null = null,
+): Promise<[string[], string[]]> {
   const sending: string[] = []
   const boundary: string[] = []
+  const shallow: string[] = []
   const trees: string[] = []
   const seen = new Set<string>()
-  const stack = [...wants]
-  for (let oid = stack.pop(); oid !== undefined; oid = stack.pop()) {
+  const queue: [string, number][] = wants.map((want) => [want, 1])
+  const take = (): [string, number] | undefined => (depth === null ? queue.pop() : queue.shift())
+  for (let next = take(); next !== undefined; next = take()) {
+    const [oid, level] = next
     if (seen.has(oid)) continue
     seen.add(oid)
     if (await has(oid)) {
@@ -166,11 +187,14 @@ export async function missingObjects(
     }
     const type = await objectType(repo, oid)
     sending.push(oid)
-    if (type === 'tag') stack.push((await git.readTag({ ...repoArgs(repo), oid })).tag.object)
+    if (type === 'tag')
+      queue.push([(await git.readTag({ ...repoArgs(repo), oid })).tag.object, level])
     else if (type === 'commit') {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
       trees.push(commit.tree)
-      for (const item of grafted(repo, oid, commit.parent)) stack.push(item)
+      const parents = grafted(repo, oid, commit.parent)
+      if (depth !== null && level >= depth && parents.length > 0) shallow.push(oid)
+      else for (const item of parents) queue.push([item, level + 1])
     }
   }
   const held = new Set<string>()
@@ -180,7 +204,7 @@ export async function missingObjects(
     await walkTree(repo, commit.tree, held, null)
   }
   for (const tree of trees) await walkTree(repo, tree, held, sending)
-  return sending
+  return [sending, shallow]
 }
 
 /** Visit a tree once, collecting what is new into `sending`. */
@@ -252,11 +276,12 @@ export class LocalTransport implements Transport {
     wants: readonly string[],
     _haves: readonly string[],
     has: (oid: string) => Promise<boolean>,
-  ): Promise<Uint8Array> {
-    const oids = await missingObjects(this.repo, wants, has)
-    if (!oids.length) return new Uint8Array()
+    depth: number | null = null,
+  ): Promise<Fetched> {
+    const [oids, shallow] = await missingObjects(this.repo, wants, has, depth)
+    if (!oids.length) return { pack: new Uint8Array(), shallow }
     const { packfile } = await git.packObjects({ ...repoArgs(this.repo), oids })
-    return packfile ?? new Uint8Array()
+    return { pack: packfile ?? new Uint8Array(), shallow }
   }
 }
 
@@ -345,13 +370,24 @@ export class HttpTransport implements Transport {
     return parseAdvertisement(lines)
   }
 
-  /** POST the wants and haves to upload-pack; return the pack. */
-  async fetchPack(wants: readonly string[], haves: readonly string[]): Promise<Uint8Array> {
+  /**
+   * POST the wants and haves to upload-pack; return the pack. A depth asks for
+   * the `shallow` capability and sends `deepen`; the server names each commit
+   * it cut in a `shallow` line ahead of the pack.
+   */
+  async fetchPack(
+    wants: readonly string[],
+    haves: readonly string[],
+    _has?: (oid: string) => Promise<boolean>,
+    depth: number | null = null,
+  ): Promise<Fetched> {
     const [first, ...rest] = wants
-    if (first === undefined) return new Uint8Array()
+    if (first === undefined) return { pack: new Uint8Array(), shallow: [] }
+    const caps = depth === null ? CAPABILITIES : `${CAPABILITIES} shallow`
     const parts = [
-      pktLine(`want ${first} ${CAPABILITIES}\n`),
+      pktLine(`want ${first} ${caps}\n`),
       ...rest.map((want) => pktLine(`want ${want}\n`)),
+      ...(depth === null ? [] : [pktLine(`deepen ${String(depth)}\n`)]),
       ENC.encode(FLUSH),
       ...haves.map((have) => pktLine(`have ${have}\n`)),
       pktLine('done\n'),
@@ -366,15 +402,20 @@ export class HttpTransport implements Transport {
       concat(parts),
     )
     const pack: Uint8Array[] = []
+    const shallow: string[] = []
     for (const line of pktLines(reply)) {
       if (line === null) continue
       const text = DEC.decode(line.subarray(0, 4))
       if (text.startsWith('NAK') || text === 'ACK ') continue
+      if (DEC.decode(line.subarray(0, SHALLOW_LINE.length)) === SHALLOW_LINE) {
+        shallow.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
+        continue
+      }
       if (line[0] === PACK_BAND) pack.push(line.subarray(1))
       else if (line[0] === ERROR_BAND)
         throw new GitError(`remote error: ${DEC.decode(line.subarray(1)).trim()}`)
     }
-    return concat(pack)
+    return { pack: concat(pack), shallow }
   }
 }
 

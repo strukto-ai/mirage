@@ -1017,6 +1017,15 @@ export const GIT = new CLI({
             action: 'store_true',
             help: 'Leave the working tree empty',
           }),
+          new Argument('--depth', { help: 'Fetch only this many commits of history' }),
+          new Argument('--single-branch', {
+            action: 'store_true',
+            help: 'Fetch only the branch or tag checked out',
+          }),
+          new Argument('--no-single-branch', {
+            action: 'store_true',
+            help: 'Fetch every branch, even with --depth',
+          }),
           REVISION,
         ],
       }),

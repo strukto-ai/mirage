@@ -40,7 +40,15 @@ import {
   validRefName,
   writeRef,
 } from './refs.ts'
-import { grafted, objectType, openRepo, repoArgs, storePack, type Repo } from './repo.ts'
+import {
+  addShallow,
+  grafted,
+  objectType,
+  openRepo,
+  repoArgs,
+  storePack,
+  type Repo,
+} from './repo.ts'
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import {
@@ -161,19 +169,30 @@ async function holds(repo: Repo, oid: string): Promise<boolean> {
   return (await objectType(repo, oid)) !== null
 }
 
-/** Fetch what `wants` reaches that is missing, then reopen. */
-async function receive(repo: Repo, transport: Transport, wants: readonly string[]): Promise<Repo> {
+/**
+ * Fetch what `wants` reaches that is missing, then reopen. The commits a depth
+ * cut are listed in `.git/shallow` before the repository is reopened, so every
+ * walk after it stops there.
+ */
+async function receive(
+  repo: Repo,
+  transport: Transport,
+  wants: readonly string[],
+  depth: number | null = null,
+): Promise<Repo> {
   const refs = await resolvedRefs(repo)
   const tips = new Set(refs.values())
   const missing: string[] = []
   for (const want of new Set(wants)) if (!(await holds(repo, want))) missing.push(want)
   if (!missing.length) return repo
-  const pack = await transport.fetchPack(
+  const fetched = await transport.fetchPack(
     missing,
     [...tips].sort(compareCodePoints),
     tips.size ? (oid) => holds(repo, oid) : () => Promise.resolve(false),
+    depth,
   )
-  await storePack(repo, pack)
+  await storePack(repo, fetched.pack)
+  await addShallow(repo, fetched.shallow)
   return openRepo(repo.vfs, repo.location, repo.ambiguous)
 }
 
@@ -230,11 +249,13 @@ export async function fetchObjects(
   adv: Advertisement,
   wants: readonly ReturnType<typeof wanted>[],
   follow: boolean,
+  depth: number | null = null,
 ): Promise<[Repo, ReturnType<typeof wanted>[]]> {
   let current = await receive(
     repo,
     transport,
     wants.map((want) => want.oid),
+    depth,
   )
   if (!follow) return [current, [...wants]]
   const tags = await followedTags(current, adv, new Set(wants.map((want) => want.remote)))

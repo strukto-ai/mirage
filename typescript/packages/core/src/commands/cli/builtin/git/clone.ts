@@ -41,6 +41,29 @@ import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
+// How C's atoi and strtol(..., 0) read a number, which is how git reads
+// `--depth`: atoi for the positive check, strtol for the value.
+const ATOI = /^\s*([+-]?\d+)/
+const STRTOL = /^\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)$/
+const LOCAL_DEPTH_WARNING = 'warning: --depth is ignored in local clones; use file:// instead.\n'
+
+/** Refuse a `--depth` git refuses before cloning: one C's atoi reads below one. */
+export function checkDepth(text: string): void {
+  const found = ATOI.exec(text)?.[1]
+  if (found === undefined || Number.parseInt(found, 10) < 1)
+    throw new GitError(`depth ${text} is not a positive number`)
+}
+
+/**
+ * `--depth` as the transport reads it, C's strtol in base 0; the value is past
+ * `checkDepth`, so it is never negative.
+ */
+export function transportDepth(text: string): number {
+  const digits = STRTOL.exec(text)?.[1]
+  if (digits === undefined) throw new GitError(`transport: invalid depth option '${text}'`)
+  if (/^0[xX]/.test(digits)) return Number.parseInt(digits.slice(2), 16)
+  return Number.parseInt(digits, digits.startsWith('0') ? 8 : 10)
+}
 
 /** The directory git names a clone after when none is given. */
 export function defaultDirectory(url: string): string {
@@ -50,14 +73,27 @@ export function defaultDirectory(url: string): string {
   return path.split(/[/:]/).at(-1) ?? path
 }
 
-/** A clone's config, in the order git writes it. */
-function config(url: string, remote: string, branch: string | null): string {
+/**
+ * A clone's config, in the order git writes it. `single` is the one ref a
+ * single-branch clone takes, which its fetch refspec names; null fetches every
+ * branch.
+ */
+function config(
+  url: string,
+  remote: string,
+  branch: string | null,
+  single: { readonly remote: string; readonly local: string | null } | null,
+): string {
+  const refspec =
+    single === null
+      ? `+refs/heads/*:refs/remotes/${remote}/*`
+      : `+${single.remote}:${single.local ?? single.remote}`
   let text =
     '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n' +
     '\tlogallrefupdates = true\n' +
     configSection('remote', remote, [
       ['url', url],
-      ['fetch', `+refs/heads/*:refs/remotes/${remote}/*`],
+      ['fetch', refspec],
     ])
   if (branch !== null)
     text += configSection('branch', branch, [
@@ -92,8 +128,11 @@ export function remoteHead(
  *
  * A path or `file://` URL is a repository inside the workspace, an `https://`
  * one is fetched over smart HTTP. Every branch lands as a remote-tracking ref
- * and every tag as a tag, and the remote's HEAD branch is checked out. A failed
- * clone removes what it wrote, and keeps a directory that was already there,
+ * and every tag as a tag, and the remote's HEAD branch is checked out.
+ * `--single-branch` takes only the branch or tag it checks out, and the tags
+ * that point into its history; `--depth` implies it and cuts the history that
+ * many commits deep, except from a plain path, which git warns it ignores the
+ * depth for. A failed clone removes what it wrote, and keeps a directory that was already there,
  * empty, as git does. `credentials` is the Authorization `gh repo clone` sends,
  * scoped to the URL's origin as userinfo is and never written to the clone's
  * config.
@@ -113,6 +152,8 @@ export async function clone(
   }
   if (texts.length > 2) throw new UsageError('', `fatal: Too many arguments.\n\n${verbUsage(ctx)}`)
   const name = named ?? defaultDirectory(url)
+  const typed = fl.asStr('depth') ?? null
+  if (typed !== null) checkDepth(typed)
   const quiet = fl.asBool('quiet')
   const vfs = requireVfs(ctx)
   const start = startPoint(fl)
@@ -134,7 +175,7 @@ export async function clone(
   const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
-    notes += await populate(ctx, transport, target, stored, local && !quiet)
+    notes += await populate(ctx, transport, target, stored, local)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
     // A refused checkout leaves the clone behind, as git does.
@@ -156,7 +197,11 @@ export async function clone(
   return [null, new IOResult({ stderr: ENC.encode(notes) })]
 }
 
-/** Lay the clone out, fetch into it and check it out; returns what it prints after `Cloning into`. */
+/**
+ * Lay the clone out, fetch into it and check it out; returns what it prints
+ * after `Cloning into`. `local` is whether the remote is a plain path, which
+ * git copies whole whatever the depth, and prints `done.` after.
+ */
 async function populate(
   ctx: Context,
   transport: Transport,
@@ -166,6 +211,14 @@ async function populate(
 ): Promise<string> {
   const fl = new FlagView(ctx.flags)
   const vfs = requireVfs(ctx)
+  const typed = fl.asStr('depth') ?? null
+  let depth: number | null = null
+  let notes = ''
+  if (typed !== null && local) notes = LOCAL_DEPTH_WARNING
+  else if (typed !== null) depth = transportDepth(typed)
+  let single = typed !== null
+  for (const [key] of fl.occurrences('single_branch', 'no_single_branch'))
+    single = key === 'single_branch'
   const gitdir = target.join('.git')
   const remote = fl.asStr('origin', 'origin')
   if (!validRefName(`refs/remotes/${remote}/test`))
@@ -178,7 +231,7 @@ async function populate(
     worktree: target,
     mountRoot: PathSpec.fromStrPath(vfs.mountOf(target) ?? '/', undefined, '/'),
   }
-  const [wants, funny] = ignoreFunny(
+  const [survivors, funny] = ignoreFunny(
     [...advertised.refs]
       .filter(([ref]) => ref.startsWith(BRANCH_PREFIX) || ref.startsWith(TAG_PREFIX))
       .map(([ref, oid]) => ({
@@ -192,7 +245,8 @@ async function populate(
         listed: true,
       })),
   )
-  let notes = funny
+  notes += funny
+  let wants = survivors
   // Only what survived is a candidate for the branch to check out: a HEAD
   // naming a refused branch detaches, as git's does.
   const kept = new Set(wants.map((want) => want.remote))
@@ -207,6 +261,14 @@ async function populate(
   const commit = picked[1]
   if (chosen !== null && commit === null)
     throw new GitError(`Remote branch ${chosen} not found in upstream ${remote}`)
+  const taken =
+    branch !== null
+      ? `${BRANCH_PREFIX}${branch}`
+      : chosen !== null
+        ? `${TAG_PREFIX}${chosen}`
+        : null
+  const narrowed = wants.find((want) => want.remote === taken) ?? null
+  if (single && narrowed !== null) wants = [narrowed]
   if (!advertised.refs.size) notes += 'warning: You appear to have cloned an empty repository.\n'
   // No HEAD to start from, in an empty remote or one whose HEAD names a branch
   // it lacks: the clone is born on the branch that HEAD names, as git's unborn
@@ -219,13 +281,22 @@ async function populate(
         : `${BRANCH_PREFIX}${DEFAULT_BRANCH}`
     ).slice(BRANCH_PREFIX.length)
   }
-  const [repo] = await fetchObjects(await openRepo(vfs, location), transport, adv, wants, false)
-  for (const want of wants)
+  const one = single ? narrowed : null
+  const [repo, received] = await fetchObjects(
+    await openRepo(vfs, location),
+    transport,
+    adv,
+    wants,
+    one !== null,
+    depth,
+  )
+  for (const want of received)
     if (want.local !== null) await writeRef(vfs, gitdir, want.local, want.oid)
   const reason = `clone: from ${url}`
   const now = Math.floor(systemNow())
+  const fetched = new Set(received.map((want) => want.remote))
   const headOid = adv.head === null ? undefined : adv.refs.get(adv.head)
-  if (adv.head !== null && headOid !== undefined) {
+  if (adv.head !== null && headOid !== undefined && fetched.has(adv.head)) {
     const tracking = `refs/remotes/${remote}/HEAD`
     await writeFile(
       vfs,
@@ -234,8 +305,8 @@ async function populate(
     )
     await append(vfs, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
   }
-  await writeFile(vfs, gitdir.join('config'), ENC.encode(config(url, remote, branch)))
-  if (local) notes += 'done.\n'
+  await writeFile(vfs, gitdir.join('config'), ENC.encode(config(url, remote, branch, one)))
+  if (local && !fl.asBool('quiet')) notes += 'done.\n'
   if (commit === null) {
     if (advertised.refs.size && !fl.asBool('no_checkout'))
       notes += 'warning: remote HEAD refers to nonexistent ref, unable to checkout\n'
