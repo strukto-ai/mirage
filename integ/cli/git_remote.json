@@ -237,6 +237,90 @@
         "stdout": "true\nfalse\ntrue\ndocs/\ntrue\ntrue\nfalse\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_clone_depth_over_file_url",
+      "seq": 568068,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone --depth 1 file:///repo c; status=$?; cat c/.git/shallow; git -C c log --oneline --decorate; git -C c branch -a; git -C c config remote.origin.fetch; git -C c rev-parse --is-shallow-repository; ls c; rm -rf c; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef2542 (grafted, HEAD -> main, origin/main, origin/HEAD) add two\n* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n+refs/heads/main:refs/remotes/origin/main\ntrue\ndocs\nletters.txt\nnumbers.txt\n",
+        "stderr": "Cloning into 'c'...\n"
+      }
+    },
+    {
+      "id": "git_shallow_history_stops_at_the_graft",
+      "seq": 568069,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone -q --depth 2 file:///repo c && cd c && git log --format='%h %p|%s%d'; git rev-list --count HEAD; git log --graph --oneline; git show --stat --format=%s HEAD~1; git cat-file -p HEAD~1 | grep -c '^parent '; git diff HEAD~2; echo rc=$?; git fsck --no-dangling; echo fsck=$?; cd /repo && rm -rf c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 225f39c|add two (HEAD -> main, origin/main, origin/HEAD)\n225f39c |add docs (grafted)\n2\n* 8ef2542 add two\n* 225f39c add docs\nadd docs\n\n docs/readme.md | 1 +\n letters.txt    | 4 ++++\n numbers.txt    | 1 +\n 3 files changed, 6 insertions(+)\n1\nrc=128\nfsck=0\n",
+        "stderr": "fatal: ambiguous argument 'HEAD~2': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_clone_depth_no_single_branch",
+      "seq": 568070,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone -q --depth 1 --no-single-branch file:///repo c && git -C c branch -a && cat c/.git/shallow && git -C c config remote.origin.fetch; git -C c log --oneline --all --decorate; rm -rf c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n  remotes/origin/topic\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n+refs/heads/*:refs/remotes/origin/*\n8ef2542 (grafted, HEAD -> main, origin/main, origin/HEAD) add two\n225f39c (grafted, origin/topic) add docs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_clone_depth_ignored_from_a_plain_path",
+      "seq": 568071,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone --depth 1 . c; status=$?; test -e c/.git/shallow || echo full; git -C c rev-list --count HEAD; git -C c branch -a; git -C c config remote.origin.fetch; rm -rf c; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": "full\n4\n* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n+refs/heads/main:refs/remotes/origin/main\n",
+        "stderr": "Cloning into 'c'...\nwarning: --depth is ignored in local clones; use file:// instead.\ndone.\n"
+      }
+    },
+    {
+      "id": "git_clone_depth_refuses_what_git_cannot_read",
+      "seq": 568072,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone --depth 0 file:///repo c; echo rc=$?; git clone --depth 1abc file:///repo c; echo rc=$?; test -e c || echo removed; git clone -q --depth 010 file:///repo c && git -C c rev-list --count HEAD; test -e c/.git/shallow || echo full; rm -rf c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=128\nremoved\n4\nfull\n",
+        "stderr": "fatal: depth 0 is not a positive number\nCloning into 'c'...\nfatal: transport: invalid depth option '1abc'\n"
+      }
+    },
+    {
+      "id": "git_clone_single_branch_takes_one_branch",
+      "seq": 568073,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone -q --single-branch -b topic file:///repo c && git -C c branch -a && git -C c config remote.origin.fetch && git -C c log --oneline && test -e c/.git/shallow || echo full; git clone -q --depth 1 --no-single-branch --single-branch file:///repo d && git -C d branch -a; rm -rf c d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "* topic\n  remotes/origin/topic\n+refs/heads/topic:refs/remotes/origin/topic\n225f39c add docs\n265ec3a add delta\n98b4ffe first commit\nfull\n* main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n",
+        "stderr": ""
+      }
     }
   ]
 }
