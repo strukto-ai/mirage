@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { LineFacts } from '../../types.ts'
+import { type LineFacts, PathSpec } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BUILTIN_SPECS, isBuiltinGrammar } from './builtins.ts'
@@ -138,6 +138,10 @@ export class ParsedArgs {
   // read as an option, VALUE for an option's detached value, OPERAND for an
   // argument, null for a word the scan never reads.
   readonly wordRoles: (WordKind | null)[]
+  // Per-position path, aligned with wordKinds: what a PATH value or
+  // operand resolves to, on the option word itself when its value is
+  // attached (`--file=x`, `-fx`), null for a word naming no path.
+  readonly wordPaths: (PathSpec | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
   // abbreviated longs matching several options (typed prefix, matched
@@ -196,6 +200,7 @@ export class ParsedArgs {
           | 'wordKinds'
           | 'wordBases'
           | 'wordRoles'
+          | 'wordPaths'
           | 'invalidOptions'
           | 'ambiguousOptions'
           | 'optionErrorKinds'
@@ -222,6 +227,7 @@ export class ParsedArgs {
     this.wordKinds = init.wordKinds ?? []
     this.wordBases = init.wordBases ?? []
     this.wordRoles = init.wordRoles ?? []
+    this.wordPaths = init.wordPaths ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
     this.optionErrorKinds = init.optionErrorKinds ?? []
@@ -596,6 +602,7 @@ export function parseCommand(
   let base = cwd
   const wordBases: (string | null)[] = new Array<string | null>(argv.length).fill(null)
   const rawBases: string[] = []
+  const attachedValues: [number, ValueType, string][] = []
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
@@ -715,6 +722,13 @@ export function parseCommand(
     for (let offset = 0; offset < detached; offset++) {
       wordKinds[scanOrigins[i + offset + 1] ?? -1] =
         kinds[offset + (attachedValue === null ? 0 : 1)] ?? cs.kindOf.get(spelling) ?? 'str'
+    }
+    if (attachedValue !== null) {
+      attachedValues.push([
+        scanOrigins[i] ?? -1,
+        kinds[0] ?? cs.kindOf.get(spelling) ?? 'str',
+        attachedValue,
+      ])
     }
     return detached + 1
   }
@@ -857,6 +871,11 @@ export function parseCommand(
           (cs.longValueSpellings.has(spelling) || cs.longOptionalSpellings.has(spelling))
         ) {
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, spelling, tok.slice(eqPos + 1))
+          attachedValues.push([
+            scanOrigins[i] ?? -1,
+            cs.kindOf.get(spelling) ?? 'str',
+            tok.slice(eqPos + 1),
+          ])
           base = rebase(flags, cs, spelling, tok.slice(eqPos + 1), base)
         } else if (cs.longValueSpellings.has(etok)) {
           // Declared value flag at end of line with no argument.
@@ -912,6 +931,11 @@ export function parseCommand(
       for (const vf of cs.attachSpellings) {
         if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, tok.slice(vf.length))
+          attachedValues.push([
+            scanOrigins[i] ?? -1,
+            cs.kindOf.get(vf) ?? 'str',
+            tok.slice(vf.length),
+          ])
           base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
           matchedOptional = true
@@ -949,6 +973,7 @@ export function parseCommand(
         if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           const attachedValue = attached(tok.slice(vf.length), equalsValues)
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, attachedValue)
+          attachedValues.push([scanOrigins[i] ?? -1, cs.kindOf.get(vf) ?? 'str', attachedValue])
           base = rebase(flags, cs, vf, attachedValue, base)
           i += 1
           matchedValue = true
@@ -1038,6 +1063,11 @@ export function parseCommand(
           const attachedValue = attached(mixed.attached, equalsValues)
           for (const name of mixed.bools) setBoolFlag(flags, cs, name)
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, mixed.valueFlag, attachedValue)
+          attachedValues.push([
+            scanOrigins[i] ?? -1,
+            cs.kindOf.get(mixed.valueFlag) ?? 'str',
+            attachedValue,
+          ])
           base = rebase(flags, cs, mixed.valueFlag, attachedValue, base)
           i += 1
           continue
@@ -1304,6 +1334,14 @@ export function parseCommand(
           ? WordKind.VALUE
           : null,
   )
+  const wordPaths: (PathSpec | null)[] = argv.map((word, slot) =>
+    wordKinds[slot] === 'path' && wordRoles[slot] !== WordKind.OPTION
+      ? PathSpec.fromStrPath(word, undefined, wordBases[slot] ?? cwd)
+      : null,
+  )
+  for (const [slot, kind, value] of attachedValues) {
+    if (kind === 'path') wordPaths[slot] = PathSpec.fromStrPath(value, undefined, cwd)
+  }
   const parsed = new ParsedArgs({
     flags,
     args: classified,
@@ -1328,6 +1366,7 @@ export function parseCommand(
     wordKinds,
     wordBases,
     wordRoles,
+    wordPaths,
   })
   if (parses !== undefined) {
     if (parses.size >= PARSES_KEPT) parses.clear()
