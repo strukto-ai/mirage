@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { gnuStrftime } from './strftime.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { gnuStrftime, strftimeStream } from './strftime.ts'
 import { UTC_ZONE, resolveTz } from '../../../utils/timezone.ts'
 
 const MOMENT = new Date(Date.UTC(2026, 0, 1, 0, 0, 1, 123))
@@ -184,4 +184,65 @@ it.each([
 it('preserves raw bytes, a BOM and input across the WASM window', () => {
   const fmt = '\udcff\ufeff' + '😀%Y'.repeat(30000)
   expect(gnuStrftime(MOMENT, fmt, UTC_ZONE)).toBe('\udcff\ufeff' + '😀2026'.repeat(30000))
+})
+
+it('streams formats across character and directive boundaries', async () => {
+  const fmt = 'x'.repeat(16383) + '\u{10080}\udcff%Y' + 'é'.repeat(20000) + '%:z'
+  const parts: Uint8Array[] = []
+  for await (const part of await strftimeStream(MOMENT, fmt, UTC_ZONE)) parts.push(part)
+  expect(Buffer.concat(parts)).toEqual(
+    Buffer.concat([
+      Buffer.from('x'.repeat(16383) + '\u{10080}'),
+      Buffer.from([255]),
+      Buffer.from('2026' + 'é'.repeat(20000) + '+00:00'),
+    ]),
+  )
+})
+
+it('cancels format preparation before any output is emitted', async () => {
+  const abort = new AbortController()
+  const output = await strftimeStream(
+    MOMENT,
+    'x'.repeat(1 << 20),
+    UTC_ZONE,
+    undefined,
+    abort.signal,
+  )
+  abort.abort(new Error('format stopped'))
+  await expect(output.next()).rejects.toMatchObject({ name: 'AbortError' })
+  await output.return?.()
+  expect(gnuStrftime(MOMENT, '%Y', UTC_ZONE)).toBe('2026')
+})
+
+it('closes an unconsumed large format and keeps the next formatter usable', async () => {
+  const output = await strftimeStream(MOMENT, 'x'.repeat(1 << 20), UTC_ZONE)
+  await output.return?.()
+  expect(gnuStrftime(MOMENT, '%Y', UTC_ZONE)).toBe('2026')
+})
+
+it('stops between encoded format windows', async () => {
+  const abort = new AbortController()
+  const output = await strftimeStream(
+    MOMENT,
+    'x'.repeat(1 << 20),
+    UTC_ZONE,
+    undefined,
+    abort.signal,
+  )
+  const original = TextEncoder.prototype.encode.bind(new TextEncoder())
+  let calls = 0
+  const encode = vi.spyOn(TextEncoder.prototype, 'encode').mockImplementation((text) => {
+    calls += 1
+    const bytes = original(text)
+    abort.abort()
+    return bytes
+  })
+  try {
+    await expect(output.next()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(calls).toBe(1)
+  } finally {
+    encode.mockRestore()
+    await output.return?.()
+  }
+  expect(gnuStrftime(MOMENT, '%Y', UTC_ZONE)).toBe('2026')
 })

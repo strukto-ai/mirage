@@ -31,12 +31,18 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.cooperative import chunks
-from mirage.io.spool import IO_BUFFER_SIZE, ByteSpool
+from mirage.io.spool import IO_BUFFER_SIZE, MEMORY_LIMIT, ByteSpool
+from mirage.io.stream import OutputStream, rechunk
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs import StreamRefusal, open_stream, run_stream
 from mirage.rs.scan import refused, scan
-from mirage.rs.stream import OpenStream, chain_output, close_stream
+from mirage.rs.stream import (
+    OpenStream,
+    chain_output,
+    close_stream,
+    merge_output,
+)
 from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, LineFacts, PathSpec, PolymorphicReadFn
 from mirage.utils.ids import IdSource, SystemIdSource
@@ -358,39 +364,67 @@ def _label(path: PathSpec | None) -> str:
     return path.raw_path
 
 
-# A run is sorted once its records reach SORT_RUN_BYTES, each counting its
-# length plus 64, and spooled; MERGE_FAN_IN runs merge into one at a time,
-# so a sort of any size holds one run and one chunk per merged input.
+# Completed records spill when their bytes, overhead and the open record
+# reach SORT_RUN_BYTES. A single record may exceed that target. Merging
+# retains one complete head per input and, with -u, the previous record.
+# Spooling bounds completed output, not these record buffers.
 SORT_RUN_BYTES = 8 * 1024 * 1024
 MERGE_FAN_IN = 16
 
 
-async def _merge_spools(
+def _merged_output(
     runs: list[ByteSpool], config: Mapping[str, JsonValue]
-) -> ByteSpool:
-    """A k-way merge of sorted spools, each read as the merge asks.
+) -> OutputStream:
+    """Merge sorted spools directly, owning them even before the first pull.
+
+    The native binding takes bounded spool reads directly; the Wasm twin
+    recuts reads for its fixed input window.
 
     Args:
         runs (list[ByteSpool]): the runs, closed once merged.
         config (Mapping[str, JsonValue]): the engine's, as mirage-rs read it.
     """
-    output = ByteSpool()
-    stream = open_stream(
+    stream: OpenStream | None = open_stream(
         "sort", {**config, "mode": "merge", "inputs": len(runs)}
     )
+    positions = [0] * len(runs)
+
+    async def read(index: int) -> bytes | None:
+        if positions[index] >= runs[index].size:
+            return None
+        data = await runs[index].read(positions[index], MEMORY_LIMIT)
+        positions[index] += len(data)
+        return data or None
+
+    output = rechunk(merge_output(stream, read), MEMORY_LIMIT)
+
+    async def close() -> None:
+        nonlocal stream
+        closing, stream = stream, None
+        try:
+            if closing is not None:
+                await close_stream(closing)
+        finally:
+            for run in runs:
+                await run.close()
+
+    return OutputStream(output, close)
+
+
+async def _spool_records(source: OutputStream) -> ByteSpool:
+    output = ByteSpool(buffer_size=MEMORY_LIMIT)
     try:
-        await output.fill(
-            chain_output(
-                stream, [run.stream(piece=IO_BUFFER_SIZE) for run in runs]
-            )
-        )
+        await output.fill(source)
         return output
     except BaseException:
         await output.close()
         raise
-    finally:
-        for run in runs:
-            await run.close()
+
+
+async def _merge_spools(
+    runs: list[ByteSpool], config: Mapping[str, JsonValue]
+) -> ByteSpool:
+    return await _spool_records(_merged_output(runs, config))
 
 
 async def _add_run(
@@ -415,7 +449,7 @@ async def _merge_operands(
     read: PolymorphicReadFn,
     stdin: ByteSource | None,
     config: Mapping[str, JsonValue],
-) -> ByteSpool | bytes:
+) -> ByteSpool | OutputStream | bytes:
     stream = stdin_stream(read, stdin)
     first_failure: tuple[InputStage, bytes] | None = None
     levels: list[list[ByteSpool]] = [[]]
@@ -446,7 +480,7 @@ async def _merge_operands(
             engine = open_stream(
                 "sort", {**config, "mode": "merge", "inputs": len(group)}
             )
-            output = ByteSpool()
+            output = ByteSpool(buffer_size=MEMORY_LIMIT)
             try:
                 await output.fill(
                     chain_output(engine, [source(path) for path in group])
@@ -458,16 +492,12 @@ async def _merge_operands(
         if first_failure is not None:
             return first_failure[1]
         runs = [run for level in reversed(levels) for run in level]
-        while len(runs) > 1:
+        while len(runs) > MERGE_FAN_IN:
             merging = runs[:MERGE_FAN_IN]
             merged = await _merge_spools(merging, config)
             levels.append([merged])
             runs[: len(merging)] = [merged]
-        output = runs.pop()
-        for level in levels:
-            for run in level:
-                if run is not output:
-                    await run.close()
+        output = _merged_output(runs, config) if len(runs) > 1 else runs[0]
         levels.clear()
         return output
     finally:
@@ -481,7 +511,7 @@ async def _external_records(
     read: PolymorphicReadFn,
     stdin: ByteSource | None,
     parsed: SortFlags,
-) -> ByteSpool | bytes:
+) -> ByteSpool | OutputStream | bytes:
     separator = record_separator(parsed.zero_terminated)
     config = parsed.config
     if parsed.merge:
@@ -499,7 +529,7 @@ async def _external_records(
         # and what it writes belongs to that run, so the loop yields between
         # steps; a feed of no bytes then starts a run already buffered.
         while stream.busy():
-            run = ByteSpool()
+            run = ByteSpool(buffer_size=MEMORY_LIMIT)
             try:
                 while stream.busy():
                     if piece := stream.drain():
@@ -545,7 +575,7 @@ async def _external_records(
         await add_sorted(sorter)
         runs = [run for level in reversed(levels) for run in level]
         # Ownership remains in levels until each merge closes its inputs.
-        while len(runs) > 1:
+        while len(runs) > MERGE_FAN_IN:
             next_runs = []
             for start in range(0, len(runs), MERGE_FAN_IN):
                 merged_run = await _merge_spools(
@@ -554,11 +584,13 @@ async def _external_records(
                 levels.append([merged_run])
                 next_runs.append(merged_run)
             runs = next_runs
-        output = runs[0] if runs else ByteSpool()
-        for level in levels:
-            for run in level:
-                if run is not output:
-                    await run.close()
+        output = (
+            _merged_output(runs, config)
+            if len(runs) > 1
+            else runs[0]
+            if runs
+            else ByteSpool()
+        )
         levels.clear()
         return output
     finally:
@@ -573,7 +605,7 @@ async def _check_stream(
     path: PathSpec | None,
     parsed: SortFlags,
 ) -> IOResult:
-    config = {**parsed.config, "mode": "check"}
+    config = {**parsed.config, "mode": "check", "quiet": parsed.check_quiet}
     try:
         async with aclosing(run_stream("sort", config, source)) as checked:
             async for _ in checked:
@@ -671,9 +703,19 @@ async def sort_generic(
             else stdin or b""
         )
         return b"", await _check_stream(source, path, parsed)
-    ordered = await _external_records(paths, read, stdin, parsed)
+    try:
+        ordered = await _external_records(paths, read, stdin, parsed)
+        if parsed.output is not None and isinstance(ordered, OutputStream):
+            ordered = await _spool_records(ordered)
+    except StreamRefusal as refusal:
+        return b"", IOResult(
+            stderr=encode_text(f"{refusal.message}\n"),
+            exit_code=refusal.status,
+        )
     if isinstance(ordered, bytes):
         return b"", IOResult(stderr=ordered, exit_code=2)
+    if isinstance(ordered, OutputStream):
+        return ordered, IOResult()
 
     if parsed.output is not None:
         if write_bytes is None:

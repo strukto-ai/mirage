@@ -1,3 +1,5 @@
+import asyncio
+import weakref
 from collections.abc import Awaitable, Callable
 
 import pytest
@@ -8,6 +10,7 @@ from mirage.commands.builtin.generic.sort import (
     parse_flags,
     sort_generic,
 )
+from mirage.io.stream import OutputStream
 from mirage.io.types import IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream
@@ -17,6 +20,10 @@ from mirage.types import PathSpec
 
 async def _unused_read_bytes(_path: PathSpec) -> bytes:
     raise AssertionError("read_bytes should not be called")
+
+
+async def _failed_spool_read(_spool, _offset, _size):
+    raise OSError("scratch read failed")
 
 
 def _parsed(flags: dict) -> SortFlags:
@@ -169,8 +176,10 @@ async def test_check_refuses_an_output_by_its_own_letter(flags, mode):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flags", [{"c": True}, {"C": True}])
-async def test_check_out_of_memory_is_sorts_own_line(monkeypatch, flags):
+@pytest.mark.parametrize(
+    "flags", [{}, {"merge": True}, {"c": True}, {"C": True}]
+)
+async def test_out_of_memory_is_sorts_own_line(monkeypatch, flags):
     # The engine refuses a line past its cap as sort does out of memory,
     # which -C does not silence (pinned, coreutils 9.7).
     feed = OpenStream.feed
@@ -180,7 +189,12 @@ async def test_check_out_of_memory_is_sorts_own_line(monkeypatch, flags):
             raise StreamRefusal("sort: memory exhausted", b"", 2)
         return feed(self, chunk)
 
+    def refusing_input(self: OpenStream, index: int, chunk: bytes) -> bytes:
+        del index
+        return refusing(self, chunk)
+
     monkeypatch.setattr(OpenStream, "feed", refusing)
+    monkeypatch.setattr(OpenStream, "feed_input", refusing_input)
     _, io = await sort_generic(
         [], read=_unused_read_bytes, stdin=b"a\nlong", flags=flags
     )
@@ -383,6 +397,33 @@ async def test_check_names_the_disordered_record():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,quiet",
+    [
+        ({"c": True}, False),
+        ({"C": True}, True),
+        ({"check": "quiet"}, True),
+        ({"check": "silent"}, True),
+    ],
+)
+@pytest.mark.parametrize("separator", [b"\n", b"\0"])
+async def test_check_preserves_large_binary_diagnostics(
+    flags, quiet, separator
+):
+    record = b"a" * (128 * 1024) + b"\xff\xf0\x9f\x98\x80"
+    stdout, result = await sort_generic(
+        [],
+        read=_unused_read_bytes,
+        stdin=b"z" + separator + record + separator,
+        flags={**flags, "zero_terminated": separator == b"\0"},
+    )
+    assert await materialize(stdout) == b""
+    assert result.exit_code == 1
+    expected = b"" if quiet else b"sort: -:2: disorder: " + record + separator
+    assert await _stderr(result) == expected
+
+
+@pytest.mark.asyncio
 async def test_external_sort_preserves_stability_across_spill_and_merge_levels(
     monkeypatch,
 ):
@@ -409,9 +450,9 @@ async def test_merge_retires_groups_before_reading_all_operands(monkeypatch):
     spool = sort_module.ByteSpool
 
     class TrackingSpool(spool):
-        def __init__(self):
+        def __init__(self, **kwargs):
             nonlocal peak
-            super().__init__()
+            super().__init__(**kwargs)
             live.add(self)
             peak = max(peak, len(live))
 
@@ -430,3 +471,96 @@ async def test_merge_retires_groups_before_reading_all_operands(monkeypatch):
     assert result.exit_code == 0
     assert peak < 32
     assert not live
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stop", ["unstarted", "early", "cancel", "read_error"]
+)
+async def test_final_merge_owns_runs_until_the_consumer_closes(
+    monkeypatch, stop
+):
+    stores = []
+    engines = []
+    opening = sort_module.open_stream
+    spool = sort_module.ByteSpool
+
+    def opened(*args, **kwargs):
+        stream = opening(*args, **kwargs)
+        engines.append(weakref.ref(stream))
+        return stream
+
+    class TrackingSpool(spool):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            stores.append(self)
+
+    monkeypatch.setattr(sort_module, "ByteSpool", TrackingSpool)
+    monkeypatch.setattr(sort_module, "open_stream", opened)
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 128)
+    stdout, result = await sort_generic(
+        [],
+        read=_unused_read_bytes,
+        stdin=b"z" * 90 + b"\n" + b"a" * 90,
+        flags={},
+    )
+    assert result.exit_code == 0
+    assert isinstance(stdout, OutputStream)
+    assert len(stores) == 2 and all(not store.closed for store in stores)
+    if stop == "early":
+        assert await anext(stdout) == b"a" * 90 + b"\n" + b"z" * 90 + b"\n"
+    elif stop == "cancel":
+        entered = asyncio.Event()
+
+        async def blocked(self, offset, size):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(TrackingSpool, "read", blocked)
+        task = asyncio.create_task(anext(stdout))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    elif stop == "read_error":
+        monkeypatch.setattr(TrackingSpool, "read", _failed_spool_read)
+        with pytest.raises(OSError, match="scratch read failed"):
+            await anext(stdout)
+    await stdout.aclose()
+    assert all(store.closed for store in stores)
+    if stop in {"unstarted", "early"}:
+        assert all(engine() is None for engine in engines)
+
+
+@pytest.mark.asyncio
+async def test_output_file_waits_for_final_merge_read_errors(monkeypatch):
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 128)
+    written = []
+
+    async def write(path, source):
+        written.append(path)
+        await materialize(source)
+
+    monkeypatch.setattr(sort_module.ByteSpool, "read", _failed_spool_read)
+    with pytest.raises(OSError, match="scratch read failed"):
+        await sort_generic(
+            [],
+            read=_unused_read_bytes,
+            write_bytes=write,
+            stdin=b"z" * 90 + b"\n" + b"a" * 90,
+            flags={"output": [_spec("/out")]},
+        )
+    assert not written
+
+
+@pytest.mark.asyncio
+async def test_final_merge_preserves_short_records_across_large_spool_windows():
+    source = b"a\n" * 65536
+    paths = [_spec(f"/input{i}") for i in range(17)]
+    stdout, result = await sort_generic(
+        paths,
+        read=_reader({path.virtual: source for path in paths}),
+        flags={"merge": True},
+    )
+    assert await materialize(stdout) == source * 17
+    assert result.exit_code == 0

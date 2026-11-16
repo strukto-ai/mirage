@@ -12,6 +12,153 @@ fn config(mode: &str, keys: &str, extra: &str) -> String {
 const WHOLE: &str = r#"[{"start_field":1,"start_char":1,"start_skip":false,"end_field":null,"end_char":null,"end_skip":false,"mods":{"numeric":false,"general_numeric":false,"human":false,"version":false,"month":false,"fold":false,"reverse":false,"dictionary":false,"ignore_nonprinting":false,"random":false}}]"#;
 
 #[test]
+fn numeric_comparisons_resume_without_changing_key_order() {
+    let tail = "0".repeat(1600);
+    let records: Vec<Vec<u8>> = [
+        format!("{}-0007.04{tail} z", " ".repeat(1600)),
+        format!("-7.04{tail} a"),
+        format!("0.{tail}1"),
+        format!("0000.{tail}"),
+        format!("-0.{tail}"),
+        "".into(),
+        "-".into(),
+        format!("9{tail}"),
+        format!("9{tail}1"),
+        format!("same|{tail}7.000|z"),
+        format!("same|7.0{tail}|a"),
+        format!("{} 5 suffix", "x".repeat(1600)),
+        format!("{} 4 suffix", "x".repeat(1600)),
+        "  2 \t".into(),
+    ]
+    .into_iter()
+    .map(String::into_bytes)
+    .collect();
+    let mut resumed = 0;
+    for separator in [None, Some(b'|')] {
+        for (start_field, start_char, end_field, end_char) in [
+            (1, 1, None, None),
+            (1, 2, Some(1), Some(1200)),
+            (2, 1, Some(2), None),
+            (2, 2, Some(3), Some(2)),
+            (3, 1, Some(1), None),
+            (40, 1, Some(40), None),
+        ] {
+            for stable in [false, true] {
+                for unique in [false, true] {
+                    for reverse in [false, true] {
+                        let key: Json = serde_json::from_str::<Json>(WHOLE).unwrap()[0].clone();
+                        let mut key = key;
+                        key["start_field"] = json!(start_field);
+                        key["start_char"] = json!(start_char);
+                        key["start_skip"] = json!(stable);
+                        key["end_field"] = json!(end_field);
+                        key["end_char"] = json!(end_char);
+                        key["end_skip"] = json!(unique);
+                        key["mods"]["numeric"] = json!(true);
+                        key["mods"]["reverse"] = json!(reverse);
+                        let keys = if unique {
+                            json!([key.clone(), key])
+                        } else {
+                            json!([key])
+                        };
+                        let compare: super::key::Compare = serde_json::from_value(json!({
+                            "keys": keys, "field_sep": separator,
+                            "reverse": !reverse, "stable": stable, "unique": unique,
+                        }))
+                        .unwrap();
+                        let mut comparison = super::key::Comparison::default();
+                        for a in &records {
+                            for b in &records {
+                                let mut calls = 0;
+                                let actual = loop {
+                                    calls += 1;
+                                    assert!(calls < 200, "comparison failed to advance");
+                                    if let Some(order) = comparison.step(&compare, a, b, &mut 0, 1)
+                                    {
+                                        break order;
+                                    }
+                                };
+                                resumed += usize::from(calls > 1);
+                                assert_eq!(actual, compare.records(a, b));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(resumed > 100);
+}
+
+#[test]
+fn long_numeric_records_sort_merge_and_deduplicate_stably() {
+    let digits = "7".repeat(400 * 1024);
+    let first = format!("{digits}.05000 z\n").into_bytes();
+    let equal = format!("00{digits}.05 a\n").into_bytes();
+    let smaller = format!("-{digits}.05\n").into_bytes();
+    let larger = format!("{digits}.051\n").into_bytes();
+    let keys = WHOLE.replace(r#""numeric":false"#, r#""numeric":true"#);
+    for unique in [false, true] {
+        let cfg = config("sort", &keys, r#","run_bytes":1073741824"#)
+            .replace(r#""stable":false"#, r#""stable":true"#)
+            .replace(r#""unique":false"#, &format!(r#""unique":{unique}"#));
+        let input = [
+            larger.as_slice(),
+            first.as_slice(),
+            equal.as_slice(),
+            smaller.as_slice(),
+        ]
+        .concat();
+        let expected = if unique {
+            [smaller.as_slice(), first.as_slice(), larger.as_slice()].concat()
+        } else {
+            [
+                smaller.as_slice(),
+                first.as_slice(),
+                equal.as_slice(),
+                larger.as_slice(),
+            ]
+            .concat()
+        };
+        let (out, error) = run("sort", &cfg, &[&input]);
+        assert!(
+            error.is_none(),
+            "{}",
+            error.map_or(String::new(), |error| error.to_string())
+        );
+        assert_eq!(out, expected);
+
+        let cfg = cfg
+            .replace(r#""mode":"sort""#, r#""mode":"merge""#)
+            .replace(r#""run_bytes":1073741824"#, r#""inputs":2"#);
+        let mut stream = open("sort", cfg.as_bytes()).unwrap();
+        let inputs = [
+            [smaller.as_slice(), first.as_slice()].concat(),
+            [equal.as_slice(), larger.as_slice()].concat(),
+        ];
+        let mut positions = [0, 0];
+        let mut output = Vec::new();
+        loop {
+            drain_all(stream.as_mut(), &mut output);
+            let Some(index) = stream.wants() else { break };
+            let at = positions[index];
+            if at == inputs[index].len() {
+                stream.end_input(index, &mut output).unwrap();
+            } else {
+                let stop = inputs[index].len().min(at + 16384);
+                stream
+                    .feed_input(index, &inputs[index][at..stop], &mut output)
+                    .unwrap();
+                positions[index] = stop;
+            }
+        }
+        stream.finish(&mut output).unwrap();
+        drain_all(stream.as_mut(), &mut output);
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
 fn sorts_bytes_and_keeps_a_missing_newline() {
     let cfg = config("sort", WHOLE, r#","run_bytes":8388608"#);
     assert_eq!(run("sort", &cfg, &[b"b\na\n\xff\nc"]).0, b"a\nb\nc\n\xff\n");
@@ -137,7 +284,7 @@ fn merges_a_long_record_once() {
     let cfg = config("merge", WHOLE, r#","inputs":2"#);
     let mut stream = open("sort", cfg.as_bytes()).unwrap();
     let mut out = Vec::new();
-    let long = vec![b'z'; 1 << 20];
+    let long = vec![b'z'; crate::constants::MAX_HELD / 2];
     for piece in long.chunks(16 * 1024) {
         stream.feed_input(0, piece, &mut out).unwrap();
     }
@@ -336,6 +483,47 @@ fn check_names_the_first_disorder() {
     let (out, err) = run("sort", &cfg, &[b"a\nc\n", b"b\nd\n"]);
     assert_eq!(out, b"b");
     assert_eq!(err.map(|e| e.message), Some("3".into()));
+}
+
+#[test]
+fn quiet_check_omits_the_disordered_record() {
+    let mut record = vec![b'a'; 128 * 1024];
+    record.extend_from_slice(b"\xff\xf0\x9f\x98\x80");
+    let input = [b"z\n".as_slice(), &record, b"\n"].concat();
+    let chunks: Vec<_> = input.chunks(16384).collect();
+    for quiet in [false, true] {
+        let cfg = config("check", WHOLE, &format!(",\"quiet\":{quiet}"));
+        let (out, error) = run("sort", &cfg, &chunks);
+        let error = error.expect("disorder");
+        assert_eq!(error.message, "2");
+        assert_eq!(error.status, 1);
+        if quiet {
+            assert!(out.is_empty());
+        } else {
+            assert_eq!(out, record);
+        }
+    }
+}
+
+#[test]
+fn quiet_check_preserves_unique_reverse_and_sorted_status() {
+    for options in [vec![("unique", "")], vec![("reverse", "")]] {
+        let cfg = engine(&options, json!({"mode": "check", "quiet": true}));
+        let input = if options[0].0 == "unique" {
+            b"a\0a\0"
+        } else {
+            b"a\0b\0"
+        };
+        let (out, error) = run("sort", &cfg, &[input]);
+        assert!(out.is_empty());
+        let error = error.expect("disorder");
+        assert_eq!(error.message, "2");
+        assert_eq!(error.status, 1);
+    }
+    let cfg = engine(&[], json!({"mode": "check", "quiet": true}));
+    let (out, error) = run("sort", &cfg, &[b"a\0b\0"]);
+    assert!(out.is_empty());
+    assert!(error.is_none());
 }
 
 type Options<'a> = [(&'a str, &'a str)];
@@ -633,4 +821,215 @@ fn a_second_random_source_must_be_the_same_word() {
     assert_eq!(scan(&[]).expect("read")["random"], json!(false));
     let random = [("random_sort".to_owned(), Vec::new())];
     assert_eq!(scan(&random).expect("read")["random"], json!(true));
+}
+
+#[test]
+fn output_pieces_split_inside_long_records() {
+    for zero in [false, true] {
+        for unique in [false, true] {
+            for mode in ["sort", "merge"] {
+                let extra = if mode == "sort" {
+                    r#", "run_bytes":8388608"#
+                } else {
+                    r#", "inputs":1"#
+                };
+                let cfg = config(mode, WHOLE, extra)
+                    .replace(
+                        r#""zero_terminated":false"#,
+                        &format!(r#""zero_terminated":{zero}"#),
+                    )
+                    .replace(r#""unique":false"#, &format!(r#""unique":{unique}"#));
+                let mut stream = open("sort", cfg.as_bytes()).unwrap();
+                let separator = if zero { 0 } else { b'\n' };
+                let mut input = vec![b'x'; 3 * crate::constants::OUTPUT];
+                input.push(separator);
+                let expected = input.clone();
+                if unique {
+                    input.extend_from_slice(&expected);
+                }
+                let mut output = Vec::new();
+                for chunk in input.chunks(16384) {
+                    let mut piece = Vec::new();
+                    stream.feed(chunk, &mut piece).unwrap();
+                    assert!(piece.len() <= crate::constants::OUTPUT);
+                    output.extend(piece);
+                    while stream.busy() {
+                        let mut piece = Vec::new();
+                        stream.drain(&mut piece).unwrap();
+                        assert!(piece.len() <= crate::constants::OUTPUT);
+                        output.extend(piece);
+                    }
+                }
+                let mut piece = Vec::new();
+                stream.finish(&mut piece).unwrap();
+                assert!(piece.len() <= crate::constants::OUTPUT);
+                output.extend(piece);
+                while stream.busy() {
+                    let mut piece = Vec::new();
+                    stream.drain(&mut piece).unwrap();
+                    assert!(piece.len() <= crate::constants::OUTPUT);
+                    output.extend(piece);
+                }
+                assert_eq!(output, expected, "{mode} unique={unique} zero={zero}");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_open_record_counts_toward_the_run_target() {
+    let cfg = config("sort", WHOLE, r#", "run_bytes":1024"#);
+    let mut stream = open("sort", cfg.as_bytes()).unwrap();
+    let mut out = Vec::new();
+    stream.feed(b"z\na\n", &mut out).unwrap();
+    stream.feed(&vec![b'x'; 1024], &mut out).unwrap();
+    assert!(stream.busy());
+    assert_eq!(drain_run(stream.as_mut()).0, b"a\nz\n");
+    stream.finish(&mut out).unwrap();
+    let mut expected = vec![b'x'; 1024];
+    expected.push(b'\n');
+    assert_eq!(drain_run(stream.as_mut()).0, expected);
+}
+
+#[test]
+fn whole_record_comparison_resumes_without_restarting_the_prefix() {
+    let compare: super::Compare = serde_json::from_value(json!({
+        "keys": serde_json::from_str::<Json>(WHOLE).unwrap(),
+        "field_sep": null, "reverse": false, "unique": false, "stable": false,
+    }))
+    .unwrap();
+    let mut a = vec![b'x'; 2 * super::COST_BYTES];
+    let mut b = a.clone();
+    a.push(b'a');
+    b.push(b'b');
+    let mut comparison = super::Comparison::default();
+    for _ in 0..2 {
+        assert_eq!(comparison.step(&compare, &a, &b, &mut 0, 1), None);
+    }
+    assert_eq!(
+        comparison.step(&compare, &a, &b, &mut 0, 1),
+        Some(std::cmp::Ordering::Less)
+    );
+    assert_eq!(
+        comparison.step(&compare, b"z", b"a", &mut 0, 1),
+        Some(std::cmp::Ordering::Greater)
+    );
+}
+
+#[test]
+fn lexical_comparison_preserves_byte_order_at_word_and_tail_boundaries() {
+    let compare: super::Compare = serde_json::from_value(json!({
+        "keys": serde_json::from_str::<Json>(WHOLE).unwrap(),
+        "field_sep": null, "reverse": false, "unique": false, "stable": false,
+    }))
+    .unwrap();
+    for len in 0..40 {
+        let a: Vec<u8> = (0..len).map(|i| (i * 37) as u8).collect();
+        for at in 0..=len {
+            let mut b = a.clone();
+            if at == len {
+                b.push(128);
+            } else {
+                b[at] ^= 128;
+            }
+            for (a, b) in [(&a, &b), (&b, &a), (&a, &a)] {
+                assert_eq!(
+                    super::Comparison::default().step(&compare, a, b, &mut 0, 1),
+                    Some(a.cmp(b)),
+                    "length {len}, differing byte {at}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn checker_yields_between_records_and_keeps_disorder_output() {
+    let cfg = config("check", WHOLE, "");
+    let mut stream = open("sort", cfg.as_bytes()).unwrap();
+    let mut out = Vec::new();
+    stream.feed(&b"x\n".repeat(10000), &mut out).unwrap();
+    assert!(stream.busy());
+    assert!(stream.feed(b"z", &mut out).is_err());
+    assert!(drain_run(stream.as_mut()).0.is_empty());
+    let error = stream.feed(b"a\n", &mut out).unwrap_err();
+    assert_eq!(error.message, "10001");
+    assert_eq!(out, b"a");
+}
+
+#[test]
+fn sort_and_merge_accept_records_larger_than_the_checker_buffer_limit() {
+    for mode in ["sort", "merge"] {
+        let extra = if mode == "sort" {
+            r#", "run_bytes":8388608"#
+        } else {
+            r#", "inputs":1"#
+        };
+        let cfg = config(mode, WHOLE, extra);
+        let mut stream = open("sort", cfg.as_bytes()).unwrap();
+        let mut expected = vec![b'x'; crate::constants::MAX_HELD + 1];
+        let mut out = Vec::new();
+        for chunk in expected.chunks(16384) {
+            stream.feed(chunk, &mut out).unwrap();
+            out.extend(drain_run(stream.as_mut()).0);
+        }
+        stream.finish(&mut out).unwrap();
+        out.extend(drain_run(stream.as_mut()).0);
+        expected.push(b'\n');
+        assert_eq!(out, expected);
+    }
+}
+
+#[test]
+fn unique_output_stays_bounded_across_a_host_drain_batch() {
+    let cfg = config("sort", WHOLE, r#", "run_bytes":8388608"#)
+        .replace(r#""unique":false"#, r#""unique":true"#);
+    let mut stream = open("sort", cfg.as_bytes()).unwrap();
+    let mut input = b"a\n".to_vec();
+    let mut long = vec![b'b'; crate::constants::OUTPUT * 4];
+    long.push(b'\n');
+    for _ in 0..8 {
+        input.extend_from_slice(&long);
+    }
+    input.push(b'z');
+    let mut piece = Vec::new();
+    stream.feed(&input, &mut piece).unwrap();
+    stream.finish(&mut piece).unwrap();
+    let mut output = Vec::new();
+    while stream.busy() {
+        piece.clear();
+        crate::drain_steps(stream.as_mut(), &mut piece).unwrap();
+        assert!(piece.len() <= crate::constants::OUTPUT);
+        output.extend_from_slice(&piece);
+    }
+    assert_eq!(output, [b"a\n".as_slice(), &long, b"z\n"].concat());
+}
+
+#[test]
+fn records_at_the_checker_buffer_limit_keep_their_separator() {
+    for mode in ["sort", "merge", "check"] {
+        let extra = match mode {
+            "sort" => r#", "run_bytes":8388608"#,
+            "merge" => r#", "inputs":1"#,
+            _ => "",
+        };
+        let cfg = config(mode, WHOLE, extra);
+        let mut stream = open("sort", cfg.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        for chunk in vec![b'x'; crate::constants::MAX_HELD].chunks(16384) {
+            stream.feed(chunk, &mut out).unwrap();
+        }
+        stream.feed(b"\n", &mut out).unwrap();
+        out.extend(drain_run(stream.as_mut()).0);
+        stream.finish(&mut out).unwrap();
+        out.extend(drain_run(stream.as_mut()).0);
+        assert_eq!(
+            out.len(),
+            if mode == "check" {
+                0
+            } else {
+                crate::constants::MAX_HELD + 1
+            }
+        );
+    }
 }

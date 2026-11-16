@@ -100,6 +100,77 @@ def test_ioresult_materialize_stdout_none():
     asyncio.run(_run())
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["stdout", "stderr"])
+async def test_materialized_output_is_repeatable_and_independent(field):
+    expected = bytes(range(256)) * 257 + "界😀".encode()
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b""
+            for offset in range(0, len(expected), 113):
+                yield expected[offset : offset + 113]
+            yield b""
+        finally:
+            closed = True
+
+    result = IOResult(**{field: source()})
+    read = getattr(result, f"materialize_{field}")
+    data = await read()
+    assert data == expected
+    assert closed
+    assert await read() is data
+    assert await materialize(_async_source(b"later")) == b"later"
+    assert data == expected
+
+
+@pytest.mark.asyncio
+async def test_materialize_keeps_direct_bytes_identity():
+    data = b"\x00\xff" + "界😀".encode()
+    assert await materialize(data) is data
+
+
+@pytest.mark.asyncio
+async def test_materialize_propagates_a_producer_failure_and_closes_it():
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"partial"
+            raise ValueError("producer failed")
+        finally:
+            closed = True
+
+    with pytest.raises(ValueError, match="producer failed"):
+        await materialize(source())
+    assert closed
+
+
+@pytest.mark.asyncio
+async def test_materialize_cancellation_closes_the_producer():
+    waiting = asyncio.Event()
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"partial"
+            waiting.set()
+            await asyncio.Event().wait()
+        finally:
+            closed = True
+
+    task = asyncio.create_task(materialize(source()))
+    await waiting.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed
+
+
 def test_ioresult_stdout_str():
     async def _run():
         io = IOResult(stdout=b"hello world")

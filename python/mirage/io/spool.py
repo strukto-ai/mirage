@@ -28,13 +28,21 @@ class ByteSpool:
 
     Args:
         memory_limit (int): maximum bytes retained in memory before spilling.
+        buffer_size (int): pending bytes that trigger a scratch-file write.
     """
 
-    def __init__(self, memory_limit: int = MEMORY_LIMIT) -> None:
+    def __init__(
+        self,
+        memory_limit: int = MEMORY_LIMIT,
+        buffer_size: int = IO_BUFFER_SIZE,
+    ) -> None:
         if memory_limit < 0:
             raise ValueError("spool memory limit must be nonnegative")
+        if buffer_size <= 0:
+            raise ValueError("spool buffer size must be positive")
         self.size = 0
         self.memory_limit = memory_limit
+        self.buffer_size = buffer_size
         self._memory = bytearray()
         self._file: BinaryIO | None = None
         self._lock = asyncio.Lock()
@@ -100,16 +108,18 @@ class ByteSpool:
             self._memory.clear()
         self._memory.extend(data)
         self.size += len(data)
-        if self._file is not None and len(self._memory) >= IO_BUFFER_SIZE:
+        if self._file is not None and len(self._memory) >= self.buffer_size:
             await self._flush()
 
     async def _flush(self) -> None:
         if self._memory:
-            await run_blocking(self._write, bytes(self._memory), self._stored)
+            # The lock and settled worker keep the buffer unchanged until
+            # the write ends, including when the awaiting task is cancelled.
+            await run_blocking(self._write, self._memory, self._stored)
             self._stored += len(self._memory)
             self._memory.clear()
 
-    def _write(self, data: bytes, offset: int) -> None:
+    def _write(self, data: bytes | bytearray, offset: int) -> None:
         assert self._file is not None
         self._file.seek(offset)
         self._file.write(data)

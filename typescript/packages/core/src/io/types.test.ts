@@ -62,10 +62,60 @@ describe('materialize', () => {
     const source: ByteSource = toAsync([new Uint8Array([1, 2]), new Uint8Array([3])])
     expect(await materialize(source)).toEqual(new Uint8Array([1, 2, 3]))
   })
+
+  it('owns the complete output after the producer arrays change', async () => {
+    const first = new Uint8Array([0, 255, 226])
+    const second = new Uint8Array([149, 140, 240, 159, 152, 128])
+    const data = await materialize(toAsync([new Uint8Array(), first, second, new Uint8Array()]))
+    first.fill(0)
+    second.fill(0)
+    expect(data).toEqual(new Uint8Array([0, 255, 226, 149, 140, 240, 159, 152, 128]))
+    expect(data.byteOffset).toBe(0)
+    expect(data.buffer.byteLength).toBe(data.byteLength)
+  })
+
+  it('propagates a producer failure and closes it', async () => {
+    let closed = false
+    async function* source() {
+      try {
+        await Promise.resolve()
+        yield new Uint8Array([1])
+        throw new Error('producer failed')
+      } finally {
+        closed = true
+      }
+    }
+    await expect(materialize(source())).rejects.toThrow('producer failed')
+    expect(closed).toBe(true)
+  })
 })
 
 describe('IOResult', () => {
   for (const field of ['stdout', 'stderr'] satisfies StreamName[]) {
+    it(`caches a complete ${field} across repeated reads`, async () => {
+      const expected = Uint8Array.from({ length: 65539 }, (_, index) => index % 256)
+      let closed = false
+      async function* source() {
+        try {
+          await Promise.resolve()
+          for (let offset = 0; offset < expected.byteLength; offset += 113) {
+            yield expected.slice(offset, offset + 113)
+          }
+        } finally {
+          closed = true
+        }
+      }
+      const io = new IOResult({ [field]: source() })
+      const data = field === 'stdout' ? await io.materializeStdout() : await io.materializeStderr()
+      expect(data).toEqual(expected)
+      expect(closed).toBe(true)
+      expect(field === 'stdout' ? await io.materializeStdout() : await io.materializeStderr()).toBe(
+        data,
+      )
+      expect(await materialize(toAsync([new Uint8Array([9])]))).toEqual(new Uint8Array([9]))
+      expect(data).toEqual(expected)
+    })
+
     it(`preserves a ${field} replacement while materializing the previous source`, async () => {
       let release: () => void = () => undefined
       const waiting = new Promise<void>((resolve) => {

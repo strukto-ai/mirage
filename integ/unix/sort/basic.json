@@ -495,6 +495,32 @@
         "stderr": ""
       },
       "flags": []
+    },
+    {
+      "id": "sort_long_record_piece_boundaries",
+      "targets": [
+        "ram"
+      ],
+      "command": "printf '%131072s' x | sort | wc -c; printf '%131072s' x | sort -m | wc -c; printf '%131072s' x | sort -c; echo $?; { printf '%131072s\\n' x; printf '%131072s' x; } | sort -u | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "131073\n131073\n0\n131073\n",
+        "stderr": ""
+      },
+      "seq": 15300108
+    },
+    {
+      "id": "sort_final_merge_early_close",
+      "targets": [
+        "ram"
+      ],
+      "command": "printf '%4194304s\\n%4194304s' z a | sort | head -c 1",
+      "expect": {
+        "exit": 0,
+        "stdout": " ",
+        "stderr": ""
+      },
+      "seq": 15300109
     }
   ]
 }

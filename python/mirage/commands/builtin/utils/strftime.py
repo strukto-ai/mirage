@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from mirage.commands.builtin.utils.stream import stream_output
 from mirage.io.stream import OutputStream
 from mirage.rs.stream import open_stream
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text, encode_text, encode_text_chunks
 from mirage.types import JsonValue
 
 
@@ -98,4 +98,5 @@ def strftime_stream(
             own microseconds when None.
     """
     stream = open_stream("strftime", _config(dt, 0, nanosecond))
-    return stream_output(stream, encode_text(fmt))
+    source = encode_text(fmt) if len(fmt) <= 16384 else encode_text_chunks(fmt)
+    return stream_output(stream, source)

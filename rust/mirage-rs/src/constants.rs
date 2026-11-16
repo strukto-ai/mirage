@@ -2,7 +2,7 @@
 pub const PIECE: usize = 16 * 1024;
 
 /// The bounded steps one host `drain` call runs at most.
-pub const STEPS: usize = 8;
+pub const STEPS: usize = 4;
 
 /// The most output one call or step writes before it yields.
 pub(crate) const OUTPUT: usize = 64 * 1024;

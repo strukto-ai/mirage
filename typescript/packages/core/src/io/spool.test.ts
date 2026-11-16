@@ -9,6 +9,38 @@ afterEach(() => {
   setSpoolFactory(null)
 })
 
+it('batches spilled writes at the requested buffer size', async () => {
+  const writes: [number, Uint8Array][] = []
+  let stored: Uint8Array = new Uint8Array()
+  setSpoolFactory(() =>
+    Promise.resolve({
+      write: (at, part) => {
+        writes.push([at, part.slice()])
+        stored = placed(stored, at, part)
+        return Promise.resolve()
+      },
+      read: (at, size) => Promise.resolve(stored.slice(at, at + size)),
+      close: () => Promise.resolve(),
+    }),
+  )
+  const spool = new ByteSpool(0, 8)
+  try {
+    await spool.append(new TextEncoder().encode('abcd'))
+    expect(writes).toEqual([])
+    await spool.append(new TextEncoder().encode('efgh'))
+    expect(writes).toEqual([[0, new TextEncoder().encode('abcdefgh')]])
+    await spool.append(new TextEncoder().encode('ij'))
+    expect(await spool.read(0, 10)).toEqual(new TextEncoder().encode('abcdefghij'))
+    expect(writes.at(-1)).toEqual([8, new TextEncoder().encode('ij')])
+  } finally {
+    await spool.close()
+  }
+})
+
+it.each([-1, 0])('requires a positive spool buffer size, got %s', (size) => {
+  expect(() => new ByteSpool(0, size)).toThrow('buffer size')
+})
+
 function placed(stored: Uint8Array, at: number, part: Uint8Array): Uint8Array {
   const out = new Uint8Array(Math.max(stored.length, at + part.length))
   out.set(stored)

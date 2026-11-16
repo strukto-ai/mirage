@@ -59,8 +59,9 @@ it('instantiates nothing synchronously where the loader compiled asynchronously,
     const md5 = { algorithm: 'md5' }
     const used = (): unknown => {
       const stream = streams.openSync('digest', md5, false)
+      const exports = instance(stream)
       stream.close()
-      return instance(stream)
+      return exports
     }
     const first = used()
     streams.retire(first as never, false)
