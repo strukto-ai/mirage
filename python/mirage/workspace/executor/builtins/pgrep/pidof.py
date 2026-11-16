@@ -105,7 +105,13 @@ async def handle_pidof(
     found = False
     places = [
         place
-        for place in (WORKSPACE_MACHINE, *scope.ids)
+        for place in dict.fromkeys(
+            (
+                WORKSPACE_MACHINE,
+                *scope.ids,
+                *(info.shown_machine for info in rows),
+            )
+        )
         if in_scope(scope, place)
     ]
     for place in places if scope.several else [""]:

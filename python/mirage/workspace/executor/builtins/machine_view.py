@@ -31,7 +31,7 @@ from mirage.execution.types import MachineResources
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.workspace.executor.builtins.jobspec import names_machine
@@ -67,7 +67,8 @@ class MachineScope:
 
 def in_scope(scope: MachineScope, machine: str) -> bool:
     """Whether a process on ``machine`` is in a scope: a machine in it,
-    or Mirage's own unless the line picked another machine.
+    or Mirage's own, or an engine's in Mirage's process (``in_process``),
+    unless the line picked another machine.
 
     Args:
         scope (MachineScope): the machines.
@@ -75,7 +76,9 @@ def in_scope(scope: MachineScope, machine: str) -> bool:
     """
     if machine == WORKSPACE_MACHINE:
         return scope.workspace or not scope.picked
-    return machine in scope.ids
+    if machine in scope.ids:
+        return True
+    return not scope.picked and machine.startswith(f"{IN_PROCESS}:")
 
 
 def _reach_of(runtime: RuntimeIdentity | None) -> str:
@@ -172,11 +175,35 @@ def machine_scope(
     )
 
 
+def _engine_machines() -> list[str]:
+    """The ``in_process`` machine of each engine the line routes
+    programs to, by id as ``ps`` shows it."""
+    context = get_current_evaluation()
+    frame = context.frame if context is not None else None
+    routing = frame.routing if frame is not None else None
+    if routing is None:
+        return []
+    machines = (
+        Runtime.require(runtime).machine
+        for runtime in routing.bindings.values()
+        if runtime is not None
+    )
+    return list(
+        dict.fromkeys(
+            str(machine)
+            for machine in machines
+            if machine is not None and machine.provider == IN_PROCESS
+        )
+    )
+
+
 def process_scope(
     processes: ProcessTable, name: str | None
 ) -> MachineScope | None:
     """Which machines a process search looks at: those ``machine_scope``
     picks, or Mirage's own alone for ``mirage``, as ``ps`` names them.
+    An engine's ``in_process`` machine is looked at wherever Mirage's
+    own is (``in_scope``), and alone when named.
 
     Args:
         processes (ProcessTable): the workspace's processes.
@@ -187,6 +214,14 @@ def process_scope(
     """
     if name is not None and names_machine(WORKSPACE_MACHINE, name):
         return MachineScope((), True, True)
+    if name is not None:
+        named = [
+            machine
+            for machine in _engine_machines()
+            if names_machine(machine, name)
+        ]
+        if named:
+            return MachineScope((named[0],), True)
     return machine_scope(processes, name)
 
 

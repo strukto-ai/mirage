@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.execution.types import MachineName
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import RuntimeReach
 
@@ -39,3 +40,8 @@ class WorkspaceRuntime(Runtime[Any]):
     # the gate, so there is no entry point around it.
     reach: RuntimeReach = "workspace"
     captures: tuple[str, ...] = ()
+
+    @property
+    def machine(self) -> MachineName | None:
+        """None: a workspace-routed line runs on the workspace itself."""
+        return None

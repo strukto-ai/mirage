@@ -21,7 +21,7 @@ import { WORKSPACE_MACHINE } from '../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../execution/process/table.ts'
 import type { MachineName, MachineResources } from '../../../execution/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
+import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../../runtime/constants.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -44,11 +44,13 @@ export interface MachineScope {
 
 /**
  * Whether a process on `machine` is in a scope: a machine in it, or Mirage's
- * own unless the line picked another machine. Mirrors Python's `in_scope`.
+ * own, or an engine's in Mirage's process (`in_process`), unless the line
+ * picked another machine. Mirrors Python's `in_scope`.
  */
 export function inScope(scope: MachineScope, machine: string): boolean {
   if (machine === WORKSPACE_MACHINE) return scope.workspace || !scope.picked
-  return scope.ids.includes(machine)
+  if (scope.ids.includes(machine)) return true
+  return !scope.picked && machine.startsWith(`${IN_PROCESS}:`)
 }
 
 function reachOf(runtime: unknown): string {
@@ -133,13 +135,32 @@ export function machineScope(
 }
 
 /**
+ * The `in_process` machine of each engine the line routes programs to, by id
+ * as `ps` shows it. Mirrors Python's `_engine_machines`.
+ */
+function engineMachines(): string[] {
+  const found: string[] = []
+  for (const runtime of Object.values(getCurrentEvaluation()?.frame.routing?.bindings ?? {})) {
+    const machine = (runtime as { machine?: MachineName | null } | null | undefined)?.machine
+    const shown = machine?.provider === IN_PROCESS ? machine.toString() : null
+    if (shown !== null && !found.includes(shown)) found.push(shown)
+  }
+  return found
+}
+
+/**
  * Which machines a process search looks at: those `machineScope` picks, or
- * Mirage's own alone for `mirage`, as `ps` names them. Null when `name` names
- * none. Mirrors Python's `process_scope`.
+ * Mirage's own alone for `mirage`, as `ps` names them. An engine's
+ * `in_process` machine is looked at wherever Mirage's own is (`inScope`), and
+ * alone when named. Null when `name` names none. Mirrors Python's
+ * `process_scope`.
  */
 export function processScope(processes: ProcessTable, name: string | null): MachineScope | null {
   if (name !== null && namesMachine(WORKSPACE_MACHINE, name))
     return { ids: [], picked: true, several: false, workspace: true }
+  const engine =
+    name === null ? undefined : engineMachines().find((machine) => namesMachine(machine, name))
+  if (engine !== undefined) return { ids: [engine], picked: true, several: false, workspace: false }
   return machineScope(processes, name)
 }
 
