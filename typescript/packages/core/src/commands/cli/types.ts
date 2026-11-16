@@ -231,6 +231,11 @@ export class WalkResult {
   readonly path: readonly string[]
   /** Where each of `path` stands in the walked argv. */
   readonly verbPositions: readonly number[]
+  /**
+   * Where each group option's detached value stands in the walked argv,
+   * however it is spelled (`-C -x`).
+   */
+  readonly valuePositions: readonly number[]
   readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag
   /**
@@ -250,6 +255,7 @@ export class WalkResult {
         | 'leaf'
         | 'path'
         | 'verbPositions'
+        | 'valuePositions'
         | 'operandBases'
         | 'groupFlags'
         | 'valuePaths'
@@ -263,6 +269,7 @@ export class WalkResult {
     this.leaf = init.leaf ?? null
     this.path = Object.freeze([...(init.path ?? [])])
     this.verbPositions = Object.freeze([...(init.verbPositions ?? [])])
+    this.valuePositions = Object.freeze([...(init.valuePositions ?? [])])
     this.groupFlags = init.groupFlags ?? {}
     this.valuePaths = init.valuePaths ?? new Map()
     this.operandBases = init.operandBases ?? []

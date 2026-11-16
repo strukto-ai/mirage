@@ -563,14 +563,13 @@ function resolveGroupPaths(
   const typed: [string, string, number][] = []
   flagOccurrences(flags).forEach(([name, word], index) => {
     const slot = slots[index]
-    if (typeof word === 'string' && slot !== undefined && !paths.has(slot))
-      typed.push([name, word, slot])
+    if (typeof word === 'string' && slot !== undefined) typed.push([name, word, slot])
   })
   if (cs.baseDest !== null) {
     const value = flags[cs.baseDest]
     if (typeof value === 'string') {
       const values: [string, number | null][] = typed
-        .filter(([name]) => name === cs.baseDest)
+        .filter(([name, , slot]) => name === cs.baseDest && !paths.has(slot))
         .map(([, word, slot]) => [word, slot])
       let scope = PathSpec.fromStrPath('.', undefined, cwd)
       for (const [word, slot] of values.length > 0 ? values : [[value, null] as const]) {
@@ -588,7 +587,7 @@ function resolveGroupPaths(
     const index = seen.get(name) ?? 0
     seen.set(name, index + 1)
     const kinds = cs.valueTypesByDest.get(name) ?? ['path']
-    if (kinds[index % kinds.length] === 'path')
+    if (!paths.has(slot) && kinds[index % kinds.length] === 'path')
       paths.set(slot, PathSpec.fromStrPath(word, undefined, base))
   }
   for (const [dest, kind] of cs.kindByDest) {
@@ -723,6 +722,10 @@ export function walk(
         leaf: node,
         path,
         verbPositions: positions,
+        valuePositions: flagOccurrences(flags).flatMap(([, word], index) => {
+          const slot = slots[index]
+          return slot !== undefined && argv[slot] === word ? [slot] : []
+        }),
         groupFlags: flags,
         valuePaths: paths,
         operandBases: bases,

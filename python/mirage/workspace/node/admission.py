@@ -20,7 +20,8 @@ from typing import Any
 
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, parse_command
-from mirage.commands.spec.types import ValueType
+from mirage.commands.spec.parser import word_paths
+from mirage.commands.spec.types import ValueType, WordKind
 from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
@@ -207,6 +208,33 @@ class Admitted:
         return io_refusal(self.rules, self.ctx.tokens, virtual, self.granted)
 
 
+def _option_scopes(name: str, args: list[str], cwd: str) -> list[PathSpec]:
+    """The paths a builtin's options name, as its grammar reads them.
+
+    Each value typed on the line keeps its spelling, so a link or a
+    ``..`` in it can be walked the way the command will open it; then
+    come the values no word typed (a default, the environment). A ``-``
+    naming stdin or stdout names no file.
+
+    Args:
+        name (str): command name.
+        args (list[str]): the words after it, as typed.
+        cwd (str): session working directory.
+    """
+    spec = SPECS.get(name)
+    if spec is None:
+        return []
+    parsed = parse_command(spec, args, cwd, name)
+    typed = [
+        path
+        for path, role in zip(
+            word_paths(parsed, args, cwd), parsed.word_roles, strict=True
+        )
+        if path is not None and role is not WordKind.OPERAND
+    ]
+    return typed + [_to_scope(v) for v in parsed.supplied_path_values]
+
+
 def policy_scopes(
     name: str,
     args: list[str],
@@ -233,8 +261,10 @@ def policy_scopes(
     ``mv``, ``ln``, ``stat``, ``tar`` ... act on the link itself, ``-L``
     turns following back on), the same one the router applies to the
     operands before the handler runs, so a rule sees exactly the path
-    the command will touch. A loop is left to that later step to
-    report; here the typed paths stand. Then the operand a bare
+    the command will touch. An option's file is opened whatever that
+    policy says, so its link target always rides along: ``--attach
+    link.csv`` sends the file the link names. A loop is left to that
+    later step to report; here the typed paths stand. Then the operand a bare
     ``ls``/``find``/``du``/``tree``/``grep -r`` implies, the working
     directory, which the executor injects after the gate and which a
     rule on that directory has to see. Last come the statement's
@@ -263,32 +293,32 @@ def policy_scopes(
             for a command with no tree.
     """
     scopes = [p for p in operands if isinstance(p, PathSpec)]
-    spec = SPECS.get(name)
-    if spec is not None:
-        scopes.extend(
-            _to_scope(value)
-            for value in parse_command(spec, args, cwd, name).path_flag_values
-            if value != "-"
-        )
+    options = [*_option_scopes(name, args, cwd), *tree_flags]
     typed = {p.virtual for p in scopes}
-    scopes.extend(p for p in tree_flags if p.virtual not in typed)
+    for option in options:
+        if option.virtual not in typed:
+            typed.add(option.virtual)
+            scopes.append(option)
     if "/" in name:
         # A slash-carrying head word is a file the line executes, and it
         # lives in argv[0], not the operands, so a path-pattern guard
         # would never see it without this row.
         scopes.insert(0, _to_scope(resolve_path(name, cwd)))
-    if links is not None and operands:
-        followed = follow_paths(
-            links,
-            list(operands),
-            follows,
-            slash_follows=name not in SLASH_KEEPS_LAST,
-        )
-        seen = {p.virtual for p in scopes}
-        for item in followed:
-            if isinstance(item, PathSpec) and item.virtual not in seen:
-                seen.add(item.virtual)
-                scopes.append(item)
+    followed: list[str | PathSpec] = []
+    if links is not None:
+        if operands:
+            followed += follow_paths(
+                links,
+                list(operands),
+                follows,
+                slash_follows=name not in SLASH_KEEPS_LAST,
+            )
+        followed += follow_paths(links, list(options), True)
+    seen = {p.virtual for p in scopes}
+    for item in followed:
+        if isinstance(item, PathSpec) and item.virtual not in seen:
+            seen.add(item.virtual)
+            scopes.append(item)
     if implied is not None and implied.virtual not in {
         p.virtual for p in scopes
     }:
