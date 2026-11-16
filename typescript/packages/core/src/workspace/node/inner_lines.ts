@@ -21,7 +21,7 @@ import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 import { readWrapper } from '../lookup/constants.ts'
 import { pathProgram } from '../lookup/lookup.ts'
-import type { NamespaceReader } from '../dispatcher/reader.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 
@@ -372,7 +372,7 @@ export function programLines(
   words: readonly Word[],
   session: SessionState,
   registry: MountRegistry,
-  links: NamespaceReader | null = null,
+  links: NamespaceLinks | null = null,
 ): InnerLine[] {
   const [first, ...args] = words
   if (first === undefined) return []

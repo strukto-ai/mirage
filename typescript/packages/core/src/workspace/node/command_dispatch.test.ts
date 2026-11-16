@@ -18,7 +18,13 @@ import { materialize } from '../../io/types.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
-import type { CommandContext, Deny, Route } from '../../policy/types.ts'
+import type {
+  CommandContext,
+  CommandExplanation,
+  Deny,
+  Route,
+  ShellNode,
+} from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -491,10 +497,18 @@ const SPELLED = [
   'setsid /usr/bin/python3 -c 1',
   'nice nohup /usr/bin/python3 -c 1',
   'cd /usr/bin && nice ./python3 -c 1',
+  'nohup /usr/bin/env python3 -c 1',
+  'ln -s /usr/bin/python3 /py && nice /py -c 1',
 ]
 
 const NO_PYTHON_PROFILES = {
   default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } },
+}
+
+/** Every machine an explained tree places a command on, nested scopes included. */
+function machines(node: ShellNode | CommandExplanation): string[] {
+  const own = 'command' in node ? [node.machine] : []
+  return [...own, ...node.children.flatMap(machines)]
 }
 
 function spelledWs(options: Pick<WorkspaceOptions, 'policies' | 'profiles'>): Workspace {
@@ -515,31 +529,31 @@ function spelledWs(options: Pick<WorkspaceOptions, 'policies' | 'profiles'>): Wo
 // The plain path runs /usr/bin/python3 as python3, so a deny or a route on the
 // name holds under a wrapper however the program is spelled.
 describe('a wrapper running a program spelled by its path', () => {
-  it.each(
-    [...SPELLED, 'ln -s /usr/bin/python3 /py && nice /py -c 1'].flatMap((line) => [
-      [line, 'policy'] as const,
-      [line, 'profile'] as const,
-    ]),
-  )('is refused: %s (%s)', async (line, by) => {
-    const ws = spelledWs(
-      by === 'policy' ? { policies: [new NoPython()] } : { profiles: NO_PYTHON_PROFILES },
-    )
-    try {
-      const bare = await ws.shell('python3 -c 1')
-      const io = await ws.shell(line)
-      expect(bare.exitCode).toBe(126)
-      expect([io.exitCode, text(io.stderr)]).toEqual([126, text(bare.stderr)])
-    } finally {
-      await ws.close()
-    }
-  })
+  it.each(SPELLED.flatMap((line) => [[line, 'policy'] as const, [line, 'profile'] as const]))(
+    'is refused: %s (%s)',
+    async (line, by) => {
+      const ws = spelledWs(
+        by === 'policy' ? { policies: [new NoPython()] } : { profiles: NO_PYTHON_PROFILES },
+      )
+      try {
+        const bare = await ws.shell('python3 -c 1')
+        const io = await ws.shell(line)
+        expect(bare.exitCode).toBe(126)
+        expect([io.exitCode, text(io.stderr)]).toEqual([126, text(bare.stderr)])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   it.each(SPELLED)('goes where the program is routed: %s', async (line) => {
     const ws = spelledWs({ policies: [new Routes({ python3: { kind: 'route', machine: 'c' } })] })
     try {
       expect(text((await ws.shell('/usr/bin/python3 -c 1')).stdout)).toBe('c\n')
       const io = await ws.shell(line)
+      const said = await ws.explain(line)
       expect([io.exitCode, text(io.stdout)]).toEqual([0, 'c\n'])
+      expect(machines(said.node)).not.toContain('b')
     } finally {
       await ws.close()
     }

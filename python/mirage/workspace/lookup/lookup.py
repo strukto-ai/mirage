@@ -184,6 +184,7 @@ def routed_consumer(
     session: SessionState,
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
+    links: "NamespaceReader | None" = None,
 ) -> tuple[Consumer, RouteDecision[RuntimeIdentity] | None]:
     """``lookup``'s answer, with a wrapper no Mirage layer owns bound to
     the runtime that captures its program by name (``nice gcc``).
@@ -194,6 +195,8 @@ def routed_consumer(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
+        links (NamespaceReader | None): the session's links, followed to
+            a program spelled by a path; None to read it as typed.
     """
     if (
         name == MACHINE_VIEW
@@ -206,7 +209,7 @@ def routed_consumer(
     consumer = lookup(name, session, registry, routing)
     if routing is None or not _outside_mirage(consumer):
         return consumer, routing
-    program = _wrapped(name, args, routing.bindings, session, registry)
+    program = _wrapped(name, args, routing.bindings, session, registry, links)
     if program is None:
         return consumer, routing
     bindings = {**routing.bindings, name: routing.bindings[program]}
@@ -272,6 +275,7 @@ def mirage_program_at(
     session: SessionState,
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
+    links: "NamespaceReader | None" = None,
 ) -> int | None:
     """Where a wrapper's program stands in its words when Mirage runs
     that program itself, without the wrapper (``nice grep``); None
@@ -283,6 +287,8 @@ def mirage_program_at(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
+        links (NamespaceReader | None): the session's links, followed to
+            a program spelled by a path; None to read it as typed.
     """
     bindings: Mapping[str, RuntimeIdentity | None] = (
         routing.bindings if routing is not None else registry.runtime_bindings
@@ -291,17 +297,16 @@ def mirage_program_at(
         name not in PROGRAM_WRAPPERS
         or name in bindings
         or not _outside_mirage(lookup(name, session, registry, routing))
-        or _wrapped(name, args, bindings, session, registry) is not None
+        or _wrapped(name, args, bindings, session, registry, links) is not None
     ):
         return None
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
-    # shortcut: a symlink routes by fallback, pass links if a route must hold.
-    inner = path_program(args[at], session, registry) or args[at]
+    inner = path_program(args[at], session, registry, links) or args[at]
     if inner in PROGRAM_WRAPPERS:
         deeper = mirage_program_at(
-            inner, args[at + 1 :], session, registry, routing
+            inner, args[at + 1 :], session, registry, routing, links
         )
         return None if deeper is None else at
     if _outside_mirage(lookup(inner, session, registry, routing)):
@@ -319,6 +324,7 @@ def wrapper_runs_outside(
     session: SessionState,
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
+    links: "NamespaceReader | None" = None,
 ) -> bool:
     """Whether a wrapper goes to a runtime with its program under it
     (``nohup python3`` on a machine), so Mirage never runs that program
@@ -330,11 +336,14 @@ def wrapper_runs_outside(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
+        links (NamespaceReader | None): the session's links, followed to
+            a program spelled by a path; None to read it as typed.
     """
     return (
         name in PROGRAM_WRAPPERS
-        and mirage_program_at(name, args, session, registry, routing) is None
-        and routed_consumer(name, args, session, registry, routing)[0]
+        and mirage_program_at(name, args, session, registry, routing, links)
+        is None
+        and routed_consumer(name, args, session, registry, routing, links)[0]
         is Consumer.EXTERNAL
     )
 
@@ -487,10 +496,11 @@ def _wrapped(
     bindings: Mapping[str, RuntimeIdentity | None],
     session: SessionState,
     registry: "MountRegistry",
+    links: "NamespaceReader | None",
 ) -> str | None:
     """The program a wrapper runs, nested wrappers followed, when a
     runtime captures it by name and runs it natively; a word spelled by
-    its ``/usr/bin`` path, read as typed, is that program.
+    its ``/usr/bin`` path is that program, as the plain path runs it.
 
     Args:
         name (str): the wrapper's name.
@@ -499,17 +509,18 @@ def _wrapped(
             command bindings.
         session (SessionState): shell session (cwd, its programs).
         registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        links (NamespaceReader | None): the session's links, followed to
+            a program spelled by a path; None to read it as typed.
     """
     if name not in PROGRAM_WRAPPERS or name in bindings:
         return None
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
-    # shortcut: a symlink routes by fallback, pass links if a route must hold.
-    inner = path_program(args[at], session, registry) or args[at]
+    inner = path_program(args[at], session, registry, links) or args[at]
     if _is_native(bindings.get(inner), inner):
         return inner
-    return _wrapped(inner, args[at + 1 :], bindings, session, registry)
+    return _wrapped(inner, args[at + 1 :], bindings, session, registry, links)
 
 
 def _layers(

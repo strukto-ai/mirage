@@ -1025,7 +1025,14 @@ async function runArgv(
         const gate = admitted
         if (
           gate !== null &&
-          wrapperRunsOutside(name, argv.args, session, registry, context.frame.routing)
+          wrapperRunsOutside(
+            name,
+            argv.args,
+            session,
+            registry,
+            context.frame.routing,
+            namespace.sessionLinks(session),
+          )
         ) {
           const verdict = await wrappedVerdict(
             [name, ...argv.args].map((w) => ({ raw: w, text: w })),
@@ -1431,7 +1438,8 @@ async function routeArgv(
     ]
   }
 
-  const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing)
+  const links = namespace.sessionLinks(session)
+  const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing, links)
   if (at !== null) {
     const refused = wrapperRefusal(name, argv.args, session, registry)
     if (refused !== null) {
@@ -1452,6 +1460,7 @@ async function routeArgv(
     session,
     registry,
     context.frame.routing,
+    links,
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)

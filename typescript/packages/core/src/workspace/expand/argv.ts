@@ -134,9 +134,17 @@ export async function expandArgv(
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
   const typed = expanded.slice(consumed).map(unmarkGlobs)
-  const [routed, routing] = routedConsumer(name, typed, session, registry, context.frame.routing)
+  const [routed, routing] = routedConsumer(
+    name,
+    typed,
+    session,
+    registry,
+    context.frame.routing,
+    links,
+  )
   const consumer =
-    routed === Consumer.UNKNOWN && mirageProgramAt(name, typed, session, registry, routing) !== null
+    routed === Consumer.UNKNOWN &&
+    mirageProgramAt(name, typed, session, registry, routing, links) !== null
       ? Consumer.EXTERNAL
       : routed
   const refused = runtimeRefused(name, session, registry, routing)

@@ -22,7 +22,7 @@ import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
-import type { NamespaceReader } from '../dispatcher/reader.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import {
@@ -61,7 +61,7 @@ export function pathProgram(
   word: string,
   session: SessionState,
   registry: MountRegistry,
-  links: NamespaceReader | null = null,
+  links: NamespaceLinks | null = null,
 ): string | null {
   if (!word.includes('/')) return null
   let target = resolvePath(word, session.cwd)
@@ -190,6 +190,7 @@ export function routedConsumer(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  links: NamespaceLinks | null = null,
 ): [Consumer, RouteDecision<Runtime> | undefined] {
   if (
     name === MACHINE_VIEW &&
@@ -201,7 +202,7 @@ export function routedConsumer(
     return [Consumer.SESSION, routing]
   const consumer = lookup(name, session, registry, routing)
   if (routing === undefined || !outsideMirage(consumer)) return [consumer, routing]
-  const program = wrapped(name, args, routing.bindings, session, registry)
+  const program = wrapped(name, args, routing.bindings, session, registry, links)
   if (program === null) return [consumer, routing]
   const bindings = Object.assign(
     Object.create(null) as Record<string, Runtime | null>,
@@ -241,22 +242,22 @@ export function mirageProgramAt(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  links: NamespaceLinks | null = null,
 ): number | null {
   const bindings = routing?.bindings ?? registry.runtimeBindings
   if (
     !PROGRAM_WRAPPERS.has(name) ||
     Object.hasOwn(bindings, name) ||
     !outsideMirage(lookup(name, session, registry, routing)) ||
-    wrapped(name, args, bindings, session, registry) !== null
+    wrapped(name, args, bindings, session, registry, links) !== null
   )
     return null
   const [at] = readWrapper(name, args)
   if (at === null) return null
   const word = args[at] ?? ''
-  // shortcut: a symlink routes by fallback, pass links if a route must hold.
-  const inner = pathProgram(word, session, registry) ?? word
+  const inner = pathProgram(word, session, registry, links) ?? word
   if (PROGRAM_WRAPPERS.has(inner)) {
-    const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing)
+    const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing, links)
     return deeper === null ? null : at
   }
   if (outsideMirage(lookup(inner, session, registry, routing))) return null
@@ -280,11 +281,12 @@ export function wrapperRunsOutside(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  links: NamespaceLinks | null = null,
 ): boolean {
   return (
     PROGRAM_WRAPPERS.has(name) &&
-    mirageProgramAt(name, args, session, registry, routing) === null &&
-    routedConsumer(name, args, session, registry, routing)[0] === Consumer.EXTERNAL
+    mirageProgramAt(name, args, session, registry, routing, links) === null &&
+    routedConsumer(name, args, session, registry, routing, links)[0] === Consumer.EXTERNAL
   )
 }
 
@@ -396,7 +398,8 @@ function outsideMirage(consumer: Consumer): boolean {
 /**
  * The program a wrapper runs, nested wrappers followed, when a runtime
  * captures it by name and runs it natively; a word spelled by its
- * `/usr/bin` path, read as typed, is that program.
+ * `/usr/bin` path is that program, as the plain path runs it. `links`, the
+ * session's, are followed to it; null reads the word as typed.
  */
 function wrapped(
   name: string,
@@ -404,15 +407,15 @@ function wrapped(
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
   session: SessionState,
   registry: MountRegistry,
+  links: NamespaceLinks | null,
 ): string | null {
   if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return null
   const [at] = readWrapper(name, args)
   if (at === null) return null
   const word = args[at] ?? ''
-  // shortcut: a symlink routes by fallback, pass links if a route must hold.
-  const inner = pathProgram(word, session, registry) ?? word
+  const inner = pathProgram(word, session, registry, links) ?? word
   if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
-  return wrapped(inner, args.slice(at + 1), bindings, session, registry)
+  return wrapped(inner, args.slice(at + 1), bindings, session, registry, links)
 }
 
 /**

@@ -973,7 +973,12 @@ async def _run_argv(
             # places it the wrapper goes with it. One process runs them
             # all, so every route answering for them has to agree.
             if admitted is not None and wrapper_runs_outside(
-                name, argv.args, session, registry, context.frame.routing
+                name,
+                argv.args,
+                session,
+                registry,
+                context.frame.routing,
+                namespace.session_links(session),
             ):
                 verdict = await _wrapped_verdict(
                     [Word(w, w) for w in (name, *argv.args)],
@@ -1592,8 +1597,9 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=code, stderr=err),
         )
 
+    links = namespace.session_links(session)
     at = mirage_program_at(
-        name, argv.args, session, registry, context.frame.routing
+        name, argv.args, session, registry, context.frame.routing, links
     )
     if at is not None:
         refused = wrapper_refusal(name, argv.args, session, registry)
@@ -1610,7 +1616,7 @@ async def _route_argv(
         )
 
     consumer, routing = routed_consumer(
-        name, argv.args, session, registry, context.frame.routing
+        name, argv.args, session, registry, context.frame.routing, links
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None

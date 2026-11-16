@@ -17,7 +17,7 @@ import pytest
 from mirage import Policy
 from mirage.io.types import materialize
 from mirage.machine.handle import MachineHandle
-from mirage.policy import Deny, Route
+from mirage.policy import CommandExplanation, Deny, Route, ShellNode
 from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -479,6 +479,8 @@ SPELLED = [
     "setsid /usr/bin/python3 -c 1",
     "nice nohup /usr/bin/python3 -c 1",
     "cd /usr/bin && nice ./python3 -c 1",
+    "nohup /usr/bin/env python3 -c 1",
+    "ln -s /usr/bin/python3 /py && nice /py -c 1",
 ]
 
 NO_PYTHON_PROFILES = {
@@ -486,6 +488,11 @@ NO_PYTHON_PROFILES = {
         "commands": {"deny": [{"reason": "no", "commands": ["python3"]}]}
     }
 }
+
+
+def _machines(node: ShellNode | CommandExplanation) -> list[str]:
+    own = [node.machine] if isinstance(node, CommandExplanation) else []
+    return own + [m for child in node.children for m in _machines(child)]
 
 
 def _spelled(**kwargs) -> Workspace:
@@ -502,9 +509,7 @@ def _spelled(**kwargs) -> Workspace:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line", [*SPELLED, "ln -s /usr/bin/python3 /py && nice /py -c 1"]
-)
+@pytest.mark.parametrize("line", SPELLED)
 @pytest.mark.parametrize(
     "denies", [{"policies": [NoPython()]}, {"profiles": NO_PYTHON_PROFILES}]
 )
@@ -528,7 +533,9 @@ async def test_a_wrapper_goes_where_a_path_spelled_program_is_routed(line):
     try:
         assert (await ws.shell("/usr/bin/python3 -c 1")).stdout == b"c\n"
         r = await ws.shell(line)
+        said = await ws.explain(line)
         assert (r.exit_code, r.stdout) == (0, b"c\n")
+        assert "b" not in _machines(said.node)
     finally:
         await ws.close()
 

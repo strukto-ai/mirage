@@ -33,7 +33,9 @@ import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { type Judged, refusedWhereItStands, type Walked } from '../node/explain.ts'
 import { programLines, type Word, wordValue } from '../node/inner_lines.ts'
 import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
@@ -99,20 +101,26 @@ function wrappedPrograms(
   judged: readonly Judged[],
   session: SessionState,
   registry: MountRegistry,
+  links: NamespaceLinks,
 ): Judged[] {
   const found: Judged[] = []
-  for (const inner of programLines(words, session, registry)) {
+  for (const inner of programLines(words, session, registry, links)) {
     if (inner.argv.length === 0) continue
     const place = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
     const held = judged.find((other) => sameOccurrence(other.occurrence, place))
     if (held !== undefined)
-      found.push(held, ...wrappedPrograms(inner.argv, place, judged, session, registry))
+      found.push(held, ...wrappedPrograms(inner.argv, place, judged, session, registry, links))
   }
   return found
 }
 
 /** The judged commands a wrapper's run answers for; none for any other command. */
-function programsOf(one: Judged, judged: readonly Judged[], registry: MountRegistry): Judged[] {
+function programsOf(
+  one: Judged,
+  judged: readonly Judged[],
+  registry: MountRegistry,
+  namespace: Namespace,
+): Judged[] {
   const command = one.judgment.command
   if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined || one.session === undefined)
     return []
@@ -122,16 +130,19 @@ function programsOf(one: Judged, judged: readonly Judged[], registry: MountRegis
     judged,
     one.session,
     registry,
+    namespace.sessionLinks(one.session),
   )
 }
 
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
+  private readonly namespace: Namespace
 
-  constructor(registry: MountRegistry, runtimes: Runtimes) {
+  constructor(registry: MountRegistry, runtimes: Runtimes, namespace: Namespace) {
     this.registry = registry
     this.runtimes = runtimes
+    this.namespace = namespace
   }
 
   async decide(
@@ -281,7 +292,14 @@ export class Router {
     if (
       one.ctx === undefined ||
       one.session === undefined ||
-      !wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
+      !wrapperRunsOutside(
+        one.judgment.command,
+        one.ctx.argv,
+        one.session,
+        this.registry,
+        placed,
+        this.namespace.sessionLinks(one.session),
+      )
     ) {
       return null
     }
@@ -318,7 +336,7 @@ export class Router {
    */
   refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
     return judged.map((one) => {
-      const programs = programsOf(one, judged, this.registry)
+      const programs = programsOf(one, judged, this.registry, this.namespace)
       if (programs.length === 0) return one
       if ([one, ...programs].some((held) => held.judgment.exitCode !== 0)) return one
       const answer = this.wrapperAnswer(
@@ -340,7 +358,7 @@ export class Router {
       this.placementFor(
         one,
         this.outerPlaced(one, judged, decision),
-        programsOf(one, judged, this.registry),
+        programsOf(one, judged, this.registry, this.namespace),
       )
   }
 
@@ -372,7 +390,10 @@ export class Router {
     let decision = placed
     let fallback = placed.fallback
     if (one.ctx !== undefined && one.session !== undefined) {
-      if (mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed) !== null) {
+      const links = this.namespace.sessionLinks(one.session)
+      if (
+        mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed, links) !== null
+      ) {
         return ''
       }
       const [consumer, rerouted] = routedConsumer(
@@ -381,6 +402,7 @@ export class Router {
         one.session,
         this.registry,
         placed,
+        links,
       )
       decision = rerouted ?? placed
       if (consumer === Consumer.EXTERNAL && !command.includes('/')) {

@@ -159,12 +159,13 @@ async def expand_argv(
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
     typed = [unmark_globs(w) for w in expanded[consumed:]]
+    links = None if namespace is None else namespace.session_links(session)
     consumer, routing = routed_consumer(
-        name, typed, session, registry, context.frame.routing
+        name, typed, session, registry, context.frame.routing, links
     )
     if (
         consumer is Consumer.UNKNOWN
-        and mirage_program_at(name, typed, session, registry, routing)
+        and mirage_program_at(name, typed, session, registry, routing, links)
         is not None
     ):
         consumer = Consumer.EXTERNAL
