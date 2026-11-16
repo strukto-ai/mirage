@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { walk } from '../../commands/cli/walk.ts'
+import { SPECS } from '../../commands/spec/index.ts'
+import { parseCommand } from '../../commands/spec/parser.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -181,8 +183,10 @@ export class Admitted implements EntryGate {
 /**
  * The paths a path-pattern guard reads for a line: the operands as
  * typed and the values of path-valued flags, a command tree's group and
- * leaf options among them (`treeFlags`, from `treePathScopes`), then, for
- * a command that
+ * leaf options among them (`treeFlags`, from `treePathScopes`), and a
+ * program file or a file an option hands the dispatcher (`grep --file=x`,
+ * `curl -o x`), which routing leaves out but a rule still has to see, then,
+ * for a command that
  * follows links, the targets they resolve to. `cat /data/link` reads
  * `/data/secret`, so a rule protecting the target has to see it, and a
  * command-scoped rule never runs at the dispatcher where the resolved path
@@ -221,7 +225,12 @@ export function policyScopes(
   for (const p of operands) {
     if (p instanceof PathSpec) scopes.push(p)
   }
-  for (const item of pathFlagScopes(name, [...args], cwd)) scopes.push(item)
+  const spec = SPECS[name]
+  if (spec !== undefined) {
+    for (const value of parseCommand(spec, [...args], cwd, name).pathFlagValues) {
+      if (value !== '-') scopes.push(toScope(value))
+    }
+  }
   const typed = new Set(scopes.map((p) => p.virtual))
   for (const item of treeFlags.filter((p) => !typed.has(p.virtual))) scopes.push(item)
   if (name.includes('/')) {

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.commands.cli.walk import walk
+from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
@@ -220,7 +221,10 @@ def policy_scopes(
     """The paths a path-pattern guard reads for a line.
 
     The operands as typed and the values of path-valued flags, a command
-    tree's group and leaf options among them, then, for
+    tree's group and leaf options among them, and a program file or a
+    file an option hands the dispatcher (``grep --file=x``,
+    ``curl -o x``), which routing leaves out but a rule still has to
+    see, then, for
     a command that follows links, the targets they resolve to: ``cat
     /data/link`` reads ``/data/secret``, so a rule protecting the target
     has to see it, and a command-scoped rule never runs at the dispatcher
@@ -259,7 +263,13 @@ def policy_scopes(
             for a command with no tree.
     """
     scopes = [p for p in operands if isinstance(p, PathSpec)]
-    scopes.extend(path_flag_scopes(name, args, cwd))
+    spec = SPECS.get(name)
+    if spec is not None:
+        scopes.extend(
+            _to_scope(value)
+            for value in parse_command(spec, args, cwd, name).path_flag_values
+            if value != "-"
+        )
     typed = {p.virtual for p in scopes}
     scopes.extend(p for p in tree_flags if p.virtual not in typed)
     if "/" in name:
