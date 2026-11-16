@@ -774,6 +774,20 @@
           }
         },
         {
+          "command": "nice /usr/bin/grep python /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
+          "command": "nohup /usr/bin/env cat /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
           "command": "nice make",
           "expect": {
             "exit": 0,
