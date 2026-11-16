@@ -2071,7 +2071,10 @@ jobs:
           --health-retries 5
       mongodb:
         # MongoDB 8 refuses to start on the runners' kernel 6.19+ (SERVER-121912).
-        image: mongo:7.0
+        # Only the last leg takes the one suite that mounts MongoDB, so only it
+        # starts the service; an empty image skips it on the other thirteen,
+        # and the resolver below refuses a MongoDB suite on any other leg.
+        image: ${{ matrix.leg == 'h3' && 'mongo:7.0' || '' }}
         ports:
           - 27017:27017
         options: >-
@@ -2138,6 +2141,7 @@ jobs:
           wasi_suites=()
           box_suites=()
           ssh_suites=()
+          mongo_suites=()
           while IFS= read -r f; do
             n="${f#integ/runtime/}"
             n="${n%.json}"
@@ -2169,6 +2173,9 @@ jobs:
             # The ssh backend mounts the ssh runtime's box over SFTP.
             if jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "ssh"))' "$f" >/dev/null; then
               ssh_suites+=("$n")
+            fi
+            if jq -e 'any(.cases[]?; any((.world.mounts // {})[]; .vfs == "mongodb"))' "$f" >/dev/null; then
+              mongo_suites+=("$n")
             fi
           done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
@@ -2225,6 +2232,12 @@ jobs:
           # resolved list rather than the leg letter, so moving a folder
           # across moves its service with it.
           in_leg() { grep -qx "$1" <<<"$suites"; }
+          for s in "${mongo_suites[@]}"; do
+            if in_leg "$s" && [ "$LEG" != h3 ]; then
+              echo "$s mounts MongoDB, which only leg h3 starts" >&2
+              exit 1
+            fi
+          done
           for s in "${wasi_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_WASI=1" >> "$GITHUB_ENV"; break; fi
           done

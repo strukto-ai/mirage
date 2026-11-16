@@ -347,7 +347,8 @@ pull request that sets it, the shared shards leave the six targets to the full
 run, whose parity job diffs them over every case, so each runs once.
 
 Each full target has its own 30-minute job and an isolated fake fleet from
-the existing battery setup. Both regular and full runs check strict goldens,
+the existing battery setup, running the Python and TypeScript batteries at
+once against it. Both regular and full runs check strict goldens,
 retain emitted output and compare all six targets across hosts, including
 missing or extra rows. The full workflow's final gate fails if either the
 batteries or parity fail. Omit `--suite shared` to run a full target locally,

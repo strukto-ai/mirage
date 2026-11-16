@@ -171,7 +171,7 @@ def selftest(
     prefix += "names=(" + " ".join(names) + ")\n"
     prefix += (
         "minio_suites=(unused)\nwasi_suites=(unused)\n"
-        "box_suites=(unused)\nssh_suites=(unused)\n"
+        "box_suites=(unused)\nssh_suites=(unused)\nmongo_suites=(unused)\n"
     )
     base = {
         f"LEG_{leg.upper()}_SUITES": entries
