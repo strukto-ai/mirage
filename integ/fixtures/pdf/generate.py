@@ -301,7 +301,7 @@ LOCKED = {
     "pages": [{"text": lines(72, 720, ["This memo may be read but not copied."])}],
 }
 
-SECRET = {
+BANDS = {
     "info": {"Title": "Salary bands", "Author": "People"},
     "pages": [{"text": lines(72, 720, ["Only the password opens this page."])}],
 }
@@ -314,7 +314,7 @@ def main() -> None:
     (OUT / "scan.pdf").write_bytes(build(SCAN))
     (OUT / "locked.pdf").write_bytes(build(LOCKED, Lock(b"owner", -3900)))
     (OUT / "secret.pdf").write_bytes(
-        build(SECRET, Lock(b"keeper", -4, b"reader"))
+        build(BANDS, Lock(b"keeper", -4, b"reader"))
     )
     (OUT / "notes.pdf").write_bytes(b"These are plain notes, not a PDF.\n")
 
