@@ -52,185 +52,190 @@ The commands below are what the agent runs in its terminal, on
 `ky.extend()` replaces an `AbortSignal` the parent instance set. The whole
 repository is 3.5 MB, and the clone takes a few seconds.
 
-## Installation
+## Setup
 
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```bash
-    pip install mirage-ai fastapi uvicorn
-    ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```bash
-    npm install @struktoai/mirage-node express
-    ```
-  </Tab>
-</Tabs>
+You need a GitHub token for the server, `GITHUB_TOKEN`. The server builds
+its workspace from `workspace.yaml` and clones ky into it when it starts.
 
-## Workspace
+<AccordionGroup>
+  <Accordion title="Installation">
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```bash
+        pip install mirage-ai fastapi uvicorn
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```bash
+        npm install @struktoai/mirage-node express
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+  <Accordion title="workspace.yaml">
+    `workspace.yaml` mounts `/repo` and `/workspace` in memory, installs `gh` and
+    `git`, and defines the `reviewer` profile every agent terminal gets:
 
-`workspace.yaml` mounts `/repo` and `/workspace` in memory, installs `gh` and
-`git`, and defines the `reviewer` profile every agent terminal gets:
-
-```yaml workspace.yaml
-mounts:
-  /repo:
-    vfs: ram
-    mode: write
-  /workspace:
-    vfs: ram
-    mode: write
-
-clis:
-  gh:
-    cli: gh
-    machine: in_process
-    config:
-      token: {from: env, key: GITHUB_TOKEN}
-      repo: sindresorhus/ky
-  git:
-    cli: git
-    machine: in_process
-
-profiles:
-  reviewer:
-    cwd: /repo
+    ```yaml workspace.yaml
     mounts:
       /repo:
-        mode: read
-    commands:
-      allow: [cd, pwd, echo, ls, cat, head, tail, grep, sed, awk, wc, sort, uniq, find, jq, git, gh pr view, gh pr diff, gh pr checks, gh issue view]
-```
+        vfs: ram
+        mode: write
+      /workspace:
+        vfs: ram
+        mode: write
 
-- `mounts` in the profile makes `/repo` read-only for the agent. The server
-  clones into it from its own session, which has no profile.
-- `commands.allow` is the whole list of what the agent can run. `rm`, `mv`
-  and `curl` are not on it, and of `gh` only the four commands that read a
-  pull request, its issue and CI. `gh pr merge`, `gh pr comment` and `gh api`
-  are refused, so the agent cannot post or change anything on GitHub.
+    clis:
+      gh:
+        cli: gh
+        machine: in_process
+        config:
+          token: {from: env, key: GITHUB_TOKEN}
+          repo: sindresorhus/ky
+      git:
+        cli: git
+        machine: in_process
 
-## Server
-
-This is the server from the
-[Overview](/home/examples/in-process-terminal#simple-server) with three
-changes: it builds the workspace from `workspace.yaml`, clones the repository
-into `/repo` when it starts, and creates each terminal under the `reviewer`
-profile. A fourth route posts a finished review. The clone is pinned to the
-commit pull request 880 merged as, so `/repo` holds the code as merged.
-
-Before you start the server, set `GITHUB_TOKEN` to a token that can read
-public repositories. [GitHub](/home/setup/github) says how to create one. To
-post reviews on your own repository, the token also needs write access to its
-pull requests.
-
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```python app.py
-    from contextlib import asynccontextmanager
-
-    from fastapi import FastAPI
-    from pydantic import BaseModel
-
-    from mirage import Workspace
-    from mirage.config import load_config, resolve_secrets
-
-    REPO = "https://github.com/sindresorhus/ky.git"
-    REF = "0bda554d448c1b57c17a5c18114432c02465d467"
-    ws: Workspace
-
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        global ws
-        config = await resolve_secrets(load_config("workspace.yaml"))
-        ws = Workspace(**config.to_workspace_kwargs())
-        ws.create_session("server")
-        r = await ws.shell(f"git clone -q {REPO} /repo && git -C /repo checkout -q --detach {REF}", session_id="server")
-        if r.exit_code != 0:
-            raise RuntimeError(await r.stderr_str())
-        yield
-        await ws.close()
-
-
-    app = FastAPI(lifespan=lifespan)
-
-
-    class Run(BaseModel):
-        command: str
-
-
-    @app.post("/sessions/{session_id}")
-    async def create(session_id: str) -> None:
-        ws.create_session(session_id, profile="reviewer")
-
-
-    @app.post("/sessions/{session_id}/run")
-    async def run(session_id: str, body: Run) -> dict:
-        r = await ws.shell(body.command, session_id=session_id)
-        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
-
-
-    @app.post("/pulls/{number}/review")
-    async def post_review(number: int) -> dict:
-        r = await ws.shell(
-            f"gh api repos/sindresorhus/ky/pulls/{number}/reviews --input /workspace/review.json --jq .html_url",
-            session_id="server",
-        )
-        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    profiles:
+      reviewer:
+        cwd: /repo
+        mounts:
+          /repo:
+            mode: read
+        commands:
+          allow: [cd, pwd, echo, ls, cat, head, tail, grep, sed, awk, wc, sort, uniq, find, jq, git, gh pr view, gh pr diff, gh pr checks, gh issue view]
     ```
 
-    ```bash
-    uvicorn app:app --port 3000
-    ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```typescript app.mjs
-    import express from 'express'
-    import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+    - `mounts` in the profile makes `/repo` read-only for the agent. The server
+      clones into it from its own session, which has no profile.
+    - `commands.allow` is the whole list of what the agent can run. `rm`, `mv`
+      and `curl` are not on it, and of `gh` only the four commands that read a
+      pull request, its issue and CI. `gh pr merge`, `gh pr comment` and `gh api`
+      are refused, so the agent cannot post or change anything on GitHub.
+  </Accordion>
+  <Accordion title="Server">
+    This is the server from the
+    [Overview](/home/examples/in-process-terminal#simple-server) with three
+    changes: it builds the workspace from `workspace.yaml`, clones the repository
+    into `/repo` when it starts, and creates each terminal under the `reviewer`
+    profile. A fourth route posts a finished review. The clone is pinned to the
+    commit pull request 880 merged as, so `/repo` holds the code as merged.
 
-    const REPO = 'https://github.com/sindresorhus/ky.git'
-    const REF = '0bda554d448c1b57c17a5c18114432c02465d467'
+    Before you start the server, set `GITHUB_TOKEN` to a token that can read
+    public repositories. [GitHub](/home/setup/github) says how to create one. To
+    post reviews on your own repository, the token also needs write access to its
+    pull requests.
 
-    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-    const ws = new Workspace(mounts, options)
-    ws.createSession('server')
-    const cloned = await ws.shell(`git clone -q ${REPO} /repo && git -C /repo checkout -q --detach ${REF}`, {
-      sessionId: 'server',
-    })
-    if (cloned.exitCode !== 0) throw new Error(cloned.stderrText)
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```python app.py
+        from contextlib import asynccontextmanager
 
-    const app = express()
-    app.use(express.json())
+        from fastapi import FastAPI
+        from pydantic import BaseModel
 
-    app.post('/sessions/:id', (req, res) => {
-      ws.createSession(req.params.id, { profile: 'reviewer' })
-      res.sendStatus(201)
-    })
+        from mirage import Workspace
+        from mirage.config import load_config, resolve_secrets
 
-    app.post('/sessions/:id/run', async (req, res) => {
-      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-    })
+        REPO = "https://github.com/sindresorhus/ky.git"
+        REF = "0bda554d448c1b57c17a5c18114432c02465d467"
+        ws: Workspace
 
-    app.post('/pulls/:number/review', async (req, res) => {
-      const r = await ws.shell(
-        `gh api repos/sindresorhus/ky/pulls/${Number(req.params.number)}/reviews --input /workspace/review.json --jq .html_url`,
-        { sessionId: 'server' },
-      )
-      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-    })
 
-    app.listen(3000, '127.0.0.1')
-    ```
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            global ws
+            config = await resolve_secrets(load_config("workspace.yaml"))
+            ws = Workspace(**config.to_workspace_kwargs())
+            ws.create_session("server")
+            r = await ws.shell(f"git clone -q {REPO} /repo && git -C /repo checkout -q --detach {REF}", session_id="server")
+            if r.exit_code != 0:
+                raise RuntimeError(await r.stderr_str())
+            yield
+            await ws.close()
 
-    ```bash
-    node app.mjs
-    ```
-  </Tab>
-</Tabs>
 
-To review your own repository, change `REPO` and `REF`, the `repo` of `gh`
-in `workspace.yaml`, and the path in the last route.
+        app = FastAPI(lifespan=lifespan)
+
+
+        class Run(BaseModel):
+            command: str
+
+
+        @app.post("/sessions/{session_id}")
+        async def create(session_id: str) -> None:
+            ws.create_session(session_id, profile="reviewer")
+
+
+        @app.post("/sessions/{session_id}/run")
+        async def run(session_id: str, body: Run) -> dict:
+            r = await ws.shell(body.command, session_id=session_id)
+            return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+
+
+        @app.post("/pulls/{number}/review")
+        async def post_review(number: int) -> dict:
+            r = await ws.shell(
+                f"gh api repos/sindresorhus/ky/pulls/{number}/reviews --input /workspace/review.json --jq .html_url",
+                session_id="server",
+            )
+            return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+        ```
+
+        ```bash
+        uvicorn app:app --port 3000
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```typescript app.mjs
+        import express from 'express'
+        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+        const REPO = 'https://github.com/sindresorhus/ky.git'
+        const REF = '0bda554d448c1b57c17a5c18114432c02465d467'
+
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
+        ws.createSession('server')
+        const cloned = await ws.shell(`git clone -q ${REPO} /repo && git -C /repo checkout -q --detach ${REF}`, {
+          sessionId: 'server',
+        })
+        if (cloned.exitCode !== 0) throw new Error(cloned.stderrText)
+
+        const app = express()
+        app.use(express.json())
+
+        app.post('/sessions/:id', (req, res) => {
+          ws.createSession(req.params.id, { profile: 'reviewer' })
+          res.sendStatus(201)
+        })
+
+        app.post('/sessions/:id/run', async (req, res) => {
+          const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+          res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+        })
+
+        app.post('/pulls/:number/review', async (req, res) => {
+          const r = await ws.shell(
+            `gh api repos/sindresorhus/ky/pulls/${Number(req.params.number)}/reviews --input /workspace/review.json --jq .html_url`,
+            { sessionId: 'server' },
+          )
+          res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+        })
+
+        app.listen(3000, '127.0.0.1')
+        ```
+
+        ```bash
+        node app.mjs
+        ```
+      </Tab>
+    </Tabs>
+
+    To review your own repository, change `REPO` and `REF`, the `repo` of `gh`
+    in `workspace.yaml`, and the path in the last route.
+  </Accordion>
+</AccordionGroup>
 
 ## Usage
 

@@ -70,326 +70,330 @@ Northwind Health,Tacoma,evt_4102,2026-11-16T08:45:00Z
 ...
 ```
 
-## Before you start
+## Setup
 
-You need a Slack bot and a mailbox for support.
+You need a Slack bot, a mailbox and two keys for the server,
+`SLACK_BOT_TOKEN` and `MAIL_PASSWORD`. The server builds its workspace from
+`workspace.yaml` and judges every reply with `guard.py`.
 
-**Slack.** A bot with `channels:read`, `channels:history` and `files:read`,
-plus `groups:read` and `groups:history` for a private channel. See
-[Slack](/home/setup/slack). Invite it to `#incidents`, and post the note
-above with the CSV as a message in the channel, not as a reply in a
-thread: the mount shows a channel's messages, not its threads.
+<AccordionGroup>
+  <Accordion title="Slack and a mailbox">
+    **Slack.** A bot with `channels:read`, `channels:history` and `files:read`,
+    plus `groups:read` and `groups:history` for a private channel. See
+    [Slack](/home/setup/slack). Invite it to `#incidents`, and post the note
+    above with the CSV as a message in the channel, not as a reply in a
+    thread: the mount shows a channel's messages, not its threads.
 
-**Mail.** Any IMAP and SMTP account works; see [Email](/home/setup/email).
-To try the example without one, run [GreenMail](https://greenmail-mail-test.github.io/greenmail/),
-a mail server for tests, in Docker. It takes any password and keeps every
-message on your machine, so nothing reaches a real inbox:
+    **Mail.** Any IMAP and SMTP account works; see [Email](/home/setup/email).
+    To try the example without one, run [GreenMail](https://greenmail-mail-test.github.io/greenmail/),
+    a mail server for tests, in Docker. It takes any password and keeps every
+    message on your machine, so nothing reaches a real inbox:
 
-```bash
-docker run -d --name greenmail -p 3025:3025 -p 3143:3143 greenmail/standalone:2.1.15
-```
-
-A real mailbox comes with `Drafts` and `Sent` folders. GreenMail starts with
-none, so create them:
-
-```bash
-curl -s imap://localhost:3143 -u support@acme.example:any -X 'CREATE Drafts'
-curl -s imap://localhost:3143 -u support@acme.example:any -X 'CREATE Sent'
-```
-
-Then send the customer's email to the support address:
-
-```bash
-curl -s smtp://localhost:3025 -T - \
-  --mail-from priya@northwind.example --mail-rcpt support@acme.example <<EOF
-From: Priya Shah <priya@northwind.example>
-To: support@acme.example
-Date: $(date -u -R)
-Message-ID: <calendar-sync-1@northwind.example>
-Subject: Our calendar sync failed this morning
-
-Hi, appointments were missing from our calendars this morning.
-What happened, did we lose any data, and which appointments were
-affected? Our clinics want to check them with patients.
-
-Priya
-EOF
-```
-
-The server needs two keys: `SLACK_BOT_TOKEN`, and `MAIL_PASSWORD`, which
-can be anything for GreenMail.
-
-## Installation
-
-The policy runs on [Monty](/home/policy/scripts#runtimes), a small sandboxed
-Python interpreter:
-
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```bash
-    pip install 'mirage-ai[email,monty]' fastapi uvicorn
+    docker run -d --name greenmail -p 3025:3025 -p 3143:3143 greenmail/standalone:2.1.15
     ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
+
+    A real mailbox comes with `Drafts` and `Sent` folders. GreenMail starts with
+    none, so create them:
+
     ```bash
-    npm install @struktoai/mirage-node @pydantic/monty express
+    curl -s imap://localhost:3143 -u support@acme.example:any -X 'CREATE Drafts'
+    curl -s imap://localhost:3143 -u support@acme.example:any -X 'CREATE Sent'
     ```
-  </Tab>
-</Tabs>
 
-## Workspace
+    Then send the customer's email to the support address:
 
-`workspace.yaml` mounts Slack read-only, keeps `/workspace` in memory and
-installs `himalaya` with the support account. With your own mailbox, set its
-hosts and username, and drop the two ports and `use_ssl`.
+    ```bash
+    curl -s smtp://localhost:3025 -T - \
+      --mail-from priya@northwind.example --mail-rcpt support@acme.example <<EOF
+    From: Priya Shah <priya@northwind.example>
+    To: support@acme.example
+    Date: $(date -u -R)
+    Message-ID: <calendar-sync-1@northwind.example>
+    Subject: Our calendar sync failed this morning
 
-The `support` profile is what every terminal gets. Its allow list leaves
-the agent the text tools it needs and three mail commands, to list, read
-and reply: no `compose`, `forward`, `delete` or raw `send`. Its policy,
-`guard.py`, judges each reply before it runs:
+    Hi, appointments were missing from our calendars this morning.
+    What happened, did we lose any data, and which appointments were
+    affected? Our clinics want to check them with patients.
 
-```yaml workspace.yaml
-mounts:
-  /slack:
-    vfs: slack
-    mode: read
-    config:
-      token: {from: env, key: SLACK_BOT_TOKEN}
-  /workspace:
-    vfs: ram
-    mode: write
+    Priya
+    EOF
+    ```
 
-clis:
-  himalaya:
-    cli: himalaya
-    machine: in_process
-    config:
-      imap_host: localhost
-      imap_port: 3143
-      smtp_host: localhost
-      smtp_port: 3025
-      use_ssl: false
-      username: support@acme.example
-      password: {from: env, key: MAIL_PASSWORD}
+    The server needs two keys: `SLACK_BOT_TOKEN`, and `MAIL_PASSWORD`, which
+    can be anything for GreenMail.
+  </Accordion>
+  <Accordion title="Installation">
+    The policy runs on [Monty](/home/policy/scripts#runtimes), a small sandboxed
+    Python interpreter:
 
-profiles:
-  support:
-    commands:
-      allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, mkdir,
-              himalaya envelope list, himalaya message read, himalaya message reply]
-    policy:
-      pre_command:
-        - {script: ./guard.py}
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```bash
+        pip install 'mirage-ai[email,monty]' fastapi uvicorn
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```bash
+        npm install @struktoai/mirage-node @pydantic/monty express
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+  <Accordion title="workspace.yaml">
+    `workspace.yaml` mounts Slack read-only, keeps `/workspace` in memory and
+    installs `himalaya` with the support account. With your own mailbox, set its
+    hosts and username, and drop the two ports and `use_ssl`.
 
-profile: support
-```
+    The `support` profile is what every terminal gets. Its allow list leaves
+    the agent the text tools it needs and three mail commands, to list, read
+    and reply: no `compose`, `forward`, `delete` or raw `send`. Its policy,
+    `guard.py`, judges each reply before it runs:
 
-`guard.py` sees each command after the shell has expanded it, so a variable
-or a glob cannot hide a recipient or a path. It judges only
-`himalaya message reply`, the one way the profile lets the agent write
-mail, with one rule per function:
+    ```yaml workspace.yaml
+    mounts:
+      /slack:
+        vfs: slack
+        mode: read
+        config:
+          token: {from: env, key: SLACK_BOT_TOKEN}
+      /workspace:
+        vfs: ram
+        mode: write
 
-- `hides_a_flag_value`: a flag must be written apart from its value, as
-  `--attach FILE`, not `--attach=FILE` or `-tADDR`, so the rules below see
-  every value.
-- `adds_a_recipient`: a reply goes to whoever wrote in, and no one else, so
-  `--to`, `--cc` and `--bcc` are refused.
-- `attaches_a_bad_report`: an attachment must be a report the agent built
-  in `/workspace/outbox/`, never a file straight from Slack, and
-  `customers_in` reads its first column to check that it holds one
-  customer.
-- `sends_now`: `--send` asks a person. Without it, a reply is only saved
-  to `Drafts`.
+    clis:
+      himalaya:
+        cli: himalaya
+        machine: in_process
+        config:
+          imap_host: localhost
+          imap_port: 3143
+          smtp_host: localhost
+          smtp_port: 3025
+          use_ssl: false
+          username: support@acme.example
+          password: {from: env, key: MAIL_PASSWORD}
 
-```python guard.py
-OUTBOX = "/workspace/outbox/"
-RECIPIENT_FLAGS = ("-t", "--to", "--cc", "--bcc")
+    profiles:
+      support:
+        commands:
+          allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, mkdir,
+                  himalaya envelope list, himalaya message read, himalaya message reply]
+        policy:
+          pre_command:
+            - {script: ./guard.py}
 
+    profile: support
+    ```
+  </Accordion>
+  <Accordion title="guard.py">
+    `guard.py` sees each command after the shell has expanded it, so a variable
+    or a glob cannot hide a recipient or a path. It judges only
+    `himalaya message reply`, the one way the profile lets the agent write
+    mail, with one rule per function:
 
-def is_reply(words):
-    return [w["text"] for w in words[:3]] == ["himalaya", "message", "reply"]
+    - `hides_a_flag_value`: a flag must be written apart from its value, as
+      `--attach FILE`, not `--attach=FILE` or `-tADDR`, so the rules below see
+      every value.
+    - `adds_a_recipient`: a reply goes to whoever wrote in, and no one else, so
+      `--to`, `--cc` and `--bcc` are refused.
+    - `attaches_a_bad_report`: an attachment must be a report the agent built
+      in `/workspace/outbox/`, never a file straight from Slack, and
+      `customers_in` reads its first column to check that it holds one
+      customer.
+    - `sends_now`: `--send` asks a person. Without it, a reply is only saved
+      to `Drafts`.
 
-
-def hides_a_flag_value(words):
-    for w in words:
-        t = w["text"]
-        if w["kind"] == "option" and ("=" in t or (not t.startswith("--") and len(t) > 2)):
-            return "write each flag and its value apart"
-
-
-def adds_a_recipient(words):
-    for w in words:
-        if w["text"] in RECIPIENT_FLAGS:
-            return "a reply goes only to the sender"
-
-
-def customers_in(report):
-    names = []
-    for line in open(report).read().splitlines()[1:]:
-        name = line.split(",")[0]
-        if line and name not in names:
-            names.append(name)
-    return names
-
-
-def attaches_a_bad_report(words):
-    for w in words:
-        if w["option"] != "--attach":
-            continue
-        report = w["path"] or ""
-        if not report.startswith(OUTBOX):
-            return "attach only reports from " + OUTBOX
-        if len(customers_in(report)) != 1:
-            return "a report holds one customer's data"
-
-
-def sends_now(words):
-    return "--send" in [w["text"] for w in words]
+    ```python guard.py
+    OUTBOX = "/workspace/outbox/"
+    RECIPIENT_FLAGS = ("-t", "--to", "--cc", "--bcc")
 
 
-def pre_command(ctx):
-    words = ctx["words"]
-    if not is_reply(words):
+    def is_reply(words):
+        return [w["text"] for w in words[:3]] == ["himalaya", "message", "reply"]
+
+
+    def hides_a_flag_value(words):
+        for w in words:
+            t = w["text"]
+            if w["kind"] == "option" and ("=" in t or (not t.startswith("--") and len(t) > 2)):
+                return "write each flag and its value apart"
+
+
+    def adds_a_recipient(words):
+        for w in words:
+            if w["text"] in RECIPIENT_FLAGS:
+                return "a reply goes only to the sender"
+
+
+    def customers_in(report):
+        names = []
+        for line in open(report).read().splitlines()[1:]:
+            name = line.split(",")[0]
+            if line and name not in names:
+                names.append(name)
+        return names
+
+
+    def attaches_a_bad_report(words):
+        for w in words:
+            if w["option"] != "--attach":
+                continue
+            report = w["path"] or ""
+            if not report.startswith(OUTBOX):
+                return "attach only reports from " + OUTBOX
+            if len(customers_in(report)) != 1:
+                return "a report holds one customer's data"
+
+
+    def sends_now(words):
+        return "--send" in [w["text"] for w in words]
+
+
+    def pre_command(ctx):
+        words = ctx["words"]
+        if not is_reply(words):
+            return None
+        problem = hides_a_flag_value(words) or adds_a_recipient(words) or attaches_a_bad_report(words)
+        if problem:
+            return {"kind": "deny", "reason": problem}
+        if sends_now(words):
+            return {"kind": "ask", "reason": "a person approves every send"}
         return None
-    problem = hides_a_flag_value(words) or adds_a_recipient(words) or attaches_a_bad_report(words)
-    if problem:
-        return {"kind": "deny", "reason": problem}
-    if sends_now(words):
-        return {"kind": "ask", "reason": "a person approves every send"}
-    return None
-```
-
-## Server
-
-This is the server from the
-[Overview](/home/examples/in-process-terminal#simple-server), built from
-`workspace.yaml`, with two changes:
-
-- `/sessions/{id}/run` also returns the policy's `decision`, so the agent
-  knows why a command was refused, and the ask's ID.
-- `GET /asks` lists the sends waiting for a person, and `POST /asks/{id}`
-  approves or refuses one.
-
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```python app.py
-    from contextlib import asynccontextmanager
-
-    from fastapi import FastAPI
-    from pydantic import BaseModel
-
-    from mirage import Outcome, Workspace
-    from mirage.config import load_config, resolve_secrets
-
-    ws: Workspace
-
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        global ws
-        config = await resolve_secrets(load_config("workspace.yaml"))
-        ws = Workspace(**config.to_workspace_kwargs())
-        yield
-        await ws.close()
-
-
-    app = FastAPI(lifespan=lifespan)
-
-
-    class Run(BaseModel):
-        command: str
-
-
-    class Answer(BaseModel):
-        allow: bool
-
-
-    @app.post("/sessions/{session_id}")
-    async def create(session_id: str) -> None:
-        ws.create_session(session_id)
-
-
-    @app.post("/sessions/{session_id}/run")
-    async def run(session_id: str, body: Run) -> dict:
-        r = await ws.shell(body.command, session_id=session_id)
-        d = r.decision
-        return {
-            "stdout": await r.stdout_str(),
-            "stderr": await r.stderr_str(),
-            "exit_code": r.exit_code,
-            "decision": d and {"kind": d.kind, "reason": d.reason, "ask_id": d.ask_id},
-        }
-
-
-    @app.get("/asks")
-    async def asks() -> dict:
-        return {"items": [
-            {"id": a.id, "session_id": a.session_id, "command": " ".join([a.command, *a.argv]), "reason": a.reason}
-            for a in ws.decisions.pending()
-        ]}
-
-
-    @app.post("/asks/{ask_id}", status_code=204)
-    async def answer(ask_id: str, body: Answer) -> None:
-        await ws.decisions.answer(ask_id, Outcome.ALLOW if body.allow else Outcome.DENY)
     ```
+  </Accordion>
+  <Accordion title="Server">
+    This is the server from the
+    [Overview](/home/examples/in-process-terminal#simple-server), built from
+    `workspace.yaml`, with two changes:
 
-    ```bash
-    export SLACK_BOT_TOKEN=xoxb-...
-    export MAIL_PASSWORD=any
-    uvicorn app:app --port 3000
-    ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```typescript app.mjs
-    import express from 'express'
-    import { Outcome, Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+    - `/sessions/{id}/run` also returns the policy's `decision`, so the agent
+      knows why a command was refused, and the ask's ID.
+    - `GET /asks` lists the sends waiting for a person, and `POST /asks/{id}`
+      approves or refuses one.
 
-    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-    const ws = new Workspace(mounts, options)
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```python app.py
+        from contextlib import asynccontextmanager
 
-    const app = express()
-    app.use(express.json())
+        from fastapi import FastAPI
+        from pydantic import BaseModel
 
-    app.post('/sessions/:id', (req, res) => {
-      ws.createSession(req.params.id)
-      res.sendStatus(201)
-    })
+        from mirage import Outcome, Workspace
+        from mirage.config import load_config, resolve_secrets
 
-    app.post('/sessions/:id/run', async (req, res) => {
-      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-      const d = r.decision
-      res.json({
-        stdout: r.stdoutText,
-        stderr: r.stderrText,
-        exitCode: r.exitCode,
-        decision: d && { kind: d.kind, reason: d.reason, ask_id: d.askId },
-      })
-    })
+        ws: Workspace
 
-    app.get('/asks', (req, res) => {
-      res.json({
-        items: ws.decisions.pending().map((a) => ({
-          id: a.id, session_id: a.sessionId, command: [a.command, ...a.argv].join(' '), reason: a.reason,
-        })),
-      })
-    })
 
-    app.post('/asks/:id', async (req, res) => {
-      await ws.decisions.answer(req.params.id, req.body.allow ? Outcome.ALLOW : Outcome.DENY)
-      res.sendStatus(204)
-    })
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            global ws
+            config = await resolve_secrets(load_config("workspace.yaml"))
+            ws = Workspace(**config.to_workspace_kwargs())
+            yield
+            await ws.close()
 
-    app.listen(3000, '127.0.0.1')
-    ```
 
-    ```bash
-    export SLACK_BOT_TOKEN=xoxb-...
-    export MAIL_PASSWORD=any
-    node app.mjs
-    ```
-  </Tab>
-</Tabs>
+        app = FastAPI(lifespan=lifespan)
+
+
+        class Run(BaseModel):
+            command: str
+
+
+        class Answer(BaseModel):
+            allow: bool
+
+
+        @app.post("/sessions/{session_id}")
+        async def create(session_id: str) -> None:
+            ws.create_session(session_id)
+
+
+        @app.post("/sessions/{session_id}/run")
+        async def run(session_id: str, body: Run) -> dict:
+            r = await ws.shell(body.command, session_id=session_id)
+            d = r.decision
+            return {
+                "stdout": await r.stdout_str(),
+                "stderr": await r.stderr_str(),
+                "exit_code": r.exit_code,
+                "decision": d and {"kind": d.kind, "reason": d.reason, "ask_id": d.ask_id},
+            }
+
+
+        @app.get("/asks")
+        async def asks() -> dict:
+            return {"items": [
+                {"id": a.id, "session_id": a.session_id, "command": " ".join([a.command, *a.argv]), "reason": a.reason}
+                for a in ws.decisions.pending()
+            ]}
+
+
+        @app.post("/asks/{ask_id}", status_code=204)
+        async def answer(ask_id: str, body: Answer) -> None:
+            await ws.decisions.answer(ask_id, Outcome.ALLOW if body.allow else Outcome.DENY)
+        ```
+
+        ```bash
+        export SLACK_BOT_TOKEN=xoxb-...
+        export MAIL_PASSWORD=any
+        uvicorn app:app --port 3000
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```typescript app.mjs
+        import express from 'express'
+        import { Outcome, Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
+
+        const app = express()
+        app.use(express.json())
+
+        app.post('/sessions/:id', (req, res) => {
+          ws.createSession(req.params.id)
+          res.sendStatus(201)
+        })
+
+        app.post('/sessions/:id/run', async (req, res) => {
+          const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+          const d = r.decision
+          res.json({
+            stdout: r.stdoutText,
+            stderr: r.stderrText,
+            exitCode: r.exitCode,
+            decision: d && { kind: d.kind, reason: d.reason, ask_id: d.askId },
+          })
+        })
+
+        app.get('/asks', (req, res) => {
+          res.json({
+            items: ws.decisions.pending().map((a) => ({
+              id: a.id, session_id: a.sessionId, command: [a.command, ...a.argv].join(' '), reason: a.reason,
+            })),
+          })
+        })
+
+        app.post('/asks/:id', async (req, res) => {
+          await ws.decisions.answer(req.params.id, req.body.allow ? Outcome.ALLOW : Outcome.DENY)
+          res.sendStatus(204)
+        })
+
+        app.listen(3000, '127.0.0.1')
+        ```
+
+        ```bash
+        export SLACK_BOT_TOKEN=xoxb-...
+        export MAIL_PASSWORD=any
+        node app.mjs
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
 
 ## Usage
 

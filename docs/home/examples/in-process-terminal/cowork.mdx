@@ -54,183 +54,187 @@ this to `#deals-won`:
 Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
 ```
 
-## Before you start
+## Setup
 
-Set up three accounts, and give the server five keys:
+You need Slack, Google and Notion accounts, two files in Drive, and five
+keys for the server. The server builds its workspace from `workspace.yaml`.
 
-| Service | Set up | Keys |
-| --- | --- | --- |
-| Slack | A bot with `channels:read`, `channels:history`, `chat:write` and `users:read`, plus `groups:read` and `groups:history` for a private channel. Invite it to `#deals-won`. See [Slack](/home/setup/slack). | `SLACK_BOT_TOKEN` |
-| Google | An OAuth client and a refresh token with the Drive, Docs and Sheets scopes. See [Google Workspace](/home/setup/google). | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
-| Notion | An internal integration. The agent creates its pages at the top level of the workspace, so nothing needs sharing. See [Notion](/home/setup/notion). | `NOTION_API_KEY` |
+<AccordionGroup>
+  <Accordion title="Accounts and files">
+    Set up three accounts, and give the server five keys:
 
-In Google Drive, make a folder named `Onboarding` with two files:
+    | Service | Set up | Keys |
+    | --- | --- | --- |
+    | Slack | A bot with `channels:read`, `channels:history`, `chat:write` and `users:read`, plus `groups:read` and `groups:history` for a private channel. Invite it to `#deals-won`. See [Slack](/home/setup/slack). | `SLACK_BOT_TOKEN` |
+    | Google | An OAuth client and a refresh token with the Drive, Docs and Sheets scopes. See [Google Workspace](/home/setup/google). | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
+    | Notion | An internal integration. The agent creates its pages at the top level of the workspace, so nothing needs sharing. See [Notion](/home/setup/notion). | `NOTION_API_KEY` |
 
-- **`Onboarding tracker`**, a Sheet with the columns `Customer`, `Seats`,
-  `Start`, `Account manager` and `Plan`, and a row for each customer.
-- **`Onboarding plan template`**, a Doc with `{{customer}}`, `{{seats}}`,
-  `{{start}}`, `{{manager}}`, `{{goal}}`, `{{champion}}` and `{{kickoff}}`
-  where the values go:
+    In Google Drive, make a folder named `Onboarding` with two files:
 
-  ```text
-  Onboarding plan: {{customer}}
+    - **`Onboarding tracker`**, a Sheet with the columns `Customer`, `Seats`,
+      `Start`, `Account manager` and `Plan`, and a row for each customer.
+    - **`Onboarding plan template`**, a Doc with `{{customer}}`, `{{seats}}`,
+      `{{start}}`, `{{manager}}`, `{{goal}}`, `{{champion}}` and `{{kickoff}}`
+      where the values go:
 
-  Seats: {{seats}}
-  Start date: {{start}}
-  Account manager: {{manager}}
+      ```text
+      Onboarding plan: {{customer}}
 
-  Goal
-  {{goal}}
+      Seats: {{seats}}
+      Start date: {{start}}
+      Account manager: {{manager}}
 
-  Stakeholders
-  {{champion}}, champion
+      Goal
+      {{goal}}
 
-  Milestones
-  Kickoff call by {{kickoff}}
-  Week 1: admin accounts and SSO
-  Week 2: import data and train the first team
-  Week 4: adoption review with {{champion}}
-  ```
+      Stakeholders
+      {{champion}}, champion
 
-## Installation
+      Milestones
+      Kickoff call by {{kickoff}}
+      Week 1: admin accounts and SSO
+      Week 2: import data and train the first team
+      Week 4: adoption review with {{champion}}
+      ```
+  </Accordion>
+  <Accordion title="Installation">
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```bash
+        pip install mirage-ai fastapi uvicorn
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```bash
+        npm install @struktoai/mirage-node express
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+  <Accordion title="workspace.yaml">
+    `workspace.yaml` mounts Slack and Drive read-only, keeps `/workspace` in
+    memory, and installs the three CLIs. Each credential is read from the
+    server's environment:
 
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```bash
-    pip install mirage-ai fastapi uvicorn
+    ```yaml workspace.yaml
+    mounts:
+      /slack:
+        vfs: slack
+        mode: read
+        config:
+          token: {from: env, key: SLACK_BOT_TOKEN}
+      /gdrive:
+        vfs: gdrive
+        mode: read
+        config:
+          client_id: {from: env, key: GOOGLE_CLIENT_ID}
+          client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
+          refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
+      /workspace:
+        vfs: ram
+        mode: write
+
+    clis:
+      slack:
+        cli: slack
+        machine: in_process
+        config:
+          token: {from: env, key: SLACK_BOT_TOKEN}
+      gws:
+        cli: gws
+        machine: in_process
+        config:
+          client_id: {from: env, key: GOOGLE_CLIENT_ID}
+          client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
+          refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
+      ntn:
+        cli: ntn
+        machine: in_process
+        config:
+          api_key: {from: env, key: NOTION_API_KEY}
     ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```bash
-    npm install @struktoai/mirage-node express
-    ```
-  </Tab>
-</Tabs>
+  </Accordion>
+  <Accordion title="Server">
+    This is the server from the
+    [Overview](/home/examples/in-process-terminal#simple-server), built from
+    `workspace.yaml`. Set the five keys in its environment before you start it.
 
-## Workspace
+    <Tabs>
+      <Tab title="FastAPI" icon="/images/python-logo.svg">
+        ```python app.py
+        from contextlib import asynccontextmanager
 
-`workspace.yaml` mounts Slack and Drive read-only, keeps `/workspace` in
-memory, and installs the three CLIs. Each credential is read from the
-server's environment:
+        from fastapi import FastAPI
+        from pydantic import BaseModel
 
-```yaml workspace.yaml
-mounts:
-  /slack:
-    vfs: slack
-    mode: read
-    config:
-      token: {from: env, key: SLACK_BOT_TOKEN}
-  /gdrive:
-    vfs: gdrive
-    mode: read
-    config:
-      client_id: {from: env, key: GOOGLE_CLIENT_ID}
-      client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
-      refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
-  /workspace:
-    vfs: ram
-    mode: write
+        from mirage import Workspace
+        from mirage.config import load_config, resolve_secrets
 
-clis:
-  slack:
-    cli: slack
-    machine: in_process
-    config:
-      token: {from: env, key: SLACK_BOT_TOKEN}
-  gws:
-    cli: gws
-    machine: in_process
-    config:
-      client_id: {from: env, key: GOOGLE_CLIENT_ID}
-      client_secret: {from: env, key: GOOGLE_CLIENT_SECRET}
-      refresh_token: {from: env, key: GOOGLE_REFRESH_TOKEN}
-  ntn:
-    cli: ntn
-    machine: in_process
-    config:
-      api_key: {from: env, key: NOTION_API_KEY}
-```
-
-## Server
-
-This is the server from the
-[Overview](/home/examples/in-process-terminal#simple-server), built from
-`workspace.yaml`. Set the five keys in its environment before you start it.
-
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```python app.py
-    from contextlib import asynccontextmanager
-
-    from fastapi import FastAPI
-    from pydantic import BaseModel
-
-    from mirage import Workspace
-    from mirage.config import load_config, resolve_secrets
-
-    ws: Workspace
+        ws: Workspace
 
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        global ws
-        config = await resolve_secrets(load_config("workspace.yaml"))
-        ws = Workspace(**config.to_workspace_kwargs())
-        yield
-        await ws.close()
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            global ws
+            config = await resolve_secrets(load_config("workspace.yaml"))
+            ws = Workspace(**config.to_workspace_kwargs())
+            yield
+            await ws.close()
 
 
-    app = FastAPI(lifespan=lifespan)
+        app = FastAPI(lifespan=lifespan)
 
 
-    class Run(BaseModel):
-        command: str
+        class Run(BaseModel):
+            command: str
 
 
-    @app.post("/sessions/{session_id}")
-    async def create(session_id: str) -> None:
-        ws.create_session(session_id)
+        @app.post("/sessions/{session_id}")
+        async def create(session_id: str) -> None:
+            ws.create_session(session_id)
 
 
-    @app.post("/sessions/{session_id}/run")
-    async def run(session_id: str, body: Run) -> dict:
-        r = await ws.shell(body.command, session_id=session_id)
-        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
-    ```
+        @app.post("/sessions/{session_id}/run")
+        async def run(session_id: str, body: Run) -> dict:
+            r = await ws.shell(body.command, session_id=session_id)
+            return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+        ```
 
-    ```bash
-    uvicorn app:app --port 3000
-    ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```typescript app.mjs
-    import express from 'express'
-    import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+        ```bash
+        uvicorn app:app --port 3000
+        ```
+      </Tab>
+      <Tab title="Express" icon="/images/typescript-logo.svg">
+        ```typescript app.mjs
+        import express from 'express'
+        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 
-    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-    const ws = new Workspace(mounts, options)
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
 
-    const app = express()
-    app.use(express.json())
+        const app = express()
+        app.use(express.json())
 
-    app.post('/sessions/:id', (req, res) => {
-      ws.createSession(req.params.id)
-      res.sendStatus(201)
-    })
+        app.post('/sessions/:id', (req, res) => {
+          ws.createSession(req.params.id)
+          res.sendStatus(201)
+        })
 
-    app.post('/sessions/:id/run', async (req, res) => {
-      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-    })
+        app.post('/sessions/:id/run', async (req, res) => {
+          const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+          res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+        })
 
-    app.listen(3000, '127.0.0.1')
-    ```
+        app.listen(3000, '127.0.0.1')
+        ```
 
-    ```bash
-    node app.mjs
-    ```
-  </Tab>
-</Tabs>
+        ```bash
+        node app.mjs
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
 
 ## Usage
 
