@@ -288,6 +288,12 @@ async def test_rg_searches_the_cwd_when_stdin_is_a_device():
             "-cf../../slack/export.csv",
             "-cf",
         ),
+        (
+            "grep --file=../../slack/export.csv x",
+            "--file=../../slack/export.csv",
+            "--file",
+        ),
+        ("grep -f../../slack/export.csv x", "-f../../slack/export.csv", "-f"),
     ],
 )
 async def test_a_path_word_names_the_path_paths_holds(
