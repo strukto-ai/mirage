@@ -26,7 +26,15 @@ import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
-import { objectType, openRepo, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
+import {
+  readCommit,
+  objectType,
+  openRepo,
+  refOid,
+  repoArgs,
+  storedItems,
+  type Repo,
+} from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
@@ -49,6 +57,7 @@ const SCP_LIKE = /^[^/:]+:/
 const REPO_SUFFIXES = ['/.git', '', '.git/.git', '.git']
 const SYMREF_HEAD = 'symref=HEAD:'
 export const PEELED = '^{}'
+const SHALLOW_LINE = 'shallow '
 
 /** What a remote publishes before anything is fetched. */
 export interface Advertisement {
@@ -62,15 +71,29 @@ export interface Advertisement {
   readonly symrefs?: ReadonlyMap<string, string>
 }
 
+/** What one fetch brought back. */
+export interface Fetched {
+  /** The packfile, empty for none. */
+  readonly pack: Uint8Array
+  /** The commits whose parents were left out, for `.git/shallow`. */
+  readonly shallow: readonly string[]
+}
+
 /** A remote a fetch or clone reads from. */
 export interface Transport {
   advertise(): Promise<Advertisement>
-  /** `has` says whether the receiver already holds an object. */
+  /**
+   * `has` says whether the receiver already holds an object; `depth` is how
+   * many commits deep to fetch, null for the whole history; `shallow` lists
+   * the receiver's shallow commits.
+   */
   fetchPack(
     wants: readonly string[],
     haves: readonly string[],
     has: (oid: string) => Promise<boolean>,
-  ): Promise<Uint8Array>
+    depth?: number | null,
+    shallow?: readonly string[],
+  ): Promise<Fetched>
 }
 
 /** One pkt-line: four hex digits of length, then the payload. */
@@ -141,23 +164,41 @@ export function displayUrl(url: string): string {
 }
 
 /**
- * Every object reachable from `wants` that the other side lacks.
+ * Every object reachable from `wants` that the other side lacks, and the
+ * commits a depth cut shallow.
  *
  * Commits the other side has stop the walk; the trees of those boundary commits
  * are what it already holds, so their contents are left out as upload-pack's
- * edge does. Gitlinks name another repository and are never followed.
+ * edge does. Gitlinks name another repository and are never followed. A depth
+ * keeps only the commits that many steps from a want, the want counting as one,
+ * walked breadth first so each commit is counted at its nearest, a tag's target
+ * at the tag's own step; one at the limit that has parents is cut there,
+ * shallow, as `deepen` cuts it. A commit the sender itself holds shallow is cut
+ * there too, so a clone of a shallow repository is shallow where it is.
  */
 export async function missingObjects(
   repo: Repo,
   wants: readonly string[],
   has: (oid: string) => Promise<boolean>,
-): Promise<string[]> {
+  depth: number | null = null,
+): Promise<[string[], string[]]> {
   const sending: string[] = []
   const boundary: string[] = []
+  const shallow: string[] = []
   const trees: string[] = []
   const seen = new Set<string>()
-  const stack = [...wants]
-  for (let oid = stack.pop(); oid !== undefined; oid = stack.pop()) {
+  const queue: [string, number][] = wants.map((want) => [want, 1])
+  // Breadth first reads from a cursor rather than shifting, so the walk stays
+  // linear; a tag's target takes the slot the tag was just read from.
+  let head = 0
+  const take = (): [string, number] | undefined =>
+    depth === null ? queue.pop() : head < queue.length ? queue[head++] : undefined
+  const now = (item: [string, number]): void => {
+    if (depth === null) queue.push(item)
+    else queue[--head] = item
+  }
+  for (let next = take(); next !== undefined; next = take()) {
+    const [oid, level] = next
     if (seen.has(oid)) continue
     seen.add(oid)
     if (await has(oid)) {
@@ -166,21 +207,23 @@ export async function missingObjects(
     }
     const type = await objectType(repo, oid)
     sending.push(oid)
-    if (type === 'tag') stack.push((await git.readTag({ ...repoArgs(repo), oid })).tag.object)
+    if (type === 'tag') now([(await git.readTag({ ...repoArgs(repo), oid })).tag.object, level])
     else if (type === 'commit') {
-      const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+      const commit = await readCommit(repo, oid)
       trees.push(commit.tree)
-      for (const item of commit.parent) stack.push(item)
+      if (repo.shallow.has(oid) || (depth !== null && level >= depth && commit.parent.length > 0))
+        shallow.push(oid)
+      else for (const item of commit.parent) queue.push([item, level + 1])
     }
   }
   const held = new Set<string>()
   for (const oid of boundary) {
     if ((await objectType(repo, oid)) !== 'commit') continue
-    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+    const commit = await readCommit(repo, oid)
     await walkTree(repo, commit.tree, held, null)
   }
   for (const tree of trees) await walkTree(repo, tree, held, sending)
-  return sending
+  return [sending, shallow]
 }
 
 /** Visit a tree once, collecting what is new into `sending`. */
@@ -252,11 +295,12 @@ export class LocalTransport implements Transport {
     wants: readonly string[],
     _haves: readonly string[],
     has: (oid: string) => Promise<boolean>,
-  ): Promise<Uint8Array> {
-    const oids = await missingObjects(this.repo, wants, has)
-    if (!oids.length) return new Uint8Array()
+    depth: number | null = null,
+  ): Promise<Fetched> {
+    const [oids, shallow] = await missingObjects(this.repo, wants, has, depth)
+    if (!oids.length) return { pack: new Uint8Array(), shallow }
     const { packfile } = await git.packObjects({ ...repoArgs(this.repo), oids })
-    return packfile ?? new Uint8Array()
+    return { pack: packfile ?? new Uint8Array(), shallow }
   }
 }
 
@@ -345,13 +389,28 @@ export class HttpTransport implements Transport {
     return parseAdvertisement(lines)
   }
 
-  /** POST the wants and haves to upload-pack; return the pack. */
-  async fetchPack(wants: readonly string[], haves: readonly string[]): Promise<Uint8Array> {
+  /**
+   * POST the wants and haves to upload-pack; return the pack. A shallow
+   * receiver names its shallow commits, so the server does not count what lies
+   * past them as held, and a depth sends `deepen`; both ask for the `shallow`
+   * capability, and the server names each commit it cut in a `shallow` line
+   * ahead of the pack.
+   */
+  async fetchPack(
+    wants: readonly string[],
+    haves: readonly string[],
+    _has?: (oid: string) => Promise<boolean>,
+    depth: number | null = null,
+    shallow: readonly string[] = [],
+  ): Promise<Fetched> {
     const [first, ...rest] = wants
-    if (first === undefined) return new Uint8Array()
+    if (first === undefined) return { pack: new Uint8Array(), shallow: [] }
+    const caps = depth === null && !shallow.length ? CAPABILITIES : `${CAPABILITIES} shallow`
     const parts = [
-      pktLine(`want ${first} ${CAPABILITIES}\n`),
+      pktLine(`want ${first} ${caps}\n`),
       ...rest.map((want) => pktLine(`want ${want}\n`)),
+      ...shallow.map((oid) => pktLine(`shallow ${oid}\n`)),
+      ...(depth === null ? [] : [pktLine(`deepen ${String(depth)}\n`)]),
       ENC.encode(FLUSH),
       ...haves.map((have) => pktLine(`have ${have}\n`)),
       pktLine('done\n'),
@@ -366,15 +425,20 @@ export class HttpTransport implements Transport {
       concat(parts),
     )
     const pack: Uint8Array[] = []
+    const cut: string[] = []
     for (const line of pktLines(reply)) {
       if (line === null) continue
       const text = DEC.decode(line.subarray(0, 4))
       if (text.startsWith('NAK') || text === 'ACK ') continue
+      if (DEC.decode(line.subarray(0, SHALLOW_LINE.length)) === SHALLOW_LINE) {
+        cut.push(DEC.decode(line.subarray(SHALLOW_LINE.length)).trim())
+        continue
+      }
       if (line[0] === PACK_BAND) pack.push(line.subarray(1))
       else if (line[0] === ERROR_BAND)
         throw new GitError(`remote error: ${DEC.decode(line.subarray(1)).trim()}`)
     }
-    return concat(pack)
+    return { pack: concat(pack), shallow: cut }
   }
 }
 

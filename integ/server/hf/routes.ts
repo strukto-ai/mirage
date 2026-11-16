@@ -20,13 +20,22 @@ import {
   deleteFolder,
   deleteObject,
   objectAt,
-  objects,
+  objectRows,
+  objectsAt,
   putXorb,
   registerShard,
   writeObject,
   xetFile,
 } from './store.ts'
-import { clampedReply, fileEntry, notFound, selfUrl, strip, treeEntries } from './wire.ts'
+import {
+  clampedReply,
+  fileEntry,
+  notFound,
+  selfUrl,
+  strip,
+  treeEntries,
+  treeFiles,
+} from './wire.ts'
 import { SERVE_CHUNK_SIZE, serializeChunks, serializedOffsetOf, serveHash } from './xet.ts'
 
 const BOOT = randomUUID().replace(/-/g, '').slice(0, 12)
@@ -50,8 +59,17 @@ function truthy(value: string | null): boolean {
 }
 
 async function tree(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await objects(ctx.db, ctx.tenant, bucketOf(ctx))
-  const entries = treeEntries(rows, ctx.params.path ?? '', truthy(ctx.query.get('recursive')))
+  const bucket = bucketOf(ctx)
+  const prefix = ctx.params.path ?? ''
+  const recursive = truthy(ctx.query.get('recursive'))
+  const rows = await objectRows(ctx.sql, ctx.tenant, bucket)
+  const files = await objectsAt(ctx.sql, ctx.tenant, bucket, treeFiles(rows, prefix, recursive))
+  const entries = treeEntries(
+    rows,
+    new Map(files.map((file) => [file.path, file])),
+    prefix,
+    recursive,
+  )
   return { status: 200, body: entries }
 }
 
@@ -74,14 +92,14 @@ function resolveHead(row: { content: Uint8Array }): Reply {
 }
 
 async function resolveStat(ctx: Ctx<C>): Promise<Reply> {
-  const row = await objectAt(ctx.db, ctx.tenant, bucketOf(ctx), strip(ctx.params.path ?? ''))
+  const row = await objectAt(ctx.sql, ctx.tenant, bucketOf(ctx), strip(ctx.params.path ?? ''))
   return row === null ? notFound() : resolveHead(row)
 }
 
 // The real Hub 302s to its CDN bridge and the client follows; serving the bytes
 // from here instead would leave the redirect path untested.
 async function resolveGet(ctx: Ctx<C>): Promise<Reply> {
-  const row = await objectAt(ctx.db, ctx.tenant, bucketOf(ctx), strip(ctx.params.path ?? ''))
+  const row = await objectAt(ctx.sql, ctx.tenant, bucketOf(ctx), strip(ctx.params.path ?? ''))
   if (row === null) return notFound()
   const head = resolveHead(row)
   const hash = serveHash(row.content)
@@ -99,7 +117,7 @@ async function resolveGet(ctx: Ctx<C>): Promise<Reply> {
 // is for the rest of the window: a range running past EOF comes back short.
 async function cdn(ctx: Ctx<C>): Promise<Reply> {
   const hash = ctx.params.hash ?? ''
-  const content = await xetFile(ctx.db, hash)
+  const content = await xetFile(ctx.sql, hash)
   if (content === null) return { status: 404 }
   const header = rangeHeaderOf(ctx.headers)
   if (header?.startsWith('bytes=') === true) {
@@ -143,7 +161,7 @@ async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   // and for a leading-slash spelling of a file (measured 2026-09-25), and a
   // fake that normalised either would pass a key production never finds.
   for (const raw of requestedPaths(ctx)) {
-    const row = await objectAt(ctx.db, ctx.tenant, bucket, raw)
+    const row = await objectAt(ctx.sql, ctx.tenant, bucket, raw)
     if (row !== null) entries.push(fileEntry(row))
   }
   return { status: 200, body: entries }
@@ -181,10 +199,10 @@ async function batch(ctx: Ctx<C>): Promise<Reply> {
     const path = strip(String(op.path ?? ''))
     if (op.type === 'addFile') {
       const hash = String(op.xetHash ?? '')
-      const content = await xetFile(ctx.db, hash)
+      const content = await xetFile(ctx.sql, hash)
       if (content === null) return { status: 400, body: { error: `unknown xetHash ${hash}` } }
       await writeObject(
-        ctx.db,
+        ctx.sql,
         ctx.tenant,
         bucket,
         path,
@@ -193,9 +211,9 @@ async function batch(ctx: Ctx<C>): Promise<Reply> {
         ctx.minter,
       )
     } else if (op.type === 'deleteFile') {
-      await deleteObject(ctx.db, ctx.tenant, bucket, path)
+      await deleteObject(ctx.sql, ctx.tenant, bucket, path)
     } else if (op.type === 'deleteFolder') {
-      await deleteFolder(ctx.db, ctx.tenant, bucket, path)
+      await deleteFolder(ctx.sql, ctx.tenant, bucket, path)
     } else {
       return { status: 400, body: { error: `unsupported batch op ${String(op.type)}` } }
     }
@@ -210,12 +228,12 @@ function casChunks(): Reply {
 }
 
 async function casXorb(ctx: Ctx<C>): Promise<Reply> {
-  await putXorb(ctx.db, ctx.params.hash ?? '', ctx.body)
+  await putXorb(ctx.sql, ctx.params.hash ?? '', ctx.body)
   return { status: 200, body: { was_inserted: true } }
 }
 
 async function casShard(ctx: Ctx<C>): Promise<Reply> {
-  await registerShard(ctx.db, ctx.body)
+  await registerShard(ctx.sql, ctx.body)
   return { status: 200, body: { result: 1 } }
 }
 
@@ -226,7 +244,7 @@ function casReconstructionV2(): Reply {
 
 async function casReconstruction(ctx: Ctx<C>): Promise<Reply> {
   const hash = ctx.params.hash ?? ''
-  const content = await xetFile(ctx.db, hash)
+  const content = await xetFile(ctx.sql, hash)
   if (content === null) return { status: 404 }
   const header = rangeHeaderOf(ctx.headers)
   const window = parseRange(header, content.length)
@@ -273,7 +291,7 @@ async function casReconstruction(ctx: Ctx<C>): Promise<Reply> {
 // same content re-cut into scheme-0 chunks, so a client that asks for a byte
 // range of the serialization gets exactly the chunks it was promised.
 async function casData(ctx: Ctx<C>): Promise<Reply> {
-  const content = await xetFile(ctx.db, ctx.params.hash ?? '')
+  const content = await xetFile(ctx.sql, ctx.params.hash ?? '')
   if (content === null) return { status: 404 }
   // No Content-Range here: this body is the fake's own serialization, and the
   // client reads exactly the url_range the reconstruction handed it.

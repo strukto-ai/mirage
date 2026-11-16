@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import { Clock } from './clock.ts'
 import { Faults } from './fault.ts'
 import { Minter } from './mint.ts'
@@ -46,6 +47,8 @@ export interface Fake<C extends MinimalClient> {
   // the one this reset asked for. It participates in the template key, so two
   // epochs are two templates rather than one carrying the first caller's
   // clock.
+  // `sql` is the same file over node:sqlite (sql.ts), for a fake that reads
+  // its rows directly; the rows `db` just seeded are there to read.
   afterSeed?: (
     db: C,
     tenant: string,
@@ -53,6 +56,7 @@ export interface Fake<C extends MinimalClient> {
     extras: Record<string, JsonValue>,
     fixtureRoot: string,
     epoch: string | undefined,
+    sql: DatabaseSync,
   ) => Promise<void>
   // What a fake has to FORGET when a /reset has replaced a tenant's rows
   // underneath it -- today gws and its cached tenant world. A KIT hook because
@@ -60,8 +64,9 @@ export interface Fake<C extends MinimalClient> {
   // matches, so no route can see one. It is handed the run's CLIENT because
   // that is what such a cache is keyed by, and fires for every reset that
   // reached one, successful or not: a reset that threw has already cleared
-  // rows, so a view built before it is stale either way.
-  afterReset?: (db: C, tenants: readonly string[]) => void
+  // rows, so a view built before it is stale either way. `sql` is the run's
+  // node:sqlite connection, for a cache keyed by that instead.
+  afterReset?: (db: C, tenants: readonly string[], sql: DatabaseSync) => void
   defaultTenants?: string[]
   requestToken?: (
     headers: Record<string, string | string[] | undefined>,

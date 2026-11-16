@@ -120,6 +120,8 @@ try {
   await writeFile(join(output, 'index.html'), '<!doctype html><title>Mirage shell</title>')
   // The office cases read the corpus's Office files, which the page fetches.
   await cp(join(root, 'integ/fixtures/office/v1'), join(output, 'office'), { recursive: true })
+  // So do the pdftotext and pdfinfo cases, with the corpus's PDF files.
+  await cp(join(root, 'integ/fixtures/pdf/v1'), join(output, 'pdf'), { recursive: true })
   // QuickJS runs on a worker, which a page with no shared memory reaches the
   // workspace through Mirage's service worker; the page serves both.
   const quickjs = process.env.MIRAGE_QUICKJS_HOME

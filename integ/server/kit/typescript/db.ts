@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { KitError } from './errors.ts'
 import type { SeedReport } from './types.ts'
 import { runId } from './tenant.ts'
@@ -142,6 +143,7 @@ export class ClientPool<C extends MinimalClient> {
   private readonly internal: string
   private readonly ctor: ClientCtor<C>
   private readonly clients = new Map<string, C>()
+  private readonly handles = new Map<string, DatabaseSync>()
   private readonly seeded = new Map<string, Promise<SeededTemplate>>()
   private readonly seedKeys = new Map<string, string>()
   private builds = 0
@@ -189,6 +191,21 @@ export class ClientPool<C extends MinimalClient> {
     return this.clientFrom(run, this.ensureTemplate())
   }
 
+  // The run's file over node:sqlite, for a fake whose handlers query it
+  // directly (sql.ts says why). It opens beside the run's Prisma client, which
+  // still seeds and resets the same file, and closes whenever that client
+  // does, so a recreated run never reads through a handle on a deleted file.
+  // The busy timeout covers a write the other connection holds a lock for.
+  sql(run: string): DatabaseSync {
+    const live = this.handles.get(run)
+    if (live !== undefined) return live
+    this.client(run)
+    const db = new DatabaseSync(this.fileFor(run))
+    db.exec('PRAGMA busy_timeout = 5000')
+    this.handles.set(run, db)
+    return db
+  }
+
   private clientFrom(run: string, template: string): C {
     const live = this.clients.get(run)
     if (live !== undefined) return live
@@ -219,7 +236,7 @@ export class ClientPool<C extends MinimalClient> {
   // the promise means the second caller awaits the first caller's build.
   private seededTemplate(
     key: string,
-    seed: (db: C) => Promise<SeedReport[]>,
+    seed: (db: C, sql: DatabaseSync) => Promise<SeedReport[]>,
   ): Promise<SeededTemplate> {
     const live = this.seeded.get(key)
     if (live !== undefined) return live
@@ -240,7 +257,9 @@ export class ClientPool<C extends MinimalClient> {
   // appeared among their own worlds. Keeping it out is better than filtering
   // it out of `runs()`: there is then nothing to filter, and no way for a
   // later reader of `clients` to have to know about it either.
-  private async buildTemplate(seed: (db: C) => Promise<SeedReport[]>): Promise<SeededTemplate> {
+  private async buildTemplate(
+    seed: (db: C, sql: DatabaseSync) => Promise<SeedReport[]>,
+  ): Promise<SeededTemplate> {
     // Taken ONCE, before the first await, and used for both names. Reading the
     // counter again after the seed gave two concurrent builds the same number,
     // so two different keys could write the same template file and the second
@@ -249,11 +268,14 @@ export class ClientPool<C extends MinimalClient> {
     const scratch = join(this.internal, `build-${n}.db`)
     copyFileSync(this.ensureTemplate(), scratch)
     const db = new this.ctor({ datasourceUrl: `file:${scratch}` })
+    const sql = new DatabaseSync(scratch)
+    sql.exec('PRAGMA busy_timeout = 5000')
     try {
-      const rows = await seed(db)
+      const rows = await seed(db, sql)
       // Before the copy, not after: SQLite writes through a -wal that only the
       // last connection closing folds back in, so a snapshot taken while this
       // is open would be missing the seed's most recent commits.
+      sql.close()
       await db.$disconnect()
       const file = join(this.internal, `seeded-${n}.db`)
       copyFileSync(scratch, file)
@@ -262,6 +284,7 @@ export class ClientPool<C extends MinimalClient> {
       // Also on the failure path. The rejected promise is evicted so a later
       // reset retries, so without this every retry left another live client
       // and another set of SQLite files behind until disposal.
+      if (sql.isOpen) sql.close()
       await db.$disconnect()
       for (const suffix of ['', '-journal', '-wal', '-shm']) {
         rmSync(`${scratch}${suffix}`, { force: true })
@@ -272,7 +295,7 @@ export class ClientPool<C extends MinimalClient> {
   async clientFromSeeded(
     run: string,
     key: string,
-    seed: (db: C) => Promise<SeedReport[]>,
+    seed: (db: C, sql: DatabaseSync) => Promise<SeedReport[]>,
   ): Promise<{ client: C; rows: SeedReport[] }> {
     // Register before awaiting the build, so another run dropping its last
     // reference cannot unlink a template this run is about to copy.
@@ -312,6 +335,11 @@ export class ClientPool<C extends MinimalClient> {
   }
 
   async close(run: string): Promise<void> {
+    const handle = this.handles.get(run)
+    if (handle !== undefined) {
+      handle.close()
+      this.handles.delete(run)
+    }
     const live = this.clients.get(run)
     if (live === undefined) return
     await live.$disconnect()

@@ -33,7 +33,7 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.constants import expand_captures
+from mirage.runtime.constants import IN_PROCESS, expand_captures
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import E, LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import (
@@ -134,8 +134,9 @@ class Runtime(ABC, Generic[E]):
     @property
     def machine(self) -> MachineName | None:
         """The machine this runtime runs its programs on, which their
-        process records name; None for the workspace's own."""
-        return None
+        process records name: an engine in Mirage's process is the
+        ``in_process`` machine of its entry's name."""
+        return MachineName(IN_PROCESS, self.name)
 
     @property
     def refusal_name(self) -> str:
@@ -247,7 +248,7 @@ class Runtime(ABC, Generic[E]):
                     kind,
                     list(texts),
                     run_ctx,
-                    lambda: self._run(
+                    lambda run_ctx: self._run(
                         kind,
                         engine,
                         list(paths),
@@ -267,46 +268,49 @@ class Runtime(ABC, Generic[E]):
         kind: ExecutionKind,
         texts: list[str],
         ctx: Context,
-        run: Callable[[], Awaitable[RunResult]],
+        run: Callable[[Context], Awaitable[RunResult]],
     ) -> RunResult:
-        """Run a program past the workspace's reach as a process of its
-        own, as bash forks one: the process started for it when it is
-        that process's one command (``ProcessHandle.take``) or the last
-        a forked shell runs (``ends_line``), as bash execs it in the
-        shell's place, else a child
-        of the running one, in its group, on this runtime's machine. Its
-        record names the processes its command's substitutions started,
-        each ``<( )`` by its descriptor (``fd``), each ``$( )`` as part
-        of its arguments (``argv``), and the stage writing its pipe
-        while it reads its stage's (``stdin``). A
-        run the workspace reaches stays in its shell's process, as does
-        one outside a process. A child stopped with its shell gets the
-        signal the shell was stopped with, or the interrupt it took; one
-        stopped alone answers 128 plus its signal, and its shell goes on.
+        """Run a program as a process of its own, as bash forks one: the
+        process started for it when it is that process's one command
+        (``ProcessHandle.take``) or the last a forked shell runs
+        (``ends_line``), as bash execs it in the shell's place, else a
+        child of the running one, in its group, on this runtime's machine.
+        Its record names the processes its command's substitutions
+        started, each ``<( )`` by its descriptor (``fd``), each ``$( )``
+        as part of its arguments (``argv``), and the stage writing its
+        pipe while it reads its stage's (``stdin``). An engine in Mirage's
+        own process runs as one too, on its ``in_process`` machine, so
+        ``ps``, ``kill`` and ``wait`` see its runs as they see any
+        machine's; a run outside a process stays where it is. A child
+        stopped with its shell gets the signal the shell was stopped
+        with, or the interrupt it took; one stopped alone answers 128
+        plus its signal, and its shell goes on. A child's files and
+        session are captured again as it, so the calls it makes are its
+        own, as ``ps`` lists it.
 
         Args:
             kind (ExecutionKind): what is asked, which names the program.
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
-            run (Callable[[], Awaitable[RunResult]]): the program, to its
-                end.
+            run (Callable[[Context], Awaitable[RunResult]]): the program,
+                to its end, over the context it runs with.
         """
         processes = (
             self._binding.processes if self._binding is not None else None
         )
         caller = current_caller()
         shell, session = caller.process, caller.session
+        machine = self.machine
         if (
-            self.reach == "workspace"
+            machine is None
             or processes is None
             or shell is None
             or session is None
         ):
-            return await run()
-        machine = self.machine
+            return await run(ctx)
         instance = (
             None
-            if machine is None or processes.machine_instance is None
+            if processes.machine_instance is None
             else processes.machine_instance(machine)
         )
         line = ctx.flags.get("c")
@@ -355,11 +359,26 @@ class Runtime(ABC, Generic[E]):
         ):
             shell.one_command = True
         if shell.take(machine, instance, command, fd, argv):
-            return await run()
+            return await run(ctx)
         done: list[RunResult] = []
 
         async def program() -> int:
-            done.append(await run())
+            own = self._binding.capture().ctx if self._binding else None
+            done.append(
+                await run(
+                    ctx
+                    if own is None
+                    else replace(
+                        ctx,
+                        vfs=own.vfs,
+                        session=(
+                            own.session
+                            if own.session is not None
+                            else ctx.session
+                        ),
+                    )
+                )
+            )
             return done[0].exit_code
 
         try:

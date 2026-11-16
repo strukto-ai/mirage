@@ -19,8 +19,21 @@ import { rangeReply } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { BOT_ID, BOT_USER_ID, BOT_USER_NAME, TEAM_ID, TEAM_NAME } from './config.ts'
-import { channelById, channels, fileById, filesIn, messageAt, users } from './store.ts'
-import type { MessageRow } from './store.ts'
+import {
+  channelById,
+  channels,
+  channelsMatching,
+  directMessages,
+  fileById,
+  filesIn,
+  historyOf,
+  messageAt,
+  pinsIn,
+  threadOf,
+  userById,
+  users,
+} from './store.ts'
+import type { ChannelFilter, MessageRow, TsBounds } from './store.ts'
 import {
   CUSTOM_EMOJI,
   argsOf,
@@ -79,17 +92,17 @@ export async function conversationsList(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const types = (args.get('types') ?? '').split(',').filter((t) => t !== '')
   const requested = types.length > 0 ? types : ['public_channel', 'private_channel']
-  const filters: Record<string, JsonValue>[] = []
+  const filters: ChannelFilter[] = []
   if (requested.includes('public_channel')) filters.push({ kind: 'channel', isPrivate: false })
   if (requested.includes('private_channel')) filters.push({ kind: 'channel', isPrivate: true })
   if (requested.includes('im')) filters.push({ kind: 'im' })
   if (requested.includes('mpim')) filters.push({ kind: 'mpim' })
-  const where: Record<string, JsonValue> = {
-    tenant: ctx.tenant,
-    OR: filters,
-  }
-  if (args.get('exclude_archived') === 'true') where.isArchived = false
-  const rows = await ctx.db.channel.findMany({ where, orderBy: { id: 'asc' } })
+  const rows = await channelsMatching(
+    ctx.sql,
+    ctx.tenant,
+    filters,
+    args.get('exclude_archived') === 'true',
+  )
   const start = cursorStart(
     ctx,
     'team',
@@ -116,19 +129,16 @@ export async function conversationsList(ctx: Ctx<C>): Promise<Reply> {
 export async function conversationsReplies(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
-  const row = await channelById(ctx.db, ctx.tenant, channel)
+  const row = await channelById(ctx.sql, ctx.tenant, channel)
   if (row === null) return fail('channel_not_found')
   if (!row.isMember) return fail('not_in_channel')
-  const asked = await messageAt(ctx.db, ctx.tenant, channel, args.get('ts') ?? '')
+  const asked = await messageAt(ctx.sql, ctx.tenant, channel, args.get('ts') ?? '')
   if (asked === null) return fail('thread_not_found')
   const root = asked.threadTs !== null && asked.threadTs !== '' ? asked.threadTs : asked.ts
   const inclusive = ['true', '1'].includes(args.get('inclusive') ?? '')
   const oldest = args.get('oldest')
   const latest = args.get('latest')
-  const whole = (await ctx.db.message.findMany({
-    where: { tenant: ctx.tenant, channelId: channel, OR: [{ ts: root }, { threadTs: root }] },
-    orderBy: { ts: 'asc' },
-  })) as MessageRow[]
+  const whole = await threadOf(ctx.sql, ctx.tenant, channel, root)
   const parent = whole.find((m) => m.ts === root)
   const replies = whole.filter((m) => m.ts !== root)
   const thread = whole.filter((m) => {
@@ -145,7 +155,7 @@ export async function conversationsReplies(ctx: Ctx<C>): Promise<Reply> {
   if (start === null) return fail('invalid_cursor')
   const size = pageSize(ctx, 1000, 1000)
   const next = thread[start + size]
-  const files = await filesIn(ctx.db, ctx.tenant, channel)
+  const files = await filesIn(ctx.sql, ctx.tenant, channel)
   const messages = thread.slice(start, start + size).map((m) => {
     const out = messageJson(
       m,
@@ -201,10 +211,7 @@ export function authTest(ctx: Ctx<C>): Reply {
 // shared from another workspace. The fake answers who is signed in and its
 // DMs, none of them shared, and nothing else the real reply carries.
 export async function clientUserBoot(ctx: Ctx<C>): Promise<Reply> {
-  const dms = await ctx.db.channel.findMany({
-    where: { tenant: ctx.tenant, kind: 'im' },
-    orderBy: { id: 'asc' },
-  })
+  const dms = await directMessages(ctx.sql, ctx.tenant)
   return {
     status: 200,
     body: {
@@ -242,30 +249,23 @@ function cursorTs(cursor: string): string | null {
 export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
-  const row = await channelById(ctx.db, ctx.tenant, channel)
+  const row = await channelById(ctx.sql, ctx.tenant, channel)
   if (row === null) return fail('channel_not_found')
   if (!row.isMember) return fail('not_in_channel')
   const oldest = args.get('oldest')
   const latest = args.get('latest')
   const cursor = args.get('cursor') ?? ''
   const inclusive = ['true', '1'].includes(args.get('inclusive') ?? '')
-  const where: Record<string, JsonValue> = { tenant: ctx.tenant, channelId: channel }
-  const ts: Record<string, string> = {}
+  const ts: TsBounds = {}
   if (oldest !== null) ts[inclusive ? 'gte' : 'gt'] = historyTimestamp(oldest)
   if (latest !== null) ts[inclusive ? 'lte' : 'lt'] = historyTimestamp(latest)
-  if (Object.keys(ts).length > 0) where.ts = ts
   const from = cursor === '' ? '' : cursorTs(cursor)
   if (from === null) return fail('invalid_cursor')
-  if (from !== '') where.AND = [{ ts: { lte: from } }]
   const size = pageSize(ctx, 100, 1000)
-  const rows: MessageRow[] = await ctx.db.message.findMany({
-    where,
-    orderBy: { ts: 'desc' },
-    take: size + 1,
-  })
+  const rows: MessageRow[] = await historyOf(ctx.sql, ctx.tenant, channel, ts, from, size + 1)
   if (from !== '' && rows[0]?.ts !== from) return fail('invalid_cursor')
   const next = rows[size]
-  const files = await filesIn(ctx.db, ctx.tenant, channel)
+  const files = await filesIn(ctx.sql, ctx.tenant, channel)
   const messages = rows.slice(0, size).map((m) =>
     messageJson(
       m,
@@ -287,7 +287,7 @@ export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function usersList(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await users(ctx.db, ctx.tenant)
+  const rows = await users(ctx.sql, ctx.tenant)
   return {
     status: 200,
     body: { ok: true, members: rows.map(userJson), response_metadata: { next_cursor: '' } },
@@ -295,24 +295,17 @@ export async function usersList(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function usersInfo(ctx: Ctx<C>): Promise<Reply> {
-  const row = await ctx.db.user.findUnique({
-    where: { tenant_id: { tenant: ctx.tenant, id: argsOf(ctx).get('user') ?? '' } },
-  })
+  const row = await userById(ctx.sql, ctx.tenant, argsOf(ctx).get('user') ?? '')
   if (row === null) return fail('user_not_found')
   return { status: 200, body: { ok: true, user: userJson(row) } }
 }
 
 export async function pinsList(ctx: Ctx<C>): Promise<Reply> {
   const channel = argsOf(ctx).get('channel') ?? ''
-  const pinned = await ctx.db.pin.findMany({
-    where: { tenant: ctx.tenant, channelId: channel },
-    orderBy: { ts: 'asc' },
-  })
+  const pinned = await pinsIn(ctx.sql, ctx.tenant, channel)
   const items: JsonValue[] = []
   for (const pin of pinned) {
-    const m = await ctx.db.message.findUnique({
-      where: { tenant_channelId_ts: { tenant: ctx.tenant, channelId: channel, ts: pin.ts } },
-    })
+    const m = await messageAt(ctx.sql, ctx.tenant, channel, pin.ts)
     if (m === null) continue
     items.push({
       type: 'message',
@@ -327,9 +320,7 @@ export async function reactionsGet(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
   const timestamp = args.get('timestamp') ?? ''
-  const m = await ctx.db.message.findUnique({
-    where: { tenant_channelId_ts: { tenant: ctx.tenant, channelId: channel, ts: timestamp } },
-  })
+  const m = await messageAt(ctx.sql, ctx.tenant, channel, timestamp)
   if (m === null) return fail('message_not_found')
   const message: Record<string, JsonValue> = {
     type: m.type,
@@ -353,7 +344,7 @@ export function emojiList(): Reply {
 // the last five, which is the same defect the dropbox and box fakes each had
 // independently; rangeReply is the kit's, so there is one implementation now.
 export async function download(ctx: Ctx<C>): Promise<Reply> {
-  const file = await fileById(ctx.db, ctx.tenant, ctx.params.id ?? '')
+  const file = await fileById(ctx.sql, ctx.tenant, ctx.params.id ?? '')
   if (file === null) return { status: 404, body: { error: 'not_found' } }
   return rangeReply(ctx.headers, fileBytes(file), file.mimetype)
 }

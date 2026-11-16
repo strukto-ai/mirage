@@ -72,17 +72,23 @@ export interface RouteOpts {
 // mismatch evicts as well as complaining.
 function stateful(handler: KitHandler<GwsState>, write: boolean): KitHandler<C> {
   return async (ctx: Ctx<C>): Promise<Reply> => {
-    const st = await withState(ctx.db, ctx.tenant, () => loadState(ctx.db, ctx.tenant))
+    const st = await withState(ctx.sql, ctx.tenant, () => loadState(ctx.sql, ctx.tenant))
     const before = write ? 0 : fingerprint(st)
     try {
       const reply = await handler({ ...ctx, db: st })
       if (write) {
-        const rows = await saveState(ctx.db, DMMF, ctx.tenant, st, flushedRows(ctx.db, ctx.tenant))
+        const rows = await saveState(
+          ctx.sql,
+          DMMF,
+          ctx.tenant,
+          st,
+          flushedRows(ctx.sql, ctx.tenant),
+        )
         // The rows now say what this world says, so it becomes the cached
         // one and every load still in flight is stale; see `Cached`.
-        installFlushed(ctx.db, ctx.tenant, st, rows)
+        installFlushed(ctx.sql, ctx.tenant, st, rows)
       } else if (fingerprint(st) !== before) {
-        dropState(ctx.db, ctx.tenant)
+        dropState(ctx.sql, ctx.tenant)
         process.stderr.write(
           `gws fake: read route advanced the clock or a mint counter and the ` +
             `advance was dropped; mark it write: true\n`,
@@ -92,7 +98,7 @@ function stateful(handler: KitHandler<GwsState>, write: boolean): KitHandler<C> 
     } catch (err: unknown) {
       // A handler mutates in place, so a throw leaves a world that is partly
       // applied and was never written. That used to die with the request.
-      dropState(ctx.db, ctx.tenant)
+      dropState(ctx.sql, ctx.tenant)
       throw err
     }
   }

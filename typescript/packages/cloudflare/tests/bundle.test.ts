@@ -82,7 +82,12 @@ it('fits the upload limit with the 1password source, minified', () => {
 }, 180_000)
 
 it('loads the Rust modules as .wasm files, with no base64 copy in the script', () => {
-  for (const module of ['mirage_rs.wasm', 'mirage_shell.wasm', 'mirage_gh.wasm']) {
+  for (const module of [
+    'mirage_rs.wasm',
+    'mirage_shell.wasm',
+    'mirage_gh.wasm',
+    'mirage_pdf.wasm',
+  ]) {
     expect([...files.keys()].some((name) => name.endsWith(module))).toBe(true)
   }
   // A base64 copy of a module would be one run of millions of base64

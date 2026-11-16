@@ -1,0 +1,31 @@
+---
+title: pdftotext
+icon: file-pdf
+description: Set up the credential-free pdftotext CLI for PDF files with Python or TypeScript.
+---
+
+Mirage implements [poppler](https://poppler.freedesktop.org)'s `pdftotext`:
+the text of a PDF in reading order, with `-layout`, `-raw`, page ranges and
+poppler's messages and exit codes. It reads text layers; scanned pages give
+empty text.
+
+`pdftotext` needs no account config and reads PDF files through existing mounts.
+Register it on `ws`. Commands: [Python](/python/cli/pdftotext) ·
+[TypeScript](/typescript/cli/pdftotext).
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage.commands.cli.builtin.pdf import PDFTOTEXT
+
+    ws.register_cli("pdftotext", PDFTOTEXT)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { PDFTOTEXT } from '@struktoai/mirage-node'
+
+    ws.registerCli('pdftotext', PDFTOTEXT)
+    ```
+  </Tab>
+</Tabs>

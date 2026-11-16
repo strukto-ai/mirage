@@ -51,7 +51,18 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 데이터와 CLI, 런타임을 하나로 아우르는 셸입니다. Unix 도구가 모든 서비스에 닿고, `grep`은 Gmail이나 Slack처럼 각 서비스 자체의 검색 위에서 실행됩니다. Mirage는 각 명령을 알맞은 런타임으로 라우팅하므로 대부분의 명령줄은 프로세스 안에서 실행되고 무거운 작업만 샌드박스로 가서 인프라 비용과 토큰을 줄입니다. 터미널 자체도 가볍습니다. 워크스페이스 하나는 메모리를 **약 100 KB**, 새 세션은 **약 10 KB** 차지하므로 하나의 프로세스가 많은 에이전트를 동시에 처리합니다. 프로파일은 에이전트가 무엇을 실행하고 무엇을 볼 수 있는지까지 정하며, 스크립트로 작성하는 정책은 그 규칙으로 표현할 수 없는 것을 거부합니다.
+AI 에이전트는 터미널에서 일합니다. Mirage는 터미널 인터페이스, 데이터 저장소, 컴퓨팅 머신을 서로 분리하는 **가상 터미널**입니다. Mirage는 각 명령을 알맞은 머신으로 라우팅하며, 컨테이너, microVM, 클라우드 샌드박스, SSH 호스트 같은 이기종 머신을 아우릅니다. 파일, CLI, 머신은 각각 따로 추가되므로 유연하고 인프라 비용이 낮으며, 에이전트는 가장 효율적이고 안전한 방식으로 일할 수 있습니다.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-terminal-dark.svg">
+    <img src="../assets/mirage-terminal-light.svg" alt="하나의 통합 가상 파일시스템 위의 하나의 가상 터미널: 각 명령은 자신에게 맞는 머신에서 실행되고, 에이전트의 allow, deny, show, hide 규칙을 거치며, 세션, 작업, 명령 로그를 그것들을 위해 고른 백엔드에 보관합니다" width="100%">
+  </picture>
+</p>
+
+- **제어 가능.** 각 에이전트가 무엇에 닿는지 정합니다. 어떤 파일을 보는지, 가상 파일시스템과 CLI가 어떤 자격 증명을 보여 주지 않고 사용하는지, 어떤 머신이 각 프로그램을 실행하는지까지 정합니다.
+- **스크립트 가능.** 가상 파일시스템, CLI, 머신부터 어떤 명령에 승인이 필요한지, 에이전트가 출력을 얼마나 돌려받는지 같은 규칙까지, 터미널 전체를 코드나 설정 파일로 정의합니다.
+- **관리형.** Mirage는 선택한 백엔드로 구성된 가상 터미널 인프라를 관리합니다. 가상 파일시스템은 S3, Drive, 데이터베이스, RAM 위에, 잡과 히스토리는 RAM, Redis, 디스크 위에 두며, 워크스페이스 전체를 스냅샷으로 저장할 수 있습니다. 에이전트가 실행하는 모든 명령은 기록되고, 트레이스로 OpenTelemetry 백엔드에 보낼 수 있습니다.
 
 <p align="center">
   <picture>
@@ -120,8 +131,8 @@ slack: Permission denied
 - **N개의 SDK와 M개의 MCP 대신 통합된 가상 터미널 인터페이스.** 모든 백엔드가 동일한 파일 시스템 의미론을 사용하므로 파이프라인이 서비스 간에 조합됩니다.
 - **모든 소스를 아우르는 가상 파일 시스템.** S3, Google Drive, Slack, Gmail, Redis 등이 하나의 루트 아래 나란히 마운트되어, 에이전트는 이미 아는 unix 도구인 `ls`, `grep`, `find`, `jq`로 통합된 인터페이스를 통해 모두에 접근합니다.
 - **가상 명령줄 도구(CLI).** `git`, `slack`, `ntn`은 Mirage가 직접 응답하므로 에이전트는 아무것도 설치하지 않고 서로 다른 런타임과 머신에 걸쳐 서비스를 다룰 수 있고, 하나의 도구를 둘 이상으로 가상화해 각각 고유한 이름과 자격 증명을 줄 수 있습니다.
-- **라우팅되는 동적 런타임.** Python, JavaScript를 비롯한 모든 명령을 설정된 런타임으로, 프로세스 내부나 샌드박스 또는 원격으로 보낼 수 있어 연산과 저장소가 분리되고 한쪽을 건드리지 않고 다른 쪽을 바꿀 수 있습니다.
-- **가상화된 Mirage 셸.** 파일 시스템과 CLI, 런타임을 하나의 명령줄로 묶어 파이프, 리다이렉션, 변수, 잡, 히스토리가 셋 모두에서 동작합니다.
+- **라우팅되는 동적 머신.** Python, JavaScript를 비롯한 모든 명령을 설정된 머신으로, 프로세스 내부나 샌드박스 또는 원격으로 보낼 수 있어 연산과 저장소가 분리되고 한쪽을 건드리지 않고 다른 쪽을 바꿀 수 있습니다.
+- **가상화된 Mirage 셸.** 파일 시스템과 CLI, 머신을 하나의 명령줄로 묶어 파이프, 리다이렉션, 변수, 잡, 히스토리가 셋 모두에서 동작합니다.
 - **가벼운 설계.** 가상 터미널 그 자체인 워크스페이스는 메모리를 약 100 KB, 새 세션은 약 10 KB 차지하므로, 에이전트마다 컨테이너나 VM 없이 하나의 프로세스가 많은 에이전트를 처리합니다.
 - **에이전트를 위해 설계된 프로파일.** `allow`, `ask`, `deny`가 명령과 CLI를 통제하고 `hide`와 `show`가 파일과 폴더를 통제하므로, 숨겨진 경로는 단순히 읽을 수 없는 것이 아니라 에이전트가 보는 파일 시스템에 존재하지 않습니다.
 - **스크립트로 작성하는 정책 엔진.** 정책 스크립트는 위험한 동작을 실행 전에 금지할 수 있으며, 같은 스택이 모든 VFS 작업과 세션 쓰기를 통제하므로 파일도 환경 변수도 새어 나가지 않습니다.
@@ -152,11 +163,11 @@ slack: Permission denied
 | **커뮤니케이션**  | <a href="https://slack.com"><img src="https://api.iconify.design/logos/slack-icon.svg" width="20" height="20" alt="slack" title="slack" /></a>  <a href="https://discord.com"><img src="https://cdn.simpleicons.org/discord" width="20" height="20" alt="discord" title="discord" /></a>  <a href="https://github.com/pimalaya/himalaya"><img src="../assets/icons/himalaya.png" width="20" height="20" alt="himalaya" title="himalaya" /></a>                                                                                                                         |
 | **업무와 데이터** | <a href="https://linear.app"><img src="https://cdn.simpleicons.org/linear" width="20" height="20" alt="linear" title="linear" /></a>  <a href="https://www.notion.so"><img src="https://cdn.simpleicons.org/notion/000000/e6edf3" width="20" height="20" alt="ntn" title="ntn" /></a>  <a href="https://workspace.google.com"><img src="https://cdn.simpleicons.org/google" width="20" height="20" alt="gws" title="gws" /></a>  <a href="https://huggingface.co"><img src="https://cdn.simpleicons.org/huggingface" width="20" height="20" alt="hf" title="hf" /></a> |
 
-## 가상 런타임
+## 가상 머신
 
-런타임도 같은 방식으로 가상화되며, 프로그래밍 언어에만 해당하지 않습니다. 명령줄의 어떤 명령이든 설정된 런타임으로 보낼 수 있어서, Python은 [Monty](https://pydantic.dev/articles/pydantic-monty)로 프로세스 안에서 실행하고 다른 명령, 예를 들어 `kubectl`은 SSH로 원격 머신에 보낼 수 있습니다. 어떤 줄을 어떤 런타임이 처리할지는 [스크립트 런타임 라우터](https://docs.mirage.strukto.ai/home/policy/route-machine)가 결정할 수 있습니다.
+머신도 같은 방식으로 가상화되며, 프로그래밍 언어에만 해당하지 않습니다. 명령줄의 어떤 명령이든 설정된 머신으로 보낼 수 있어서, Python은 [Monty](https://pydantic.dev/articles/pydantic-monty)로 프로세스 안에서 실행하고 다른 명령, 예를 들어 `kubectl`은 SSH로 원격 머신에서 실행할 수 있습니다. 어떤 줄을 어떤 머신이 처리할지는 [스크립트 머신 라우터](https://docs.mirage.strukto.ai/home/policy/route-machine)가 결정할 수 있습니다.
 
-|                | 런타임                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|                | 머신                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python**     | <a href="https://pydantic.dev/articles/pydantic-monty"><img src="https://cdn.simpleicons.org/pydantic" width="20" height="20" alt="Monty" title="Monty" /></a>  <a href="https://wasi.dev"><img src="https://cdn.simpleicons.org/webassembly" width="20" height="20" alt="WASI CPython on wasmtime" title="WASI CPython on wasmtime" /></a>  <a href="https://pyodide.org"><img src="../assets/icons/pyodide.svg" width="56" height="20" alt="Pyodide" title="Pyodide" /></a>  <a href="https://pypi.org/project/sandlock/"><img src="../docs/images/sandlock-logo.svg" width="20" height="20" alt="sandlock" title="sandlock" /></a>  <a href="https://www.python.org"><img src="https://cdn.simpleicons.org/python" width="20" height="20" alt="Host CPython" title="Host CPython" /></a>                                                                                                                                                                                                                                                   |
 | **JavaScript** | <a href="https://docs.mirage.strukto.ai/home/setup/runtime/quickjs"><img src="../assets/icons/quickjs.png" width="20" height="20" alt="QuickJS, serving node and js" title="QuickJS, serving node and js" /></a> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://cdn.simpleicons.org/javascript" width="20" height="20" alt="JavaScript" title="JavaScript" /></a> <a href="https://www.typescriptlang.org"><img src="https://cdn.simpleicons.org/typescript" width="20" height="20" alt="TypeScript" title="TypeScript" /></a>                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -193,7 +204,6 @@ uv add 'mirage-ai[monty]'     # Monty, 예제가 쓰는 프로세스 내 Python 
 ```bash
 npm install @struktoai/mirage-node      # Node.js 서버와 CLI
 npm install @struktoai/mirage-browser   # 브라우저 / edge 런타임
-npm install @struktoai/mirage-vercel    # Vercel AI 어댑터, 에이전트 프레임워크마다 별도 패키지
 ```
 
 두 런타임 패키지 모두 `@struktoai/mirage-core`를 자동으로 가져옵니다.
@@ -258,37 +268,12 @@ python3: Permission denied
 
 스크립트가 응답할 수 있는 다른 단계는 [정책 스크립트](https://docs.mirage.strukto.ai/home/policy/scripts)를 참고하세요.
 
-## 임베디드 터미널
+## 예제
 
-대부분의 경우 에이전트에게 필요한 것은 샌드박스가 아니라 터미널 같은 인터페이스뿐이며, Mirage는 이를 애플리케이션 서버에 내장합니다. 각 터미널은 고유한 작업 디렉터리, 환경, 히스토리를 가진 Mirage 세션이고 Python은 Monty로 프로세스 안에서 실행되므로, 컨테이너나 VM 없이 터미널이 시작됩니다. 다음은 Express 예시이며, FastAPI 버전은 [문서](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)에 있습니다.
-
-```bash
-npm install @struktoai/mirage-node @pydantic/monty express
-```
-
-```ts
-import express from 'express'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'monty' } } },
-)
-const app = express()
-app.use(express.json())
-
-app.post('/sessions/:id', (req, res) => {
-  ws.createSession(req.params.id)
-  res.sendStatus(201)
-})
-
-app.post('/sessions/:id/run', async (req, res) => {
-  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-})
-
-app.listen(3000, '127.0.0.1')
-```
+- **[In-Process Terminal](https://docs.mirage.strukto.ai/home/examples/in-process-terminal).** 애플리케이션 안에서, 심지어 FastAPI나 Express 서버 안에서도 고정된 머신이나 샌드박스 없이 에이전트에게 터미널을 제공합니다.
+- **[Multi-machine Terminal](https://docs.mirage.strukto.ai/home/examples/multi-machine-terminal).** 여러 머신에 걸친 하나의 통합 가상 터미널로, 각 작업을 알맞은 머신에서 실행해 AI 에이전트가 더 효율적이고 저렴하게 일하게 합니다.
+- **[Secured Terminal](https://docs.mirage.strukto.ai/home/examples/secured-terminal).** 에이전트가 보는 파일, 실행하는 명령과 CLI, 도구가 쓰는 자격 증명을 하나의 워크스페이스 설정에서 정합니다.
+- **[Infra-agnostic Terminal](https://docs.mirage.strukto.ai/home/examples/infra-agnostic-terminal).** 고정된 인프라에 묶이지 않는 가상 터미널로, 파일, 세션, 명령 로그를 이미 갖춘 백엔드에 보관합니다.
 
 ## 기여자
 

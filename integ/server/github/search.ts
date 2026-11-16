@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { select } from '../kit/typescript/index.ts'
+import type { GithubComment, GithubIssue, GithubPull } from '../../generated/github/index.js'
+import { DMMF } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
@@ -26,7 +29,6 @@ import {
   repoJson,
   starsOf,
   metaOf,
-  scope,
   branchCommits,
   commitsJson,
   repoByName,
@@ -146,10 +148,10 @@ async function searchRepos(ctx: Ctx<C>): Promise<Reply> {
     const fn = REPO_FIELDS[field]
     return fn === undefined ? [] : [fn]
   })
-  const repos = await allRepos(ctx.db, ctx.tenant)
+  const repos = await allRepos(ctx.sql, ctx.tenant)
   const primary = new Map<string, string>()
   for (const repo of repos) {
-    primary.set(repo.fullName, (await primaryLanguage(ctx.db, ctx.tenant, repo)) ?? '')
+    primary.set(repo.fullName, (await primaryLanguage(ctx.sql, ctx.tenant, repo)) ?? '')
   }
   const matched = repos.filter((repo) => {
     if (!repoMatches(repo, q, primary.get(repo.fullName) ?? '')) return false
@@ -174,7 +176,7 @@ async function searchRepos(ctx: Ctx<C>): Promise<Reply> {
   } else {
     matched.sort((a, b) => (a.fullName < b.fullName ? -1 : a.fullName > b.fullName ? 1 : 0))
   }
-  return searchReply(ctx, await Promise.all(matched.map((r) => repoJson(ctx.db, ctx.tenant, r))))
+  return searchReply(ctx, await Promise.all(matched.map((r) => repoJson(ctx.sql, ctx.tenant, r))))
 }
 
 // Accounts are searched by what the fake holds of them: `type:user` or
@@ -190,7 +192,7 @@ async function searchUsers(ctx: Ctx<C>): Promise<Reply> {
   const query = (ctx.query.get('q') ?? '').trim()
   if (query === '') return fail(422, 'Validation Failed')
   const { words, qualifiers: q } = tokens(query)
-  const repos = await allRepos(ctx.db, ctx.tenant)
+  const repos = await allRepos(ctx.sql, ctx.tenant)
   const owned = (account: AccountRow): number =>
     repos.filter((repo) => repo.owner.toLowerCase() === account.login.toLowerCase()).length
   const asked = (q.get('in') ?? []).map((field) => field.toLowerCase())
@@ -205,10 +207,10 @@ async function searchUsers(ctx: Ctx<C>): Promise<Reply> {
   const spoken = new Map<string, string[]>()
   for (const repo of repos) {
     const owner = repo.owner.toLowerCase()
-    const language = ((await primaryLanguage(ctx.db, ctx.tenant, repo)) ?? '').toLowerCase()
+    const language = ((await primaryLanguage(ctx.sql, ctx.tenant, repo)) ?? '').toLowerCase()
     spoken.set(owner, [...(spoken.get(owner) ?? []), language])
   }
-  const matched = (await accountsOf(ctx.db, ctx.tenant)).filter((account) => {
+  const matched = (await accountsOf(ctx.sql, ctx.tenant)).filter((account) => {
     const type = account.type === 'User' ? 'user' : 'org'
     const types = (q.get('type') ?? []).map((value) => value.toLowerCase())
     if (types.length > 0 && !types.includes(type)) return false
@@ -324,10 +326,10 @@ async function searchCode(ctx: Ctx<C>): Promise<Reply> {
   const { repos, owners, terms, pathFilter } = parsed
   let scope: RepoRow[]
   if (repos.length > 0) {
-    const named = await Promise.all(repos.map((name) => repoByName(ctx.db, ctx.tenant, name)))
+    const named = await Promise.all(repos.map((name) => repoByName(ctx.sql, ctx.tenant, name)))
     scope = named.filter((repo): repo is RepoRow => repo !== null)
   } else {
-    scope = await allRepos(ctx.db, ctx.tenant)
+    scope = await allRepos(ctx.sql, ctx.tenant)
   }
   if (owners.length > 0) scope = scope.filter((repo) => owners.includes(repo.owner.toLowerCase()))
   // Full-name order rather than relevance, which is not modelled, so the
@@ -335,8 +337,8 @@ async function searchCode(ctx: Ctx<C>): Promise<Reply> {
   scope.sort((a, b) => (a.fullName < b.fullName ? -1 : a.fullName > b.fullName ? 1 : 0))
   const items: JsonValue[] = []
   for (const repo of scope) {
-    const files = await treeOfBranch(ctx.db, ctx.tenant, repo, repo.defaultBranch)
-    const repository = await repoJson(ctx.db, ctx.tenant, repo)
+    const files = await treeOfBranch(ctx.sql, ctx.tenant, repo, repo.defaultBranch)
+    const repository = await repoJson(ctx.sql, ctx.tenant, repo)
     for (const path of searchTree(files, terms, pathFilter)) {
       const data = files.get(path)
       if (data === undefined || !fileMatches(parsed, path, data.length)) continue
@@ -390,9 +392,9 @@ function validatedSearch(handler: Handler): Handler {
     )
     const names = qualifiers.get('repo') ?? []
     const owners = ownersOf(qualifiers)
-    const repos = await Promise.all(names.map((name) => repoByName(ctx.db, ctx.tenant, name)))
+    const repos = await Promise.all(names.map((name) => repoByName(ctx.sql, ctx.tenant, name)))
     const logins = new Set(
-      (await accountsOf(ctx.db, ctx.tenant)).map((account) => account.login.toLowerCase()),
+      (await accountsOf(ctx.sql, ctx.tenant)).map((account) => account.login.toLowerCase()),
     )
     const named = names.length + owners.length
     const known = repos.some((repo) => repo !== null) || owners.some((o) => logins.has(o))
@@ -529,20 +531,33 @@ async function searchIssues(ctx: Ctx<C>): Promise<Reply> {
   const owners = ownersOf(q)
   const is = q.get('is') ?? []
   const items: Record<string, JsonValue>[] = []
-  for (const repo of await allRepos(ctx.db, ctx.tenant)) {
+  for (const repo of await allRepos(ctx.sql, ctx.tenant)) {
     if (q.has('repo') && !q.get('repo')?.includes(repo.fullName)) continue
     if (owners.length > 0 && !owners.includes(repo.owner.toLowerCase())) continue
-    const issues = await ctx.db.githubIssue.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName },
-      orderBy: { seq: 'desc' },
-    })
-    const pulls = await ctx.db.githubPull.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName },
-      orderBy: { seq: 'desc' },
-    })
-    const comments = await ctx.db.githubComment.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName },
-    })
+    const issues = select<GithubIssue>(
+      ctx.sql,
+      DMMF,
+      'GithubIssue',
+      '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+      ctx.tenant,
+      repo.fullName,
+    )
+    const pulls = select<GithubPull>(
+      ctx.sql,
+      DMMF,
+      'GithubPull',
+      '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+      ctx.tenant,
+      repo.fullName,
+    )
+    const comments = select<GithubComment>(
+      ctx.sql,
+      DMMF,
+      'GithubComment',
+      '"tenant" = ? AND "repo" = ?',
+      ctx.tenant,
+      repo.fullName,
+    )
     const candidates: Record<string, JsonValue>[] = [
       ...issues.map((row) => record(issueJson(repo, row))),
       ...(await Promise.all(
@@ -604,7 +619,7 @@ async function searchIssues(ctx: Ctx<C>): Promise<Reply> {
       if (q.has('status')) {
         const side = record(item.head ?? null)
         const home = await repoByName(
-          ctx.db,
+          ctx.sql,
           ctx.tenant,
           String(record(side.repo ?? null).full_name),
         )
@@ -661,15 +676,15 @@ async function searchCommits(ctx: Ctx<C>): Promise<Reply> {
   const { words, qualifiers: q } = tokens(ctx.query.get('q') ?? '')
   const owners = ownersOf(q)
   const items: Record<string, JsonValue>[] = []
-  for (const repo of await allRepos(ctx.db, ctx.tenant)) {
+  for (const repo of await allRepos(ctx.sql, ctx.tenant)) {
     if (q.has('repo') && !q.get('repo')?.includes(repo.fullName)) continue
     if (owners.length > 0 && !owners.includes(repo.owner.toLowerCase())) continue
-    const repository = await repoJson(ctx.db, ctx.tenant, repo)
-    for (const row of await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
+    const repository = await repoJson(ctx.sql, ctx.tenant, repo)
+    for (const row of await branchCommits(ctx.sql, ctx.tenant, repo, repo.defaultBranch)) {
       if (!words.every((word) => row.message.toLowerCase().includes(word))) continue
       if (q.has('author') && !q.get('author')?.includes(row.authorLogin)) continue
       if (q.has('hash') && !row.sha.startsWith(q.get('hash')?.[0] ?? '')) continue
-      const [item] = await commitsJson(ctx.db, ctx.tenant, repo, [row])
+      const [item] = await commitsJson(ctx.sql, ctx.tenant, repo, [row])
       items.push({
         ...record(item ?? null),
         node_id: `C_${row.sha}`,

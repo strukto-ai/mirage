@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GithubCommit } from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
@@ -67,7 +69,7 @@ import {
 } from './http.ts'
 import { base64Bytes, recordCommit, writeFile } from './contents.ts'
 import { rebuildOnPush } from './pages.ts'
-import { stripSlash } from '../kit/typescript/index.ts'
+import { count, first, insert, remove, stripSlash, update } from '../kit/typescript/index.ts'
 
 // A blob is written on its own, before any tree names it, which is how a
 // client builds a commit from the git database API: blobs, then a tree of
@@ -77,7 +79,7 @@ import { stripSlash } from '../kit/typescript/index.ts'
 // documents the 409 and points at a contents write to start one. The wording
 // of a refused field is the fake's own, not measured.
 const createBlob = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
   const body = jsonBodyOf(ctx)
   const content = body.content
   if (content === undefined || content === null) {
@@ -90,7 +92,7 @@ const createBlob = withRepo(async (ctx, repo) => {
   }
   const data = encoding === 'base64' ? base64Bytes(content) : Buffer.from(content, 'utf8')
   if (data === null) return fail(422, 'Invalid request.\n\n"content" is invalid.')
-  const sha = await storeBlob(ctx.db, ctx.tenant, repo, data)
+  const sha = await storeBlob(ctx.sql, ctx.tenant, repo, data)
   return {
     status: 201,
     body: { url: `https://api.github.com/repos/${repo.fullName}/git/blobs/${sha}`, sha },
@@ -98,7 +100,7 @@ const createBlob = withRepo(async (ctx, repo) => {
 })
 
 async function baseTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   base: string,
@@ -135,15 +137,15 @@ const createTree = withRepo(async (ctx, repo) => {
   }
   const entries = body.tree
   const base = str(body, 'base_tree')
-  const named = base === '' ? null : await baseTree(ctx.db, ctx.tenant, repo, base)
+  const named = base === '' ? null : await baseTree(ctx.sql, ctx.tenant, repo, base)
   if (base !== '' && named === null) {
     return fail(422, 'Invalid request.\n\n"base_tree" is invalid.')
   }
   const { files, links } =
     named === null
       ? {
-          files: await treeOfBranch(ctx.db, ctx.tenant, repo, repo.defaultBranch),
-          links: await branchLinks(ctx.db, ctx.tenant, repo, repo.defaultBranch),
+          files: await treeOfBranch(ctx.sql, ctx.tenant, repo, repo.defaultBranch),
+          links: await branchLinks(ctx.sql, ctx.tenant, repo, repo.defaultBranch),
         }
       : subtreeOf(named, named.at)
   for (const raw of entries) {
@@ -161,7 +163,7 @@ const createTree = withRepo(async (ctx, repo) => {
       links.set(path, entry.sha)
       files.delete(path)
     } else if (typeof entry.sha === 'string' && entry.sha !== '') {
-      const blob = await blobBySha(ctx.db, ctx.tenant, repo, entry.sha)
+      const blob = await blobBySha(ctx.sql, ctx.tenant, repo, entry.sha)
       if (blob === null) return fail(422, `Tree entry ${path} has an unknown sha`)
       files.set(path, blob)
       links.delete(path)
@@ -169,7 +171,7 @@ const createTree = withRepo(async (ctx, repo) => {
   }
   return {
     status: 201,
-    body: { sha: await stageTree(ctx.db, ctx.tenant, repo, files, links), tree: [] },
+    body: { sha: await stageTree(ctx.sql, ctx.tenant, repo, files, links), tree: [] },
   }
 })
 
@@ -184,12 +186,12 @@ const createTree = withRepo(async (ctx, repo) => {
 const createCommit = withRepo(async (ctx, repo) => {
   const body = jsonBodyOf(ctx)
   const tree = str(body, 'tree')
-  const named = await treeById(ctx.db, ctx.tenant, repo, tree)
+  const named = await treeById(ctx.sql, ctx.tenant, repo, tree)
   if (named === null) {
     return fail(422, 'Invalid request.\n\n"tree" is invalid.')
   }
   const sub = subtreeOf(named, named.at)
-  await stageTree(ctx.db, ctx.tenant, repo, sub.files, sub.links)
+  await stageTree(ctx.sql, ctx.tenant, repo, sub.files, sub.links)
   const message = str(body, 'message') === '' ? 'Update' : str(body, 'message')
   const author = bodyPerson(body, 'author')
   if (author === INVALID_PERSON) return fail(422, 'Invalid request.\n\n"author" is invalid.')
@@ -201,9 +203,9 @@ const createCommit = withRepo(async (ctx, repo) => {
   // falls back to where the default branch currently points.
   const parents = Array.isArray(body.parents)
     ? body.parents.filter((sha): sha is string => typeof sha === 'string')
-    : [await visibleHeadOf(ctx.db, ctx.tenant, repo, repo.defaultBranch)]
+    : [await visibleHeadOf(ctx.sql, ctx.tenant, repo, repo.defaultBranch)]
   const commit = await recordCommit(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     repo,
     message,
@@ -235,48 +237,48 @@ const createRef = withRepo(async (ctx, repo) => {
   if (!ref.startsWith('refs/heads/')) return fail(422, 'Invalid request.\n\n"ref" is invalid.')
   const name = ref.slice('refs/heads/'.length)
   if (name === '') return fail(422, 'Invalid request.\n\n"ref" is invalid.')
-  const names = await branchNames(ctx.db, ctx.tenant, repo)
+  const names = await branchNames(ctx.sql, ctx.tenant, repo)
   if (names.includes(name)) return fail(422, 'Reference already exists')
-  const at = await resolveRef(ctx.db, ctx.tenant, repo, str(body, 'sha'))
+  const at = await resolveRef(ctx.sql, ctx.tenant, repo, str(body, 'sha'))
   // A commit carries its own tree, so the branch is populated from the commit
   // that was named rather than from a branch that happens to hold it. Those are
   // different answers whenever that branch has moved on since, and reading the
   // branch reported the newer files under the older sha.
-  const files = at === null ? null : await treeAt(ctx.db, ctx.tenant, repo, at)
+  const files = at === null ? null : await treeAt(ctx.sql, ctx.tenant, repo, at)
   if (at === null || files === null) return fail(422, 'Object does not exist')
   // Recorded before the files are copied, because a branch off an empty
   // repository copies none and would otherwise not exist at all.
-  await addBranch(ctx.db, ctx.tenant, repo.fullName, name)
+  await addBranch(ctx.sql, ctx.tenant, repo.fullName, name)
   // A synthesized root is no stored commit, so a branch started on one keeps
   // no head and derives the same root from the files it is given.
   const named = at.history[0]
   const startAt =
     at.branch !== null
-      ? await headOf(ctx.db, ctx.tenant, repo, at.branch)
+      ? await headOf(ctx.sql, ctx.tenant, repo, at.branch)
       : named !== undefined && named.treeSha !== ''
         ? named.sha
         : ''
   if (startAt !== '') {
-    await ctx.db.githubBranch.updateMany({
-      where: { tenant: ctx.tenant, repo: repo.fullName, name },
-      data: { headSha: startAt },
-    })
+    update(
+      ctx.sql,
+      'GithubBranch',
+      { headSha: startAt },
+      { tenant: ctx.tenant, repo: repo.fullName, name },
+    )
   }
   let seq = 0
   for (const [path, data] of files) {
-    await ctx.db.githubFile.create({
-      data: {
-        tenant: ctx.tenant,
-        repo: repo.fullName,
-        branch: name,
-        path,
-        data: new Uint8Array(data),
-        seq,
-      },
+    insert(ctx.sql, 'GithubFile', {
+      tenant: ctx.tenant,
+      repo: repo.fullName,
+      branch: name,
+      path,
+      data: new Uint8Array(data),
+      seq,
     })
     seq += 1
   }
-  const head = await commitList(ctx.db, ctx.tenant, repo, name)
+  const head = await commitList(ctx.sql, ctx.tenant, repo, name)
   return {
     status: 201,
     body: { ref: `refs/heads/${name}`, object: { sha: head[0]?.sha ?? '', type: 'commit' } },
@@ -296,38 +298,44 @@ const createRef = withRepo(async (ctx, repo) => {
 const updateRef = withRepo(async (ctx, repo) => {
   const ref = stripSlash(param(ctx, 'ref'))
   const name = ref.startsWith('heads/') ? ref.slice('heads/'.length) : ''
-  const names = await branchNames(ctx.db, ctx.tenant, repo)
+  const names = await branchNames(ctx.sql, ctx.tenant, repo)
   if (name === '' || !names.includes(name)) return fail(422, 'Reference does not exist')
   const body = jsonBodyOf(ctx)
   const sha = str(body, 'sha')
-  const commit = await ctx.db.githubCommit.findFirst({
-    where: { tenant: ctx.tenant, repo: repo.fullName, sha },
-  })
+  const commit = first<GithubCommit>(
+    ctx.sql,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" = ? AND "sha" = ?',
+    ctx.tenant,
+    repo.fullName,
+    sha,
+  )
   if (commit === null) return fail(422, 'Invalid request.\n\n"sha" is invalid.')
   // Every commit records a tree, so the ref is restored to the snapshot the
   // named commit took. A commit written through /contents used to record none,
   // and was refused here as though it were not a commit at all.
-  const staged = await stagedTree(ctx.db, ctx.tenant, repo, commit.treeSha)
+  const staged = await stagedTree(ctx.sql, ctx.tenant, repo, commit.treeSha)
   if (staged === null) return fail(422, 'Invalid request.\n\n"sha" is invalid.')
   // Refused before anything is written, so a refused update changes nothing.
-  const head = await visibleHeadOf(ctx.db, ctx.tenant, repo, name)
-  const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+  const head = await visibleHeadOf(ctx.sql, ctx.tenant, repo, name)
+  const byId = await commitsBySha(ctx.sql, ctx.tenant, repo)
   if (!reaches(sha, head, byId) && body.force !== true) {
     return fail(422, 'Update is not a fast forward')
   }
-  await keepRoot(ctx.db, ctx.tenant, repo, name)
-  await ctx.db.githubBranch.updateMany({
-    where: { tenant: ctx.tenant, repo: repo.fullName, name },
-    data: { headSha: sha },
-  })
-  await keepTree(ctx.db, ctx.tenant, repo, name)
-  await ctx.db.githubFile.deleteMany({
-    where: { tenant: ctx.tenant, repo: repo.fullName, branch: name },
-  })
+  await keepRoot(ctx.sql, ctx.tenant, repo, name)
+  update(
+    ctx.sql,
+    'GithubBranch',
+    { headSha: sha },
+    { tenant: ctx.tenant, repo: repo.fullName, name },
+  )
+  await keepTree(ctx.sql, ctx.tenant, repo, name)
+  remove(ctx.sql, 'GithubFile', { tenant: ctx.tenant, repo: repo.fullName, branch: name })
   for (const [path, data] of staged) {
-    await writeFile(ctx.db, ctx.tenant, repo, name, path, data)
+    await writeFile(ctx.sql, ctx.tenant, repo, name, path, data)
   }
-  await rebuildOnPush(ctx.db, ctx.tenant, repo.fullName, name)
+  await rebuildOnPush(ctx.sql, ctx.tenant, repo.fullName, name)
   return { status: 200, body: { ref: `refs/${ref}`, object: { sha, type: 'commit' } } }
 })
 
@@ -340,13 +348,19 @@ const updateRef = withRepo(async (ctx, repo) => {
 // tree is the id of the files it holds.
 const gitCommit = withRepo(async (ctx, repo) => {
   const sha = param(ctx, 'sha')
-  const stored = (await ctx.db.githubCommit.findFirst({
-    where: { tenant: ctx.tenant, repo: repo.fullName, sha },
-  })) as CommitRow | null
+  const stored = first<GithubCommit>(
+    ctx.sql,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" = ? AND "sha" = ?',
+    ctx.tenant,
+    repo.fullName,
+    sha,
+  ) as CommitRow | null
   let row = stored
   if (row === null) {
-    for (const branch of await branchNames(ctx.db, ctx.tenant, repo)) {
-      const history = await commitList(ctx.db, ctx.tenant, repo, branch)
+    for (const branch of await branchNames(ctx.sql, ctx.tenant, repo)) {
+      const history = await commitList(ctx.sql, ctx.tenant, repo, branch)
       const hit = history.find((c) => c.sha === sha)
       if (hit !== undefined) {
         row = hit
@@ -355,12 +369,12 @@ const gitCommit = withRepo(async (ctx, repo) => {
     }
   }
   if (row === null) return fail(404, 'Not Found')
-  const tree = await commitTreeId(ctx.db, ctx.tenant, repo, row)
+  const tree = await commitTreeId(ctx.sql, ctx.tenant, repo, row)
   return { status: 200, body: gitCommitJson(repo.fullName, row, tree) }
 })
 
 async function headSha(ctx: Ctx<C>, repo: RepoRow, branch: string): Promise<string> {
-  const head = await commitList(ctx.db, ctx.tenant, repo, branch)
+  const head = await commitList(ctx.sql, ctx.tenant, repo, branch)
   return head[0]?.sha ?? ''
 }
 
@@ -368,8 +382,8 @@ async function headSha(ctx: Ctx<C>, repo: RepoRow, branch: string): Promise<stri
 // or a commit, by its whole sha, as git objects are named. Null for anything
 // else, which is how GitHub's "Object does not exist" reads.
 async function objectType(ctx: Ctx<C>, repo: RepoRow, sha: string): Promise<string | null> {
-  if ((await tagObject(ctx.db, ctx.tenant, repo, sha)) !== null) return 'tag'
-  const at = await resolveRef(ctx.db, ctx.tenant, repo, sha)
+  if ((await tagObject(ctx.sql, ctx.tenant, repo, sha)) !== null) return 'tag'
+  const at = await resolveRef(ctx.sql, ctx.tenant, repo, sha)
   return at !== null && at.branch === null && at.history[0]?.sha === sha ? 'commit' : null
 }
 
@@ -429,35 +443,45 @@ const createTag = withRepo(async (ctx, repo) => {
   row.sha = commitSha(
     ['tag', repo.fullName, row.tag, object, type, row.message, taggerJson].join('\0'),
   )
-  if ((await tagObject(ctx.db, ctx.tenant, repo, row.sha)) === null) {
-    const count = await ctx.db.githubTag.count({
-      where: { tenant: ctx.tenant, repo: repo.fullName },
-    })
-    await ctx.db.githubTag.create({
-      data: { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: count },
-    })
+  if ((await tagObject(ctx.sql, ctx.tenant, repo, row.sha)) === null) {
+    const seq = count(
+      ctx.sql,
+      'GithubTag',
+      '"tenant" = ? AND "repo" = ?',
+      ctx.tenant,
+      repo.fullName,
+    )
+    insert(ctx.sql, 'GithubTag', { tenant: ctx.tenant, repo: repo.fullName, ...row, seq })
   }
   return { status: 201, body: tagJson(repo, row) }
 })
 
 const getTag = withRepo(async (ctx, repo) => {
-  const row = await tagObject(ctx.db, ctx.tenant, repo, param(ctx, 'sha'))
+  const row = await tagObject(ctx.sql, ctx.tenant, repo, param(ctx, 'sha'))
   return row === null ? fail(404, 'Not Found') : { status: 200, body: tagJson(repo, row) }
 })
 
 // A tag ref names a commit or an annotated tag object by its whole sha.
 async function createTagRef(ctx: Ctx<C>, repo: RepoRow, name: string, sha: string) {
   if (name === '') return fail(422, 'Invalid request.\n\n"ref" is invalid.')
-  if ((await tagRefs(ctx.db, ctx.tenant, repo)).some((row) => row.name === name)) {
+  if ((await tagRefs(ctx.sql, ctx.tenant, repo)).some((row) => row.name === name)) {
     return fail(422, 'Reference already exists')
   }
   const type = await objectType(ctx, repo, sha)
   if (type === null) return fail(422, 'Object does not exist')
-  const count = await ctx.db.githubTagRef.count({
-    where: { tenant: ctx.tenant, repo: repo.fullName },
-  })
-  await ctx.db.githubTagRef.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, name, sha, seq: count },
+  const seq = count(
+    ctx.sql,
+    'GithubTagRef',
+    '"tenant" = ? AND "repo" = ?',
+    ctx.tenant,
+    repo.fullName,
+  )
+  insert(ctx.sql, 'GithubTagRef', {
+    tenant: ctx.tenant,
+    repo: repo.fullName,
+    name,
+    sha,
+    seq,
   })
   return { status: 201, body: { ref: `refs/tags/${name}`, object: { sha, type } } }
 }
@@ -467,10 +491,10 @@ async function createTagRef(ctx: Ctx<C>, repo: RepoRow, name: string, sha: strin
 // to the commit it names.
 const listTags = withRepo(async (ctx, repo) => {
   const api = `https://api.github.com/repos/${repo.fullName}`
-  const rows = (await tagRefs(ctx.db, ctx.tenant, repo)).sort((a, b) => (a.name < b.name ? 1 : -1))
+  const rows = (await tagRefs(ctx.sql, ctx.tenant, repo)).sort((a, b) => (a.name < b.name ? 1 : -1))
   const items: JsonValue[] = []
   for (const row of rows) {
-    const commit = await peeled(ctx.db, ctx.tenant, repo, row.sha)
+    const commit = await peeled(ctx.sql, ctx.tenant, repo, row.sha)
     items.push({
       name: row.name,
       zipball_url: `${api}/zipball/refs/tags/${row.name}`,
@@ -490,12 +514,12 @@ async function refsOf(
   repo: RepoRow,
 ): Promise<Array<{ ref: string; sha: string; type: string }>> {
   const out: Array<{ ref: string; sha: string; type: string }> = []
-  for (const name of await branchNames(ctx.db, ctx.tenant, repo)) {
+  for (const name of await branchNames(ctx.sql, ctx.tenant, repo)) {
     const sha = await headSha(ctx, repo, name)
     if (sha !== '') out.push({ ref: `heads/${name}`, sha, type: 'commit' })
   }
-  for (const row of await tagRefs(ctx.db, ctx.tenant, repo)) {
-    const tag = await tagObject(ctx.db, ctx.tenant, repo, row.sha)
+  for (const row of await tagRefs(ctx.sql, ctx.tenant, repo)) {
+    const tag = await tagObject(ctx.sql, ctx.tenant, repo, row.sha)
     out.push({ ref: `tags/${row.name}`, sha: row.sha, type: tag === null ? 'commit' : 'tag' })
   }
   return out
@@ -514,7 +538,7 @@ async function refsOf(
 // reason a branch nothing has been committed to is no ref once the repository
 // has others: a ref names a commit, so that branch is missing, not at "".
 const showRef = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
   const ref = stripSlash(param(ctx, 'ref'))
   const hit = (await refsOf(ctx, repo)).find((row) => row.ref === ref)
   if (hit === undefined) return fail(404, 'Not Found')
@@ -522,7 +546,7 @@ const showRef = withRepo(async (ctx, repo) => {
 })
 
 const listRefs = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
   const prefix = stripSlash(param(ctx, 'ref'))
   const items: JsonValue[] = (await refsOf(ctx, repo))
     .filter((row) => row.ref.startsWith(prefix))

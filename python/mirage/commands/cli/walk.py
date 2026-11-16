@@ -25,6 +25,7 @@ from mirage.commands.cli.constants import (
     CLAP_EXIT,
     GIT_SYNOPSES,
     HELP_EXIT,
+    POPPLER_EXIT,
     USAGE_EXIT,
 )
 from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
@@ -320,7 +321,7 @@ def node_help(
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
     """
-    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
+    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER):
         return argparse_help(
             name, listed_node(node, style), subcommand_rows(node)
         )
@@ -368,7 +369,7 @@ def listed_node(
         return node
     names = (
         ("-h", "--help")
-        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
+        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
         and not any("-h" in arg.names for arg in node.arguments)
         else ("--help",)
     )
@@ -395,6 +396,7 @@ def _usage_error(
     --help, and exits 2, at every level of the tree; the exit code is the
     group's just as much as the leaf's, so reading the style here is what
     keeps `ntn --bogus` and `ntn pages get --bogus` from disagreeing.
+    poppler's readers print the help page and exit 99, as their leaves do.
 
     Args:
         name (str): display path walked so far, e.g. "gws gmail".
@@ -410,6 +412,12 @@ def _usage_error(
         text = cobra_refusal(group_message(message, token), name, node)
         return WalkResult(
             output=encode_text(text), stream="stderr", exit_code=COBRA_EXIT
+        )
+    if style is UsageStyle.POPPLER:
+        return WalkResult(
+            output=encode_text(node_help(name, node, style)),
+            stream="stderr",
+            exit_code=POPPLER_EXIT,
         )
     if style is UsageStyle.CLAP:
         first = (
@@ -837,7 +845,8 @@ def walk(
                 not options_ended
                 and token == "-h"
                 and node.add_help
-                and style in (UsageStyle.ARGPARSE, UsageStyle.COBRA)
+                and style
+                in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
                 and "-h" not in cs.dest
             ):
                 return WalkResult(

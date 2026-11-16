@@ -12,12 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { count, create, first, insert, select, update } from '../kit/typescript/index.ts'
+import type {
+  GithubCheck,
+  GithubRun,
+  GithubStatus,
+  GithubWorkflow,
+} from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import { crc32 } from 'node:zlib'
 import { YAMLException, load as yamlLoad } from 'js-yaml'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, WRITE_COMMIT_DATE } from './config.ts'
 import type { C } from './config.ts'
-import { branchFor, resolveRef, scope, treeOfBranch, visibleHeadOf } from './store.ts'
+import { branchFor, resolveRef, treeOfBranch, visibleHeadOf } from './store.ts'
 import type { RepoRow, Tree } from './store.ts'
 import {
   authedRoute,
@@ -206,8 +214,14 @@ function dispatchable(data: Buffer): boolean {
   return typeof on === 'object' && on !== null && 'workflow_dispatch' in on
 }
 
-async function nextWorkflowId(db: C, tenant: string): Promise<number> {
-  const top = await db.githubWorkflow.findFirst({ where: scope(tenant), orderBy: { id: 'desc' } })
+async function nextWorkflowId(db: Db, tenant: string): Promise<number> {
+  const top = first<GithubWorkflow>(
+    db,
+    DMMF,
+    'GithubWorkflow',
+    '"tenant" = ? ORDER BY "id" DESC',
+    tenant,
+  )
   return Math.max(top?.id ?? 0, 100) + 1
 }
 
@@ -221,20 +235,30 @@ async function nextWorkflowId(db: C, tenant: string): Promise<number> {
  * Registering writes, so every route that reads the list is a write route: two
  * concurrent reads would otherwise mint two ids for one file.
  */
-export async function workflowsOf(db: C, tenant: string, repo: RepoRow): Promise<Workflow[]> {
+export async function workflowsOf(db: Db, tenant: string, repo: RepoRow): Promise<Workflow[]> {
   const files: Tree = await treeOfBranch(db, tenant, repo, repo.defaultBranch)
-  const rows = (await db.githubWorkflow.findMany({
-    where: { ...scope(tenant), repo: repo.fullName },
-  })) as WorkflowRow[]
+  const rows = select<GithubWorkflow>(
+    db,
+    DMMF,
+    'GithubWorkflow',
+    '"tenant" = ? AND "repo" = ?',
+    tenant,
+    repo.fullName,
+  ) as WorkflowRow[]
   const known = new Map(rows.map((row) => [row.path, row]))
   const out: Workflow[] = []
   for (const path of [...files.keys()].filter(isWorkflowFile).sort()) {
     let row = known.get(path)
     if (row === undefined) {
       const id = await nextWorkflowId(db, tenant)
-      row = (await db.githubWorkflow.create({
-        data: { tenant, repo: repo.fullName, id, path, state: 'active', seq: id },
-      })) as WorkflowRow
+      row = create<GithubWorkflow>(db, DMMF, 'GithubWorkflow', {
+        tenant,
+        repo: repo.fullName,
+        id,
+        path,
+        state: 'active',
+        seq: id,
+      }) as WorkflowRow
     }
     const data = files.get(path) ?? Buffer.alloc(0)
     out.push({ id: row.id, path, state: row.state, name: workflowName(path, data), data })
@@ -245,7 +269,7 @@ export async function workflowsOf(db: C, tenant: string, repo: RepoRow): Promise
 // The REST routes name a workflow by its id or its file's base name, never by
 // its display name: gh resolves a name to an id itself before it asks.
 async function findWorkflow(ctx: Ctx<C>, repo: RepoRow, value: string): Promise<Workflow | null> {
-  const rows = await workflowsOf(ctx.db, ctx.tenant, repo)
+  const rows = await workflowsOf(ctx.sql, ctx.tenant, repo)
   const match = rows.find(
     (r) => value === String(r.id) || value === r.path.slice(r.path.lastIndexOf('/') + 1),
   )
@@ -261,35 +285,55 @@ export async function findWorkflowRow(
 }
 
 export async function runRow(ctx: Ctx<C>, repo: RepoRow, id: number): Promise<RunRow | null> {
-  return (await ctx.db.githubRun.findFirst({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, id },
-  })) as RunRow | null
+  return first<GithubRun>(
+    ctx.sql,
+    DMMF,
+    'GithubRun',
+    '"tenant" = ? AND "repo" = ? AND "id" = ?',
+    ctx.tenant,
+    repo.fullName,
+    id,
+  ) as RunRow | null
 }
 
 // Runs come back newest first, which is where a dispatch inserts itself.
 async function runRows(ctx: Ctx<C>, repo: RepoRow): Promise<RunRow[]> {
-  return (await ctx.db.githubRun.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'desc' },
-  })) as RunRow[]
+  return select<GithubRun>(
+    ctx.sql,
+    DMMF,
+    'GithubRun',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+    ctx.tenant,
+    repo.fullName,
+  ) as RunRow[]
 }
 
 async function runById(ctx: Ctx<C>, repo: RepoRow, id: number): Promise<RunRow | null> {
-  return (await ctx.db.githubRun.findFirst({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, id },
-  })) as RunRow | null
+  return first<GithubRun>(
+    ctx.sql,
+    DMMF,
+    'GithubRun',
+    '"tenant" = ? AND "repo" = ? AND "id" = ?',
+    ctx.tenant,
+    repo.fullName,
+    id,
+  ) as RunRow | null
 }
 
 async function topSeq(ctx: Ctx<C>, repo: RepoRow): Promise<number> {
-  const row = await ctx.db.githubRun.findFirst({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'desc' },
-  })
+  const row = first<GithubRun>(
+    ctx.sql,
+    DMMF,
+    'GithubRun',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+    ctx.tenant,
+    repo.fullName,
+  )
   return row === null ? -1 : row.seq
 }
 
 async function listWorkflows(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  const rows = await workflowsOf(ctx.db, ctx.tenant, repo)
+  const rows = await workflowsOf(ctx.sql, ctx.tenant, repo)
   return pagedReply(ctx, rows.map(workflowJson), 'workflows')
 }
 
@@ -307,37 +351,35 @@ async function dispatchWorkflow(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   if (workflow === null) return fail(404, 'Not Found')
   const ref = str(jsonBodyOf(ctx), 'ref')
   if (ref === '') return fail(422, 'No ref found')
-  const branch = await branchFor(ctx.db, ctx.tenant, repo, ref)
+  const branch = await branchFor(ctx.sql, ctx.tenant, repo, ref)
   if (branch === null) return fail(422, `No ref found for: ${ref}`)
   if (workflow.state !== 'active') {
     return fail(422, "Cannot trigger a 'workflow_dispatch' on a disabled workflow")
   }
-  const file = (await treeOfBranch(ctx.db, ctx.tenant, repo, branch)).get(workflow.path)
+  const file = (await treeOfBranch(ctx.sql, ctx.tenant, repo, branch)).get(workflow.path)
   if (file === undefined || !dispatchable(file)) {
     return fail(422, "Workflow does not have 'workflow_dispatch' trigger")
   }
   const rows = await runRows(ctx, repo)
   const id = Math.max(200, ...rows.map((r) => r.id)) + 1
-  await ctx.db.githubRun.create({
-    data: {
-      tenant: ctx.tenant,
-      repo: repo.fullName,
-      id,
-      name: workflow.name,
-      displayTitle: `${workflow.name} dispatch`,
-      workflowId: workflow.id,
-      runNumber: rows.filter((r) => r.workflowId === workflow.id).length + 1,
-      runAttempt: 1,
-      event: 'workflow_dispatch',
-      headBranch: branch,
-      headSha: await visibleHeadOf(ctx.db, ctx.tenant, repo, branch),
-      status: 'queued',
-      conclusion: null,
-      createdAt: DISPATCHED_AT,
-      updatedAt: DISPATCHED_AT,
-      runStartedAt: null,
-      seq: (await topSeq(ctx, repo)) + 1,
-    },
+  insert(ctx.sql, 'GithubRun', {
+    tenant: ctx.tenant,
+    repo: repo.fullName,
+    id,
+    name: workflow.name,
+    displayTitle: `${workflow.name} dispatch`,
+    workflowId: workflow.id,
+    runNumber: rows.filter((r) => r.workflowId === workflow.id).length + 1,
+    runAttempt: 1,
+    event: 'workflow_dispatch',
+    headBranch: branch,
+    headSha: await visibleHeadOf(ctx.sql, ctx.tenant, repo, branch),
+    status: 'queued',
+    conclusion: null,
+    createdAt: DISPATCHED_AT,
+    updatedAt: DISPATCHED_AT,
+    runStartedAt: null,
+    seq: (await topSeq(ctx, repo)) + 1,
   })
   return { status: 204 }
 }
@@ -572,17 +614,19 @@ async function rerun(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const id = idParam(ctx, 'run_id')
   const row = id === null ? null : await runById(ctx, repo, id)
   if (row === null) return byJob ? { status: 201, body: {} } : fail(404, 'Not Found')
-  await ctx.db.githubRun.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, id: row.id },
-    data: { runAttempt: row.runAttempt + 1, status: 'queued', conclusion: null },
-  })
+  update(
+    ctx.sql,
+    'GithubRun',
+    { runAttempt: row.runAttempt + 1, status: 'queued', conclusion: null },
+    { tenant: ctx.tenant, repo: repo.fullName, id: row.id },
+  )
   return { status: 201, body: {} }
 }
 
 // The commit a `commits/{ref}/...` route names: a branch's head, a tag's
 // commit, or a commit by its sha. Null for a ref that names none.
 async function namedCommit(ctx: Ctx<C>, repo: RepoRow): Promise<string | null> {
-  return (await resolveRef(ctx.db, ctx.tenant, repo, param(ctx, 'sha')))?.history[0]?.sha ?? null
+  return (await resolveRef(ctx.sql, ctx.tenant, repo, param(ctx, 'sha')))?.history[0]?.sha ?? null
 }
 
 function noCommit(ctx: Ctx<C>): Reply {
@@ -594,10 +638,15 @@ function noCommit(ctx: Ctx<C>): Reply {
 async function checkRuns(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const sha = await namedCommit(ctx, repo)
   if (sha === null) return noCommit(ctx)
-  const rows = (await ctx.db.githubCheck.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, sha },
-    orderBy: { seq: 'asc' },
-  })) as CheckRow[]
+  const rows = select<GithubCheck>(
+    ctx.sql,
+    DMMF,
+    'GithubCheck',
+    '"tenant" = ? AND "repo" = ? AND "sha" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+    sha,
+  ) as CheckRow[]
   return pagedReply(ctx, rows.map(checkJson), 'check_runs')
 }
 
@@ -609,21 +658,26 @@ async function checkRuns(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
  * repositories is the table's.
  */
 export async function statusesOf(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repos: RepoRow[],
   sha: string,
 ): Promise<StatusRow[]> {
-  return (await ctx.db.githubStatus.findMany({
-    where: { ...scope(ctx.tenant), repo: { in: repos.map((r) => r.fullName) }, sha },
-    orderBy: { pk: 'desc' },
-  })) as StatusRow[]
+  return select<GithubStatus>(
+    ctx.sql,
+    DMMF,
+    'GithubStatus',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ? ORDER BY "pk" DESC',
+    ctx.tenant,
+    JSON.stringify(repos.map((r) => r.fullName)),
+    sha,
+  ) as StatusRow[]
 }
 
 // The rolled-up state of a commit's statuses: the newest of each context,
 // failure winning over pending, which wins over success, and no statuses at
 // all reading as pending rather than as a pass, as GitHub rolls them up.
 export async function combinedStatus(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repos: RepoRow[],
   sha: string,
 ): Promise<{ state: string; rows: StatusRow[] }> {
@@ -666,9 +720,13 @@ async function createStatus(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const body = jsonBodyOf(ctx)
   const state = str(body, 'state')
   if (!STATUS_STATES.includes(state)) return fail(422, 'Validation Failed')
-  const seq = await ctx.db.githubStatus.count({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-  })
+  const seq = count(
+    ctx.sql,
+    'GithubStatus',
+    '"tenant" = ? AND "repo" = ?',
+    ctx.tenant,
+    repo.fullName,
+  )
   const row: StatusRow = {
     context: str(body, 'context') || 'default',
     state,
@@ -679,7 +737,7 @@ async function createStatus(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     sha,
     seq,
   }
-  await ctx.db.githubStatus.create({ data: { tenant: ctx.tenant, repo: repo.fullName, ...row } })
+  insert(ctx.sql, 'GithubStatus', { tenant: ctx.tenant, repo: repo.fullName, ...row })
   return {
     status: 201,
     body: { ...(statusJson(row) as Record<string, JsonValue>), creator: { login: DEFAULT_LOGIN } },

@@ -40,6 +40,8 @@ export const githubFake: Fake<C> = {
   // stateable in a fixture, so that happens here, along with registering the
   // workflow files each repository holds.
   afterSeed: seedRepos,
-  afterReset: forgetKept,
+  afterReset: (_db, tenants, sql) => {
+    forgetKept(sql, tenants)
+  },
   routes: githubRoutes,
 }

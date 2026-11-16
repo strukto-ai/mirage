@@ -12,32 +12,74 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
+import { BYTES, all, bytes, exec, one } from '../kit/typescript/index.ts'
 import type { Minter } from '../kit/typescript/index.ts'
-import type { C } from './config.ts'
 import { dirname, type Item } from './wire.ts'
 
-// Every row carries the tenant, and the tenant is the account, so the WHERE
-// clause is written once here rather than at each of the twenty call sites.
-function where(tenant: string): { tenant: string } {
-  return { tenant }
-}
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/dropbox.prisma declares. A Boolean column holds 0 or 1.
+type Db = DatabaseSync
 
-function key(tenant: string, path: string): { tenant_path: { tenant: string; path: string } } {
-  return { tenant_path: { tenant, path } }
-}
-
-function toItem(row: {
+interface Row {
   path: string
-  isFolder: boolean
+  isFolder: number
   content: Uint8Array | null
   modified: string | null
-}): Item {
-  return { path: row.path, isFolder: row.isFolder, content: row.content, modified: row.modified }
+  seq: number
 }
 
-export async function itemAt(db: C, tenant: string, path: string): Promise<Item | null> {
+const ITEM = 'SELECT path, isFolder, content, modified, seq FROM DropboxItem'
+
+// `startsWith` as Prisma ran it on SQLite, which every prefix query here used
+// to be: LIKE with the prefix unescaped, so ASCII case is ignored and `%` or
+// `_` match as wildcards. Kept exactly.
+function like(prefix: string): string {
+  return `${prefix}%`
+}
+
+function toItem(row: Row): Item {
+  return {
+    path: row.path,
+    isFolder: row.isFolder !== 0,
+    content: row.content,
+    modified: row.modified,
+  }
+}
+
+function rowAt(db: Db, tenant: string, path: string): Row | null {
+  return one<Row>(db, `${ITEM} WHERE tenant = ? AND path = ?`, tenant, path)
+}
+
+function insertItem(
+  db: Db,
+  tenant: string,
+  path: string,
+  isFolder: boolean,
+  content: Uint8Array | null,
+  modified: string | null,
+  seq: number,
+): void {
+  exec(
+    db,
+    'INSERT INTO DropboxItem (tenant, path, isFolder, content, modified, seq) ' +
+      `VALUES (?, ?, ?, ${BYTES}, ?, ?)`,
+    tenant,
+    path,
+    isFolder ? 1 : 0,
+    ...bytes(content),
+    modified,
+    seq,
+  )
+}
+
+function clearTombstone(db: Db, tenant: string, path: string): void {
+  exec(db, 'DELETE FROM DropboxTombstone WHERE tenant = ? AND path = ?', tenant, path)
+}
+
+export async function itemAt(db: Db, tenant: string, path: string): Promise<Item | null> {
   if (path === '') return null
-  const row = await db.dropboxItem.findUnique({ where: key(tenant, path) })
+  const row = rowAt(db, tenant, path)
   return row === null ? null : toItem(row)
 }
 
@@ -46,7 +88,7 @@ export async function itemAt(db: C, tenant: string, path: string): Promise<Item 
 // The rows are created rather than upserted per level so an existing folder
 // keeps its seq, which is what makes a re-upload leave a listing unchanged.
 export async function addAncestors(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   minter: Minter,
@@ -55,70 +97,91 @@ export async function addAncestors(
   let cur = ''
   for (const part of parts) {
     cur += `/${part}`
-    const found = await db.dropboxItem.findUnique({ where: key(tenant, cur) })
-    if (found !== null) continue
-    await db.dropboxItem.create({
-      data: {
-        tenant,
-        path: cur,
-        isFolder: true,
-        content: null,
-        modified: null,
-        seq: minter.next('item'),
-      },
-    })
+    if (rowAt(db, tenant, cur) !== null) continue
+    insertItem(db, tenant, cur, true, null, null, minter.next('item'))
   }
 }
 
 export async function addFolder(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   minter: Minter,
 ): Promise<Item> {
   await addAncestors(db, tenant, path, minter)
-  const row = await db.dropboxItem.create({
-    data: { tenant, path, isFolder: true, content: null, modified: null, seq: minter.next('item') },
-  })
-  await db.dropboxTombstone.deleteMany({ where: { tenant, path } })
-  return toItem(row)
+  const seq = minter.next('item')
+  insertItem(db, tenant, path, true, null, null, seq)
+  clearTombstone(db, tenant, path)
+  return { path, isFolder: true, content: null, modified: null }
 }
 
 export async function putFile(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
-  content: Uint8Array<ArrayBuffer>,
+  content: Uint8Array,
   modified: string,
   minter: Minter,
 ): Promise<Item> {
   await addAncestors(db, tenant, path, minter)
-  const row = await db.dropboxItem.upsert({
-    where: key(tenant, path),
-    update: { isFolder: false, content, modified, seq: minter.next('item') },
-    create: { tenant, path, isFolder: false, content, modified, seq: minter.next('item') },
-  })
-  await db.dropboxTombstone.deleteMany({ where: { tenant, path } })
-  return toItem(row)
+  // Prisma's upsert built both its branches before it ran, so a write took
+  // two numbers, the first for an update and the second for a create; the
+  // counter is shared, so taking one would renumber everything after it.
+  const updateSeq = minter.next('item')
+  const createSeq = minter.next('item')
+  if (rowAt(db, tenant, path) === null) {
+    insertItem(db, tenant, path, false, content, modified, createSeq)
+  } else {
+    exec(
+      db,
+      `UPDATE DropboxItem SET isFolder = 0, content = ${BYTES}, modified = ?, seq = ? ` +
+        'WHERE tenant = ? AND path = ?',
+      ...bytes(content),
+      modified,
+      updateSeq,
+      tenant,
+      path,
+    )
+  }
+  clearTombstone(db, tenant, path)
+  return { path, isFolder: false, content, modified }
 }
 
 // null means the path names no folder, which the caller reports as
 // path/not_found; an empty array means a real but empty folder.
 export async function listChildren(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   recursive: boolean,
 ): Promise<Item[] | null> {
   if (path !== '') {
-    const at = await db.dropboxItem.findUnique({ where: key(tenant, path) })
-    if (at === null || !at.isFolder) return null
+    const at = rowAt(db, tenant, path)
+    if (at === null || at.isFolder === 0) return null
   }
-  const rows = await db.dropboxItem.findMany({ where: where(tenant), orderBy: { seq: 'asc' } })
   const prefix = `${path}/`
-  const out = rows
-    .filter((r) => (recursive ? r.path.startsWith(prefix) : dirname(r.path) === path))
-    .map(toItem)
+  // Paths first, then whole rows for the ones listed: reading every item's
+  // content to list one folder cost 11ms a listing. LIKE ignores ASCII case,
+  // so the filter below still decides.
+  const under = all<{ path: string }>(
+    db,
+    'SELECT path FROM DropboxItem WHERE tenant = ? AND path LIKE ?',
+    tenant,
+    like(prefix),
+  )
+  const listed = under
+    .map((r) => r.path)
+    .filter((p) => (recursive ? p.startsWith(prefix) : dirname(p) === path))
+  const rows =
+    listed.length === 0
+      ? []
+      : all<Row>(
+          db,
+          `${ITEM} WHERE tenant = ? AND path IN (SELECT value FROM json_each(?))`,
+          tenant,
+          JSON.stringify(listed),
+        )
+  const out = rows.map(toItem)
   // A recursive listing is ordered parent-before-child, which is what the
   // vendor guarantees and what a consumer building a tree from the stream
   // relies on; a shallow one is ordered by name, which is what it renders.
@@ -131,35 +194,38 @@ export async function listChildren(
 
 // Removes a file, or a folder plus its subtree (delete_v2 semantics).
 export async function remove(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   minter: Minter,
 ): Promise<boolean> {
-  const at = await db.dropboxItem.findUnique({ where: key(tenant, path) })
+  const at = rowAt(db, tenant, path)
   if (at === null) return false
-  const doomed = at.isFolder
+  const folder = at.isFolder !== 0
+  const doomed = folder
     ? [
         path,
-        ...(
-          await db.dropboxItem.findMany({
-            where: { tenant, path: { startsWith: `${path}/` } },
-            select: { path: true },
-          })
+        ...all<{ path: string }>(
+          db,
+          'SELECT path FROM DropboxItem WHERE tenant = ? AND path LIKE ?',
+          tenant,
+          like(`${path}/`),
         ).map((row) => row.path),
       ]
     : [path]
-  await db.dropboxItem.delete({ where: key(tenant, path) })
-  if (at.isFolder) {
-    await db.dropboxItem.deleteMany({ where: { tenant, path: { startsWith: `${path}/` } } })
+  exec(db, 'DELETE FROM DropboxItem WHERE tenant = ? AND path = ?', tenant, path)
+  if (folder) {
+    exec(db, 'DELETE FROM DropboxItem WHERE tenant = ? AND path LIKE ?', tenant, like(`${path}/`))
   }
   for (const gone of doomed) {
-    const seq = minter.next('item')
-    await db.dropboxTombstone.upsert({
-      where: { tenant_path: { tenant, path: gone } },
-      update: { seq },
-      create: { tenant, path: gone, seq },
-    })
+    exec(
+      db,
+      'INSERT INTO DropboxTombstone (tenant, path, seq) VALUES (?, ?, ?) ' +
+        'ON CONFLICT (tenant, path) DO UPDATE SET seq = excluded.seq',
+      tenant,
+      gone,
+      minter.next('item'),
+    )
   }
   return true
 }
@@ -170,13 +236,18 @@ function inScope(itemPath: string, root: string, recursive: boolean): boolean {
   return dirname(itemPath) === root
 }
 
-export async function maxItemSeq(db: C, tenant: string): Promise<number> {
-  const item = await db.dropboxItem.aggregate({ where: where(tenant), _max: { seq: true } })
-  const tomb = await db.dropboxTombstone.aggregate({
-    where: where(tenant),
-    _max: { seq: true },
-  })
-  return Math.max(item._max.seq ?? 0, tomb._max.seq ?? 0)
+export async function maxItemSeq(db: Db, tenant: string): Promise<number> {
+  const item = one<{ n: number | null }>(
+    db,
+    'SELECT MAX(seq) AS n FROM DropboxItem WHERE tenant = ?',
+    tenant,
+  )
+  const tomb = one<{ n: number | null }>(
+    db,
+    'SELECT MAX(seq) AS n FROM DropboxTombstone WHERE tenant = ?',
+    tenant,
+  )
+  return Math.max(item?.n ?? 0, tomb?.n ?? 0)
 }
 
 export type Change = { kind: 'item'; item: Item } | { kind: 'deleted'; path: string }
@@ -187,14 +258,19 @@ export type Change = { kind: 'item'; item: Item } | { kind: 'deleted'; path: str
 // disagreeing with list_folder about a file that is there. The vendor reports
 // changes in the order they happened; so does this.
 export async function changesSince(
-  db: C,
+  db: Db,
   tenant: string,
   path: string,
   recursive: boolean,
   seq: number,
 ): Promise<Change[]> {
-  const rows = await db.dropboxItem.findMany({ where: { tenant, seq: { gt: seq } } })
-  const tombs = await db.dropboxTombstone.findMany({ where: { tenant, seq: { gt: seq } } })
+  const rows = all<Row>(db, `${ITEM} WHERE tenant = ? AND seq > ?`, tenant, seq)
+  const tombs = all<{ path: string; seq: number }>(
+    db,
+    'SELECT path, seq FROM DropboxTombstone WHERE tenant = ? AND seq > ?',
+    tenant,
+    seq,
+  )
   const stamped: { seq: number; change: Change }[] = [
     ...rows
       .filter((row) => inScope(row.path, path, recursive))
@@ -209,54 +285,46 @@ export async function changesSince(
 // Copies a file or a folder subtree. The caller has already refused a
 // conflicting destination, so this only has to place rows.
 export async function copyTree(
-  db: C,
+  db: Db,
   tenant: string,
   from: string,
   to: string,
   minter: Minter,
 ): Promise<boolean> {
-  const src = await db.dropboxItem.findUnique({ where: key(tenant, from) })
+  const src = rowAt(db, tenant, from)
   if (src === null) return false
   await addAncestors(db, tenant, to, minter)
-  await db.dropboxItem.create({
-    data: {
-      tenant,
-      path: to,
-      isFolder: src.isFolder,
-      content: src.content,
-      modified: src.modified,
-      seq: minter.next('item'),
-    },
-  })
+  insertItem(db, tenant, to, src.isFolder !== 0, src.content, src.modified, minter.next('item'))
   // Same rule as putFile and addFolder: a tombstone never names a live
   // path, so moving onto a name that was deleted earlier clears it.
-  await db.dropboxTombstone.deleteMany({ where: { tenant, path: to } })
-  if (!src.isFolder) return true
-  const under = await db.dropboxItem.findMany({
-    where: { tenant, path: { startsWith: `${from}/` } },
-    orderBy: { seq: 'asc' },
-  })
+  clearTombstone(db, tenant, to)
+  if (src.isFolder === 0) return true
+  const under = all<Row>(
+    db,
+    `${ITEM} WHERE tenant = ? AND path LIKE ? ORDER BY seq`,
+    tenant,
+    like(`${from}/`),
+  )
   for (const row of under) {
     const landed = `${to}${row.path.slice(from.length)}`
-    await db.dropboxItem.create({
-      data: {
-        tenant,
-        path: landed,
-        isFolder: row.isFolder,
-        content: row.content,
-        modified: row.modified,
-        seq: minter.next('item'),
-      },
-    })
-    await db.dropboxTombstone.deleteMany({ where: { tenant, path: landed } })
+    insertItem(
+      db,
+      tenant,
+      landed,
+      row.isFolder !== 0,
+      row.content,
+      row.modified,
+      minter.next('item'),
+    )
+    clearTombstone(db, tenant, landed)
   }
   return true
 }
 
 // Scope is a path the search is confined to; '' is the whole account. null
 // means the scope names nothing, which the caller reports as path/not_found.
-export async function scopedItems(db: C, tenant: string, scope: string): Promise<Item[] | null> {
-  const rows = await db.dropboxItem.findMany({ where: where(tenant), orderBy: { path: 'asc' } })
+export async function scopedItems(db: Db, tenant: string, scope: string): Promise<Item[] | null> {
+  const rows = all<Row>(db, `${ITEM} WHERE tenant = ? ORDER BY path`, tenant)
   if (scope === '') return rows.map(toItem)
   const lower = scope.toLowerCase()
   if (!rows.some((r) => r.path === scope)) return null
@@ -270,7 +338,7 @@ export async function scopedItems(db: C, tenant: string, scope: string): Promise
 }
 
 export async function saveCursor(
-  db: C,
+  db: Db,
   tenant: string,
   kind: string,
   payload: string,
@@ -278,22 +346,35 @@ export async function saveCursor(
 ): Promise<string> {
   const n = minter.next('cursor')
   const token = `${kind}-${String(n)}`
-  await db.dropboxCursor.create({ data: { tenant, token, kind, payload, seq: n } })
+  exec(
+    db,
+    'INSERT INTO DropboxCursor (tenant, token, kind, payload, seq) VALUES (?, ?, ?, ?, ?)',
+    tenant,
+    token,
+    kind,
+    payload,
+    n,
+  )
   return token
 }
 
 export async function takeCursor(
-  db: C,
+  db: Db,
   tenant: string,
   token: string,
   kind: string,
 ): Promise<string | null> {
-  const row = await db.dropboxCursor.findUnique({ where: { tenant_token: { tenant, token } } })
+  const row = one<{ kind: string; payload: string }>(
+    db,
+    'SELECT kind, payload FROM DropboxCursor WHERE tenant = ? AND token = ?',
+    tenant,
+    token,
+  )
   if (row === null || row.kind !== kind) return null
   // A list cursor is consumed; a search cursor is re-read on every page and
   // rewritten by the handler, so only the list side deletes here.
   if (kind === 'list') {
-    await db.dropboxCursor.delete({ where: { tenant_token: { tenant, token } } })
+    exec(db, 'DELETE FROM DropboxCursor WHERE tenant = ? AND token = ?', tenant, token)
   }
   return row.payload
 }

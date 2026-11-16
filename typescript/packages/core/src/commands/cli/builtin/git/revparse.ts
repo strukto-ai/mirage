@@ -32,7 +32,15 @@ import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
 import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { BRANCH_PREFIX, loadRefs, mapped, parseRefspec, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
-import { commitFacts, rawObject, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
+import {
+  commitFacts,
+  readCommit,
+  rawObject,
+  refOid,
+  repoArgs,
+  storedItems,
+  type Repo,
+} from './repo.ts'
 import { decoded, guarded, located, placeOf, placed, rooted } from './seen.ts'
 import type { AncestryStep, GitObject, RefUpstream, RevOp } from './types.ts'
 import { configValues } from './fs.ts'
@@ -126,8 +134,8 @@ function splitOperators(revision: string): [string, RevOp[]] {
 /** Load one commit's parents by object id, or report the revision as unknown. */
 async function parentsOf(repo: Repo, oid: string, revision: string): Promise<string[]> {
   try {
-    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-    return [...commit.parent]
+    const commit = await readCommit(repo, oid)
+    return commit.parent
   } catch (err) {
     if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
       throw new AmbiguousArgumentError(revision)
@@ -385,17 +393,6 @@ async function upstreamOf(repo: Repo, branch: string): Promise<RefUpstream> {
  *
  * @throws SelectorError the branch has no such destination
  */
-/** The commits a shallow repository holds without their parents. */
-export async function shallowCommits(repo: Repo): Promise<Set<string>> {
-  const data = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))
-  return new Set(
-    new TextDecoder()
-      .decode(data ?? new Uint8Array())
-      .trim()
-      .split(/\s+/),
-  )
-}
-
 /** The remote a branch pushes to, by the settings in git's order. */
 async function pushRemote(repo: Repo, branch: string): Promise<string> {
   const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
@@ -595,7 +592,7 @@ async function peeled(
   let { oid, type } = want === TAG ? found : await unwrapped(repo, found, revision)
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
-    oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
+    oid = (await readCommit(repo, oid)).tree
     rooted(repo, oid, revision)
     type = TREE
   }
@@ -624,7 +621,7 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   // `v1:a.txt` does.
   let holder = await unwrapped(repo, named, revision)
   if (holder.type === COMMIT) {
-    const tree = (await git.readCommit({ ...repoArgs(repo), oid: holder.oid })).commit.tree
+    const tree = (await readCommit(repo, holder.oid)).tree
     rooted(repo, tree)
     holder = { oid: tree, type: TREE }
   }
@@ -816,7 +813,6 @@ export async function mergeBases(
   other: CommitFacts,
   others: readonly CommitFacts[] = [],
 ): Promise<CommitFacts[]> {
-  const shallow = await shallowCommits(repo)
   const tips = [one, other, ...others]
   const known = new Map(tips.map((commit) => [commit.oid, commit]))
   const load = async (oid: string): Promise<CommitFacts> => {
@@ -827,8 +823,7 @@ export async function mergeBases(
     }
     return commit
   }
-  const parentsOf = async (oid: string): Promise<readonly string[]> =>
-    shallow.has(oid) ? [] : (await load(oid)).parents
+  const parentsOf = async (oid: string): Promise<readonly string[]> => (await load(oid)).parents
   // What `one` reaches, what the merged side reaches, and what lies beneath a
   // commit both reach.
   const fromOne = new Set([one.oid])
@@ -886,7 +881,7 @@ export async function mergeBases(
     if (oid === undefined) break
     const flags = reached.get(oid) ?? 0n
     if (origins.has(oid) && flags !== origins.get(oid)) redundant.add(oid)
-    if (flags === allOrigins || shallow.has(oid)) continue
+    if (flags === allOrigins) continue
     for (const parent of (await commitFacts(repo, oid)).parents) {
       const had = reached.get(parent) ?? 0n
       if ((had | flags) !== had) {

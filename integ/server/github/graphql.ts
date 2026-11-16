@@ -400,7 +400,7 @@ async function answer(ctx: Ctx<C>): Promise<Reply> {
     variableValues: body.variables as Record<string, unknown> | undefined,
     rootValue: {
       repository: async ({ owner, name }: { owner: string; name: string }) => {
-        const repo = await repoByName(ctx.db, ctx.tenant, `${owner}/${name}`)
+        const repo = await repoByName(ctx.sql, ctx.tenant, `${owner}/${name}`)
         if (repo === null) {
           throw new Error(`Could not resolve to a Repository with the name '${owner}/${name}'.`)
         }

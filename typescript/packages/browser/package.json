@@ -52,9 +52,9 @@
     "!dist/**/*.map"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/service-worker.mjs",
+    "build": "node scripts/clean.mjs && node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json && node scripts/service-worker.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",

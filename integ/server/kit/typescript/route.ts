@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import type { Clock } from './clock.ts'
 import type { Minter } from './mint.ts'
 import { RouteError } from './errors.ts'
@@ -23,6 +24,8 @@ import type { JsonValue, Reply, RouteMatch } from './types.ts'
 // fakes: the run's client, the clock, the minter, and the raw headers.
 export interface Ctx<C> extends RouteMatch {
   db: C
+  // The same run's file over node:sqlite, opened on first use (sql.ts).
+  sql: DatabaseSync
   clock: Clock
   minter: Minter
   headers: Headers

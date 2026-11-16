@@ -217,7 +217,7 @@ exactly one of `cli` or `script`, and always a `machine`:
 
 | Key | Purpose |
 | --- | --- |
-| `cli` | A registered CLI, such as `slack`. See [CLIs](/home/setup/clis) for the twelve bundled ones. |
+| `cli` | A registered CLI, such as `slack`. See [CLIs](/home/setup/clis) for the bundled ones. |
 | `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. See custom CLIs in [Python](/python/cli/custom) and [TypeScript](/typescript/cli/custom). |
 | `machine` | Required. The machine type it runs on: `in_process` for a `cli` entry; `in_process` or `host` for a `script`. The workspace needs a `machines` entry of that type that runs the script's language. |
 | `runtime` | The runtime that runs `script` on `in_process`, such as `monty` or `quickjs`. Unset uses the first one for the script's language. A `host` takes none. Only valid with `script`. |

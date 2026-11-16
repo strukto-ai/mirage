@@ -12,39 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Prisma } from '../../generated/trello/index.js'
-import { plainWords, route, tenantWhere } from '../kit/typescript/index.ts'
+import type { SQLInputValue } from 'node:sqlite'
+import { exec, plainWords, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
-import { WRITE_STAMP, config } from './config.ts'
+import { WRITE_STAMP } from './config.ts'
 import type { C } from './config.ts'
 import {
+  allCards,
+  boardById,
   boardJson,
-  boardWhere,
+  boardMemberIds,
+  boardsIn,
+  cardById,
   cardLabelIds,
   cardMemberIds,
   cardView,
-  cardWhere,
+  cardsIn,
+  changeOne,
   commentActions,
-  commentWhere,
-  listWhere,
-  memberWhere,
+  commentIn,
+  labelsIn,
+  listById,
+  listsIn,
+  memberById,
   nextSeq,
   notFound,
   parseIds,
-  workspaceWhere,
+  workspaceById,
+  workspacesOf,
 } from './views.ts'
 
-const KIND = config.tenantKind
-
-function tenantOf<W>(ctx: Ctx<C>): W {
-  return tenantWhere<W>(ctx.tenant, KIND)
-}
-
 async function listWorkspaces(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await ctx.db.trelloWorkspace.findMany({
-    where: tenantOf<Prisma.TrelloWorkspaceWhereInput>(ctx),
-    orderBy: { seq: 'asc' },
-  })
+  const rows = workspacesOf(ctx.sql, ctx.tenant)
   return {
     status: 200,
     body: rows.map((w) => ({ id: w.id, displayName: w.displayName, name: w.name })),
@@ -53,32 +52,22 @@ async function listWorkspaces(ctx: Ctx<C>): Promise<Reply> {
 
 async function workspaceBoards(ctx: Ctx<C>): Promise<Reply> {
   const workspaceId = ctx.params.workspace ?? ''
-  const ws = await ctx.db.trelloWorkspace.findUnique({
-    where: workspaceWhere(ctx.tenant, workspaceId),
-  })
+  const ws = workspaceById(ctx.sql, ctx.tenant, workspaceId)
   if (ws === null) return notFound('organization')
-  const rows = await ctx.db.trelloBoard.findMany({
-    where: { ...tenantOf<Prisma.TrelloBoardWhereInput>(ctx), workspaceId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = boardsIn(ctx.sql, ctx.tenant, workspaceId)
   return { status: 200, body: rows.map(boardJson) }
 }
 
 async function getBoard(ctx: Ctx<C>): Promise<Reply> {
-  const board = await ctx.db.trelloBoard.findUnique({
-    where: boardWhere(ctx.tenant, ctx.params.board ?? ''),
-  })
+  const board = boardById(ctx.sql, ctx.tenant, ctx.params.board ?? '')
   return board === null ? notFound('board') : { status: 200, body: boardJson(board) }
 }
 
 async function boardLists(ctx: Ctx<C>): Promise<Reply> {
   const boardId = ctx.params.board ?? ''
-  const board = await ctx.db.trelloBoard.findUnique({ where: boardWhere(ctx.tenant, boardId) })
+  const board = boardById(ctx.sql, ctx.tenant, boardId)
   if (board === null) return notFound('board')
-  const rows = await ctx.db.trelloList.findMany({
-    where: { ...tenantOf<Prisma.TrelloListWhereInput>(ctx), boardId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = listsIn(ctx.sql, ctx.tenant, boardId)
   return {
     status: 200,
     body: rows.map((l) => ({
@@ -92,9 +81,7 @@ async function boardLists(ctx: Ctx<C>): Promise<Reply> {
 }
 
 async function getList(ctx: Ctx<C>): Promise<Reply> {
-  const list = await ctx.db.trelloList.findUnique({
-    where: listWhere(ctx.tenant, ctx.params.list ?? ''),
-  })
+  const list = listById(ctx.sql, ctx.tenant, ctx.params.list ?? '')
   return list === null
     ? notFound('list')
     : {
@@ -111,15 +98,11 @@ async function getList(ctx: Ctx<C>): Promise<Reply> {
 
 async function boardMembers(ctx: Ctx<C>): Promise<Reply> {
   const boardId = ctx.params.board ?? ''
-  const board = await ctx.db.trelloBoard.findUnique({ where: boardWhere(ctx.tenant, boardId) })
+  const board = boardById(ctx.sql, ctx.tenant, boardId)
   if (board === null) return notFound('board')
-  const links = await ctx.db.trelloBoardMember.findMany({
-    where: { ...tenantOf<Prisma.TrelloBoardMemberWhereInput>(ctx), boardId },
-    orderBy: { seq: 'asc' },
-  })
   const rows: JsonValue[] = []
-  for (const link of links) {
-    const member = await ctx.db.trelloMember.findUnique({ where: memberWhere(ctx.tenant, link.id) })
+  for (const id of boardMemberIds(ctx.sql, ctx.tenant, boardId)) {
+    const member = memberById(ctx.sql, ctx.tenant, id)
     if (member !== null) {
       rows.push({ id: member.id, username: member.username, fullName: member.fullName })
     }
@@ -129,12 +112,9 @@ async function boardMembers(ctx: Ctx<C>): Promise<Reply> {
 
 async function boardLabels(ctx: Ctx<C>): Promise<Reply> {
   const boardId = ctx.params.board ?? ''
-  const board = await ctx.db.trelloBoard.findUnique({ where: boardWhere(ctx.tenant, boardId) })
+  const board = boardById(ctx.sql, ctx.tenant, boardId)
   if (board === null) return notFound('board')
-  const rows = await ctx.db.trelloLabel.findMany({
-    where: { ...tenantOf<Prisma.TrelloLabelWhereInput>(ctx), boardId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = labelsIn(ctx.sql, ctx.tenant, boardId)
   return {
     status: 200,
     body: rows.map((l) => ({ id: l.id, name: l.name, color: l.color, idBoard: l.boardId })),
@@ -143,27 +123,24 @@ async function boardLabels(ctx: Ctx<C>): Promise<Reply> {
 
 async function listCards(ctx: Ctx<C>): Promise<Reply> {
   const listId = ctx.params.list ?? ''
-  const list = await ctx.db.trelloList.findUnique({ where: listWhere(ctx.tenant, listId) })
+  const list = listById(ctx.sql, ctx.tenant, listId)
   if (list === null) return notFound('list')
-  const rows = await ctx.db.trelloCard.findMany({
-    where: { ...tenantOf<Prisma.TrelloCardWhereInput>(ctx), listId },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = cardsIn(ctx.sql, ctx.tenant, listId)
   const views: JsonValue[] = []
-  for (const row of rows) views.push(await cardView(ctx.db, ctx.tenant, row.id))
+  for (const row of rows) views.push(await cardView(ctx.sql, ctx.tenant, row.id))
   return { status: 200, body: views }
 }
 
 async function getCard(ctx: Ctx<C>): Promise<Reply> {
-  const view = await cardView(ctx.db, ctx.tenant, ctx.params.card ?? '')
+  const view = await cardView(ctx.sql, ctx.tenant, ctx.params.card ?? '')
   return view === null ? notFound('card') : { status: 200, body: view }
 }
 
 async function cardActions(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const card = await ctx.db.trelloCard.findUnique({ where: cardWhere(ctx.tenant, cardId) })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
-  return { status: 200, body: await commentActions(ctx.db, ctx.tenant, cardId) }
+  return { status: 200, body: await commentActions(ctx.sql, ctx.tenant, cardId) }
 }
 
 // Trello's search, cards only: the cards whose name or description holds
@@ -175,10 +152,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
     .split(/\s+/)
     .filter((word) => word !== '')
   const limit = Number(ctx.query.get('cards_limit') ?? '10')
-  const rows = await ctx.db.trelloCard.findMany({
-    where: tenantOf<Prisma.TrelloCardWhereInput>(ctx),
-    orderBy: { seq: 'asc' },
-  })
+  const rows = allCards(ctx.sql, ctx.tenant)
   const cards: JsonValue[] = []
   for (const row of rows) {
     if (cards.length >= limit) break
@@ -193,131 +167,157 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
 async function createCard(ctx: Ctx<C>): Promise<Reply> {
   const listId = ctx.query.get('idList')
   if (listId === null || listId === '') return notFound('list')
-  const list = await ctx.db.trelloList.findUnique({ where: listWhere(ctx.tenant, listId) })
+  const list = listById(ctx.sql, ctx.tenant, listId)
   if (list === null) return notFound('list')
   const cardId = ctx.minter.mint('crd')
-  const seq = await nextSeq(
-    ctx.db.trelloCard.findMany({
-      where: { ...tenantOf<Prisma.TrelloCardWhereInput>(ctx), listId },
-      select: { seq: true },
-    }),
+  const seq = nextSeq(ctx.sql, 'TrelloCard', 'tenant = ? AND listId = ?', ctx.tenant, listId)
+  exec(
+    ctx.sql,
+    'INSERT INTO TrelloCard (tenant, id, listId, name, "desc", due, dueComplete, closed, ' +
+      'dateLastActivity, seq) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, ?, ?)',
+    ctx.tenant,
+    cardId,
+    listId,
+    ctx.query.get('name') ?? '',
+    ctx.query.get('desc') ?? '',
+    WRITE_STAMP,
+    seq,
   )
-  await ctx.db.trelloCard.create({
-    data: {
-      tenant: ctx.tenant,
-      id: cardId,
-      listId,
-      name: ctx.query.get('name') ?? '',
-      desc: ctx.query.get('desc') ?? '',
-      due: null,
-      dueComplete: false,
-      closed: false,
-      dateLastActivity: WRITE_STAMP,
-      seq,
-    },
-  })
-  return { status: 200, body: await cardView(ctx.db, ctx.tenant, cardId) }
+  return { status: 200, body: await cardView(ctx.sql, ctx.tenant, cardId) }
 }
 
 async function updateCard(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const where = cardWhere(ctx.tenant, cardId)
-  const card = await ctx.db.trelloCard.findUnique({ where })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
   const q = ctx.query
-  const data: Prisma.TrelloCardUncheckedUpdateInput = { dateLastActivity: WRITE_STAMP }
+  const sets = ['dateLastActivity = ?']
+  const values: SQLInputValue[] = [WRITE_STAMP]
   const name = q.get('name')
-  if (name !== null) data.name = name
+  if (name !== null) {
+    sets.push('name = ?')
+    values.push(name)
+  }
   const desc = q.get('desc')
-  if (desc !== null) data.desc = desc
+  if (desc !== null) {
+    sets.push('"desc" = ?')
+    values.push(desc)
+  }
   const closed = q.get('closed')
-  if (closed !== null) data.closed = closed === 'true'
+  if (closed !== null) {
+    sets.push('closed = ?')
+    values.push(closed === 'true' ? 1 : 0)
+  }
   const due = q.get('due')
-  if (due !== null) data.due = due
+  if (due !== null) {
+    sets.push('due = ?')
+    values.push(due)
+  }
   const dueComplete = q.get('dueComplete')
-  if (dueComplete !== null) data.dueComplete = dueComplete === 'true'
+  if (dueComplete !== null) {
+    sets.push('dueComplete = ?')
+    values.push(dueComplete === 'true' ? 1 : 0)
+  }
   const newListId = q.get('idList')
   if (newListId !== null) {
-    const list = await ctx.db.trelloList.findUnique({ where: listWhere(ctx.tenant, newListId) })
+    const list = listById(ctx.sql, ctx.tenant, newListId)
     if (list === null) return notFound('list')
-    data.listId = newListId
-    data.seq = await nextSeq(
-      ctx.db.trelloCard.findMany({
-        where: { ...tenantOf<Prisma.TrelloCardWhereInput>(ctx), listId: newListId },
-        select: { seq: true },
-      }),
+    sets.push('listId = ?', 'seq = ?')
+    values.push(
+      newListId,
+      nextSeq(ctx.sql, 'TrelloCard', 'tenant = ? AND listId = ?', ctx.tenant, newListId),
     )
   }
-  await ctx.db.trelloCard.update({ where, data })
-  return { status: 200, body: await cardView(ctx.db, ctx.tenant, cardId) }
+  if (
+    exec(
+      ctx.sql,
+      `UPDATE TrelloCard SET ${sets.join(', ')} WHERE tenant = ? AND id = ?`,
+      ...values,
+      ctx.tenant,
+      cardId,
+    ) === 0
+  ) {
+    throw new Error('trello fake: no row matched')
+  }
+  return { status: 200, body: await cardView(ctx.sql, ctx.tenant, cardId) }
 }
 
 async function addMember(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const where = cardWhere(ctx.tenant, cardId)
-  const card = await ctx.db.trelloCard.findUnique({ where })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
   const memberId = ctx.query.get('value')
   if (memberId !== null && memberId !== '') {
     const ids = parseIds(card.idMembers)
     if (!ids.includes(memberId)) {
       ids.push(memberId)
-      await ctx.db.trelloCard.update({ where, data: { idMembers: JSON.stringify(ids) } })
+      changeOne(
+        ctx.sql,
+        'UPDATE TrelloCard SET idMembers = ? WHERE tenant = ? AND id = ?',
+        JSON.stringify(ids),
+        ctx.tenant,
+        cardId,
+      )
     }
   }
-  return { status: 200, body: await cardMemberIds(ctx.db, ctx.tenant, cardId) }
+  return { status: 200, body: await cardMemberIds(ctx.sql, ctx.tenant, cardId) }
 }
 
 async function addLabel(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const where = cardWhere(ctx.tenant, cardId)
-  const card = await ctx.db.trelloCard.findUnique({ where })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
   const labelId = ctx.query.get('value')
   if (labelId !== null && labelId !== '') {
     const ids = parseIds(card.labelIds)
     if (!ids.includes(labelId)) {
       ids.push(labelId)
-      await ctx.db.trelloCard.update({ where, data: { labelIds: JSON.stringify(ids) } })
+      changeOne(
+        ctx.sql,
+        'UPDATE TrelloCard SET labelIds = ? WHERE tenant = ? AND id = ?',
+        JSON.stringify(ids),
+        ctx.tenant,
+        cardId,
+      )
     }
   }
-  return { status: 200, body: await cardLabelIds(ctx.db, ctx.tenant, cardId) }
+  return { status: 200, body: await cardLabelIds(ctx.sql, ctx.tenant, cardId) }
 }
 
 async function removeLabel(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const where = cardWhere(ctx.tenant, cardId)
-  const card = await ctx.db.trelloCard.findUnique({ where })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
   const labelId = ctx.params.label ?? ''
   const kept = parseIds(card.labelIds).filter((id) => id !== labelId)
-  await ctx.db.trelloCard.update({ where, data: { labelIds: JSON.stringify(kept) } })
+  changeOne(
+    ctx.sql,
+    'UPDATE TrelloCard SET labelIds = ? WHERE tenant = ? AND id = ?',
+    JSON.stringify(kept),
+    ctx.tenant,
+    cardId,
+  )
   return { status: 200, body: kept }
 }
 
 async function addComment(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
-  const card = await ctx.db.trelloCard.findUnique({ where: cardWhere(ctx.tenant, cardId) })
+  const card = cardById(ctx.sql, ctx.tenant, cardId)
   if (card === null) return notFound('card')
   const commentId = ctx.minter.mint('cmt')
   const text = ctx.query.get('text') ?? ''
-  const seq = await nextSeq(
-    ctx.db.trelloComment.findMany({
-      where: { ...tenantOf<Prisma.TrelloCommentWhereInput>(ctx), cardId },
-      select: { seq: true },
-    }),
+  const seq = nextSeq(ctx.sql, 'TrelloComment', 'tenant = ? AND cardId = ?', ctx.tenant, cardId)
+  exec(
+    ctx.sql,
+    'INSERT INTO TrelloComment (tenant, id, cardId, memberId, text, date, seq) ' +
+      'VALUES (?, ?, ?, NULL, ?, ?, ?)',
+    ctx.tenant,
+    commentId,
+    cardId,
+    text,
+    WRITE_STAMP,
+    seq,
   )
-  await ctx.db.trelloComment.create({
-    data: {
-      tenant: ctx.tenant,
-      id: commentId,
-      cardId,
-      memberId: null,
-      text,
-      date: WRITE_STAMP,
-      seq,
-    },
-  })
   return {
     status: 200,
     body: {
@@ -332,12 +332,16 @@ async function addComment(ctx: Ctx<C>): Promise<Reply> {
 async function updateComment(ctx: Ctx<C>): Promise<Reply> {
   const cardId = ctx.params.card ?? ''
   const commentId = ctx.params.comment ?? ''
-  const comment = await ctx.db.trelloComment.findFirst({
-    where: { ...tenantOf<Prisma.TrelloCommentWhereInput>(ctx), id: commentId, cardId },
-  })
+  const comment = commentIn(ctx.sql, ctx.tenant, cardId, commentId)
   if (comment === null) return notFound('comment')
   const text = ctx.query.get('text') ?? ''
-  await ctx.db.trelloComment.update({ where: commentWhere(ctx.tenant, commentId), data: { text } })
+  changeOne(
+    ctx.sql,
+    'UPDATE TrelloComment SET text = ? WHERE tenant = ? AND id = ?',
+    text,
+    ctx.tenant,
+    commentId,
+  )
   return {
     status: 200,
     body: { id: commentId, type: 'commentCard', data: { text, card: { id: cardId } } },

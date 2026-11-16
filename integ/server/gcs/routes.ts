@@ -17,13 +17,19 @@ import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts
 import { DEFAULT_CONTENT_TYPE, DEFAULT_PROJECT, type C } from './config.ts'
 import { boundaryOf, parseRelated } from './multipart.ts'
 import {
+  addBucket,
   bucketIsEmpty,
   bucketOf,
   bucketsOf,
   deleteBucket,
+  deleteObject,
+  dropUpload,
+  growUpload,
   objectOf,
   objectsOf,
+  openUpload,
   putObject,
+  uploadOf,
 } from './store.ts'
 import {
   bucketBody,
@@ -66,7 +72,7 @@ function str(v: JsonValue | undefined, fallback = ''): string {
 // disagree about the project name answer an EMPTY listing rather than an error,
 // and the seeder and the CLI take theirs from two different files.
 async function listBuckets(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await bucketsOf(ctx.db, ctx.tenant, ctx.query.get('prefix') ?? '')
+  const rows = await bucketsOf(ctx.sql, ctx.tenant, ctx.query.get('prefix') ?? '')
   return {
     status: 200,
     body: { kind: 'storage#buckets', items: rows.map((row) => bucketBody(row, base(ctx))) },
@@ -77,23 +83,20 @@ async function createBucket(ctx: Ctx<C>): Promise<Reply> {
   const body = obj(ctx.json())
   const name = str(body.name, ctx.query.get('name') ?? '')
   if (name === '') return errorReply(400, 'Required parameter: name', 'required')
-  if ((await bucketOf(ctx.db, ctx.tenant, name)) !== null) return bucketConflict(name)
+  if ((await bucketOf(ctx.sql, ctx.tenant, name)) !== null) return bucketConflict(name)
   const now = ctx.clock.nowIso()
-  const row = await ctx.db.gcsBucket.create({
-    data: {
-      tenant: ctx.tenant,
-      name,
-      project: ctx.query.get('project') ?? DEFAULT_PROJECT,
-      timeCreated: now,
-      updated: now,
-      seq: await ctx.db.gcsBucket.count({ where: { tenant: ctx.tenant } }),
-    },
-  })
+  const row = await addBucket(
+    ctx.sql,
+    ctx.tenant,
+    name,
+    ctx.query.get('project') ?? DEFAULT_PROJECT,
+    now,
+  )
   return { status: 200, body: bucketBody(row, base(ctx)) }
 }
 
 async function getBucket(ctx: Ctx<C>): Promise<Reply> {
-  const row = await bucketOf(ctx.db, ctx.tenant, ctx.params.bucket ?? '')
+  const row = await bucketOf(ctx.sql, ctx.tenant, ctx.params.bucket ?? '')
   if (row === null) return notFound()
   return { status: 200, body: bucketBody(row, base(ctx)) }
 }
@@ -105,11 +108,11 @@ async function getBucket(ctx: Ctx<C>): Promise<Reply> {
 // deletes the bucket).
 async function removeBucket(ctx: Ctx<C>): Promise<Reply> {
   const name = ctx.params.bucket ?? ''
-  if ((await bucketOf(ctx.db, ctx.tenant, name)) === null) return notFound()
-  if (!(await bucketIsEmpty(ctx.db, ctx.tenant, name))) {
+  if ((await bucketOf(ctx.sql, ctx.tenant, name)) === null) return notFound()
+  if (!(await bucketIsEmpty(ctx.sql, ctx.tenant, name))) {
     return errorReply(412, 'bucket must be empty prior to deletion', 'conditionNotMet')
   }
-  await deleteBucket(ctx.db, ctx.tenant, name)
+  await deleteBucket(ctx.sql, ctx.tenant, name)
   return { status: 204 }
 }
 
@@ -117,8 +120,8 @@ async function removeBucket(ctx: Ctx<C>): Promise<Reply> {
 
 async function listObjects(ctx: Ctx<C>): Promise<Reply> {
   const bucket = ctx.params.bucket ?? ''
-  if ((await bucketOf(ctx.db, ctx.tenant, bucket)) === null) return notFound()
-  const rows = await objectsOf(ctx.db, ctx.tenant, bucket, ctx.query.get('prefix') ?? '')
+  if ((await bucketOf(ctx.sql, ctx.tenant, bucket)) === null) return notFound()
+  const rows = await objectsOf(ctx.sql, ctx.tenant, bucket, ctx.query.get('prefix') ?? '')
   return {
     status: 200,
     body: { kind: 'storage#objects', items: rows.map((row) => objectBody(row, base(ctx))) },
@@ -131,7 +134,7 @@ async function listObjects(ctx: Ctx<C>): Promise<Reply> {
 // mediaLink resolves to), and no `alt` at all, which is the metadata.
 async function getObject(ctx: Ctx<C>): Promise<Reply> {
   const media = ctx.query.get('alt') === 'media' || ctx.url.pathname.startsWith('/download/')
-  const row = await objectOf(ctx.db, ctx.tenant, ctx.params.bucket ?? '', ctx.params.name ?? '')
+  const row = await objectOf(ctx.sql, ctx.tenant, ctx.params.bucket ?? '', ctx.params.name ?? '')
   if (row === null) return media ? mediaNotFound() : notFound()
   if (!media) return { status: 200, body: objectBody(row, base(ctx)) }
   return rangeReply(ctx.headers, row.content, row.contentType)
@@ -140,10 +143,8 @@ async function getObject(ctx: Ctx<C>): Promise<Reply> {
 async function removeObject(ctx: Ctx<C>): Promise<Reply> {
   const bucket = ctx.params.bucket ?? ''
   const name = ctx.params.name ?? ''
-  if ((await objectOf(ctx.db, ctx.tenant, bucket, name)) === null) return notFound()
-  await ctx.db.gcsObject.delete({
-    where: { tenant_bucket_name: { tenant: ctx.tenant, bucket, name } },
-  })
+  if ((await objectOf(ctx.sql, ctx.tenant, bucket, name)) === null) return notFound()
+  await deleteObject(ctx.sql, ctx.tenant, bucket, name)
   return { status: 204 }
 }
 
@@ -160,7 +161,7 @@ async function stored(ctx: Ctx<C>, row: ObjectRow): Promise<Reply> {
 //   resumable  the python client's chunked writer, which the seeder uses
 async function upload(ctx: Ctx<C>): Promise<Reply> {
   const bucket = ctx.params.bucket ?? ''
-  if ((await bucketOf(ctx.db, ctx.tenant, bucket)) === null) return notFound()
+  if ((await bucketOf(ctx.sql, ctx.tenant, bucket)) === null) return notFound()
   const kind = ctx.query.get('uploadType') ?? 'media'
   if (kind === 'resumable') return openResumable(ctx, bucket)
   if (kind === 'multipart') return uploadMultipart(ctx, bucket)
@@ -168,7 +169,7 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
   if (name === '') return errorReply(400, 'Required parameter: name', 'required')
   const type = header(ctx, 'content-type')
   const row = await putObject(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     bucket,
     name,
@@ -192,7 +193,7 @@ async function uploadMultipart(ctx: Ctx<C>, bucket: string): Promise<Reply> {
   }
   const declared = str(meta.contentType, media.contentType)
   const row = await putObject(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     bucket,
     name,
@@ -214,17 +215,14 @@ async function openResumable(ctx: Ctx<C>, bucket: string): Promise<Reply> {
   if (name === '') return errorReply(400, 'Required parameter: name', 'required')
   const declared = header(ctx, 'x-upload-content-type') || str(meta.contentType)
   const id = String(ctx.minter.next('upload')).padStart(32, '0')
-  await ctx.db.gcsUpload.create({
-    data: {
-      tenant: ctx.tenant,
-      id,
-      bucket,
-      name,
-      contentType: declared === '' ? DEFAULT_CONTENT_TYPE : declared,
-      content: Buffer.alloc(0),
-      seq: await ctx.db.gcsUpload.count({ where: { tenant: ctx.tenant } }),
-    },
-  })
+  await openUpload(
+    ctx.sql,
+    ctx.tenant,
+    id,
+    bucket,
+    name,
+    declared === '' ? DEFAULT_CONTENT_TYPE : declared,
+  )
   const query = new URLSearchParams({ uploadType: 'resumable', name, upload_id: id })
   return {
     status: 200,
@@ -255,9 +253,7 @@ const CONTENT_RANGE_RE = /^bytes (\d+)-(\d+)\/(\d+|\*)$/
 // upload of the whole body, which is what a small `blob.upload_from_file` sends.
 async function resumableChunk(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.query.get('upload_id') ?? ''
-  const session = await ctx.db.gcsUpload.findUnique({
-    where: { tenant_id: { tenant: ctx.tenant, id } },
-  })
+  const session = await uploadOf(ctx.sql, ctx.tenant, id)
   if (session === null) return notFound()
   const held = Buffer.from(session.content)
   // A client that lost a response asks where the upload stands with an empty
@@ -299,19 +295,16 @@ async function resumableChunk(ctx: Ctx<C>): Promise<Reply> {
     merged = Buffer.concat([held, ctx.body.subarray(held.length - start)])
   }
   if (more) {
-    await ctx.db.gcsUpload.update({
-      where: { tenant_id: { tenant: ctx.tenant, id } },
-      data: { content: merged },
-    })
+    await growUpload(ctx.sql, ctx.tenant, id, merged)
     return {
       status: 308,
       headers: { Range: `bytes=0-${String(merged.length - 1)}` },
       body: Buffer.alloc(0),
     }
   }
-  await ctx.db.gcsUpload.delete({ where: { tenant_id: { tenant: ctx.tenant, id } } })
+  await dropUpload(ctx.sql, ctx.tenant, id)
   const row = await putObject(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     session.bucket,
     session.name,

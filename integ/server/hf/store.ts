@@ -12,30 +12,59 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
+import { BYTES, all, bytes, exec, one } from '../kit/typescript/index.ts'
 import type { Minter } from '../kit/typescript/index.ts'
-import { CAS_TENANT, type C } from './config.ts'
-import type { HfObject } from './wire.ts'
+import { CAS_TENANT } from './config.ts'
+import type { HfObject, TreeRow } from './wire.ts'
 import { decodeXorb, parseShardFiles, serveHash } from './xet.ts'
 
-function objectKey(
-  tenant: string,
-  bucket: string,
-  path: string,
-): { tenant_bucket_path: { tenant: string; bucket: string; path: string } } {
-  return { tenant_bucket_path: { tenant, bucket, path } }
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/hf.prisma declares.
+type Db = DatabaseSync
+
+const OBJECT = 'SELECT tenant, bucket, path, content, etag, modified, seq FROM HfObject'
+
+// The bucket's objects without their bytes: a listing used to read every
+// object's content to render the few files directly under one folder.
+export async function objectRows(db: Db, tenant: string, bucket: string): Promise<TreeRow[]> {
+  return all<TreeRow>(
+    db,
+    'SELECT path, modified FROM HfObject WHERE tenant = ? AND bucket = ? ORDER BY path',
+    tenant,
+    bucket,
+  )
 }
 
-export async function objects(db: C, tenant: string, bucket: string): Promise<HfObject[]> {
-  return db.hfObject.findMany({ where: { tenant, bucket }, orderBy: { path: 'asc' } })
+export async function objectsAt(
+  db: Db,
+  tenant: string,
+  bucket: string,
+  paths: string[],
+): Promise<HfObject[]> {
+  if (paths.length === 0) return []
+  return all<HfObject>(
+    db,
+    `${OBJECT} WHERE tenant = ? AND bucket = ? AND path IN (SELECT value FROM json_each(?))`,
+    tenant,
+    bucket,
+    JSON.stringify(paths),
+  )
 }
 
 export async function objectAt(
-  db: C,
+  db: Db,
   tenant: string,
   bucket: string,
   path: string,
 ): Promise<HfObject | null> {
-  return db.hfObject.findUnique({ where: objectKey(tenant, bucket, path) })
+  return one<HfObject>(
+    db,
+    `${OBJECT} WHERE tenant = ? AND bucket = ? AND path = ?`,
+    tenant,
+    bucket,
+    path,
+  )
 }
 
 /**
@@ -46,7 +75,7 @@ export async function objectAt(
  * addresses the same bytes and is what named them here.
  *
  * Args:
- *   db (C): the run's client.
+ *   db (Db): the run's file.
  *   tenant (string): the account.
  *   bucket (string): the vendor's `namespace/name`.
  *   path (string): the key being written.
@@ -55,7 +84,7 @@ export async function objectAt(
  *   minter (Minter): source of the etag and the row's sequence.
  */
 export async function writeObject(
-  db: C,
+  db: Db,
   tenant: string,
   bucket: string,
   path: string,
@@ -64,62 +93,88 @@ export async function writeObject(
   minter: Minter,
 ): Promise<void> {
   const n = minter.next('object')
-  const row = {
-    content: content as Uint8Array<ArrayBuffer>,
-    etag: `hf-etag-${String(n)}`,
+  exec(
+    db,
+    'INSERT INTO HfObject (tenant, bucket, path, content, etag, modified, seq) ' +
+      `VALUES (?, ?, ?, ${BYTES}, ?, ?, ?) ON CONFLICT (tenant, bucket, path) DO UPDATE SET ` +
+      'content = excluded.content, etag = excluded.etag, modified = excluded.modified, ' +
+      'seq = excluded.seq',
+    tenant,
+    bucket,
+    path,
+    ...bytes(content),
+    `hf-etag-${String(n)}`,
     modified,
-    seq: n,
-  }
-  await db.hfObject.upsert({
-    where: objectKey(tenant, bucket, path),
-    create: { tenant, bucket, path, ...row },
-    update: row,
-  })
+    n,
+  )
   await putXetFile(db, serveHash(content), content)
 }
 
 export async function deleteObject(
-  db: C,
+  db: Db,
   tenant: string,
   bucket: string,
   path: string,
 ): Promise<void> {
-  await db.hfObject.deleteMany({ where: { tenant, bucket, path } })
+  exec(
+    db,
+    'DELETE FROM HfObject WHERE tenant = ? AND bucket = ? AND path = ?',
+    tenant,
+    bucket,
+    path,
+  )
 }
 
+// `startsWith` as Prisma ran it on SQLite: LIKE with the prefix unescaped, so
+// ASCII case is ignored and `%` or `_` match as wildcards. Kept exactly.
 export async function deleteFolder(
-  db: C,
+  db: Db,
   tenant: string,
   bucket: string,
   path: string,
 ): Promise<void> {
-  await db.hfObject.deleteMany({ where: { tenant, bucket, path: { startsWith: `${path}/` } } })
+  exec(
+    db,
+    'DELETE FROM HfObject WHERE tenant = ? AND bucket = ? AND path LIKE ?',
+    tenant,
+    bucket,
+    `${path}/%`,
+  )
 }
 
-export async function putXetFile(db: C, hash: string, raw: Uint8Array): Promise<void> {
-  const content = raw as Uint8Array<ArrayBuffer>
-  await db.hfXetFile.upsert({
-    where: { tenant_hash: { tenant: CAS_TENANT, hash } },
-    create: { tenant: CAS_TENANT, hash, content },
-    update: { content },
-  })
+export async function putXetFile(db: Db, hash: string, content: Uint8Array): Promise<void> {
+  exec(
+    db,
+    `INSERT INTO HfXetFile (tenant, hash, content) VALUES (?, ?, ${BYTES}) ` +
+      'ON CONFLICT (tenant, hash) DO UPDATE SET content = excluded.content',
+    CAS_TENANT,
+    hash,
+    ...bytes(content),
+  )
 }
 
-export async function xetFile(db: C, hash: string): Promise<Uint8Array | null> {
-  const row = await db.hfXetFile.findUnique({
-    where: { tenant_hash: { tenant: CAS_TENANT, hash } },
-  })
+export async function xetFile(db: Db, hash: string): Promise<Uint8Array | null> {
+  const row = one<{ content: Uint8Array }>(
+    db,
+    'SELECT content FROM HfXetFile WHERE tenant = ? AND hash = ?',
+    CAS_TENANT,
+    hash,
+  )
   return row === null ? null : row.content
 }
 
-export async function putXorb(db: C, hash: string, body: Buffer): Promise<void> {
+export async function putXorb(db: Db, hash: string, body: Buffer): Promise<void> {
   const { content, offsets } = decodeXorb(body)
-  const row = { content: content as Uint8Array<ArrayBuffer>, offsets: JSON.stringify(offsets) }
-  await db.hfXorb.upsert({
-    where: { tenant_hash: { tenant: CAS_TENANT, hash } },
-    create: { tenant: CAS_TENANT, hash, ...row },
-    update: row,
-  })
+  exec(
+    db,
+    `INSERT INTO HfXorb (tenant, hash, content, offsets) VALUES (?, ?, ${BYTES}, ?) ` +
+      'ON CONFLICT (tenant, hash) DO UPDATE SET content = excluded.content, ' +
+      'offsets = excluded.offsets',
+    CAS_TENANT,
+    hash,
+    ...bytes(content),
+    JSON.stringify(offsets),
+  )
 }
 
 /**
@@ -131,16 +186,19 @@ export async function putXorb(db: C, hash: string, body: Buffer): Promise<void> 
  * this is where a file first exists as bytes.
  *
  * Args:
- *   db (C): the run's client.
+ *   db (Db): the run's file.
  *   body (Buffer): the uploaded shard.
  */
-export async function registerShard(db: C, body: Buffer): Promise<void> {
+export async function registerShard(db: Db, body: Buffer): Promise<void> {
   for (const file of parseShardFiles(body)) {
     const parts: Buffer[] = []
     for (const entry of file.entries) {
-      const row = await db.hfXorb.findUnique({
-        where: { tenant_hash: { tenant: CAS_TENANT, hash: entry.casHash } },
-      })
+      const row = one<{ content: Uint8Array; offsets: string }>(
+        db,
+        'SELECT content, offsets FROM HfXorb WHERE tenant = ? AND hash = ?',
+        CAS_TENANT,
+        entry.casHash,
+      )
       if (row === null) throw new Error(`shard names an unknown xorb ${entry.casHash}`)
       const offsets = JSON.parse(row.offsets) as number[]
       const from = offsets[entry.start] ?? 0

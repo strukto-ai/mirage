@@ -146,7 +146,9 @@ function mounts(target: Target, build: (m: Target['mounts'][number]) => Config):
 
 /** The CLIs the workspace itself carries, which reach no service. */
 function localClis(target: Target): Config {
-  const names = (target.clis ?? []).filter((name) => ['git', 'office', 'search'].includes(name))
+  const names = (target.clis ?? []).filter((name) =>
+    ['git', 'office', 'pdfinfo', 'pdftotext', 'search'].includes(name),
+  )
   return names.length === 0
     ? {}
     : {

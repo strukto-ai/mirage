@@ -186,6 +186,19 @@ def test_a_clap_group_refusal_names_a_short_token_the_same_way():
     )
 
 
+def test_a_poppler_group_refusal_prints_help_and_exits_99():
+    # poppler 25.03.0's readers answer any command line they refuse with
+    # their help page on stderr and exit 99, a group's option as a leaf's.
+    tree = replace(_tree(), usage_style=UsageStyle.POPPLER)
+    for argv in (["--zzz", "gmail"], ["--cwd"]):
+        result = walk("gws", tree, argv)
+        assert result.stream == "stderr"
+        assert result.exit_code == 99
+        assert result.output.decode() == node_help(
+            "gws", tree, tree.usage_style
+        )
+
+
 def test_starved_group_value_exits_129():
     result = walk("gws", _tree(), ["--cwd"])
     assert result.exit_code == 129

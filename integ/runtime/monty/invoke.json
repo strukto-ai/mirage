@@ -254,6 +254,44 @@
           }
         }
       ]
+    },
+    {
+      "id": "background_runs_are_processes_on_their_machine",
+      "world": {
+        "machines": {
+          "monty": {
+            "provider": "in_process",
+            "runtime": "monty"
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "wait.py": "import time\ntime.sleep(5)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "for f in a b; do python3 /ram/wait.py $f & done; sleep 1; ps -o machine,cmd; kill %1 %2; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "MACHINE                         CMD\nmirage                          for f in a b; do python3 /ram/wait.py $f & done; sleep 1; ps -o machine,cmd; kill %1 %2; wait\nin_process:monty                python3 /ram/wait.py a\nin_process:monty                python3 /ram/wait.py b\nmirage                          ps -o machine,cmd\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /ram/wait.py & sleep 1; pgrep -f /ram/wait.py >/dev/null && echo found; pgrep --machine monty -f wait.py >/dev/null && echo named; pkill -f /ram/wait.py; wait $!; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "found\nnamed\n143\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "note": "A job's Monty run is a process on its in_process machine, under its expanded words, as bash's ps shows what a job execs; jobs keeps the typed text. pgrep and pkill look at that machine wherever they look at Mirage's own, and at it alone when --machine names it."
     }
   ]
 }

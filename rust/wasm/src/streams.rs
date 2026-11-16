@@ -268,6 +268,16 @@ pub extern "C" fn mirage_rs_request(handle: u32) -> i32 {
     })
 }
 
+/// Make room for a reply of `len` bytes before it is staged, so a file read
+/// whole lands in one allocation of its size rather than doubling to it.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_reserve(handle: u32, len: usize) -> i32 {
+    with_slot(handle, 1, |slot| {
+        slot.staged.reserve_exact(len);
+        0
+    })
+}
+
 /// Append the first `len` bytes of the input window to the reply being
 /// handed over.
 #[unsafe(no_mangle)]
@@ -289,9 +299,9 @@ pub extern "C" fn mirage_rs_respond(handle: u32, reply_len: usize) -> i32 {
     with_slot(handle, 1, |slot| {
         slot.out.clear();
         mirage_rs::release_capacity(&mut slot.out);
-        let staged = std::mem::take(&mut slot.staged);
-        let (reply, data) = staged.split_at(reply_len.min(staged.len()));
-        match slot.stream.respond(reply, data, &mut slot.out) {
+        let mut data = std::mem::take(&mut slot.staged);
+        let reply: Vec<u8> = data.drain(..reply_len.min(data.len())).collect();
+        match slot.stream.respond_owned(&reply, data, &mut slot.out) {
             Ok(()) => 0,
             Err(err) => {
                 slot.refuse(err);

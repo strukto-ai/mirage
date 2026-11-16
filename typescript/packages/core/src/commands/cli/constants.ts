@@ -33,6 +33,10 @@ export const CLI_CONFIG_ENV = 'MIRAGE_CLI_CONFIG'
 // cannot import a module that reaches the workspace.
 export const CLAP_EXIT = 2
 
+// poppler-utils' readers exit 99 for a command line they refuse, and print
+// their help page on stderr (poppler 25.03.0).
+export const POPPLER_EXIT = 99
+
 // git's own long options for each parse-options verb mirage implements, in
 // git's table order and its `--[no-]` notation, captured from
 // `git <verb> --help-all` on git 2.56.0 (config's legacy table from its usage

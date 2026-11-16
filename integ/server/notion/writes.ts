@@ -13,13 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  count,
+  exec,
+  first,
+  insert,
+  matched,
+  remove,
+  select,
+  update,
+} from '../kit/typescript/index.ts'
+import type {
+  NotionBlock,
+  NotionComment,
+  NotionDatabase,
+  NotionPage,
+} from '../../generated/notion/index.js'
+import { DMMF, type Db } from './store.ts'
+import {
   BLOCK_TYPES,
   supportsChildren,
   validateChildren,
   validatePayload,
   validation,
 } from './blocks.ts'
-import type { Ctx, Minter, Reply } from '../kit/typescript/index.ts'
+import type { Cell, Ctx, Minter, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { DATA_SOURCE_VERSION, MAX_PAGE_SIZE } from './config.ts'
 import {
@@ -66,7 +83,7 @@ import {
 } from './wire.ts'
 
 async function createPage(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -98,7 +115,14 @@ async function createPage(
     return apiError(400, 'validation_error', 'body.parent should be defined.')
   }
   if (parentType === 'page_id' && parentId !== null) {
-    const owner = await db.notionPage.findFirst({ where: { tenant, id: parentId } })
+    const owner = first<NotionPage>(
+      db,
+      DMMF,
+      'NotionPage',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      parentId,
+    )
     if (owner === null) return notFound('page', parentId)
   }
   // The owner is read once and serves three purposes: the parent check, the
@@ -106,9 +130,14 @@ async function createPage(
   // the title column a markdown-only create files its heading under.
   let owner: DatabaseRow | null = null
   if (parentType === 'database_id' && parentId !== null) {
-    owner = (await db.notionDatabase.findFirst({
-      where: { tenant, id: parentId },
-    })) as DatabaseRow | null
+    owner = first<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      parentId,
+    ) as DatabaseRow | null
     if (owner === null) return notFound('database', parentId)
   }
   const schema = schemaOf(owner)
@@ -135,58 +164,75 @@ async function createPage(
   if (!Array.isArray(specs)) return specs
   await persistSchema(db, tenant, owner, schema, schemaBefore)
   const id = mintId(minter, 'a0000000')
-  await db.notionPage.create({
-    data: {
+  insert(db, 'NotionPage', {
+    id,
+    tenant,
+    parentType,
+    parentId,
+    titleText: title,
+    propertiesJson: JSON.stringify(
+      owner === null ? properties : fillSchema(properties, schema, meta),
+    ),
+    iconJson: body.icon !== undefined ? JSON.stringify(body.icon) : null,
+    coverJson: body.cover !== undefined ? JSON.stringify(body.cover) : null,
+    createdTime: meta.createdTime,
+    lastEditedTime: meta.lastEditedTime,
+    createdBy: meta.createdBy,
+    lastEditedBy: meta.lastEditedBy,
+    url: defaultUrl(meta, id),
+    position: count(db, 'NotionPage', '"tenant" = ?', tenant),
+  })
+  if (parentType === 'page_id' && parentId !== null) {
+    insert(db, 'NotionBlock', {
       id,
       tenant,
-      parentType,
       parentId,
-      titleText: title,
-      propertiesJson: JSON.stringify(
-        owner === null ? properties : fillSchema(properties, schema, meta),
-      ),
-      iconJson: body.icon !== undefined ? JSON.stringify(body.icon) : null,
-      coverJson: body.cover !== undefined ? JSON.stringify(body.cover) : null,
+      position: count(db, 'NotionBlock', '"tenant" = ? AND "parentId" = ?', tenant, parentId),
+      type: 'child_page',
+      payloadJson: JSON.stringify({ title }),
+      hasChildren: false,
       createdTime: meta.createdTime,
       lastEditedTime: meta.lastEditedTime,
       createdBy: meta.createdBy,
       lastEditedBy: meta.lastEditedBy,
-      url: defaultUrl(meta, id),
-      position: await db.notionPage.count({ where: { tenant } }),
-    },
-  })
-  if (parentType === 'page_id' && parentId !== null) {
-    await db.notionBlock.create({
-      data: {
-        id,
-        tenant,
-        parentId,
-        position: await db.notionBlock.count({ where: { tenant, parentId } }),
-        type: 'child_page',
-        payloadJson: JSON.stringify({ title }),
-        hasChildren: false,
-        createdTime: meta.createdTime,
-        lastEditedTime: meta.lastEditedTime,
-        createdBy: meta.createdBy,
-        lastEditedBy: meta.lastEditedBy,
-      },
     })
   }
   if (specs.length > 0) await insertChildren(db, tenant, meta, minter, id, specs, 0)
-  const created = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow
+  const created = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow
   return { status: 200, body: pageJson(created, version) }
 }
 
 async function appendChildren(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
   parentId: string,
   body: Json,
 ): Promise<Reply> {
-  const parentPage = await db.notionPage.findFirst({ where: { tenant, id: parentId } })
-  const parentBlock = await db.notionBlock.findFirst({ where: { tenant, id: parentId } })
+  const parentPage = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    parentId,
+  )
+  const parentBlock = first<NotionBlock>(
+    db,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    parentId,
+  )
   if (parentPage === null && parentBlock === null) return notFound('block', parentId)
   if (
     parentPage === null &&
@@ -197,7 +243,7 @@ async function appendChildren(
   }
   const specs = validateChildren(body.children)
   if (!Array.isArray(specs)) return specs
-  let at = await db.notionBlock.count({ where: { tenant, parentId } })
+  let at = count(db, 'NotionBlock', '"tenant" = ? AND "parentId" = ?', tenant, parentId)
   let anchorPos: number | null = null
   const after = typeof body.after === 'string' ? body.after : null
   if (after !== null) {
@@ -205,7 +251,14 @@ async function appendChildren(
     // later siblings shift down. The live API reports a malformed id and
     // a well-formed one that is not a child of this parent with the SAME
     // validation message (probed on 2025-09-03).
-    const anchor = await db.notionBlock.findFirst({ where: { tenant, id: after } })
+    const anchor = first<NotionBlock>(
+      db,
+      DMMF,
+      'NotionBlock',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      after,
+    )
     if (anchor === null || anchor.parentId !== parentId) {
       return apiError(
         400,
@@ -213,10 +266,15 @@ async function appendChildren(
         `body failed validation: body.position.after_block.id should be a valid uuid, instead was \`"${after}"\`.`,
       )
     }
-    await db.notionBlock.updateMany({
-      where: { tenant, parentId, position: { gt: anchor.position } },
-      data: { position: { increment: specs.length } },
-    })
+    exec(
+      db,
+      'UPDATE "NotionBlock" SET "position" = "position" + ? ' +
+        'WHERE "tenant" = ? AND "parentId" = ? AND "position" > ?',
+      specs.length,
+      tenant,
+      parentId,
+      anchor.position,
+    )
     anchorPos = anchor.position
     at = anchor.position + 1
   }
@@ -226,17 +284,22 @@ async function appendChildren(
   // the inserted blocks.
   let results = created
   if (anchorPos !== null) {
-    const fromAnchor = await db.notionBlock.findMany({
-      where: { tenant, parentId, position: { gt: anchorPos } },
-      orderBy: [{ position: 'asc' }, { id: 'asc' }],
-    })
+    const fromAnchor = select<NotionBlock>(
+      db,
+      DMMF,
+      'NotionBlock',
+      '"tenant" = ? AND "parentId" = ? AND "position" > ? ORDER BY "position" ASC, "id" ASC',
+      tenant,
+      parentId,
+      anchorPos,
+    )
     results = fromAnchor.map((row) => blockJson(row as BlockRow))
   }
   return { status: 200, body: listJson(results, null, 'block') }
 }
 
 async function insertChildren(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -247,41 +310,44 @@ async function insertChildren(
   const created: Json[] = []
   for (const { type, payload, children } of specs) {
     const id = mintId(minter, 'b0000000')
-    await db.notionBlock.create({
-      data: {
-        id,
-        tenant,
-        parentId,
-        position: at++,
-        type,
-        payloadJson: JSON.stringify(normalizeBlockPayload(payload)),
-        hasChildren: children.length > 0,
-        createdTime: meta.createdTime,
-        lastEditedTime: meta.lastEditedTime,
-        createdBy: meta.createdBy,
-        lastEditedBy: meta.lastEditedBy,
-      },
+    insert(db, 'NotionBlock', {
+      id,
+      tenant,
+      parentId,
+      position: at++,
+      type,
+      payloadJson: JSON.stringify(normalizeBlockPayload(payload)),
+      hasChildren: children.length > 0,
+      createdTime: meta.createdTime,
+      lastEditedTime: meta.lastEditedTime,
+      createdBy: meta.createdBy,
+      lastEditedBy: meta.lastEditedBy,
     })
     if (children.length > 0) {
       await insertChildren(db, tenant, meta, minter, id, children, 0)
     }
-    const row = (await db.notionBlock.findFirst({ where: { tenant, id } })) as BlockRow
+    const row = first<NotionBlock>(
+      db,
+      DMMF,
+      'NotionBlock',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      id,
+    ) as BlockRow
     created.push(blockJson(row))
   }
   if (
     specs.length > 0 &&
-    (await db.notionBlock.findFirst({ where: { tenant, id: parentId } })) !== null
+    first<NotionBlock>(db, DMMF, 'NotionBlock', '"tenant" = ? AND "id" = ?', tenant, parentId) !==
+      null
   ) {
-    await db.notionBlock.update({
-      where: { tenant_id: { tenant, id: parentId } },
-      data: { hasChildren: true },
-    })
+    matched(update(db, 'NotionBlock', { hasChildren: true }, { tenant, id: parentId }))
   }
   return created
 }
 
 async function createComment(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -292,27 +358,39 @@ async function createComment(
   if (parentId === '') {
     return apiError(400, 'validation_error', 'body.parent.page_id should be a valid uuid.')
   }
-  const owner = await db.notionPage.findFirst({ where: { tenant, id: parentId } })
+  const owner = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    parentId,
+  )
   if (owner === null) return notFound('page', parentId)
   // One tick per comment: the discussion shares the comment's sequence number
   // so a scenario's ids stay easy to predict.
   const seq = minter.next('comment')
   const id = idAt('c0000000', seq)
-  await db.notionComment.create({
-    data: {
-      id,
-      tenant,
-      parentType: 'page_id',
-      parentId,
-      discussionId: idAt('d0000000', seq),
-      richTextJson: JSON.stringify(Array.isArray(body.rich_text) ? body.rich_text : []),
-      createdTime: meta.createdTime,
-      lastEditedTime: meta.lastEditedTime,
-      createdBy: meta.createdBy,
-      position: await db.notionComment.count({ where: { tenant, parentId } }),
-    },
+  insert(db, 'NotionComment', {
+    id,
+    tenant,
+    parentType: 'page_id',
+    parentId,
+    discussionId: idAt('d0000000', seq),
+    richTextJson: JSON.stringify(Array.isArray(body.rich_text) ? body.rich_text : []),
+    createdTime: meta.createdTime,
+    lastEditedTime: meta.lastEditedTime,
+    createdBy: meta.createdBy,
+    position: count(db, 'NotionComment', '"tenant" = ? AND "parentId" = ?', tenant, parentId),
   })
-  const row = (await db.notionComment.findFirst({ where: { tenant, id } })) as CommentRow
+  const row = first<NotionComment>(
+    db,
+    DMMF,
+    'NotionComment',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as CommentRow
   return { status: 200, body: commentJson(row) }
 }
 
@@ -326,22 +404,40 @@ async function createComment(
 // stored parented to a page today, so an existing block carrying none of them
 // answers with an empty list rather than a 404, since upstream 404s only when
 // the id itself is not shared with the integration.
-async function listComments(db: C, tenant: string, q: URLSearchParams): Promise<Reply> {
+async function listComments(db: Db, tenant: string, q: URLSearchParams): Promise<Reply> {
   const blockId = q.get('block_id') ?? ''
   if (blockId === '') {
     return apiError(400, 'validation_error', 'block_id should be a valid uuid.')
   }
-  const page = await db.notionPage.findFirst({ where: { tenant, id: blockId } })
+  const page = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    blockId,
+  )
   if (page === null) {
-    const block = await db.notionBlock.findFirst({ where: { tenant, id: blockId } })
+    const block = first<NotionBlock>(
+      db,
+      DMMF,
+      'NotionBlock',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      blockId,
+    )
     if (block === null) return notFound('block', blockId)
   }
   // Upstream returns every discussion's comments in one ascending chronological
   // flat list, distinguishable by discussion_id, rather than grouped by thread.
-  const rows = (await db.notionComment.findMany({
-    where: { tenant, parentId: blockId },
-    orderBy: [{ position: 'asc' }, { id: 'asc' }],
-  })) as CommentRow[]
+  const rows = select<NotionComment>(
+    db,
+    DMMF,
+    'NotionComment',
+    '"tenant" = ? AND "parentId" = ? ORDER BY "position" ASC, "id" ASC',
+    tenant,
+    blockId,
+  ) as CommentRow[]
   const size = intOr(q.get('page_size'), MAX_PAGE_SIZE)
   return pageOf(rows.map(commentJson), cursorOf(q.get('start_cursor')), size, 'comment')
 }
@@ -351,13 +447,14 @@ async function listComments(db: C, tenant: string, q: URLSearchParams): Promise<
 // a database query read, the NotionBlock row is what the parent's children
 // listing reads, and setting only one leaves the page gone from half the
 // surfaces and present in the other half.
-async function setTrashed(db: C, tenant: string, id: string, trashed: boolean): Promise<void> {
-  const where = { tenant_id: { tenant, id } }
-  if ((await db.notionPage.findFirst({ where: { tenant, id } })) !== null) {
-    await db.notionPage.update({ where, data: { inTrash: trashed } })
+async function setTrashed(db: Db, tenant: string, id: string, trashed: boolean): Promise<void> {
+  if (first<NotionPage>(db, DMMF, 'NotionPage', '"tenant" = ? AND "id" = ?', tenant, id) !== null) {
+    matched(update(db, 'NotionPage', { inTrash: trashed }, { tenant, id }))
   }
-  if ((await db.notionBlock.findFirst({ where: { tenant, id } })) !== null) {
-    await db.notionBlock.update({ where, data: { inTrash: trashed } })
+  if (
+    first<NotionBlock>(db, DMMF, 'NotionBlock', '"tenant" = ? AND "id" = ?', tenant, id) !== null
+  ) {
+    matched(update(db, 'NotionBlock', { inTrash: trashed }, { tenant, id }))
   }
 }
 
@@ -366,13 +463,23 @@ async function setTrashed(db: C, tenant: string, id: string, trashed: boolean): 
 // MCP client cannot remove anything. Upstream: "Sets a Block object, including
 // page blocks, to in_trash: true", which covers database rows, so this resolves
 // a block id first and falls back to a page of the same id.
-export async function deleteBlock(db: C, tenant: string, id: string): Promise<Reply> {
-  const block = (await db.notionBlock.findFirst({
-    where: { tenant, id },
-  })) as BlockRow | null
-  const page = (await db.notionPage.findFirst({
-    where: { tenant, id },
-  })) as PageRow | null
+export async function deleteBlock(db: Db, tenant: string, id: string): Promise<Reply> {
+  const block = first<NotionBlock>(
+    db,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as BlockRow | null
+  const page = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow | null
   if (block === null && page === null) return notFound('block', id)
   await setTrashed(db, tenant, id, true)
   // A page that owns no block row (a top-level page, or a database row) still
@@ -390,8 +497,8 @@ export async function deleteBlock(db: C, tenant: string, id: string): Promise<Re
   return { status: 200, body: { ...body, archived: true, in_trash: true } }
 }
 
-async function updateBlock(db: C, tenant: string, id: string, body: Json): Promise<Reply> {
-  const row = await db.notionBlock.findFirst({ where: { tenant, id } })
+async function updateBlock(db: Db, tenant: string, id: string, body: Json): Promise<Reply> {
+  const row = first<NotionBlock>(db, DMMF, 'NotionBlock', '"tenant" = ? AND "id" = ?', tenant, id)
   if (row === null) return notFound('block', id)
   if (body.type !== undefined && body.type !== row.type) {
     return validation(`body.type should be "${row.type}".`)
@@ -424,10 +531,23 @@ async function updateBlock(db: C, tenant: string, id: string, body: Json): Promi
   }
   const trash = body.in_trash ?? body.archived
   if (typeof trash === 'boolean') await setTrashed(db, tenant, id, trash)
-  const updated = await db.notionBlock.update({
-    where: { tenant_id: { tenant, id } },
-    data: { payloadJson: JSON.stringify(normalizeBlockPayload(payload)) },
-  })
+  matched(
+    update(
+      db,
+      'NotionBlock',
+      { payloadJson: JSON.stringify(normalizeBlockPayload(payload)) },
+      { tenant, id },
+    ),
+  )
+  const updated = first<NotionBlock>(
+    db,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  )
+  if (updated === null) throw new Error(`notion fake: block ${id} vanished as it was updated`)
   return {
     status: 200,
     body: { ...blockJson(updated), archived: updated.inTrash, in_trash: updated.inTrash },
@@ -435,21 +555,33 @@ async function updateBlock(db: C, tenant: string, id: string, body: Json): Promi
 }
 
 async function updatePage(
-  db: C,
+  db: Db,
   tenant: string,
   id: string,
   body: Json,
   version: string,
 ): Promise<Reply> {
-  const row = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow | null
+  const row = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow | null
   if (row === null) return notFound('page', id)
-  const data: Record<string, unknown> = {}
+  const data: Record<string, Cell> = {}
   if (body.properties !== undefined) {
     const owner =
       row.parentType === 'database_id' && row.parentId !== null
-        ? ((await db.notionDatabase.findFirst({
-            where: { tenant, id: row.parentId },
-          })) as DatabaseRow | null)
+        ? (first<NotionDatabase>(
+            db,
+            DMMF,
+            'NotionDatabase',
+            '"tenant" = ? AND "id" = ?',
+            tenant,
+            row.parentId,
+          ) as DatabaseRow | null)
         : null
     const schema = schemaOf(owner)
     const schemaBefore = JSON.stringify(schema)
@@ -466,8 +598,15 @@ async function updatePage(
   if (typeof trash === 'boolean') await setTrashed(db, tenant, id, trash)
   if (body.icon !== undefined) data.iconJson = JSON.stringify(body.icon)
   if (body.cover !== undefined) data.coverJson = JSON.stringify(body.cover)
-  await db.notionPage.update({ where: { tenant_id: { tenant, id } }, data })
-  const updated = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow
+  matched(update(db, 'NotionPage', data, { tenant, id }))
+  const updated = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow
   return { status: 200, body: pageJson(updated, version) }
 }
 
@@ -477,7 +616,7 @@ async function updatePage(
 // of that page, as a child page is a child_page block, so the page's children
 // list it. The fake stores no database icon or cover, so both are ignored.
 async function createDatabase(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -491,7 +630,8 @@ async function createDatabase(
   }
   if (
     parentId !== null &&
-    (await db.notionPage.findFirst({ where: { tenant, id: parentId } })) === null
+    first<NotionPage>(db, DMMF, 'NotionPage', '"tenant" = ? AND "id" = ?', tenant, parentId) ===
+      null
   ) {
     return notFound('page', parentId)
   }
@@ -504,44 +644,47 @@ async function createDatabase(
   }
   const title = normalizeRichText(body.title)
   const id = mintId(minter, 'f0000000')
-  await db.notionDatabase.create({
-    data: {
+  insert(db, 'NotionDatabase', {
+    id,
+    tenant,
+    parentType: parentId === null ? 'workspace' : 'page_id',
+    parentId,
+    titleText: plainTextOf(title),
+    titleJson: JSON.stringify(title),
+    descriptionJson:
+      body.description === undefined ? null : JSON.stringify(normalizeRichText(body.description)),
+    propertiesJson: JSON.stringify(Object.fromEntries(columns)),
+    isInline: body.is_inline === true,
+    createdTime: meta.createdTime,
+    lastEditedTime: meta.lastEditedTime,
+    createdBy: meta.createdBy,
+    lastEditedBy: meta.lastEditedBy,
+    url: defaultUrl(meta, id),
+    position: count(db, 'NotionDatabase', '"tenant" = ?', tenant),
+  })
+  if (parentId !== null) {
+    insert(db, 'NotionBlock', {
       id,
       tenant,
-      parentType: parentId === null ? 'workspace' : 'page_id',
       parentId,
-      titleText: plainTextOf(title),
-      titleJson: JSON.stringify(title),
-      descriptionJson:
-        body.description === undefined ? null : JSON.stringify(normalizeRichText(body.description)),
-      propertiesJson: JSON.stringify(Object.fromEntries(columns)),
-      isInline: body.is_inline === true,
+      position: count(db, 'NotionBlock', '"tenant" = ? AND "parentId" = ?', tenant, parentId),
+      type: 'child_database',
+      payloadJson: JSON.stringify({ title: plainTextOf(title) }),
+      hasChildren: false,
       createdTime: meta.createdTime,
       lastEditedTime: meta.lastEditedTime,
       createdBy: meta.createdBy,
       lastEditedBy: meta.lastEditedBy,
-      url: defaultUrl(meta, id),
-      position: await db.notionDatabase.count({ where: { tenant } }),
-    },
-  })
-  if (parentId !== null) {
-    await db.notionBlock.create({
-      data: {
-        id,
-        tenant,
-        parentId,
-        position: await db.notionBlock.count({ where: { tenant, parentId } }),
-        type: 'child_database',
-        payloadJson: JSON.stringify({ title: plainTextOf(title) }),
-        hasChildren: false,
-        createdTime: meta.createdTime,
-        lastEditedTime: meta.lastEditedTime,
-        createdBy: meta.createdBy,
-        lastEditedBy: meta.lastEditedBy,
-      },
     })
   }
-  const created = (await db.notionDatabase.findFirst({ where: { tenant, id } })) as DatabaseRow
+  const created = first<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as DatabaseRow
   return { status: 200, body: databaseJson(created, version) }
 }
 
@@ -551,7 +694,7 @@ async function createDatabase(
 // page's children render the block rather than the database. Null when the
 // write landed, the refusal when it did not.
 async function patchDatabase(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -559,7 +702,7 @@ async function patchDatabase(
   body: Json,
 ): Promise<Reply | null> {
   const id = row.id
-  const data: Record<string, unknown> = {}
+  const data: Record<string, Cell> = {}
   if (body.title !== undefined) {
     const title = normalizeRichText(body.title)
     data.titleJson = JSON.stringify(title)
@@ -577,29 +720,54 @@ async function patchDatabase(
     if (!Array.isArray(columns)) return columns
     const schema = Object.fromEntries(columns)
     data.propertiesJson = JSON.stringify(schema)
-    const rows = (await db.notionPage.findMany({
-      where: { tenant, parentType: 'database_id', parentId: id },
-    })) as PageRow[]
+    const rows = select<NotionPage>(
+      db,
+      DMMF,
+      'NotionPage',
+      '"tenant" = ? AND "parentType" = ? AND "parentId" = ?',
+      tenant,
+      'database_id',
+      id,
+    ) as PageRow[]
     for (const one of rows) {
       const properties = migrateRow(JSON.parse(one.propertiesJson) as Json, before, schema, meta)
-      await db.notionPage.update({
-        where: { tenant_id: { tenant, id: one.id } },
-        data: { propertiesJson: JSON.stringify(properties) },
-      })
+      matched(
+        update(
+          db,
+          'NotionPage',
+          { propertiesJson: JSON.stringify(properties) },
+          { tenant, id: one.id },
+        ),
+      )
     }
   }
-  const updated = await db.notionDatabase.update({ where: { tenant_id: { tenant, id } }, data })
-  if ((await db.notionBlock.findFirst({ where: { tenant, id } })) !== null) {
-    await db.notionBlock.update({
-      where: { tenant_id: { tenant, id } },
-      data: { payloadJson: JSON.stringify({ title: updated.titleText }), inTrash: updated.inTrash },
-    })
+  matched(update(db, 'NotionDatabase', data, { tenant, id }))
+  const updated = first<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  )
+  if (updated === null) throw new Error(`notion fake: database ${id} vanished as it was updated`)
+  if (
+    first<NotionBlock>(db, DMMF, 'NotionBlock', '"tenant" = ? AND "id" = ?', tenant, id) !== null
+  ) {
+    matched(
+      update(
+        db,
+        'NotionBlock',
+        { payloadJson: JSON.stringify({ title: updated.titleText }), inTrash: updated.inTrash },
+        { tenant, id },
+      ),
+    )
   }
   return null
 }
 
 async function updateDatabase(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -607,11 +775,25 @@ async function updateDatabase(
   body: Json,
   version: string,
 ): Promise<Reply> {
-  const row = (await db.notionDatabase.findFirst({ where: { tenant, id } })) as DatabaseRow | null
+  const row = first<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as DatabaseRow | null
   if (row === null) return notFound('database', id)
   const refused = await patchDatabase(db, tenant, meta, minter, row, body)
   if (refused !== null) return refused
-  const updated = (await db.notionDatabase.findFirst({ where: { tenant, id } })) as DatabaseRow
+  const updated = first<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as DatabaseRow
   return { status: 200, body: databaseJson(updated, version) }
 }
 
@@ -620,7 +802,7 @@ async function updateDatabase(
 // same row. Moving a data source to another database would leave its database
 // with none, which that model cannot hold, so it is refused.
 async function updateDataSource(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   minter: Minter,
@@ -639,9 +821,14 @@ async function updateDataSource(
   }
   const refused = await patchDatabase(db, tenant, meta, minter, row, body)
   if (refused !== null) return refused
-  const updated = (await db.notionDatabase.findFirst({
-    where: { tenant, id: row.id },
-  })) as DatabaseRow
+  const updated = first<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    row.id,
+  ) as DatabaseRow
   return { status: 200, body: dataSourceJson(updated) }
 }
 
@@ -650,14 +837,17 @@ async function updateDataSource(
 // second is refused in the fake's words, after the same checks live makes. A
 // database with a new schema is `POST /v1/databases` with
 // `initial_data_source`.
-async function createDataSource(db: C, tenant: string, body: Json): Promise<Reply> {
+async function createDataSource(db: Db, tenant: string, body: Json): Promise<Reply> {
   const id = asObject(body.parent).database_id
   if (typeof id !== 'string') {
     return validation(
       'body failed validation: body.parent.database_id should be defined, instead was `undefined`.',
     )
   }
-  if ((await db.notionDatabase.findFirst({ where: { tenant, id } })) === null) {
+  if (
+    first<NotionDatabase>(db, DMMF, 'NotionDatabase', '"tenant" = ? AND "id" = ?', tenant, id) ===
+    null
+  ) {
     return notFound('database', id)
   }
   return validation(
@@ -673,14 +863,21 @@ async function createDataSource(db: C, tenant: string, body: Json): Promise<Repl
 // content is keyed by the page and moves untouched. Moving a page under
 // itself or its own subpage is refused, in the fake's words.
 async function movePage(
-  db: C,
+  db: Db,
   tenant: string,
   meta: MetaRow,
   id: string,
   body: Json,
   version: string,
 ): Promise<Reply> {
-  const row = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow | null
+  const row = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow | null
   if (row === null) return notFound('page', id)
   const parent = asObject(body.parent)
   let owner: DatabaseRow | null = null
@@ -690,12 +887,19 @@ async function movePage(
     if (owner === null) return notFound('data source', parent.data_source_id)
   } else if (typeof parent.database_id === 'string' || typeof parent.page_id === 'string') {
     const ref = String(parent.page_id ?? parent.database_id)
-    owner = (await db.notionDatabase.findFirst({
-      where: { tenant, id: ref },
-    })) as DatabaseRow | null
+    owner = first<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      ref,
+    ) as DatabaseRow | null
     if (owner === null && typeof parent.page_id !== 'string') return notFound('database', ref)
     if (owner === null) {
-      if ((await db.notionPage.findFirst({ where: { tenant, id: ref } })) === null) {
+      if (
+        first<NotionPage>(db, DMMF, 'NotionPage', '"tenant" = ? AND "id" = ?', tenant, ref) === null
+      ) {
         return notFound('page', ref)
       }
       parentPage = ref
@@ -709,13 +913,27 @@ async function movePage(
   while (above !== null) {
     if (above === id)
       return validation('A page cannot be moved into itself or one of its subpages.')
-    const up = (await db.notionPage.findFirst({ where: { tenant, id: above } })) as PageRow | null
+    const up = first<NotionPage>(
+      db,
+      DMMF,
+      'NotionPage',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      above,
+    ) as PageRow | null
     if (up === null || up.parentType === 'workspace') break
     if (up.parentType === 'page_id') {
       above = up.parentId
       continue
     }
-    const holder = await db.notionDatabase.findFirst({ where: { tenant, id: up.parentId ?? '' } })
+    const holder = first<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ? AND "id" = ?',
+      tenant,
+      up.parentId ?? '',
+    )
     above = holder !== null && holder.parentType === 'page_id' ? holder.parentId : null
   }
   const properties = movedProperties(
@@ -723,44 +941,50 @@ async function movePage(
     owner === null ? null : schemaOf(owner),
     meta,
   )
-  await db.notionPage.update({
-    where: { tenant_id: { tenant, id } },
-    data: {
-      parentType: owner === null ? 'page_id' : 'database_id',
-      parentId: owner === null ? parentPage : owner.id,
-      propertiesJson: JSON.stringify(properties),
-    },
-  })
-  const block = await db.notionBlock.findFirst({ where: { tenant, id } })
+  matched(
+    update(
+      db,
+      'NotionPage',
+      {
+        parentType: owner === null ? 'page_id' : 'database_id',
+        parentId: owner === null ? parentPage : owner.id,
+        propertiesJson: JSON.stringify(properties),
+      },
+      { tenant, id },
+    ),
+  )
+  const block = first<NotionBlock>(db, DMMF, 'NotionBlock', '"tenant" = ? AND "id" = ?', tenant, id)
   if (parentPage === null) {
-    if (block !== null) await db.notionBlock.delete({ where: { tenant_id: { tenant, id } } })
+    if (block !== null) matched(remove(db, 'NotionBlock', { tenant, id }))
   } else if (block === null || block.parentId !== parentPage) {
-    const position = await db.notionBlock.count({ where: { tenant, parentId: parentPage } })
+    const position = count(db, 'NotionBlock', '"tenant" = ? AND "parentId" = ?', tenant, parentPage)
     if (block === null) {
-      await db.notionBlock.create({
-        data: {
-          id,
-          tenant,
-          parentId: parentPage,
-          position,
-          type: 'child_page',
-          payloadJson: JSON.stringify({ title: row.titleText }),
-          hasChildren: false,
-          inTrash: row.inTrash,
-          createdTime: meta.createdTime,
-          lastEditedTime: meta.lastEditedTime,
-          createdBy: meta.createdBy,
-          lastEditedBy: meta.lastEditedBy,
-        },
+      insert(db, 'NotionBlock', {
+        id,
+        tenant,
+        parentId: parentPage,
+        position,
+        type: 'child_page',
+        payloadJson: JSON.stringify({ title: row.titleText }),
+        hasChildren: false,
+        inTrash: row.inTrash,
+        createdTime: meta.createdTime,
+        lastEditedTime: meta.lastEditedTime,
+        createdBy: meta.createdBy,
+        lastEditedBy: meta.lastEditedBy,
       })
     } else {
-      await db.notionBlock.update({
-        where: { tenant_id: { tenant, id } },
-        data: { parentId: parentPage, position },
-      })
+      matched(update(db, 'NotionBlock', { parentId: parentPage, position }, { tenant, id }))
     }
   }
-  const moved = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow
+  const moved = first<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    tenant,
+    id,
+  ) as PageRow
   return { status: 200, body: pageJson(moved, version) }
 }
 
@@ -769,25 +993,32 @@ async function movePage(
 // the meta row (the fixture's old `defaults`), the tenant's minter, and the
 // parsed body.
 export async function createPageRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
-  return createPage(ctx.db, ctx.tenant, meta, ctx.minter, asObject(ctx.json()), apiVersion(ctx))
+  const meta = await metaOf(ctx.sql, ctx.tenant)
+  return createPage(ctx.sql, ctx.tenant, meta, ctx.minter, asObject(ctx.json()), apiVersion(ctx))
 }
 
 export async function updatePageRoute(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
-  return updatePage(ctx.db, ctx.tenant, id, asObject(ctx.json()), apiVersion(ctx))
+  return updatePage(ctx.sql, ctx.tenant, id, asObject(ctx.json()), apiVersion(ctx))
 }
 
 export async function createDatabaseRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
-  return createDatabase(ctx.db, ctx.tenant, meta, ctx.minter, asObject(ctx.json()), apiVersion(ctx))
+  const meta = await metaOf(ctx.sql, ctx.tenant)
+  return createDatabase(
+    ctx.sql,
+    ctx.tenant,
+    meta,
+    ctx.minter,
+    asObject(ctx.json()),
+    apiVersion(ctx),
+  )
 }
 
 export async function updateDatabaseRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
+  const meta = await metaOf(ctx.sql, ctx.tenant)
   const id = ctx.params.id ?? ''
   return updateDatabase(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     meta,
     ctx.minter,
@@ -798,25 +1029,25 @@ export async function updateDatabaseRoute(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function updateDataSourceRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
+  const meta = await metaOf(ctx.sql, ctx.tenant)
   const id = ctx.params.id ?? ''
-  return updateDataSource(ctx.db, ctx.tenant, meta, ctx.minter, id, asObject(ctx.json()))
+  return updateDataSource(ctx.sql, ctx.tenant, meta, ctx.minter, id, asObject(ctx.json()))
 }
 
 export async function createDataSourceRoute(ctx: Ctx<C>): Promise<Reply> {
-  return createDataSource(ctx.db, ctx.tenant, asObject(ctx.json()))
+  return createDataSource(ctx.sql, ctx.tenant, asObject(ctx.json()))
 }
 
 export async function movePageRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
+  const meta = await metaOf(ctx.sql, ctx.tenant)
   const id = ctx.params.id ?? ''
-  return movePage(ctx.db, ctx.tenant, meta, id, asObject(ctx.json()), apiVersion(ctx))
+  return movePage(ctx.sql, ctx.tenant, meta, id, asObject(ctx.json()), apiVersion(ctx))
 }
 
 export async function appendChildrenRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
+  const meta = await metaOf(ctx.sql, ctx.tenant)
   return appendChildren(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     meta,
     ctx.minter,
@@ -826,22 +1057,29 @@ export async function appendChildrenRoute(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function deleteBlockRoute(ctx: Ctx<C>): Promise<Reply> {
-  return deleteBlock(ctx.db, ctx.tenant, ctx.params.id ?? '')
+  return deleteBlock(ctx.sql, ctx.tenant, ctx.params.id ?? '')
 }
 
 export async function listCommentsRoute(ctx: Ctx<C>): Promise<Reply> {
-  return listComments(ctx.db, ctx.tenant, ctx.query)
+  return listComments(ctx.sql, ctx.tenant, ctx.query)
 }
 
 export async function createCommentRoute(ctx: Ctx<C>): Promise<Reply> {
-  const meta = await metaOf(ctx.db, ctx.tenant)
-  return createComment(ctx.db, ctx.tenant, meta, ctx.minter, asObject(ctx.json()))
+  const meta = await metaOf(ctx.sql, ctx.tenant)
+  return createComment(ctx.sql, ctx.tenant, meta, ctx.minter, asObject(ctx.json()))
 }
 
-async function deleteBlockTree(db: C, tenant: string, id: string): Promise<void> {
-  const children = await db.notionBlock.findMany({ where: { tenant, parentId: id } })
+async function deleteBlockTree(db: Db, tenant: string, id: string): Promise<void> {
+  const children = select<NotionBlock>(
+    db,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "parentId" = ?',
+    tenant,
+    id,
+  )
   for (const child of children) await deleteBlockTree(db, tenant, child.id)
-  await db.notionBlock.delete({ where: { tenant_id: { tenant, id } } })
+  matched(remove(db, 'NotionBlock', { tenant, id }))
 }
 
 // `ntn pages edit --content` replaces a page's body wholesale, which the API
@@ -849,7 +1087,14 @@ async function deleteBlockTree(db: C, tenant: string, id: string): Promise<void>
 export async function replaceMarkdown(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
   const body = asObject(ctx.json())
-  const row = await ctx.db.notionPage.findFirst({ where: { tenant: ctx.tenant, id } })
+  const row = first<NotionPage>(
+    ctx.sql,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  )
   if (row === null) return notFound('page', id)
   if (body.type !== 'replace_content') {
     return apiError(400, 'validation_error', 'body.type should be "replace_content".')
@@ -861,21 +1106,28 @@ export async function replaceMarkdown(ctx: Ctx<C>): Promise<Reply> {
   const blocks = replacement === '' ? [] : markdownToBlocks(replacement)
   const specs = validateChildren(blocks)
   if (!Array.isArray(specs)) return specs
-  const kept = await ctx.db.notionBlock.findMany({ where: { tenant: ctx.tenant, parentId: id } })
+  const kept = select<NotionBlock>(
+    ctx.sql,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "parentId" = ?',
+    ctx.tenant,
+    id,
+  )
   for (const one of kept) {
     if (one.type === 'child_page' || one.type === 'child_database') continue
-    await deleteBlockTree(ctx.db, ctx.tenant, one.id)
+    await deleteBlockTree(ctx.sql, ctx.tenant, one.id)
   }
   if (specs.length > 0) {
-    const meta = await metaOf(ctx.db, ctx.tenant)
-    const at = await ctx.db.notionBlock.count({ where: { tenant: ctx.tenant, parentId: id } })
-    await insertChildren(ctx.db, ctx.tenant, meta, ctx.minter, id, specs, at)
+    const meta = await metaOf(ctx.sql, ctx.tenant)
+    const at = count(ctx.sql, 'NotionBlock', '"tenant" = ? AND "parentId" = ?', ctx.tenant, id)
+    await insertChildren(ctx.sql, ctx.tenant, meta, ctx.minter, id, specs, at)
   }
   const lines: string[] = []
-  await markdownOf(ctx.db, ctx.tenant, id, 0, lines)
+  await markdownOf(ctx.sql, ctx.tenant, id, 0, lines)
   return markdownReply(id, lines)
 }
 
 export async function updateBlockRoute(ctx: Ctx<C>): Promise<Reply> {
-  return updateBlock(ctx.db, ctx.tenant, ctx.params.id ?? '', asObject(ctx.json()))
+  return updateBlock(ctx.sql, ctx.tenant, ctx.params.id ?? '', asObject(ctx.json()))
 }

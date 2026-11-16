@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -237,6 +238,43 @@ it('clones and fetches over smart http', async () => {
   expect(lines[2]).toBe(' * [new tag]         v2         -> v2')
   result = await ws.shell('cd /w/c && git log -1 --format=%s origin/main')
   expect(DEC.decode(result.stdout)).toBe('third\n')
+})
+
+it('clones shallow over smart http as git does', async () => {
+  const native = join(tmp, 'native-shallow')
+  await promisify(execFile)('git', ['clone', '-q', '--depth', '1', url, native], { env: ENV })
+  const git = (args: string[]): string =>
+    execFileSync('git', ['-C', native, ...args], { env: ENV, encoding: 'utf8' })
+  const ws = workspace()
+  let result = await ws.shell(`cd /w && git clone -q --depth 1 ${url} s`)
+  expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+  result = await ws.shell('cat /w/s/.git/shallow')
+  expect(DEC.decode(result.stdout)).toBe(readFileSync(join(native, '.git/shallow'), 'utf8'))
+  result = await ws.shell('cd /w/s && git log --format=%s%d')
+  expect(DEC.decode(result.stdout)).toBe(git(['log', '--format=%s%d']))
+  result = await ws.shell("cd /w/s && git for-each-ref --format='%(refname)'")
+  expect(DEC.decode(result.stdout)).toBe(git(['for-each-ref', '--format=%(refname)']))
+  result = await ws.shell('cd /w/s && git config remote.origin.fetch')
+  expect(DEC.decode(result.stdout)).toBe(git(['config', 'remote.origin.fetch']))
+})
+
+it('fetches what lies past the cut into a shallow clone', async () => {
+  const ws = workspace()
+  let result = await ws.shell(`cd /w && git clone -q --depth 1 ${url} f`)
+  expect(result.exitCode).toBe(0)
+  execFileSync(
+    'bash',
+    [
+      '-ec',
+      'echo one > a && git commit -qam back && git push -q ../srv/repo.git main && ' +
+        'git -C ../srv/repo.git repack -adbq',
+    ],
+    { cwd: join(tmp, 'work'), env: ENV, stdio: 'ignore' },
+  )
+  result = await ws.shell('cd /w/f && git fetch -q')
+  expect(result.exitCode).toBe(0)
+  result = await ws.shell('cd /w/f && git show origin/main:a')
+  expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'one\n'])
 })
 
 it('says a missing http repository is not found and removes the clone', async () => {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { MachineName } from '../execution/types.ts'
 import { Runtime } from './base.ts'
 
 /**
@@ -36,5 +37,10 @@ export class WorkspaceRuntime extends Runtime {
 
   constructor() {
     super({}, [])
+  }
+
+  /** Null: a workspace-routed line runs on the workspace itself. */
+  override get machine(): MachineName | null {
+    return null
   }
 }

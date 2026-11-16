@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { count, first, insert, matched, select, update } from '../kit/typescript/index.ts'
+import type { NotionFileUpload } from '../../generated/notion/index.js'
+import { DMMF } from './store.ts'
 import { readMultipart } from '../box/multipart.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
@@ -60,10 +63,26 @@ function receivedParts(row: UploadRow): Set<number> {
   return new Set(JSON.parse(row.partsJson) as number[])
 }
 
+function uploadAt(ctx: Ctx<C>, id: string): UploadRow | null {
+  return first<NotionFileUpload>(
+    ctx.sql,
+    DMMF,
+    'NotionFileUpload',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  )
+}
+
+// The row a write just made or changed, read back whole as Prisma answered it.
+function reread(ctx: Ctx<C>, id: string): UploadRow {
+  const row = uploadAt(ctx, id)
+  if (row === null) throw new Error(`notion fake: upload ${id} vanished as it was written`)
+  return row
+}
+
 async function found(ctx: Ctx<C>): Promise<UploadRow | null> {
-  return ctx.db.notionFileUpload.findUnique({
-    where: { tenant_id: { tenant: ctx.tenant, id: ctx.params.id ?? '' } },
-  })
+  return uploadAt(ctx, ctx.params.id ?? '')
 }
 
 export async function createUpload(ctx: Ctx<C>): Promise<Reply> {
@@ -77,22 +96,21 @@ export async function createUpload(ctx: Ctx<C>): Promise<Reply> {
     return apiError(400, 'validation_error', 'external_url should be defined.')
   }
   const now = ctx.clock.nowMs()
-  const seq = await ctx.db.notionFileUpload.count({ where: { tenant: ctx.tenant } })
-  const row = await ctx.db.notionFileUpload.create({
-    data: {
-      tenant: ctx.tenant,
-      id: mintId(ctx.minter, UPLOAD_ID_PREFIX),
-      seq,
-      mode,
-      status: mode === 'external_url' ? 'uploaded' : 'pending',
-      filename: filename ?? 'upload.bin',
-      contentType: asText(body.content_type),
-      numberOfParts: mode === 'multi_part' ? (body.number_of_parts as number) : null,
-      createdTime: new Date(now).toISOString(),
-      expiryTime: new Date(now + EXPIRY_MS).toISOString(),
-    },
+  const seq = count(ctx.sql, 'NotionFileUpload', '"tenant" = ?', ctx.tenant)
+  const id = mintId(ctx.minter, UPLOAD_ID_PREFIX)
+  insert(ctx.sql, 'NotionFileUpload', {
+    tenant: ctx.tenant,
+    id,
+    seq,
+    mode,
+    status: mode === 'external_url' ? 'uploaded' : 'pending',
+    filename: filename ?? 'upload.bin',
+    contentType: asText(body.content_type),
+    numberOfParts: mode === 'multi_part' ? (body.number_of_parts as number) : null,
+    createdTime: new Date(now).toISOString(),
+    expiryTime: new Date(now + EXPIRY_MS).toISOString(),
   })
-  return { status: 200, body: render(ctx, row) }
+  return { status: 200, body: render(ctx, reread(ctx, id)) }
 }
 
 export async function sendUpload(ctx: Ctx<C>): Promise<Reply> {
@@ -112,15 +130,19 @@ export async function sendUpload(ctx: Ctx<C>): Promise<Reply> {
     }
     parts.add(number)
   }
-  const updated = await ctx.db.notionFileUpload.update({
-    where: { tenant_id: { tenant: ctx.tenant, id: row.id } },
-    data: {
-      contentLength: (row.contentLength ?? 0) + file.bytes.byteLength,
-      partsJson: JSON.stringify([...parts]),
-      status: row.mode === 'multi_part' ? 'pending' : 'uploaded',
-    },
-  })
-  return { status: 200, body: render(ctx, updated) }
+  matched(
+    update(
+      ctx.sql,
+      'NotionFileUpload',
+      {
+        contentLength: (row.contentLength ?? 0) + file.bytes.byteLength,
+        partsJson: JSON.stringify([...parts]),
+        status: row.mode === 'multi_part' ? 'pending' : 'uploaded',
+      },
+      { tenant: ctx.tenant, id: row.id },
+    ),
+  )
+  return { status: 200, body: render(ctx, reread(ctx, row.id)) }
 }
 
 export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
@@ -137,11 +159,10 @@ export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
       `Expected ${String(row.numberOfParts)} parts, received ${String(received)}.`,
     )
   }
-  const updated = await ctx.db.notionFileUpload.update({
-    where: { tenant_id: { tenant: ctx.tenant, id: row.id } },
-    data: { status: 'uploaded' },
-  })
-  return { status: 200, body: render(ctx, updated) }
+  matched(
+    update(ctx.sql, 'NotionFileUpload', { status: 'uploaded' }, { tenant: ctx.tenant, id: row.id }),
+  )
+  return { status: 200, body: render(ctx, reread(ctx, row.id)) }
 }
 
 export async function getUpload(ctx: Ctx<C>): Promise<Reply> {
@@ -151,10 +172,13 @@ export async function getUpload(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function listUploads(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await ctx.db.notionFileUpload.findMany({
-    where: { tenant: ctx.tenant },
-    orderBy: { seq: 'desc' },
-  })
+  const rows = select<NotionFileUpload>(
+    ctx.sql,
+    DMMF,
+    'NotionFileUpload',
+    '"tenant" = ? ORDER BY "seq" DESC',
+    ctx.tenant,
+  )
   return {
     status: 200,
     body: {

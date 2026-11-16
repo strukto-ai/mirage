@@ -38,7 +38,7 @@ export const mailFake: Fake<C> = {
   // which usernames exist. The manifest names an account per message, but an
   // account with no mail still has to be loginable -- the CLI installs each
   // take one, and two of the three start empty.
-  afterSeed: async (db, tenant, _counts, extras, fixtureRoot) => {
+  afterSeed: async (_db, tenant, _counts, extras, fixtureRoot, _epoch, db) => {
     for (const name of DEFAULT_MAILBOXES) {
       if ((await mailboxOf(db, tenant, name)) === null) await createMailbox(db, tenant, name)
     }

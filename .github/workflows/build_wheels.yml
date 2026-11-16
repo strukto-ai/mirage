@@ -46,7 +46,7 @@ jobs:
           name: mirage-ai-wheel-${{ matrix.target }}
           path: python/dist/*.whl
 
-  # Anything without a wheel above builds from this with Rust 1.85 or later.
+  # Anything without a wheel above builds from this with Rust 1.88 or later.
   sdist:
     runs-on: ubuntu-latest
     timeout-minutes: 30

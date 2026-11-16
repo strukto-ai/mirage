@@ -69,16 +69,25 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.installer == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      matrix:
-        shell: [sh, dash, bash]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      # Each check takes seconds, so one job runs all three shells and
+      # reports every one that fails.
       - name: Check installer behavior
-        run: python3 scripts/check_install.py --shell ${{ matrix.shell }}
+        run: |
+          failed=()
+          for shell in sh dash bash; do
+            echo "::group::$shell"
+            python3 scripts/check_install.py --shell "$shell" || failed+=("$shell")
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "failed shells: ${failed[*]}"
+            exit 1
+          fi
 
   python-install:
     needs: changes

@@ -79,7 +79,7 @@ interface Batch {
 // write's own time, so a write reads the clock once whether or not a webhook
 // is listening.
 async function persist(b: Batch, stamp: string): Promise<void> {
-  await saveWorld(b.ctx.db, b.world)
+  await saveWorld(b.ctx.sql, b.world)
   const changes: TableChanges = {}
   for (const table of b.world.tables) {
     const created: JsonObject = {}
@@ -98,7 +98,7 @@ async function persist(b: Batch, stamp: string): Promise<void> {
     if (destroyed.length > 0) entry.destroyedRecordIds = destroyed
     if (Object.keys(entry).length > 0) changes[table.id] = entry
   }
-  await notePayloads(b.ctx.db, b.world.tenant, b.world.base.id, stamp, changes)
+  await notePayloads(b.ctx.sql, b.world.tenant, b.world.base.id, stamp, changes)
 }
 
 async function openBatch(ctx: Ctx<C>, who: Principal, typecast: boolean): Promise<Batch> {

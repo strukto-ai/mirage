@@ -12,12 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { tenantWhere } from '../kit/typescript/index.ts'
+import { all } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
-import type { Prisma } from '../../generated/airtable/index.js'
 import { authenticate, baseFor, onlyQuery, requireIds, tableOf } from './access.ts'
 import { cellValue, compileIn, formulaInput, isEmpty, renderRecord, scalar } from './cells.ts'
-import { MAX_PAGE_SIZE, config } from './config.ts'
+import { MAX_PAGE_SIZE } from './config.ts'
 import type { C } from './config.ts'
 import { FormulaSyntaxError, UnknownFieldsError, evaluate, truthy } from './formula.ts'
 import type { Compiled, FValue } from './formula.ts'
@@ -48,8 +47,6 @@ import {
   viewNotFound,
 } from './wire.ts'
 import type { JsonObject } from './wire.ts'
-
-const KIND = config.tenantKind
 
 export interface ListParams {
   pageSize: number | undefined
@@ -277,13 +274,13 @@ export function sortRecords(
 }
 
 async function commentCounts(ctx: Ctx<C>, ids: string[]): Promise<Map<string, number>> {
-  const rows = await ctx.db.airtableComment.findMany({
-    where: {
-      ...tenantWhere<Prisma.AirtableCommentWhereInput>(ctx.tenant, KIND),
-      recordId: { in: ids },
-    },
-    select: { recordId: true },
-  })
+  const rows = all<{ recordId: string }>(
+    ctx.sql,
+    'SELECT recordId FROM AirtableComment WHERE tenant = ? AND ' +
+      'recordId IN (SELECT value FROM json_each(?))',
+    ctx.tenant,
+    JSON.stringify(ids),
+  )
   const out = new Map<string, number>()
   for (const row of rows) out.set(row.recordId, (out.get(row.recordId) ?? 0) + 1)
   return out

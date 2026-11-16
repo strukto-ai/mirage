@@ -16,13 +16,14 @@ import asyncio
 
 import pytest
 
-from mirage import RAMVFS, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
 from mirage.execution.process.types import Process
 from mirage.execution.types import MachineName
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -118,11 +119,12 @@ async def test_a_cancelled_close_still_closes_the_engine_and_a_retry_waits():
 class SeenRuntime(Runtime, ProcessExecutorMixin):
     """A runtime past the workspace's reach, on machine ``box:b1``, that
     keeps the record of the process each program it runs runs as, and
-    holds one named ``hold`` until ``release``."""
+    holds one named ``hold`` until ``release``; ``peek`` reads
+    ``/data/f``."""
 
     name = "seen"
     reach = "remote"
-    captures = ("probe", "hold")
+    captures = ("probe", "hold", "peek")
 
     def __init__(self, reach: str = "remote") -> None:
         super().__init__()
@@ -142,7 +144,28 @@ class SeenRuntime(Runtime, ProcessExecutorMixin):
         self.seen.append(process.record)
         if texts[0] == "hold":
             await self.release.wait()
+        if texts[0] == "peek" and ctx.vfs is not None:
+            await ctx.vfs.read("/data/f")
         return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class EngineRuntime(SeenRuntime):
+    """The same, as an engine in Mirage's own process, on its
+    ``in_process`` machine."""
+
+    def __init__(self) -> None:
+        super().__init__("workspace")
+
+    @property
+    def machine(self) -> MachineName:
+        return MachineName(IN_PROCESS, self.name)
+
+
+class IdleRuntime(Runtime):
+    """A second engine in Mirage's own process, which runs ``idle``."""
+
+    name = "idle"
+    captures = ("idle",)
 
 
 async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
@@ -187,11 +210,61 @@ async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     assert (batched.parent, batched.program) == (int(pid), True)
 
 
-# A runtime the workspace reaches runs its program in its shell's process.
+# A runtime the workspace reaches runs its program as a process of its
+# own as well, and an engine in Mirage's process names the in_process
+# machine of its entry, so ps, kill and wait see it as any machine's.
 @pytest.mark.asyncio
-async def test_a_program_the_workspace_reaches_stays_in_its_shell():
+async def test_a_program_the_workspace_reaches_is_a_process_of_its_own():
     process, line = await _seen("echo $$; probe", "workspace")
-    assert (process.pid, process.program) == (int(line), False)
+    assert (process.parent, process.program) == (int(line), True)
+    assert SlowCloseRuntime().machine == MachineName(IN_PROCESS, "slow-close")
+
+
+# A program's file calls are its own process's, as ps lists it, not its
+# shell's.
+@pytest.mark.asyncio
+async def test_a_programs_file_calls_name_its_process():
+    runtime = SeenRuntime("workspace")
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines=[runtime]
+    )
+    try:
+        await ws.vfs.write("/data/f", b"x\n")
+        del ws.vfs.records[:]
+        await ws.shell("true; peek")
+        [program] = runtime.seen
+        reads = [r for r in ws.vfs.records if r.path == "/data/f"]
+        assert reads
+        assert {r.process for r in reads} == {str(program.id)}
+    finally:
+        await ws.close()
+
+
+# A process search looks at an engine's in_process machine wherever it
+# looks at Mirage's own, and at it alone when named; a substitution's
+# answer stays bare PIDs, however many engines there are.
+@pytest.mark.asyncio
+async def test_a_process_search_finds_an_engines_programs():
+    runtime = EngineRuntime()
+    ws = Workspace({"/data": RAMVFS()}, machines=[runtime, IdleRuntime()])
+    try:
+        async with asyncio.timeout(10):
+            done = await ws.shell(
+                "hold & sleep 0.2; pgrep hold >/dev/null && echo found; "
+                "pgrep --machine seen hold >/dev/null && echo named; "
+                "pkill hold; wait $!; echo $?"
+            )
+        assert done.stdout == b"found\nnamed\n143\n"
+        async with asyncio.timeout(10):
+            bare = await ws.shell(
+                'hold & p=$!; sleep 0.2; [ "$(pgrep hold)" = "$p" ] && '
+                'echo pgrep; [ "$(pidof hold)" = "$p" ] && echo pidof; '
+                "pkill hold; wait"
+            )
+        assert bare.stdout == b"pgrep\npidof\n"
+    finally:
+        runtime.release.set()
+        await ws.close()
 
 
 # A program's process stopped with its shell ends by the shell's signal.

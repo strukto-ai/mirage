@@ -65,6 +65,7 @@ jobs:
       fuse: ${{ steps.filter.outputs.fuse }}
       observability: ${{ steps.filter.outputs.observability }}
       runtime: ${{ steps.filter.outputs.runtime }}
+      shared_full: ${{ steps.filter.outputs.shared_full }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -299,6 +300,114 @@ jobs:
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,tidb_filesystem,trello,wandb,wasabi}{.py,/**}'
+            # Shared backends full: the six SaaS targets with every case on
+            # both hosts. A pull request that sets it runs that workflow, and
+            # the shared shards leave those six targets to it.
+            shared_full:
+              # Implementation changes can affect backend I/O through shared execution.
+              # Keep this broad; generic case-only formatting changes stay on RAM/disk.
+              - 'python/mirage/**'
+              - 'typescript/packages/*/src/**'
+              - 'rust/**'
+              - 'python/pyproject.toml'
+              - 'python/uv.lock'
+              - 'typescript/**/package.json'
+              - 'typescript/pnpm-lock.yaml'
+              - 'typescript/pnpm-workspace.yaml'
+              - 'typescript/**/tsconfig*.json'
+              - 'typescript/packages/*/scripts/**'
+              - 'integ/runners/**'
+              - 'integ/ci/**'
+              - 'integ/targets.json'
+              - 'integ/package.json'
+              - 'integ/server/**'
+              - 'integ/prisma/**'
+              - 'integ/fixtures/**'
+              - 'integ/truth/**'
+              - 'integ/vfs/**'
+              - 'integ/crossmount/**'
+              - 'integ/session/**'
+              - 'integ/lifecycle/**'
+              - 'integ/unix/write/**'
+              - 'integ/unix/consistency/**'
+              - 'integ/unix/office/**'
+              - 'integ/unix/meta_overlay/**'
+              - 'integ/unix/truncate/**'
+              - 'integ/unix/rm/**'
+              - 'integ/unix/rmdir/**'
+              - 'integ/unix/arch/**'
+              - 'integ/unix/readfail/**'
+              - 'integ/unix/df/**'
+              - 'integ/unix/awk/redirect.json'
+              - 'integ/unix/awk/getline.json'
+              - 'integ/unix/awk/bytes.json'
+              - 'integ/unix/sed/read.json'
+              - 'integ/unix/sed/write.json'
+              - 'integ/unix/sed/inplace.json'
+              - 'integ/unix/sed/bytes.json'
+              - 'integ/unix/grep/**'
+              - 'integ/unix/capacity/**'
+              - 'integ/unix/cat/**'
+              - 'integ/unix/cmp/**'
+              - 'integ/unix/cp/**'
+              - 'integ/unix/diff/**'
+              - 'integ/unix/find/**'
+              - 'integ/unix/gunzip/**'
+              - 'integ/unix/gzip/**'
+              - 'integ/unix/head/**'
+              - 'integ/unix/ln/**'
+              - 'integ/unix/ls/**'
+              - 'integ/unix/mkdir/**'
+              - 'integ/unix/mv/**'
+              - 'integ/unix/overwrite/**'
+              - 'integ/unix/readlink/**'
+              - 'integ/unix/realpath/**'
+              - 'integ/unix/rg/**'
+              - 'integ/unix/split/**'
+              - 'integ/unix/stat/**'
+              - 'integ/unix/tail/**'
+              - 'integ/unix/tar/**'
+              - 'integ/unix/tee/**'
+              - 'integ/unix/touch/**'
+              - 'integ/unix/unlink/**'
+              - 'integ/unix/unzip/**'
+              - 'integ/unix/xattr/**'
+              - 'integ/unix/zcat/**'
+              - 'integ/unix/zgrep/**'
+              - 'integ/unix/zip/**'
+              - 'integ/unix/du/**'
+              - 'integ/unix/guard/**'
+              - 'integ/unix/meta/**'
+              - 'integ/unix/mtime/**'
+              - 'integ/unix/root/**'
+              - 'integ/unix/slash/**'
+              - 'integ/unix/sym/**'
+              - 'integ/unix/tree/**'
+              - 'integ/unix/sort/basic.json'
+              - 'integ/unix/wc/basic.json'
+              - 'integ/bash/assign/**'
+              - 'integ/bash/command/**'
+              - 'integ/bash/cwd/**'
+              - 'integ/bash/exec/**'
+              - 'integ/bash/glob/**'
+              - 'integ/bash/heredoc/**'
+              - 'integ/bash/midglob/**'
+              - 'integ/bash/pipe/**'
+              - 'integ/bash/relative/**'
+              - 'integ/bash/relspell/**'
+              - 'integ/bash/relword/**'
+              - 'integ/bash/source/**'
+              - 'integ/bash/redirect/**'
+              - '.github/workflows/test_integ.yml'
+              - '.github/workflows/test_shared_full.yml'
+              - '.github/actions/integ-battery-setup/**'
+              - '.github/actions/setup-node-pnpm/**'
+              - '.github/actions/setup-uv/**'
+              - '.github/actions/setup-rust/**'
+              - '!python/**/README.md'
+              - '!typescript/**/README.md'
+              - '!rust/**/README.md'
+              - '!integ/server/**/README.md'
 
   typescript-build:
     needs: changes
@@ -345,9 +454,14 @@ jobs:
         image: redis:7
         ports:
           - 6379:6379
+        # Every service here probes each second until it first answers, then
+        # every 10 s. Docker's first probe otherwise waits the whole interval,
+        # so a job sat 10 to 15 s on a service that was up in one or two.
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -455,6 +569,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -534,6 +650,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       nextcloud:
@@ -753,6 +871,18 @@ jobs:
           chmod +x /tmp/officecli-real/officecli
           OFFICECLI_BIN=/tmp/officecli-real/officecli pnpm exec tsx office_conformance.ts
 
+      # Runs every cli-pdf case through the REAL poppler-utils (25.03.0, in
+      # debian:stable-slim pinned by digest), so the goldens are by
+      # construction what pdftotext and pdfinfo print.
+      - name: Run pdf CLI conformance against the real poppler-utils
+        working-directory: integ
+        run: |
+          printf '%s\n' \
+            'FROM debian:stable-slim@sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04' \
+            'RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils poppler-data && rm -rf /var/lib/apt/lists/*' \
+            | docker build -t mirage-poppler -
+          POPPLER_IMAGE=mirage-poppler pnpm exec tsx pdf_conformance.ts
+
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
         env:
@@ -787,6 +917,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
@@ -797,6 +929,8 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -848,11 +982,15 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_COUNT: ${{ strategy.job-total }}
+          # Shared backends full runs these six with every case in this run,
+          # a superset of the focused cases this battery gives them.
+          SKIP_TARGETS: ${{ needs.changes.outputs.shared_full == 'true' && 'sharepoint,sharepoint-prefix,onedrive,box,gdrive,gdrive-folder' || '' }}
         run: >-
           ./python/.venv/bin/python integ/runners/tools/shard.py
           --shard "$SHARD_INDEX" --shards "$SHARD_COUNT" --procs 4
           --host python --facet core --facet http
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
+          --skip-targets "$SKIP_TARGETS"
           --emit-dir "$GITHUB_WORKSPACE/emit/python"
           -- ./python/.venv/bin/python integ/runners/python/main.py --suite shared --strict
       # The battery cannot snapshot a workspace, so the GridFS trash under a
@@ -1043,6 +1181,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
@@ -1053,6 +1193,8 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -1075,11 +1217,15 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_COUNT: ${{ strategy.job-total }}
+          # Shared backends full runs these six with every case in this run,
+          # a superset of the focused cases this battery gives them.
+          SKIP_TARGETS: ${{ needs.changes.outputs.shared_full == 'true' && 'sharepoint,sharepoint-prefix,onedrive,box,gdrive,gdrive-folder' || '' }}
         run: >-
           ../python/.venv/bin/python runners/tools/shard.py
           --shard "$SHARD_INDEX" --shards "$SHARD_COUNT" --procs 4
           --host typescript --facet core --facet http
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
+          --skip-targets "$SKIP_TARGETS"
           --emit-dir "$GITHUB_WORKSPACE/emit/typescript"
           -- pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --suite shared --strict
       - name: Probe the GridFS trash under a snapshot restore (typescript)
@@ -1099,7 +1245,9 @@ jobs:
   # so a change that breaks the same way in both languages still fails.
   # The battery jobs keep every target's raw outputs, so parity is a diff of
   # those files rather than both hosts running these targets a second time.
-  # The six focused backend targets keep the same selected rows on both hosts.
+  # The six focused backend targets keep the same selected rows on both hosts;
+  # when the shards leave them to Shared backends full, its parity job diffs
+  # them over every case instead.
   # Include nested mounts and the search-only command service so native
   # delegation and dispatcher-backed composition are checked across hosts.
   integ-shared-parity:
@@ -1120,10 +1268,17 @@ jobs:
           path: emit/typescript
           merge-multiple: true
       - name: Diff python and typescript battery output
+        env:
+          SAAS: ${{ needs.changes.outputs.shared_full != 'true' && 'sharepoint sharepoint-prefix onedrive box gdrive gdrive-folder' || '' }}
         run: >-
           python3 integ/runners/parity.py --from emit
           ram disk disk-host-links disk-capacity-permissions redis ram-history ram-nested ram-chain command-service
-          sharepoint sharepoint-prefix onedrive box gdrive gdrive-folder
+          $SAAS
+
+  shared-full:
+    needs: changes
+    if: needs.changes.outputs.shared_full == 'true'
+    uses: ./.github/workflows/test_shared_full.yml
 
   # One job per backend family with both hosts inside it. The postgres, chroma,
   # qdrant and mongodb fleet is the expensive part and was being started twice,
@@ -1148,6 +1303,8 @@ jobs:
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 10
       chroma:
@@ -1920,7 +2077,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b, c1, c2, c3, d, e, f, g1, g2, g3, h1, h2, h3]
+        leg: [a, b, c1, c2, d, e, f, g1, g2, h1, h3]
     services:
       redis:
         image: redis:7
@@ -1929,16 +2086,23 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 5
       mongodb:
         # MongoDB 8 refuses to start on the runners' kernel 6.19+ (SERVER-121912).
-        image: mongo:7.0
+        # Only the last leg takes the one suite that mounts MongoDB, so only it
+        # starts the service; an empty image skips it on the other ten,
+        # and the resolver below refuses a MongoDB suite on any other leg.
+        image: ${{ matrix.leg == 'h3' && 'mongo:7.0' || '' }}
         ports:
           - 27017:27017
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
+          --health-start-period 60s
+          --health-start-interval 1s
           --health-timeout 5s
           --health-retries 10
     env:
@@ -1964,21 +2128,20 @@ jobs:
       # Every leg keeps the complete SDK and CLI matrices for its suites.
       # Split the long open, policy/program/write and runtime-specific legs
       # at suite boundaries; setup and fresh interpreters still count toward
-      # their wall time. MongoDB and sandbox mount host ordering stays in
-      # parallel.sh. The last leg takes every otherwise-unclaimed suite.
+      # their wall time, so a leg that ran five or six minutes shares its
+      # runner with a sibling rather than paying two minutes of setup alone.
+      # MongoDB and sandbox mount host ordering stays in parallel.sh. The
+      # last leg takes every otherwise-unclaimed suite.
       LEG_A_SUITES: "path/cwd path/rename path/stat"
       LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
       LEG_C1_SUITES: "dir/readdir open/a+ open/mode open/view"
-      LEG_C2_SUITES: "open/a open/r open/x"
-      LEG_C3_SUITES: "open/r+ open/w open/w+"
+      LEG_C2_SUITES: "open/a open/r open/r+ open/w open/w+ open/x"
       LEG_D_SUITES: "dir/glob dir/mkdir dir/rmdir dir/walk facade"
       LEG_E_SUITES: "read routing workspace"
       LEG_F_SUITES: "write/capacity write/exit write/fd write/order write/parallel write/pwrite write/sync write/truncate write/writev"
-      LEG_G1_SUITES: "policy"
+      LEG_G1_SUITES: "policy write/write"
       LEG_G2_SUITES: "program quickjs"
-      LEG_G3_SUITES: "write/write"
       LEG_H1_SUITES: "pyodide"
-      LEG_H2_SUITES: "sandbox host"
     steps:
       - uses: actions/checkout@v7
 
@@ -2000,6 +2163,7 @@ jobs:
           wasi_suites=()
           box_suites=()
           ssh_suites=()
+          mongo_suites=()
           while IFS= read -r f; do
             n="${f#integ/runtime/}"
             n="${n%.json}"
@@ -2032,6 +2196,9 @@ jobs:
             if jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "ssh"))' "$f" >/dev/null; then
               ssh_suites+=("$n")
             fi
+            if jq -e 'any(.cases[]?; any((.world.mounts // {})[]; .vfs == "mongodb"))' "$f" >/dev/null; then
+              mongo_suites+=("$n")
+            fi
           done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
           folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
@@ -2051,7 +2218,7 @@ jobs:
             ' <<<"$all"
           }
           named=""
-          for leg in A B C1 C2 C3 D E F G1 G2 G3 H1 H2; do
+          for leg in A B C1 C2 D E F G1 G2 H1; do
             var="LEG_${leg}_SUITES"
             picked=$(select_suites "${!var:-}")
             if [ -z "$picked" ]; then
@@ -2087,6 +2254,12 @@ jobs:
           # resolved list rather than the leg letter, so moving a folder
           # across moves its service with it.
           in_leg() { grep -qx "$1" <<<"$suites"; }
+          for s in "${mongo_suites[@]}"; do
+            if in_leg "$s" && [ "$LEG" != h3 ]; then
+              echo "$s mounts MongoDB, which only leg h3 starts" >&2
+              exit 1
+            fi
+          done
           for s in "${wasi_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_WASI=1" >> "$GITHUB_ENV"; break; fi
           done
@@ -3012,7 +3185,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ-cloudflare, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-cloudflare, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, shared-full, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

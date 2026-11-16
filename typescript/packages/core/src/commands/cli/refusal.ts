@@ -20,9 +20,16 @@ import {
   GIT_USAGE_GAP,
   GIT_USAGE_WIDTH,
   HELP_EXIT,
+  POPPLER_EXIT,
   USAGE_EXIT,
 } from './constants.ts'
-import { clapUnexpectedArgument, operandSlot, optionMetavar, usageLine } from '../spec/help.ts'
+import {
+  argparseHelp,
+  clapUnexpectedArgument,
+  operandSlot,
+  optionMetavar,
+  usageLine,
+} from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -343,7 +350,8 @@ export function clapLeafRefusal(
  * USAGE_EXIT table, because an installed CLI name is never a GNU tool with its
  * own pinned exit. git exits 129 for the same mistake, which is neither that
  * nor its own 128 for a fatal. clap exits 2, agreeing with argparse by
- * coincidence rather than by lineage.
+ * coincidence rather than by lineage. poppler's readers print their help page
+ * and exit 99.
  *
  * git answers in parse-options' words, and some of them print the verb's
  * usage block: after an unknown option or an ambiguous abbreviation on
@@ -381,6 +389,9 @@ export function leafRefusal(
     }
     const worded = clapLeafRefusal(prog, spec, parsed as unknown as ClapRefusalFacts)
     return [worded ?? argparseMessage, CLAP_EXIT, null]
+  }
+  if (style === UsageStyle.POPPLER) {
+    return [encodeText(argparseHelp(prog, spec)), POPPLER_EXIT, null]
   }
   if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT, null]
   const kind = parsed.optionErrorKinds[0]

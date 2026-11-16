@@ -12,6 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { first, insert, select, update } from '../kit/typescript/index.ts'
+import type {
+  GithubCheck,
+  GithubComment,
+  GithubIssue,
+  GithubPull,
+  GithubReview,
+  GithubReviewComment,
+} from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
@@ -47,7 +57,6 @@ import {
   reachableFrom,
   repoJson,
   resolveRef,
-  scope,
 } from './store.ts'
 import type { RepoRow, Resolved } from './store.ts'
 import {
@@ -142,28 +151,28 @@ function headBranch(row: PullRow): string {
 // network the row names by seq, or whose owner an `owner:` head names. Null
 // when that repository is gone, as GitHub then reports the head's repo.
 export async function headRepoOf(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
 ): Promise<RepoRow | null> {
-  const repos = await allRepos(ctx.db, ctx.tenant)
+  const repos = await allRepos(ctx.sql, ctx.tenant)
   if (row.headRepoSeq >= 0) return repos.find((r) => r.seq === row.headRepoSeq) ?? null
   const cut = row.head.indexOf(':')
   const owner = cut < 0 ? repo.owner : row.head.slice(0, cut)
   if (owner.toLowerCase() === repo.owner.toLowerCase()) return repo
-  return await forkOwnedBy(ctx.db, ctx.tenant, repo, owner, headBranch(row))
+  return await forkOwnedBy(ctx.sql, ctx.tenant, repo, owner, headBranch(row))
 }
 
 async function pullHead(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
 ): Promise<Resolved | null> {
   const home = await headRepoOf(ctx, repo, row)
-  const branch = home === null ? null : await branchFor(ctx.db, ctx.tenant, home, headBranch(row))
+  const branch = home === null ? null : await branchFor(ctx.sql, ctx.tenant, home, headBranch(row))
   if (branch === null && row.headSha === '') return null
   return await resolveRef(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     home ?? repo,
     branch === null ? row.headSha : `refs/heads/${branch}`,
@@ -171,16 +180,18 @@ async function pullHead(
 }
 
 async function pullBase(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
 ): Promise<Resolved | null> {
-  const branch = await branchFor(ctx.db, ctx.tenant, repo, row.base)
-  return branch === null ? null : await resolveRef(ctx.db, ctx.tenant, repo, `refs/heads/${branch}`)
+  const branch = await branchFor(ctx.sql, ctx.tenant, repo, row.base)
+  return branch === null
+    ? null
+    : await resolveRef(ctx.sql, ctx.tenant, repo, `refs/heads/${branch}`)
 }
 
 async function pullState(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
 ): Promise<PullState> {
@@ -190,13 +201,13 @@ async function pullState(
   const range =
     head === null || base === null
       ? NO_RANGE
-      : ((await rangeOf(ctx.db, ctx.tenant, repo, base, head, home)) ?? NO_RANGE)
+      : ((await rangeOf(ctx.sql, ctx.tenant, repo, base, head, home)) ?? NO_RANGE)
   const tip = head?.history[0]?.sha
   return {
     head: tip ?? row.headSha,
     base: base?.history[0]?.sha ?? '',
     history:
-      tip === undefined ? [] : reachableFrom(tip, await commitsBySha(ctx.db, ctx.tenant, home)),
+      tip === undefined ? [] : reachableFrom(tip, await commitsBySha(ctx.sql, ctx.tenant, home)),
     range,
   }
 }
@@ -207,7 +218,7 @@ async function pullState(
 // repository and its `owner:branch` label, the head's a fork's when it comes
 // from one.
 export async function pullJson(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
 ): Promise<JsonValue> {
@@ -221,7 +232,7 @@ export async function pullJson(
     ref,
     sha,
     user: { login: owner },
-    repo: at === null ? null : await repoJson(ctx.db, ctx.tenant, at),
+    repo: at === null ? null : await repoJson(ctx.sql, ctx.tenant, at),
   })
   return {
     number: row.number,
@@ -260,19 +271,25 @@ function record(value: JsonValue): Record<string, JsonValue> {
 }
 
 export async function pullRow(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   number: number,
 ): Promise<PullRow | null> {
-  return (await db.githubPull.findFirst({
-    where: { ...scope(tenant), repo: repo.fullName, number },
-  })) as PullRow | null
+  return first<GithubPull>(
+    db,
+    DMMF,
+    'GithubPull',
+    '"tenant" = ? AND "repo" = ? AND "number" = ?',
+    tenant,
+    repo.fullName,
+    number,
+  ) as PullRow | null
 }
 
 async function found(ctx: Ctx<C>, repo: RepoRow): Promise<PullRow | null> {
   const number = numberParam(ctx)
-  return number === null ? null : await pullRow(ctx.db, ctx.tenant, repo, number)
+  return number === null ? null : await pullRow(ctx.sql, ctx.tenant, repo, number)
 }
 
 // `sort` is `created` (the default), `updated`, `popularity`, which is the
@@ -281,9 +298,14 @@ async function found(ctx: Ctx<C>, repo: RepoRow): Promise<PullRow | null> {
 // one needs a clock the fake does not keep, so it is not applied. `direction`
 // defaults to `desc` for `created` and to `asc` for the rest, as GitHub's does.
 async function listPulls(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  const rows = (await ctx.db.githubPull.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-  })) as PullRow[]
+  const rows = select<GithubPull>(
+    ctx.sql,
+    DMMF,
+    'GithubPull',
+    '"tenant" = ? AND "repo" = ?',
+    ctx.tenant,
+    repo.fullName,
+  ) as PullRow[]
   const wanted = ctx.query.get('state') ?? 'open'
   let kept = rows.filter((r) => wanted === 'all' || r.state === wanted)
   const base = ctx.query.get('base') ?? ''
@@ -302,10 +324,14 @@ async function listPulls(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   }
   const sort = ctx.query.get('sort') ?? 'created'
   const direction = ctx.query.get('direction') ?? (sort === 'created' ? 'desc' : 'asc')
-  const comments = await ctx.db.githubComment.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    select: { issueNumber: true },
-  })
+  const comments = select<GithubComment>(
+    ctx.sql,
+    DMMF,
+    'GithubComment',
+    '"tenant" = ? AND "repo" = ?',
+    ctx.tenant,
+    repo.fullName,
+  )
   const talk = (row: PullRow): number => comments.filter((c) => c.issueNumber === row.number).length
   const key = (row: PullRow): number | string =>
     sort === 'updated' ? row.updatedAt : sort === 'popularity' ? talk(row) : row.createdAt
@@ -330,10 +356,10 @@ export async function createPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const home =
     owner.toLowerCase() === repo.owner.toLowerCase()
       ? repo
-      : await forkOwnedBy(ctx.db, ctx.tenant, repo, owner, named)
+      : await forkOwnedBy(ctx.sql, ctx.tenant, repo, owner, named)
   const headName =
-    home === null || named === '' ? null : await branchFor(ctx.db, ctx.tenant, home, named)
-  const baseBranch = await branchFor(ctx.db, ctx.tenant, repo, base)
+    home === null || named === '' ? null : await branchFor(ctx.sql, ctx.tenant, home, named)
+  const baseBranch = await branchFor(ctx.sql, ctx.tenant, repo, base)
   const invalid = [
     ...(baseBranch === null ? [{ resource: 'PullRequest', field: 'base', code: 'invalid' }] : []),
     ...(headName === null ? [{ resource: 'PullRequest', field: 'head', code: 'invalid' }] : []),
@@ -346,16 +372,18 @@ export async function createPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const custom = (message: string): Reply =>
     validationFailed([{ resource: 'PullRequest', code: 'custom', message }], CREATE_DOCS)
   const headRepoSeq = cross ? home.seq : -1
-  const open = await ctx.db.githubPull.findFirst({
-    where: {
-      ...scope(ctx.tenant),
-      repo: repo.fullName,
-      head: headName,
-      headRepoSeq,
-      base: baseBranch,
-      state: 'open',
-    },
-  })
+  const open = first<GithubPull>(
+    ctx.sql,
+    DMMF,
+    'GithubPull',
+    '"tenant" = ? AND "repo" = ? AND "head" = ? AND "headRepoSeq" = ? AND "base" = ? AND "state" = ?',
+    ctx.tenant,
+    repo.fullName,
+    headName,
+    headRepoSeq,
+    baseBranch,
+    'open',
+  )
   if (open !== null) {
     return custom(`A pull request already exists for ${home.owner}:${headName}.`)
   }
@@ -375,19 +403,17 @@ export async function createPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   }
-  const from = await resolveRef(ctx.db, ctx.tenant, repo, `refs/heads/${baseBranch}`)
-  const to = await resolveRef(ctx.db, ctx.tenant, home, `refs/heads/${headName}`)
+  const from = await resolveRef(ctx.sql, ctx.tenant, repo, `refs/heads/${baseBranch}`)
+  const to = await resolveRef(ctx.sql, ctx.tenant, home, `refs/heads/${headName}`)
   const range =
-    from === null || to === null ? null : await rangeOf(ctx.db, ctx.tenant, repo, from, to, home)
+    from === null || to === null ? null : await rangeOf(ctx.sql, ctx.tenant, repo, from, to, home)
   if (range === null) {
     return custom(`The ${label} branch has no history in common with ${baseBranch}`)
   }
   if (range.ahead.length === 0) return custom(`No commits between ${baseBranch} and ${label}`)
-  const number = await nextNumber(ctx.db, ctx.tenant, repo)
+  const number = await nextNumber(ctx.sql, ctx.tenant, repo)
   const row: PullRow = { ...draft, number, headSha: range.after }
-  await ctx.db.githubPull.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: number },
-  })
+  insert(ctx.sql, 'GithubPull', { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: number })
   return { status: 201, body: await pullDetail(ctx, repo, row) }
 }
 
@@ -416,7 +442,7 @@ async function listPullCommits(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const row = await found(ctx, repo)
   if (row === null) return fail(404, 'Not Found')
   const { range } = await pullState(ctx, repo, row)
-  return pagedReply(ctx, await commitsJson(ctx.db, ctx.tenant, repo, [...range.ahead].reverse()))
+  return pagedReply(ctx, await commitsJson(ctx.sql, ctx.tenant, repo, [...range.ahead].reverse()))
 }
 
 async function editPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
@@ -428,10 +454,16 @@ async function editPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   if ('body' in body) next.body = str(body, 'body')
   if ('state' in body) next.state = str(body, 'state')
   if ('base' in body) next.base = str(body, 'base')
-  await ctx.db.githubPull.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, number: row.number },
-    data: next,
-  })
+  update(
+    ctx.sql,
+    'GithubPull',
+    { ...next },
+    {
+      tenant: ctx.tenant,
+      repo: repo.fullName,
+      number: row.number,
+    },
+  )
   return { status: 200, body: await pullDetail(ctx, repo, next) }
 }
 
@@ -443,10 +475,12 @@ async function mergePull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const expected = str(jsonBodyOf(ctx), 'sha')
   const head = (await pullState(ctx, repo, row)).head
   if (expected !== '' && expected !== head) return fail(409, 'Head branch was modified')
-  await ctx.db.githubPull.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, number: row.number },
-    data: { state: 'closed', merged: true },
-  })
+  update(
+    ctx.sql,
+    'GithubPull',
+    { state: 'closed', merged: true },
+    { tenant: ctx.tenant, repo: repo.fullName, number: row.number },
+  )
   return {
     status: 200,
     body: {
@@ -594,14 +628,19 @@ function reviewCommentJson(repo: RepoRow, number: number, row: ReviewCommentRow)
 }
 
 async function reviewCommentRows(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   number: number,
 ): Promise<ReviewCommentRow[]> {
-  return (await ctx.db.githubReviewComment.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, pullNumber: number },
-    orderBy: { seq: 'asc' },
-  })) as ReviewCommentRow[]
+  return select<GithubReviewComment>(
+    ctx.sql,
+    DMMF,
+    'GithubReviewComment',
+    '"tenant" = ? AND "repo" = ? AND "pullNumber" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+    number,
+  ) as ReviewCommentRow[]
 }
 
 // Record a review and the comments it carries, all placed already.
@@ -614,8 +653,12 @@ async function recordReview(
 ): Promise<{ review: ReviewRow; comments: ReviewCommentRow[] }> {
   const seq = (await reviewRows(ctx, repo, pull.number)).length + 1
   const made: ReviewRow = { id: 8000 + pull.number * 100 + seq, ...review }
-  await ctx.db.githubReview.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, pullNumber: pull.number, ...made, seq },
+  insert(ctx.sql, 'GithubReview', {
+    tenant: ctx.tenant,
+    repo: repo.fullName,
+    pullNumber: pull.number,
+    ...made,
+    seq,
   })
   const first = (await reviewCommentRows(ctx, repo, pull.number)).length + 1
   const rows = comments.map((comment, i): ReviewCommentRow => ({
@@ -627,14 +670,12 @@ async function recordReview(
     ...comment,
   }))
   for (const [i, row] of rows.entries()) {
-    await ctx.db.githubReviewComment.create({
-      data: {
-        tenant: ctx.tenant,
-        repo: repo.fullName,
-        pullNumber: pull.number,
-        ...row,
-        seq: first + i,
-      },
+    insert(ctx.sql, 'GithubReviewComment', {
+      tenant: ctx.tenant,
+      repo: repo.fullName,
+      pullNumber: pull.number,
+      ...row,
+      seq: first + i,
     })
   }
   return { review: made, comments: rows }
@@ -730,14 +771,19 @@ function pick(from: Placement): Placement {
 }
 
 async function reviewRows(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   number: number,
 ): Promise<ReviewRow[]> {
-  return (await ctx.db.githubReview.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, pullNumber: number },
-    orderBy: { seq: 'asc' },
-  })) as ReviewRow[]
+  return select<GithubReview>(
+    ctx.sql,
+    DMMF,
+    'GithubReview',
+    '"tenant" = ? AND "repo" = ? AND "pullNumber" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+    number,
+  ) as ReviewRow[]
 }
 
 async function listReviews(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
@@ -808,10 +854,12 @@ async function requestReviewers(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   }
   const reviewers = [...new Set([...(JSON.parse(row.reviewersJson) as string[]), ...logins])]
   const next: PullRow = { ...row, reviewersJson: JSON.stringify(reviewers) }
-  await ctx.db.githubPull.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, number: row.number },
-    data: { reviewersJson: next.reviewersJson },
-  })
+  update(
+    ctx.sql,
+    'GithubPull',
+    { reviewersJson: next.reviewersJson },
+    { tenant: ctx.tenant, repo: repo.fullName, number: row.number },
+  )
   return { status: 201, body: await pullDetail(ctx, repo, next) }
 }
 
@@ -844,15 +892,13 @@ interface HistoryArgs extends PageArgs {
  * listing `GET /commits` answers from it, filtered and paged the same way.
  */
 export function commitNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repos: RepoRow[],
   row: CommitRow,
 ): Record<string, unknown> {
-  const where = {
-    ...scope(ctx.tenant),
-    repo: { in: repos.map((r) => r.fullName) },
-    sha: row.sha,
-  }
+  const where =
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ? ORDER BY "pk" ASC'
+  const at = [ctx.tenant, JSON.stringify(repos.map((r) => r.fullName)), row.sha]
   const who = commitIdentity(row)
   const [headline = '', ...rest] = row.message.split('\n')
   return {
@@ -870,7 +916,7 @@ export function commitNode(
     statusCheckRollup: {
       contexts: async ({ first, after }: PageArgs) => {
         const required = new Set(JSON.parse(repos[0]?.requiredChecksJson ?? '[]') as string[])
-        const checks = await ctx.db.githubCheck.findMany({ where, orderBy: { pk: 'asc' } })
+        const checks = select<GithubCheck>(ctx.sql, DMMF, 'GithubCheck', where, ...at)
         const statuses = (await combinedStatus(ctx, repos, row.sha)).rows
         const contexts = [
           ...checks.map((check) => ({
@@ -900,8 +946,8 @@ export function commitNode(
     history: async ({ first, after, path, since, until }: HistoryArgs) => {
       const [home] = repos
       if (home === undefined) return page([], first, after)
-      const byId = await commitsBySha(ctx.db, ctx.tenant, home)
-      const listed = await commitHistory(ctx.db, ctx.tenant, home, row.sha, byId, {
+      const byId = await commitsBySha(ctx.sql, ctx.tenant, home)
+      const listed = await commitHistory(ctx.sql, ctx.tenant, home, row.sha, byId, {
         since: since ?? null,
         until: until ?? null,
         author: '',
@@ -921,7 +967,7 @@ export function commitNode(
  * opens every pull request between two of one repository's branches.
  */
 export async function pullRequestNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: PullRow,
   repository: Record<string, unknown>,
@@ -940,11 +986,14 @@ export async function pullRequestNode(
   const latest = new Map<string, ReviewRow>()
   for (const review of reviews) if (review.user !== row.user) latest.set(review.user, review)
   const referenced = closedNumbers(row.body)
-  const closing = (
-    await ctx.db.githubIssue.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName, number: { in: referenced } },
-      orderBy: { seq: 'asc' },
-    })
+  const closing = select<GithubIssue>(
+    ctx.sql,
+    DMMF,
+    'GithubIssue',
+    '"tenant" = ? AND "repo" = ? AND "number" IN (SELECT value FROM json_each(?)) ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+    JSON.stringify(referenced),
   ).map((issue) => ({
     id: issueNodeId(repo.seq, issue.number),
     number: issue.number,
@@ -1083,15 +1132,19 @@ export interface PullRequestsArgs extends PageArgs {
  * into its node, which the caller composes with what it owns.
  */
 export async function pullRequestConnection(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   args: PullRequestsArgs,
   nodes: (row: PullRow) => Promise<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
-  const rows = (await ctx.db.githubPull.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'desc' },
-  })) as PullRow[]
+  const rows = select<GithubPull>(
+    ctx.sql,
+    DMMF,
+    'GithubPull',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+    ctx.tenant,
+    repo.fullName,
+  ) as PullRow[]
   const states = args.states ?? ['OPEN', 'CLOSED', 'MERGED']
   const kept = rows.filter((row) => {
     const state = row.merged ? 'MERGED' : row.state === 'closed' ? 'CLOSED' : 'OPEN'

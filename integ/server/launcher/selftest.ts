@@ -199,6 +199,12 @@ async function refusals(): Promise<void> {
   } catch {
     // asserted above; this call is here for the leak check that follows
   }
+  // A closed listener and the template push's child process both leave the
+  // handle list in the loop's close phase, after their callbacks have run,
+  // and a seed on node:sqlite no longer turns the loop before the arm
+  // refuses. The count waits for one timer, which runs after that phase. A
+  // listener left up would still be counted.
+  await new Promise((resolve) => setTimeout(resolve, 0))
   const after = process.getActiveResourcesInfo().length
   check('a refused launch leaves nothing listening', after <= before, `${before} -> ${after}`)
 }

@@ -128,7 +128,7 @@ async function listPage(
     tail.length > 0
       ? JSON.stringify({ kind: 'page', entries: tail, ...meta })
       : JSON.stringify({ kind: 'delta', ...meta })
-  const cursor = await saveCursor(ctx.db, ctx.tenant, 'list', payload, ctx.minter)
+  const cursor = await saveCursor(ctx.sql, ctx.tenant, 'list', payload, ctx.minter)
   return {
     status: 200,
     body: page(head, cursor, tail.length > 0),
@@ -144,8 +144,8 @@ async function listFolder(ctx: Ctx<C>): Promise<Reply> {
   // taking the watermark first re-reports that write on the next continue,
   // where taking it last would swallow the row the listing had already
   // passed and leave the file invisible until something else touched it.
-  const seq = await maxItemSeq(ctx.db, ctx.tenant)
-  const items = await listChildren(ctx.db, ctx.tenant, path, recursive)
+  const seq = await maxItemSeq(ctx.sql, ctx.tenant)
+  const items = await listChildren(ctx.sql, ctx.tenant, path, recursive)
   if (items === null) return apiError('path/not_found/...')
   return listPage(ctx, items.map(entryFor), num(body.limit, LIST_LIMIT), {
     path,
@@ -160,17 +160,17 @@ async function latestCursor(ctx: Ctx<C>): Promise<Reply> {
   const body = obj(ctx.json())
   const path = str(body.path)
   const recursive = body.recursive === true
-  const seq = await maxItemSeq(ctx.db, ctx.tenant)
-  if ((await listChildren(ctx.db, ctx.tenant, path, false)) === null) {
+  const seq = await maxItemSeq(ctx.sql, ctx.tenant)
+  if ((await listChildren(ctx.sql, ctx.tenant, path, false)) === null) {
     return apiError('path/not_found/...')
   }
   const payload = JSON.stringify({ kind: 'delta', path, recursive, seq })
-  const cursor = await saveCursor(ctx.db, ctx.tenant, 'list', payload, ctx.minter)
+  const cursor = await saveCursor(ctx.sql, ctx.tenant, 'list', payload, ctx.minter)
   return { status: 200, body: { cursor } }
 }
 
 async function listContinue(ctx: Ctx<C>): Promise<Reply> {
-  const payload = await takeCursor(ctx.db, ctx.tenant, str(obj(ctx.json()).cursor), 'list')
+  const payload = await takeCursor(ctx.sql, ctx.tenant, str(obj(ctx.json()).cursor), 'list')
   if (payload === null) return apiError('reset/...')
   const parsed = JSON.parse(payload) as {
     kind?: string
@@ -188,8 +188,8 @@ async function listContinue(ctx: Ctx<C>): Promise<Reply> {
     return listPage(ctx, parsed.entries, LIST_LIMIT, meta)
   }
   if (parsed.kind === 'delta') {
-    const seq = await maxItemSeq(ctx.db, ctx.tenant)
-    const changed = await changesSince(ctx.db, ctx.tenant, meta.path, meta.recursive, meta.seq)
+    const seq = await maxItemSeq(ctx.sql, ctx.tenant)
+    const changed = await changesSince(ctx.sql, ctx.tenant, meta.path, meta.recursive, meta.seq)
     const entries = changed.map((row) =>
       row.kind === 'item' ? entryFor(row.item) : deletedEntry(row.path),
     )
@@ -199,7 +199,7 @@ async function listContinue(ctx: Ctx<C>): Promise<Reply> {
 }
 
 async function getMetadata(ctx: Ctx<C>): Promise<Reply> {
-  const item = await itemAt(ctx.db, ctx.tenant, str(obj(ctx.json()).path))
+  const item = await itemAt(ctx.sql, ctx.tenant, str(obj(ctx.json()).path))
   if (item === null) return apiError('path/not_found/...')
   return { status: 200, body: entryFor(item) }
 }
@@ -212,7 +212,7 @@ async function getMetadata(ctx: Ctx<C>): Promise<Reply> {
 // a full download and on a ranged one (206), as the real service sends it;
 // a read stamps that hash.
 async function download(ctx: Ctx<C>): Promise<Reply> {
-  const item = await itemAt(ctx.db, ctx.tenant, argPath(ctx))
+  const item = await itemAt(ctx.sql, ctx.tenant, argPath(ctx))
   if (item === null) return apiError('path/not_found/...')
   if (item.isFolder) return apiError('path/not_file/...')
   const reply = rangeReply(ctx.headers, item.content ?? new Uint8Array(0))
@@ -226,7 +226,7 @@ async function download(ctx: Ctx<C>): Promise<Reply> {
 async function upload(ctx: Ctx<C>): Promise<Reply> {
   const path = argPath(ctx)
   if (path === '') return malformed()
-  const at = await itemAt(ctx.db, ctx.tenant, path)
+  const at = await itemAt(ctx.sql, ctx.tenant, path)
   if (at !== null && at.isFolder) return apiError('path/conflict/folder/...')
   // Update mode stores the upload only while the file is still the rev it
   // names, and answers path/conflict otherwise (measured 2026-10-05). The rev
@@ -239,7 +239,7 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
   // pinned in the past, so `find -mtime -1` sees a just-written file as fresh
   // exactly as it does against MinIO in the s3 targets.
   const item = await putFile(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     path,
     new Uint8Array(ctx.body),
@@ -252,17 +252,17 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
 async function createFolder(ctx: Ctx<C>): Promise<Reply> {
   const path = str(obj(ctx.json()).path)
   if (path === '') return malformed()
-  if ((await itemAt(ctx.db, ctx.tenant, path)) !== null) {
+  if ((await itemAt(ctx.sql, ctx.tenant, path)) !== null) {
     return apiError('path/conflict/folder/...')
   }
-  const item = await addFolder(ctx.db, ctx.tenant, path, ctx.minter)
+  const item = await addFolder(ctx.sql, ctx.tenant, path, ctx.minter)
   return { status: 200, body: { metadata: entryFor(item) } }
 }
 
 async function deleteItem(ctx: Ctx<C>): Promise<Reply> {
   const path = str(obj(ctx.json()).path)
   if (path === '') return malformed()
-  const item = await itemAt(ctx.db, ctx.tenant, path)
+  const item = await itemAt(ctx.sql, ctx.tenant, path)
   if (item === null) return apiError('path_lookup/not_found/...')
   // parent_rev deletes only while the file is still that rev (measured
   // 2026-10-08).
@@ -270,7 +270,7 @@ async function deleteItem(ctx: Ctx<C>): Promise<Reply> {
   if (typeof parentRev === 'string' && revOf(item) !== parentRev) {
     return apiError('path_write/conflict/file/...')
   }
-  await remove(ctx.db, ctx.tenant, path, ctx.minter)
+  await remove(ctx.sql, ctx.tenant, path, ctx.minter)
   return { status: 200, body: { metadata: entryFor(item) } }
 }
 
@@ -282,15 +282,15 @@ function relocate(isMove: boolean) {
     const from = str(body.from_path)
     const to = str(body.to_path)
     if (from === '' || to === '') return malformed()
-    const src = await itemAt(ctx.db, ctx.tenant, from)
+    const src = await itemAt(ctx.sql, ctx.tenant, from)
     if (src === null) return apiError('from_lookup/not_found/...')
-    const dst = await itemAt(ctx.db, ctx.tenant, to)
+    const dst = await itemAt(ctx.sql, ctx.tenant, to)
     if (dst !== null) {
       return apiError(dst.isFolder ? 'to/conflict/folder/...' : 'to/conflict/file/...')
     }
-    await copyTree(ctx.db, ctx.tenant, from, to, ctx.minter)
-    if (isMove) await remove(ctx.db, ctx.tenant, from, ctx.minter)
-    const moved = await itemAt(ctx.db, ctx.tenant, to)
+    await copyTree(ctx.sql, ctx.tenant, from, to, ctx.minter)
+    if (isMove) await remove(ctx.sql, ctx.tenant, from, ctx.minter)
+    const moved = await itemAt(ctx.sql, ctx.tenant, to)
     return { status: 200, body: { metadata: moved === null ? null : entryFor(moved) } }
   }
 }
@@ -308,7 +308,7 @@ async function searchPage(ctx: Ctx<C>, state: SearchState): Promise<Reply> {
   const out: Record<string, JsonValue> = { matches: slice, has_more: hasMore }
   if (hasMore) {
     out.cursor = await saveCursor(
-      ctx.db,
+      ctx.sql,
       ctx.tenant,
       'search',
       JSON.stringify({ matches, start: start + limit, limit }),
@@ -323,7 +323,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
   const query = str(body.query)
   if (query === '') return { status: 400, body: { error_summary: 'invalid_argument' } }
   const options = obj(body.options)
-  const items = await scopedItems(ctx.db, ctx.tenant, str(options.path))
+  const items = await scopedItems(ctx.sql, ctx.tenant, str(options.path))
   if (items === null) return apiError('path/not_found/...')
   const q = query.toLowerCase()
   const filenameOnly = options.filename_only === true
@@ -342,7 +342,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
 }
 
 async function searchContinue(ctx: Ctx<C>): Promise<Reply> {
-  const payload = await takeCursor(ctx.db, ctx.tenant, str(obj(ctx.json()).cursor), 'search')
+  const payload = await takeCursor(ctx.sql, ctx.tenant, str(obj(ctx.json()).cursor), 'search')
   if (payload === null) return apiError('reset/...')
   return searchPage(ctx, JSON.parse(payload) as SearchState)
 }
@@ -350,7 +350,7 @@ async function searchContinue(ctx: Ctx<C>): Promise<Reply> {
 // The account's space, the bytes every stored file holds against a Basic
 // account's allocation.
 async function spaceUsage(ctx: Ctx<C>): Promise<Reply> {
-  const items = (await scopedItems(ctx.db, ctx.tenant, '')) ?? []
+  const items = (await scopedItems(ctx.sql, ctx.tenant, '')) ?? []
   const used = items.reduce((n, item) => n + (item.content?.length ?? 0), 0)
   return {
     status: 200,

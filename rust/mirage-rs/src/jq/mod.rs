@@ -15,7 +15,7 @@ mod regex;
 mod syntax;
 #[cfg(test)]
 mod tests;
-mod time;
+pub(crate) mod time;
 mod unicode;
 mod value;
 mod vm;

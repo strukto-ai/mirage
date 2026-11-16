@@ -315,7 +315,8 @@
     "ModuleSource": "What a `#mirage-*-wasm` import gives: the module its host compiled (a page as it loads, workerd's bundler) or Node's loader that compiles it on first use; Python loads its native extension.",
     "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile.",
     "StreamModule": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
-    "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader."
+    "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
+    "unbound": "Stands in for the functions a Wasm module imports, so an instance can be made; Python's native module links nothing from its host."
    }
   },
   "fuse/constants": {
@@ -935,6 +936,10 @@
     "overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
    },
    "typescript_only": {
+    "SHALLOW_WRITERS": "Serializes addShallow's read and rewrite of each .git/shallow; Python's twin sits in objects.py beside add_shallow, a module TypeScript folds into repo.ts.",
+    "addShallow": "Lists the commits a fetch cut in .git/shallow; Python's add_shallow sits in objects.py beside store_pack and the store that reads the file, a module TypeScript folds into repo.ts.",
+    "grafted": "A shallow repository's boundary commit read parentless, for readCommit and commitFacts; Python grafts it once where its object store parses the commit (objects.GraftedCommit).",
+    "readCommit": "Every isomorphic-git commit read that walks history goes through it, so a shallow repository's boundary commit reads parentless; Python grafts it once where its object store parses the commit (objects.GraftedCommit).",
     "refOid": "isomorphic-git has no ref table to hand a circling chain to, so each resolve goes through this; Python overrides follow on the one RefTable.",
     "storedItems": "isomorphic-git's tree reader refuses a whole tree over one reserved name, so TypeScript parses the stored bytes; dulwich's Tree parses every name."
    }
@@ -1830,6 +1835,12 @@
    "python_only": {
     "_mint": "Python mints an App installation token with the pool and error mapping in this module; TypeScript's transport mints through appMinter.",
     "github_token": "Python's calls are module functions over an account, so the current token is one too; TypeScript's is HttpGitHubTransport.token."
+   }
+  },
+  "commands/cli/builtin/pdf/run": {
+   "typescript_only": {
+    "openPdfStream": "The PDF Wasm module, which the TypeScript host loads on first use; Python's native module has pdftotext and pdfinfo built in.",
+    "pdfModule": "The PDF Wasm module, which the TypeScript host loads on first use; Python's native module has pdftotext and pdfinfo built in."
    }
   }
  }

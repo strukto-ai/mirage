@@ -135,6 +135,9 @@ async function callRoute(
       tenant: at.tenant,
       runPrefix: '',
       db: at.runtime.pool.client(at.run),
+      get sql() {
+        return at.runtime.pool.sql(at.run)
+      },
       clock: state.clock,
       minter: state.minter,
       // The routes authenticate off a bearer, and the tenant IS the token in this

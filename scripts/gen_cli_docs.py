@@ -52,6 +52,14 @@ SUMMARIES = {
         "Create and edit Excel workbooks, Word documents and PowerPoint "
         "decks with OfficeCLI paths"
     ),
+    "pdfinfo": (
+        "Print a PDF's metadata, page count, page sizes, encryption and "
+        "version"
+    ),
+    "pdftotext": (
+        "Extract a PDF's text in reading order, by layout or in drawing "
+        "order, page by page"
+    ),
     "search": (
         "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "
         "for a query"
@@ -65,6 +73,7 @@ SUMMARIES = {
         "assign, label and comment on cards"
     ),
 }
+UNLISTED = frozenset({"search"})
 
 
 def commands(
@@ -131,7 +140,7 @@ def reference(cli: CLI) -> str:
 
 
 def catalog(language: str) -> str:
-    """Render the complete bundled CLI inventory for an overview page.
+    """Render the listed CLI inventory for an overview page.
 
     Args:
         language (str): The documentation section containing the links.
@@ -141,7 +150,7 @@ def catalog(language: str) -> str:
         "| Program | Supported operations | Commands |",
         "| --- | --- | --- |",
     ]
-    for name in sorted(BUILTIN_CLI_SPECS):
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
         spec = cli_spec_for(name)
         count = sum(1 for _ in commands(spec.spec))
         rows.append(

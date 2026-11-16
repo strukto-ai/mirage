@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { JsonValue } from '../../kit/typescript/index.ts'
+import { select } from '../../kit/typescript/index.ts'
+import type { Dmmf, JsonValue } from '../../kit/typescript/index.ts'
+import { Prisma } from '../../../generated/gws/index.js'
+import type * as Model from '../../../generated/gws/index.js'
 import { isObj } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
-import type { C } from './client.ts'
+import type { Db } from './client.ts'
 import { DEFAULT_CALENDAR_TZ, GwsState } from './state.ts'
 import type {
   CalendarEvent,
@@ -110,69 +113,46 @@ function eventTime(
   }
 }
 
+const DMMF = Prisma.dmmf as unknown as Dmmf
+
+// One tenant's rows of one table as Prisma's findMany returned them (kit
+// `select`). Read with no await, so the tables come from one consistent
+// moment of a connection a write may share.
+function rowsOf<T>(db: Db, model: string, tenant: string, bySeq: boolean): T[] {
+  return select<T>(db, DMMF, model, bySeq ? 'tenant = ? ORDER BY seq' : 'tenant = ?', tenant)
+}
+
 // `epochMs` is for the one caller that KNOWS the epoch and is writing the Meta
 // row rather than reading it: a seed. Every request leaves it out and resumes
 // the stored clock.
-export async function loadState(db: C, tenant: string, epochMs?: number): Promise<GwsState> {
-  const where = { tenant }
-  const seq = { seq: 'asc' } as const
-  const [
-    meta,
-    counters,
-    changes,
-    drives,
-    files,
-    parents,
-    revisions,
-    permissions,
-    docs,
-    docTabs,
-    spreadsheets,
-    tabs,
-    cells,
-    presentations,
-    slides,
-    elements,
-    labels,
-    messages,
-    headers,
-    messageLabels,
-    attachments,
-    drafts,
-    calendars,
-    events,
-    forms,
-    formItems,
-    formResponses,
-  ] = await Promise.all([
-    db.meta.findUnique({ where: { tenant } }),
-    db.counter.findMany({ where }),
-    db.driveChange.findMany({ where, orderBy: seq }),
-    db.drive.findMany({ where, orderBy: seq }),
-    db.driveFile.findMany({ where, orderBy: seq }),
-    db.driveParent.findMany({ where, orderBy: seq }),
-    db.revision.findMany({ where, orderBy: seq }),
-    db.permission.findMany({ where, orderBy: seq }),
-    db.doc.findMany({ where }),
-    db.docTab.findMany({ where, orderBy: seq }),
-    db.spreadsheet.findMany({ where }),
-    db.sheetTab.findMany({ where, orderBy: seq }),
-    db.sheetCell.findMany({ where }),
-    db.presentation.findMany({ where }),
-    db.slide.findMany({ where, orderBy: seq }),
-    db.slideElement.findMany({ where, orderBy: seq }),
-    db.label.findMany({ where, orderBy: seq }),
-    db.message.findMany({ where, orderBy: seq }),
-    db.messageHeader.findMany({ where, orderBy: seq }),
-    db.messageLabel.findMany({ where, orderBy: seq }),
-    db.attachment.findMany({ where, orderBy: seq }),
-    db.draft.findMany({ where, orderBy: seq }),
-    db.calendar.findMany({ where, orderBy: seq }),
-    db.event.findMany({ where, orderBy: seq }),
-    db.form.findMany({ where }),
-    db.formItem.findMany({ where, orderBy: seq }),
-    db.formResponse.findMany({ where, orderBy: seq }),
-  ])
+export async function loadState(db: Db, tenant: string, epochMs?: number): Promise<GwsState> {
+  const meta = rowsOf<Model.Meta>(db, 'Meta', tenant, false)[0] ?? null
+  const counters = rowsOf<Model.Counter>(db, 'Counter', tenant, false)
+  const changes = rowsOf<Model.DriveChange>(db, 'DriveChange', tenant, true)
+  const drives = rowsOf<Model.Drive>(db, 'Drive', tenant, true)
+  const files = rowsOf<Model.DriveFile>(db, 'DriveFile', tenant, true)
+  const parents = rowsOf<Model.DriveParent>(db, 'DriveParent', tenant, true)
+  const revisions = rowsOf<Model.Revision>(db, 'Revision', tenant, true)
+  const permissions = rowsOf<Model.Permission>(db, 'Permission', tenant, true)
+  const docs = rowsOf<Model.Doc>(db, 'Doc', tenant, false)
+  const docTabs = rowsOf<Model.DocTab>(db, 'DocTab', tenant, true)
+  const spreadsheets = rowsOf<Model.Spreadsheet>(db, 'Spreadsheet', tenant, false)
+  const tabs = rowsOf<Model.SheetTab>(db, 'SheetTab', tenant, true)
+  const cells = rowsOf<Model.SheetCell>(db, 'SheetCell', tenant, false)
+  const presentations = rowsOf<Model.Presentation>(db, 'Presentation', tenant, false)
+  const slides = rowsOf<Model.Slide>(db, 'Slide', tenant, true)
+  const elements = rowsOf<Model.SlideElement>(db, 'SlideElement', tenant, true)
+  const labels = rowsOf<Model.Label>(db, 'Label', tenant, true)
+  const messages = rowsOf<Model.Message>(db, 'Message', tenant, true)
+  const headers = rowsOf<Model.MessageHeader>(db, 'MessageHeader', tenant, true)
+  const messageLabels = rowsOf<Model.MessageLabel>(db, 'MessageLabel', tenant, true)
+  const attachments = rowsOf<Model.Attachment>(db, 'Attachment', tenant, true)
+  const drafts = rowsOf<Model.Draft>(db, 'Draft', tenant, true)
+  const calendars = rowsOf<Model.Calendar>(db, 'Calendar', tenant, true)
+  const events = rowsOf<Model.Event>(db, 'Event', tenant, true)
+  const forms = rowsOf<Model.Form>(db, 'Form', tenant, false)
+  const formItems = rowsOf<Model.FormItem>(db, 'FormItem', tenant, true)
+  const formResponses = rowsOf<Model.FormResponse>(db, 'FormResponse', tenant, true)
 
   // A tenant with no Meta row has never been seeded, so there is nothing to
   // resume: the epoch is now and the tick count is zero, which is what the

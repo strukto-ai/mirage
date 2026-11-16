@@ -1,20 +1,28 @@
 ---
 title: Introduction
-description: A composable, scriptable and durable virtual terminal for AI agents.
+description: A controllable, scriptable and managed virtual terminal for AI agents.
 icon: /images/mirage-icon-light.svg
 ---
 
-Mirage is a virtual terminal for AI agents, with a unified virtual filesystem,
-virtual CLIs and a router that picks where each command runs.
+AI agents work in a terminal. Mirage is a virtual terminal that separates the
+terminal interface, the data storage and the computing machines.
+Mirage routes each command to the machine that fits it, across heterogeneous
+machines such as containers, microVMs, cloud sandboxes and SSH hosts.
+Files, CLIs and machines are added to it separately, which keeps it flexible
+and its infrastructure cost low, and lets agents work in the most efficient and
+safest way.
 
-- **Composable.** The filesystem, CLIs, shell and compute are separate parts you
-  put together. Run the terminal in your app or a FastAPI or Fastify server, and
-  send programs to a microVM or sandbox.
-- **Scriptable.** A scriptable policy engine, written in code or as scripts, hides files per
-  session profile, refuses commands, asks for approval, caps output and routes
-  commands to machines.
-- **Durable.** Each part can live in your own storage: sessions in RAM, each
-  shell job's output in Redis, and the command logs on disk.
+- **Controllable.** Decide what each agent reaches, which files it sees, which
+  credentials its virtual filesystems and CLIs use without showing them, and
+  which machine runs each of its programs.
+- **Scriptable.** The whole terminal is defined in code or a config file, from
+  its virtual filesystems, CLIs and machines to its rules, such as which
+  commands need approval and how much output an agent gets back.
+- **Managed.** Mirage manages the virtual terminal's infrastructure, composed
+  from the chosen backends. The virtual filesystem sits on S3, Drive, a database or RAM,
+  jobs and history on RAM, Redis or disk, and whole workspaces can be saved as
+  snapshots. Every command an agent runs is recorded and can be sent
+  to an OpenTelemetry backend as a trace.
 
 ## Architecture
 
@@ -27,22 +35,29 @@ virtual CLIs and a router that picks where each command runs.
 - **[Session profiles](/home/configuration/session).** Choose what each agent can run and which files and folders it can see.
 - **[Policy engine](/home/policy/policies).** Apply rules to commands, file operations and connections before they run.
 - **[Machines](/home/setup/machine/overview).** Run programs in the workspace, on your host, or on a container, microVM, cloud sandbox or SSH host.
-- **[Runtimes](/home/setup/runtime/overview).** Run Python and JavaScript on an interpreter inside a machine.
+  - **[Runtimes](/home/setup/runtime/overview).** Run Python and JavaScript on an interpreter inside a machine.
 - **[Service credentials](/home/service-credentials).** Connect credentials from environment variables, dotenv, AWS Secrets Manager or 1Password.
 - **[Notifications](/home/notifications).** Notify agents about external file or directory changes in the virtual filesystem.
 
 ## Benefits
 
-- **Fewer tokens.** One shell interface replaces a tool per service. Across 200
-  tasks, it used 52% fewer tokens per task than MCP tools
+- **Fewer tokens.** One shell interface replaces a tool per service, so agents
+  use up to 90% fewer tokens than with MCP tools
   ([AgentVFS](https://agentvfs.org/blogs/agentvfs-1)).
-- **Cloud search through shell commands.** With Chroma at `/knowledge/`,
-  `grep -r refund /knowledge/` asks Chroma which documents match, then reads
-  only those. A backend without search reads its files. See
+- **Low cost.** A sandbox reserves memory for every agent, busy or idle. An idle
+  Mirage terminal is a record of about 10 KB in your server's memory, so one
+  server holds thousands. See the
+  [comparison](/home/examples/in-process-terminal#infrastructure-cost).
+- **Deep integration with each service.** The virtual filesystem translates
+  Unix commands into each service's own features, so `grep` or `rg` runs as
+  the service's search instead of reading every file. See
   [Search](/home/integration/search).
-- **Full control.** Choose which files each agent can see and which commands it
-  can run with [session profiles](/home/configuration/session) and
-  [policies](/home/policy/overview).
+- **Full control and safety.** Choose which files each agent can see and which
+  commands it can run with [session profiles](/home/configuration/session) and
+  [policies](/home/policy/overview). Agents use
+  [credentials](/home/service-credentials) without seeing them: keys stay in
+  the server's memory, never in a file or variable an agent can read, so an
+  agent cannot leak them.
 
 ## Try Mirage
 
@@ -110,33 +125,28 @@ to use the same commands on your own data. Continue with the
 
 ## Example Use Cases
 
-- **Respond to changes.** React to Slack replies or GitHub pushes through file notifications.
-- **Search connected data.** Use `grep` for text search and `search` for semantic matches in vector stores.
-- **Investigate traces.** Query Langfuse and Jaeger traces with `grep` and `jq`.
+See the [examples](/home/examples/in-process-terminal).
 
 ## FAQ
 
 <AccordionGroup>
   <Accordion title="Do I need FUSE?">
-    No. Agents can use workspace files through Mirage directly. Use <a href="/home/setup/fuse">FUSE</a> when host tools, such as editors or language servers, need to open those files.
+    It is not required, but use <a href="/home/setup/fuse">FUSE</a> where the platform supports it. Without it, agents use workspace files through Mirage. With it, the workspace is a real folder on the host, so host tools such as editors and language servers can open those files too.
   </Accordion>
   <Accordion title="Where does the shell run? Is it really bash?">
     Mirage provides a Bash-compatible shell in your application. It supports common commands, pipes, redirects, variables and jobs. See the <a href="/home/core/shell">shell guide</a> for supported behavior and differences from Bash.
   </Accordion>
   <Accordion title="Is it sandboxed?">
-    The shell sees the files you mount. The Monty and QuickJS runtimes cannot access host files or the network. Other machines have different access; see <a href="/home/setup/machine/overview#files">machine file and network access</a> before choosing one.
+    The shell sees only the virtual filesystems in its workspace, and a session profile can narrow that further. A program sent to a machine gets that machine's file and network access, so check <a href="/home/setup/machine/overview#files">machine file and network access</a> before choosing one.
   </Accordion>
   <Accordion title="What about latency and cost?">
     Operations use the APIs of the services you connect, so their latency and usage charges apply.
-  </Accordion>
-  <Accordion title="Hosted or self-hosted?">
-    Self-hosted. Run Mirage in your own application, server or sandbox, and connect the services you need.
   </Accordion>
   <Accordion title="Which agent frameworks are supported?">
     Any agent that can call a shell tool can use Mirage. See the <a href="/home/agents">agent integrations</a> for setup guides.
   </Accordion>
   <Accordion title="Python or TypeScript?">
-    Both SDKs provide workspaces, shell commands and service integrations. Runtime availability differs; see the <a href="/home/setup/runtime/overview">runtime comparison</a>. Start with the <a href="/python/quickstart">Python</a> or <a href="/typescript/quickstart">TypeScript</a> quickstart.
+    TypeScript is recommended. It runs in Node, the browser and Cloudflare Workers. Both SDKs provide workspaces, shell commands and service integrations, and the <a href="/home/setup/runtime/overview">runtime comparison</a> shows where their runtimes differ. Start with the <a href="/typescript/quickstart">TypeScript</a> or <a href="/python/quickstart">Python</a> quickstart.
   </Accordion>
   <Accordion title="What if a VFS I want isn't supported yet?">
     You can add a custom filesystem. See <a href="/python/vfs/new">Add a VFS</a> for the required API and examples.
@@ -147,7 +157,7 @@ to use the same commands on your own data. Continue with the
 
 <CardGroup cols={2}>
   <Card title="Python Quickstart" icon="python" href="/python/quickstart">
-    Create a workspace, mount your sources, and run shell commands in minutes.
+    Create a workspace, add virtual filesystems, and run shell commands in minutes.
   </Card>
   <Card title="TypeScript Quickstart" icon="js" href="/typescript/quickstart">
     Same Workspace API in Node, browser, and edge runtimes.

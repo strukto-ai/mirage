@@ -98,7 +98,9 @@ export async function handlePidof(
   const rows = await running(jobTable, session, scope)
   const lines: string[] = []
   let found = false
-  const places = [WORKSPACE_MACHINE, ...scope.ids].filter((place) => inScope(scope, place))
+  const places = [
+    ...new Set([WORKSPACE_MACHINE, ...scope.ids, ...rows.map((info) => shownMachine(info))]),
+  ].filter((place) => inScope(scope, place))
   for (const place of scope.several ? places : ['']) {
     let pids: string[] = []
     for (const name of names) {

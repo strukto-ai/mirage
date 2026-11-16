@@ -16,7 +16,7 @@ import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { parseQuery, withinDates } from './query.ts'
 import type { ParsedQuery } from './query.ts'
-import { channels, users } from './store.ts'
+import { channels, filesContaining, messagesContaining, users } from './store.ts'
 import type { MessageRow } from './store.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
 import { argsOf, fail, reactionsOf, requestToken } from './wire.ts'
@@ -60,8 +60,8 @@ function searchPage(ctx: Ctx<C>, matches: JsonValue[], count: number): JsonValue
 
 async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
   const parsed = parseQuery(argsOf(ctx).get('query') ?? '')
-  const chans: ChannelRow[] = await channels(ctx.db, ctx.tenant)
-  const people: UserRow[] = await users(ctx.db, ctx.tenant)
+  const chans: ChannelRow[] = await channels(ctx.sql, ctx.tenant)
+  const people: UserRow[] = await users(ctx.sql, ctx.tenant)
   const userName = new Map(people.map((u) => [u.id, u.name]))
   const byId = new Map(chans.map((c) => [c.id, c]))
   const display = (id: string): string => {
@@ -120,16 +120,10 @@ function searchText(text: string, names: Map<string, string>): string {
 export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
   if (!userToken(ctx)) return fail('not_allowed_token_type')
   const s = await scopeOf(ctx)
-  const where: Record<string, JsonValue> = {
-    tenant: ctx.tenant,
-    text: { contains: s.parsed.literal },
-  }
-  if (s.channelId !== undefined) where.channelId = s.channelId
-  if (s.fromUserId !== undefined) where.userId = s.fromUserId
   const rows: MessageRow[] =
     s.fromMissing || s.channelMissing
       ? []
-      : await ctx.db.message.findMany({ where, orderBy: { ts: 'asc' } })
+      : await messagesContaining(ctx.sql, ctx.tenant, s.parsed.literal, s.channelId, s.fromUserId)
   const matches = rows
     .filter(
       (m) =>
@@ -163,15 +157,6 @@ export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
 export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
   if (!userToken(ctx)) return fail('not_allowed_token_type')
   const s = await scopeOf(ctx)
-  const where: Record<string, JsonValue> = {
-    tenant: ctx.tenant,
-    OR: [
-      { name: { contains: s.parsed.literal } },
-      { title: { contains: s.parsed.literal } },
-      { content: { contains: s.parsed.literal } },
-    ],
-  }
-  if (s.channelId !== undefined) where.channelId = s.channelId
   // search.files has no author or reaction field in this model, so a from:
   // or has:: query can never match a file; return an empty set rather than
   // silently ignoring it.
@@ -181,7 +166,7 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
     s.parsed.fromId !== undefined ||
     s.parsed.reaction !== undefined
       ? []
-      : await ctx.db.slackFile.findMany({ where, orderBy: { id: 'asc' } })
+      : await filesContaining(ctx.sql, ctx.tenant, s.parsed.literal, s.channelId)
   const matches = rows
     .filter((f) => withinDates(f.timestamp, s.parsed))
     .map((f) => ({

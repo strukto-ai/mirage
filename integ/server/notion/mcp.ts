@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NotionDatabase, NotionPage } from '../../generated/notion/index.js'
+import { DMMF, type Db } from './store.ts'
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js'
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { DEFAULT_RUN, Router, bindHost, start } from '../kit/typescript/index.ts'
+import { bindHost, DEFAULT_RUN, first, Router, select, start } from '../kit/typescript/index.ts'
 import type { JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { DEFAULT_API_VERSION, MAX_PAGE_SIZE } from './config.ts'
@@ -53,7 +55,7 @@ function payloadOf(reply: Reply): JsonValue {
   return reply.body as JsonValue
 }
 
-async function toolPayload(db: C, tenant: string, name: string, args: Json): Promise<JsonValue> {
+async function toolPayload(db: Db, tenant: string, name: string, args: Json): Promise<JsonValue> {
   const ws = tenant
   if (name === 'API-post-search') {
     const results = await searchResults(db, ws, args)
@@ -64,17 +66,27 @@ async function toolPayload(db: C, tenant: string, name: string, args: Json): Pro
   }
   if (name === 'API-retrieve-a-page') {
     const id = String(args.page_id)
-    const row = (await db.notionPage.findFirst({
-      where: { tenant: ws, id },
-    })) as PageRow | null
+    const row = first<NotionPage>(
+      db,
+      DMMF,
+      'NotionPage',
+      '"tenant" = ? AND "id" = ?',
+      ws,
+      id,
+    ) as PageRow | null
     if (row === null) throw new Error(`mock notion: unknown page ${id}`)
     return pageJson(row)
   }
   if (name === 'API-retrieve-a-database') {
     const id = String(args.database_id)
-    const row = (await db.notionDatabase.findFirst({
-      where: { tenant: ws, id },
-    })) as DatabaseRow | null
+    const row = first<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ? AND "id" = ?',
+      ws,
+      id,
+    ) as DatabaseRow | null
     if (row === null) throw new Error(`mock notion: unknown database ${id}`)
     // No version to read: a tool call carries no Notion-Version, and this arm
     // exists to render byte-identically to the REST arm, which mirage's own
@@ -84,14 +96,26 @@ async function toolPayload(db: C, tenant: string, name: string, args: Json): Pro
   }
   if (name === 'API-retrieve-a-data-source') {
     const id = String(args.data_source_id)
-    const all = (await db.notionDatabase.findMany({ where: { tenant: ws } })) as DatabaseRow[]
+    const all = select<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ?',
+      ws,
+    ) as DatabaseRow[]
     const owner = databaseIdOf(id, all)
     const row = owner === null ? null : all.find((one) => one.id === owner)
     if (row === undefined || row === null) throw new Error(`mock notion: unknown data source ${id}`)
     return dataSourceJson(row)
   }
   if (name === 'API-post-data-source-query') {
-    const all = (await db.notionDatabase.findMany({ where: { tenant: ws } })) as DatabaseRow[]
+    const all = select<NotionDatabase>(
+      db,
+      DMMF,
+      'NotionDatabase',
+      '"tenant" = ?',
+      ws,
+    ) as DatabaseRow[]
     const owner = databaseIdOf(String(args.data_source_id), all)
     if (owner === null) throw new Error(`mock notion: unknown data source`)
     const refused = filterRefusal(args.filter)
@@ -118,7 +142,7 @@ async function toolPayload(db: C, tenant: string, name: string, args: Json): Pro
   throw new Error(`mock notion: unsupported tool ${name}`)
 }
 
-function buildMcpServer(db: C, tenant: string): McpServer {
+function buildMcpServer(db: Db, tenant: string): McpServer {
   const server = new McpServer(
     { name: 'mock-notion-mcp', version: '0.0.0' },
     { capabilities: { tools: {} } },
@@ -146,7 +170,7 @@ export async function startMockMcpServer(): Promise<{
 }> {
   const rest = await start(notionFake, 0)
   const tenant = (notionFake.defaultTenants ?? [])[0] ?? DEFAULT_RUN
-  const db = rest.runtime.pool.client(DEFAULT_RUN)
+  const db = rest.runtime.pool.sql(DEFAULT_RUN)
   const server = createServer((req, res) => {
     void (async () => {
       const mcp = buildMcpServer(db, tenant)

@@ -1,29 +1,52 @@
 export const SandboxesVsTerminals = () => {
-  const mark = (label, color, shape) => (
-    <span className="inline-flex items-center gap-1.5">
-      <span
-        className={`inline-block h-2.5 w-2.5 ${shape === "ring" ? "rounded-full border-2" : "rounded-sm"} ${
-          shape === "outline" ? "border border-zinc-400 dark:border-zinc-500" : color ? "" : "bg-zinc-300 dark:bg-zinc-700"
-        }`}
-        style={color ? (shape === "ring" ? { borderColor: color } : { background: color }) : undefined}
-      />
-      {label}
-    </span>
-  )
   const button = (label, onClick, pressed) => (
     <button
       key={label}
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
-        pressed
-          ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
-          : "border-zinc-300 text-zinc-700 hover:border-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500"
-      }`}
+      className="tm-btn rounded-lg border px-2.5 py-1 text-xs transition-colors"
     >
       {label}
     </button>
+  )
+  const stepper = (id, label, value, setValue, last, text) => (
+    <div className="flex items-center gap-3">
+      <label htmlFor={id} className="w-14 font-semibold">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="range"
+        min="0"
+        max={last}
+        step="1"
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        aria-valuetext={text}
+        className="w-40"
+        style={{ accentColor: "var(--tm-b)" }}
+      />
+      <span className="w-14 tabular-nums">{text}</span>
+      <button
+        type="button"
+        aria-label={`Fewer ${label.toLowerCase()}`}
+        disabled={value === 0}
+        onClick={() => setValue(value - 1)}
+        className="tm-btn h-7 w-7 rounded-lg border text-sm disabled:opacity-40"
+      >
+        −
+      </button>
+      <button
+        type="button"
+        aria-label={`More ${label.toLowerCase()}`}
+        disabled={value === last}
+        onClick={() => setValue(value + 1)}
+        className="tm-btn h-7 w-7 rounded-lg border text-sm disabled:opacity-40"
+      >
+        +
+      </button>
+    </div>
   )
   const steps = [1, 5, 10, 25, 50, 100]
   const shares = [
@@ -33,35 +56,43 @@ export const SandboxesVsTerminals = () => {
     ["Half", 0.5],
     ["All", 1],
   ]
-  const sizes = [1, 4, 16]
+  const sizes = [32, 64, 128]
   const [step, setStep] = useState(4)
   const [share, setShare] = useState(1)
-  const [size, setSize] = useState(1)
+  const [size, setSize] = useState(0)
   const agents = steps[step]
   const busy = Math.round(agents * shares[share][1])
   const idle = agents - busy
   const holds = sizes[size]
 
   const base = 100
-  const idleMB = idle * 0.02
+  const idleMB = idle * 0.01
   const busyMB = busy * holds
   const used = base + idleMB + busyMB
-  const over = used > 512
+  const containers = [
+    ["lite", 256, 2],
+    ["basic", 1024, 4],
+    ["standard-1", 4096, 8],
+    ["standard-2", 6144, 12],
+    ["standard-3", 8192, 16],
+    ["standard-4", 12288, 20],
+  ]
+  const fit = containers.find(([, mb]) => mb >= used)
+  const [kind, capacity, disk] = fit || containers[containers.length - 1]
+  const servers = fit ? 1 : Math.ceil((idleMB + busyMB) / (capacity - base))
+  const total = servers * capacity
 
   const width = 300
-  const height = 240
+  const height = 184
   const cols = [1, 5, 5, 9, 10, 20][step]
   const gap = agents >= 50 ? 3 : 5
   const cell = Math.min(44, (width - (cols - 1) * gap) / cols)
   const rows = Math.ceil(agents / cols)
   const left = (width - (cols * cell + (cols - 1) * gap)) / 2
-  const top = (height - (rows * cell + (rows - 1) * gap)) / 2
+  const top = 3 + (height - (rows * cell + (rows - 1) * gap)) / 2
   const corner = Math.min(3, cell / 5)
 
-  const server = cell * 2 + gap
-  const serverX = 380
-  const serverY = 4
-  const zoom = { x: 380, y: 108, w: 296, h: 130 }
+  const zoom = { x: 380, y: 30, w: 296, h: 130 }
   const pitch = agents <= 25 ? 16 : 11
   const radius = agents <= 25 ? 5 : 3.5
   const dotCols = Math.min(agents, Math.floor((zoom.w - 20) / pitch))
@@ -69,67 +100,114 @@ export const SandboxesVsTerminals = () => {
   const dotsLeft = zoom.x + (zoom.w - (dotCols - 1) * pitch) / 2
   const dotsTop = zoom.y + 12 + (64 - (dotRows - 1) * pitch) / 2
 
-  const bar = { x: zoom.x + 12, y: zoom.y + 88, w: zoom.w - 24, h: 14 }
-  const scale = bar.w / Math.max(512, used)
-  const baseW = base * scale
+  const bar = { x: zoom.x + 12, y: zoom.y + 92, w: zoom.w - 24, h: 14 }
+  const scale = bar.w / total
+  const baseW = servers * base * scale
   const idleW = Math.max(idle ? 1 : 0, idleMB * scale)
   const busyW = busyMB * scale
-  const limitX = bar.x + 512 * scale
 
-  const megabytes = agents * 128
+  const megabytes = agents * 256
+  const price = (gib, gb) => (gib * 0.0000025 + gb * 0.00000007) * 30 * 24 * 3600
+  const sandboxCost = agents * price(0.25, 2)
+  const terminalCost = servers * price(capacity / 1024, disk)
+  const saving = sandboxCost - terminalCost
+  const money = (value) => {
+    const amount = Math.abs(value)
+    const text = amount >= 100 ? Math.round(amount).toLocaleString("en-US") : amount.toFixed(amount >= 1 ? 2 : 3)
+    return `${value < 0 ? "-" : ""}$${text}`
+  }
   const format = (mb) =>
     mb >= 1024 ? `${Number((mb / 1024).toFixed(1))} GB` : mb > 0 && mb < 1 ? "under 1 MB" : `${Math.round(mb)} MB`
   const reserved = format(megabytes)
-  const plural = agents === 1 ? "" : "s"
   const count = agents.toLocaleString("en-US")
   const marks = Array.from({ length: agents })
-  const strip = (index) => Math.max(1.5, (cell * (index < busy ? holds : 0.02)) / 128)
-  const summary = over
-    ? `needs ${format(used)}, more than the server has`
-    : `${format(used)} of 512 MB in use`
+  const host =
+    servers === 1 ? `Mirage on one Cloudflare ${kind} container` : `Mirage on ${servers} Cloudflare ${kind} containers`
+  const fleet = `${count} Cloudflare lite container${agents === 1 ? "" : "s"}`
+  const tip = (text) => (
+    <span className="tm-tip" tabIndex={0} aria-label={text}>
+      ?<span className="tm-pop" role="tooltip">{text}</span>
+    </span>
+  )
+  const stat = (label, value, detail) => (
+    <div className="rounded-xl border p-3" style={{ borderColor: "var(--tm-edge)" }}>
+      <div className="tm-muted text-xs">{label}</div>
+      <div className="tm-ink mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      {detail && <div className="tm-muted text-xs">{detail}</div>}
+    </div>
+  )
 
   return (
-    <div className="terminal-model not-prose my-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
+    <div className="terminal-model not-prose my-6 rounded-2xl border p-4">
       <style>{`
-        .terminal-model { --tm-a: #2a78d6; --tm-b: #eb6834; --tm-refused: #d03b3b; }
-        html.dark .terminal-model { --tm-a: #3987e5; --tm-b: #d95926; --tm-refused: #e66767; }
+        .terminal-model {
+          --tm-surface: #faf8f2; --tm-edge: #cec6b3; --tm-edge-soft: #e2dccd;
+          --tm-ink: #0a0a0a; --tm-muted: #5b5647; --tm-reserved: #cbc5b7; --tm-base: #a39a86;
+          --tm-a: #455a64; --tm-b: #b08a2e; --tm-refused: #b91c1c;
+          background: var(--tm-surface); border-color: var(--tm-edge); color: var(--tm-ink);
+        }
+        html.dark .terminal-model {
+          --tm-surface: #1a1a1d; --tm-edge: #3f3f46; --tm-edge-soft: #2a2a2f;
+          --tm-ink: #ffffff; --tm-muted: #a1a1aa; --tm-reserved: #3a3a40; --tm-base: #71717a;
+          --tm-a: #8aa4b1; --tm-b: #c9a03e; --tm-refused: #fca5a5;
+        }
+        .terminal-model .tm-ink { color: var(--tm-ink); }
+        .terminal-model .tm-muted { color: var(--tm-muted); }
+        .terminal-model .tm-btn { border-color: var(--tm-edge); color: var(--tm-muted); }
+        .terminal-model .tm-btn:hover { border-color: var(--tm-muted); }
+        .terminal-model .tm-btn[aria-pressed="true"] { background: var(--tm-ink); border-color: var(--tm-ink); color: var(--tm-surface); }
+        .terminal-model .tm-dark-only { display: none; }
+        html.dark .terminal-model .tm-dark-only { display: inline; }
+        html.dark .terminal-model .tm-light-only { display: none; }
+        .terminal-model .tm-legend { position: relative; }
+        .terminal-model .tm-tip { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--tm-edge); border-radius: 9999px; font-size: 10px; line-height: 1; cursor: help; }
+        .terminal-model .tm-pop { display: none; position: absolute; top: 22px; right: -8px; width: 260px; padding: 8px 10px; border: 1px solid var(--tm-edge); border-radius: 8px; background: var(--tm-surface); color: var(--tm-ink); font-size: 12px; line-height: 1.45; z-index: 10; }
+        .terminal-model .tm-tip:hover .tm-pop, .terminal-model .tm-tip:focus .tm-pop { display: block; }
+        @media (max-width: 639px) {
+          .terminal-model .tm-tip { position: static; }
+          .terminal-model .tm-pop { top: calc(100% + 6px); left: 0; right: 0; width: auto; }
+        }
       `}</style>
-      <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-900 dark:text-zinc-100">
-        <label htmlFor="agent-count" className="font-semibold">
-          Agents
-        </label>
-        <input
-          id="agent-count"
-          type="range"
-          min="0"
-          max={steps.length - 1}
-          step="1"
-          value={step}
-          onChange={(event) => setStep(Number(event.target.value))}
-          aria-valuetext={`${agents} agent${plural}`}
-          className="w-48"
-          style={{ accentColor: "var(--tm-a)" }}
-        />
-        <span className="tabular-nums">{count}</span>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-900 dark:text-zinc-100">
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Busy terminals">
-          <span className="mr-1 font-semibold">Busy</span>
-          {shares.map(([label], index) => button(label, () => setShare(index), share === index))}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="What each busy terminal holds">
+      <div className="flex flex-col gap-2 text-sm tm-ink">
+        {stepper("agent-count", "Agents", step, setStep, steps.length - 1, count)}
+        {stepper("active-share", "Active", share, setShare, shares.length - 1, shares[share][0])}
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="What each active terminal holds">
           <span className="mr-1 font-semibold">Each holds</span>
           {sizes.map((mb, index) => button(`${mb} MB`, () => setSize(index), size === index))}
         </div>
       </div>
 
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {stat("Sandbox Cost / Month", money(sandboxCost))}
+        {stat("In-Process Terminals Cost / Month", money(terminalCost))}
+        {stat("Saving / Month", money(saving))}
+      </div>
+
+      <div className="tm-legend mt-4 flex text-xs tm-muted">
+        <div className="flex items-center gap-1.5" style={{ width: "55.9%" }}>
+          <img src="/images/cloudflare-logo.svg" alt="" className="h-4 w-4" />
+          <span>{fleet}</span>
+          {tip(
+            "Each sandbox is Cloudflare's smallest container, lite, with 256 MB of memory, 2 GB of disk and 1/16 of a vCPU. Its cost is Cloudflare's price for the memory and disk it reserves. CPU is billed only while it runs, about the same either way, so it is left out.",
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <img src="/images/mirage-icon-light.svg" alt="" className="tm-light-only h-4 w-4" />
+          <img src="/images/mirage-icon-dark.svg" alt="" className="tm-dark-only h-4 w-4" />
+          <span>{host}</span>
+          {tip(
+            "Mirage takes about 100 MB, which also fits a Cloudflare Worker's 128 MB. An idle terminal adds about 10 KB and an active one what its command holds. Mirage runs in the smallest Cloudflare container that fits, from lite up to standard-4, and adds containers past that.",
+          )}
+        </div>
+      </div>
+
       <svg
-        viewBox="0 0 680 244"
+        viewBox="0 0 680 190"
         role="img"
-        aria-label={`${agents} sandboxes reserve ${reserved} of memory. One 512 MB server holds ${idle} idle and ${busy} busy terminals and ${summary}.`}
+        aria-label={`${fleet} reserve ${reserved} of memory for ${money(sandboxCost)} a month. ${host} holds ${idle} idle and ${busy} active terminals for ${money(terminalCost)} a month.`}
         className="mt-3 w-full"
       >
-        <g className="text-zinc-300 dark:text-zinc-700" fill="currentColor">
+        <g fill="var(--tm-reserved)">
           {marks.map((_, index) => (
             <rect
               key={index}
@@ -138,38 +216,10 @@ export const SandboxesVsTerminals = () => {
               width={cell}
               height={cell}
               rx={corner}
-            />
-          ))}
-          {[0, 1, 2, 3].map((index) => (
-            <rect
-              key={index}
-              x={serverX + (index % 2) * (cell + gap)}
-              y={serverY + Math.floor(index / 2) * (cell + gap)}
-              width={cell}
-              height={cell}
-              rx={corner}
+              fill={index < busy ? "var(--tm-b)" : undefined}
             />
           ))}
         </g>
-        <text
-          x={serverX + server + 10}
-          y={serverY + 12}
-          fontSize="12"
-          fill="currentColor"
-          className="text-zinc-600 dark:text-zinc-400"
-        >
-          one server, at the same scale
-        </text>
-        {marks.map((_, index) => (
-          <rect
-            key={index}
-            x={left + (index % cols) * (cell + gap)}
-            y={top + Math.floor(index / cols) * (cell + gap) + cell - strip(index)}
-            width={cell}
-            height={strip(index)}
-            fill={index < busy ? "var(--tm-b)" : "var(--tm-a)"}
-          />
-        ))}
         {marks.map((_, index) =>
           index < busy ? (
             <circle
@@ -198,244 +248,17 @@ export const SandboxesVsTerminals = () => {
             width={bar.w}
             height={bar.h}
             rx="3"
-            className="text-zinc-100 dark:text-zinc-800"
-            fill="currentColor"
+            fill="var(--tm-edge-soft)"
           />
-          <rect x={bar.x} y={bar.y} width={baseW} height={bar.h} className="text-zinc-400 dark:text-zinc-500" fill="currentColor" />
+          <rect x={bar.x} y={bar.y} width={baseW} height={bar.h} fill="var(--tm-base)" />
           <rect x={bar.x + baseW} y={bar.y} width={idleW} height={bar.h} fill="var(--tm-a)" />
           <rect x={bar.x + baseW + idleW} y={bar.y} width={busyW} height={bar.h} fill="var(--tm-b)" />
-          {over && (
-            <g>
-              <line
-                x1={limitX}
-                x2={limitX}
-                y1={bar.y - 4}
-                y2={bar.y + bar.h + 4}
-                stroke="var(--tm-refused)"
-                strokeWidth="2"
-              />
-              <text x={limitX} y={bar.y - 7} fontSize="10" textAnchor="middle" fill="var(--tm-refused)">
-                512 MB
-              </text>
-            </g>
-          )}
-          <text
-            x={bar.x}
-            y={bar.y + bar.h + 16}
-            fontSize="11"
-            fill="currentColor"
-            className="text-zinc-600 dark:text-zinc-400"
-          >
-            {`Mirage ${base} MB · idle ${format(idleMB)} · busy ${format(busyMB)}`}
-          </text>
         </g>
-        <g className="text-zinc-400 dark:text-zinc-500" fill="none" stroke="currentColor">
+        <g fill="none" stroke="var(--tm-base)">
           <rect x={zoom.x} y={zoom.y} width={zoom.w} height={zoom.h} rx="10" strokeWidth="1.5" />
-          <path
-            d={`M${serverX} ${serverY + server} L${zoom.x} ${zoom.y + 10} M${serverX + server} ${serverY + server} L${zoom.x + zoom.w} ${zoom.y + 10}`}
-            strokeWidth="1"
-            strokeDasharray="3 3"
-          />
         </g>
       </svg>
 
-      <div className="mt-2 grid grid-cols-2 gap-6 text-sm">
-        <div>
-          <div className="font-semibold text-zinc-900 dark:text-zinc-100">A sandbox for each agent</div>
-          <div className="text-zinc-600 dark:text-zinc-400">
-            {count} machine{plural}, {reserved} reserved, busy or idle
-          </div>
-        </div>
-        <div>
-          <div className="font-semibold text-zinc-900 dark:text-zinc-100">Terminals in one server</div>
-          <div className="text-zinc-600 dark:text-zinc-400" style={over ? { color: "var(--tm-refused)" } : undefined}>
-            1 server, {idle} idle and {busy} busy, {summary}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-        {mark("128 MB of memory, reserved")}
-        {mark("idle terminal with no files kept, about 20 KB", "var(--tm-a)", "ring")}
-        {mark("busy terminal: its files, cache and buffers", "var(--tm-b)")}
-        {mark("the server, enlarged", null, "outline")}
-      </div>
-    </div>
-  )
-}
-
-export const WaitingOrWorking = () => {
-  const mark = (label, color, opacity, outline) => (
-    <span className="inline-flex items-center gap-1.5">
-      <span
-        className={`inline-block h-2.5 w-2.5 rounded-sm ${
-          outline ? "border border-zinc-400 dark:border-zinc-500" : color ? "" : "bg-zinc-300 dark:bg-zinc-700"
-        }`}
-        style={color ? { background: color, opacity } : undefined}
-      />
-      {label}
-    </span>
-  )
-  const button = (label, onClick, pressed) => (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-        pressed
-          ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
-          : "border-zinc-300 text-zinc-700 hover:border-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500"
-      }`}
-    >
-      {label}
-    </button>
-  )
-  const [mode, setMode] = useState("waiting")
-  const [run, setRun] = useState(0)
-  const [progress, setProgress] = useState(1)
-
-  useEffect(() => {
-    if (run === 0) return undefined
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setProgress(1)
-      return undefined
-    }
-    const started = performance.now()
-    let frame = requestAnimationFrame(function tick(now) {
-      const next = Math.min(1, (now - started) / 2600)
-      setProgress(next)
-      if (next < 1) frame = requestAnimationFrame(tick)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [run])
-
-  const play = (next) => {
-    setMode(next)
-    setProgress(0)
-    setRun((value) => value + 1)
-  }
-
-  const span = 4.3
-  const plot = { x: 96, w: 572 }
-  const at = (time) => plot.x + (time / span) * plot.w
-  const lane = (index) => 8 + index * 30
-  const cpuLane = lane(4) + 10
-  const bar = 20
-
-  const segments = []
-  if (mode === "waiting") {
-    for (let index = 0; index < 4; index += 1) {
-      const start = index * 0.05
-      segments.push({ lane: lane(index), from: start, to: start + 0.05, kind: "cpu" })
-      segments.push({ lane: lane(index), from: start + 0.05, to: start + 1, kind: "reply" })
-      segments.push({ lane: lane(index), from: start + 1, to: start + 1.05, kind: "cpu" })
-    }
-    segments.push({ lane: cpuLane, from: 0, to: 0.2, kind: "cpu" })
-    segments.push({ lane: cpuLane, from: 1, to: 1.2, kind: "cpu" })
-  } else {
-    for (let index = 0; index < 4; index += 1) {
-      segments.push({ lane: lane(index), from: 0, to: 3.5 + (index + 1) * 0.125, kind: "queue" })
-    }
-    for (let slice = 0; slice < 32; slice += 1) {
-      segments.push({ lane: lane(slice % 4), from: slice * 0.125, to: (slice + 1) * 0.125, kind: "cpu" })
-    }
-    segments.push({ lane: cpuLane, from: 0, to: 4, kind: "cpu" })
-  }
-  const now = progress * span
-  const summary =
-    mode === "waiting"
-      ? "All four commands finish in about the time one takes alone. The CPU is free while they wait."
-      : "The four commands share the CPU, so each takes about four times as long as it would alone."
-
-  return (
-    <div className="terminal-model not-prose my-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
-      <style>{`
-        .terminal-model { --tm-a: #2a78d6; --tm-b: #eb6834; --tm-refused: #d03b3b; }
-        html.dark .terminal-model { --tm-a: #3987e5; --tm-b: #d95926; --tm-refused: #e66767; }
-      `}</style>
-      <div className="flex flex-wrap items-center gap-2">
-        {button("Four commands wait on a service", () => play("waiting"), mode === "waiting")}
-        {button("Four commands work on data", () => play("working"), mode === "working")}
-      </div>
-
-      <svg viewBox="0 0 680 190" role="img" aria-label={summary} className="mt-3 w-full">
-        <defs>
-          <clipPath id="waiting-or-working-played">
-            <rect x={plot.x} y="0" width={Math.max(0, at(now) - plot.x)} height="190" />
-          </clipPath>
-        </defs>
-        <g fontSize="12" fill="currentColor" className="text-zinc-600 dark:text-zinc-400">
-          {[1, 2, 3, 4].map((terminal, index) => (
-            <text key={terminal} x="0" y={lane(index) + 14}>
-              terminal {terminal}
-            </text>
-          ))}
-          <text x="0" y={cpuLane + 14} fontWeight="600">
-            the CPU
-          </text>
-          {[0, 1, 2, 3, 4].map((tick) => (
-            <text key={tick} x={at(tick)} y="186" textAnchor={tick === 0 ? "start" : "middle"}>
-              {tick === 0 ? "start" : `${tick}×`}
-            </text>
-          ))}
-        </g>
-        <g className="text-zinc-200 dark:text-zinc-800" stroke="currentColor" strokeWidth="1">
-          {[0, 1, 2, 3, 4].map((tick) => (
-            <line key={tick} x1={at(tick)} y1="4" x2={at(tick)} y2={cpuLane + bar + 6} />
-          ))}
-        </g>
-        <g clipPath="url(#waiting-or-working-played)">
-          <g className="text-zinc-300 dark:text-zinc-700" fill="currentColor">
-            {segments
-              .filter((segment) => segment.kind === "queue")
-              .map((segment, index) => (
-                <rect
-                  key={index}
-                  x={at(segment.from)}
-                  y={segment.lane}
-                  width={at(segment.to) - at(segment.from)}
-                  height={bar}
-                  rx="3"
-                />
-              ))}
-          </g>
-          <g fill="var(--tm-a)">
-            {segments
-              .filter((segment) => segment.kind !== "queue")
-              .map((segment, index) => (
-                <rect
-                  key={index}
-                  x={at(segment.from)}
-                  y={segment.lane}
-                  width={at(segment.to) - at(segment.from)}
-                  height={bar}
-                  rx={segment.kind === "reply" ? 3 : 0}
-                  opacity={segment.kind === "reply" ? 0.28 : 1}
-                />
-              ))}
-          </g>
-        </g>
-        {progress < 1 && (
-          <line
-            x1={at(now)}
-            y1="2"
-            x2={at(now)}
-            y2={cpuLane + bar + 6}
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="text-zinc-900 dark:text-zinc-100"
-          />
-        )}
-      </svg>
-
-      <p className="mt-2 text-sm text-zinc-900 dark:text-zinc-100">{summary}</p>
-
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-        {mark("using the CPU", "var(--tm-a)")}
-        {mark("waiting for a reply", "var(--tm-a)", 0.28)}
-        {mark("waiting for the CPU")}
-        <span>1× is the time one command takes alone</span>
-      </div>
     </div>
   )
 }

@@ -72,6 +72,31 @@ h1#page-title {
   font-weight: 700;
 }
 
-.prose td:first-child > code {
+.prose table td:first-child {
+  min-width: 0;
+}
+
+.prose td > code {
   word-break: normal;
+}
+
+pre[language="diff"] .line {
+  display: inline-block;
+  min-width: 100%;
+}
+
+pre[language="diff"] .line:has(> span:first-child[style*="#B5CEA8" i]) {
+  background: rgb(4 120 87 / 0.1);
+}
+
+pre[language="diff"] .line:has(> span:first-child[style*="#CE9178" i]) {
+  background: rgb(185 28 28 / 0.08);
+}
+
+html.dark pre[language="diff"] .line:has(> span:first-child[style*="#B5CEA8" i]) {
+  background: rgb(52 211 153 / 0.12);
+}
+
+html.dark pre[language="diff"] .line:has(> span:first-child[style*="#CE9178" i]) {
+  background: rgb(248 113 113 / 0.12);
 }

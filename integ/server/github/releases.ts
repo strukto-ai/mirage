@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { insert, select } from '../kit/typescript/index.ts'
+import type { GithubRelease } from '../../generated/github/index.js'
+import { DMMF } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
-import { scope } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,
@@ -59,10 +61,14 @@ export function releaseJson(repo: RepoRow, row: ReleaseRow): JsonValue {
 }
 
 async function releaseRows(ctx: Ctx<C>, repo: RepoRow): Promise<ReleaseRow[]> {
-  return (await ctx.db.githubRelease.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'asc' },
-  })) as ReleaseRow[]
+  return select<GithubRelease>(
+    ctx.sql,
+    DMMF,
+    'GithubRelease',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+  ) as ReleaseRow[]
 }
 
 async function listReleases(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
@@ -89,9 +95,7 @@ async function createRelease(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     prerelease: body.prerelease === true,
     createdAt: CREATED_AT,
   }
-  await ctx.db.githubRelease.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: row.id },
-  })
+  insert(ctx.sql, 'GithubRelease', { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: row.id })
   return { status: 201, body: releaseJson(repo, row) }
 }
 

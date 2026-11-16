@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { first, select } from '../kit/typescript/index.ts'
+import type { NotionDatabase, NotionPage } from '../../generated/notion/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { Reply } from '../kit/typescript/index.ts'
-import type { C } from './config.ts'
 import { DATA_SOURCE_VERSION, DEFAULT_API_VERSION } from './config.ts'
 import { plainTextOf } from './text.ts'
 import type { Json, PageRow } from './types.ts'
@@ -30,20 +32,23 @@ import {
 
 type Key = { id: string; lastEditedTime: string; position: number }
 
+// A piece of a WHERE and the parameters its marks take.
+type Clause = [string, (string | number)[]]
+
 // A title query is folded in JS, so rows arrive one batch at a time and the
 // scan stops as soon as a page's worth matched. Each batch resumes after the
 // last row it read by key, not by offset: no earlier row is read twice, and a
 // row trashed mid-scan cannot shift a later match out. With no query the first
 // batch is the page.
 async function firstMatches<R extends Key & { titleText: string }>(
-  fetch: (after: Key | null) => Promise<R[]>,
+  fetch: (after: Key | null) => R[],
   take: number,
   matches: (row: R) => boolean,
 ): Promise<R[]> {
   const kept: R[] = []
   let after: Key | null = null
   while (kept.length < take) {
-    const batch = await fetch(after)
+    const batch = fetch(after)
     kept.push(...batch.filter(matches))
     after = batch.at(-1) ?? null
     if (batch.length < take) break
@@ -58,7 +63,7 @@ async function firstMatches<R extends Key & { titleText: string }>(
 // recently edited first unless `sort` says otherwise, which is the documented
 // default; equal times keep databases ahead of pages, each in stored order.
 export async function searchResults(
-  db: C,
+  db: Db,
   tenant: string,
   args: Json,
   version: string = DEFAULT_API_VERSION,
@@ -69,14 +74,9 @@ export async function searchResults(
   const query = typeof args.query === 'string' ? args.query.toLowerCase() : ''
   const matches = (row: { titleText: string }): boolean =>
     query === '' || row.titleText.toLowerCase().includes(query)
-  const where = { tenant, inTrash: false }
   const ascending = asObject(args.sort).direction === 'ascending'
-  const direction = ascending ? ('asc' as const) : ('desc' as const)
-  const orderBy = [
-    { lastEditedTime: direction },
-    { position: 'asc' as const },
-    { id: 'asc' as const },
-  ]
+  const order =
+    `ORDER BY "lastEditedTime" ${ascending ? 'ASC' : 'DESC'}, "position" ASC, "id" ASC ` + 'LIMIT ?'
   const take = Math.min(Math.max(intOr(args.page_size, 100), 1), 100) + 1
   const onlyDatabases = kind === 'database' || kind === 'data_source'
   const includeDatabases = kind === undefined || onlyDatabases
@@ -86,54 +86,86 @@ export async function searchResults(
   let anchor: { row: Key; database: boolean } | null = null
   if (cursor !== null) {
     if (!onlyDatabases) {
-      const row = await db.notionPage.findFirst({ where: { ...where, id: cursor } })
+      const row = first<NotionPage>(
+        db,
+        DMMF,
+        'NotionPage',
+        '"tenant" = ? AND "inTrash" = ? AND "id" = ?',
+        tenant,
+        false,
+        cursor,
+      )
       if (row !== null) anchor = { row, database: false }
     }
     if (anchor === null && includeDatabases) {
-      const rows = await db.notionDatabase.findMany({
-        where: { ...where, id: asDataSource ? { endsWith: cursor.slice(8) } : cursor },
-      })
+      // `endsWith` as Prisma ran it: LIKE with the suffix unescaped.
+      const rows = asDataSource
+        ? select<NotionDatabase>(
+            db,
+            DMMF,
+            'NotionDatabase',
+            '"tenant" = ? AND "inTrash" = ? AND "id" LIKE ?',
+            tenant,
+            false,
+            `%${cursor.slice(8)}`,
+          )
+        : select<NotionDatabase>(
+            db,
+            DMMF,
+            'NotionDatabase',
+            '"tenant" = ? AND "inTrash" = ? AND "id" = ?',
+            tenant,
+            false,
+            cursor,
+          )
       const row = rows.find((r) => (asDataSource ? dataSourceIdOf(r.id) : r.id) === cursor)
       if (row !== undefined) anchor = { row, database: true }
     }
     if (anchor === null) return []
   }
-  const laterTime = (row: Key) => ({
-    lastEditedTime: ascending ? { gt: row.lastEditedTime } : { lt: row.lastEditedTime },
-  })
+  const laterTime = (row: Key): Clause => [
+    ascending ? '"lastEditedTime" > ?' : '"lastEditedTime" < ?',
+    [row.lastEditedTime],
+  ]
   // Rows from `row` on in sort order; the cursor row itself opens its page, a
   // batch resumes strictly after the row it ended on.
-  const from = (row: Key, inclusive: boolean) => ({
-    OR: [
-      laterTime(row),
-      {
-        lastEditedTime: row.lastEditedTime,
-        OR: [
-          { position: { gt: row.position } },
-          { position: row.position, id: inclusive ? { gte: row.id } : { gt: row.id } },
-        ],
-      },
-    ],
-  })
-  const bounds = (database: boolean) => {
-    if (anchor === null) return {}
+  const from = (row: Key, inclusive: boolean): Clause => {
+    const [later, params] = laterTime(row)
+    return [
+      `(${later} OR ("lastEditedTime" = ? AND ("position" > ? OR ` +
+        `("position" = ? AND "id" ${inclusive ? '>=' : '>'} ?))))`,
+      [...params, row.lastEditedTime, row.position, row.position, row.id],
+    ]
+  }
+  const bounds = (database: boolean): Clause => {
+    if (anchor === null) return ['1 = 1', []]
     const row = anchor.row
     if (database !== anchor.database) {
-      return database
-        ? laterTime(row)
-        : { OR: [laterTime(row), { lastEditedTime: row.lastEditedTime }] }
+      if (database) return laterTime(row)
+      const [later, params] = laterTime(row)
+      return [`(${later} OR "lastEditedTime" = ?)`, [...params, row.lastEditedTime]]
     }
     return from(row, true)
   }
-  const batch = (database: boolean, after: Key | null) => ({
-    where: { AND: [{ ...where, ...bounds(database) }, after === null ? {} : from(after, false)] },
-    orderBy,
-    take,
-  })
+  const batch = <T>(model: string, database: boolean, after: Key | null): T[] => {
+    const [bound, boundParams] = bounds(database)
+    const [rest, restParams] = after === null ? ['1 = 1', []] : from(after, false)
+    return select<T>(
+      db,
+      DMMF,
+      model,
+      `"tenant" = ? AND "inTrash" = ? AND ${bound} AND ${rest} ${order}`,
+      tenant,
+      false,
+      ...boundParams,
+      ...restParams,
+      take,
+    )
+  }
   const found: { row: Key; item: Json; database: boolean }[] = []
   if (includeDatabases) {
     const rows = await firstMatches(
-      (after) => db.notionDatabase.findMany(batch(true, after)),
+      (after) => batch<NotionDatabase>('NotionDatabase', true, after),
       take,
       matches,
     )
@@ -146,7 +178,7 @@ export async function searchResults(
   }
   if (!onlyDatabases) {
     const rows = await firstMatches(
-      (after) => db.notionPage.findMany(batch(false, after)),
+      (after) => batch<NotionPage>('NotionPage', false, after),
       take,
       matches,
     )
@@ -377,16 +409,22 @@ export function keepProperties(page: Json, refs: string[]): Json {
 }
 
 export async function databaseRows(
-  db: C,
+  db: Db,
   tenant: string,
   databaseId: string,
   args: Json,
   version: string = DEFAULT_API_VERSION,
 ): Promise<Json[]> {
-  const rows = (await db.notionPage.findMany({
-    where: { tenant, parentType: 'database_id', parentId: databaseId, inTrash: false },
-    orderBy: [{ position: 'asc' }, { id: 'asc' }],
-  })) as PageRow[]
+  const rows = select<NotionPage>(
+    db,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "parentType" = ? AND "parentId" = ? AND "inTrash" = ? ORDER BY "position" ASC, "id" ASC',
+    tenant,
+    'database_id',
+    databaseId,
+    false,
+  ) as PageRow[]
   let out = rows.map((row) => pageJson(row, version))
   if (args.filter !== undefined) {
     out = out.filter((row) => matchesFilter(row, asObject(args.filter)))
