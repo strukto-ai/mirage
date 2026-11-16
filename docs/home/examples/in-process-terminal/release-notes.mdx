@@ -15,12 +15,12 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
   steps={[
     { cmd: "gh search prs --merged-at 2025-12-29..2026-01-04 …", cli: "gh", out: "10 pull requests" },
     { cmd: "linear issue list --team BILL | jq …", cli: "linear", out: "3 issues" },
-    { cmd: "python3 /work/group.py", cli: "python3", out: "Breaking 1, New 3, Improved 1, Fixed 2" },
-    { cmd: "python3 /work/notes.py", cli: "python3", out: "/work/release-notes.md" },
+    { cmd: "python3 /workspace/group.py", cli: "python3", out: "Breaking 1, New 3, Improved 1, Fixed 2" },
+    { cmd: "python3 /workspace/notes.py", cli: "python3", out: "/workspace/release-notes.md" },
     { cmd: "ntn pages create --parent \"page:$parent\" …", cli: "ntn", out: "Week of December 29, 2025" },
   ]}
   extras={[
-    { text: "/work in memory" },
+    { text: "/workspace in memory" },
     { text: "python3 on Monty", cli: "python3" },
   ]}
 />
@@ -31,10 +31,10 @@ publishes the draft to Notion for a person to review. A cron job can start it
 every Monday.
 
 A job this small needs no VM or sandbox. It runs in a
-[lightweight terminal](/home/examples/lightweight-terminal) inside one
+[in-process terminal](/home/examples/in-process-terminal) inside one
 FastAPI or Express server:
 
-- **Files:** `/work`, mounted in [memory](/home/setup/ram) for the agent's
+- **Files:** `/workspace`, mounted in [memory](/home/setup/ram) for the agent's
   scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
   [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
   instead.
@@ -50,7 +50,7 @@ repository whose team tracks its work in the Linear team `BILL`.
 ## Server
 
 This is the server from the
-[Overview](/home/examples/lightweight-terminal#server) with three additions:
+[Overview](/home/examples/in-process-terminal#simple-server) with three additions:
 it registers `gh`, `linear` and `ntn`, each with a credential read from an
 environment variable.
 
@@ -82,7 +82,7 @@ APIs, or set them for GitHub Enterprise or a proxy.
     from mirage.runtime.python.monty import MontyRuntime
 
     ws = Workspace(
-        {"/work": (RAMVFS(), MountMode.EXEC)},
+        {"/workspace": (RAMVFS(), MountMode.EXEC)},
         machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("gh", GH, GhConfig(
@@ -133,7 +133,7 @@ APIs, or set them for GitHub Enterprise or a proxy.
     import { GH, LINEAR, MontyRuntime, MountMode, NTN, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
-      { '/work': new RAMVFS() },
+      { '/workspace': new RAMVFS() },
       { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('gh', GH, {
@@ -200,9 +200,9 @@ the count and the titles:
 ```bash
 run <<'SH'
 gh search prs --repo example/billing --merged-at 2025-12-29..2026-01-04 \
-  --json number,title,body,url --limit 100 > /work/prs.json
-jq length /work/prs.json
-jq -r 'sort_by(.number)[] | "#\(.number) \(.title)"' /work/prs.json
+  --json number,title,body,url --limit 100 > /workspace/prs.json
+jq length /workspace/prs.json
+jq -r 'sort_by(.number)[] | "#\(.number) \(.title)"' /workspace/prs.json
 SH
 ```
 
@@ -233,9 +233,9 @@ state that were last updated during the same week:
 ```bash
 run <<'SH'
 linear issue list --team BILL |
-  jq '[.[] | select(.state_name == "Done" and .updated_at >= "2025-12-29" and .updated_at < "2026-01-05")]' > /work/issues.json
-jq length /work/issues.json
-jq -r '.[] | "\(.issue_key) \(.label_names[0]) \(.title)"' /work/issues.json
+  jq '[.[] | select(.state_name == "Done" and .updated_at >= "2025-12-29" and .updated_at < "2026-01-05")]' > /workspace/issues.json
+jq length /workspace/issues.json
+jq -r '.[] | "\(.issue_key) \(.label_names[0]) \(.title)"' /workspace/issues.json
 SH
 ```
 
@@ -269,12 +269,12 @@ file, which runs on Monty inside the server, joins the two lists:
 
 ```bash
 run <<'SH'
-cat > /work/group.py <<'PY'
+cat > /workspace/group.py <<'PY'
 import json
 import re
 
-prs = json.load(open("/work/prs.json"))
-issues = {i["issue_key"]: i for i in json.load(open("/work/issues.json"))}
+prs = json.load(open("/workspace/prs.json"))
+issues = {i["issue_key"]: i for i in json.load(open("/workspace/issues.json"))}
 kinds = {"feat": "New", "perf": "Improved", "fix": "Fixed"}
 labels = {"Feature": "New", "Improvement": "Improved", "Bug": "Fixed"}
 groups = {"Breaking": [], "New": [], "Improved": [], "Fixed": []}
@@ -299,12 +299,12 @@ for key, issue in issues.items():
     if found:
         groups[found[0]].append({"text": issue["title"], "links": [f"[{key}]({issue['url']})"]})
 
-json.dump(groups, open("/work/groups.json", "w"))
+json.dump(groups, open("/workspace/groups.json", "w"))
 for kind, entries in groups.items():
     print(kind, len(entries))
 print("Dropped", dropped)
 PY
-python3 /work/group.py
+python3 /workspace/group.py
 SH
 ```
 
@@ -326,19 +326,19 @@ entries, and the agent prints the result:
 
 ```bash
 run <<'SH'
-cat > /work/notes.py <<'PY'
+cat > /workspace/notes.py <<'PY'
 import json
 
-groups = json.load(open("/work/groups.json"))
+groups = json.load(open("/workspace/groups.json"))
 lines = ["# Week of December 29, 2025", ""]
 for kind, entries in groups.items():
     if entries:
         lines.append(f"## {kind}")
         lines += [f"- {e['text']} ({', '.join(e['links'])})" for e in entries]
-open("/work/release-notes.md", "w").write("\n".join(lines) + "\n")
+open("/workspace/release-notes.md", "w").write("\n".join(lines) + "\n")
 PY
-python3 /work/notes.py
-cat /work/release-notes.md
+python3 /workspace/notes.py
+cat /workspace/release-notes.md
 SH
 ```
 
@@ -359,7 +359,7 @@ SH
 ```
 
 The notes are a draft. The agent can rewrite a line in plainer words with
-one more write to `/work/release-notes.md` before it publishes.
+one more write to `/workspace/release-notes.md` before it publishes.
 
 ## Publish to Notion
 
@@ -374,7 +374,7 @@ run <<'SH'
 parent=$(ntn api v1/search -d '{"query": "Release Notes"}' |
   jq -r '[.results[] | select((.properties.title.title // [] | map(.plain_text) | join("")) == "Release Notes") | .id] |
     if length == 1 then .[0] else error("\(length) pages are titled Release Notes") end') &&
-page=$(ntn pages create --parent "page:$parent" < /work/release-notes.md) &&
+page=$(ntn pages create --parent "page:$parent" < /workspace/release-notes.md) &&
 ntn api "v1/pages/$page" | jq -r .url
 SH
 ```

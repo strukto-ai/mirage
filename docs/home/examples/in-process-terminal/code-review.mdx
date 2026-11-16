@@ -10,7 +10,7 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
   services={[
     { cli: "gh", name: "GitHub", text: "reads the pull request, its diff and CI" },
     { cli: "/repo", name: "Mirage's repository", text: "mounted read-only as files, never cloned" },
-    { cli: "git", name: "Pydantic Monty", text: "Mirage's Python runtime, history cloned into /work" },
+    { cli: "git", name: "Pydantic Monty", text: "Mirage's Python runtime, history cloned into /workspace" },
     { cli: "deepwiki", name: "DeepWiki", text: "an MCP server, installed as a CLI" },
   ]}
   steps={[
@@ -18,12 +18,12 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
     { cmd: "gh pr diff 2240 | awk …", cli: "gh", out: "the Python handler's diff" },
     { cmd: "grep -rn get_secret_value /repo/python/…", cli: "/repo", out: "3 matches, none prints a secret" },
     { cmd: "gh pr checks 2240 --json bucket …", cli: "gh", out: "89 pass, 5 skipping" },
-    { cmd: "git clone -q -n https://github.com/pydantic/monty.git /work/monty", cli: "git", out: "85 commits from 1.4.0 to 1.6.0" },
-    { cmd: "python3 /work/api.py", cli: "python3", out: "removed: none" },
-    { cmd: "deepwiki ask-wiki-question '{…}' > /work/context.md", cli: "deepwiki", out: "background, kept in a file" },
+    { cmd: "git clone -q -n https://github.com/pydantic/monty.git /workspace/monty", cli: "git", out: "85 commits from 1.4.0 to 1.6.0" },
+    { cmd: "python3 /workspace/api.py", cli: "python3", out: "removed: none" },
+    { cmd: "deepwiki ask-wiki-question '{…}' > /workspace/context.md", cli: "deepwiki", out: "background, kept in a file" },
   ]}
   extras={[
-    { text: "/work in memory" },
+    { text: "/workspace in memory" },
     { text: "python3 on Monty", cli: "python3" },
   ]}
 />
@@ -33,18 +33,18 @@ at the code around it, checks the tests and CI, and looks things up. A
 webhook can start it for each new pull request.
 
 A job this small needs no VM or sandbox. It runs in a
-[lightweight terminal](/home/examples/lightweight-terminal) inside one
+[in-process terminal](/home/examples/in-process-terminal) inside one
 FastAPI or Express server:
 
-- **Files:** `/work`, mounted in [memory](/home/setup/ram) for scratch files
+- **Files:** `/workspace`, mounted in [memory](/home/setup/ram) for scratch files
   and clones, and `/repo`, Mirage's repository mounted read-only with the
-  [GitHub VFS](/python/vfs/github), with no clone. To keep `/work`, mount a
+  [GitHub VFS](/python/vfs/github), with no clone. To keep `/workspace`, mount a
   [disk folder](/home/setup/disk), an [S3 bucket](/home/setup/s3) or another
   [VFS](/home/setup/vfs) there instead.
 - **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
 - **CLIs:** [`gh`](/python/cli/gh) calls GitHub's API with a token the
   server holds, and [`git`](/python/cli/git) clones a repository into
-  `/work` with no `git` program on the host. DeepWiki, an MCP server, is
+  `/workspace` with no `git` program on the host. DeepWiki, an MCP server, is
   installed as a CLI named `deepwiki`, with one subcommand for each tool.
 
 The commands below are what the agent runs in its terminal, in two reviews
@@ -64,7 +64,7 @@ that read a repository in two ways:
 ## Server
 
 This is the server from the
-[Overview](/home/examples/lightweight-terminal#server) with three additions:
+[Overview](/home/examples/in-process-terminal#simple-server) with three additions:
 it registers `gh` and [`git`](/python/cli/git), it mounts Mirage's
 repository read-only at `/repo`, and at start it installs the DeepWiki MCP
 server as a CLI. The mount is pinned to the commit the pull request merged
@@ -100,7 +100,7 @@ from the terminal.
         ref="f260be475efbebd860a25dd28c5ab84047d353c6",
     )
     ws = Workspace(
-        {"/work": (RAMVFS(), MountMode.EXEC), "/repo": (repo, MountMode.READ)},
+        {"/workspace": (RAMVFS(), MountMode.EXEC), "/repo": (repo, MountMode.READ)},
         machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("git", GIT)
@@ -155,7 +155,7 @@ from the terminal.
       ref: 'f260be475efbebd860a25dd28c5ab84047d353c6',
     })
     const ws = new Workspace(
-      { '/work': [new RAMVFS(), MountMode.EXEC], '/repo': [repo, MountMode.READ] },
+      { '/workspace': [new RAMVFS(), MountMode.EXEC], '/repo': [repo, MountMode.READ] },
       { machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('git', GIT)
@@ -227,9 +227,9 @@ A large answer goes to a file, and the caller reads only what it asks for:
 
 ```bash
 run <<'SH'
-deepwiki read-wiki-contents '{"repoName": "pydantic/monty"}' > /work/monty-wiki.md
-wc -c /work/monty-wiki.md
-grep -n -i "abstractos" /work/monty-wiki.md | head -5
+deepwiki read-wiki-contents '{"repoName": "pydantic/monty"}' > /workspace/monty-wiki.md
+wc -c /workspace/monty-wiki.md
+grep -n -i "abstractos" /workspace/monty-wiki.md | head -5
 SH
 ```
 
@@ -357,9 +357,9 @@ the answer to a file:
 
 ```bash
 run <<'SH'
-deepwiki ask-wiki-question '{"repoName": "strukto-ai/mirage", "question": "How does an account CLI such as gh or ntn get its token, and which commands can show it?"}' > /work/context.md
-wc -l < /work/context.md
-grep -n -i "token" /work/context.md | head -3
+deepwiki ask-wiki-question '{"repoName": "strukto-ai/mirage", "question": "How does an account CLI such as gh or ntn get its token, and which commands can show it?"}' > /workspace/context.md
+wc -l < /workspace/context.md
+grep -n -i "token" /workspace/context.md | head -3
 SH
 ```
 
@@ -415,8 +415,8 @@ Next the agent clones Monty. `-n` skips the checkout, so the terminal holds
 
 ```bash
 run <<'SH'
-git clone -q -n https://github.com/pydantic/monty.git /work/monty
-cd /work/monty
+git clone -q -n https://github.com/pydantic/monty.git /workspace/monty
+cd /workspace/monty
 git log --oneline 1.4.0..v1.6.0 | wc -l
 git diff --name-only 1.4.0 v1.6.0 -- crates/monty-python/python
 SH
@@ -436,14 +436,14 @@ Python file on Monty lists the public names the release adds and removes:
 
 ```bash
 run <<'SH'
-git diff 1.4.0 v1.6.0 -- crates/monty-python/python > /work/monty-api.patch
-cat > /work/api.py <<'PY'
+git diff 1.4.0 v1.6.0 -- crates/monty-python/python > /workspace/monty-api.patch
+cat > /workspace/api.py <<'PY'
 import re
 
 added = {}
 removed = set()
 path = None
-for line in open("/work/monty-api.patch"):
+for line in open("/workspace/monty-api.patch"):
     if line.startswith("+++ b/"):
         path = line[6:].strip().rsplit("/", 1)[-1]
     m = re.match(r"^([+-])\s*(?:async )?(?:def|class) ([A-Za-z]\w*)\s*[(:\[]", line)
@@ -460,7 +460,7 @@ for path, names in sorted(added.items()):
 gone = sorted(n for p, n in removed if n not in added.get(p, set()))
 print("removed: " + (", ".join(gone) or "none"))
 PY
-python3 /work/api.py
+python3 /workspace/api.py
 SH
 ```
 
@@ -519,9 +519,9 @@ into a file:
 
 ```bash
 run <<'SH'
-deepwiki ask-wiki-question '{"repoName": "pydantic/monty", "question": "How does a host implement AbstractOS, and what happens when a program opens a file in exclusive mode (x) and the host has not implemented path_create_exclusive?"}' > /work/context.md
-wc -l < /work/context.md
-grep -n -i "exclusive" /work/context.md | head -3
+deepwiki ask-wiki-question '{"repoName": "pydantic/monty", "question": "How does a host implement AbstractOS, and what happens when a program opens a file in exclusive mode (x) and the host has not implemented path_create_exclusive?"}' > /workspace/context.md
+wc -l < /workspace/context.md
+grep -n -i "exclusive" /workspace/context.md | head -3
 SH
 ```
 
