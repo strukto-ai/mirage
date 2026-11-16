@@ -376,7 +376,7 @@ export const InfraDiagram = () => {
             justifyContent: "space-between",
             alignItems: "stretch",
             gap: wide ? 14 : 6,
-            marginTop: 30,
+            marginTop: 40,
             fontSize: wide ? 12.5 : 10,
           }}
         >
@@ -400,7 +400,7 @@ export const InfraDiagram = () => {
             </div>
           ))}
         </div>
-        <div data-card className="ia-box" style={{ position: "relative", marginTop: wide ? 56 : 44 }}>
+        <div data-card className="ia-box" style={{ position: "relative", marginTop: 40 }}>
           <div
             style={{
               display: "flex",
@@ -450,7 +450,7 @@ export const InfraDiagram = () => {
             gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))`,
             alignItems: "stretch",
             gap: wide ? 14 : 6,
-            marginTop: wide ? 56 : 44,
+            marginTop: 40,
             fontSize: wide ? 12.5 : 10,
           }}
         >

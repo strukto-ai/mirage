@@ -352,7 +352,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
             justifyContent: "space-between",
             alignItems: "stretch",
             gap: wide ? 14 : 6,
-            marginTop: 30,
+            marginTop: 40,
             fontSize: wide ? 12.5 : 10,
           }}
         >
@@ -369,7 +369,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
               alignItems: "center",
               justifyContent: "center",
               gap: wide ? 14 : 10,
-              marginTop: wide ? 48 : 40,
+              marginTop: 40,
               padding: wide ? "10px 14px" : "9px 10px",
               borderColor: gated ? tone : undefined,
             }}
@@ -383,7 +383,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
             </span>
           </div>
         )}
-        <div data-card className="rd-box" style={{ position: "relative", marginTop: policy ? 26 : wide ? 56 : 44 }}>
+        <div data-card className="rd-box" style={{ position: "relative", marginTop: 40 }}>
           <div
             style={{
               display: "flex",
