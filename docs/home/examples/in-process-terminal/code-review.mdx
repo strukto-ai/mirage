@@ -1,7 +1,7 @@
 ---
 title: Code Review
 icon: code-pull-request
-description: An agent reviews a pull request the way a review bot does. It reads the change against a read-only clone in memory, scores it and writes line comments, with no sandbox.
+description: An agent reviews a pull request against a read-only clone in memory, scores it and writes line comments, with no sandbox.
 ---
 
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
@@ -26,11 +26,10 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
   ]}
 />
 
-An agent reviews a pull request the way a review bot does. It reads what
-changed and why, reads the code around the change, checks the tests and CI,
-and writes a review: a confidence score, a diagram of the change, and
-comments on the lines that need one. A webhook can start it for each new
-pull request.
+An agent reviews a pull request. It reads what changed and why, reads the
+code around the change, checks the tests and CI, and writes a review: a
+confidence score, a diagram of the change, and comments on the lines that
+need one. A webhook can start it for each new pull request.
 
 A job this small needs no VM or sandbox. It runs in an
 [in-process terminal](/home/examples/in-process-terminal) inside one
@@ -264,7 +263,7 @@ SH
 0bda554 Fix `signal` replacement when extending instances (#880)
 ```
 
-## Read the pull request
+## 1. Read the pull request
 
 First the agent reads what the pull request is, which files it touches, and
 the issue it closes:
@@ -359,7 +358,7 @@ index aa046c40..922f0175 100644
 The new check resets the signals on a `replaceOption` or `undefined`, but
 not on `null`.
 
-## Read the code around it
+## 2. Read the code around it
 
 A diff shows only the lines that changed. To know what a `null` does next,
 the agent reads the rest of the function in `/repo`: how the signals it
@@ -405,7 +404,7 @@ SH
 Three tests, for a `replaceOption`, `undefined` and a nested `signal`; none
 for `null`. CI passed.
 
-## Write the review
+## 3. Write the review
 
 The agent writes the review in two files: the summary, with its score, a
 diagram and a table of the files, and one comment on the line that needs it:
@@ -477,7 +476,7 @@ SH
 To get there the agent read about 3 KB of output, and nothing left the
 server but calls to GitHub's API.
 
-## Post the review
+## 4. Post the review
 
 The agent cannot post: its profile refuses `gh api`. The server posts the
 file once the review is written, from its own session:
@@ -492,7 +491,7 @@ rendered, at the top of the pull request, and the comment on line 228 of
 the agent's last command; one that keeps a person in the loop shows
 `/workspace/review.json` to them first.
 
-## What the profile refuses
+## 5. What the profile refuses
 
 The `reviewer` profile is checked before each command runs, and the mount
 mode on every write:

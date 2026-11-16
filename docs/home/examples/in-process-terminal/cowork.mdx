@@ -251,7 +251,7 @@ The commands between `SH` and `SH` in the blocks below run in the terminal
 on the server, not in the shell that calls `run`. Variables the agent sets,
 such as `$plan`, stay set in the terminal for the next block.
 
-## Read the deal
+## 1. Read the deal
 
 A Slack channel is a folder named after the channel and its ID, with a
 folder for each day and the day's messages in `chat.jsonl`. The agent
@@ -269,7 +269,7 @@ deals-won__C0CJ1LE89NV
 1794815580.678919 Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
 ```
 
-## Pick the account manager
+## 2. Pick the account manager
 
 Drive's folders are directories, and a Sheet is a `.gsheet.json` file, the
 Sheets API's view of it with every cell. The agent adds up the seats each
@@ -293,7 +293,7 @@ Onboarding tracker.gsheet.json
 
 Mei Chen has the fewest seats, so Northwind Health goes to her.
 
-## Write the plan
+## 3. Write the plan
 
 The agent copies the template into the folder. The IDs `gws` needs come
 from the files themselves: a Doc's `documentId` is in its `.gdoc.json`, and
@@ -364,7 +364,7 @@ Week 2: import data and train the first team
 Week 4: adoption review with Priya Shah
 ```
 
-## Add it to the tracker
+## 4. Add it to the tracker
 
 ```bash
 run <<'SH'
@@ -379,7 +379,7 @@ SH
 Sheet1!A6:E6
 ```
 
-## Open a project in Notion
+## 5. Open a project in Notion
 
 The agent builds the page, a summary, a link to the plan and the kickoff
 checklist, and creates it in Notion. Its parent is the workspace, so the
@@ -413,7 +413,7 @@ SH
 https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8984c1
 ```
 
-## Tell the team
+## 6. Tell the team
 
 Last, the agent replies in the deal's thread with who owns it and where
 everything is. The channel ID is the end of its folder's name:

@@ -40,8 +40,9 @@ or Express server:
 - **Mail:** [`himalaya`](/python/cli/himalaya) reads the support inbox and
   saves replies to `Drafts` over IMAP, and sends over SMTP.
 - **Files:** `/slack` mounts [Slack](/python/vfs/slack) read-only, files
-  shared in a channel included, so the agent reads the export with `awk`
-  where it lies. `/workspace`, in [memory](/home/setup/ram), holds the
+  shared in a channel included, so the agent runs `awk` on the export
+  straight from `/slack`, without downloading it. `/workspace`, in
+  [memory](/home/setup/ram), holds the
   reply's text and the report it builds.
 - **Policy:** the agent may draft as much as it likes. A
   [policy](/home/policy/overview) on the server reads each attachment
@@ -178,56 +179,82 @@ profiles:
               himalaya envelope list, himalaya message read, himalaya message reply]
     policy:
       pre_command:
-        - {script: ./guard.py, runtime: monty}
+        - {script: ./guard.py}
 
 profile: support
 ```
 
 `guard.py` sees each command after the shell has expanded it, so a variable
-or a glob cannot hide a recipient or a path:
+or a glob cannot hide a recipient or a path. It judges only
+`himalaya message reply`, the one way the profile lets the agent write
+mail, with one rule per function:
 
-- A reply goes to whoever wrote in, and no one else: `--to`, `--cc` and
-  `--bcc` are refused.
-- An attachment must be a report the agent built in `/workspace/outbox/`,
-  never a file straight from Slack.
-- `guard.py` opens each attachment and reads its first column: a report
-  with more than one customer in it is refused.
-- `--send` asks a person. Without it, a reply is only saved to `Drafts`.
-- A flag must be written apart from its value, as `--attach FILE`, not
-  `--attach=FILE` or `-tADDR`, so the rules above see every value.
+- `hides_a_flag_value`: a flag must be written apart from its value, as
+  `--attach FILE`, not `--attach=FILE` or `-tADDR`, so the rules below see
+  every value.
+- `adds_a_recipient`: a reply goes to whoever wrote in, and no one else, so
+  `--to`, `--cc` and `--bcc` are refused.
+- `attaches_a_bad_report`: an attachment must be a report the agent built
+  in `/workspace/outbox/`, never a file straight from Slack, and
+  `customers_in` reads its first column to check that it holds one
+  customer.
+- `sends_now`: `--send` asks a person. Without it, a reply is only saved
+  to `Drafts`.
 
 ```python guard.py
-def customers(path):
+OUTBOX = "/workspace/outbox/"
+RECIPIENT_FLAGS = ("-t", "--to", "--cc", "--bcc")
+
+
+def is_reply(words):
+    return [w["text"] for w in words[:3]] == ["himalaya", "message", "reply"]
+
+
+def hides_a_flag_value(words):
+    for w in words:
+        t = w["text"]
+        if w["kind"] == "option" and ("=" in t or (not t.startswith("--") and len(t) > 2)):
+            return "write each flag and its value apart"
+
+
+def adds_a_recipient(words):
+    for w in words:
+        if w["text"] in RECIPIENT_FLAGS:
+            return "a reply goes only to the sender"
+
+
+def customers_in(report):
     names = []
-    for line in open(path).read().splitlines()[1:]:
+    for line in open(report).read().splitlines()[1:]:
         name = line.split(",")[0]
         if line and name not in names:
             names.append(name)
     return names
 
 
-def deny(reason):
-    return {"kind": "deny", "reason": reason}
+def attaches_a_bad_report(words):
+    for w in words:
+        if w["option"] != "--attach":
+            continue
+        report = w["path"] or ""
+        if not report.startswith(OUTBOX):
+            return "attach only reports from " + OUTBOX
+        if len(customers_in(report)) != 1:
+            return "a report holds one customer's data"
+
+
+def sends_now(words):
+    return "--send" in [w["text"] for w in words]
 
 
 def pre_command(ctx):
     words = ctx["words"]
-    texts = [w["text"] for w in words]
-    if texts[:3] != ["himalaya", "message", "reply"]:
+    if not is_reply(words):
         return None
-    for w in words:
-        t = w["text"]
-        if w["kind"] == "option" and ("=" in t or (not t.startswith("--") and len(t) > 2)):
-            return deny("write each flag and its value apart")
-        if t in ("-t", "--to", "--cc", "--bcc"):
-            return deny("a reply goes only to the sender")
-        if w["option"] == "--attach":
-            path = w["path"] or ""
-            if not path.startswith("/workspace/outbox/"):
-                return deny("attach only reports from /workspace/outbox/")
-            if len(customers(path)) != 1:
-                return deny("a report holds one customer's data")
-    if "--send" in texts:
+    problem = hides_a_flag_value(words) or adds_a_recipient(words) or attaches_a_bad_report(words)
+    if problem:
+        return {"kind": "deny", "reason": problem}
+    if sends_now(words):
         return {"kind": "ask", "reason": "a person approves every send"}
     return None
 ```
@@ -465,8 +492,8 @@ each customer only their own.
 
 ## 3. Build the report
 
-The agent reads the export where it lies on the Slack mount, with no
-download, and keeps only Northwind Health's rows:
+The agent reads the export from the Slack mount, without downloading it,
+and keeps only Northwind Health's rows:
 
 - `awk -F,` splits each line on commas. `NR == 1` keeps the header, and
   `$1 == "Northwind Health"` keeps the rows whose first column is the
