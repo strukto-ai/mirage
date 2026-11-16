@@ -27,7 +27,7 @@ import { PathSpec } from '../../types.ts'
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
 import { WalkResult, type CLI, type WalkFlagBag } from './types.ts'
 
-import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, USAGE_EXIT } from './constants.ts'
+import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, POPPLER_EXIT, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -335,6 +335,13 @@ function usageError(
       output: encodeText(cobraRefusal(groupMessage(message, token), name, node)),
       stream: 'stderr',
       exitCode: COBRA_EXIT,
+    })
+  }
+  if (style === UsageStyle.POPPLER) {
+    return new WalkResult({
+      output: encodeText(nodeHelp(name, node, style)),
+      stream: 'stderr',
+      exitCode: POPPLER_EXIT,
     })
   }
   if (style === UsageStyle.CLAP) {
