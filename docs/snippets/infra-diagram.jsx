@@ -37,9 +37,11 @@ export const InfraDiagram = () => {
   const machines = [
     ["Monty", "/images/pydantic-logo.svg"],
     ["Cloudflare", "/images/cloudflare-logo.svg"],
+    ["Mirage", "/logo/light.svg", "/logo/dark.svg"],
     ["E2B", "/images/e2b-logo.svg"],
     ["EC2 GPU", "/images/ec2-logo.svg"],
   ]
+  const hub = 2
   const redis = ["Redis", "/images/redis-logo.svg"]
   const views = [
     {
@@ -169,6 +171,7 @@ export const InfraDiagram = () => {
   const typedChars = Math.max(0, Math.min(step.size, Math.floor(((elapsed - step.start) / (step.typed - step.start)) * step.size)))
   const drawn = elapsed >= step.draw ? Math.min(1, (elapsed - step.draw) / 450) : 0
   const on = drawn >= 0.625
+  const climb = elapsed >= step.draw + 450 ? Math.min(1, (elapsed - step.draw - 450) / 300) : 0
 
   const keywords = ["for", "in", "do", "done"]
   const tokens = (text) => {
@@ -197,6 +200,7 @@ export const InfraDiagram = () => {
 
   const middle = (box) => (box.left + box.right) / 2
   const up = (machine) => `M ${middle(machine)} ${layout.vfs.bottom} L ${middle(machine)} ${machine.top}`
+  const lift = (machine) => `M ${middle(machine)} ${machine.top} L ${middle(machine)} ${layout.vfs.bottom}`
   const rise = (machine) => {
     const x0 = middle(layout.card)
     const y0 = layout.card.top
@@ -276,7 +280,8 @@ export const InfraDiagram = () => {
         .infra-diagram .ia-box { background: var(--ia-surface); border: 1px solid var(--ia-edge); }
         .infra-diagram .ia-muted { color: var(--ia-muted); }
         .infra-diagram .ia-slot { transition: opacity .3s, border-color .3s; }
-        .infra-diagram .ia-slot.ia-on { border-color: var(--ia-on); }
+        .infra-diagram .ia-slot.ia-on, .infra-diagram .ia-machine.ia-on, .infra-diagram .ia-vfs.ia-on { border-color: var(--ia-on); }
+        .infra-diagram .ia-machine, .infra-diagram .ia-vfs { transition: border-color .3s; }
         .infra-diagram .ia-swap { animation: ia-swap .45s ease-out; }
         @keyframes ia-swap { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
         .infra-diagram img { margin: 0; display: block; }
@@ -302,7 +307,7 @@ export const InfraDiagram = () => {
       <div
         ref={setRoot}
         role="img"
-        aria-label="Monty, a Cloudflare sandbox, an E2B sandbox and an EC2 GPU share one unified virtual filesystem, and the Mirage terminal runs commands on them. Under Mirage, it keeps its sessions, jobs and command logs on backends that can be swapped. It cycles through three setups: Redis, Redis and Langfuse; disk, memory and disk; then S3, Redis and Jaeger. The commands run the same on each."
+        aria-label="Monty, a Cloudflare sandbox, Mirage itself, an E2B sandbox and an EC2 GPU share one unified virtual filesystem, and the Mirage terminal runs commands on them; these shell commands run on Mirage and reach the filesystem through it. Under Mirage, it keeps its sessions, jobs and command logs on backends that can be swapped. It cycles through three setups: Redis, Redis and Langfuse; disk, memory and disk; then S3, Redis and Jaeger. The commands run the same on each."
         style={{ position: "relative", display: "flex", flexDirection: "column", fontSize: wide ? 13 : 11 }}
       >
         {layout && (
@@ -333,11 +338,17 @@ export const InfraDiagram = () => {
                   strokeDashoffset={1 - drawn}
                 />
               ))}
+            {drawn > 0 && layout.machines[hub] && (
+              <g fill="none" stroke="var(--ia-on)" strokeWidth="1">
+                <path d={rise(layout.machines[hub])} pathLength="1" strokeDasharray="1" strokeDashoffset={1 - drawn} />
+                {climb > 0 && <path d={lift(layout.machines[hub])} pathLength="1" strokeDasharray="1" strokeDashoffset={1 - climb} />}
+              </g>
+            )}
           </svg>
         )}
         <div
           data-vfs
-          className="ia-box"
+          className={`ia-box ia-vfs ${climb >= 1 ? "ia-on" : ""}`}
           style={{
             position: "relative",
             display: "flex",
@@ -372,19 +383,18 @@ export const InfraDiagram = () => {
           style={{
             position: "relative",
             display: "grid",
-            gridTemplateColumns: wide ? `repeat(${machines.length}, 132px)` : `repeat(${machines.length}, minmax(0, 1fr))`,
-            justifyContent: "space-between",
+            gridTemplateColumns: `repeat(${machines.length}, minmax(0, 1fr))`,
             alignItems: "stretch",
             gap: wide ? 14 : 6,
             marginTop: 40,
             fontSize: wide ? 12.5 : 10,
           }}
         >
-          {machines.map(([label, logo]) => (
+          {machines.map(([label, logo, dark], position) => (
             <div
               key={label}
               data-machine
-              className="ia-box"
+              className={`ia-box ia-machine ${position === hub && drawn >= 1 ? "ia-on" : ""}`}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -392,11 +402,20 @@ export const InfraDiagram = () => {
                 flexDirection: wide ? "row" : "column",
                 gap: wide ? 9 : 5,
                 minHeight: wide ? 52 : 62,
-                padding: wide ? "8px 10px" : "7px 4px",
+                padding: wide ? "8px 6px" : "7px 4px",
               }}
             >
-              <img src={logo} alt="" width={wide ? 20 : 18} height={wide ? 20 : 18} style={{ flex: "none" }} />
-              <span style={{ textAlign: wide ? "left" : "center", lineHeight: 1.35 }}>{label}</span>
+              {dark ? (
+                <>
+                  <img src={logo} alt={label} className="ia-light-only" style={{ height: wide ? 20 : 13, width: "auto" }} />
+                  <img src={dark} alt={label} className="ia-dark-only" style={{ height: wide ? 20 : 13, width: "auto" }} />
+                </>
+              ) : (
+                <>
+                  <img src={logo} alt="" width={wide ? 20 : 18} height={wide ? 20 : 18} style={{ flex: "none" }} />
+                  <span style={{ textAlign: wide ? "left" : "center", lineHeight: 1.35 }}>{label}</span>
+                </>
+              )}
             </div>
           ))}
         </div>

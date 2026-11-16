@@ -2,6 +2,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
   const machines = [
     ["Monty", "/images/pydantic-logo.svg"],
     ["Cloudflare", "/images/cloudflare-logo.svg"],
+    ["Mirage", "/logo/light.svg", "/logo/dark.svg"],
     ["E2B", "/images/e2b-logo.svg"],
     ["EC2 GPU", "/images/ec2-logo.svg"],
   ]
@@ -118,15 +119,14 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
   const outcome = active.outcome || "allow"
   const typedChars = Math.max(0, Math.min(step.size, Math.floor(((elapsed - step.start) / (step.typed - step.start)) * step.size)))
   const started = elapsed >= step.draw
-  const target = outcome === "allow" ? active.target : -1
-  const direct = outcome === "show"
-  const parts = (policy ? 1 : 0) + (target >= 0 ? 2 : direct ? 1 : 0)
+  const target = active.target === undefined ? -1 : active.target
+  const parts = (policy ? 1 : 0) + (target >= 0 ? 2 : 0)
   const segment = 280
   const reach = started ? Math.max(0, Math.min(parts, (elapsed - step.draw) / segment)) : 0
   const atMachine = policy ? 2 : 1
   const gated = policy && reach >= 1
   const lit = target >= 0 && reach >= atMachine ? target : -1
-  const reached = (target >= 0 || direct) && reach >= parts
+  const reached = target >= 0 && reach >= parts
   const arrived = step.draw + atMachine * segment
   const spawned = active.forks && lit >= 0 ? Math.max(0, Math.min(forks, Math.floor((elapsed - arrived - 100) / 180) + 1)) : 0
   const tone = { allow: "var(--rd-on)", show: "var(--rd-on)", deny: "var(--rd-deny)", hide: "var(--rd-ink)" }[outcome]
@@ -171,7 +171,6 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
     if (!started) return []
     const out = policy ? [stem()] : []
     if (target >= 0 && layout.machines[target]) out.push(route(layout.machines[target]), up(layout.machines[target]))
-    if (direct && layout.gate) out.push(`M ${middle(layout.gate)} ${layout.gate.top} L ${middle(layout.gate)} ${layout.vfs.bottom}`)
     return out
   }
   const folder = (
@@ -190,7 +189,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
     </svg>
   )
   const mini = wide ? 16 : 12
-  const machine = ([label, logo], position) => {
+  const machine = ([label, logo, dark], position) => {
     const on = lit === position
     return (
       <div
@@ -203,13 +202,22 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
           alignItems: "center",
           justifyContent: "center",
           minHeight: wide ? 62 : 74,
-          padding: wide ? "8px 10px" : "7px 4px",
+          padding: wide ? "8px 6px" : "7px 4px",
           opacity: on ? 1 : 0.55,
         }}
       >
         <div style={{ display: "flex", flexDirection: wide ? "row" : "column", alignItems: "center", gap: wide ? 9 : 5 }}>
-          <img src={logo} alt="" width={wide ? 20 : 18} height={wide ? 20 : 18} style={{ flex: "none" }} />
-          <span style={{ textAlign: wide ? "left" : "center", lineHeight: 1.35 }}>{label}</span>
+          {dark ? (
+            <>
+              <img src={logo} alt={label} className="rd-light-only" style={{ height: wide ? 20 : 13, width: "auto" }} />
+              <img src={dark} alt={label} className="rd-dark-only" style={{ height: wide ? 20 : 13, width: "auto" }} />
+            </>
+          ) : (
+            <>
+              <img src={logo} alt="" width={wide ? 20 : 18} height={wide ? 20 : 18} style={{ flex: "none" }} />
+              <span style={{ textAlign: wide ? "left" : "center", lineHeight: 1.35 }}>{label}</span>
+            </>
+          )}
         </div>
         {position === 0 && steps.some((one) => one.forks) && (
           <div
@@ -348,8 +356,7 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
           style={{
             position: "relative",
             display: "grid",
-            gridTemplateColumns: wide ? "repeat(4, 132px)" : "repeat(4, minmax(0, 1fr))",
-            justifyContent: "space-between",
+            gridTemplateColumns: `repeat(${machines.length}, minmax(0, 1fr))`,
             alignItems: "stretch",
             gap: wide ? 14 : 6,
             marginTop: 40,
@@ -433,12 +440,12 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
 
 export const RoutingDiagram = () => (
   <FlowDiagram
-    label="Monty, Cloudflare, an E2B sandbox and an EC2 GPU all share one unified virtual filesystem. Each command typed in the Mirage terminal runs on one of them: a for loop forks four Monty processes, numpy runs on Cloudflare, building features on E2B and training on the EC2 GPU."
+    label="Monty, Cloudflare, Mirage itself, an E2B sandbox and an EC2 GPU all share one unified virtual filesystem. Each command typed in the Mirage terminal runs on one of them: a for loop forks four Monty processes, numpy runs on Cloudflare, building features on E2B and training on the EC2 GPU."
     steps={[
       { line: "for f in raw/*.csv; do python3 count.py $f & done", target: 0, forks: true },
       { line: 'python3 -c "import numpy as np; …"', target: 1 },
-      { line: "python3 build.py", target: 2 },
-      { line: "python3 train.py", target: 3 },
+      { line: "python3 build.py", target: 3 },
+      { line: "python3 train.py", target: 4 },
     ]}
   />
 )
@@ -446,11 +453,11 @@ export const RoutingDiagram = () => (
 export const SecuredDiagram = () => (
   <FlowDiagram
     policy
-    label="Every command typed in the Mirage terminal is checked first. An allowed Python script runs on Monty over the unified virtual filesystem, posting to Slack is denied, a file shown again inside a hidden folder reads from the filesystem, and a hidden secret does not exist for the agent."
+    label="Every command typed in the Mirage terminal is checked first. An allowed Python script runs on Monty over the unified virtual filesystem, posting to Slack is denied, a file shown again inside a hidden folder is read by Mirage from the filesystem, and a hidden secret does not exist for the agent."
     steps={[
       { line: "python3 count.py reports/q3.csv", target: 0 },
       { line: "slack send-message --text hi", outcome: "deny" },
-      { line: "cat secrets/README.md", outcome: "show" },
+      { line: "cat secrets/README.md", target: 2, outcome: "show" },
       { line: "cat secrets/aws.txt", outcome: "hide" },
     ]}
   />
