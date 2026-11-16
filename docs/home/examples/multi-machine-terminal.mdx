@@ -1,0 +1,357 @@
+---
+title: Multi-machine Terminal
+icon: route
+description: A unified virtual terminal across different machines that runs each task on the machine that fits it, so AI agents perform tasks more efficiently and at lower cost.
+---
+
+import { FanOutBenchmark, GpuBenchmark, MachineBenchmark } from "/snippets/machine-benchmark.jsx"
+import { ProcessTable } from "/snippets/process-table.jsx"
+import { FlowDiagram, RoutingDiagram } from "/snippets/routing-diagram.jsx"
+
+<RoutingDiagram />
+
+Mirage gives an agent a unified virtual terminal across different machines. The
+agent types every command in the same terminal, and each one runs on the machine
+that fits it, plain Python inside Mirage, numpy in a small container, data
+processing on a CPU sandbox and training on a GPU, so the agent finishes its
+tasks faster and at lower cost.
+
+| Machine | Provider | Task |
+| --- | --- | --- |
+| `monty` | [In Process](/home/setup/machine/in_process) | Count page views, in plain Python |
+| `cf` | [Cloudflare Container](/home/setup/machine/cloudflare_container), lite | Summarize the counts with numpy |
+| `cpu` | [E2B](/home/setup/machine/e2b) | Build features with pandas |
+| `gpu` | [SSH](/home/setup/machine/ssh) | Train a model with PyTorch |
+
+## Setup
+
+<AccordionGroup>
+  <Accordion title="Create the machines">
+    A Cloudflare lite container with numpy, reached through a relay Worker
+    (see [Cloudflare Container](/home/setup/machine/cloudflare_container#usage-through-a-relay)):
+
+    ```dockerfile Dockerfile
+    FROM python:3.12-slim
+    RUN pip install --no-cache-dir numpy
+    CMD ["sleep", "infinity"]
+    ```
+
+    ```jsonc wrangler.jsonc
+    {
+      "name": "mirage-relay",
+      "main": "src/relay.ts",
+      "compatibility_flags": ["nodejs_compat"],
+      "containers": [{ "class_name": "Relay", "image": "./Dockerfile", "instance_type": "lite", "max_instances": 5 }],
+      "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+    }
+    ```
+
+    An E2B sandbox from a template with `sshfs`, pandas and numpy:
+
+    <Tabs>
+      <Tab title="Python" icon="/images/python-logo.svg">
+        ```python
+        from e2b import AsyncSandbox, Template
+
+        template = Template().from_python_image("3.12").apt_install("sshfs").pip_install(["pandas", "numpy"])
+        Template.build(template, "mirage-cpu-pandas")
+        sandbox = await AsyncSandbox.create("mirage-cpu-pandas", timeout=3600)
+        print(sandbox.sandbox_id)
+        ```
+      </Tab>
+      <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+        ```typescript
+        import { Sandbox, Template } from 'e2b'
+
+        const template = Template().fromPythonImage('3.12').aptInstall('sshfs').pipInstall(['pandas', 'numpy'])
+        await Template.build(template, 'mirage-cpu-pandas')
+        const sandbox = await Sandbox.create('mirage-cpu-pandas', { timeoutMs: 3_600_000 })
+        console.log(sandbox.sandboxId)
+        ```
+      </Tab>
+    </Tabs>
+
+    For the GPU, any machine reachable over SSH works. This example uses an
+    EC2 `g4dn.xlarge` with an NVIDIA T4, running a container with PyTorch,
+    CUDA, `sshfs` and `sshd` on port 2222.
+  </Accordion>
+  <Accordion title="workspace.yaml">
+    ```yaml workspace.yaml
+    mode: exec
+
+    mounts:
+      /:
+        vfs: ram
+      /tmp:
+        vfs: ram
+      /workspace:
+        vfs: s3
+        config:
+          bucket: ${AWS_S3_BUCKET}
+          region: ${AWS_DEFAULT_REGION}
+          aws_access_key_id: {from: env, key: AWS_ACCESS_KEY_ID}
+          aws_secret_access_key: {from: env, key: AWS_SECRET_ACCESS_KEY}
+
+    machines:
+      monty:
+        provider: in_process
+        runtime: monty
+      cf:
+        provider: cloudflare_container
+        url: ${RELAY_URL}/cf
+        token: {from: env, key: MIRAGE_RELAY_TOKEN}
+        captures: ["@python"]
+      cpu:
+        provider: e2b
+        sandbox_id: ${E2B_SANDBOX_ID}
+        mount_type: ssh
+        captures: ["@python"]
+      gpu:
+        provider: ssh
+        host: ${GPU_HOST}
+        port: 2222
+        username: root
+        identity_file: ~/.ssh/id_ed25519
+        mount_type: ssh
+        captures: ["@python"]
+
+    profiles:
+      agent:
+        policy:
+          pre_command:
+            - {script: ./route.py, runtime: monty}
+    profile: agent
+    ```
+  </Accordion>
+  <Accordion title="Load the workspace">
+    <Tabs>
+      <Tab title="Python" icon="/images/python-logo.svg">
+        ```python
+        from mirage import Workspace
+        from mirage.config import load_config, resolve_secrets
+
+        config = await resolve_secrets(load_config("workspace.yaml"))
+        ws = Workspace(**config.to_workspace_kwargs())
+        result = await ws.shell("ps -o pid,machine,cmd")
+        print(await result.stdout_str(), end="")
+        ```
+      </Tab>
+      <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+        ```typescript
+        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+        const ws = new Workspace(mounts, options)
+        const result = await ws.shell('ps -o pid,machine,cmd')
+        process.stdout.write(result.stdoutText)
+        ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
+
+## Routing
+
+A policy script picks the machine for each Python command by the library its
+code uses:
+
+| When the code uses | It runs on |
+| --- | --- |
+| No packages | `monty`, inside Mirage |
+| numpy | `cf`, the Cloudflare lite container |
+| pandas | `cpu`, the E2B sandbox |
+| PyTorch | `gpu`, the EC2 GPU instance |
+
+<Accordion title="route.py">
+  ```python route.py
+  MACHINES = (
+      ("torch", "gpu", "PyTorch trains on the GPU"),
+      ("pandas", "cpu", "pandas processes data on the E2B sandbox"),
+      ("numpy", "cf", "numpy runs in the Cloudflare container"),
+  )
+
+
+  def source(ctx):
+      code = " ".join(ctx["argv"])
+      for path in ctx["paths"]:
+          if not path.endswith(".py"):
+              continue
+          try:
+              code += open(path).read()
+          except OSError:
+              pass
+      return code
+
+
+  def pre_command(ctx):
+      if not ctx["command"].startswith("python"):
+          return None
+      code = source(ctx)
+      for library, machine, reason in MACHINES:
+          if library in code:
+              return {"kind": "route", "machine": machine, "reason": reason}
+  ```
+</Accordion>
+
+## Count Page Views
+
+`/workspace/raw` holds a year of page views, one file a quarter. Mirage fans the
+counting out to four Monty runs, lightweight Python sandboxes inside Mirage, one
+per quarter, so they run in parallel with no container to start. Only the numpy
+summary goes to the Cloudflare lite container, which then runs for seconds
+instead of the whole task.
+
+<FanOutBenchmark />
+
+A lite container shares its 1/16 vCPU across every process in it, so counting
+the quarters in parallel there is no faster, about 16 seconds against 11.7 one
+after another. The four Monty runs take about 3.3 seconds, and the container
+runs only for numpy.
+
+### Monty: count each quarter in parallel
+
+<Accordion title="jobs/count.py">
+  ```python jobs/count.py
+  name = argv[1].split("/")[-1].removesuffix(".csv")
+  counts = {}
+  with open(argv[1]) as views:
+      next(views)
+      for line in views:
+          page = line.split(",")[1]
+          counts[page] = counts.get(page, 0) + 1
+  with open(f"/workspace/counts/{name}.txt", "w") as out:
+      for page in sorted(counts):
+          out.write(f"{counts[page]}\n")
+  ```
+</Accordion>
+
+```bash
+for f in /workspace/raw/*.csv; do
+  python3 /workspace/jobs/count.py $f &
+done
+```
+
+<ProcessTable
+  command="ps -o pid,machine,cmd"
+  rows={[
+    ["4194305", "mirage", "ps -o pid,machine,cmd"],
+    ["4194306", "in_process:monty", "python3 /workspace/jobs/count.py /workspace/raw/2025-Q1.csv"],
+    ["4194307", "in_process:monty", "python3 /workspace/jobs/count.py /workspace/raw/2025-Q2.csv"],
+    ["4194308", "in_process:monty", "python3 /workspace/jobs/count.py /workspace/raw/2025-Q3.csv"],
+    ["4194309", "in_process:monty", "python3 /workspace/jobs/count.py /workspace/raw/2025-Q4.csv"],
+  ]}
+/>
+
+### Cloudflare container: summarize with numpy
+
+```bash
+wait
+cat /workspace/counts/*.txt | python3 -c "import sys, numpy as np; c = np.loadtxt(sys.stdin); print(f'{c.size} counts, mean {c.mean():.0f}, std {c.std():.0f}')"
+# 28 counts, mean 39698, std 21772
+```
+
+## Train a Model
+
+The features and the model come from the same year of page views. pandas
+builds the features on the E2B sandbox, and only the training goes to the GPU,
+so the GPU is paid for the training alone.
+
+<GpuBenchmark />
+
+pandas runs about as fast on the E2B sandbox as on the GPU machine's CPU, so the
+two take about the same time. The GPU costs about 4.5 times as much a second, so
+moving the features off it cuts the cost by about 44%. `python3 -P` keeps the
+script's folder off Python's import path, so its imports do not search
+`/workspace` over the network.
+
+### E2B: build features
+
+`build.py` turns the four quarters of page views into one row per user
+with pandas, and writes them back to `/workspace`.
+
+<Accordion title="jobs/build.py">
+  ```python jobs/build.py
+  from glob import glob
+
+  import pandas as pd
+
+  events = pd.concat(pd.read_csv(path) for path in sorted(glob("/workspace/raw/*.csv")))
+  features = events.groupby("user").agg(visits=("page", "count"), spend=("amount", "sum")).reset_index()
+  features["label"] = (features["spend"] > features["spend"].median()).astype(int)
+  features.to_csv("/workspace/features.csv", index=False)
+  print(f"{len(events)} events -> {len(features)} users")
+  ```
+</Accordion>
+
+```bash
+python3 -P /workspace/jobs/build.py
+# 1111538 events -> 50 users
+```
+
+### GPU: train the model
+
+`train.py` reads the features the E2B sandbox wrote, trains a small model
+on the T4 and saves it next to them. Started as a background job, `ps` lists it
+on the GPU by its real pid there, and `jobs`, `wait` and `kill` reach it the
+same way.
+
+<Accordion title="jobs/train.py">
+  ```python jobs/train.py
+  import csv
+
+  import torch
+
+  rows = list(csv.DictReader(open("/workspace/features.csv")))
+  x = torch.tensor([[float(r["visits"]), float(r["spend"])] for r in rows], device="cuda")
+  y = torch.tensor([float(r["label"]) for r in rows], device="cuda")
+  x = (x - x.mean(0)) / (x.std(0) + 1e-6)
+  model = torch.nn.Linear(2, 1).cuda()
+  optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+  for _ in range(200):
+      loss = torch.nn.functional.binary_cross_entropy_with_logits(model(x).squeeze(1), y)
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
+  torch.save(model.state_dict(), "/workspace/model.pt")
+  print(f"trained on {torch.cuda.get_device_name(0)}, loss {loss.item():.3f}")
+  ```
+</Accordion>
+
+```bash
+python3 -P /workspace/jobs/train.py &
+```
+
+<ProcessTable
+  command="ps -o pid,machine,cmd"
+  rows={[
+    ["4194305", "mirage", "ps -o pid,machine,cmd"],
+    ["3076", "ssh:gpu", "python3 -P /workspace/jobs/train.py", "/images/ec2-logo.svg"],
+  ]}
+/>
+
+```bash
+wait
+# trained on Tesla T4, loss 0.165
+```
+
+`mirage shell --explain` shows which machine each command will run on, before
+the commands are executed.
+
+```bash
+mirage workspace create workspace.yaml --id demo
+mirage shell -w demo -c "python3 /workspace/jobs/count.py /workspace/raw/2025-Q1.csv" --explain
+# python3 /workspace/jobs/count.py /workspace/raw/2025-Q1.csv  [allow, exit 0]
+#   python3 /workspace/jobs/count.py /workspace/raw/2025-Q1.csv  [allow]  on monty
+mirage shell -w demo -c 'cat /workspace/counts/*.txt | python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"' --explain
+# cat /workspace/counts/*.txt | python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"  [allow, exit 0]
+#   pipeline: cat /workspace/counts/*.txt | python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"
+#     cat /workspace/counts/*.txt  [allow]
+#     python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"  [allow]  on cf
+mirage shell -w demo -c "python3 -P /workspace/jobs/build.py" --explain
+# python3 -P /workspace/jobs/build.py  [allow, exit 0]
+#   python3 -P /workspace/jobs/build.py  [allow]  on cpu
+mirage shell -w demo -c "python3 -P /workspace/jobs/train.py" --explain
+# python3 -P /workspace/jobs/train.py  [allow, exit 0]
+#   python3 -P /workspace/jobs/train.py  [allow]  on gpu
+```
