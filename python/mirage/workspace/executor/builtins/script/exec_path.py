@@ -32,8 +32,6 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
-from mirage.utils.path import resolve_path
-from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.command.command import (
     handle_command_builtin,
@@ -44,6 +42,7 @@ from mirage.workspace.executor.builtins.script.script import (
     read_script_bytes,
     script_error,
 )
+from mirage.workspace.lookup.lookup import path_program
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
@@ -174,11 +173,10 @@ async def handle_exec_path(
             path,
         )
     script = decode_text(data)
-    target = namespace.session_links(session).follow(
-        resolve_path(path, session.cwd)
+    name = path_program(
+        path, session, registry, namespace.session_links(session)
     )
-    vfs, key, _ = registry.resolve(target)
-    if isinstance(vfs, BinViewVFS):
+    if name is not None:
         # The read above enforces visibility and path policy. Dispatch the
         # target through its own command gate, without requiring permission
         # for the stub's implementation helper, `command`. It runs as the
@@ -191,7 +189,7 @@ async def handle_exec_path(
         try:
             return await handle_command_builtin(
                 execute_fn,
-                ["--", key.strip("/"), *args],
+                ["--", name, *args],
                 session,
                 registry,
                 stdin,

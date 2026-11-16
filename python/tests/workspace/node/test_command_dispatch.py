@@ -17,7 +17,7 @@ import pytest
 from mirage import Policy
 from mirage.io.types import materialize
 from mirage.machine.handle import MachineHandle
-from mirage.policy import Route
+from mirage.policy import Deny, Route
 from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -308,16 +308,16 @@ async def test_an_outside_wrapper_runs_a_path_only_without_an_allow_list(
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session("s", profile=profile)
-        r = await ws.shell("nohup /usr/bin/env python3 -c x", session_id="s")
+        r = await ws.shell("nohup /opt/bin/env python3 -c x", session_id="s")
         if refused:
             assert (r.exit_code, r.stderr) == (
                 126,
-                b"/usr/bin/env: Permission denied\n",
+                b"/opt/bin/env: Permission denied\n",
             )
             assert box.ran == []
         else:
             assert r.exit_code == 0
-            assert box.ran == [["nohup", "/usr/bin/env", "python3", "-c", "x"]]
+            assert box.ran == [["nohup", "/opt/bin/env", "python3", "-c", "x"]]
     finally:
         await ws.close()
 
@@ -464,6 +464,77 @@ async def test_routes_that_agree_place_the_wrapper():
     try:
         r = await ws.shell(TWO_TOOLS)
         assert (r.exit_code, r.stdout) == (0, b"b\n")
+    finally:
+        await ws.close()
+
+
+class NoPython(Policy):
+    def pre_command(self, ctx):
+        return Deny("no python") if ctx.command == "python3" else None
+
+
+SPELLED = [
+    "nice /usr/bin/python3 -c 1",
+    "nohup /usr/bin/python3 -c 1",
+    "setsid /usr/bin/python3 -c 1",
+    "nice nohup /usr/bin/python3 -c 1",
+    "cd /usr/bin && nice ./python3 -c 1",
+]
+
+
+def _spelled(**kwargs) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "m": {"provider": "in_process", "runtime": "monty"},
+            "c": Named("c", {"captures": ["python3"]}),
+            "b": Named("b", {"captures": [EXTERNAL_COMMANDS]}),
+        },
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", [*SPELLED, "ln -s /usr/bin/python3 /py && nice /py -c 1"]
+)
+@pytest.mark.parametrize(
+    "denies",
+    [
+        {"policies": [NoPython()]},
+        {
+            "profiles": {
+                "default": {
+                    "commands": {
+                        "deny": [{"reason": "no", "commands": ["python3"]}]
+                    }
+                }
+            }
+        },
+    ],
+)
+async def test_a_wrapper_refuses_a_program_spelled_by_its_path(line, denies):
+    # The plain path runs /usr/bin/python3 as python3, so a deny on the
+    # name holds under a wrapper however the program is spelled.
+    ws = _spelled(**denies)
+    try:
+        bare = await ws.shell("python3 -c 1")
+        r = await ws.shell(line)
+        assert bare.exit_code == 126
+        assert (r.exit_code, r.stderr) == (126, bare.stderr)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", SPELLED)
+async def test_a_wrapper_goes_where_a_path_spelled_program_is_routed(line):
+    ws = _spelled(policies=[Routes({"python3": Route(machine="c")})])
+    try:
+        assert (await ws.shell("/usr/bin/python3 -c 1")).stdout == b"c\n"
+        r = await ws.shell(line)
+        assert (r.exit_code, r.stdout) == (0, b"c\n")
     finally:
         await ws.close()
 

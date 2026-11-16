@@ -57,7 +57,7 @@ from mirage.workspace.node.explain import (
     Walked,
     refused_where_it_stands,
 )
-from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.inner_lines import Word, program_lines
 from mirage.workspace.node.occurrence import argv_frame, whole_occurrence
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
@@ -86,6 +86,8 @@ def _wrapped_programs(
     words: Sequence[Word],
     occurrence: Occurrence,
     by_place: Mapping[Occurrence, Judged],
+    session: SessionState,
+    registry: MountRegistry,
 ) -> list[Judged]:
     """The judged commands a wrapper's run answers for, as the run walks
     them: a shell line under the wrapper is the machine's to run, so what
@@ -95,9 +97,11 @@ def _wrapped_programs(
         words (Sequence[Word]): the wrapper's words, name first.
         occurrence (Occurrence): its place on the line.
         by_place (Mapping[Occurrence, Judged]): the line's judged commands.
+        session (SessionState): the session it was judged in.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
     """
     found: list[Judged] = []
-    for inner in inner_lines(words[0].value, words[1:]):
+    for inner in program_lines(words, session, registry):
         if not inner.argv:
             continue
         place = whole_occurrence(
@@ -106,12 +110,18 @@ def _wrapped_programs(
         held = by_place.get(place)
         if held is not None:
             found.append(held)
-            found.extend(_wrapped_programs(inner.argv, place, by_place))
+            found.extend(
+                _wrapped_programs(
+                    inner.argv, place, by_place, session, registry
+                )
+            )
     return found
 
 
 def _programs_of(
-    one: Judged, by_place: Mapping[Occurrence, Judged]
+    one: Judged,
+    by_place: Mapping[Occurrence, Judged],
+    registry: MountRegistry,
 ) -> list[Judged]:
     """The judged commands a wrapper's run answers for; none for any
     other command.
@@ -119,14 +129,21 @@ def _programs_of(
     Args:
         one (Judged): the command.
         by_place (Mapping[Occurrence, Judged]): the line's judged commands.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
     """
     command = one.judgment.command
-    if command not in PROGRAM_WRAPPERS or one.ctx is None:
+    if (
+        command not in PROGRAM_WRAPPERS
+        or one.ctx is None
+        or one.session is None
+    ):
         return []
     return _wrapped_programs(
         [Word(w, w) for w in (command, *one.ctx.argv)],
         one.occurrence,
         by_place,
+        one.session,
+        registry,
     )
 
 
@@ -447,7 +464,7 @@ class Router:
         by_place = {one.occurrence: one for one in judged}
         kept: list[Judged] = []
         for one in judged:
-            programs = _programs_of(one, by_place)
+            programs = _programs_of(one, by_place, self._registry)
             answer = (
                 self._wrapper_answer(
                     one,
@@ -489,7 +506,7 @@ class Router:
             return self.placement_for(
                 one,
                 self._outer_placed(one, by_place, decision),
-                _programs_of(one, by_place),
+                _programs_of(one, by_place, self._registry),
             )
 
         return placed

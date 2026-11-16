@@ -129,7 +129,7 @@ import {
 import { ExecutionNode } from '../types.ts'
 import { admit, Admitted, classifiedWords, type Refused } from './admission.ts'
 import { UNREADABLE_LINES } from './explain.ts'
-import { innerLines, type Word, wordValue } from './inner_lines.ts'
+import { programLines, type Word, wordValue } from './inner_lines.ts'
 import { argvFrame, claimantFor, evaluatedFrom, wholeOccurrence } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
 
@@ -1270,11 +1270,12 @@ function unreadable(name: string, session: SessionState): Refused | null {
 /**
  * The gate's answer on the programs a wrapper runs where Mirage cannot see
  * them run (`nohup python3` on a machine). What the words run is followed as
- * the line's pass follows it (`innerLines`): each program is admitted as
+ * the line's pass follows it (`programLines`): each program is admitted as
  * `env` and `timeout` have theirs admitted, at the place the pass judged it,
- * and a line the gate cannot read (`nohup /usr/bin/env`) is refused under an
+ * and a line the gate cannot read (`nohup /opt/bin/env`) is refused under an
  * allow list. The machine runs the program itself, so a function of its name
- * does not stand in for it. Returns the first refusal, else every route a
+ * does not stand in for it. A program spelled by its `/usr/bin` path is
+ * admitted under its name too, as the plain path admits it. Returns the first refusal, else every route a
  * policy answered for them.
  */
 async function wrappedVerdict(
@@ -1286,11 +1287,12 @@ async function wrappedVerdict(
   signal: AbortSignal | undefined,
   claimant: Claimant | null,
 ): Promise<Refused | Route[]> {
-  const [first, ...rest] = words
+  const [first] = words
   if (first === undefined) return []
   const head = wordValue(first)
   const routes: Route[] = []
-  for (const inner of innerLines(head, rest)) {
+  const links = namespace.sessionLinks(session)
+  for (const inner of programLines(words, session, registry, links)) {
     if (inner.argv.length === 0) {
       // shortcut: a line run under the box (`time sh -c`) is not judged.
       const unread = unreadable(head, session)

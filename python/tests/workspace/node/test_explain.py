@@ -34,6 +34,7 @@ from mirage.policy import (
     CommandExplanation,
     Deny,
     Policy,
+    Route,
     ShellNode,
 )
 from mirage.policy.match import Outcome
@@ -1999,3 +2000,65 @@ async def test_explain_reads_a_scope_that_spells_a_byte_past_utf8():
         assert printf.words[-1].text == "'\udcff"
     finally:
         await workspace.close()
+
+
+class _PythonOnC(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="c") if ctx.command == "python3" else None
+
+
+PATH_SPELLED = [
+    "/usr/bin/python3 -c 1",
+    "nice /usr/bin/python3 -c 1",
+    "nohup /usr/bin/python3 -c 1",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", PATH_SPELLED)
+async def test_explain_refuses_a_usr_bin_path_as_its_program(line):
+    # The run runs /usr/bin/python3 as python3, so a rule on the name
+    # refuses the line in explain as it does when run.
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"m": {"provider": "in_process", "runtime": "monty"}},
+        profiles={
+            "default": {
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["python3"]}]
+                }
+            }
+        },
+    )
+    try:
+        said = await ws.explain(line)
+        ran = await ws.shell(line)
+        assert (said.outcome, ran.exit_code) == (Outcome.DENY, 126)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", PATH_SPELLED)
+async def test_explain_places_a_usr_bin_path_as_its_program(line):
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "m": {"provider": "in_process", "runtime": "monty"},
+            "c": {
+                "provider": "in_process",
+                "runtime": "monty",
+                "captures": ["python3"],
+            },
+        },
+        policies=[_PythonOnC()],
+    )
+    try:
+        said = await ws.explain(line)
+        placed = [(c.command, c.machine) for c in _commands(said.node)]
+        assert placed[-1] == ("python3", "c")
+        assert all(machine == "" for _, machine in placed[:-1])
+    finally:
+        await ws.close()

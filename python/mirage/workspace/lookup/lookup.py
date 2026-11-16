@@ -25,7 +25,9 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.utils.path import resolve_path
 from mirage.utils.quote import shell_quote
+from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
     DEFAULT_NICENESS,
@@ -48,7 +50,39 @@ from mirage.workspace.lookup.types import Consumer, WrapperAnswer
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
+    from mirage.workspace.dispatcher.reader import NamespaceReader
     from mirage.workspace.mount import MountRegistry
+
+
+def path_program(
+    word: str,
+    session: SessionState,
+    registry: "MountRegistry",
+    links: "NamespaceReader | None" = None,
+) -> str | None:
+    """The program a path-spelled command word runs through the
+    ``/usr/bin`` view (``/usr/bin/python3`` runs ``python3``); None for a
+    word naming no file the session's view lists.
+
+    Args:
+        word (str): the command word, as typed.
+        session (SessionState): the session (cwd, its programs).
+        registry (MountRegistry): mount registry (the view's mount).
+        links (NamespaceReader | None): the session's links, followed
+            to the file; None to read the word as typed.
+    """
+    if "/" not in word:
+        return None
+    target = resolve_path(word, session.cwd)
+    if links is not None:
+        target = links.follow(target)
+    mount = registry.try_mount_for(target)
+    if mount is None or not isinstance(mount.vfs, BinViewVFS):
+        return None
+    name = registry.resolve(target)[1].strip("/")
+    if program(name, session, registry) is None:
+        return None
+    return name
 
 
 def is_tool(name: str, session: SessionState) -> bool:
@@ -165,7 +199,7 @@ def routed_consumer(
     consumer = lookup(name, session, registry, routing)
     if routing is None or not _outside_mirage(consumer):
         return consumer, routing
-    program = _wrapped(name, args, routing.bindings)
+    program = _wrapped(name, args, routing.bindings, session, registry)
     if program is None:
         return consumer, routing
     bindings = {**routing.bindings, name: routing.bindings[program]}
@@ -250,13 +284,13 @@ def mirage_program_at(
         name not in PROGRAM_WRAPPERS
         or name in bindings
         or not _outside_mirage(lookup(name, session, registry, routing))
-        or _wrapped(name, args, bindings) is not None
+        or _wrapped(name, args, bindings, session, registry) is not None
     ):
         return None
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
-    inner = args[at]
+    inner = path_program(args[at], session, registry) or args[at]
     if inner in PROGRAM_WRAPPERS:
         deeper = mirage_program_at(
             inner, args[at + 1 :], session, registry, routing
@@ -443,25 +477,31 @@ def _wrapped(
     name: str,
     args: Sequence[str],
     bindings: Mapping[str, RuntimeIdentity | None],
+    session: SessionState,
+    registry: "MountRegistry",
 ) -> str | None:
     """The program a wrapper runs, nested wrappers followed, when a
-    runtime captures it by name and runs it natively.
+    runtime captures it by name and runs it natively; a word spelled by
+    its ``/usr/bin`` path is that program, as the plain path runs it.
 
     Args:
         name (str): the wrapper's name.
         args (Sequence[str]): its words, argv[0] excluded.
         bindings (Mapping[str, RuntimeIdentity | None]): the line's
             command bindings.
+        session (SessionState): shell session (cwd, its programs).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
     """
     if name not in PROGRAM_WRAPPERS or name in bindings:
         return None
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
-    inner = args[at]
+    # shortcut: a symlink routes by fallback; pass links here if that matters.
+    inner = path_program(args[at], session, registry) or args[at]
     if _is_native(bindings.get(inner), inner):
         return inner
-    return _wrapped(inner, args[at + 1 :], bindings)
+    return _wrapped(inner, args[at + 1 :], bindings, session, registry)
 
 
 def _layers(

@@ -35,7 +35,7 @@ import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { type Judged, refusedWhereItStands, type Walked } from '../node/explain.ts'
-import { innerLines, type Word, wordValue } from '../node/inner_lines.ts'
+import { programLines, type Word, wordValue } from '../node/inner_lines.ts'
 import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
@@ -97,27 +97,31 @@ function wrappedPrograms(
   words: readonly Word[],
   occurrence: Occurrence,
   judged: readonly Judged[],
+  session: SessionState,
+  registry: MountRegistry,
 ): Judged[] {
-  const [first, ...rest] = words
-  if (first === undefined) return []
   const found: Judged[] = []
-  for (const inner of innerLines(wordValue(first), rest)) {
+  for (const inner of programLines(words, session, registry)) {
     if (inner.argv.length === 0) continue
     const place = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
     const held = judged.find((other) => sameOccurrence(other.occurrence, place))
-    if (held !== undefined) found.push(held, ...wrappedPrograms(inner.argv, place, judged))
+    if (held !== undefined)
+      found.push(held, ...wrappedPrograms(inner.argv, place, judged, session, registry))
   }
   return found
 }
 
 /** The judged commands a wrapper's run answers for; none for any other command. */
-function programsOf(one: Judged, judged: readonly Judged[]): Judged[] {
+function programsOf(one: Judged, judged: readonly Judged[], registry: MountRegistry): Judged[] {
   const command = one.judgment.command
-  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined) return []
+  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined || one.session === undefined)
+    return []
   return wrappedPrograms(
     [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
     one.occurrence,
     judged,
+    one.session,
+    registry,
   )
 }
 
@@ -314,7 +318,7 @@ export class Router {
    */
   refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
     return judged.map((one) => {
-      const programs = programsOf(one, judged)
+      const programs = programsOf(one, judged, this.registry)
       if (programs.length === 0) return one
       if ([one, ...programs].some((held) => held.judgment.exitCode !== 0)) return one
       const answer = this.wrapperAnswer(
@@ -333,7 +337,11 @@ export class Router {
    */
   placements(judged: readonly Judged[], decision: RouteDecision<Runtime>): (one: Judged) => string {
     return (one) =>
-      this.placementFor(one, this.outerPlaced(one, judged, decision), programsOf(one, judged))
+      this.placementFor(
+        one,
+        this.outerPlaced(one, judged, decision),
+        programsOf(one, judged, this.registry),
+      )
   }
 
   /**

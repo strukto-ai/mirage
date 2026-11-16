@@ -584,6 +584,141 @@
       ]
     },
     {
+      "id": "a_wrapper_refuses_a_usr_bin_path_as_its_program",
+      "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
+            "captures": [
+              "@external"
+            ]
+          },
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "gcc"
+            ]
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "no compilers",
+                  "commands": [
+                    "gcc"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "/usr/bin/gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
+          "command": "nice /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
+          "command": "setsid /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        },
+        {
+          "command": "cd /usr/bin && nice ./gcc x.c",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "gcc: Permission denied\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_wrapper_goes_where_a_usr_bin_path_s_program_is_placed",
+      "world": {
+        "machines": {
+          "processbox": {
+            "provider": "in_process",
+            "runtime": "processbox",
+            "captures": [
+              "gcc",
+              "@external"
+            ]
+          },
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "gcc"
+            ]
+          }
+        },
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "policies": [
+          {
+            "name": "place_command",
+            "contains": "gcc",
+            "machine": "echobox"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "/usr/bin/gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:gcc x.c\n"
+          }
+        },
+        {
+          "command": "nice /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice /usr/bin/gcc x.c\n"
+          }
+        },
+        {
+          "command": "nohup /usr/bin/gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nohup /usr/bin/gcc x.c\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_wrapper_around_a_mirage_command_runs_it_in_mirage",
       "world": {
         "machines": {

@@ -24,10 +24,8 @@ import type { JobConsole } from '../../../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { resolvePath } from '../../../../utils/path.ts'
-import { stripSlash } from '../../../../utils/slash.ts'
-import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import { pathProgram } from '../../../lookup/lookup.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -141,9 +139,8 @@ export async function handleExecPath(
       path,
     )
   const script = decodeText(data)
-  const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
-  const [vfs, spec] = registry.resolve(target)
-  if (vfs instanceof BinViewVFS) {
+  const name = pathProgram(path, session, registry, namespace.sessionLinks(session))
+  if (name !== null) {
     // The read enforces visibility and path policy; the target still passes
     // its command gate, without needing permission for the stub's helper. It
     // runs as the program, as an `exec`'d or `env`'d head does:
@@ -154,7 +151,7 @@ export async function handleExecPath(
     return await runAsProgram(session, () =>
       handleCommandBuiltin(
         (command, opts) => executeFn(command, { ...opts, context }),
-        ['--', stripSlash(spec.mountPath), ...args],
+        ['--', name, ...args],
         session,
         registry,
         stdin,

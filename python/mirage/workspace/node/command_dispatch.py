@@ -156,7 +156,7 @@ from mirage.workspace.node.admission import (
     classified_words,
 )
 from mirage.workspace.node.explain import UNREADABLE_LINES
-from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.inner_lines import Word, program_lines
 from mirage.workspace.node.occurrence import (
     argv_frame,
     claimant_for,
@@ -1434,12 +1434,13 @@ async def _wrapped_verdict(
 ) -> Refused | list[Route]:
     """The gate's answer on the programs a wrapper runs where Mirage
     cannot see them run (``nohup python3`` on a machine). What the words
-    run is followed as the line's pass follows it (``inner_lines``):
+    run is followed as the line's pass follows it (``program_lines``):
     each program is admitted as ``env`` and ``timeout`` have theirs
     admitted, at the place the pass judged it, and a line the gate
-    cannot read (``nohup /usr/bin/env``) is refused under an allow list.
+    cannot read (``nohup /opt/bin/env``) is refused under an allow list.
     The machine runs the program itself, so a function of its name does
-    not stand in for it.
+    not stand in for it. A program spelled by its ``/usr/bin`` path is
+    admitted under its name too, as the plain path admits it.
 
     Args:
         words (Sequence[Word]): the command running the others, name
@@ -1455,7 +1456,8 @@ async def _wrapped_verdict(
         The first refusal, else every route a policy answered for them.
     """
     routes: list[Route] = []
-    for inner in inner_lines(words[0].value, words[1:]):
+    links = namespace.session_links(session)
+    for inner in program_lines(words, session, registry, links):
         if not inner.argv:
             # shortcut: a line run under the box (`time sh -c`) is not judged.
             unread = _unreadable(words[0].value, session)

@@ -22,6 +22,7 @@ import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
+import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import {
@@ -43,8 +44,32 @@ import {
   readWrapper,
 } from './constants.ts'
 import { Consumer, WrapperAnswer } from './types.ts'
+import { resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+
+/**
+ * The program a path-spelled command word runs through the `/usr/bin` view
+ * (`/usr/bin/python3` runs `python3`); null for a word naming no file the
+ * session's view lists. `links`, the session's, are followed to the file;
+ * null reads the word as typed. Mirrors Python's `path_program`.
+ */
+export function pathProgram(
+  word: string,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader | null = null,
+): string | null {
+  if (!word.includes('/')) return null
+  let target = resolvePath(word, session.cwd)
+  if (links !== null) target = links.follow(target)
+  const mount = registry.tryMountFor(target)
+  if (mount === null || !(mount.vfs instanceof BinViewVFS)) return null
+  const name = stripSlash(registry.resolve(target)[1].mountPath)
+  return program(name, session, registry) === null ? null : name
+}
 
 /**
  * Whether a command word is a tool the allow lists govern. Every named
@@ -168,7 +193,7 @@ export function routedConsumer(
     return [Consumer.SESSION, routing]
   const consumer = lookup(name, session, registry, routing)
   if (routing === undefined || !outsideMirage(consumer)) return [consumer, routing]
-  const program = wrapped(name, args, routing.bindings)
+  const program = wrapped(name, args, routing.bindings, session, registry)
   if (program === null) return [consumer, routing]
   const bindings = Object.assign(
     Object.create(null) as Record<string, Runtime | null>,
@@ -214,12 +239,13 @@ export function mirageProgramAt(
     !PROGRAM_WRAPPERS.has(name) ||
     Object.hasOwn(bindings, name) ||
     !outsideMirage(lookup(name, session, registry, routing)) ||
-    wrapped(name, args, bindings) !== null
+    wrapped(name, args, bindings, session, registry) !== null
   )
     return null
   const [at] = readWrapper(name, args)
   if (at === null) return null
-  const inner = args[at] ?? ''
+  const word = args[at] ?? ''
+  const inner = pathProgram(word, session, registry) ?? word
   if (PROGRAM_WRAPPERS.has(inner)) {
     const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing)
     return deeper === null ? null : at
@@ -360,19 +386,24 @@ function outsideMirage(consumer: Consumer): boolean {
 
 /**
  * The program a wrapper runs, nested wrappers followed, when a runtime
- * captures it by name and runs it natively.
+ * captures it by name and runs it natively; a word spelled by its
+ * `/usr/bin` path is that program, as the plain path runs it.
  */
 function wrapped(
   name: string,
   args: readonly string[],
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
+  session: SessionState,
+  registry: MountRegistry,
 ): string | null {
   if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return null
   const [at] = readWrapper(name, args)
   if (at === null) return null
-  const inner = args[at] ?? ''
+  const word = args[at] ?? ''
+  // shortcut: a symlink routes by fallback; pass links here if that matters.
+  const inner = pathProgram(word, session, registry) ?? word
   if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
-  return wrapped(inner, args.slice(at + 1), bindings)
+  return wrapped(inner, args.slice(at + 1), bindings, session, registry)
 }
 
 /**

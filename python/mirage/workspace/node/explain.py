@@ -83,7 +83,7 @@ from mirage.workspace.node.admission import (
 from mirage.workspace.node.inner_lines import (
     InnerLine,
     Word,
-    inner_lines,
+    program_lines,
     read_word,
     reads_of_test,
 )
@@ -582,7 +582,12 @@ async def _judge_words(
         rules_only=rules_only,
         line=occurrence.source,
     )
-    inners = inner_lines(name, words[1:])
+    inners = program_lines(
+        words,
+        session,
+        registry,
+        None if namespace is None else namespace.session_links(session),
+    )
     refused = (
         _line_decision(
             name,

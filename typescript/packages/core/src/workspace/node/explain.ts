@@ -68,7 +68,7 @@ import {
   type Refused,
 } from './admission.ts'
 import {
-  innerLines,
+  programLines,
   innerReadable,
   readWord,
   readsOfTest,
@@ -513,7 +513,12 @@ async function* judgeWords(
     rulesOnly,
     occurrence.source,
   )
-  const inners = innerLines(name, words.slice(1))
+  const inners = programLines(
+    words,
+    session,
+    registry,
+    namespace === null ? null : namespace.sessionLinks(session),
+  )
   const refused =
     wholeLine && asked?.kind !== 'deny'
       ? lineDecision(

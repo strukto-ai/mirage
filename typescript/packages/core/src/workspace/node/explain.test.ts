@@ -22,6 +22,7 @@ import type {
   CommandContext,
   CommandExplanation,
   Policy,
+  Route,
   ShellNode,
 } from '../../policy/index.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
@@ -1721,5 +1722,55 @@ describe('explain answers and the op form', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+class PythonOnC implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'python3' ? { kind: 'route', machine: 'c' } : null
+  }
+}
+
+const PATH_SPELLED = [
+  '/usr/bin/python3 -c 1',
+  'nice /usr/bin/python3 -c 1',
+  'nohup /usr/bin/python3 -c 1',
+]
+
+// The run runs /usr/bin/python3 as python3, so explain judges and places that
+// program as the run does.
+describe('a /usr/bin path', () => {
+  it.each(PATH_SPELLED)('is refused as its program: %s', async (line) => {
+    const w = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { m: { provider: 'in_process', runtime: 'monty' } },
+        profiles: { default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } } },
+      },
+    )
+    open.push(w)
+    const said = await w.explain(line)
+    const ran = await w.shell(line)
+    expect([said.outcome, ran.exitCode]).toEqual([Outcome.DENY, 126])
+  })
+
+  it.each(PATH_SPELLED)('is placed as its program: %s', async (line) => {
+    const w = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          m: { provider: 'in_process', runtime: 'monty' },
+          c: { provider: 'in_process', runtime: 'monty', captures: ['python3'] },
+        },
+        policies: [new PythonOnC()],
+      },
+    )
+    open.push(w)
+    const said = await w.explain(line)
+    const placed = commands(said.node).map((c) => [c.command, c.machine])
+    expect(placed.at(-1)).toEqual(['python3', 'c'])
+    expect(placed.slice(0, -1).every(([, machine]) => machine === '')).toBe(true)
   })
 })
