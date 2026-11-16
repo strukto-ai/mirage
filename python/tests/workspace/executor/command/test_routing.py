@@ -261,6 +261,44 @@ async def test_rg_searches_the_cwd_when_stdin_is_a_device():
         await ws.close()
 
 
+async def _seen_by_policy(line: str, setup: str = "") -> CommandContext:
+    seen: list[CommandContext] = []
+
+    class Capture(Policy):
+        def pre_command(self, ctx: CommandContext) -> Deny | None:
+            if ctx.command in ("cd", "mkdir", "ln", "echo"):
+                return None
+            seen.append(ctx)
+            return Deny("captured")
+
+    ws = Workspace(
+        {"/workspace": RAMVFS(), "/slack": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[Capture()],
+    )
+    try:
+        ws.register_cli("git", cli_spec_for("git"))
+        ws.register_cli("pdfinfo", cli_spec_for("pdfinfo"))
+        ws.register_cli(
+            "himalaya",
+            HIMALAYA,
+            {
+                "imap_host": "h",
+                "smtp_host": "h",
+                "username": "u",
+                "password": "p",
+            },
+        )
+        await ws.shell("mkdir -p /workspace/outbox")
+        if setup:
+            await ws.shell(setup)
+        await ws.shell("cd /workspace/outbox")
+        await ws.shell(line)
+        return seen[-1]
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, text, option",
@@ -289,6 +327,11 @@ async def test_rg_searches_the_cwd_when_stdin_is_a_device():
             "-cf",
         ),
         (
+            "tar -C ../.. -Cslack/export.csv -cf x.tar a.txt",
+            "-Cslack/export.csv",
+            "-C",
+        ),
+        (
             "grep --file=../../slack/export.csv x",
             "--file=../../slack/export.csv",
             "--file",
@@ -299,42 +342,48 @@ async def test_rg_searches_the_cwd_when_stdin_is_a_device():
 async def test_a_path_word_names_the_path_paths_holds(
     line: str, text: str, option: str | None
 ):
-    seen: list[CommandContext] = []
-
-    class Capture(Policy):
-        def pre_command(self, ctx: CommandContext) -> Deny | None:
-            if ctx.command in ("cd", "mkdir"):
-                return None
-            seen.append(ctx)
-            return Deny("captured")
-
-    ws = Workspace(
-        {"/workspace": RAMVFS(), "/slack": RAMVFS()},
-        mode=MountMode.WRITE,
-        policies=[Capture()],
+    ctx = await _seen_by_policy(line)
+    word = next(w for w in ctx.words if w.text == text)
+    assert (word.option, word.to_dict()["path"]) == (
+        option,
+        "/slack/export.csv",
     )
-    try:
-        ws.register_cli("git", cli_spec_for("git"))
-        ws.register_cli("pdfinfo", cli_spec_for("pdfinfo"))
-        ws.register_cli(
-            "himalaya",
-            HIMALAYA,
-            {
-                "imap_host": "h",
-                "smtp_host": "h",
-                "username": "u",
-                "password": "p",
-            },
-        )
-        await ws.shell("mkdir -p /workspace/outbox")
-        await ws.shell("cd /workspace/outbox")
-        await ws.shell(line)
-        ctx = seen[-1]
-        word = next(w for w in ctx.words if w.text == text)
-        assert (word.option, word.to_dict()["path"]) == (
-            option,
-            "/slack/export.csv",
-        )
-        assert "/slack/export.csv" in [p.virtual for p in ctx.paths]
-    finally:
-        await ws.close()
+    assert "/slack/export.csv" in [p.virtual for p in ctx.paths]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, text",
+    [
+        ("himalaya message reply 1 --attach x.csv", "x.csv"),
+        ("grep --file=x.csv y", "--file=x.csv"),
+        ("tar -cf x.csv a.txt", "x.csv"),
+    ],
+)
+async def test_a_policy_sees_the_file_a_linked_option_value_opens(
+    line: str, text: str
+):
+    ctx = await _seen_by_policy(
+        line,
+        "echo s > /slack/export.csv && "
+        "ln -s /slack/export.csv /workspace/outbox/x.csv",
+    )
+    word = next(w for w in ctx.words if w.text == text)
+    assert word.to_dict()["path"] == "/workspace/outbox/x.csv"
+    assert "/slack/export.csv" in [p.virtual for p in ctx.paths]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["grep --file= x", "pdfinfo -"])
+async def test_a_dash_or_an_empty_value_names_no_file(line: str):
+    ctx = await _seen_by_policy(line)
+    virtuals = [p.virtual for p in ctx.paths]
+    assert "/workspace/outbox" not in virtuals
+    assert "/workspace/outbox/-" not in virtuals
+
+
+@pytest.mark.asyncio
+async def test_a_dash_led_group_value_is_a_value():
+    ctx = await _seen_by_policy("git -C -x log")
+    word = next(w for w in ctx.words if w.text == "-x")
+    assert (word.kind.value, word.option) == ("value", "-C")

@@ -886,3 +886,48 @@ it('matches longer short spellings before fixed-width prefixes', () => {
   expect(result.leaf?.name).toBe('run')
   expect(result.groupFlags).toEqual({ '-name': 'plain', '-number': '3' })
 })
+
+describe('walk value paths', () => {
+  function basedTree(): CommandSpec {
+    const pair = (): Argument =>
+      new Argument('--pair', {
+        nargs: 2,
+        type: 'path',
+        valueTypes: ['str', 'path'],
+        action: 'extend',
+      })
+    return new CommandSpec({
+      name: 'r',
+      operandBase: '-C',
+      arguments: [
+        new Argument('-C', { type: 'path', default: '.' }),
+        new Argument('--dir', { type: 'path' }),
+        pair(),
+      ],
+      subcommands: [
+        new CommandSpec({
+          name: 'mid',
+          arguments: [pair()],
+          subcommands: [new CommandSpec({ name: 'leaf' })],
+        }),
+      ],
+    })
+  }
+
+  it.each([
+    [['-C', 'a', '-Cb', 'mid', 'leaf'], { 1: '/w/a', 2: '/w/a/b' }, [1]],
+    [['-C', 'a', '--dir=d', 'mid', 'leaf'], { 1: '/w/a', 2: '/w/a/d' }, [1]],
+    [['-C', '-x', 'mid', 'leaf'], { 1: '/w/-x' }, [1]],
+    [
+      ['--pair', 'n1', 'f1', 'mid', '--pair', 'n2', 'f2', 'leaf'],
+      { 2: '/w/f1', 6: '/w/f2' },
+      [1, 2, 5, 6],
+    ],
+  ])('keeps each group value by where it stands: %j', (argv, paths, values) => {
+    const result = walk('r', basedTree(), argv, '/w')
+    expect(
+      Object.fromEntries([...result.valuePaths].map(([slot, path]) => [slot, path.virtual])),
+    ).toEqual(paths)
+    expect(result.valuePositions).toEqual(values)
+  })
+})
