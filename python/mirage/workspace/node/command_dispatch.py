@@ -144,6 +144,7 @@ from mirage.workspace.lookup.lookup import (
     mirage_program_at,
     routed_consumer,
     wrapper_answer,
+    wrapper_program_words,
     wrapper_refusal,
     wrapper_runs_outside,
 )
@@ -1620,6 +1621,19 @@ async def _route_argv(
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
+        named = wrapper_program_words(
+            name, argv.args, session, registry, links
+        )
+        argv = dataclasses.replace(
+            argv,
+            args=tuple(named),
+            operands=tuple(
+                op if word == typed else word
+                for op, word, typed in zip(
+                    argv.operands, named, argv.args, strict=True
+                )
+            ),
+        )
         return await run_external(
             argv, stdin, session, registry, routing, sink
         )

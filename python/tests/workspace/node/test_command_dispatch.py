@@ -612,6 +612,26 @@ async def test_a_path_spelled_program_is_asked_once(line):
         await ws.close()
 
 
+class GccBox(Box):
+    captures = ("gcc",)
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_hands_its_runtime_the_program_a_path_names():
+    # The plain path runs a /usr/bin program by its name, so a wrapper hands
+    # its runtime the name too: a workspace link means nothing to the host.
+    box = GccBox()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        await ws.shell("ln -s /usr/bin/gcc /data/tool")
+        await ws.shell("/data/tool x.c")
+        r = await ws.shell("nice /data/tool x.c")
+        assert r.exit_code == 0
+        assert box.ran == [["gcc", "x.c"], ["nice", "gcc", "x.c"]]
+    finally:
+        await ws.close()
+
+
 class OtherBox(Box):
     name = "other"
     captures = ("hostname",)

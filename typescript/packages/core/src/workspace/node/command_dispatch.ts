@@ -111,6 +111,7 @@ import {
   mirageProgramAt,
   routedConsumer,
   wrapperAnswer,
+  wrapperProgramWords,
   wrapperRefusal,
   wrapperRunsOutside,
 } from '../lookup/lookup.ts'
@@ -1464,7 +1465,14 @@ async function routeArgv(
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    return runExternal(argv, stdin, session, registry, routing, signal, sink)
+    const named = wrapperProgramWords(name, argv.args, session, registry, links)
+    const handed = new Argv(
+      argv.name,
+      named,
+      argv.operands.map((op, i) => (named[i] === argv.args[i] ? op : (named[i] ?? op))),
+      argv.prefix,
+    )
+    return runExternal(handed, stdin, session, registry, routing, signal, sink)
   }
 
   if (consumer === Consumer.UNKNOWN && RUNNERS.has(name)) {

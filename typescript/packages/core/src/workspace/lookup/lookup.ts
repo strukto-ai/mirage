@@ -50,6 +50,9 @@ import { stripSlash } from '../../utils/slash.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
+/** Debug sink for a link loop met while naming a program; set it to see one. */
+export const logger: { debug?: (message: string) => void } = {}
+
 /**
  * The program a path-spelled command word runs through the `/usr/bin` view
  * (`/usr/bin/python3` runs `python3`); null for a word naming no file the
@@ -69,8 +72,9 @@ export function pathProgram(
     try {
       target = links.follow(target)
     } catch (err) {
-      if (err instanceof CycleError) return null
-      throw err
+      if (!(err instanceof CycleError)) throw err
+      logger.debug?.(`a link loop names no program: ${err.message}`)
+      return null
     }
   }
   const mount = registry.tryMountFor(target)
@@ -229,6 +233,34 @@ export function withoutCapture(
     if (key !== name) bindings[key] = bound
   }
   return { ...routing, bindings }
+}
+
+/**
+ * A wrapper's words with each program it runs that a `/usr/bin` path spells
+ * named instead (`nice /usr/bin/gcc` hands `nice gcc`), as the plain path
+ * runs that program by name: a runtime cannot read a workspace link. Mirrors
+ * Python's `wrapper_program_words`.
+ */
+export function wrapperProgramWords(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceLinks | null = null,
+): string[] {
+  const words = [...args]
+  let head = name
+  let start = 0
+  while (PROGRAM_WRAPPERS.has(head)) {
+    const [found] = readWrapper(head, words.slice(start))
+    if (found === null) break
+    const at = start + found
+    const word = words[at] ?? ''
+    head = pathProgram(word, session, registry, links) ?? word
+    words[at] = head
+    start = at + 1
+  }
+  return words
 }
 
 /**

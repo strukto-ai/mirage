@@ -269,6 +269,39 @@ def without_capture(
     return dataclasses.replace(routing, bindings=bindings)
 
 
+def wrapper_program_words(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+    links: "NamespaceReader | None" = None,
+) -> list[str]:
+    """A wrapper's words with each program it runs that a ``/usr/bin``
+    path spells named instead (``nice /usr/bin/gcc`` hands ``nice gcc``),
+    as the plain path runs that program by name: a runtime cannot read a
+    workspace link.
+
+    Args:
+        name (str): expanded command name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (cwd, its programs).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        links (NamespaceReader | None): the session's links, followed to
+            a program spelled by a path; None to read it as typed.
+    """
+    words = list(args)
+    head, start = name, 0
+    while head in PROGRAM_WRAPPERS:
+        at = read_wrapper(head, words[start:])[0]
+        if at is None:
+            break
+        at += start
+        head = path_program(words[at], session, registry, links) or words[at]
+        words[at] = head
+        start = at + 1
+    return words
+
+
 def mirage_program_at(
     name: str,
     args: Sequence[str],

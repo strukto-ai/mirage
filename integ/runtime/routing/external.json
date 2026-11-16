@@ -708,7 +708,12 @@
             "contains": "gcc",
             "machine": "echobox"
           }
-        ]
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
       },
       "steps": [
         {
@@ -722,14 +727,21 @@
           "command": "nice /usr/bin/gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice /usr/bin/gcc x.c\n"
+            "stdout": "box:nice gcc x.c\n"
           }
         },
         {
           "command": "nohup /usr/bin/gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nohup /usr/bin/gcc x.c\n"
+            "stdout": "box:nohup gcc x.c\n"
+          }
+        },
+        {
+          "command": "ln -s /usr/bin/gcc /ram/cc && nice /ram/cc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice gcc x.c\n"
           }
         }
       ]

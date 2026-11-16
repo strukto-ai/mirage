@@ -632,6 +632,25 @@ describe('a program spelled by its path under an ask rule', () => {
   )
 })
 
+// The plain path runs a /usr/bin program by its name, so a wrapper hands its
+// runtime the name too: a workspace link means nothing to the host.
+it('a wrapper hands its runtime the program a path names', async () => {
+  const box = new Box(['gcc'])
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+  try {
+    await ws.shell('ln -s /usr/bin/gcc /data/tool')
+    await ws.shell('/data/tool x.c')
+    const io = await ws.shell('nice /data/tool x.c')
+    expect(io.exitCode).toBe(0)
+    expect(box.ran).toEqual([
+      ['gcc', 'x.c'],
+      ['nice', 'gcc', 'x.c'],
+    ])
+  } finally {
+    await ws.close()
+  }
+})
+
 class OtherBox extends Box {
   override readonly name: string = 'other'
   constructor() {
