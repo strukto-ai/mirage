@@ -133,14 +133,24 @@ class LocalStream:
                 self._sender.cancel()
             if not proc.stdin.is_closing():
                 proc.stdin.close()
-            if proc.returncode is None:
-                os.killpg(proc.pid, signal.SIGTERM)
+            self._end_group()
             await proc.wait()
+
+    def _end_group(self) -> None:
+        """TERM the command's process group unless it already ended:
+        macOS refuses (EPERM) a group whose only process exited unreaped,
+        and a reaped one is gone (ESRCH) before asyncio has its exit."""
+        if self.proc.returncode is not None:
+            return
+        try:
+            os.killpg(self.proc.pid, signal.SIGTERM)
+        except (PermissionError, ProcessLookupError) as exc:
+            logger.debug("the fake command had already ended: %s", exc)
 
     async def close(self) -> None:
         self.closed = True
-        if self.proc is not None and self.proc.returncode is None:
-            os.killpg(self.proc.pid, signal.SIGTERM)
+        if self.proc is not None:
+            self._end_group()
             await self.proc.wait()
 
 
@@ -449,6 +459,10 @@ async def test_a_cancelled_line_ends_its_stream():
 # A kill with a gentler signal reaches the program before the stream ends,
 # which would end it with TERM.
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.path.isdir("/proc"),
+    reason="the stop line finds a run's processes through /proc",
+)
 async def test_a_kill_sends_its_signal_before_the_stream_ends(tmp_path):
     ready, seen = tmp_path / "ready", tmp_path / "seen"
     box = _machine()

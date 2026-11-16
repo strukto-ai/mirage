@@ -154,13 +154,19 @@ class LocalStream {
     return this.exited
   }
 
+  /**
+   * TERM the command's process group unless it already ended: macOS refuses
+   * (EPERM) a group whose only process exited unreaped, and a reaped one is
+   * gone (ESRCH) before Node reports its exit.
+   */
   close(): void {
     this.closed = true
     if (this.child.exitCode === null && this.child.signalCode === null) {
       try {
         process.kill(-(this.child.pid ?? 0), 'SIGTERM')
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ESRCH' && code !== 'EPERM') throw error
         debuglog('mirage')('the fake command had already ended: %s', error)
       }
     }
@@ -433,7 +439,7 @@ describe('BoxdMachine', () => {
 
   // A kill with a gentler signal reaches the program before the stream ends,
   // which would end it with TERM.
-  it('a kill sends its signal before the stream ends', async () => {
+  it.skipIf(!existsSync('/proc'))('a kill sends its signal before the stream ends', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-boxd-'))
     const [ready, seen] = [join(dir, 'ready'), join(dir, 'seen')]
     const machine = makeMachine()
