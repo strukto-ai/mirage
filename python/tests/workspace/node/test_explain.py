@@ -2077,3 +2077,74 @@ async def test_a_link_loop_command_names_no_program(line):
         assert (said.outcome, ran.exit_code) == (Outcome.ALLOW, 126)
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_is_judged_past_a_function_of_its_name():
+    # The path runs the program, never a function of the same name, so an
+    # allow list holds over it on a line the box runs whole.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines=[box],
+        route_policy=lambda ctx: "workspace" if "grep()" in ctx.line else None,
+    )
+    try:
+        ws.create_session("s", profile={"commands": {"allow": ["echo"]}})
+        await ws.shell("grep() { echo hi; }", session_id="s")
+        r = await ws.shell("/usr/bin/grep x /data", session_id="s")
+        assert (r.exit_code, r.stderr) == (126, b"grep: Permission denied\n")
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_keeps_the_operands_xargs_appends_unread():
+    box = _LineBox()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["echo forbidden"]}]
+                }
+            },
+        )
+        bare = await ws.shell("cat /data/f | xargs echo", session_id="s")
+        r = await ws.shell("cat /data/f | xargs /usr/bin/echo", session_id="s")
+        assert (r.exit_code, r.stderr) == (bare.exit_code, bare.stderr)
+        assert bare.exit_code == 126
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
+    # Read against the directory the pass last knew, ./python3 named the
+    # /usr/bin program and refused a harmless script in /data.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"m": {"provider": "in_process", "runtime": "monty"}},
+    )
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["python3"]}]
+                }
+            },
+        )
+        await ws.shell(
+            "printf 'echo harmless\\n' > /data/python3; cd /usr/bin",
+            session_id="s",
+        )
+        r = await ws.shell('cd "$(echo /data)" && ./python3', session_id="s")
+        assert (r.exit_code, r.stdout) == (0, b"harmless\n")
+    finally:
+        await ws.close()

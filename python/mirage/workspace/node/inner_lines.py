@@ -421,6 +421,7 @@ def program_lines(
     session: "SessionState",
     registry: "MountRegistry",
     links: "NamespaceReader | None" = None,
+    open_: bool = False,
 ) -> list[InnerLine]:
     """``inner_lines`` of a command, a ``/usr/bin`` path running its
     program on the words after it, as the plain path runs it
@@ -432,9 +433,11 @@ def program_lines(
         registry (MountRegistry): mount registry (the ``/usr/bin`` view).
         links (NamespaceReader | None): the session's links, followed
             to the file; None to read the path as typed.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read to the command (``xargs``), kept for its program.
     """
     head, args = words[0].value, words[1:]
     program = path_program(head, session, registry, links)
     if program is None:
         return inner_lines(head, args)
-    return [InnerLine(argv=(Word(program, program), *args))]
+    return [InnerLine(argv=(Word(program, program), *args), open=open_)]

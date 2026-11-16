@@ -1787,3 +1787,57 @@ describe('a link loop command', () => {
     expect([said.outcome, ran.exitCode]).toEqual([Outcome.ALLOW, 126])
   })
 })
+
+describe('a /usr/bin path on a line the box runs whole', () => {
+  // The path runs the program, never a function of the same name, so an allow
+  // list holds over it on a line the box runs whole.
+  it('is judged past a function of its name', async () => {
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: [box],
+        routePolicy: (ctx) => (ctx.line.includes('grep()') ? 'workspace' : null),
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: SessionProfile({ commands: { allow: ['echo'] } }) })
+    await w.shell('grep() { echo hi; }', { sessionId: 's' })
+    const io = await w.shell('/usr/bin/grep x /data', { sessionId: 's' })
+    expect([io.exitCode, DEC.decode(io.stderr)]).toEqual([126, 'grep: Permission denied\n'])
+    expect(box.lines).toEqual([])
+  })
+
+  it('keeps the operands xargs appends unread', async () => {
+    const box = new LineBox()
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { deny: [{ reason: 'no', commands: ['echo forbidden'] }] },
+      }),
+    })
+    const bare = await w.shell('cat /data/f | xargs echo', { sessionId: 's' })
+    const io = await w.shell('cat /data/f | xargs /usr/bin/echo', { sessionId: 's' })
+    expect([io.exitCode, DEC.decode(io.stderr)]).toEqual([bare.exitCode, DEC.decode(bare.stderr)])
+    expect(bare.exitCode).toBe(126)
+    expect(box.lines).toEqual([])
+  })
+})
+
+// Read against the directory the pass last knew, ./python3 named the /usr/bin
+// program and refused a harmless script in /data.
+it('leaves a relative path after a cd the pass lost to the gate', async () => {
+  const w = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, machines: { m: { provider: 'in_process', runtime: 'monty' } } },
+  )
+  open.push(w)
+  w.createSession('s', {
+    profile: SessionProfile({ commands: { deny: [{ reason: 'no', commands: ['python3'] }] } }),
+  })
+  await w.shell("printf 'echo harmless\\n' > /data/python3; cd /usr/bin", { sessionId: 's' })
+  const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })
+  expect([io.exitCode, DEC.decode(io.stdout)]).toEqual([0, 'harmless\n'])
+})
