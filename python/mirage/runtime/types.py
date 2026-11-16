@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Protocol, TypeAlias, TypeVar
 
+from mirage.execution.types import MachineName
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
@@ -29,6 +30,9 @@ class RuntimeIdentity(Protocol):
 
     @property
     def captures(self) -> Sequence[str]: ...
+
+    @property
+    def machine(self) -> MachineName | None: ...
 
 
 _R = TypeVar("_R", bound=RuntimeIdentity, covariant=True)

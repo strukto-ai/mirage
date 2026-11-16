@@ -171,7 +171,7 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr": "native-tool: Permission denied\n"
+            "stderr_contains": "native-tool: Permission denied\n"
           }
         },
         {
@@ -564,21 +564,21 @@
           "command": "nice -n 5 gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice -n 5 gcc x.c\n"
+            "stdout": "box:gcc x.c\n"
           }
         },
         {
           "command": "nice nohup gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice nohup gcc x.c\n"
+            "stdout": "box:gcc x.c\n"
           }
         },
         {
           "command": "nice make",
           "expect": {
             "exit": 0,
-            "stdout": "[\"nice\",\"make\"]\n"
+            "stdout": "[\"make\"]\n"
           }
         }
       ]
@@ -727,21 +727,21 @@
           "command": "nice /usr/bin/gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice gcc x.c\n"
+            "stdout": "box:gcc x.c\n"
           }
         },
         {
           "command": "nohup /usr/bin/gcc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nohup gcc x.c\n"
+            "stdout": "box:gcc x.c\n"
           }
         },
         {
           "command": "ln -s /usr/bin/gcc /ram/cc && nice /ram/cc x.c",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice gcc x.c\n"
+            "stdout": "box:gcc x.c\n"
           }
         }
       ]
@@ -803,7 +803,7 @@
           "command": "nice make",
           "expect": {
             "exit": 0,
-            "stdout": "[\"nice\",\"make\"]\n"
+            "stdout": "[\"make\"]\n"
           }
         }
       ]
@@ -941,21 +941,21 @@
           "command": "nohup native-tool a",
           "expect": {
             "exit": 0,
-            "stdout": "box:nohup native-tool a\n"
+            "stdout": "box:native-tool a\n"
           }
         },
         {
           "command": "nice -n 5 native-tool a",
           "expect": {
             "exit": 0,
-            "stdout": "box:nice -n 5 native-tool a\n"
+            "stdout": "box:native-tool a\n"
           }
         },
         {
           "command": "nohup other-tool a",
           "expect": {
             "exit": 0,
-            "stdout": "[\"nohup\",\"other-tool\",\"a\"]\n"
+            "stdout": "[\"other-tool\",\"a\"]\n"
           }
         }
       ]
@@ -1006,7 +1006,7 @@
       ]
     },
     {
-      "id": "external_wrapper_routes_that_disagree_refuse",
+      "id": "external_wrapper_routes_on_in_process_machines_never_disagree",
       "world": {
         "machines": {
           "processbox": {
@@ -1048,16 +1048,15 @@
         {
           "command": "nohup native-tool a",
           "expect": {
-            "exit": 126,
-            "stdout": "",
-            "stderr": "nohup: Permission denied\n"
+            "exit": 0,
+            "stdout": "box:native-tool a\n"
           }
         },
         {
           "command": "nohup other-tool a",
           "expect": {
             "exit": 0,
-            "stdout": "[\"nohup\",\"other-tool\",\"a\"]\n"
+            "stdout": "[\"other-tool\",\"a\"]\n"
           }
         }
       ]

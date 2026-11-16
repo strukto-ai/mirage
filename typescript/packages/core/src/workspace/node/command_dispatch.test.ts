@@ -26,7 +26,8 @@ import type {
   ShellNode,
 } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
-import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
+import { MachineName } from '../../execution/types.ts'
+import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -186,9 +187,18 @@ class Box extends Runtime implements ProcessExecutorMixin {
   constructor(captures: string[] = [EXTERNAL_COMMANDS]) {
     super({}, captures)
   }
+  override get machine(): MachineName {
+    return new MachineName('ssh', this.name)
+  }
   runProcess(_engine: unknown, _paths: unknown, texts: string[]): Promise<RunResult> {
     this.ran.push([...texts])
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+class InProcessBox extends Box {
+  override get machine(): MachineName {
+    return new MachineName(IN_PROCESS, this.name)
   }
 }
 
@@ -658,6 +668,36 @@ it('a wrapper keeps the path of a program named like an option', async () => {
     const io = await ws.shell('nice /usr/bin/--help')
     expect(io.exitCode).toBe(0)
     expect(box.ran).toEqual([['nice', '/usr/bin/--help']])
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  'nice gcc x.c',
+  'nohup gcc x.c',
+  'setsid gcc x.c',
+  'nice -n 5 nohup gcc x.c',
+  'nice /usr/bin/gcc x.c',
+])('a wrapper over an in_process machine program is dropped: %s', async (line) => {
+  const box = new InProcessBox(['gcc'])
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+  try {
+    const io = await ws.shell(line)
+    expect(io.exitCode).toBe(0)
+    expect(box.ran).toEqual([['gcc', 'x.c']])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a wrapper over an in_process external program is dropped', async () => {
+  const box = new InProcessBox()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+  try {
+    const io = await ws.shell('nohup native-tool a')
+    expect(io.exitCode).toBe(0)
+    expect(box.ran).toEqual([['native-tool', 'a']])
   } finally {
     await ws.close()
   }

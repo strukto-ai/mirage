@@ -15,12 +15,13 @@
 import pytest
 
 from mirage import Policy
+from mirage.execution.types import MachineName
 from mirage.io.types import materialize
 from mirage.machine.handle import MachineHandle
 from mirage.policy import CommandExplanation, Deny, Route, ShellNode
 from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.monty import MontyRuntime
@@ -148,6 +149,10 @@ class Box(Runtime, ProcessExecutorMixin):
     def __init__(self) -> None:
         super().__init__()
         self.ran: list[list[str]] = []
+
+    @property
+    def machine(self) -> MachineName:
+        return MachineName("ssh", self.name)
 
     async def run_process(
         self, engine, paths, texts, ctx, output, errors=None
@@ -628,6 +633,50 @@ async def test_a_wrapper_hands_its_runtime_the_program_a_path_names():
         r = await ws.shell("nice /data/tool x.c")
         assert r.exit_code == 0
         assert box.ran == [["gcc", "x.c"], ["nice", "gcc", "x.c"]]
+    finally:
+        await ws.close()
+
+
+class InProcessBox(Box):
+    @property
+    def machine(self) -> MachineName:
+        return MachineName(IN_PROCESS, self.name)
+
+
+class InProcessGccBox(InProcessBox):
+    captures = ("gcc",)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "nice gcc x.c",
+        "nohup gcc x.c",
+        "setsid gcc x.c",
+        "nice -n 5 nohup gcc x.c",
+        "nice /usr/bin/gcc x.c",
+    ],
+)
+async def test_a_wrapper_over_an_in_process_machines_program_is_dropped(line):
+    box = InProcessGccBox()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        r = await ws.shell(line)
+        assert r.exit_code == 0
+        assert box.ran == [["gcc", "x.c"]]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_over_an_in_process_external_program_is_dropped():
+    box = InProcessBox()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        r = await ws.shell("nohup native-tool a")
+        assert r.exit_code == 0
+        assert box.ran == [["native-tool", "a"]]
     finally:
         await ws.close()
 

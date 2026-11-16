@@ -18,6 +18,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
 from mirage.policy.types import AdmissionRules, CommandExplanation
@@ -381,6 +382,10 @@ class _Box(Runtime, LineExecutorMixin):
     def __init__(self, name: str, *captures: str) -> None:
         super().__init__(captures=captures)
         self.name = name
+
+    @property
+    def machine(self) -> MachineName:
+        return MachineName("ssh", self.name)
 
     async def run_line(self, engine, paths, texts, ctx):
         return RunResult(

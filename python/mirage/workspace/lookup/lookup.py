@@ -22,7 +22,8 @@ from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.standard import version_line
 from mirage.commands.spec.synopsis import SYNOPSES
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.execution.types import MachineName
+from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
@@ -178,6 +179,39 @@ def _is_native(runtime: RuntimeIdentity | None, name: str) -> bool:
     )
 
 
+def _program_machine(
+    name: str,
+    session: SessionState,
+    registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> MachineName | None:
+    """The machine that runs a name as a program, by its own capture or
+    the external one; None when Mirage runs it, nothing does, or a route
+    took the name off its machine.
+
+    Args:
+        name (str): the program's name.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement.
+    """
+    bindings: Mapping[str, RuntimeIdentity | None] = (
+        routing.bindings if routing is not None else registry.runtime_bindings
+    )
+    serving = bindings.get(name)
+    if serving is None:
+        if (
+            name in bindings
+            or lookup(name, session, registry, routing)
+            is not Consumer.EXTERNAL
+        ):
+            return None
+        serving = bindings.get(EXTERNAL_COMMANDS)
+    elif not _is_native(serving, name):
+        return None
+    return None if serving is None else serving.machine
+
+
 def routed_consumer(
     name: str,
     args: Sequence[str],
@@ -209,7 +243,7 @@ def routed_consumer(
     consumer = lookup(name, session, registry, routing)
     if routing is None or not _outside_mirage(consumer):
         return consumer, routing
-    program = _wrapped(name, args, routing.bindings, session, registry, links)
+    program = _wrapped(name, args, session, registry, routing, links)
     if program is None:
         return consumer, routing
     bindings = {**routing.bindings, name: routing.bindings[program]}
@@ -313,8 +347,9 @@ def mirage_program_at(
     links: "NamespaceReader | None" = None,
 ) -> int | None:
     """Where a wrapper's program stands in its words when Mirage runs
-    that program itself, without the wrapper (``nice grep``); None
-    otherwise.
+    that program itself, without the wrapper: one of Mirage's commands
+    (``nice grep``) or a program of Mirage's own ``in_process`` machine,
+    which has no process for the wrapper to change. None otherwise.
 
     Args:
         name (str): expanded command name.
@@ -332,7 +367,7 @@ def mirage_program_at(
         name not in PROGRAM_WRAPPERS
         or name in bindings
         or not _outside_mirage(lookup(name, session, registry, routing))
-        or _wrapped(name, args, bindings, session, registry, links) is not None
+        or _wrapped(name, args, session, registry, routing, links) is not None
     ):
         return None
     at = read_wrapper(name, args)[0]
@@ -344,11 +379,13 @@ def mirage_program_at(
             inner, args[at + 1 :], session, registry, routing, links
         )
         return None if deeper is None else at
-    if _outside_mirage(lookup(inner, session, registry, routing)):
+    machine = _program_machine(inner, session, registry, routing)
+    if machine is None:
+        if _outside_mirage(lookup(inner, session, registry, routing)):
+            return None
+    elif machine.provider != IN_PROCESS:
         return None
-    if inner in INTERPRETER_NAMES and not isinstance(
-        bindings.get(inner), LanguageRuntime
-    ):
+    if inner in INTERPRETER_NAMES and bindings.get(inner) is None:
         return None
     return at
 
@@ -528,34 +565,42 @@ def _outside_mirage(consumer: Consumer) -> bool:
 def _wrapped(
     name: str,
     args: Sequence[str],
-    bindings: Mapping[str, RuntimeIdentity | None],
     session: SessionState,
     registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity] | None,
     links: "NamespaceReader | None",
 ) -> str | None:
     """The program a wrapper runs, nested wrappers followed, when a
-    runtime captures it by name and runs it natively; a word spelled by
-    its ``/usr/bin`` path is that program, as the plain path runs it.
+    machine past Mirage's own process captures it by name, so the
+    wrapper goes there with it; a word spelled by its ``/usr/bin`` path
+    is that program, as the plain path runs it.
 
     Args:
         name (str): the wrapper's name.
         args (Sequence[str]): its words, argv[0] excluded.
-        bindings (Mapping[str, RuntimeIdentity | None]): the line's
-            command bindings.
         session (SessionState): shell session (cwd, its programs).
         registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        routing (RouteDecision | None): the line's placement.
         links (NamespaceReader | None): the session's links, followed to
             a program spelled by a path; None to read it as typed.
     """
+    bindings: Mapping[str, RuntimeIdentity | None] = (
+        routing.bindings if routing is not None else registry.runtime_bindings
+    )
     if name not in PROGRAM_WRAPPERS or name in bindings:
         return None
     at = read_wrapper(name, args)[0]
     if at is None:
         return None
     inner = path_program(args[at], session, registry, links) or args[at]
-    if _is_native(bindings.get(inner), inner):
+    machine = _program_machine(inner, session, registry, routing)
+    if (
+        inner in bindings
+        and machine is not None
+        and machine.provider != IN_PROCESS
+    ):
         return inner
-    return _wrapped(inner, args[at + 1 :], bindings, session, registry, links)
+    return _wrapped(inner, args[at + 1 :], session, registry, routing, links)
 
 
 def _layers(

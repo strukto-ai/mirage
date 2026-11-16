@@ -25,6 +25,7 @@ import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
 import * as stream from '../../rs/stream.ts'
 import { Runtime } from '../../runtime/base.ts'
+import { MachineName } from '../../execution/types.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import {
   LINE_EXECUTOR,
@@ -932,6 +933,10 @@ class Box extends Runtime implements LineExecutorMixin {
     ...captures: string[]
   ) {
     super({ captures })
+  }
+
+  override get machine(): MachineName {
+    return new MachineName('ssh', this.name)
   }
 
   runLine(): Promise<RunResult> {
