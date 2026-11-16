@@ -357,11 +357,47 @@ export class Workspace {
   // can't mount), so the core Workspace carries no FUSE state.
 
   constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
-    if ('python' in options) {
-      throw new Error(
-        "the 'python' workspace option was removed: configure the runtime on its machine, " +
-          'e.g. new PyodideRuntime({ config: { denyPackages } })',
-      )
+    // A JavaScript caller is not held to the type, so a key outside it is
+    // refused here rather than ignored.
+    const known: Record<keyof WorkspaceOptions, true> = {
+      io: true,
+      mode: true,
+      read: true,
+      write: true,
+      commandLimits: true,
+      driftPolicy: true,
+      sessionId: true,
+      maxMemory: true,
+      maxBodyBytes: true,
+      maxEnv: true,
+      network: true,
+      systemTime: true,
+      cache: true,
+      index: true,
+      clock: true,
+      ids: true,
+      observe: true,
+      namespaceStore: true,
+      sessionStore: true,
+      workspaceId: true,
+      daemonId: true,
+      store: true,
+      ownsStore: true,
+      machines: true,
+      routePolicy: true,
+      profiles: true,
+      profile: true,
+      processes: true,
+      ceilings: true,
+      policies: true,
+      onAsk: true,
+      policyFunctions: true,
+      clis: true,
+      env: true,
+      secrets: true,
+    }
+    for (const key of Object.keys(options)) {
+      if (!Object.hasOwn(known, key)) throw new Error(`Workspace: unknown option \`${key}\``)
     }
     // The workspace-level default a mount overrides, as `mode` is.
     this.io = new IOConfig(options.io)
@@ -1387,7 +1423,26 @@ export class Workspace {
   setProfile(name: string, profile: SessionProfile): void {
     checkName('profile name', name)
     // A typed caller does not pass the parser, so this entry point repeats
-    // its check that a policy block is whole.
+    // its checks: no field outside the type, and a policy block is whole.
+    const fields: Record<keyof SessionProfile, true> = {
+      cwd: true,
+      env: true,
+      mounts: true,
+      paths: true,
+      vars: true,
+      commands: true,
+      policy: true,
+      commandLimits: true,
+      processes: true,
+      network: true,
+    }
+    for (const key of Object.keys(profile)) {
+      if (!Object.hasOwn(fields, key)) {
+        throw new PolicyError(
+          `profile '${name}': unknown field \`${key}\` (allowed: ${Object.keys(fields).join(', ')})`,
+        )
+      }
+    }
     if (profile.policy != null) {
       parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
     }

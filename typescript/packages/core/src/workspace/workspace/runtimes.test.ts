@@ -205,12 +205,6 @@ describe('removeMachine', () => {
     expect(await line).toBe('AbortError')
     expect(alpha.closed).toBe(1)
   })
-
-  it('refuses the removed python workspace option', () => {
-    expect(() => new Workspace({}, { python: { denyPackages: ['requests'] } } as never)).toThrow(
-      /'python' workspace option was removed/,
-    )
-  })
 })
 
 class Box extends Runtime implements LineExecutorMixin {

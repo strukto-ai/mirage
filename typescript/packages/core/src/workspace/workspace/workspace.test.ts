@@ -28,7 +28,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
-import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
+import type { ExecuteOptions, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
 
 const DEC = new TextDecoder()
@@ -143,6 +143,13 @@ describe('handle parity with the workspace entry point', () => {
     const parity: Forwarded = {} as SessionExecuteOptions
     expect(parity).toBeDefined()
     expectTypeOf<SessionExecuteOptions>().toEqualTypeOf<Omit<ExecuteOptions, 'sessionId'>>()
+  })
+
+  it('refuses an option outside its type', () => {
+    const options = { cacheLimit: 0 } as unknown as WorkspaceOptions
+    expect(() => new Workspace({ '/data/': new RAMVFS() }, options)).toThrow(
+      /unknown option `cacheLimit`/,
+    )
   })
 })
 

@@ -309,6 +309,12 @@ describe('profile policies', () => {
     }
   }, 120000)
 
+  it('refuses a field outside the profile type', () => {
+    expect(() =>
+      build({ release: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } }),
+    ).toThrow(/profile 'release': unknown field `script`/)
+  })
+
   it('names its programs per method', async () => {
     expect(() =>
       build({
