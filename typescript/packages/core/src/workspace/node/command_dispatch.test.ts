@@ -505,10 +505,11 @@ const NO_PYTHON_PROFILES = {
   default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } },
 }
 
-/** Every machine an explained tree places a command on, nested scopes included. */
-function machines(node: ShellNode | CommandExplanation): string[] {
-  const own = 'command' in node ? [node.machine] : []
-  return [...own, ...node.children.flatMap(machines)]
+/** Every command of an explained tree, nested scopes included, with its exit and machine. */
+function explained(node: ShellNode | CommandExplanation): [string, number, string][] {
+  const own: [string, number, string][] =
+    'command' in node ? [[node.command, node.exitCode, node.machine]] : []
+  return [...own, ...node.children.flatMap(explained)]
 }
 
 function spelledWs(options: Pick<WorkspaceOptions, 'policies' | 'profiles'>): Workspace {
@@ -553,7 +554,55 @@ describe('a wrapper running a program spelled by its path', () => {
       const io = await ws.shell(line)
       const said = await ws.explain(line)
       expect([io.exitCode, text(io.stdout)]).toEqual([0, 'c\n'])
-      expect(machines(said.node)).not.toContain('b')
+      expect(explained(said.node).map(([, , machine]) => machine)).not.toContain('b')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a wrapper over a path-spelled program', () => {
+  it('is refused where the routes answering for it disagree', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          c: new Named('c', { captures: ['python3'] }),
+          b: new Named('b', { captures: [EXTERNAL_COMMANDS] }),
+        },
+        policies: [
+          new Routes({
+            nice: { kind: 'route', machine: 'b' },
+            python3: { kind: 'route', machine: 'c' },
+          }),
+        ],
+      },
+    )
+    try {
+      const bare = await ws.explain('nice python3 -c 1')
+      const said = await ws.explain('nice /usr/bin/python3 -c 1')
+      const ran = await ws.shell('nice /usr/bin/python3 -c 1')
+      expect(ran.exitCode).toBe(126)
+      expect(explained(said.node)[0]).toEqual(explained(bare.node)[0])
+      expect(explained(said.node)[0]?.[1]).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Only a listed /usr/bin file is a program; any other path is the machine's
+  // own file under a wrapper as on the plain path, which only an allow list
+  // refuses.
+  it('leaves a path the view does not list to the machine', async () => {
+    const ws = spelledWs({
+      profiles: { default: { commands: { deny: [{ reason: 'no', commands: ['nosuch'] }] } } },
+    })
+    try {
+      const bare = await ws.shell('/usr/bin/nosuch -c 1')
+      const io = await ws.shell('nice /usr/bin/nosuch -c 1')
+      expect([io.exitCode, text(io.stdout)]).toEqual([bare.exitCode, text(bare.stdout)])
+      expect(text(bare.stdout)).toBe('b\n')
     } finally {
       await ws.close()
     }

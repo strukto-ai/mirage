@@ -490,9 +490,15 @@ NO_PYTHON_PROFILES = {
 }
 
 
-def _machines(node: ShellNode | CommandExplanation) -> list[str]:
-    own = [node.machine] if isinstance(node, CommandExplanation) else []
-    return own + [m for child in node.children for m in _machines(child)]
+def _explained(
+    node: ShellNode | CommandExplanation,
+) -> list[tuple[str, int, str]]:
+    own = (
+        [(node.command, node.exit_code, node.machine)]
+        if isinstance(node, CommandExplanation)
+        else []
+    )
+    return own + [e for child in node.children for e in _explained(child)]
 
 
 def _spelled(**kwargs) -> Workspace:
@@ -535,7 +541,47 @@ async def test_a_wrapper_goes_where_a_path_spelled_program_is_routed(line):
         r = await ws.shell(line)
         said = await ws.explain(line)
         assert (r.exit_code, r.stdout) == (0, b"c\n")
-        assert "b" not in _machines(said.node)
+        assert "b" not in [m for _, _, m in _explained(said.node)]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_routes_that_disagree_refuse_a_wrapper_over_a_path_spelled_one():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "c": Named("c", {"captures": ["python3"]}),
+            "b": Named("b", {"captures": [EXTERNAL_COMMANDS]}),
+        },
+        policies=[
+            Routes({"nice": Route(machine="b"), "python3": Route(machine="c")})
+        ],
+    )
+    try:
+        bare = await ws.explain("nice python3 -c 1")
+        said = await ws.explain("nice /usr/bin/python3 -c 1")
+        ran = await ws.shell("nice /usr/bin/python3 -c 1")
+        assert ran.exit_code == 126
+        assert _explained(said.node)[0] == _explained(bare.node)[0]
+        assert _explained(said.node)[0][1] == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_leaves_a_path_the_view_does_not_list_to_the_machine():
+    # Only a listed /usr/bin file is a program; any other path is the
+    # machine's own file under a wrapper as on the plain path, which only an
+    # allow list refuses.
+    deny = {"deny": [{"reason": "no", "commands": ["nosuch"]}]}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        bare = await ws.shell("/usr/bin/nosuch -c 1")
+        r = await ws.shell("nice /usr/bin/nosuch -c 1")
+        assert (r.exit_code, r.stdout) == (bare.exit_code, bare.stdout)
+        assert bare.stdout == b"b\n"
     finally:
         await ws.close()
 
