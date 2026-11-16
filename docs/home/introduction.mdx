@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: A composable, scriptable and durable virtual terminal for AI agents.
+description: A composable, scriptable and managed virtual terminal for AI agents.
 icon: /images/mirage-icon-light.svg
 ---
 
@@ -13,8 +13,10 @@ virtual CLIs and a router that picks where each command runs.
 - **Scriptable.** A scriptable policy engine, written in code or as scripts, hides files per
   session profile, refuses commands, asks for approval, caps output and routes
   commands to machines.
-- **Durable.** Each part can live in your own storage: sessions in RAM, each
-  shell job's output in Redis, and the command logs on disk.
+- **Managed.** Mirage keeps the terminal's state for you, in storage you
+  choose: sessions in RAM or Redis, each shell job's output in Redis, the
+  command history on disk, and whole workspaces as snapshots you restore
+  anywhere.
 
 ## Architecture
 
