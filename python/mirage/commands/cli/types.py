@@ -242,6 +242,9 @@ class WalkResult:
         verb_positions (tuple[int, ...]): where each of ``path`` stands
             in the walked argv.
         group_flags (WalkFlagBag): group flags keyed by canonical spelling.
+        value_paths (Mapping[int, PathSpec]): what each typed PATH group
+            value resolved to, by the walked argv position it stands in
+            (the option word itself for an attached value).
         operand_bases (tuple[PathSpec, ...]): ordered directory changes.
         argv (tuple[str, ...]): remaining words for the leaf parser.
         output (bytes): rendered help or refusal when leaf is None.
@@ -253,6 +256,7 @@ class WalkResult:
     path: tuple[str, ...] = ()
     verb_positions: tuple[int, ...] = ()
     group_flags: WalkFlagBag = field(default_factory=FlagBag)
+    value_paths: Mapping[int, PathSpec] = field(default_factory=dict)
     operand_bases: tuple[PathSpec, ...] = ()
     argv: tuple[str, ...] = ()
     output: bytes = b""

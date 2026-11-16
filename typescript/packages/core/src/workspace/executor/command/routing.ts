@@ -133,12 +133,14 @@ export function defaultCwdOperand(
 }
 
 /**
- * The path-valued options a command tree's walk resolves. `pathFlagScopes`
- * reads the built-in specs, which hold no tree, and a tree's words are
- * classified as its walk reads them, its group options as text. So a tree's
- * group options and its leaf's are read here, walked as the run walks them:
- * `notes --file /data/secret show` hands the leaf `/data/secret`, and a rule
- * protecting it has to see it. Mirrors Python's `tree_path_scopes`.
+ * The paths a command tree's walk resolves: its options' values and its
+ * leaf's path operands. `pathFlagScopes` reads the built-in specs, which hold
+ * no tree, and a tree's words are classified as its walk reads them, its
+ * group options as text. So a tree's group options and its leaf's are read
+ * here, walked as the run walks them: `notes --file /data/secret show` hands
+ * the leaf `/data/secret`, and a rule protecting it has to see it, as it has
+ * to see `pdfinfo report.pdf` typed under `/data`. Mirrors Python's
+ * `tree_path_scopes`.
  */
 export function treePathScopes(
   registry: MountRegistry,
@@ -162,6 +164,9 @@ export function treePathScopes(
   for (const value of leaf.pathFlagValues) {
     found.push(new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }))
   }
+  leaf.wordPaths.forEach((path, slot) => {
+    if (path !== null && leaf.wordRoles[slot] === WordKind.OPERAND) found.push(path)
+  })
   return found
 }
 
@@ -345,24 +350,32 @@ export function programTokens(
 }
 
 /**
- * Each word's kind as a command's grammar reads it: an option, an option's
- * value or an operand. A command no spec describes reads a dashed word as an
- * option and anything else as an operand. `cli` says the spec is an
- * installed CLI's node, whose undeclared dashed words are the program's own
- * operands. Mirrors Python's `_parsed_kinds`.
+ * Each word's kind as a command's grammar reads it (an option, an option's
+ * value or an operand) and the path it names there. A command no spec
+ * describes reads a dashed word as an option and anything else as an
+ * operand, and names no path. `cli` says the spec is an installed CLI's
+ * node, whose undeclared dashed words are the program's own operands.
+ * Mirrors Python's `_parsed_words`.
  */
-function parsedKinds(
+function parsedWords(
   spec: CommandSpec | undefined,
   argv: readonly string[],
   cwd: string,
   cmdName: string,
+  env?: Record<string, string>,
   cli = false,
-): WordKind[] {
+): [WordKind, PathSpec | null][] {
   if (spec === undefined) {
-    return argv.map((w) => (w.startsWith('-') && w !== '-' ? WordKind.OPTION : WordKind.OPERAND))
+    return argv.map((w) => [
+      w.startsWith('-') && w !== '-' ? WordKind.OPTION : WordKind.OPERAND,
+      null,
+    ])
   }
-  const parsed = parseCommand(spec, [...argv], cwd, cmdName, undefined, cli)
-  return parsed.wordRoles.map((role) => role ?? WordKind.OPERAND)
+  const parsed = parseCommand(spec, [...argv], cwd, cmdName, env, cli)
+  return parsed.wordRoles.map((role, slot) => [
+    role ?? WordKind.OPERAND,
+    parsed.wordPaths[slot] ?? null,
+  ])
 }
 
 /**
@@ -391,10 +404,14 @@ export function operandPaths(
 /**
  * The command line word by word, each with its kind and the path it names.
  * The name comes first and the redirect targets last. A command tree's verbs
- * (an installed CLI's, or a mount's) are read off the tree and its leaf's
- * words off the leaf's grammar; any other command's words off its own spec.
- * `env` is the session environment, which fills a group option declaring
- * `Argument.env` as the run's walk does. Mirrors Python's `command_words`.
+ * and group options (an installed CLI's, or a mount's) are read off its walk
+ * and its leaf's words off the leaf's grammar; any other command's words off
+ * its own spec. A word's path is the one `paths` holds for it: the
+ * classifier's, else the grammar's for an option's value (attached, as in
+ * `--file=x`, or detached) and, for a tree, for an operand. A word carrying
+ * its value attached names its option without the value. `env` is the
+ * session environment, which fills a group option declaring `Argument.env`
+ * as the run's walk does. Mirrors Python's `command_words`.
  */
 export function commandWords(
   registry: MountRegistry,
@@ -408,31 +425,41 @@ export function commandWords(
 ): CommandWord[] {
   const tree = commandTree(registry, name, cwd, argv, access)
   const result = tree !== null ? walk(name, tree.spec, argv, cwd, env) : null
-  let kinds: WordKind[]
+  let read: [WordKind, PathSpec | null][]
   if (result !== null && result.leaf !== null) {
     const lead = argv.length - result.argv.length
-    kinds = [
+    read = [
       ...argv
         .slice(0, lead)
-        .map((word, i) =>
+        .map((word, i): [WordKind, PathSpec | null] => [
           result.verbPositions.includes(i)
             ? WordKind.SUBCOMMAND
             : word.startsWith('-')
               ? WordKind.OPTION
               : WordKind.VALUE,
-        ),
-      ...parsedKinds(result.leaf, argv.slice(lead), cwd, name, true),
+          result.valuePaths.get(i) ?? null,
+        ]),
+      ...parsedWords(result.leaf, argv.slice(lead), cwd, name, env, true),
     ]
   } else {
-    kinds = parsedKinds(SPECS[name], argv, cwd, name)
+    read = parsedWords(SPECS[name], argv, cwd, name).map(([kind, path]) => [
+      kind,
+      kind === WordKind.OPERAND ? null : path,
+    ])
   }
   const words = [new CommandWord(name, WordKind.NAME)]
   let option: string | null = null
   argv.forEach((text, index) => {
-    const kind = kinds[index] ?? WordKind.OPERAND
+    const [kind, specPath] = read[index] ?? [WordKind.OPERAND, null]
     const word = classified[index]
-    const path = word instanceof PathSpec ? word : null
-    words.push(new CommandWord(text, kind, kind === WordKind.VALUE ? option : null, path))
+    const path = word instanceof PathSpec ? word : specPath
+    const owner =
+      kind === WordKind.VALUE
+        ? option
+        : kind === WordKind.OPTION && path !== null
+          ? text.slice(0, text.length - path.rawPath.length).replace(/=$/, '')
+          : null
+    words.push(new CommandWord(text, kind, owner, path))
     if (kind === WordKind.OPTION) option = text
   })
   for (const p of redirects) {

@@ -54,7 +54,7 @@ from mirage.commands.spec.word_choice import (
     match_word,
     value_classes,
 )
-from mirage.types import LineFacts
+from mirage.types import LineFacts, PathSpec
 from mirage.utils.path import resolve_path
 
 
@@ -127,6 +127,10 @@ class ParsedArgs:
     # scan read as an option, VALUE for an option's detached value,
     # OPERAND for an argument, None for a word the scan never reads.
     word_roles: list[WordKind | None] = field(default_factory=list)
+    # Per-position path, aligned with word_kinds: what a PATH value or
+    # operand resolves to, on the option word itself when its value is
+    # attached (`--file=x`, `-fx`), None for a word naming no path.
+    word_paths: list[PathSpec | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
     # abbreviated longs matching several options (typed prefix, matched
@@ -656,6 +660,7 @@ def parse_command(
     base = cwd
     word_bases: list[str | None] = [None] * len(argv)
     raw_bases: list[str] = []
+    attached_values: list[tuple[int, ValueType, str]] = []
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
@@ -777,6 +782,8 @@ def parse_command(
             word_kinds[scan_origins[i + offset + 1]] = kinds[
                 offset + (attached is not None)
             ]
+        if attached is not None:
+            attached_values.append((scan_origins[i], kinds[0], attached))
         return detached + 1
 
     i = 0
@@ -933,6 +940,9 @@ def parse_command(
                         spelling,
                         tok[eq + 1 :],
                     )
+                    attached_values.append(
+                        (scan_origins[i], cs.kind_of[spelling], tok[eq + 1 :])
+                    )
                     base = _rebase(flags, cs, spelling, tok[eq + 1 :], base)
                 elif etok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
@@ -997,6 +1007,9 @@ def parse_command(
                         vf,
                         tok[len(vf) :],
                     )
+                    attached_values.append(
+                        (scan_origins[i], cs.kind_of[vf], tok[len(vf) :])
+                    )
                     base = _rebase(flags, cs, vf, tok[len(vf) :], base)
                     i += 1
                     matched_optional = True
@@ -1046,6 +1059,9 @@ def parse_command(
                         word_choice_dests,
                         vf,
                         attached_value,
+                    )
+                    attached_values.append(
+                        (scan_origins[i], cs.kind_of[vf], attached_value)
                     )
                     base = _rebase(flags, cs, vf, attached_value, base)
                     i += 1
@@ -1151,6 +1167,9 @@ def parse_command(
                         _set_bool_flag(flags, cs, name)
                     _set_value_flag(
                         flags, refusals, cs, word_choice_dests, vflag, attached
+                    )
+                    attached_values.append(
+                        (scan_origins[i], cs.kind_of[vflag], attached)
                     )
                     base = _rebase(flags, cs, vflag, attached, base)
                     i += 1
@@ -1455,6 +1474,16 @@ def parse_command(
         else None
         for slot in range(len(argv))
     ]
+    word_paths: list[PathSpec | None] = [
+        PathSpec.from_str_path(word, cwd=word_bases[slot] or cwd)
+        if word_kinds[slot] == "path"
+        and word_roles[slot] is not WordKind.OPTION
+        else None
+        for slot, word in enumerate(argv)
+    ]
+    for at, kind, value in attached_values:
+        if kind == "path":
+            word_paths[at] = PathSpec.from_str_path(value, cwd=cwd)
     parsed = ParsedArgs(
         flags=flags,
         args=classified,
@@ -1466,6 +1495,7 @@ def parse_command(
         word_kinds=word_kinds,
         word_bases=word_bases,
         word_roles=word_roles,
+        word_paths=word_paths,
         invalid_options=invalid_options,
         ambiguous_options=ambiguous_options,
         option_error_kinds=option_error_kinds,

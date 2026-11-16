@@ -184,14 +184,15 @@ def tree_path_scopes(
     cwd: str,
     env: Mapping[str, str] | None = None,
 ) -> list[PathSpec]:
-    """The path-valued options a command tree's walk resolves.
+    """The paths a command tree's walk resolves: its options' values
+    and its leaf's path operands.
 
     ``path_flag_scopes`` reads the built-in specs, which hold no tree, and
     a tree's words are classified as its walk reads them, its group
     options as text. So a tree's group options and its leaf's are read
     here, walked as the run walks them: ``notes --file /data/secret show``
     hands the leaf ``/data/secret``, and a rule protecting it has to see
-    it.
+    it, as it has to see ``pdfinfo report.pdf`` typed under ``/data``.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs and
@@ -223,6 +224,11 @@ def tree_path_scopes(
     found += [
         PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
         for value in leaf.path_flag_values
+    ]
+    found += [
+        path
+        for path, role in zip(leaf.word_paths, leaf.word_roles, strict=True)
+        if path is not None and role is WordKind.OPERAND
     ]
     return found
 
@@ -426,36 +432,47 @@ def program_tokens(
     return (name, *argv), (name,)
 
 
-def _parsed_kinds(
+def _parsed_words(
     spec: CommandSpec | None,
     argv: Sequence[str],
     cwd: str,
     cmd_name: str,
+    env: Mapping[str, str] | None = None,
     cli: bool = False,
-) -> list[WordKind]:
-    """Each word's kind as a command's grammar reads it: an option, an
-    option's value or an operand. A command no spec describes reads a
-    dashed word as an option and anything else as an operand.
+) -> list[tuple[WordKind, PathSpec | None]]:
+    """Each word's kind as a command's grammar reads it (an option, an
+    option's value or an operand) and the path it names there. A
+    command no spec describes reads a dashed word as an option and
+    anything else as an operand, and names no path.
 
     Args:
         spec (CommandSpec | None): the command's grammar.
         argv (Sequence[str]): the words after the command name.
         cwd (str): working directory the line was typed under.
         cmd_name (str): command name.
+        env (Mapping[str, str] | None): session environment.
         cli (bool): whether the spec is an installed CLI's node, whose
             undeclared dashed words are the program's own operands.
     """
     if spec is None:
         return [
-            WordKind.OPTION
-            if w.startswith("-") and w != "-"
-            else WordKind.OPERAND
+            (
+                WordKind.OPTION
+                if w.startswith("-") and w != "-"
+                else WordKind.OPERAND,
+                None,
+            )
             for w in argv
         ]
     parsed = parse_command(
-        spec, list(argv), cwd, cmd_name, unknown_is_operand=cli
+        spec, list(argv), cwd, cmd_name, env, unknown_is_operand=cli
     )
-    return [role or WordKind.OPERAND for role in parsed.word_roles]
+    return [
+        (role or WordKind.OPERAND, path)
+        for role, path in zip(
+            parsed.word_roles, parsed.word_paths, strict=True
+        )
+    ]
 
 
 def operand_paths(
@@ -499,9 +516,13 @@ def command_words(
     it names.
 
     The name comes first and the redirect targets last. A command
-    tree's verbs (an installed CLI's, or a mount's) are read off the tree
-    and its leaf's words off the leaf's grammar; any other command's
-    words off its own spec.
+    tree's verbs and group options (an installed CLI's, or a mount's)
+    are read off its walk and its leaf's words off the leaf's grammar;
+    any other command's words off its own spec. A word's path is the
+    one ``paths`` holds for it: the classifier's, else the grammar's
+    for an option's value (attached, as in ``--file=x``, or detached)
+    and, for a tree, for an operand. A word carrying its value attached
+    names its option without the value.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs.
@@ -520,31 +541,43 @@ def command_words(
     result = (
         walk(name, tree.spec, argv, cwd, env) if tree is not None else None
     )
+    read: list[tuple[WordKind, PathSpec | None]]
     if result is not None and result.leaf is not None:
         lead = len(argv) - len(result.argv)
-        kinds = [
+        read = [
             *(
-                WordKind.SUBCOMMAND
-                if i in result.verb_positions
-                else WordKind.OPTION
-                if word.startswith("-")
-                else WordKind.VALUE
+                (
+                    WordKind.SUBCOMMAND
+                    if i in result.verb_positions
+                    else WordKind.OPTION
+                    if word.startswith("-")
+                    else WordKind.VALUE,
+                    result.value_paths.get(i),
+                )
                 for i, word in enumerate(argv[:lead])
             ),
-            *_parsed_kinds(result.leaf, argv[lead:], cwd, name, cli=True),
+            *_parsed_words(result.leaf, argv[lead:], cwd, name, env, cli=True),
         ]
     else:
-        kinds = _parsed_kinds(SPECS.get(name), argv, cwd, name)
+        read = [
+            (kind, None if kind is WordKind.OPERAND else path)
+            for kind, path in _parsed_words(SPECS.get(name), argv, cwd, name)
+        ]
     words = [CommandWord(name, WordKind.NAME)]
     option: str | None = None
-    for index, (text, kind) in enumerate(zip(argv, kinds, strict=True)):
+    for index, (text, (kind, spec_path)) in enumerate(
+        zip(argv, read, strict=True)
+    ):
         word = classified[index] if index < len(classified) else text
-        path = word if isinstance(word, PathSpec) else None
-        words.append(
-            CommandWord(
-                text, kind, option if kind is WordKind.VALUE else None, path
-            )
+        path = word if isinstance(word, PathSpec) else spec_path
+        owner = (
+            option
+            if kind is WordKind.VALUE
+            else text[: len(text) - len(path.raw_path)].removesuffix("=")
+            if kind is WordKind.OPTION and path is not None
+            else None
         )
+        words.append(CommandWord(text, kind, owner, path))
         if kind is WordKind.OPTION:
             option = text
     words.extend(

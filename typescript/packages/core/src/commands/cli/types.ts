@@ -233,6 +233,11 @@ export class WalkResult {
   readonly verbPositions: readonly number[]
   readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag
+  /**
+   * What each typed PATH group value resolved to, by the walked argv
+   * position it stands in (the option word itself for an attached value).
+   */
+  readonly valuePaths: ReadonlyMap<number, PathSpec>
   readonly argv: readonly string[]
   readonly output: Uint8Array
   readonly stream: 'stdout' | 'stderr'
@@ -247,6 +252,7 @@ export class WalkResult {
         | 'verbPositions'
         | 'operandBases'
         | 'groupFlags'
+        | 'valuePaths'
         | 'argv'
         | 'output'
         | 'stream'
@@ -258,6 +264,7 @@ export class WalkResult {
     this.path = Object.freeze([...(init.path ?? [])])
     this.verbPositions = Object.freeze([...(init.verbPositions ?? [])])
     this.groupFlags = init.groupFlags ?? {}
+    this.valuePaths = init.valuePaths ?? new Map()
     this.operandBases = init.operandBases ?? []
     this.argv = Object.freeze([...(init.argv ?? [])])
     this.output = init.output ?? new Uint8Array(0)
