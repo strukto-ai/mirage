@@ -194,9 +194,7 @@ and only to its configured GitHub origin.
 checks out, which keeps a large repository small in a RAM mount. Like git, it
 implies `--single-branch`; pass `--no-single-branch` to take every branch at
 that depth. `log`, `show` and the other history commands stop at the oldest
-commit fetched, which `--decorate` labels `grafted`. A plain workspace path
-ignores the depth with git's warning; use a `file://` URL to clone one
-shallow.
+commit fetched, which `--decorate` labels `grafted`.
 
 `--git-dir` and `--work-tree` override `GIT_DIR` and `GIT_WORK_TREE` and resolve
 against `-C`. Repository `core.worktree` and `core.bare` affect discovery;
