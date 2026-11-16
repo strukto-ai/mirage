@@ -12,11 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type {
+  GithubAccount,
+  GithubBlob,
+  GithubBranch,
+  GithubComment,
+  GithubCommit,
+  GithubFile,
+  GithubIssue,
+  GithubPull,
+  GithubRepo,
+  GithubStagedDir,
+  GithubStagedEntry,
+  GithubStagedTree,
+  GithubSubmodule,
+  GithubTag,
+  GithubTagRef,
+} from '../../generated/github/index.js'
+import type { DatabaseSync } from 'node:sqlite'
 import { Prisma } from '../../generated/github/index.js'
-import { deleteOrder, stripSlash, tenantWhere } from '../kit/typescript/index.ts'
+import {
+  count,
+  deleteOrder,
+  exec,
+  first,
+  insert,
+  select,
+  stripSlash,
+  tenantWhere,
+} from '../kit/typescript/index.ts'
 import type { Dmmf, JsonValue } from '../kit/typescript/index.ts'
 import { DEFAULT_LOGIN, REPO_DATE, SEARCH_SIZE_LIMIT, config } from './config.ts'
-import type { C } from './config.ts'
 import { languagesOf } from './languages.ts'
 import {
   blobSha,
@@ -29,6 +55,12 @@ import {
   treeSha,
 } from './wire.ts'
 import type { CommitRow } from './wire.ts'
+
+// The run's file over node:sqlite (kit sql.ts), on the tables the schema
+// declares; the kit's `select` types every column from it, so rows come back
+// as Prisma's findMany returned them.
+export type Db = DatabaseSync
+export const DMMF = Prisma.dmmf as unknown as Dmmf
 
 export interface RepoRow {
   fullName: string
@@ -81,49 +113,51 @@ export function perRepoModels(): string[] {
   return deleteOrder(dmmf).filter((name) => holdsRepo.has(name))
 }
 
-// One typed handle onto a delegate named at runtime. The two lifecycle walks are
-// the only callers, and both do exactly these two things.
-interface RepoScopedDelegate {
-  updateMany(args: { where: Record<string, string>; data: { repo: string } }): Promise<unknown>
-  deleteMany(args: { where: Record<string, string> }): Promise<unknown>
+export async function repoByName(
+  db: Db,
+  tenant: string,
+  fullName: string,
+): Promise<RepoRow | null> {
+  return first<GithubRepo>(
+    db,
+    DMMF,
+    'GithubRepo',
+    '"tenant" = ? AND "fullName" = ?',
+    tenant,
+    fullName,
+  ) as RepoRow | null
 }
 
-export function delegateFor(db: C, model: string): RepoScopedDelegate {
-  const key = model.charAt(0).toLowerCase() + model.slice(1)
-  const found = (db as unknown as Record<string, RepoScopedDelegate | undefined>)[key]
-  if (found === undefined) throw new Error(`github fake: no delegate for ${model}`)
-  return found
-}
-
-export async function repoByName(db: C, tenant: string, fullName: string): Promise<RepoRow | null> {
-  return (await db.githubRepo.findUnique({
-    where: { tenant_fullName: { tenant, fullName } },
-  })) as RepoRow | null
-}
-
-export async function allRepos(db: C, tenant: string): Promise<RepoRow[]> {
-  return (await db.githubRepo.findMany({
-    where: scope(tenant),
-    orderBy: { seq: 'asc' },
-  })) as RepoRow[]
+export async function allRepos(db: Db, tenant: string): Promise<RepoRow[]> {
+  return select<GithubRepo>(
+    db,
+    DMMF,
+    'GithubRepo',
+    '"tenant" = ? ORDER BY "seq" ASC',
+    tenant,
+  ) as RepoRow[]
 }
 
 // Issues and pull requests share one counter, because on GitHub they share one
 // number space: a repository with issue 1 numbers its first pull request 2.
-export async function nextNumber(db: C, tenant: string, repo: RepoRow): Promise<number> {
-  const where = { ...scope(tenant), repo: repo.fullName }
-  const issue = await db.githubIssue.findFirst({ where, orderBy: { number: 'desc' } })
-  const pull = await db.githubPull.findFirst({ where, orderBy: { number: 'desc' } })
+export async function nextNumber(db: Db, tenant: string, repo: RepoRow): Promise<number> {
+  const where = '"tenant" = ? AND "repo" = ? ORDER BY "number" DESC'
+  const issue = first<GithubIssue>(db, DMMF, 'GithubIssue', where, tenant, repo.fullName)
+  const pull = first<GithubPull>(db, DMMF, 'GithubPull', where, tenant, repo.fullName)
   return Math.max(issue?.number ?? 0, pull?.number ?? 0) + 1
 }
 
 // One past the highest id in the repository, not the count: after a deletion
 // the count is the id of a comment that still exists.
-export async function nextCommentId(db: C, tenant: string, repo: RepoRow): Promise<number> {
-  const last = await db.githubComment.findFirst({
-    where: { ...scope(tenant), repo: repo.fullName },
-    orderBy: { id: 'desc' },
-  })
+export async function nextCommentId(db: Db, tenant: string, repo: RepoRow): Promise<number> {
+  const last = first<GithubComment>(
+    db,
+    DMMF,
+    'GithubComment',
+    '"tenant" = ? AND "repo" = ? ORDER BY "id" DESC',
+    tenant,
+    repo.fullName,
+  )
   return (last?.id ?? 0) + 1
 }
 
@@ -149,7 +183,7 @@ export function starsOf(repo: RepoRow): number {
 // GitHub's `{name: bytes}`, or else what Linguist counts in its default
 // branch.
 export async function repoLanguages(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
 ): Promise<Array<[string, number]>> {
@@ -167,7 +201,7 @@ export async function repoLanguages(
 // Its primary language: the one its fixture states, null included, or else
 // its largest.
 export async function primaryLanguage(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
 ): Promise<string | null> {
@@ -179,7 +213,7 @@ export async function primaryLanguage(
 // The repository shape every route returns. A fixture's own values win, except
 // default_branch, which seeding decides, and the lists it states, which are
 // read through their own endpoints.
-export async function repoJson(db: C, tenant: string, repo: RepoRow): Promise<JsonValue> {
+export async function repoJson(db: Db, tenant: string, repo: RepoRow): Promise<JsonValue> {
   const meta = metaOf(repo)
   const {
     default_branch: _ignored,
@@ -211,11 +245,15 @@ export async function repoJson(db: C, tenant: string, repo: RepoRow): Promise<Js
 }
 
 // Branches, the default one first and the rest in name order.
-export async function branchNames(db: C, tenant: string, repo: RepoRow): Promise<string[]> {
-  const rows = await db.githubBranch.findMany({
-    where: { ...scope(tenant), repo: repo.fullName },
-    select: { name: true },
-  })
+export async function branchNames(db: Db, tenant: string, repo: RepoRow): Promise<string[]> {
+  const rows = select<GithubBranch>(
+    db,
+    DMMF,
+    'GithubBranch',
+    '"tenant" = ? AND "repo" = ?',
+    tenant,
+    repo.fullName,
+  )
   const seen = new Set(rows.map((r) => r.name))
   // The default branch is prepended whether or not a row exists for it, which
   // is what the fake this replaces did: renaming a repository's default branch
@@ -230,29 +268,38 @@ export async function branchNames(db: C, tenant: string, repo: RepoRow): Promise
 // it. Idempotent, because every path that can reach a branch (seeding, repo
 // creation, a fork, a new ref) may be reached twice for the same name.
 export async function addBranch(
-  db: C,
+  db: Db,
   tenant: string,
   fullName: string,
   name: string,
 ): Promise<void> {
-  const count = await db.githubBranch.count({ where: { ...scope(tenant), repo: fullName } })
-  await db.githubBranch.upsert({
-    where: { tenant_repo_name: { tenant, repo: fullName, name } },
-    update: {},
-    create: { tenant, repo: fullName, name, seq: count },
-  })
+  const seq = count(db, 'GithubBranch', '"tenant" = ? AND "repo" = ?', tenant, fullName)
+  exec(
+    db,
+    'INSERT INTO "GithubBranch" ("tenant", "repo", "name", "seq") VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT ("tenant", "repo", "name") DO NOTHING',
+    tenant,
+    fullName,
+    name,
+    seq,
+  )
 }
 
 export async function treeOfBranch(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
 ): Promise<Tree> {
-  const rows = await db.githubFile.findMany({
-    where: { ...scope(tenant), repo: repo.fullName, branch },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = select<GithubFile>(
+    db,
+    DMMF,
+    'GithubFile',
+    '"tenant" = ? AND "repo" = ? AND "branch" = ? ORDER BY "seq" ASC',
+    tenant,
+    repo.fullName,
+    branch,
+  )
   const out: Tree = new Map()
   for (const r of rows) out.set(r.path, Buffer.from(r.data))
   return out
@@ -279,7 +326,7 @@ function fingerprintOf(rows: Array<[string, string]>): string {
 // fork in its network, the one its forks descend from included, as GitHub
 // shares one object store across a fork network. A repository no fork touches
 // is a network of one.
-export async function networkNames(db: C, tenant: string, repo: RepoRow): Promise<string[]> {
+export async function networkNames(db: Db, tenant: string, repo: RepoRow): Promise<string[]> {
   const repos = await allRepos(db, tenant)
   const bySeq = new Map(repos.map((row) => [row.seq, row]))
   const rootOf = (row: RepoRow): number => {
@@ -303,7 +350,7 @@ export async function networkNames(db: C, tenant: string, repo: RepoRow): Promis
 // account's fork that holds the branch, since the fake lets one account keep
 // several forks of a network where GitHub keeps one.
 export async function forkOwnedBy(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   owner: string,
@@ -327,30 +374,53 @@ export async function forkOwnedBy(
 // `mode` narrows the read to blobs or to gitlinks, for a caller that needs
 // only one of them.
 export async function stagedSnapshot(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   sha: string,
   mode: string | null = null,
 ): Promise<Snapshot | null> {
-  const tree = await db.githubStagedTree.findFirst({
-    where: { tenant, repo: { in: await networkNames(db, tenant, repo) }, sha },
-  })
+  const tree = first<GithubStagedTree>(
+    db,
+    DMMF,
+    'GithubStagedTree',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+    sha,
+  )
   if (tree === null) return null
   return await storedSnapshot(db, tenant, tree.repo, sha, mode)
 }
 
 async function storedSnapshot(
-  db: C,
+  db: Db,
   tenant: string,
   repo: string,
   sha: string,
   mode: string | null = null,
 ): Promise<Snapshot> {
-  const rows = await db.githubStagedEntry.findMany({
-    where: { tenant, repo, treeSha: sha, ...(mode === null ? {} : { mode }) },
-    orderBy: { seq: 'asc' },
-  })
+  const rows =
+    mode === null
+      ? select<GithubStagedEntry>(
+          db,
+          DMMF,
+          'GithubStagedEntry',
+          '"tenant" = ? AND "repo" = ? AND "treeSha" = ? ORDER BY "seq" ASC',
+          tenant,
+          repo,
+          sha,
+        )
+      : select<GithubStagedEntry>(
+          db,
+          DMMF,
+          'GithubStagedEntry',
+          '"tenant" = ? AND "repo" = ? AND "treeSha" = ? AND "mode" = ? ORDER BY "seq" ASC',
+          tenant,
+          repo,
+          sha,
+          mode,
+        )
   const out: Snapshot = { files: new Map(), links: new Map() }
   for (const r of rows) {
     if (r.mode === LINK_MODE) out.links.set(r.path, r.sha)
@@ -360,7 +430,7 @@ async function storedSnapshot(
 }
 
 export async function stagedTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   sha: string,
@@ -370,7 +440,7 @@ export async function stagedTree(
 
 // The gitlinks a fixture seeds, which a branch carries while nothing has
 // moved it.
-export async function rootLinks(db: C, tenant: string, repo: RepoRow): Promise<Links> {
+export async function rootLinks(db: Db, tenant: string, repo: RepoRow): Promise<Links> {
   return new Map((await submodulesOf(db, tenant, repo)).map((path) => [path, commitSha(path)]))
 }
 
@@ -378,7 +448,7 @@ export async function rootLinks(db: C, tenant: string, repo: RepoRow): Promise<L
 // carries forward, or the seeded ones while the branch is still on its
 // synthesized root.
 export async function branchLinks(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -387,14 +457,15 @@ export async function branchLinks(
   const commit =
     head === ''
       ? null
-      : await db.githubCommit.findFirst({
-          where: {
-            ...scope(tenant),
-            repo: { in: await networkNames(db, tenant, repo) },
-            sha: head,
-          },
-          select: { treeSha: true },
-        })
+      : first<GithubCommit>(
+          db,
+          DMMF,
+          'GithubCommit',
+          '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+          tenant,
+          JSON.stringify(await networkNames(db, tenant, repo)),
+          head,
+        )
   const staged =
     commit === null || commit.treeSha === ''
       ? null
@@ -409,7 +480,7 @@ export async function branchLinks(
 // new tree entry can still name it. Measured against GitHub (2026-09-27): a
 // superseded blob answers 200 with its old bytes.
 export async function blobBySha(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   sha: string,
@@ -420,14 +491,25 @@ export async function blobBySha(
   }
   const network = await networkNames(db, tenant, repo)
   const row =
-    (await db.githubStagedEntry.findFirst({
-      where: { tenant, repo: { in: network }, sha, mode: BLOB_MODE },
-      select: { data: true },
-    })) ??
-    (await db.githubBlob.findFirst({
-      where: { tenant, repo: { in: network }, sha },
-      select: { data: true },
-    }))
+    first<GithubStagedEntry>(
+      db,
+      DMMF,
+      'GithubStagedEntry',
+      '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ? AND "mode" = ?',
+      tenant,
+      JSON.stringify(network),
+      sha,
+      BLOB_MODE,
+    ) ??
+    first<GithubBlob>(
+      db,
+      DMMF,
+      'GithubBlob',
+      '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+      tenant,
+      JSON.stringify(network),
+      sha,
+    )
   return row === null ? null : Buffer.from(row.data)
 }
 
@@ -435,16 +517,20 @@ export async function blobBySha(
 // names it, and answer its sha. A blob is its bytes, so bytes the network
 // can already read are not stored twice.
 export async function storeBlob(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   data: Buffer,
 ): Promise<string> {
   const sha = blobSha(data)
   if ((await blobBySha(db, tenant, repo, sha)) !== null) return sha
-  const count = await db.githubBlob.count({ where: { tenant, repo: repo.fullName } })
-  await db.githubBlob.create({
-    data: { tenant, repo: repo.fullName, sha, data: new Uint8Array(data), seq: count },
+  const seq = count(db, 'GithubBlob', '"tenant" = ? AND "repo" = ?', tenant, repo.fullName)
+  insert(db, 'GithubBlob', {
+    tenant,
+    repo: repo.fullName,
+    sha,
+    data: new Uint8Array(data),
+    seq,
   })
   return sha
 }
@@ -454,7 +540,7 @@ export async function storeBlob(
 // staged costs one lookup, and only a seeded tree, which no commit staged, is
 // ever copied.
 export async function keepTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -471,7 +557,7 @@ export async function keepTree(
 // stored with no tree, as the synthesized one has none; its files are the
 // snapshot staged here, which `treeAt` finds by content.
 export async function keepRoot(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -481,23 +567,36 @@ export async function keepRoot(
   if (files.size === 0) return
   await stageTree(db, tenant, repo, files, await rootLinks(db, tenant, repo))
   const root = rootCommit(rootOf(files))
-  const where = { ...scope(tenant), repo: repo.fullName }
-  if ((await db.githubCommit.findFirst({ where: { ...where, sha: root.sha } })) !== null) return
-  const top = await db.githubCommit.findFirst({ where, orderBy: { seq: 'desc' } })
-  await db.githubCommit.create({
-    data: {
-      tenant,
-      repo: repo.fullName,
-      sha: root.sha,
-      parentSha: '',
-      message: root.message,
-      authorLogin: root.authorLogin,
-      date: root.date,
-      treeSha: '',
-      authorJson: '',
-      committerJson: '',
-      seq: top === null ? 0 : top.seq + 1,
-    },
+  const known = first<GithubCommit>(
+    db,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" = ? AND "sha" = ?',
+    tenant,
+    repo.fullName,
+    root.sha,
+  )
+  if (known !== null) return
+  const top = first<GithubCommit>(
+    db,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+    tenant,
+    repo.fullName,
+  )
+  insert(db, 'GithubCommit', {
+    tenant,
+    repo: repo.fullName,
+    sha: root.sha,
+    parentSha: '',
+    message: root.message,
+    authorLogin: root.authorLogin,
+    date: root.date,
+    treeSha: '',
+    authorJson: '',
+    committerJson: '',
+    seq: top === null ? 0 : top.seq + 1,
   })
 }
 
@@ -557,14 +656,20 @@ export interface TreeAtId extends Snapshot {
 // loads only the matching tree. Seeded branches have no snapshot until a
 // write preserves them and are the only trees that still need hashing here.
 export async function treeById(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   sha: string,
 ): Promise<TreeAtId | null> {
-  const dir = await db.githubStagedDir.findFirst({
-    where: { tenant, repo: { in: await networkNames(db, tenant, repo) }, sha },
-  })
+  const dir = first<GithubStagedDir>(
+    db,
+    DMMF,
+    'GithubStagedDir',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+    sha,
+  )
   if (dir !== null) {
     return { ...(await storedSnapshot(db, tenant, dir.repo, dir.treeSha)), at: dir.path }
   }
@@ -580,7 +685,7 @@ export async function treeById(
 // The tree a commit names, as every commit rendering reports it: the one it
 // was written with, or for a synthesized root the id of the files it holds.
 export async function commitTreeId(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   commit: CommitRow,
@@ -591,7 +696,7 @@ export async function commitTreeId(
 
 // Commits as the REST endpoints list them, each naming its tree.
 export async function commitsJson(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   rows: CommitRow[],
@@ -609,47 +714,51 @@ export async function commitsJson(
 // reproduced by a later tree landing in a slot a delete freed. Each directory
 // is indexed under its own id as it is staged.
 export async function stageTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   files: Tree,
   links: Links,
 ): Promise<string> {
   const sha = treeIdOf(files, links)
-  const already = await db.githubStagedTree.findFirst({
-    where: { tenant, repo: { in: await networkNames(db, tenant, repo) }, sha },
-  })
+  const already = first<GithubStagedTree>(
+    db,
+    DMMF,
+    'GithubStagedTree',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+    sha,
+  )
   if (already !== null) return sha
-  const count = await db.githubStagedTree.count({ where: { tenant, repo: repo.fullName } })
-  await db.githubStagedTree.create({
-    data: {
-      tenant,
-      repo: repo.fullName,
-      sha,
-      seq: count,
-      entries: {
-        create: [
-          ...[...files].map(([path, data], seq) => ({
-            path,
-            data: new Uint8Array(data),
-            sha: blobSha(data),
-            mode: BLOB_MODE,
-            seq,
-          })),
-          ...[...links].map(([path, commit], seq) => ({
-            path,
-            data: new Uint8Array(0),
-            sha: commit,
-            mode: LINK_MODE,
-            seq: files.size + seq,
-          })),
-        ],
-      },
-      dirs: {
-        create: [...directoryIds(files, links)].map(([path, id]) => ({ path, sha: id })),
-      },
-    },
-  })
+  const seq = count(db, 'GithubStagedTree', '"tenant" = ? AND "repo" = ?', tenant, repo.fullName)
+  insert(db, 'GithubStagedTree', { tenant, repo: repo.fullName, sha, seq })
+  // The tree's entries and directories, in the order Prisma's nested create
+  // wrote them.
+  const tree = { tenant, repo: repo.fullName, treeSha: sha }
+  for (const [at, [path, data]] of [...files].entries()) {
+    insert(db, 'GithubStagedEntry', {
+      ...tree,
+      path,
+      data: new Uint8Array(data),
+      sha: blobSha(data),
+      mode: BLOB_MODE,
+      seq: at,
+    })
+  }
+  for (const [at, [path, commit]] of [...links].entries()) {
+    insert(db, 'GithubStagedEntry', {
+      ...tree,
+      path,
+      data: new Uint8Array(0),
+      sha: commit,
+      mode: LINK_MODE,
+      seq: files.size + at,
+    })
+  }
+  for (const [path, id] of directoryIds(files, links)) {
+    insert(db, 'GithubStagedDir', { ...tree, path, sha: id })
+  }
   return sha
 }
 
@@ -658,7 +767,7 @@ export async function stageTree(
 // ref-taking parameter. Only a name, never a sha, because a write names the
 // branch it lands on; a read resolves a sha through `resolveRef`.
 export async function branchFor(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   ref: string | null,
@@ -706,25 +815,35 @@ export interface TagRefRow {
 // network, since a tag object is a git object like any other: a fork's copy
 // of a tag ref still peels through the one its source made.
 export async function tagObject(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   sha: string,
 ): Promise<TagRow | null> {
-  return (await db.githubTag.findFirst({
-    where: { tenant, repo: { in: await networkNames(db, tenant, repo) }, sha },
-  })) as TagRow | null
+  return first<GithubTag>(
+    db,
+    DMMF,
+    'GithubTag',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" = ?',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+    sha,
+  ) as TagRow | null
 }
 
-export async function tagRefs(db: C, tenant: string, repo: RepoRow): Promise<TagRefRow[]> {
-  return (await db.githubTagRef.findMany({
-    where: { tenant, repo: repo.fullName },
-    orderBy: { name: 'asc' },
-  })) as TagRefRow[]
+export async function tagRefs(db: Db, tenant: string, repo: RepoRow): Promise<TagRefRow[]> {
+  return select<GithubTagRef>(
+    db,
+    DMMF,
+    'GithubTagRef',
+    '"tenant" = ? AND "repo" = ? ORDER BY "name" ASC',
+    tenant,
+    repo.fullName,
+  ) as TagRefRow[]
 }
 
 // The commit a tag names, through any tag objects between.
-export async function peeled(db: C, tenant: string, repo: RepoRow, sha: string): Promise<string> {
+export async function peeled(db: Db, tenant: string, repo: RepoRow, sha: string): Promise<string> {
   const seen = new Set<string>()
   let at = sha
   for (let tag = await tagObject(db, tenant, repo, at); tag !== null && !seen.has(at);) {
@@ -738,7 +857,7 @@ export async function peeled(db: C, tenant: string, repo: RepoRow, sha: string):
 // Resolve only commit identities, including dangling commits and synthesized
 // roots. A prefix two commits share names neither; ref names cannot redirect it.
 async function resolveCommit(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   ref: string,
@@ -746,14 +865,15 @@ async function resolveCommit(
   if (!ABBREVIATED_SHA.test(ref)) return null
   const want = ref.toLowerCase()
   const found = new Set<string>()
-  const stored = await db.githubCommit.findMany({
-    where: {
-      ...scope(tenant),
-      repo: { in: await networkNames(db, tenant, repo) },
-      sha: { startsWith: want },
-    },
-    select: { sha: true },
-  })
+  const stored = select<GithubCommit>(
+    db,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) AND "sha" LIKE ?',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+    `${want}%`,
+  )
   for (const row of stored) found.add(row.sha)
   for (const name of await branchNames(db, tenant, repo)) {
     const root = (await commitList(db, tenant, repo, name)).at(-1)
@@ -765,14 +885,20 @@ async function resolveCommit(
 }
 
 async function resolveTag(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   name: string,
 ): Promise<Resolved | null> {
-  const tag = await db.githubTagRef.findFirst({
-    where: { tenant, repo: repo.fullName, name },
-  })
+  const tag = first<GithubTagRef>(
+    db,
+    DMMF,
+    'GithubTagRef',
+    '"tenant" = ? AND "repo" = ? AND "name" = ?',
+    tenant,
+    repo.fullName,
+    name,
+  )
   if (tag === null) return null
   const sha = await peeled(db, tenant, repo, tag.sha)
   return { branch: null, history: historyFrom(sha, await commitsBySha(db, tenant, repo)) }
@@ -824,7 +950,7 @@ function ancestorOf(
 // cannot hold `^` or `~`, so the first one starts it. What it names is a
 // commit, never the branch it was walked from.
 export async function resolveRef(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   ref: string | null,
@@ -865,7 +991,7 @@ export async function resolveRef(
 // that commit recorded them. Reading the branch that holds a commit instead
 // answered an older sha with whatever the branch had gained since.
 export async function treeAt(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   at: Resolved,
@@ -878,7 +1004,7 @@ export async function treeAt(
 }
 
 export async function treeOf(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   ref: string | null,
@@ -889,7 +1015,7 @@ export async function treeOf(
 
 // The tree a resolved ref names with its gitlinks, as a listing reads it.
 export async function snapshotAt(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   at: Resolved,
@@ -908,7 +1034,7 @@ export async function snapshotAt(
 }
 
 export async function snapshotOf(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   ref: string | null,
@@ -925,16 +1051,19 @@ export function rootOf(tree: Tree): string {
 
 // A synthesized root stores no tree, so its files are found by content: a
 // branch still carrying them, or the snapshot the first write kept.
-async function rootTree(db: C, tenant: string, repo: RepoRow, sha: string): Promise<Tree | null> {
+async function rootTree(db: Db, tenant: string, repo: RepoRow, sha: string): Promise<Tree | null> {
   for (const branch of await branchNames(db, tenant, repo)) {
     const files = await treeOfBranch(db, tenant, repo, branch)
     if (files.size > 0 && rootOf(files) === sha) return files
   }
-  const staged = await db.githubStagedTree.findMany({
-    where: { tenant, repo: { in: await networkNames(db, tenant, repo) } },
-    orderBy: { seq: 'asc' },
-    select: { sha: true },
-  })
+  const staged = select<GithubStagedTree>(
+    db,
+    DMMF,
+    'GithubStagedTree',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) ORDER BY "seq" ASC',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+  )
   for (const row of staged) {
     const files = await stagedTree(db, tenant, repo, row.sha)
     if (files !== null && files.size > 0 && rootOf(files) === sha) return files
@@ -945,14 +1074,18 @@ async function rootTree(db: C, tenant: string, repo: RepoRow, sha: string): Prom
 // Every commit a repository can read, its network's included, keyed by sha,
 // for walking a chain without a query per hop.
 export async function commitsBySha(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
 ): Promise<Map<string, CommitRow>> {
-  const rows = (await db.githubCommit.findMany({
-    where: { ...scope(tenant), repo: { in: await networkNames(db, tenant, repo) } },
-    orderBy: { seq: 'asc' },
-  })) as CommitRow[]
+  const rows = select<GithubCommit>(
+    db,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" IN (SELECT value FROM json_each(?)) ORDER BY "seq" ASC',
+    tenant,
+    JSON.stringify(await networkNames(db, tenant, repo)),
+  ) as CommitRow[]
   const out = new Map<string, CommitRow>()
   for (const row of rows) out.set(row.sha, row)
   return out
@@ -1030,7 +1163,7 @@ function committedAt(row: CommitRow): number {
 // the fast-forward test and a new commit's default parent have to use it or
 // they are reasoning about a ref the API never described.
 export async function visibleHeadOf(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -1042,14 +1175,20 @@ export async function visibleHeadOf(
 }
 
 export async function headOf(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
 ): Promise<string> {
-  const row = await db.githubBranch.findFirst({
-    where: { ...scope(tenant), repo: repo.fullName, name: branch },
-  })
+  const row = first<GithubBranch>(
+    db,
+    DMMF,
+    'GithubBranch',
+    '"tenant" = ? AND "repo" = ? AND "name" = ?',
+    tenant,
+    repo.fullName,
+    branch,
+  )
   return row?.headSha ?? ''
 }
 
@@ -1058,7 +1197,7 @@ export async function headOf(
 // before resolving that ref: in an empty repository a ref that matches nothing
 // is told the repository is empty, not that the ref is missing, so the test
 // cannot wait for a ref to resolve to a branch.
-export async function repoIsEmpty(db: C, tenant: string, repo: RepoRow): Promise<boolean> {
+export async function repoIsEmpty(db: Db, tenant: string, repo: RepoRow): Promise<boolean> {
   for (const branch of await branchNames(db, tenant, repo)) {
     if ((await visibleHeadOf(db, tenant, repo, branch)) !== '') return false
   }
@@ -1086,7 +1225,7 @@ export async function repoIsEmpty(db: C, tenant: string, repo: RepoRow): Promise
 // `parents: []` precisely to say it has none. A branch with neither a commit
 // nor a file has no root at all, which is how an empty repository reads.
 export async function commitList(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -1102,7 +1241,7 @@ export async function commitList(
 // search of it read, where commitList is the first-parent chain a ref's
 // history and its `~<n>` walk.
 export async function branchCommits(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
@@ -1124,7 +1263,7 @@ export function historyFrom(head: string, byId: Map<string, CommitRow>): CommitR
 // The files one commit recorded, or none for a commit that recorded nothing
 // the fake can still find.
 export async function commitTree(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   commit: CommitRow,
@@ -1193,7 +1332,7 @@ export interface AccountRow {
 // an owner. A login none of these name is no account.
 // A login as an account: the tenant's, or a user nothing states, for a login
 // a fixture names in a list but gives no profile.
-export async function accountOf(db: C, tenant: string, login: string): Promise<AccountRow> {
+export async function accountOf(db: Db, tenant: string, login: string): Promise<AccountRow> {
   const known = (await accountsOf(db, tenant)).find(
     (account) => account.login.toLowerCase() === login.toLowerCase(),
   )
@@ -1221,11 +1360,14 @@ function unstated(login: string): AccountRow {
   }
 }
 
-export async function accountsOf(db: C, tenant: string): Promise<AccountRow[]> {
-  const stated = (await db.githubAccount.findMany({
-    where: scope(tenant),
-    orderBy: { seq: 'asc' },
-  })) as AccountRow[]
+export async function accountsOf(db: Db, tenant: string): Promise<AccountRow[]> {
+  const stated = select<GithubAccount>(
+    db,
+    DMMF,
+    'GithubAccount',
+    '"tenant" = ? ORDER BY "seq" ASC',
+    tenant,
+  ) as AccountRow[]
   const out = new Map(stated.map((row) => [row.login.toLowerCase(), row]))
   const implied = [DEFAULT_LOGIN, ...(await allRepos(db, tenant)).map((repo) => repo.owner)]
   for (const login of implied) {
@@ -1244,11 +1386,15 @@ export function directoriesOf(files: Tree): Set<string> {
   return dirs
 }
 
-export async function submodulesOf(db: C, tenant: string, repo: RepoRow): Promise<string[]> {
-  const rows = await db.githubSubmodule.findMany({
-    where: { ...scope(tenant), repo: repo.fullName },
-    orderBy: { path: 'asc' },
-  })
+export async function submodulesOf(db: Db, tenant: string, repo: RepoRow): Promise<string[]> {
+  const rows = select<GithubSubmodule>(
+    db,
+    DMMF,
+    'GithubSubmodule',
+    '"tenant" = ? AND "repo" = ? ORDER BY "path" ASC',
+    tenant,
+    repo.fullName,
+  )
   return rows.map((r) => r.path)
 }
 
@@ -1341,13 +1487,13 @@ export function searchTree(files: Tree, terms: string[], pathFilter: string | nu
 // variables, secrets, deploy keys, autolinks, gists and the pin and lock
 // bits. They live in memory with the run's client, like the run they belong
 // to, and a reset forgets its tenants' (`forgetKept`).
-const KEPT = new WeakMap<C, Map<string, Map<string, unknown>>>()
+const KEPT = new WeakMap<Db, Map<string, Map<string, unknown>>>()
 
-export function kept<T>(ctx: { tenant: string; db: C }, kind: string): Map<string, T> {
-  let run = KEPT.get(ctx.db)
+export function kept<T>(ctx: { tenant: string; sql: Db }, kind: string): Map<string, T> {
+  let run = KEPT.get(ctx.sql)
   if (run === undefined) {
     run = new Map()
-    KEPT.set(ctx.db, run)
+    KEPT.set(ctx.sql, run)
   }
   const key = `${ctx.tenant}\0${kind}`
   let found = run.get(key)
@@ -1358,7 +1504,7 @@ export function kept<T>(ctx: { tenant: string; db: C }, kind: string): Map<strin
   return found as Map<string, T>
 }
 
-export function forgetKept(db: C, tenants: readonly string[]): void {
+export function forgetKept(db: Db, tenants: readonly string[]): void {
   const run = KEPT.get(db)
   if (run === undefined) return
   for (const key of run.keys()) {
@@ -1367,7 +1513,7 @@ export function forgetKept(db: C, tenants: readonly string[]): void {
 }
 
 function flagged(
-  ctx: { tenant: string; db: C },
+  ctx: { tenant: string; sql: Db },
   kind: string,
   repo: string,
   number: number,
@@ -1375,12 +1521,12 @@ function flagged(
   return kept<boolean>(ctx, kind).get(`${repo}#${String(number)}`) === true
 }
 
-export function isPinned(ctx: { tenant: string; db: C }, repo: string, number: number): boolean {
+export function isPinned(ctx: { tenant: string; sql: Db }, repo: string, number: number): boolean {
   return flagged(ctx, 'pinned', repo, number)
 }
 
 export function lockReason(
-  ctx: { tenant: string; db: C },
+  ctx: { tenant: string; sql: Db },
   repo: string,
   number: number,
 ): { locked: boolean; reason: string | null } {
@@ -1389,7 +1535,7 @@ export function lockReason(
 }
 
 export function autoMerge(
-  ctx: { tenant: string; db: C },
+  ctx: { tenant: string; sql: Db },
   repo: string,
   number: number,
 ): string | null {
@@ -1397,7 +1543,7 @@ export function autoMerge(
 }
 
 export function pullExtras(
-  ctx: { tenant: string; db: C },
+  ctx: { tenant: string; sql: Db },
   repo: string,
   number: number,
   key: string,

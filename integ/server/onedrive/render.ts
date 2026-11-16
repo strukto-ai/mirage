@@ -13,10 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JsonValue } from '../kit/typescript/index.ts'
-import type { C } from './config.ts'
 import { baseName, dirName, joinPath, norm } from './paths.ts'
-import { childNames, fileAt, dirAt, fileId, folderId, folderSize, versionsOf } from './store.ts'
-import type { FileRow } from './store.ts'
+import {
+  childNames,
+  dirAt,
+  driveIndex,
+  fileAt,
+  fileId,
+  folderId,
+  folderSize,
+  versionsFor,
+  versionsOf,
+} from './store.ts'
+import type { Db, FileRow } from './store.ts'
 
 // A type rather than an interface: it goes into a JsonValue, whose index
 // signature an interface does not satisfy.
@@ -82,7 +91,7 @@ function folderJson(
 }
 
 export async function fileItem(
-  db: C,
+  db: Db,
   tenant: string,
   origin: string,
   row: FileRow,
@@ -92,7 +101,7 @@ export async function fileItem(
 }
 
 export async function folderItem(
-  db: C,
+  db: Db,
   tenant: string,
   drive: string,
   path: string,
@@ -104,7 +113,7 @@ export async function folderItem(
 }
 
 export async function itemAt(
-  db: C,
+  db: Db,
   tenant: string,
   origin: string,
   drive: string,
@@ -129,20 +138,9 @@ interface Drive {
   sizes: Map<string, number>
 }
 
-async function readDrive(db: C, tenant: string, drive: string): Promise<Drive> {
-  const rows = await db.graphFile.findMany({
-    where: { tenant, drive },
-    select: {
-      drive: true,
-      path: true,
-      size: true,
-      ctag: true,
-      etag: true,
-      modified: true,
-      seq: true,
-    },
-  })
-  const dirRows = await db.graphDir.findMany({ where: { tenant, drive }, select: { path: true } })
+async function readDrive(db: Db, tenant: string, drive: string): Promise<Drive> {
+  const index = await driveIndex(db, tenant, drive)
+  const rows = index.files
   const names = new Map<string, Set<string>>()
   const sizes = new Map<string, number>()
   const name = (path: string): void => {
@@ -163,9 +161,9 @@ async function readDrive(db: C, tenant: string, drive: string): Promise<Drive> {
     }
   }
   const dirs = new Set<string>()
-  for (const row of dirRows) {
-    dirs.add(row.path)
-    if (row.path !== '') name(row.path)
+  for (const path of index.dirs) {
+    dirs.add(path)
+    if (path !== '') name(path)
   }
   return { files, dirs, names, sizes }
 }
@@ -178,32 +176,9 @@ function folderIn(d: Drive, drive: string, p: string, modified: string): JsonVal
   return folderJson(drive, p, modified, d.sizes.get(p) ?? 0, namesIn(d, p).length)
 }
 
-// versionsOf for many paths in one query, each list newest-first as it is.
-async function versionsFor(
-  db: C,
-  tenant: string,
-  drive: string,
-  paths: string[],
-): Promise<Map<string, Version[]>> {
-  const out = new Map<string, Version[]>()
-  if (paths.length === 0) return out
-  const rows = await db.graphVersion.findMany({
-    where: { tenant, drive, path: { in: paths } },
-    select: { path: true, versionId: true, modified: true },
-    orderBy: { seq: 'asc' },
-  })
-  for (const v of rows) {
-    const list = out.get(v.path) ?? []
-    list.push({ id: v.versionId, lastModifiedDateTime: v.modified })
-    out.set(v.path, list)
-  }
-  for (const list of out.values()) list.reverse()
-  return out
-}
-
 // The children of `dir` as itemAt renders each of them, in name order.
 export async function childItems(
-  db: C,
+  db: Db,
   tenant: string,
   origin: string,
   drive: string,
@@ -231,7 +206,7 @@ export async function childItems(
 // Every item at or under `scope`, folders first and each before its children,
 // as a full enumeration lists them; the root folder carries its `root` facet.
 export async function scopeItems(
-  db: C,
+  db: Db,
   tenant: string,
   origin: string,
   drive: string,

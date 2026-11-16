@@ -12,13 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { C } from './config.ts'
+import { first, select } from '../kit/typescript/index.ts'
+import type { NotionBlock, NotionDatabase, NotionMeta } from '../../generated/notion/index.js'
+import type { DatabaseSync } from 'node:sqlite'
+import { Prisma } from '../../generated/notion/index.js'
+import type { Dmmf } from '../kit/typescript/index.ts'
 import { blockToMd } from './text.ts'
 import type { BlockRow, DatabaseRow, MetaRow } from './types.ts'
 import { databaseIdOf } from './wire.ts'
 
-export async function metaOf(db: C, tenant: string): Promise<MetaRow> {
-  const row = await db.notionMeta.findUnique({ where: { tenant } })
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/notion.prisma declares; the kit's `select` types every column from
+// this schema, so rows come back as Prisma's findMany returned them.
+export type Db = DatabaseSync
+export const DMMF = Prisma.dmmf as unknown as Dmmf
+
+export async function metaOf(db: Db, tenant: string): Promise<MetaRow> {
+  const row = first<NotionMeta>(db, DMMF, 'NotionMeta', '"tenant" = ?', tenant)
   if (row === null) throw new Error(`notion fake: no meta row for tenant ${tenant}`)
   return row
 }
@@ -26,24 +36,35 @@ export async function metaOf(db: C, tenant: string): Promise<MetaRow> {
 // The database a data source id belongs to. The fake derives one data source
 // per database, so this is `dataSourceIdOf` run backwards over every database.
 export async function dataSourceOwner(
-  db: C,
+  db: Db,
   tenant: string,
   dataSourceId: string,
 ): Promise<DatabaseRow | null> {
-  const all = (await db.notionDatabase.findMany({ where: { tenant } })) as DatabaseRow[]
+  const all = select<NotionDatabase>(
+    db,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ?',
+    tenant,
+  ) as DatabaseRow[]
   const owner = databaseIdOf(dataSourceId, all)
   return all.find((row) => row.id === owner) ?? null
 }
 
-export async function childrenOf(db: C, tenant: string, parentId: string): Promise<BlockRow[]> {
-  return (await db.notionBlock.findMany({
-    where: { tenant, parentId, inTrash: false },
-    orderBy: { position: 'asc' },
-  })) as BlockRow[]
+export async function childrenOf(db: Db, tenant: string, parentId: string): Promise<BlockRow[]> {
+  return select<NotionBlock>(
+    db,
+    DMMF,
+    'NotionBlock',
+    '"tenant" = ? AND "parentId" = ? AND "inTrash" = ? ORDER BY "position" ASC',
+    tenant,
+    parentId,
+    false,
+  ) as BlockRow[]
 }
 
 export async function markdownOf(
-  db: C,
+  db: Db,
   tenant: string,
   parentId: string,
   indent: number,

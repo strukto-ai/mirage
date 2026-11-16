@@ -30,6 +30,7 @@ import {
   removeMessage,
   setFlags,
   withSequence,
+  type Db,
 } from './store.ts'
 
 // The capability line every client reads before it decides how to talk. LITERAL+
@@ -235,8 +236,8 @@ export function startImapServer(
   })
 }
 
-function db(runtime: Runtime<C>, session: Session): C {
-  return runtime.pool.client(session.run)
+function db(runtime: Runtime<C>, session: Session): Db {
+  return runtime.pool.sql(session.run)
 }
 
 async function handle(

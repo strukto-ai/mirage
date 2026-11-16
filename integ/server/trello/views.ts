@@ -12,13 +12,214 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import type { Prisma } from '../../generated/trello/index.js'
-import { idWhere, tenantWhere } from '../kit/typescript/index.ts'
+import { all, exec, idWhere, one } from '../kit/typescript/index.ts'
 import type { JsonValue, Reply } from '../kit/typescript/index.ts'
 import { config } from './config.ts'
-import type { C } from './config.ts'
 
 const KIND = config.tenantKind
+
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/trello.prisma declares, booleans read back as booleans.
+export type Db = DatabaseSync
+
+export interface WorkspaceRow {
+  id: string
+  displayName: string
+  name: string
+}
+
+export interface ListRow {
+  id: string
+  boardId: string
+  name: string
+  closed: boolean
+  pos: number | null
+}
+
+export interface CardRow {
+  id: string
+  listId: string
+  name: string
+  desc: string
+  idMembers: string
+  labelIds: string
+  due: string | null
+  dueComplete: boolean
+  closed: boolean
+  dateLastActivity: string | null
+  seq: number
+}
+
+export interface LabelRow {
+  id: string
+  boardId: string
+  name: string
+  color: string | null
+}
+
+export interface MemberRow {
+  id: string
+  username: string
+  fullName: string
+}
+
+export interface CommentRow {
+  id: string
+  cardId: string
+  memberId: string | null
+  text: string
+  date: string | null
+}
+
+type Flags<T, K extends keyof T> = Omit<T, K> & Record<K, number>
+
+const BOARD = 'SELECT id, workspaceId, name, closed, url, dateLastActivity FROM TrelloBoard'
+const LIST = 'SELECT id, boardId, name, closed, pos FROM TrelloList'
+const CARD =
+  'SELECT id, listId, name, "desc", idMembers, labelIds, due, dueComplete, closed, ' +
+  'dateLastActivity, seq FROM TrelloCard'
+const LABEL = 'SELECT id, boardId, name, color FROM TrelloLabel'
+const MEMBER = 'SELECT id, username, fullName FROM TrelloMember'
+const COMMENT = 'SELECT id, cardId, memberId, text, date FROM TrelloComment'
+
+function toBoard(row: Flags<BoardRow, 'closed'>): BoardRow {
+  return { ...row, closed: row.closed === 1 }
+}
+
+function toList(row: Flags<ListRow, 'closed'>): ListRow {
+  return { ...row, closed: row.closed === 1 }
+}
+
+function toCard(row: Flags<CardRow, 'dueComplete' | 'closed'>): CardRow {
+  return { ...row, dueComplete: row.dueComplete === 1, closed: row.closed === 1 }
+}
+
+export function workspacesOf(db: Db, tenant: string): WorkspaceRow[] {
+  return all<WorkspaceRow>(
+    db,
+    'SELECT id, displayName, name FROM TrelloWorkspace WHERE tenant = ? ORDER BY seq',
+    tenant,
+  )
+}
+
+export function workspaceById(db: Db, tenant: string, id: string): WorkspaceRow | null {
+  return one<WorkspaceRow>(
+    db,
+    'SELECT id, displayName, name FROM TrelloWorkspace WHERE tenant = ? AND id = ?',
+    tenant,
+    id,
+  )
+}
+
+export function boardsIn(db: Db, tenant: string, workspaceId: string): BoardRow[] {
+  return all<Flags<BoardRow, 'closed'>>(
+    db,
+    `${BOARD} WHERE tenant = ? AND workspaceId = ? ORDER BY seq`,
+    tenant,
+    workspaceId,
+  ).map(toBoard)
+}
+
+export function boardById(db: Db, tenant: string, id: string): BoardRow | null {
+  const row = one<Flags<BoardRow, 'closed'>>(db, `${BOARD} WHERE tenant = ? AND id = ?`, tenant, id)
+  return row === null ? null : toBoard(row)
+}
+
+export function listsIn(db: Db, tenant: string, boardId: string): ListRow[] {
+  return all<Flags<ListRow, 'closed'>>(
+    db,
+    `${LIST} WHERE tenant = ? AND boardId = ? ORDER BY seq`,
+    tenant,
+    boardId,
+  ).map(toList)
+}
+
+export function listById(db: Db, tenant: string, id: string): ListRow | null {
+  const row = one<Flags<ListRow, 'closed'>>(db, `${LIST} WHERE tenant = ? AND id = ?`, tenant, id)
+  return row === null ? null : toList(row)
+}
+
+export function boardMemberIds(db: Db, tenant: string, boardId: string): string[] {
+  return all<{ id: string }>(
+    db,
+    'SELECT id FROM TrelloBoardMember WHERE tenant = ? AND boardId = ? ORDER BY seq',
+    tenant,
+    boardId,
+  ).map((row) => row.id)
+}
+
+export function labelsIn(db: Db, tenant: string, boardId: string): LabelRow[] {
+  return all<LabelRow>(
+    db,
+    `${LABEL} WHERE tenant = ? AND boardId = ? ORDER BY seq`,
+    tenant,
+    boardId,
+  )
+}
+
+export function cardsIn(db: Db, tenant: string, listId: string): CardRow[] {
+  return all<Flags<CardRow, 'dueComplete' | 'closed'>>(
+    db,
+    `${CARD} WHERE tenant = ? AND listId = ? ORDER BY seq`,
+    tenant,
+    listId,
+  ).map(toCard)
+}
+
+export function allCards(db: Db, tenant: string): CardRow[] {
+  return all<Flags<CardRow, 'dueComplete' | 'closed'>>(
+    db,
+    `${CARD} WHERE tenant = ? ORDER BY seq`,
+    tenant,
+  ).map(toCard)
+}
+
+export function cardById(db: Db, tenant: string, id: string): CardRow | null {
+  const row = one<Flags<CardRow, 'dueComplete' | 'closed'>>(
+    db,
+    `${CARD} WHERE tenant = ? AND id = ?`,
+    tenant,
+    id,
+  )
+  return row === null ? null : toCard(row)
+}
+
+export function memberById(db: Db, tenant: string, id: string): MemberRow | null {
+  return one<MemberRow>(db, `${MEMBER} WHERE tenant = ? AND id = ?`, tenant, id)
+}
+
+export function commentIn(db: Db, tenant: string, cardId: string, id: string): CommentRow | null {
+  return one<CommentRow>(
+    db,
+    `${COMMENT} WHERE tenant = ? AND id = ? AND cardId = ? LIMIT 1`,
+    tenant,
+    id,
+    cardId,
+  )
+}
+
+// One past the highest seq among the rows `where` selects, never below 0.
+export function nextSeq(
+  db: Db,
+  table: 'TrelloCard' | 'TrelloComment',
+  where: string,
+  ...params: string[]
+): number {
+  const found = one<{ n: number }>(
+    db,
+    `SELECT max(COALESCE(MAX(seq) + 1, 0), 0) AS n FROM ${table} WHERE ${where}`,
+    ...params,
+  )
+  return found?.n ?? 0
+}
+
+// Throws when nothing matched, as Prisma's update did; every route looks the
+// row up first.
+export function changeOne(db: Db, sql: string, ...params: (string | number | null)[]): void {
+  if (exec(db, sql, ...params) === 0) throw new Error('trello fake: no row matched')
+}
 
 export interface BoardRow {
   id: string
@@ -56,33 +257,13 @@ export function memberWhere(tenant: string, id: string): Prisma.TrelloMemberWher
   return idWhere<Prisma.TrelloMemberWhereUniqueInput>(tenant, id, KIND)
 }
 
-export function cardWhere(tenant: string, id: string): Prisma.TrelloCardWhereUniqueInput {
-  return idWhere<Prisma.TrelloCardWhereUniqueInput>(tenant, id, KIND)
-}
-
-export function listWhere(tenant: string, id: string): Prisma.TrelloListWhereUniqueInput {
-  return idWhere<Prisma.TrelloListWhereUniqueInput>(tenant, id, KIND)
-}
-
-export function boardWhere(tenant: string, id: string): Prisma.TrelloBoardWhereUniqueInput {
-  return idWhere<Prisma.TrelloBoardWhereUniqueInput>(tenant, id, KIND)
-}
-
-export function workspaceWhere(tenant: string, id: string): Prisma.TrelloWorkspaceWhereUniqueInput {
-  return idWhere<Prisma.TrelloWorkspaceWhereUniqueInput>(tenant, id, KIND)
-}
-
-export function commentWhere(tenant: string, id: string): Prisma.TrelloCommentWhereUniqueInput {
-  return idWhere<Prisma.TrelloCommentWhereUniqueInput>(tenant, id, KIND)
-}
-
-export async function cardMemberIds(db: C, tenant: string, cardId: string): Promise<string[]> {
-  const card = await db.trelloCard.findUnique({ where: cardWhere(tenant, cardId) })
+export async function cardMemberIds(db: Db, tenant: string, cardId: string): Promise<string[]> {
+  const card = cardById(db, tenant, cardId)
   return card === null ? [] : parseIds(card.idMembers)
 }
 
-export async function cardLabelIds(db: C, tenant: string, cardId: string): Promise<string[]> {
-  const card = await db.trelloCard.findUnique({ where: cardWhere(tenant, cardId) })
+export async function cardLabelIds(db: Db, tenant: string, cardId: string): Promise<string[]> {
+  const card = cardById(db, tenant, cardId)
   return card === null ? [] : parseIds(card.labelIds)
 }
 
@@ -93,24 +274,22 @@ export async function cardLabelIds(db: C, tenant: string, cardId: string): Promi
 // foreign key to enforce the relation: a dangling listId types as a non-null
 // row and dereferences as undefined, which is a TypeError inside the render
 // rather than a rendered idBoard.
-export async function cardView(db: C, tenant: string, cardId: string): Promise<JsonValue | null> {
-  const card = await db.trelloCard.findUnique({ where: cardWhere(tenant, cardId) })
+export async function cardView(db: Db, tenant: string, cardId: string): Promise<JsonValue | null> {
+  const card = cardById(db, tenant, cardId)
   if (card === null) return null
-  const list = await db.trelloList.findUnique({ where: listWhere(tenant, card.listId) })
+  const list = listById(db, tenant, card.listId)
   const memberIds = parseIds(card.idMembers)
   const labelIds = parseIds(card.labelIds)
   const labels: JsonValue[] = []
   for (const labelId of labelIds) {
-    const label = await db.trelloLabel.findUnique({
-      where: idWhere<Prisma.TrelloLabelWhereUniqueInput>(tenant, labelId, KIND),
-    })
+    const label = one<LabelRow>(db, `${LABEL} WHERE tenant = ? AND id = ?`, tenant, labelId)
     if (label !== null) {
       labels.push({ id: label.id, name: label.name, color: label.color, idBoard: label.boardId })
     }
   }
   const members: JsonValue[] = []
   for (const memberId of memberIds) {
-    const member = await db.trelloMember.findUnique({ where: memberWhere(tenant, memberId) })
+    const member = memberById(db, tenant, memberId)
     if (member !== null) {
       members.push({ id: member.id, username: member.username, fullName: member.fullName })
     }
@@ -134,17 +313,16 @@ export async function cardView(db: C, tenant: string, cardId: string): Promise<J
   }
 }
 
-export async function commentActions(db: C, tenant: string, cardId: string): Promise<JsonValue[]> {
-  const comments = await db.trelloComment.findMany({
-    where: { ...tenantWhere<Prisma.TrelloCommentWhereInput>(tenant, KIND), cardId },
-    orderBy: { seq: 'asc' },
-  })
+export async function commentActions(db: Db, tenant: string, cardId: string): Promise<JsonValue[]> {
+  const comments = all<CommentRow>(
+    db,
+    `${COMMENT} WHERE tenant = ? AND cardId = ? ORDER BY seq`,
+    tenant,
+    cardId,
+  )
   const rows: JsonValue[] = []
   for (const comment of comments) {
-    const member =
-      comment.memberId === null
-        ? null
-        : await db.trelloMember.findUnique({ where: memberWhere(tenant, comment.memberId) })
+    const member = comment.memberId === null ? null : memberById(db, tenant, comment.memberId)
     rows.push({
       id: comment.id,
       type: 'commentCard',
@@ -158,9 +336,4 @@ export async function commentActions(db: C, tenant: string, cardId: string): Pro
     })
   }
   return rows
-}
-
-export async function nextSeq(rows: Promise<{ seq: number }[]>): Promise<number> {
-  const existing = await rows
-  return existing.reduce((acc, r) => Math.max(acc, r.seq + 1), 0)
 }

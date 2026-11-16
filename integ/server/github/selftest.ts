@@ -26,7 +26,7 @@ import { start } from '../kit/typescript/serve.ts'
 import { diffTrees, unifiedDiff } from './diff.ts'
 import { githubFake } from './fake.ts'
 import { blobSha } from './wire.ts'
-import { PrismaClient } from '../../generated/github/index.js'
+import { count, statementsRun } from '../kit/typescript/sql.ts'
 import { directoryIds, repoByName, stageTree, subtreeOf, treeById } from './store.ts'
 
 // The routes the corpus does not reach, or cannot exercise fully, because the
@@ -2843,41 +2843,19 @@ async function gitDatabase(at: string): Promise<void> {
 async function indexedTrees(): Promise<void> {
   const home = await start(githubFake, 0)
   const run = 'indexed-trees'
-  let db: PrismaClient | undefined
   try {
     await home.runtime.reset({ run, tenants: [TENANT], fixture: 'v1' })
-    const measured = new PrismaClient({
-      datasourceUrl: `file:${home.runtime.pool.fileFor(run)}`,
-      log: [{ emit: 'event', level: 'query' }],
-    })
-    db = measured
-    let queries = 0
-    let observed: (() => void) | undefined
-    measured.$on('query', ({ query }) => {
-      if (query === 'SELECT 1 AS mirage_query_barrier') {
-        observed?.()
-        observed = undefined
-      } else queries += 1
-    })
-    const drain = async (): Promise<void> => {
-      const promise = new Promise<void>((resolve) => {
-        observed = resolve
-      })
-      await Promise.all([measured.$queryRaw`SELECT 1 AS mirage_query_barrier`, promise])
-    }
+    // The run's own node:sqlite connection, whose statements the kit counts.
+    const measured = home.runtime.pool.sql(run)
     const repo = await repoByName(measured, TENANT, REPO)
     if (repo === null) throw new Error('indexed trees fixture has no repository')
     const old = new Map([['archive/deep/old.txt', Buffer.from('old snapshot')]])
     const root = await stageTree(measured, TENANT, repo, old, new Map())
     const directory = directoryIds(old, new Map()).get('archive') ?? ''
     const lookup = async (): Promise<number> => {
-      // Query events can arrive after the query promise settles. Observed
-      // barriers exclude setup events and include the lookup's final event.
-      await drain()
-      queries = 0
+      const before = statementsRun(measured)
       const hit = await treeById(measured, TENANT, repo, directory)
-      await drain()
-      const count = queries
+      const count = statementsRun(measured) - before
       eq(
         'an indexed historical directory loads its original bytes',
         hit === null
@@ -2939,11 +2917,10 @@ async function indexedTrees(): Promise<void> {
     await post(`${base}/reset`, { run, tenants: [TENANT], fixture: 'v1' })
     eq(
       'reset removes every directory index row',
-      await measured.githubStagedDir.count({ where: { tenant: TENANT } }),
+      count(home.runtime.pool.sql(run), 'GithubStagedDir', '"tenant" = ?', TENANT),
       0,
     )
   } finally {
-    await db?.$disconnect()
     await home.close()
   }
 }

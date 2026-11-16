@@ -228,13 +228,15 @@ export const gwsFake: Fake<C> = {
   dmmf: Prisma.dmmf as unknown as Dmmf,
   routes: gwsRoutes,
   requestToken: refreshToken,
-  afterSeed: async (db, tenant, _counts, extras, _fixtureRoot, epoch) => {
-    const st = await loadState(db, tenant, epoch === undefined ? undefined : Date.parse(epoch))
+  afterSeed: async (_db, tenant, _counts, extras, _fixtureRoot, epoch, sql) => {
+    const st = await loadState(sql, tenant, epoch === undefined ? undefined : Date.parse(epoch))
     applyExtras(st, extras)
-    await saveState(db, gwsFake.dmmf, tenant, st)
+    await saveState(sql, gwsFake.dmmf, tenant, st)
   },
   // The one thing that changes a tenant's rows with no route involved. It
   // runs BESIDE `afterSeed`, which reaches the rows directly and so keeps the
   // seed reading the file it just wrote rather than the world this drops.
-  afterReset: dropTenants,
+  afterReset: (_db, tenants, sql) => {
+    dropTenants(sql, tenants)
+  },
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
 import { PrismaClient } from '../../../generated/gws/index.js'
 
 // The client type, alone in its own module because both the store and the
@@ -19,3 +20,7 @@ import { PrismaClient } from '../../../generated/gws/index.js'
 // the one to hand it out without a cycle.
 export type C = PrismaClient
 export { PrismaClient }
+
+// The run's file over node:sqlite (kit sql.ts), which the store reads and
+// writes; Prisma still seeds it and makes its schema.
+export type Db = DatabaseSync

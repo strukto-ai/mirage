@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GithubCommit, GithubFile } from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
@@ -53,8 +55,16 @@ import {
   str,
   withRepo,
 } from './http.ts'
-import type { C as Client } from './config.ts'
-import { stripSlash } from '../kit/typescript/index.ts'
+import {
+  create,
+  first,
+  insert,
+  matched,
+  remove,
+  select,
+  stripSlash,
+  update,
+} from '../kit/typescript/index.ts'
 
 function fileJson(path: string, data: Buffer): JsonValue {
   return {
@@ -104,12 +114,16 @@ function dirJson(tree: Snapshot, at: string): JsonValue[] | null {
   return [...entries.keys()].sort().map((k) => entries.get(k) as JsonValue)
 }
 
-async function nextCommitSeq(db: Client, tenant: string, repo: string): Promise<number> {
-  const rows = await db.githubCommit.findMany({
-    where: { tenant, repo },
-    orderBy: { seq: 'desc' },
-    take: 1,
-  })
+async function nextCommitSeq(db: Db, tenant: string, repo: string): Promise<number> {
+  const rows = select<GithubCommit>(
+    db,
+    DMMF,
+    'GithubCommit',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC LIMIT ?',
+    tenant,
+    repo,
+    1,
+  )
   const top = rows[0]
   return top === undefined ? 0 : top.seq + 1
 }
@@ -128,7 +142,7 @@ async function nextCommitSeq(db: Client, tenant: string, repo: string): Promise<
 // points at it. `parents` are in order, the first parent first; null takes
 // the branch's head as the one parent, and an empty sha names none.
 export async function recordCommit(
-  db: Client,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   message: string,
@@ -171,62 +185,67 @@ export async function recordCommit(
   const sha = commitSha(
     [repo.fullName, named.join(' '), stored, authorJson, committerJson, message].join('\0'),
   )
-  const row = (await db.githubCommit.create({
-    data: {
-      tenant,
-      repo: repo.fullName,
-      sha,
-      parentSha: named[0] ?? '',
-      otherParentsJson: JSON.stringify(named.slice(1)),
-      message,
-      authorLogin: '',
-      date: '',
-      treeSha: stored,
-      authorJson,
-      committerJson,
-      seq,
-    },
-  })) as CommitRow
+  const row = create<GithubCommit>(db, DMMF, 'GithubCommit', {
+    tenant,
+    repo: repo.fullName,
+    sha,
+    parentSha: named[0] ?? '',
+    otherParentsJson: JSON.stringify(named.slice(1)),
+    message,
+    authorLogin: '',
+    date: '',
+    treeSha: stored,
+    authorJson,
+    committerJson,
+    seq,
+  }) as CommitRow
   if (advance) {
-    await db.githubBranch.updateMany({
-      where: { tenant, repo: repo.fullName, name: branch },
-      data: { headSha: sha },
-    })
+    update(db, 'GithubBranch', { headSha: sha }, { tenant, repo: repo.fullName, name: branch })
     await rebuildOnPush(db, tenant, repo.fullName, branch)
   }
   return row
 }
 
 export async function writeFile(
-  db: Client,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   branch: string,
   path: string,
   data: Buffer,
 ): Promise<void> {
-  const existing = await db.githubFile.findFirst({
-    where: { tenant, repo: repo.fullName, branch, path },
-  })
+  const existing = first<GithubFile>(
+    db,
+    DMMF,
+    'GithubFile',
+    '"tenant" = ? AND "repo" = ? AND "branch" = ? AND "path" = ?',
+    tenant,
+    repo.fullName,
+    branch,
+    path,
+  )
   const bytes = new Uint8Array(data)
   if (existing === null) {
-    const last = await db.githubFile.findFirst({
-      where: { tenant, repo: repo.fullName, branch },
-      orderBy: { seq: 'desc' },
-    })
-    await db.githubFile.create({
-      data: {
-        tenant,
-        repo: repo.fullName,
-        branch,
-        path,
-        data: bytes,
-        seq: last === null ? 0 : last.seq + 1,
-      },
+    const last = first<GithubFile>(
+      db,
+      DMMF,
+      'GithubFile',
+      '"tenant" = ? AND "repo" = ? AND "branch" = ? ORDER BY "seq" DESC',
+      tenant,
+      repo.fullName,
+      branch,
+    )
+    insert(db, 'GithubFile', {
+      tenant,
+      repo: repo.fullName,
+      branch,
+      path,
+      data: bytes,
+      seq: last === null ? 0 : last.seq + 1,
     })
     return
   }
-  await db.githubFile.update({ where: { pk: existing.pk }, data: { data: bytes } })
+  matched(update(db, 'GithubFile', { data: bytes }, { pk: existing.pk }))
 }
 
 // An empty repository is answered before the ref is resolved, so every ref
@@ -237,11 +256,11 @@ export async function writeFile(
 // an empty tree would pass off a ref that points nowhere as an empty
 // directory.
 const contents = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(404, 'This repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(404, 'This repository is empty.')
   const ref = ctx.query.get('ref') ?? ''
-  const at = await resolveRef(ctx.db, ctx.tenant, repo, ref)
+  const at = await resolveRef(ctx.sql, ctx.tenant, repo, ref)
   const tree =
-    at === null || at.history.length === 0 ? null : await snapshotAt(ctx.db, ctx.tenant, repo, at)
+    at === null || at.history.length === 0 ? null : await snapshotAt(ctx.sql, ctx.tenant, repo, at)
   if (tree === null) {
     return fail(404, `No commit found for the ref ${ref === '' ? repo.defaultBranch : ref}`)
   }
@@ -276,9 +295,9 @@ const putContents = withRepo(async (ctx, repo) => {
   }
   const data = base64Bytes(String(raw))
   if (data === null) return fail(422, 'Invalid request.\n\n"content" is invalid.')
-  const branch = await branchFor(ctx.db, ctx.tenant, repo, str(body, 'branch'))
+  const branch = await branchFor(ctx.sql, ctx.tenant, repo, str(body, 'branch'))
   if (branch === null) return fail(404, 'Branch not found')
-  const files = await treeOfBranch(ctx.db, ctx.tenant, repo, branch)
+  const files = await treeOfBranch(ctx.sql, ctx.tenant, repo, branch)
   const existing = files.get(path)
   const given = body.sha
   if (existing !== undefined && given !== blobSha(existing)) {
@@ -291,14 +310,14 @@ const putContents = withRepo(async (ctx, repo) => {
   // Read before the write, because the parent is where the ref pointed when
   // this request arrived: a seeded branch's root, or none on an empty branch.
   // After the write the same question names a root the ref never reported.
-  const parent = await visibleHeadOf(ctx.db, ctx.tenant, repo, branch)
+  const parent = await visibleHeadOf(ctx.sql, ctx.tenant, repo, branch)
   // Kept for a new path as well as a replaced one: the first write to a
   // seeded branch is what moves it off its synthesized root.
-  await keepRoot(ctx.db, ctx.tenant, repo, branch)
-  await keepTree(ctx.db, ctx.tenant, repo, branch)
-  await writeFile(ctx.db, ctx.tenant, repo, branch, path, data)
+  await keepRoot(ctx.sql, ctx.tenant, repo, branch)
+  await keepTree(ctx.sql, ctx.tenant, repo, branch)
+  await writeFile(ctx.sql, ctx.tenant, repo, branch, path, data)
   const message = str(body, 'message') === '' ? `Update ${path}` : str(body, 'message')
-  const commit = await recordCommit(ctx.db, ctx.tenant, repo, message, branch, '', undefined, [
+  const commit = await recordCommit(ctx.sql, ctx.tenant, repo, message, branch, '', undefined, [
     parent,
   ])
   return {
@@ -313,23 +332,30 @@ const putContents = withRepo(async (ctx, repo) => {
 const deleteContents = withRepo(async (ctx, repo) => {
   const body = jsonBodyOf(ctx)
   const path = stripSlash(param(ctx, 'path'))
-  const branch = await branchFor(ctx.db, ctx.tenant, repo, str(body, 'branch'))
+  const branch = await branchFor(ctx.sql, ctx.tenant, repo, str(body, 'branch'))
   if (branch === null) return fail(404, 'Branch not found')
-  const row = await ctx.db.githubFile.findFirst({
-    where: { tenant: ctx.tenant, repo: repo.fullName, branch, path },
-  })
+  const row = first<GithubFile>(
+    ctx.sql,
+    DMMF,
+    'GithubFile',
+    '"tenant" = ? AND "repo" = ? AND "branch" = ? AND "path" = ?',
+    ctx.tenant,
+    repo.fullName,
+    branch,
+    path,
+  )
   if (row === null) return fail(404, 'Not Found')
   // GitHub requires the current blob sha here exactly as it does for a
   // replace, so a delete racing another writer is refused rather than applied.
   if (str(body, 'sha') !== blobSha(Buffer.from(row.data))) {
     return fail(409, `${path} does not match`)
   }
-  const parent = await visibleHeadOf(ctx.db, ctx.tenant, repo, branch)
-  await keepRoot(ctx.db, ctx.tenant, repo, branch)
-  await keepTree(ctx.db, ctx.tenant, repo, branch)
-  await ctx.db.githubFile.delete({ where: { pk: row.pk } })
+  const parent = await visibleHeadOf(ctx.sql, ctx.tenant, repo, branch)
+  await keepRoot(ctx.sql, ctx.tenant, repo, branch)
+  await keepTree(ctx.sql, ctx.tenant, repo, branch)
+  matched(remove(ctx.sql, 'GithubFile', { pk: row.pk }))
   const message = str(body, 'message') === '' ? `Delete ${path}` : str(body, 'message')
-  const commit = await recordCommit(ctx.db, ctx.tenant, repo, message, branch, '', undefined, [
+  const commit = await recordCommit(ctx.sql, ctx.tenant, repo, message, branch, '', undefined, [
     parent,
   ])
   return {
@@ -339,7 +365,7 @@ const deleteContents = withRepo(async (ctx, repo) => {
 })
 
 const readme = withRepo(async (ctx, repo) => {
-  const files = await treeOf(ctx.db, ctx.tenant, repo, ctx.query.get('ref') ?? '')
+  const files = await treeOf(ctx.sql, ctx.tenant, repo, ctx.query.get('ref') ?? '')
   if (files === null) return fail(404, 'Not Found')
   // GitHub picks the first of several spellings; the fake checks the same ones.
   for (const name of ['README.md', 'README', 'README.rst', 'README.txt', 'readme.md']) {
@@ -359,12 +385,12 @@ const readme = withRepo(async (ctx, repo) => {
 // says "SHA" either way. A branch names its head and a sha, full or
 // abbreviated, its own commit.
 const oneCommit = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
   const ref = param(ctx, 'ref')
-  const history = (await resolveRef(ctx.db, ctx.tenant, repo, ref))?.history ?? []
+  const history = (await resolveRef(ctx.sql, ctx.tenant, repo, ref))?.history ?? []
   const [hit, parent] = history
   if (hit === undefined) return fail(422, `No commit found for SHA: ${ref}`)
-  const changes = await commitChanges(ctx.db, ctx.tenant, repo, history)
+  const changes = await commitChanges(ctx.sql, ctx.tenant, repo, history)
   const diff = diffReply(ctx, changes)
   if (diff !== null) return diff
   const additions = changes.reduce((n, c) => n + c.additions, 0)
@@ -375,7 +401,7 @@ const oneCommit = withRepo(async (ctx, repo) => {
       ...(commitJson(
         repo.fullName,
         hit,
-        await commitTreeId(ctx.db, ctx.tenant, repo, hit),
+        await commitTreeId(ctx.sql, ctx.tenant, repo, hit),
       ) as Record<string, JsonValue>),
       stats: { total: additions + deletions, additions, deletions },
       files: changes.map((c) => changeJson(repo.fullName, c, parent?.sha ?? '', hit.sha)),
@@ -420,7 +446,7 @@ function treeListing(
 // recursive and shallow tree of a ref and one directory of it all 409, measured
 // against GitHub (2026-09-27), whatever the ref names.
 const gitTree = withRepo(async (ctx, repo) => {
-  if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
+  if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) return fail(409, 'Git Repository is empty.')
   const ref = param(ctx, 'ref')
   if (ref === '') return fail(404, 'Not Found')
   const recursive = ctx.query.has('recursive')
@@ -429,7 +455,7 @@ const gitTree = withRepo(async (ctx, repo) => {
   // or ref is 404, and a path through a file is 422.
   const colon = ref.indexOf(':')
   if (colon >= 0) {
-    const tree = await snapshotOf(ctx.db, ctx.tenant, repo, ref.slice(0, colon))
+    const tree = await snapshotOf(ctx.sql, ctx.tenant, repo, ref.slice(0, colon))
     if (tree === null) return fail(404, 'Not Found')
     const { files } = tree
     const at = ref.slice(colon + 1).replace(/^\/+|\/+$/g, '')
@@ -443,13 +469,13 @@ const gitTree = withRepo(async (ctx, repo) => {
     if (sha === undefined) return fail(404, 'Not Found')
     return treeListing(repo, tree, at, sha, recursive)
   }
-  const resolved = await resolveRef(ctx.db, ctx.tenant, repo, ref)
-  const tree = resolved === null ? null : await snapshotAt(ctx.db, ctx.tenant, repo, resolved)
+  const resolved = await resolveRef(ctx.sql, ctx.tenant, repo, ref)
+  const tree = resolved === null ? null : await snapshotAt(ctx.sql, ctx.tenant, repo, resolved)
   if (tree !== null) {
     const head = resolved?.history[0]?.sha ?? treeIdOf(tree.files, tree.links)
     return treeListing(repo, tree, '', head, recursive)
   }
-  const named = await treeById(ctx.db, ctx.tenant, repo, ref)
+  const named = await treeById(ctx.sql, ctx.tenant, repo, ref)
   if (named === null) return fail(404, 'Not Found')
   return treeListing(repo, named, named.at, ref, recursive)
 })
@@ -485,11 +511,11 @@ export function contentRoutes(): KitRoute<C>[] {
       authedRoute(
         withRepo(async (ctx, repo) => {
           // Answered before the sha is looked at, as a tree is.
-          if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) {
+          if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) {
             return fail(409, 'Git Repository is empty.')
           }
           const want = param(ctx, 'sha')
-          const data = await blobBySha(ctx.db, ctx.tenant, repo, want)
+          const data = await blobBySha(ctx.sql, ctx.tenant, repo, want)
           if (data === null) return fail(404, 'Not Found')
           // The raw media type answers the blob's bytes themselves.
           if ((ctx.headers.accept ?? '').includes('raw')) {

@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { first, insert, select, update } from '../kit/typescript/index.ts'
+import type { GithubComment, GithubIssue, GithubPull } from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
-import { isPinned, lockReason, nextCommentId, nextNumber, scope } from './store.ts'
+import { isPinned, lockReason, nextCommentId, nextNumber } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,
@@ -91,14 +94,20 @@ export function issueJson(repo: RepoRow, row: IssueRow): JsonValue {
 }
 
 export async function issueRow(
-  db: C,
+  db: Db,
   tenant: string,
   repo: RepoRow,
   number: number,
 ): Promise<IssueRow | null> {
-  return (await db.githubIssue.findFirst({
-    where: { ...scope(tenant), repo: repo.fullName, number },
-  })) as IssueRow | null
+  return first<GithubIssue>(
+    db,
+    DMMF,
+    'GithubIssue',
+    '"tenant" = ? AND "repo" = ? AND "number" = ?',
+    tenant,
+    repo.fullName,
+    number,
+  ) as IssueRow | null
 }
 
 // A pull request as the issue it also is: its pull request shape, with the
@@ -125,10 +134,11 @@ async function pullAsIssue(ctx: Ctx<C>, repo: RepoRow, row: PullRow): Promise<Js
 // asked) order the whole list before it is paged. A pull request has no
 // assignees or labels here, so either filter leaves it out.
 async function listIssues(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
-  const where = { ...scope(ctx.tenant), repo: repo.fullName }
-  const issues = (await ctx.db.githubIssue.findMany({ where })) as IssueRow[]
-  const pulls = (await ctx.db.githubPull.findMany({ where })) as PullRow[]
-  const comments = await ctx.db.githubComment.findMany({ where, select: { issueNumber: true } })
+  const where = '"tenant" = ? AND "repo" = ?'
+  const at = [ctx.tenant, repo.fullName]
+  const issues = select<GithubIssue>(ctx.sql, DMMF, 'GithubIssue', where, ...at) as IssueRow[]
+  const pulls = select<GithubPull>(ctx.sql, DMMF, 'GithubPull', where, ...at) as PullRow[]
+  const comments = select<GithubComment>(ctx.sql, DMMF, 'GithubComment', where, ...at)
   interface Listed {
     number: number
     state: string
@@ -186,7 +196,7 @@ export async function createIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const body = jsonBodyOf(ctx)
   const title = str(body, 'title').trim()
   if (title === '') return fail(422, 'Invalid request.\n\n"title" wasn\'t supplied.')
-  const number = await nextNumber(ctx.db, ctx.tenant, repo)
+  const number = await nextNumber(ctx.sql, ctx.tenant, repo)
   const row: IssueRow = {
     number,
     title,
@@ -200,9 +210,7 @@ export async function createIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   }
-  await ctx.db.githubIssue.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: number },
-  })
+  insert(ctx.sql, 'GithubIssue', { tenant: ctx.tenant, repo: repo.fullName, ...row, seq: number })
   return { status: 201, body: issueJson(repo, row) }
 }
 
@@ -212,9 +220,9 @@ export async function createIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 async function getIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const number = numberParam(ctx)
   if (number === null) return fail(404, 'Not Found')
-  const row = await issueRow(ctx.db, ctx.tenant, repo, number)
+  const row = await issueRow(ctx.sql, ctx.tenant, repo, number)
   if (row !== null) return { status: 200, body: issueJson(repo, row) }
-  const pull = await pullRow(ctx.db, ctx.tenant, repo, number)
+  const pull = await pullRow(ctx.sql, ctx.tenant, repo, number)
   if (pull === null) return fail(404, 'Not Found')
   // `pull_request.url` is a reference the client follows, so it carries the
   // run the request came in on. Without it, resolving a pull request from a
@@ -226,7 +234,7 @@ async function getIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 async function editIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const number = numberParam(ctx)
   if (number === null) return fail(404, 'Not Found')
-  const row = await issueRow(ctx.db, ctx.tenant, repo, number)
+  const row = await issueRow(ctx.sql, ctx.tenant, repo, number)
   if (row === null) return fail(404, 'Not Found')
   const body = jsonBodyOf(ctx)
   const next: IssueRow = { ...row, updatedAt: EDITED_AT }
@@ -244,10 +252,7 @@ async function editIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   }
   if ('labels' in body) next.labelsJson = nameList(body.labels)
   if ('assignees' in body) next.assigneesJson = nameList(body.assignees)
-  await ctx.db.githubIssue.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, number },
-    data: next,
-  })
+  update(ctx.sql, 'GithubIssue', { ...next }, { tenant: ctx.tenant, repo: repo.fullName, number })
   return { status: 200, body: issueJson(repo, next) }
 }
 
@@ -256,22 +261,20 @@ async function editIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 async function createComment(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const number = numberParam(ctx)
   if (number === null) return fail(404, 'Not Found')
-  const issue = await issueRow(ctx.db, ctx.tenant, repo, number)
-  const pull = issue === null ? await pullRow(ctx.db, ctx.tenant, repo, number) : null
+  const issue = await issueRow(ctx.sql, ctx.tenant, repo, number)
+  const pull = issue === null ? await pullRow(ctx.sql, ctx.tenant, repo, number) : null
   if (issue === null && pull === null) return fail(404, 'Not Found')
-  const id = await nextCommentId(ctx.db, ctx.tenant, repo)
+  const id = await nextCommentId(ctx.sql, ctx.tenant, repo)
   const body = str(jsonBodyOf(ctx), 'body')
-  await ctx.db.githubComment.create({
-    data: {
-      tenant: ctx.tenant,
-      repo: repo.fullName,
-      issueNumber: number,
-      id,
-      body,
-      user: DEFAULT_LOGIN,
-      createdAt: CREATED_AT,
-      seq: id,
-    },
+  insert(ctx.sql, 'GithubComment', {
+    tenant: ctx.tenant,
+    repo: repo.fullName,
+    issueNumber: number,
+    id,
+    body,
+    user: DEFAULT_LOGIN,
+    createdAt: CREATED_AT,
+    seq: id,
   })
   return {
     status: 201,
@@ -298,13 +301,18 @@ async function createComment(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 async function listComments(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const number = numberParam(ctx)
   if (number === null) return fail(404, 'Not Found')
-  const issue = await issueRow(ctx.db, ctx.tenant, repo, number)
-  const pull = issue === null ? await pullRow(ctx.db, ctx.tenant, repo, number) : null
+  const issue = await issueRow(ctx.sql, ctx.tenant, repo, number)
+  const pull = issue === null ? await pullRow(ctx.sql, ctx.tenant, repo, number) : null
   if (issue === null && pull === null) return fail(404, 'Not Found')
-  const rows = await ctx.db.githubComment.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
-    orderBy: { seq: 'asc' },
-  })
+  const rows = select<GithubComment>(
+    ctx.sql,
+    DMMF,
+    'GithubComment',
+    '"tenant" = ? AND "repo" = ? AND "issueNumber" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+    number,
+  )
   return pagedReply(
     ctx,
     rows.map((row) => ({
@@ -331,7 +339,7 @@ function commentCursor(id: number): string {
  * `issues/{n}/comments` wrote, oldest first, a page at a time.
  */
 export function commentConnection(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   number: number,
 ): (args: {
@@ -342,10 +350,15 @@ export function commentConnection(
   return async ({ first, last, after }) => {
     const size = last ?? first ?? 0
     if (size < 1 || size > 100) throw new Error('first must be between 1 and 100')
-    const rows = await ctx.db.githubComment.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
-      orderBy: { seq: 'asc' },
-    })
+    const rows = select<GithubComment>(
+      ctx.sql,
+      DMMF,
+      'GithubComment',
+      '"tenant" = ? AND "repo" = ? AND "issueNumber" = ? ORDER BY "seq" ASC',
+      ctx.tenant,
+      repo.fullName,
+      number,
+    )
     const start = after ? rows.findIndex((row) => commentCursor(row.id) === after) + 1 : 0
     if (after && start === 0) throw new Error('Invalid cursor')
     const from = typeof last === 'number' ? Math.max(rows.length - last, 0) : start
@@ -396,16 +409,20 @@ function pullReference(
  * repository it lives in.
  */
 export async function issueNode(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   row: IssueRow,
   repository: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const closed = row.state === 'closed'
-  const pulls = (await ctx.db.githubPull.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'asc' },
-  })) as PullRow[]
+  const pulls = select<GithubPull>(
+    ctx.sql,
+    DMMF,
+    'GithubPull',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" ASC',
+    ctx.tenant,
+    repo.fullName,
+  ) as PullRow[]
   const closers = pulls.filter((pull) => closedNumbers(pull.body).includes(row.number))
   return {
     __typename: 'Issue',
@@ -473,15 +490,19 @@ export interface IssuesArgs extends PageArgs {
  * turns each row into its node.
  */
 export async function issueConnection(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   repo: RepoRow,
   args: IssuesArgs,
   nodes: (row: IssueRow) => Promise<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
-  const rows = (await ctx.db.githubIssue.findMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName },
-    orderBy: { seq: 'desc' },
-  })) as IssueRow[]
+  const rows = select<GithubIssue>(
+    ctx.sql,
+    DMMF,
+    'GithubIssue',
+    '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+    ctx.tenant,
+    repo.fullName,
+  ) as IssueRow[]
   const states = args.states ?? ['OPEN', 'CLOSED']
   const filter = args.filterBy ?? {}
   const kept = rows.filter((row) => {

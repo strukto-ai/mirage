@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { matched, update } from '../kit/typescript/index.ts'
+import { type Db } from './store.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, REPO_DATE } from './config.ts'
 import type { C } from './config.ts'
@@ -68,15 +70,19 @@ function siteJson(repo: RepoRow, site: Site): JsonValue {
   }
 }
 
-async function storeSite(db: C, tenant: string, repo: RepoRow, site: Site | null): Promise<void> {
-  await db.githubRepo.update({
-    where: { tenant_fullName: { tenant, fullName: repo.fullName } },
-    data: { pagesJson: site === null ? '' : JSON.stringify(site) },
-  })
+async function storeSite(db: Db, tenant: string, repo: RepoRow, site: Site | null): Promise<void> {
+  matched(
+    update(
+      db,
+      'GithubRepo',
+      { pagesJson: site === null ? '' : JSON.stringify(site) },
+      { tenant, fullName: repo.fullName },
+    ),
+  )
 }
 
 // The site with one more build, of whatever its source branch points at now.
-async function built(db: C, tenant: string, repo: RepoRow, site: Site): Promise<Site> {
+async function built(db: Db, tenant: string, repo: RepoRow, site: Site): Promise<Site> {
   const commit = await visibleHeadOf(db, tenant, repo, site.source.branch)
   return { ...site, builds: [...(site.builds ?? []), { commit, pusher: DEFAULT_LOGIN }] }
 }
@@ -85,7 +91,7 @@ async function built(db: C, tenant: string, repo: RepoRow, site: Site): Promise<
 // rebuilds a branch-sourced site on every push to that branch. A site a
 // workflow publishes is deployed by the workflow, which the fake never runs.
 export async function rebuildOnPush(
-  db: C,
+  db: Db,
   tenant: string,
   fullName: string,
   branch: string,
@@ -115,7 +121,7 @@ async function edited(
     const source = body.source
     if (typeof source !== 'object' || source === null || Array.isArray(source)) return null
     const branch = typeof source.branch === 'string' ? source.branch : ''
-    if (branch === '' || (await branchFor(ctx.db, ctx.tenant, repo, branch)) === null) return null
+    if (branch === '' || (await branchFor(ctx.sql, ctx.tenant, repo, branch)) === null) return null
     const path = source.path ?? '/'
     if (typeof path !== 'string' || !SOURCE_PATHS.includes(path)) return null
     site.source = { branch, path }
@@ -151,7 +157,7 @@ async function createSite(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   if (site === null || (site.build_type === 'legacy' && body.source === undefined)) {
     return fail(422, 'Validation Failed')
   }
-  await storeSite(ctx.db, ctx.tenant, repo, await built(ctx.db, ctx.tenant, repo, site))
+  await storeSite(ctx.sql, ctx.tenant, repo, await built(ctx.sql, ctx.tenant, repo, site))
   return { status: 201, body: siteJson(repo, site) }
 }
 
@@ -164,14 +170,14 @@ async function updateSite(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const moved =
     site.build_type === 'legacy' &&
     (site.source.branch !== current.source.branch || site.source.path !== current.source.path)
-  const next = moved ? await built(ctx.db, ctx.tenant, repo, site) : site
-  await storeSite(ctx.db, ctx.tenant, repo, next)
+  const next = moved ? await built(ctx.sql, ctx.tenant, repo, site) : site
+  await storeSite(ctx.sql, ctx.tenant, repo, next)
   return { status: 204 }
 }
 
 async function deleteSite(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   if (siteOf(repo) === null) return fail(404, 'Not Found')
-  await storeSite(ctx.db, ctx.tenant, repo, null)
+  await storeSite(ctx.sql, ctx.tenant, repo, null)
   return { status: 204 }
 }
 
@@ -192,7 +198,7 @@ async function buildJson(ctx: Ctx<C>, repo: RepoRow, build: Build, id: number): 
     url: `https://api.github.com/repos/${repo.fullName}/pages/builds/${String(id)}`,
     status: 'built',
     error: { message: null },
-    pusher: simpleUser(await accountOf(ctx.db, ctx.tenant, build.pusher)),
+    pusher: simpleUser(await accountOf(ctx.sql, ctx.tenant, build.pusher)),
     commit: build.commit,
     duration: 0,
     created_at: REPO_DATE,
@@ -217,7 +223,7 @@ async function listBuilds(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 async function requestBuild(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const site = siteOf(repo)
   if (site === null) return noBuild('request-a-apiname-pages-build')
-  await storeSite(ctx.db, ctx.tenant, repo, await built(ctx.db, ctx.tenant, repo, site))
+  await storeSite(ctx.sql, ctx.tenant, repo, await built(ctx.sql, ctx.tenant, repo, site))
   return {
     status: 201,
     body: {

@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
+import { first, insert, remove, select, update } from '../kit/typescript/index.ts'
+import type {
+  GithubComment,
+  GithubIssue,
+  GithubPull,
+  GithubRelease,
+} from '../../generated/github/index.js'
+import { DMMF, type Db } from './store.ts'
+import type { Cell, Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
 import { createIssue as createIssueRow, issueRow } from './issues.ts'
@@ -66,7 +74,7 @@ function labelRow(repo: string, name: string, color: string, description: string
 
 // The fixture repository starts with the labels its issues carry: `gh` looks a
 // name up before it writes and refuses one the repository does not have.
-function labelsOf(ctx: { tenant: string; db: C }, repo: string): Map<string, LabelRow> {
+function labelsOf(ctx: { tenant: string; sql: Db }, repo: string): Map<string, LabelRow> {
   const rows = kept<LabelRow>(ctx, `labels\0${repo}`)
   const seeded = kept<boolean>(ctx, 'labels-seeded')
   if (repo === LABELED_REPO && seeded.get(repo) !== true) {
@@ -76,7 +84,7 @@ function labelsOf(ctx: { tenant: string; db: C }, repo: string): Map<string, Lab
   return rows
 }
 
-export function labelConnection(ctx: { tenant: string; db: C }, repo: RepoRow) {
+export function labelConnection(ctx: { tenant: string; sql: Db }, repo: RepoRow) {
   return ({
     first,
     after,
@@ -100,16 +108,20 @@ export function labelConnection(ctx: { tenant: string; db: C }, repo: RepoRow) {
   }
 }
 
-export function releaseConnection(ctx: Ctx<C> | { db: C; tenant: string }, repo: RepoRow) {
+export function releaseConnection(ctx: Ctx<C> | { sql: Db; tenant: string }, repo: RepoRow) {
   return async ({
     first,
     after,
     orderBy,
   }: PageArgs & { orderBy?: { direction: string } | null }) => {
-    const rows = (await ctx.db.githubRelease.findMany({
-      where: { ...scope(ctx.tenant), repo: repo.fullName },
-      orderBy: { seq: 'asc' },
-    })) as Array<{
+    const rows = select<GithubRelease>(
+      ctx.sql,
+      DMMF,
+      'GithubRelease',
+      '"tenant" = ? AND "repo" = ? ORDER BY "seq" ASC',
+      ctx.tenant,
+      repo.fullName,
+    ) as Array<{
       tagName: string
       name: string
       draft: boolean
@@ -284,15 +296,15 @@ function decoded(id: string): string {
   return Buffer.from(id, 'base64').toString()
 }
 
-async function repoBySeq(ctx: { db: C; tenant: string }, seq: number): Promise<RepoRow> {
-  const found = (await allRepos(ctx.db, ctx.tenant)).find((repo) => repo.seq === seq)
+async function repoBySeq(ctx: { sql: Db; tenant: string }, seq: number): Promise<RepoRow> {
+  const found = (await allRepos(ctx.sql, ctx.tenant)).find((repo) => repo.seq === seq)
   if (found === undefined) throw new Error('Could not resolve to a node.')
   return found
 }
 
 // `05:Issue3:7` or `011:PullRequest3:7`, the repository's seq and the number.
 async function subject(
-  ctx: { db: C; tenant: string },
+  ctx: { sql: Db; tenant: string },
   id: string,
 ): Promise<{ repo: RepoRow; number: number; pull: boolean }> {
   const text = decoded(id)
@@ -309,10 +321,10 @@ function urlOf(repo: RepoRow, pull: boolean, number: number): string {
   return `https://github.com/${repo.fullName}/${pull ? 'pull' : 'issues'}/${String(number)}`
 }
 
-async function commentWhere(ctx: { db: C; tenant: string }, id: string) {
+async function commentWhere(ctx: { sql: Db; tenant: string }, id: string) {
   const [, seq, number] = /IssueComment(\d+):(\d+)$/.exec(decoded(id)) ?? []
   const repo = await repoBySeq(ctx, Number(seq))
-  return { ...scope(ctx.tenant), repo: repo.fullName, id: Number(number) }
+  return { tenant: ctx.tenant, repo: repo.fullName, id: Number(number) }
 }
 
 function matchesWords(row: { title: string; body: string }, words: string[]): boolean {
@@ -363,7 +375,7 @@ export function adminRoot(
   },
 ): Record<string, unknown> {
   const whereOf = (repo: RepoRow, number: number) => ({
-    ...scope(ctx.tenant),
+    tenant: ctx.tenant,
     repo: repo.fullName,
     number,
   })
@@ -382,22 +394,19 @@ export function adminRoot(
       return
     }
     const column = kind === 'labels' ? 'labelsJson' : 'assigneesJson'
-    const row = await issueRow(ctx.db, ctx.tenant, repo, number)
+    const row = await issueRow(ctx.sql, ctx.tenant, repo, number)
     if (row === null) throw new Error('Could not resolve to a node.')
     const now = JSON.parse(row[column]) as string[]
-    await ctx.db.githubIssue.updateMany({
-      where: whereOf(repo, number),
-      data: { [column]: JSON.stringify(change(now)) },
-    })
+    update(ctx.sql, 'GithubIssue', { [column]: JSON.stringify(change(now)) }, whereOf(repo, number))
   }
   return {
     node: async ({ id }: { id: string }) => {
       const { repo, number, pull } = await subject(ctx, id)
       if (pull) {
-        const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+        const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
         return row === null ? null : { __typename: 'PullRequest', ...(await nodes.pull(repo, row)) }
       }
-      const row = await issueRow(ctx.db, ctx.tenant, repo, number)
+      const row = await issueRow(ctx.sql, ctx.tenant, repo, number)
       return row === null ? null : { __typename: 'Issue', ...(await nodes.issue(repo, row)) }
     },
     search: async ({
@@ -413,7 +422,7 @@ export function adminRoot(
     }) => {
       const { words, qualifiers } = terms(query)
       const one = (name: string): string | undefined => qualifiers.get(name)?.[0]
-      const repos = (await allRepos(ctx.db, ctx.tenant)).filter(
+      const repos = (await allRepos(ctx.sql, ctx.tenant)).filter(
         (repo) => one('repo') === undefined || repo.fullName === one('repo'),
       )
       const type = one('type') ?? (qualifiers.get('is')?.includes('pr') ? 'pr' : undefined)
@@ -421,10 +430,14 @@ export function adminRoot(
       const found: Record<string, unknown>[] = []
       for (const repo of repos) {
         if (type !== 'pr') {
-          const rows = (await ctx.db.githubIssue.findMany({
-            where: { ...scope(ctx.tenant), repo: repo.fullName },
-            orderBy: { seq: 'desc' },
-          })) as IssueRow[]
+          const rows = select<GithubIssue>(
+            ctx.sql,
+            DMMF,
+            'GithubIssue',
+            '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+            ctx.tenant,
+            repo.fullName,
+          ) as IssueRow[]
           for (const row of rows) {
             const names = JSON.parse(row.labelsJson) as string[]
             const people = JSON.parse(row.assigneesJson) as string[]
@@ -438,10 +451,14 @@ export function adminRoot(
           }
         }
         if (type !== 'issue') {
-          const rows = (await ctx.db.githubPull.findMany({
-            where: { ...scope(ctx.tenant), repo: repo.fullName },
-            orderBy: { seq: 'desc' },
-          })) as PullRow[]
+          const rows = select<GithubPull>(
+            ctx.sql,
+            DMMF,
+            'GithubPull',
+            '"tenant" = ? AND "repo" = ? ORDER BY "seq" DESC',
+            ctx.tenant,
+            repo.fullName,
+          ) as PullRow[]
           for (const row of rows) {
             const state = row.merged ? 'merged' : row.state
             const wanted = one('state')
@@ -489,14 +506,16 @@ export function adminRoot(
     organization: ({ login }: { login: string }) => ({ login, rulesets: rulesetPage(ctx, login) }),
     closeIssue: async ({ input }: { input: { issueId: string; stateReason?: string } }) => {
       const { repo, number } = await subject(ctx, input.issueId)
-      await ctx.db.githubIssue.updateMany({
-        where: whereOf(repo, number),
-        data: {
+      update(
+        ctx.sql,
+        'GithubIssue',
+        {
           state: 'closed',
           stateReason: (input.stateReason ?? 'completed').toLowerCase(),
           closedAt: STAMP,
         },
-      })
+        whereOf(repo, number),
+      )
       return { issue: { id: input.issueId } }
     },
     createIssue: async ({
@@ -538,16 +557,18 @@ export function adminRoot(
       if (typeof input.body === 'string') data.body = input.body
       if (input.assigneeIds) data.assigneesJson = JSON.stringify(input.assigneeIds.map(nameIn))
       if (Object.keys(data).length > 0) {
-        await ctx.db.githubIssue.updateMany({ where: whereOf(repo, number), data })
+        update(ctx.sql, 'GithubIssue', data, whereOf(repo, number))
       }
       return { clientMutationId: null }
     },
     reopenIssue: async ({ input }: { input: { issueId: string } }) => {
       const { repo, number } = await subject(ctx, input.issueId)
-      await ctx.db.githubIssue.updateMany({
-        where: whereOf(repo, number),
-        data: { state: 'open', stateReason: 'reopened', closedAt: '' },
-      })
+      update(
+        ctx.sql,
+        'GithubIssue',
+        { state: 'open', stateReason: 'reopened', closedAt: '' },
+        whereOf(repo, number),
+      )
       return { issue: { id: input.issueId } }
     },
     createPullRequest: async ({
@@ -603,7 +624,7 @@ export function adminRoot(
       if (typeof input.body === 'string') data.body = input.body
       if (typeof input.baseRefName === 'string') data.base = input.baseRefName
       if (Object.keys(data).length > 0) {
-        await ctx.db.githubPull.updateMany({ where: whereOf(repo, number), data })
+        update(ctx.sql, 'GithubPull', data, whereOf(repo, number))
       }
       if (input.assigneeIds) {
         const given = input.assigneeIds.map(nameIn)
@@ -617,19 +638,21 @@ export function adminRoot(
     },
     reopenPullRequest: async ({ input }: { input: { pullRequestId: string } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      await ctx.db.githubPull.updateMany({ where: whereOf(repo, number), data: { state: 'open' } })
+      update(ctx.sql, 'GithubPull', { state: 'open' }, whereOf(repo, number))
       return { pullRequest: { id: input.pullRequestId } }
     },
     requestReviews: async ({ input }: { input: { pullRequestId: string; userIds?: string[] } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+      const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
       if (row === null) throw new Error('Could not resolve to a node.')
       const given = (input.userIds ?? []).map(nameIn)
       const now = JSON.parse(row.reviewersJson) as string[]
-      await ctx.db.githubPull.updateMany({
-        where: whereOf(repo, number),
-        data: { reviewersJson: JSON.stringify([...new Set([...now, ...given])]) },
-      })
+      update(
+        ctx.sql,
+        'GithubPull',
+        { reviewersJson: JSON.stringify([...new Set([...now, ...given])]) },
+        whereOf(repo, number),
+      )
       return { clientMutationId: null }
     },
     addLabelsToLabelable: async ({
@@ -661,26 +684,21 @@ export function adminRoot(
     },
     closePullRequest: async ({ input }: { input: { pullRequestId: string } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      await ctx.db.githubPull.updateMany({
-        where: whereOf(repo, number),
-        data: { state: 'closed' },
-      })
+      update(ctx.sql, 'GithubPull', { state: 'closed' }, whereOf(repo, number))
       return { pullRequest: { id: input.pullRequestId } }
     },
     addComment: async ({ input }: { input: { subjectId: string; body: string } }) => {
       const { repo, number } = await subject(ctx, input.subjectId)
-      const id = await nextCommentId(ctx.db, ctx.tenant, repo)
-      await ctx.db.githubComment.create({
-        data: {
-          tenant: ctx.tenant,
-          repo: repo.fullName,
-          issueNumber: number,
-          id,
-          body: input.body,
-          user: DEFAULT_LOGIN,
-          createdAt: STAMP,
-          seq: id,
-        },
+      const id = await nextCommentId(ctx.sql, ctx.tenant, repo)
+      insert(ctx.sql, 'GithubComment', {
+        tenant: ctx.tenant,
+        repo: repo.fullName,
+        issueNumber: number,
+        id,
+        body: input.body,
+        user: DEFAULT_LOGIN,
+        createdAt: STAMP,
+        seq: id,
       })
       return {
         commentEdge: {
@@ -690,12 +708,20 @@ export function adminRoot(
     },
     updateIssueComment: async ({ input }: { input: { id: string; body: string } }) => {
       const where = await commentWhere(ctx, input.id)
-      const row = (await ctx.db.githubComment.findFirst({ where })) as {
+      const row = first<GithubComment>(
+        ctx.sql,
+        DMMF,
+        'GithubComment',
+        '"tenant" = ? AND "repo" = ? AND "id" = ?',
+        where.tenant,
+        where.repo,
+        where.id,
+      ) as {
         repo: string
         issueNumber: number
       } | null
       if (row === null) throw new Error('Could not resolve to a node.')
-      await ctx.db.githubComment.updateMany({ where, data: { body: input.body } })
+      update(ctx.sql, 'GithubComment', { body: input.body }, where)
       return {
         issueComment: {
           url: `https://github.com/${row.repo}/issues/${String(row.issueNumber)}#issuecomment-${String(where.id)}`,
@@ -703,15 +729,12 @@ export function adminRoot(
       }
     },
     deleteIssueComment: async ({ input }: { input: { id: string } }) => {
-      await ctx.db.githubComment.deleteMany({ where: await commentWhere(ctx, input.id) })
+      remove(ctx.sql, 'GithubComment', await commentWhere(ctx, input.id))
       return { clientMutationId: null }
     },
     mergePullRequest: async ({ input }: { input: { pullRequestId: string } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      await ctx.db.githubPull.updateMany({
-        where: whereOf(repo, number),
-        data: { state: 'closed', merged: true },
-      })
+      update(ctx.sql, 'GithubPull', { state: 'closed', merged: true }, whereOf(repo, number))
       return { clientMutationId: null }
     },
     enablePullRequestAutoMerge: async ({
@@ -734,19 +757,19 @@ export function adminRoot(
       input: { pullRequestId: string; event?: string; body?: string }
     }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+      const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
       if (row === null) throw new Error('Could not resolve to a node.')
       await recordPullReview(ctx, repo, row, input.event ?? 'COMMENT', input.body ?? '')
       return { clientMutationId: null }
     },
     markPullRequestReadyForReview: async ({ input }: { input: { pullRequestId: string } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      await ctx.db.githubPull.updateMany({ where: whereOf(repo, number), data: { draft: false } })
+      update(ctx.sql, 'GithubPull', { draft: false }, whereOf(repo, number))
       return { pullRequest: { id: input.pullRequestId } }
     },
     convertPullRequestToDraft: async ({ input }: { input: { pullRequestId: string } }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      await ctx.db.githubPull.updateMany({ where: whereOf(repo, number), data: { draft: true } })
+      update(ctx.sql, 'GithubPull', { draft: true }, whereOf(repo, number))
       return { pullRequest: { id: input.pullRequestId } }
     },
     updatePullRequestBranch: ({ input }: { input: { pullRequestId: string } }) => ({
@@ -758,23 +781,27 @@ export function adminRoot(
       input: { pullRequestId: string; draft?: boolean; title?: string; body?: string }
     }) => {
       const { repo, number } = await subject(ctx, input.pullRequestId)
-      const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+      const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
       if (row === null) throw new Error('Could not resolve to a node.')
-      const made = await nextNumber(ctx.db, ctx.tenant, repo)
-      const { pk: _pk, ...data } = (await ctx.db.githubPull.findFirst({
-        where: whereOf(repo, number),
-      })) as PullRow & { pk: number; tenant: string; repo: string; seq: number }
-      await ctx.db.githubPull.create({
-        data: {
-          ...data,
-          number: made,
-          seq: made,
-          title: input.title ?? `Revert "${row.title}"`,
-          body: input.body ?? `Reverts ${repo.fullName}#${String(number)}`,
-          state: 'open',
-          merged: false,
-          draft: input.draft === true,
-        },
+      const made = await nextNumber(ctx.sql, ctx.tenant, repo)
+      const { pk: _pk, ...data } = first<GithubPull>(
+        ctx.sql,
+        DMMF,
+        'GithubPull',
+        '"tenant" = ? AND "repo" = ? AND "number" = ?',
+        ctx.tenant,
+        repo.fullName,
+        number,
+      ) as PullRow & { pk: number; tenant: string; repo: string; seq: number }
+      insert(ctx.sql, 'GithubPull', {
+        ...data,
+        number: made,
+        seq: made,
+        title: input.title ?? `Revert "${row.title}"`,
+        body: input.body ?? `Reverts ${repo.fullName}#${String(number)}`,
+        state: 'open',
+        merged: false,
+        draft: input.draft === true,
       })
       return {
         pullRequest: { id: input.pullRequestId },
@@ -797,9 +824,11 @@ export function adminRoot(
     },
     deleteIssue: async ({ input }: { input: { issueId: string } }) => {
       const { repo, number } = await subject(ctx, input.issueId)
-      await ctx.db.githubIssue.deleteMany({ where: whereOf(repo, number) })
-      await ctx.db.githubComment.deleteMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
+      remove(ctx.sql, 'GithubIssue', whereOf(repo, number))
+      remove(ctx.sql, 'GithubComment', {
+        tenant: ctx.tenant,
+        repo: repo.fullName,
+        issueNumber: number,
       })
       return { repository: { id: String(repo.seq) } }
     },
@@ -807,21 +836,30 @@ export function adminRoot(
       const { repo, number } = await subject(ctx, input.issueId)
       const seq = Number(/(\d+)$/.exec(decoded(input.repositoryId))?.[1] ?? 0)
       const destination = await repoBySeq(ctx, seq)
-      const made = await nextNumber(ctx.db, ctx.tenant, destination)
-      await ctx.db.githubIssue.updateMany({
-        where: whereOf(repo, number),
-        data: { repo: destination.fullName, number: made },
-      })
-      const moved = (await ctx.db.githubComment.findMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
-        orderBy: { seq: 'asc' },
-      })) as { pk: number }[]
-      let id = await nextCommentId(ctx.db, ctx.tenant, destination)
+      const made = await nextNumber(ctx.sql, ctx.tenant, destination)
+      update(
+        ctx.sql,
+        'GithubIssue',
+        { repo: destination.fullName, number: made },
+        whereOf(repo, number),
+      )
+      const moved = select<GithubComment>(
+        ctx.sql,
+        DMMF,
+        'GithubComment',
+        '"tenant" = ? AND "repo" = ? AND "issueNumber" = ? ORDER BY "seq" ASC',
+        ctx.tenant,
+        repo.fullName,
+        number,
+      ) as { pk: number }[]
+      let id = await nextCommentId(ctx.sql, ctx.tenant, destination)
       for (const comment of moved) {
-        await ctx.db.githubComment.updateMany({
-          where: { pk: comment.pk },
-          data: { repo: destination.fullName, issueNumber: made, id, seq: id },
-        })
+        update(
+          ctx.sql,
+          'GithubComment',
+          { repo: destination.fullName, issueNumber: made, id, seq: id },
+          { pk: comment.pk },
+        )
         id += 1
       }
       return { issue: { url: urlOf(destination, false, made) } }
@@ -852,14 +890,16 @@ async function setArchived(
 ): Promise<{ repository: { id: string } }> {
   const seq = Number(/(\d+)$/.exec(decoded(id))?.[1] ?? 0)
   const repo = await repoBySeq(ctx, seq)
-  await ctx.db.githubRepo.updateMany({
-    where: { ...scope(ctx.tenant), fullName: repo.fullName },
-    data: { metaJson: JSON.stringify({ ...metaOf(repo), archived }) },
-  })
+  update(
+    ctx.sql,
+    'GithubRepo',
+    { metaJson: JSON.stringify({ ...metaOf(repo), archived }) },
+    { tenant: ctx.tenant, fullName: repo.fullName },
+  )
   return { repository: { id } }
 }
 
-export function rulesetPage(ctx: { tenant: string; db: C }, owner: string) {
+export function rulesetPage(ctx: { tenant: string; sql: Db }, owner: string) {
   return ({ first, after }: PageArgs) => {
     const rows = [...kept<Record<string, JsonValue>>(ctx, `rulesets\0${owner}`).values()].map(
       (row) => ({
@@ -875,7 +915,7 @@ export function rulesetPage(ctx: { tenant: string; db: C }, owner: string) {
   }
 }
 
-export function gistPage(ctx: { tenant: string; db: C }) {
+export function gistPage(ctx: { tenant: string; sql: Db }) {
   return ({ first, after, privacy }: PageArgs & { privacy?: string | null }) => {
     const rows = [...kept<GistRow>(ctx, 'gists').values()]
       .filter((row) => privacy !== 'SECRET' || !row.public)
@@ -962,7 +1002,7 @@ async function bump(
   const where = { ...scope(ctx.tenant), repo: repo.fullName, number }
   const body = jsonBodyOf(ctx)
   const given = (body[key] ?? [param(ctx, 'name')]) as string[]
-  const row = await issueRow(ctx.db, ctx.tenant, repo, number)
+  const row = await issueRow(ctx.sql, ctx.tenant, repo, number)
   if (row === null) {
     const rows = kept<string[]>(ctx, `pull-${key}\0${repo.fullName}`)
     const now = rows.get(String(number)) ?? []
@@ -975,23 +1015,25 @@ async function bump(
   const now = JSON.parse(row[column]) as string[]
   const next =
     sign > 0 ? [...new Set([...now, ...given])] : now.filter((name) => !given.includes(name))
-  await ctx.db.githubIssue.updateMany({ where, data: { [column]: JSON.stringify(next) } })
+  update(ctx.sql, 'GithubIssue', { [column]: JSON.stringify(next) }, where)
   return { status: 200, body: {} }
 }
 
 async function pullPeople(ctx: Ctx<C>, repo: RepoRow, sign: 1 | -1): Promise<Reply> {
   const number = Number(param(ctx, 'number'))
-  const row = await pullRow(ctx.db, ctx.tenant, repo, number)
+  const row = await pullRow(ctx.sql, ctx.tenant, repo, number)
   if (row === null) return fail(404, 'Not Found')
   const body = jsonBodyOf(ctx)
   const given = [...((body.reviewers ?? []) as string[])]
   const now = JSON.parse(row.reviewersJson) as string[]
   const next =
     sign > 0 ? [...new Set([...now, ...given])] : now.filter((name) => !given.includes(name))
-  await ctx.db.githubPull.updateMany({
-    where: { ...scope(ctx.tenant), repo: repo.fullName, number },
-    data: { reviewersJson: JSON.stringify(next) },
-  })
+  update(
+    ctx.sql,
+    'GithubPull',
+    { reviewersJson: JSON.stringify(next) },
+    { tenant: ctx.tenant, repo: repo.fullName, number },
+  )
   return { status: 200, body: {} }
 }
 
@@ -1103,15 +1145,11 @@ export function adminRoutes(): KitRoute<C>[] {
     ),
     repoRoute('DELETE', '/git/refs/*ref', async (ctx, repo) => {
       const ref = param(ctx, 'ref')
-      const where = { ...scope(ctx.tenant), repo: repo.fullName }
+      const where = { tenant: ctx.tenant, repo: repo.fullName }
       const gone = ref.startsWith('tags/')
-        ? await ctx.db.githubTagRef.deleteMany({
-            where: { ...where, name: ref.slice('tags/'.length) },
-          })
-        : await ctx.db.githubBranch.deleteMany({
-            where: { ...where, name: ref.replace(/^heads\//, '') },
-          })
-      return gone.count > 0 ? { status: 204, body: null } : fail(422, 'Reference does not exist')
+        ? remove(ctx.sql, 'GithubTagRef', { ...where, name: ref.slice('tags/'.length) })
+        : remove(ctx.sql, 'GithubBranch', { ...where, name: ref.replace(/^heads\//, '') })
+      return gone > 0 ? { status: 204, body: null } : fail(422, 'Reference does not exist')
     }),
     repoRoute('POST', '/issues/:number/assignees', (ctx, repo) =>
       bump(ctx, repo, 'assigneesJson', 'assignees', 1),
@@ -1169,27 +1207,33 @@ export function adminRoutes(): KitRoute<C>[] {
     repoRoute('DELETE', '/actions/runs/:run', async (ctx, repo) => {
       if ((await runRow(ctx, repo, Number(param(ctx, 'run')))) === null)
         return fail(404, 'Not Found')
-      await ctx.db.githubRun.deleteMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, id: Number(param(ctx, 'run')) },
+      remove(ctx.sql, 'GithubRun', {
+        tenant: ctx.tenant,
+        repo: repo.fullName,
+        id: Number(param(ctx, 'run')),
       })
       return { status: 204, body: null }
     }),
     repoRoute('PUT', '/actions/workflows/:workflow/enable', async (ctx, repo) => {
       const row = await findWorkflowRow(ctx, repo, param(ctx, 'workflow'))
       if (row === null) return fail(404, 'Not Found')
-      await ctx.db.githubWorkflow.updateMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, id: row.id },
-        data: { state: 'active' },
-      })
+      update(
+        ctx.sql,
+        'GithubWorkflow',
+        { state: 'active' },
+        { tenant: ctx.tenant, repo: repo.fullName, id: row.id },
+      )
       return { status: 204, body: null }
     }),
     repoRoute('PUT', '/actions/workflows/:workflow/disable', async (ctx, repo) => {
       const row = await findWorkflowRow(ctx, repo, param(ctx, 'workflow'))
       if (row === null) return fail(404, 'Not Found')
-      await ctx.db.githubWorkflow.updateMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, id: row.id },
-        data: { state: 'disabled_manually' },
-      })
+      update(
+        ctx.sql,
+        'GithubWorkflow',
+        { state: 'disabled_manually' },
+        { tenant: ctx.tenant, repo: repo.fullName, id: row.id },
+      )
       return { status: 204, body: null }
     }),
     repoRoute('POST', '/merge-upstream', (ctx) => ({
@@ -1203,16 +1247,13 @@ export function adminRoutes(): KitRoute<C>[] {
     repoRoute('PATCH', '/releases/:release', async (ctx, repo) => {
       const id = Number(param(ctx, 'release'))
       const body = jsonBodyOf(ctx)
-      const data: Record<string, unknown> = {}
+      const data: Record<string, Cell> = {}
       if (typeof body.name === 'string') data.name = body.name
       if (typeof body.body === 'string') data.body = body.body
       if (typeof body.draft === 'boolean') data.draft = body.draft
       if (typeof body.prerelease === 'boolean') data.prerelease = body.prerelease
       if (typeof body.tag_name === 'string') data.tagName = body.tag_name
-      await ctx.db.githubRelease.updateMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, id },
-        data,
-      })
+      update(ctx.sql, 'GithubRelease', data, { tenant: ctx.tenant, repo: repo.fullName, id })
       const tag = typeof body.tag_name === 'string' ? body.tag_name : ''
       return {
         status: 200,
@@ -1220,8 +1261,10 @@ export function adminRoutes(): KitRoute<C>[] {
       }
     }),
     repoRoute('DELETE', '/releases/:release', async (ctx, repo) => {
-      await ctx.db.githubRelease.deleteMany({
-        where: { ...scope(ctx.tenant), repo: repo.fullName, id: Number(param(ctx, 'release')) },
+      remove(ctx.sql, 'GithubRelease', {
+        tenant: ctx.tenant,
+        repo: repo.fullName,
+        id: Number(param(ctx, 'release')),
       })
       return { status: 204, body: null }
     }),

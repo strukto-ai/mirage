@@ -1605,7 +1605,7 @@ async function main(): Promise<void> {
     try {
       const at2 = home.endpoint
       check('the in-process fake seeds', (await reset(at2, seed)) === 200)
-      const db = home.runtime.pool.client(DEFAULT_RUN)
+      const db = home.runtime.pool.sql(DEFAULT_RUN)
       const T = DEFAULT_TENANT
 
       // Way two: a write handler that THROWS mutated in place and flushed
@@ -1680,7 +1680,7 @@ async function main(): Promise<void> {
     try {
       const base = diffed.endpoint
       check('the diff flush fake seeds', (await reset(base, seed)) === 200)
-      const db = diffed.runtime.pool.client(DEFAULT_RUN)
+      const db = diffed.runtime.pool.sql(DEFAULT_RUN)
       const T = DEFAULT_TENANT
       // Each table as a sorted set of rows with sorted keys: an ordered
       // table's order is its `seq` column, which is compared, and storage
@@ -1696,7 +1696,9 @@ async function main(): Promise<void> {
                 ? Buffer.from(v).toString('base64')
                 : v,
         )
-      const reader = db as unknown as Record<
+      // Read back through Prisma, not the store: what the store writes over
+      // node:sqlite is checked against what the client reads.
+      const reader = diffed.runtime.pool.client(DEFAULT_RUN) as unknown as Record<
         string,
         { findMany(args: { where: { tenant: string } }): Promise<Record<string, unknown>[]> }
       >
@@ -1789,7 +1791,7 @@ async function main(): Promise<void> {
     const bulk = await start(gwsFake, 0)
     try {
       await reset(bulk.endpoint, seed)
-      const db = bulk.runtime.pool.client(DEFAULT_RUN)
+      const db = bulk.runtime.pool.sql(DEFAULT_RUN)
       const st = await loadState(db, 't1')
       const file = createDriveItem(
         st,
@@ -1847,19 +1849,20 @@ async function main(): Promise<void> {
       )
       await bulk.runtime.reset({ tenants: ['t2'], fixture: 'v1' })
       await bulk.runtime.reset({ tenants: ['t1'], fixture: 'v1' })
+      const counted = bulk.runtime.pool.client(DEFAULT_RUN)
       check(
         'reset clears a large workbook through the shared kit',
-        (await db.sheetCell.count({ where: { tenant: 't1' } })) === 0,
+        (await counted.sheetCell.count({ where: { tenant: 't1' } })) === 0,
       )
       check(
         'reset retains another tenant',
-        (await db.meta.count({ where: { tenant: 't2' } })) === 1,
+        (await counted.meta.count({ where: { tenant: 't2' } })) === 1,
       )
     } finally {
       await bulk.close()
     }
 
-    // Way four: keyed by the run's CLIENT, not its name, so two servers in
+    // Way four: keyed by the run's connection, not its name, so two servers in
     // ONE process cannot reach each other's worlds. A map keyed by
     // `run|tenant` passes every other check here and fails this one.
     const a = await start(gwsFake, 0)

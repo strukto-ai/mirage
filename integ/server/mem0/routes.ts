@@ -12,19 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { route, tenantWhere } from '../kit/typescript/index.ts'
+import { all, one, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitHandler, KitRoute, Reply } from '../kit/typescript/index.ts'
-import { config } from './config.ts'
 import type { C } from './config.ts'
 import { DEFAULT_PAGE_SIZE } from './config.ts'
 import { asObject, floatOf, intOf, memoryJson, scoredJson } from './wire.ts'
 import type { MemoryRow } from './wire.ts'
 
+const MEMORY =
+  'SELECT tenant, id, userId, memory, metadataJson, createdAt, updatedAt, score, seq ' +
+  'FROM Mem0Memory'
+
 async function scoped(ctx: Ctx<C>, userId: string): Promise<MemoryRow[]> {
-  return (await ctx.db.mem0Memory.findMany({
-    where: { ...tenantWhere(ctx.tenant, config.tenantKind), userId },
-    orderBy: { seq: 'asc' },
-  })) as MemoryRow[]
+  return all<MemoryRow>(
+    ctx.sql,
+    `${MEMORY} WHERE tenant = ? AND userId = ? ORDER BY seq`,
+    ctx.tenant,
+    userId,
+  )
 }
 
 // The scope is the caller's own `filters.user_id`, matched against the column
@@ -81,9 +86,12 @@ async function searchMemories(ctx: Ctx<C>): Promise<Reply> {
 }
 
 async function getMemory(ctx: Ctx<C>): Promise<Reply> {
-  const row = (await ctx.db.mem0Memory.findFirst({
-    where: { ...tenantWhere(ctx.tenant, config.tenantKind), id: ctx.params.id ?? '' },
-  })) as MemoryRow | null
+  const row = one<MemoryRow>(
+    ctx.sql,
+    `${MEMORY} WHERE tenant = ? AND id = ?`,
+    ctx.tenant,
+    ctx.params.id ?? '',
+  )
   if (row === null) return { status: 404, body: { detail: 'Memory not found' } }
   return { status: 200, body: memoryJson(row) }
 }

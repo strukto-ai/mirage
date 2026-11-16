@@ -12,8 +12,57 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
+import { BYTES, all, bytes, exec, one } from '../kit/typescript/index.ts'
 import type { Clock } from '../kit/typescript/index.ts'
-import type { C } from './config.ts'
+
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/gcs.prisma declares. Rows come back with every column, as Prisma
+// returned them.
+type Db = DatabaseSync
+
+interface BucketRecord {
+  tenant: string
+  name: string
+  project: string
+  timeCreated: string
+  updated: string
+  seq: number
+}
+
+interface ObjectRecord {
+  tenant: string
+  bucket: string
+  name: string
+  content: Uint8Array
+  contentType: string
+  timeCreated: string
+  updated: string
+  generation: string
+  seq: number
+}
+
+interface UploadRecord {
+  tenant: string
+  id: string
+  bucket: string
+  name: string
+  contentType: string
+  content: Uint8Array
+  seq: number
+}
+
+const BUCKET = 'SELECT tenant, name, project, timeCreated, updated, seq FROM GcsBucket'
+const OBJECT =
+  'SELECT tenant, bucket, name, content, contentType, timeCreated, updated, generation, seq ' +
+  'FROM GcsObject'
+const UPLOAD = 'SELECT tenant, id, bucket, name, contentType, content, seq FROM GcsUpload'
+
+// Throws when nothing matched, as Prisma's update and delete did; every route
+// looks the row up first.
+function changeOne(db: Db, sql: string, ...params: (string | number | Uint8Array | null)[]): void {
+  if (exec(db, sql, ...params) === 0) throw new Error('gcs fake: no row matched')
+}
 
 // The vendor's generation is a 64-bit number rendered as a string, and
 // fake-gcs-server mints it from the wall clock in MICROseconds. The python
@@ -24,25 +73,72 @@ export function nextGeneration(clock: Clock): string {
   return String(clock.nowMs() * 1000)
 }
 
-export async function bucketOf(db: C, tenant: string, name: string) {
-  return db.gcsBucket.findUnique({ where: { tenant_name: { tenant, name } } })
+export async function bucketOf(db: Db, tenant: string, name: string): Promise<BucketRecord | null> {
+  return one<BucketRecord>(db, `${BUCKET} WHERE tenant = ? AND name = ?`, tenant, name)
 }
 
-export async function bucketsOf(db: C, tenant: string, prefix: string) {
-  const rows = await db.gcsBucket.findMany({ where: { tenant }, orderBy: { name: 'asc' } })
-  return prefix === '' ? rows : rows.filter((row) => row.name.startsWith(prefix))
+export async function bucketsOf(db: Db, tenant: string, prefix: string): Promise<BucketRecord[]> {
+  return all<BucketRecord>(
+    db,
+    `${BUCKET} WHERE tenant = ? AND substr(name, 1, length(?)) = ? ORDER BY name`,
+    tenant,
+    prefix,
+    prefix,
+  )
 }
 
-export async function objectOf(db: C, tenant: string, bucket: string, name: string) {
-  return db.gcsObject.findUnique({ where: { tenant_bucket_name: { tenant, bucket, name } } })
+export async function addBucket(
+  db: Db,
+  tenant: string,
+  name: string,
+  project: string,
+  now: string,
+): Promise<BucketRecord> {
+  exec(
+    db,
+    'INSERT INTO GcsBucket (tenant, name, project, timeCreated, updated, seq) ' +
+      'VALUES (?, ?, ?, ?, ?, (SELECT COUNT(*) FROM GcsBucket WHERE tenant = ?))',
+    tenant,
+    name,
+    project,
+    now,
+    now,
+    tenant,
+  )
+  const made = await bucketOf(db, tenant, name)
+  if (made === null) throw new Error(`gcs fake: bucket ${name} vanished as it was made`)
+  return made
 }
 
-export async function objectsOf(db: C, tenant: string, bucket: string, prefix: string) {
-  const rows = await db.gcsObject.findMany({
-    where: { tenant, bucket },
-    orderBy: { name: 'asc' },
-  })
-  return prefix === '' ? rows : rows.filter((row) => row.name.startsWith(prefix))
+export async function objectOf(
+  db: Db,
+  tenant: string,
+  bucket: string,
+  name: string,
+): Promise<ObjectRecord | null> {
+  return one<ObjectRecord>(
+    db,
+    `${OBJECT} WHERE tenant = ? AND bucket = ? AND name = ?`,
+    tenant,
+    bucket,
+    name,
+  )
+}
+
+export async function objectsOf(
+  db: Db,
+  tenant: string,
+  bucket: string,
+  prefix: string,
+): Promise<ObjectRecord[]> {
+  return all<ObjectRecord>(
+    db,
+    `${OBJECT} WHERE tenant = ? AND bucket = ? AND substr(name, 1, length(?)) = ? ORDER BY name`,
+    tenant,
+    bucket,
+    prefix,
+    prefix,
+  )
 }
 
 /**
@@ -55,51 +151,112 @@ export async function objectsOf(db: C, tenant: string, bucket: string, prefix: s
  * the extract job that produced it.
  */
 export async function putObject(
-  db: C,
+  db: Db,
   tenant: string,
   bucket: string,
   name: string,
   content: Buffer,
   contentType: string,
   clock: Clock,
-) {
+): Promise<ObjectRecord> {
   const prior = await objectOf(db, tenant, bucket, name)
   const now = clock.nowIso()
-  const row = {
+  exec(
+    db,
+    'INSERT INTO GcsObject ' +
+      '(tenant, bucket, name, content, contentType, timeCreated, updated, generation, seq) ' +
+      `VALUES (?, ?, ?, ${BYTES}, ?, ?, ?, ?, (SELECT COUNT(*) FROM GcsObject WHERE tenant = ?)) ` +
+      'ON CONFLICT (tenant, bucket, name) DO UPDATE SET content = excluded.content, ' +
+      'contentType = excluded.contentType, timeCreated = excluded.timeCreated, ' +
+      'updated = excluded.updated, generation = excluded.generation',
     tenant,
     bucket,
     name,
-    // A pooled Buffer is a view onto a shared ArrayBuffer, which Prisma's Bytes
-    // does not accept; copying is what makes the stored bytes this object's.
-    content: new Uint8Array(content),
+    ...bytes(content),
     contentType,
-    timeCreated: prior?.timeCreated ?? now,
-    updated: now,
-    generation: nextGeneration(clock),
-  }
-  return db.gcsObject.upsert({
-    where: { tenant_bucket_name: { tenant, bucket, name } },
-    create: { ...row, seq: await nextSeq(db, tenant) },
-    update: row,
-  })
+    prior?.timeCreated ?? now,
+    now,
+    nextGeneration(clock),
+    tenant,
+  )
+  const made = await objectOf(db, tenant, bucket, name)
+  if (made === null) throw new Error(`gcs fake: object ${name} vanished as it was written`)
+  return made
 }
 
-// Insertion order, which the kit's seeder writes and every listable table
-// carries. Reads here order by NAME rather than by seq, because that is what
-// the vendor's listing does and what the bq proxy's wildcard resolution
-// depends on; seq is kept so a fixture round-trips unchanged.
-async function nextSeq(db: C, tenant: string): Promise<number> {
-  return db.gcsObject.count({ where: { tenant } })
+export async function deleteObject(
+  db: Db,
+  tenant: string,
+  bucket: string,
+  name: string,
+): Promise<void> {
+  changeOne(
+    db,
+    'DELETE FROM GcsObject WHERE tenant = ? AND bucket = ? AND name = ?',
+    tenant,
+    bucket,
+    name,
+  )
 }
 
-export async function bucketIsEmpty(db: C, tenant: string, name: string): Promise<boolean> {
-  return (await db.gcsObject.count({ where: { tenant, bucket: name } })) === 0
+export async function bucketIsEmpty(db: Db, tenant: string, name: string): Promise<boolean> {
+  const found = one<{ n: number }>(
+    db,
+    'SELECT COUNT(*) AS n FROM GcsObject WHERE tenant = ? AND bucket = ?',
+    tenant,
+    name,
+  )
+  return (found?.n ?? 0) === 0
 }
 
 // Pending resumable sessions die WITH the bucket: a session that outlived it
 // accepted its remaining chunks and wrote an orphan object, or wrote into a
 // recreated bucket of the same name, which is another world's data.
-export async function deleteBucket(db: C, tenant: string, name: string): Promise<void> {
-  await db.gcsUpload.deleteMany({ where: { tenant, bucket: name } })
-  await db.gcsBucket.delete({ where: { tenant_name: { tenant, name } } })
+export async function deleteBucket(db: Db, tenant: string, name: string): Promise<void> {
+  exec(db, 'DELETE FROM GcsUpload WHERE tenant = ? AND bucket = ?', tenant, name)
+  changeOne(db, 'DELETE FROM GcsBucket WHERE tenant = ? AND name = ?', tenant, name)
+}
+
+export async function openUpload(
+  db: Db,
+  tenant: string,
+  id: string,
+  bucket: string,
+  name: string,
+  contentType: string,
+): Promise<void> {
+  exec(
+    db,
+    'INSERT INTO GcsUpload (tenant, id, bucket, name, contentType, content, seq) ' +
+      "VALUES (?, ?, ?, ?, ?, X'', (SELECT COUNT(*) FROM GcsUpload WHERE tenant = ?))",
+    tenant,
+    id,
+    bucket,
+    name,
+    contentType,
+    tenant,
+  )
+}
+
+export async function uploadOf(db: Db, tenant: string, id: string): Promise<UploadRecord | null> {
+  return one<UploadRecord>(db, `${UPLOAD} WHERE tenant = ? AND id = ?`, tenant, id)
+}
+
+export async function growUpload(
+  db: Db,
+  tenant: string,
+  id: string,
+  content: Buffer,
+): Promise<void> {
+  changeOne(
+    db,
+    `UPDATE GcsUpload SET content = ${BYTES} WHERE tenant = ? AND id = ?`,
+    ...bytes(content),
+    tenant,
+    id,
+  )
+}
+
+export async function dropUpload(db: Db, tenant: string, id: string): Promise<void> {
+  changeOne(db, 'DELETE FROM GcsUpload WHERE tenant = ? AND id = ?', tenant, id)
 }

@@ -346,6 +346,9 @@ async function answer<C extends MinimalClient>(
       tenant,
       runPrefix: pathRun === undefined ? '' : `/${RUN_PREFIX}/${pathRun}`,
       db: rt.pool.client(run),
+      get sql() {
+        return rt.pool.sql(run)
+      },
       clock: st.clock,
       minter: st.minter,
       headers,

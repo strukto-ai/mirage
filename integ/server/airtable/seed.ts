@@ -29,7 +29,7 @@ import {
   saveWorld,
   tableById,
 } from './store.ts'
-import type { World } from './store.ts'
+import type { Db, World } from './store.ts'
 import { Refusal, isId } from './wire.ts'
 import type { JsonObject } from './wire.ts'
 
@@ -211,6 +211,7 @@ export async function afterSeed(
   tenant: string,
   counts: Record<string, number>,
   extras: Record<string, JsonValue>,
+  sql: Db,
 ): Promise<void> {
   await applyMeta(db, tenant, counts, extras)
   const bases = await db.airtableBase.findMany({
@@ -220,10 +221,10 @@ export async function afterSeed(
   for (const b of bases) need(isId('app', b.id), `base id ${b.id} is not app + 14 characters`)
   const userIds = await checkAccounts(db, tenant, new Set(bases.map((b) => b.id)))
   for (const b of bases) {
-    const world = await loadWorld(db, tenant, b.id)
+    const world = await loadWorld(sql, tenant, b.id)
     if (world === null) continue
     convertBase(world)
-    await saveWorld(db, world)
+    await saveWorld(sql, world)
   }
   await checkComments(db, tenant, userIds)
 }

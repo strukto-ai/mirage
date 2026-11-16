@@ -63,8 +63,8 @@ export const linearFake: Fake<C> = {
   client: PrismaClient,
   dmmf: Prisma.dmmf as unknown as Dmmf,
   defaultTenants: ['default'],
-  afterSeed: async (db: C, tenant: string): Promise<void> => {
-    await afterSeed(db, tenant)
+  afterSeed: async (db, tenant, _counts, _extras, _fixtureRoot, _epoch, sql): Promise<void> => {
+    await afterSeed(db, tenant, sql)
   },
   routes: (): KitRoute<C>[] => [route('POST', '/graphql', graphql, { write: true })],
 }

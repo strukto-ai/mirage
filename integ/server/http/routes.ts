@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { route } from '../kit/typescript/index.ts'
+import { one, route } from '../kit/typescript/index.ts'
 import type { Ctx, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { TEXT } from './config.ts'
 import type { C } from './config.ts'
@@ -32,9 +32,13 @@ function text(status: number, body: string, extra: Record<string, string | strin
 // Every fixed response is one row, so one handler serves all of them and a new
 // path is a fixture line rather than another route.
 async function fixed(ctx: Ctx<C>): Promise<Reply> {
-  const row = (await ctx.db.httpResponse.findUnique({
-    where: { tenant_path: { tenant: ctx.tenant, path: ctx.url.pathname } },
-  })) as ResponseRow | null
+  const row = one<ResponseRow>(
+    ctx.sql,
+    'SELECT path, status, contentType, encoding, body FROM HttpResponse ' +
+      'WHERE tenant = ? AND path = ?',
+    ctx.tenant,
+    ctx.url.pathname,
+  )
   if (row === null) return text(404, 'not found\n')
   return {
     status: row.status,

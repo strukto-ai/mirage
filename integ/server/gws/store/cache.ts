@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { C } from './client.ts'
+import type { Db } from './client.ts'
 import type { Rows } from './save.ts'
 import type { GwsState } from './state.ts'
 
@@ -48,9 +48,9 @@ interface Cached {
   generation: number
 }
 
-const WORLDS = new WeakMap<C, Map<string, Cached>>()
+const WORLDS = new WeakMap<Db, Map<string, Cached>>()
 
-function entry(db: C, tenant: string): Cached {
+function entry(db: Db, tenant: string): Cached {
   let live = WORLDS.get(db)
   if (live === undefined) {
     live = new Map()
@@ -68,7 +68,7 @@ function entry(db: C, tenant: string): Cached {
 // ordering IS the guard: a caller that read the generation after its load
 // would compile and silently reinstall a stale world.
 export async function withState(
-  db: C,
+  db: Db,
   tenant: string,
   load: () => Promise<GwsState>,
 ): Promise<GwsState> {
@@ -80,7 +80,7 @@ export async function withState(
   return world
 }
 
-export function installFlushed(db: C, tenant: string, st: GwsState, rows: Rows): void {
+export function installFlushed(db: Db, tenant: string, st: GwsState, rows: Rows): void {
   const row = entry(db, tenant)
   row.world = st
   row.flushed = rows
@@ -89,7 +89,7 @@ export function installFlushed(db: C, tenant: string, st: GwsState, rows: Rows):
 
 // No entry means no load can be in flight for it: `withState` registers one
 // synchronously, before the await it races against.
-export function dropState(db: C, tenant: string): void {
+export function dropState(db: Db, tenant: string): void {
   const row = WORLDS.get(db)?.get(tenant)
   if (row === undefined) return
   row.world = undefined
@@ -97,16 +97,16 @@ export function dropState(db: C, tenant: string): void {
   row.generation += 1
 }
 
-export function dropTenants(db: C, tenants: readonly string[]): void {
+export function dropTenants(db: Db, tenants: readonly string[]): void {
   for (const tenant of tenants) dropState(db, tenant)
 }
 
-export function flushedRows(db: C, tenant: string): Rows | undefined {
+export function flushedRows(db: Db, tenant: string): Rows | undefined {
   const row = WORLDS.get(db)?.get(tenant)
   return row?.world === undefined ? undefined : row.flushed
 }
 
 // The selftest's window onto what a request would be handed. No route reads it.
-export function cachedState(db: C, tenant: string): GwsState | undefined {
+export function cachedState(db: Db, tenant: string): GwsState | undefined {
   return WORLDS.get(db)?.get(tenant)?.world
 }

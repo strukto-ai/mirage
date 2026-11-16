@@ -77,7 +77,7 @@ export function startSmtpServer(
       // An account with no mailboxes in this run is refused rather than
       // provisioned, for LOGIN's reason: a typo'd password must not become
       // a fresh empty world that accepts every send and delivers none.
-      void mailboxesOf(runtime.pool.client(run), tenant)
+      void mailboxesOf(runtime.pool.sql(run), tenant)
         .then((boxes) => {
           if (boxes.length === 0) {
             callback(new Error(`smtp: no such account in this run: ${user}`))
@@ -112,7 +112,7 @@ export function startSmtpServer(
           .map((one) => one.local)
         void queue
           .enqueue(auth.run, async () => {
-            const db = runtime.pool.client(auth.run)
+            const db = runtime.pool.sql(auth.run)
             for (const recipient of to) {
               // Delivery is by ACCOUNT, and the account is the tenant column,
               // so a message to an address this run never seeded is dropped

@@ -71,7 +71,7 @@ function headerOf(ctx: Ctx<C>, name: string): string | undefined {
 
 async function readFile(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  const row = await fileAt(ctx.db, ctx.tenant, norm(remote))
+  const row = await fileAt(ctx.sql, ctx.tenant, norm(remote))
   if (row === null) return notFound(remote)
   const data = bytesOf(row)
   const headers: Record<string, string> = { 'Last-Modified': httpDate(row.lastModified) }
@@ -88,7 +88,7 @@ async function readFile(ctx: Ctx<C>): Promise<Reply> {
 // have answered 206 instead. The kit suppresses the body and keeps the length.
 async function headFile(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  const row = await fileAt(ctx.db, ctx.tenant, norm(remote))
+  const row = await fileAt(ctx.sql, ctx.tenant, norm(remote))
   if (row === null) return notFound(remote)
   return {
     status: 200,
@@ -99,14 +99,14 @@ async function headFile(ctx: Ctx<C>): Promise<Reply> {
 
 async function writeFile(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  await putFile(ctx.db, ctx.tenant, remote, ctx.body, ctx.clock.nowMs())
+  await putFile(ctx.sql, ctx.tenant, remote, ctx.body, ctx.clock.nowMs())
   return { status: 200, body: { path: norm(remote) } }
 }
 
 async function removeFile(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  if ((await fileAt(ctx.db, ctx.tenant, norm(remote))) === null) return notFound(remote)
-  await deleteNode(ctx.db, ctx.tenant, remote)
+  if ((await fileAt(ctx.sql, ctx.tenant, norm(remote))) === null) return notFound(remote)
+  await deleteNode(ctx.sql, ctx.tenant, remote)
   return { status: 200, body: {} }
 }
 
@@ -129,27 +129,27 @@ function entryJson(row: NodeRow): Record<string, string | number | boolean> {
 
 async function listDir(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  if (!(await isDir(ctx.db, ctx.tenant, norm(remote)))) return notFound(remote)
-  const rows = await childrenOf(ctx.db, ctx.tenant, remote)
+  if (!(await isDir(ctx.sql, ctx.tenant, norm(remote)))) return notFound(remote)
+  const rows = await childrenOf(ctx.sql, ctx.tenant, remote)
   return { status: 200, body: { contents: rows.map(entryJson), next_page_token: '' } }
 }
 
 async function headDir(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  if (!(await isDir(ctx.db, ctx.tenant, norm(remote)))) return notFound(remote)
+  if (!(await isDir(ctx.sql, ctx.tenant, norm(remote)))) return notFound(remote)
   return { status: 200 }
 }
 
 async function createDir(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  await makeDir(ctx.db, ctx.tenant, remote)
+  await makeDir(ctx.sql, ctx.tenant, remote)
   return { status: 200, body: { path: norm(remote) } }
 }
 
 async function removeDir(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
-  if (!(await isDir(ctx.db, ctx.tenant, norm(remote)))) return notFound(remote)
-  await deleteTree(ctx.db, ctx.tenant, remote)
+  if (!(await isDir(ctx.sql, ctx.tenant, norm(remote)))) return notFound(remote)
+  await deleteTree(ctx.sql, ctx.tenant, remote)
   return { status: 200, body: {} }
 }
 

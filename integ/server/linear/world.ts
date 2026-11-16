@@ -12,11 +12,65 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { tenantWhere } from '../kit/typescript/tenant.ts'
-import { config } from './config.ts'
-import type { C } from './config.ts'
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+import { all, exec, one } from '../kit/typescript/sql.ts'
 import type { Refs } from './nodes.ts'
-import type { Team } from '../../generated/linear/index.js'
+import type {
+  Cycle,
+  Label,
+  Project,
+  Team,
+  User,
+  WorkflowState,
+} from '../../generated/linear/index.js'
+
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/linear.prisma declares; rows keep Prisma's generated shapes. Every
+// read keeps the WHERE and ORDER BY Prisma sent, so rows that tie on seq come
+// back in the order they did.
+export type Db = DatabaseSync
+
+export const TEAM =
+  'SELECT tenant, id, "key", name, description, timezone, updatedAt, seq FROM Team'
+export const STATE = 'SELECT tenant, id, teamId, name, type, seq FROM WorkflowState'
+export const LABEL = 'SELECT tenant, id, teamId, name, color, seq FROM Label'
+const USER =
+  'SELECT tenant, id, teamId, name, displayName, email, active, admin, url, updatedAt, seq ' +
+  'FROM User'
+export const PROJECT =
+  'SELECT tenant, id, teamId, name, description, statusType, url, updatedAt, leadId, seq ' +
+  'FROM Project'
+export const CYCLE =
+  'SELECT tenant, id, teamId, name, number, startsAt, endsAt, updatedAt, url, seq FROM Cycle'
+export const DOCUMENT =
+  'SELECT tenant, id, teamId, title, content, url, createdAt, updatedAt, projectId, creatorId, ' +
+  'seq FROM Document'
+export const ISSUE =
+  'SELECT tenant, id, teamId, identifier, number, title, description, priority, url, createdAt, ' +
+  'updatedAt, stateId, projectId, cycleId, assigneeId, creatorId, labelIds, raw, seq FROM Issue'
+export const COMMENT =
+  'SELECT tenant, id, issueId, body, raw, url, createdAt, updatedAt, userId, seq FROM Comment'
+export const RELATION =
+  'SELECT tenant, id, issueId, relatedIssueId, type, previousStateId, seq FROM IssueRelation'
+
+type UserRecord = Omit<User, 'active' | 'admin'> & { active: number | null; admin: number | null }
+
+function toUser(row: UserRecord): User {
+  return {
+    ...row,
+    active: row.active === null ? null : row.active === 1,
+    admin: row.admin === null ? null : row.admin === 1,
+  }
+}
+
+export function usersWhere(db: Db, where: string, ...params: SQLInputValue[]): User[] {
+  return all<UserRecord>(db, `${USER} WHERE ${where}`, ...params).map(toUser)
+}
+
+// Throws when nothing matched, as Prisma's update and delete did.
+export function changeOne(db: Db, sql: string, ...params: SQLInputValue[]): void {
+  if (exec(db, sql, ...params) === 0) throw new Error('linear fake: no row matched')
+}
 
 export interface TeamScoped {
   teamId: string
@@ -42,11 +96,8 @@ export function indexById<T extends { id: string }>(rows: T[]): Map<string, T> {
   return out
 }
 
-export async function loadTeams(db: C, tenant: string): Promise<Team[]> {
-  return db.team.findMany({
-    where: tenantWhere(tenant, config.tenantKind),
-    orderBy: { seq: 'asc' },
-  })
+export async function loadTeams(db: Db, tenant: string): Promise<Team[]> {
+  return all<Team>(db, `${TEAM} WHERE tenant = ? ORDER BY seq ASC`, tenant)
 }
 
 // The next GLOBAL issue ordinal in the tenant. The seeder stamps seq per
@@ -54,12 +105,13 @@ export async function loadTeams(db: C, tenant: string): Promise<Team[]> {
 // MAX + 1 from there; taking it per team would file a new issue among its own
 // team's rows instead of at the end of the world, which is the order
 // IssueSearch pages in.
-export async function nextIssueSeq(db: C, tenant: string): Promise<number> {
-  const top = await db.issue.aggregate({
-    where: tenantWhere(tenant, config.tenantKind),
-    _max: { seq: true },
-  })
-  return (top._max.seq ?? -1) + 1
+export async function nextIssueSeq(db: Db, tenant: string): Promise<number> {
+  const top = one<{ n: number | null }>(
+    db,
+    'SELECT MAX(seq) AS n FROM Issue WHERE tenant = ?',
+    tenant,
+  )
+  return (top?.n ?? -1) + 1
 }
 
 export function teamSeqOf(teams: Team[]): Map<string, number> {
@@ -71,18 +123,15 @@ export function teamSeqOf(teams: Team[]): Map<string, number> {
 // One read of the five global tables per request. The data is small and the
 // alternative is a findUnique per rendered reference, which is the N+1 the
 // old fake avoided by holding everything in dicts.
-export async function loadRefs(db: C, tenant: string): Promise<Refs> {
-  const where = tenantWhere(tenant, config.tenantKind)
-  const order = { orderBy: { seq: 'asc' } } as const
+export async function loadRefs(db: Db, tenant: string): Promise<Refs> {
   const teams = await loadTeams(db, tenant)
   const teamSeq = teamSeqOf(teams)
-  const [states, projects, cycles, users, labels] = await Promise.all([
-    db.workflowState.findMany({ where, ...order }),
-    db.project.findMany({ where, ...order }),
-    db.cycle.findMany({ where, ...order }),
-    db.user.findMany({ where, ...order }),
-    db.label.findMany({ where, ...order }),
-  ])
+  const tenantOrder = 'WHERE tenant = ? ORDER BY seq ASC'
+  const states = all<WorkflowState>(db, `${STATE} ${tenantOrder}`, tenant)
+  const projects = all<Project>(db, `${PROJECT} ${tenantOrder}`, tenant)
+  const cycles = all<Cycle>(db, `${CYCLE} ${tenantOrder}`, tenant)
+  const users = usersWhere(db, 'tenant = ? ORDER BY seq ASC', tenant)
+  const labels = all<Label>(db, `${LABEL} ${tenantOrder}`, tenant)
   return {
     teams: indexById(teams),
     states: indexById(byTeamThenSeq(states, teamSeq)),
@@ -96,11 +145,12 @@ export async function loadRefs(db: C, tenant: string): Promise<Refs> {
 // issueId -> label ids in the order the issue holds them, duplicates kept.
 // The surrogate pk on the link table is what allows the same label twice,
 // and seq is what keeps the pair in the order it was written.
-export async function loadLabelLinks(db: C, tenant: string): Promise<Map<string, string[]>> {
-  const rows = await db.issueLabel.findMany({
-    where: tenantWhere(tenant, config.tenantKind),
-    orderBy: { seq: 'asc' },
-  })
+export async function loadLabelLinks(db: Db, tenant: string): Promise<Map<string, string[]>> {
+  const rows = all<{ issueId: string; labelId: string }>(
+    db,
+    'SELECT issueId, labelId FROM IssueLabel WHERE tenant = ? ORDER BY seq ASC',
+    tenant,
+  )
   const out = new Map<string, string[]>()
   for (const row of rows) {
     const live = out.get(row.issueId)
@@ -115,13 +165,20 @@ export function labelsOf(links: Map<string, string[]>, issueId: string): string[
 }
 
 export async function writeLabelLinks(
-  db: C,
+  db: Db,
   tenant: string,
   issueId: string,
   labelIds: string[],
 ): Promise<void> {
-  await db.issueLabel.deleteMany({ where: { tenant, issueId } })
+  exec(db, 'DELETE FROM IssueLabel WHERE tenant = ? AND issueId = ?', tenant, issueId)
   for (const [seq, labelId] of labelIds.entries()) {
-    await db.issueLabel.create({ data: { tenant, issueId, labelId, seq } })
+    exec(
+      db,
+      'INSERT INTO IssueLabel (tenant, issueId, labelId, seq) VALUES (?, ?, ?, ?)',
+      tenant,
+      issueId,
+      labelId,
+      seq,
+    )
   }
 }

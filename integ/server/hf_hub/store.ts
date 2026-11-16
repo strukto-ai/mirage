@@ -12,10 +12,42 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabaseSync } from 'node:sqlite'
+import { BYTES, all, bytes, exec, one } from '../kit/typescript/index.ts'
 import type { Minter } from '../kit/typescript/index.ts'
-import { DEFAULT_REVISION, type C } from './config.ts'
+import { DEFAULT_REVISION } from './config.ts'
 import { gitOid, repoKey, type Blob, type Ref, type Repo } from './wire.ts'
 import { rstripSlash } from '../kit/typescript/index.ts'
+
+// The run's file over node:sqlite (kit sql.ts), on the tables
+// prisma/hf_hub.prisma declares. Rows come back with every column, as Prisma
+// returned them.
+export type Db = DatabaseSync
+
+const REPO =
+  'SELECT tenant, kind, namespace, name, private, sdk, createdAt, sourceDir, downloads, likes, ' +
+  'trendingScore, gated, seq FROM HfRepo'
+const REF = 'SELECT tenant, repo, refType, name, sha, message FROM HfRef'
+const BLOB =
+  'SELECT tenant, repo, sha, path, content, oid, lfsOid, pointerSize, lastCommit, lastModified, ' +
+  'seq FROM HfBlob'
+
+interface CommitRow {
+  sha: string
+  message: string
+  description: string
+  createdAt: string
+}
+
+function toRepo(row: Omit<Repo, 'private'> & { private: number }): Repo {
+  return { ...row, private: row.private === 1 }
+}
+
+// Throws when nothing matched, as Prisma's delete did; every route looks the
+// row up first.
+function changeOne(db: Db, sql: string, ...params: string[]): void {
+  if (exec(db, sql, ...params) === 0) throw new Error('hf_hub fake: no row matched')
+}
 
 /**
  * A commit sha, minted rather than hashed.
@@ -31,23 +63,121 @@ export function mintSha(minter: Minter): string {
 }
 
 export async function repoOf(
-  db: C,
+  db: Db,
   tenant: string,
   kind: string,
   namespace: string,
   name: string,
 ): Promise<Repo | null> {
-  return db.hfRepo.findUnique({
-    where: { tenant_kind_namespace_name: { tenant, kind, namespace, name } },
-  })
+  const row = one<Omit<Repo, 'private'> & { private: number }>(
+    db,
+    `${REPO} WHERE tenant = ? AND kind = ? AND namespace = ? AND name = ?`,
+    tenant,
+    kind,
+    namespace,
+    name,
+  )
+  return row === null ? null : toRepo(row)
 }
 
-export async function reposOfKind(db: C, tenant: string, kind: string): Promise<Repo[]> {
-  return db.hfRepo.findMany({ where: { tenant, kind }, orderBy: { seq: 'asc' } })
+export async function reposOfKind(db: Db, tenant: string, kind: string): Promise<Repo[]> {
+  return all<Omit<Repo, 'private'> & { private: number }>(
+    db,
+    `${REPO} WHERE tenant = ? AND kind = ? ORDER BY seq`,
+    tenant,
+    kind,
+  ).map(toRepo)
 }
 
-export async function refsOf(db: C, tenant: string, repo: string): Promise<Ref[]> {
-  return db.hfRef.findMany({ where: { tenant, repo }, orderBy: { name: 'asc' } })
+export async function refsOf(db: Db, tenant: string, repo: string): Promise<Ref[]> {
+  return all<Ref>(db, `${REF} WHERE tenant = ? AND repo = ? ORDER BY name`, tenant, repo)
+}
+
+export async function refAt(
+  db: Db,
+  tenant: string,
+  repo: string,
+  refType: string,
+  name: string,
+): Promise<Ref | null> {
+  return one<Ref>(
+    db,
+    `${REF} WHERE tenant = ? AND repo = ? AND refType = ? AND name = ?`,
+    tenant,
+    repo,
+    refType,
+    name,
+  )
+}
+
+export async function addTag(
+  db: Db,
+  tenant: string,
+  repo: string,
+  name: string,
+  sha: string,
+  message: string,
+): Promise<void> {
+  exec(
+    db,
+    'INSERT INTO HfRef (tenant, repo, refType, name, sha, message) VALUES (?, ?, ?, ?, ?, ?)',
+    tenant,
+    repo,
+    'tag',
+    name,
+    sha,
+    message,
+  )
+}
+
+export async function deleteRef(
+  db: Db,
+  tenant: string,
+  repo: string,
+  refType: string,
+  name: string,
+): Promise<void> {
+  changeOne(
+    db,
+    'DELETE FROM HfRef WHERE tenant = ? AND repo = ? AND refType = ? AND name = ?',
+    tenant,
+    repo,
+    refType,
+    name,
+  )
+}
+
+// Children first, then the repository row, which a missing row makes throw.
+export async function deleteRepo(
+  db: Db,
+  tenant: string,
+  kind: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  const key = repoKey(kind, namespace, name)
+  exec(db, 'DELETE FROM HfBlob WHERE tenant = ? AND repo = ?', tenant, key)
+  exec(db, 'DELETE FROM HfRef WHERE tenant = ? AND repo = ?', tenant, key)
+  exec(db, 'DELETE FROM HfCommit WHERE tenant = ? AND repo = ?', tenant, key)
+  changeOne(
+    db,
+    'DELETE FROM HfRepo WHERE tenant = ? AND kind = ? AND namespace = ? AND name = ?',
+    tenant,
+    kind,
+    namespace,
+    name,
+  )
+}
+
+// Newest first.
+export async function commitsOf(db: Db, tenant: string, repo: string): Promise<CommitRow[]> {
+  return all<CommitRow>(
+    db,
+    'SELECT sha, message, description, createdAt FROM HfCommit WHERE tenant = ? AND repo = ? ' +
+      'ORDER BY seq DESC',
+    tenant,
+    repo,
+  )
 }
 
 /**
@@ -58,24 +188,26 @@ export async function refsOf(db: C, tenant: string, repo: string): Promise<Ref[]
  * must report as RevisionNotFound rather than as an empty tree.
  */
 export async function resolveRevision(
-  db: C,
+  db: Db,
   tenant: string,
   repo: string,
   revision: string,
 ): Promise<string | null> {
   for (const refType of ['branch', 'tag']) {
-    const ref = await db.hfRef.findUnique({
-      where: { tenant_repo_refType_name: { tenant, repo, refType, name: revision } },
-    })
+    const ref = await refAt(db, tenant, repo, refType, revision)
     if (ref !== null) return ref.sha
   }
-  const commit = await db.hfCommit.findUnique({
-    where: { tenant_repo_sha: { tenant, repo, sha: revision } },
-  })
+  const commit = one<{ sha: string }>(
+    db,
+    'SELECT sha FROM HfCommit WHERE tenant = ? AND repo = ? AND sha = ?',
+    tenant,
+    repo,
+    revision,
+  )
   return commit === null ? null : commit.sha
 }
 
-export async function headSha(db: C, tenant: string, repo: string): Promise<string> {
+export async function headSha(db: Db, tenant: string, repo: string): Promise<string> {
   return (await resolveRevision(db, tenant, repo, DEFAULT_REVISION)) ?? ''
 }
 
@@ -88,32 +220,51 @@ export async function headSha(db: C, tenant: string, repo: string): Promise<stri
  * anything sorting after it, or only deleted something.
  */
 export async function commitTime(
-  db: C,
+  db: Db,
   tenant: string,
   repo: string,
   sha: string,
 ): Promise<string> {
   if (sha === '') return ''
-  const commit = await db.hfCommit.findUnique({ where: { tenant_repo_sha: { tenant, repo, sha } } })
+  const commit = one<{ createdAt: string }>(
+    db,
+    'SELECT createdAt FROM HfCommit WHERE tenant = ? AND repo = ? AND sha = ?',
+    tenant,
+    repo,
+    sha,
+  )
   return commit === null ? '' : commit.createdAt
 }
 
-export async function blobsAt(db: C, tenant: string, repo: string, sha: string): Promise<Blob[]> {
-  return db.hfBlob.findMany({ where: { tenant, repo, sha }, orderBy: { path: 'asc' } })
+export async function blobsAt(db: Db, tenant: string, repo: string, sha: string): Promise<Blob[]> {
+  return all<Blob>(
+    db,
+    `${BLOB} WHERE tenant = ? AND repo = ? AND sha = ? ORDER BY path`,
+    tenant,
+    repo,
+    sha,
+  )
 }
 
 export async function blobAt(
-  db: C,
+  db: Db,
   tenant: string,
   repo: string,
   sha: string,
   path: string,
 ): Promise<Blob | null> {
-  return db.hfBlob.findUnique({ where: { tenant_repo_sha_path: { tenant, repo, sha, path } } })
+  return one<Blob>(
+    db,
+    `${BLOB} WHERE tenant = ? AND repo = ? AND sha = ? AND path = ?`,
+    tenant,
+    repo,
+    sha,
+    path,
+  )
 }
 
 export async function createRepo(
-  db: C,
+  db: Db,
   tenant: string,
   kind: string,
   namespace: string,
@@ -121,41 +272,44 @@ export async function createRepo(
   options: { private?: boolean; sdk?: string | null; now: string },
   minter: Minter,
 ): Promise<Repo> {
-  const repo = await db.hfRepo.create({
-    data: {
-      tenant,
-      kind,
-      namespace,
-      name,
-      private: options.private ?? false,
-      sdk: options.sdk ?? null,
-      createdAt: options.now,
-      seq: minter.next('repo'),
-    },
-  })
+  exec(
+    db,
+    'INSERT INTO HfRepo (tenant, kind, namespace, name, private, sdk, createdAt, seq) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    tenant,
+    kind,
+    namespace,
+    name,
+    options.private === true ? 1 : 0,
+    options.sdk ?? null,
+    options.now,
+    minter.next('repo'),
+  )
+  const repo = await repoOf(db, tenant, kind, namespace, name)
+  if (repo === null) throw new Error(`hf_hub fake: repo ${name} vanished as it was made`)
   // A new repository is not empty on the Hub: it carries an initial commit
   // and a `main` pointing at it, which is what makes an upload to a
   // just-created repo a second commit rather than the first.
   const sha = mintSha(minter)
-  await db.hfCommit.create({
-    data: {
-      tenant,
-      repo: repoKey(kind, namespace, name),
-      sha,
-      message: 'initial commit',
-      createdAt: options.now,
-      seq: minter.next('commit_seq'),
-    },
-  })
-  await db.hfRef.create({
-    data: {
-      tenant,
-      repo: repoKey(kind, namespace, name),
-      refType: 'branch',
-      name: DEFAULT_REVISION,
-      sha,
-    },
-  })
+  exec(
+    db,
+    'INSERT INTO HfCommit (tenant, repo, sha, message, createdAt, seq) VALUES (?, ?, ?, ?, ?, ?)',
+    tenant,
+    repoKey(kind, namespace, name),
+    sha,
+    'initial commit',
+    options.now,
+    minter.next('commit_seq'),
+  )
+  exec(
+    db,
+    'INSERT INTO HfRef (tenant, repo, refType, name, sha) VALUES (?, ?, ?, ?, ?)',
+    tenant,
+    repoKey(kind, namespace, name),
+    'branch',
+    DEFAULT_REVISION,
+    sha,
+  )
   return repo
 }
 
@@ -175,7 +329,7 @@ export interface Change {
  * fixtures are a few dozen small files and wrong for anything larger.
  */
 export async function commitChanges(
-  db: C,
+  db: Db,
   tenant: string,
   repo: string,
   branch: string,
@@ -187,18 +341,19 @@ export async function commitChanges(
 ): Promise<string> {
   const parent = (await resolveRevision(db, tenant, repo, branch)) ?? ''
   const sha = mintSha(minter)
-  await db.hfCommit.create({
-    data: {
-      tenant,
-      repo,
-      sha,
-      message,
-      description,
-      createdAt: now,
-      parent,
-      seq: minter.next('commit_seq'),
-    },
-  })
+  exec(
+    db,
+    'INSERT INTO HfCommit (tenant, repo, sha, message, description, createdAt, parent, seq) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    tenant,
+    repo,
+    sha,
+    message,
+    description,
+    now,
+    parent,
+    minter.next('commit_seq'),
+  )
   const carried = new Map<string, Blob>()
   if (parent !== '') {
     for (const blob of await blobsAt(db, tenant, repo, parent)) carried.set(blob.path, blob)
@@ -231,26 +386,32 @@ export async function commitChanges(
     })
   }
   for (const blob of [...carried.values()].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-    await db.hfBlob.create({
-      data: {
-        tenant,
-        repo,
-        sha,
-        path: blob.path,
-        content: Buffer.from(blob.content),
-        oid: blob.oid,
-        lfsOid: blob.lfsOid,
-        pointerSize: blob.pointerSize,
-        lastCommit: blob.lastCommit,
-        lastModified: blob.lastModified,
-        seq: blob.seq,
-      },
-    })
+    exec(
+      db,
+      'INSERT INTO HfBlob (tenant, repo, sha, path, content, oid, lfsOid, pointerSize, ' +
+        `lastCommit, lastModified, seq) VALUES (?, ?, ?, ?, ${BYTES}, ?, ?, ?, ?, ?, ?)`,
+      tenant,
+      repo,
+      sha,
+      blob.path,
+      ...bytes(blob.content),
+      blob.oid,
+      blob.lfsOid,
+      blob.pointerSize,
+      blob.lastCommit,
+      blob.lastModified,
+      blob.seq,
+    )
   }
-  await db.hfRef.upsert({
-    where: { tenant_repo_refType_name: { tenant, repo, refType: 'branch', name: branch } },
-    update: { sha },
-    create: { tenant, repo, refType: 'branch', name: branch, sha },
-  })
+  exec(
+    db,
+    'INSERT INTO HfRef (tenant, repo, refType, name, sha) VALUES (?, ?, ?, ?, ?) ' +
+      'ON CONFLICT (tenant, repo, refType, name) DO UPDATE SET sha = excluded.sha',
+    tenant,
+    repo,
+    'branch',
+    branch,
+    sha,
+  )
   return sha
 }

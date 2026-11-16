@@ -28,6 +28,7 @@ import {
   eventsAfter,
   folderItem,
   itemById,
+  moveItem,
   recordEvent,
   removeTree,
   streamHead,
@@ -93,18 +94,18 @@ function token(ctx: Ctx<C>): Reply {
 async function listItems(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const folder = await folderItem(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     ctx.params.folder_id ?? '',
     ctx.clock.nowIso(false),
   )
   if (folder === null) return notFound('folder')
-  const kids = await children(ctx.db, ctx.tenant, folder.id)
+  const kids = await children(ctx.sql, ctx.tenant, folder.id)
   const offset = intQuery(ctx, 'offset', 0)
   const limit = intQuery(ctx, 'limit', DEFAULT_LIMIT)
   const page = kids.slice(offset, offset + limit)
   const placement = page.some((item) => item.type === 'file')
-    ? pathCollection([...(await ancestors(ctx.db, ctx.tenant, folder)), folder])
+    ? pathCollection([...(await ancestors(ctx.sql, ctx.tenant, folder)), folder])
     : null
   return {
     status: 200,
@@ -124,7 +125,7 @@ async function listItems(ctx: Ctx<C>): Promise<Reply> {
 async function folderInfo(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const item = await folderItem(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     ctx.params.folder_id ?? '',
     ctx.clock.nowIso(false),
@@ -133,7 +134,7 @@ async function folderInfo(ctx: Ctx<C>): Promise<Reply> {
   // The vendor places a folder with its live ancestry and status, as it does
   // a file, which is what a check by id confirms before a change.
   const out = obj(render(item))
-  out.path_collection = pathCollection(await ancestors(ctx.db, ctx.tenant, item))
+  out.path_collection = pathCollection(await ancestors(ctx.sql, ctx.tenant, item))
   out.item_status = 'active'
   return { status: 200, body: out }
 }
@@ -142,7 +143,7 @@ async function folderInfo(ctx: Ctx<C>): Promise<Reply> {
 // account's amount.
 async function me(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const items = await allItems(ctx.db, ctx.tenant)
+  const items = await allItems(ctx.sql, ctx.tenant)
   const used = items.reduce((n, item) => n + (item.content?.length ?? 0), 0)
   return {
     status: 200,
@@ -152,12 +153,12 @@ async function me(ctx: Ctx<C>): Promise<Reply> {
 
 async function fileInfo(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
+  const item = await typedItem(ctx.sql, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
   // The vendor places a file with its live ancestry and status, which is
   // what a fresh check by id confirms before trusting the sha1 beside them.
   const out = obj(render(item))
-  out.path_collection = pathCollection(await ancestors(ctx.db, ctx.tenant, item))
+  out.path_collection = pathCollection(await ancestors(ctx.sql, ctx.tenant, item))
   out.item_status = 'active'
   if ((ctx.query.get('fields') ?? '').includes('representations')) {
     // Real Box transcodes many formats server-side; the fake advertises
@@ -185,7 +186,7 @@ async function fileInfo(ctx: Ctx<C>): Promise<Reply> {
 // caller actually reached, which is what its redirect has to point back at.
 async function download(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
+  const item = await typedItem(ctx.sql, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
   return { status: 302, headers: { Location: `${ctx.url.origin}/dl/${item.id}` } }
 }
@@ -193,13 +194,13 @@ async function download(ctx: Ctx<C>): Promise<Reply> {
 // The redirect target. Unauthenticated, like the vendor's signed download
 // host, so the tenant rides the query string the redirect carried.
 async function dl(ctx: Ctx<C>): Promise<Reply> {
-  const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
+  const item = await typedItem(ctx.sql, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
   return rangeReply(ctx.headers, item.content ?? new Uint8Array(0))
 }
 
 async function repText(ctx: Ctx<C>): Promise<Reply> {
-  const item = await itemById(ctx.db, ctx.tenant, ctx.params.file_id ?? '')
+  const item = await itemById(ctx.sql, ctx.tenant, ctx.params.file_id ?? '')
   if (item === null || item.extractedText === null) return notFound('representation')
   return {
     status: 200,
@@ -216,10 +217,10 @@ interface Placement {
 // Every create endpoint refuses the same three ways, in the same order, so the
 // checks live here rather than three times over.
 async function placement(ctx: Ctx<C>, parentId: string, name: string): Promise<Placement | Reply> {
-  const parent = await folderItem(ctx.db, ctx.tenant, parentId, ctx.clock.nowIso(false))
+  const parent = await folderItem(ctx.sql, ctx.tenant, parentId, ctx.clock.nowIso(false))
   if (parent === null) return notFound('parent folder')
   if (name === '') return boxError(400, 'bad_request', 'name is required')
-  const taken = await childByName(ctx.db, ctx.tenant, parentId, name)
+  const taken = await childByName(ctx.sql, ctx.tenant, parentId, name)
   if (taken !== null) return nameInUse(taken)
   return { parentId, name }
 }
@@ -234,14 +235,14 @@ async function createFolder(ctx: Ctx<C>): Promise<Reply> {
   const at = await placement(ctx, str(obj(body.parent).id), str(body.name))
   if (isReply(at)) return at
   const item = await addFolder(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     at.parentId,
     at.name,
     ctx.clock.nowIso(false),
     ctx.minter,
   )
-  await recordEvent(ctx.db, ctx.tenant, 'ITEM_CREATE', item, ctx.clock.lastIso(false))
+  await recordEvent(ctx.sql, ctx.tenant, 'ITEM_CREATE', item, ctx.clock.lastIso(false))
   return { status: 201, body: render(item) }
 }
 
@@ -251,7 +252,7 @@ async function createWebLink(ctx: Ctx<C>): Promise<Reply> {
   const at = await placement(ctx, str(obj(body.parent).id), str(body.name))
   if (isReply(at)) return at
   const item = await addWebLink(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     at.parentId,
     at.name,
@@ -259,7 +260,7 @@ async function createWebLink(ctx: Ctx<C>): Promise<Reply> {
     ctx.clock.nowIso(false),
     ctx.minter,
   )
-  await recordEvent(ctx.db, ctx.tenant, 'ITEM_CREATE', item, ctx.clock.lastIso(false))
+  await recordEvent(ctx.sql, ctx.tenant, 'ITEM_CREATE', item, ctx.clock.lastIso(false))
   return { status: 201, body: render(item) }
 }
 
@@ -275,7 +276,7 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
   const at = await placement(ctx, str(obj(attributes.parent).id), str(attributes.name))
   if (isReply(at)) return at
   const item = await addFile(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     at.parentId,
     at.name,
@@ -283,7 +284,7 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
     ctx.clock.nowIso(false),
     ctx.minter,
   )
-  await recordEvent(ctx.db, ctx.tenant, 'ITEM_UPLOAD', item, ctx.clock.lastIso(false))
+  await recordEvent(ctx.sql, ctx.tenant, 'ITEM_UPLOAD', item, ctx.clock.lastIso(false))
   return { status: 201, body: { total_count: 1, entries: [render(item)] } }
 }
 
@@ -298,38 +299,38 @@ function staleIfMatch(ctx: Ctx<C>, item: { version: number }): Reply | null {
 
 async function uploadVersion(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
+  const item = await typedItem(ctx.sql, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
   const refused = staleIfMatch(ctx, item)
   if (refused !== null) return refused
   const parts = await readMultipart(ctx)
   const next = await updateFile(
-    ctx.db,
+    ctx.sql,
     ctx.tenant,
     item,
     parts.file?.bytes ?? new Uint8Array(0),
     ctx.clock.nowIso(false),
   )
-  await recordEvent(ctx.db, ctx.tenant, 'ITEM_UPLOAD', next, ctx.clock.lastIso(false))
+  await recordEvent(ctx.sql, ctx.tenant, 'ITEM_UPLOAD', next, ctx.clock.lastIso(false))
   return { status: 200, body: { total_count: 1, entries: [render(next)] } }
 }
 
 function deleteOf(kind: string, param: string) {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     if (!authed(ctx)) return unauthorized()
-    const item = await typedItem(ctx.db, ctx.tenant, ctx.params[param] ?? '', kind)
+    const item = await typedItem(ctx.sql, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
     const refused = staleIfMatch(ctx, item)
     if (refused !== null) return refused
     if (kind === 'folder' && ctx.query.get('recursive') !== 'true') {
-      if ((await children(ctx.db, ctx.tenant, item.id)).length > 0) {
+      if ((await children(ctx.sql, ctx.tenant, item.id)).length > 0) {
         return boxError(409, 'folder_not_empty', 'folder is not empty')
       }
     }
     // One event for the item and none for what was inside it, as the vendor
     // sends.
-    await recordEvent(ctx.db, ctx.tenant, 'ITEM_TRASH', item, ctx.clock.lastIso(false))
-    await removeTree(ctx.db, ctx.tenant, item.id)
+    await recordEvent(ctx.sql, ctx.tenant, 'ITEM_TRASH', item, ctx.clock.lastIso(false))
+    await removeTree(ctx.sql, ctx.tenant, item.id)
     return { status: 204 }
   }
 }
@@ -339,19 +340,23 @@ function deleteOf(kind: string, param: string) {
 function updateOf(kind: string, param: string) {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     if (!authed(ctx)) return unauthorized()
-    const item = await typedItem(ctx.db, ctx.tenant, ctx.params[param] ?? '', kind)
+    const item = await typedItem(ctx.sql, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
     const body = obj(ctx.json())
     const name = str(body.name, item.name)
     const parentId = str(obj(body.parent).id, item.parentId ?? '')
-    const other = await childByName(ctx.db, ctx.tenant, parentId, name)
+    const other = await childByName(ctx.sql, ctx.tenant, parentId, name)
     if (other !== null && other.id !== item.id) return nameInUse(other)
-    const moved = await ctx.db.boxItem.update({
-      where: { tenant_id: { tenant: ctx.tenant, id: item.id } },
-      data: { name, parentId, modified: ctx.clock.nowIso(false) },
-    })
+    const moved = await moveItem(
+      ctx.sql,
+      ctx.tenant,
+      item.id,
+      name,
+      parentId,
+      ctx.clock.nowIso(false),
+    )
     await recordEvent(
-      ctx.db,
+      ctx.sql,
       ctx.tenant,
       parentId === item.parentId ? 'ITEM_RENAME' : 'ITEM_MOVE',
       moved,
@@ -364,18 +369,18 @@ function updateOf(kind: string, param: string) {
 function copyOf(kind: string, param: string) {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     if (!authed(ctx)) return unauthorized()
-    const item = await typedItem(ctx.db, ctx.tenant, ctx.params[param] ?? '', kind)
+    const item = await typedItem(ctx.sql, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
     const body = obj(ctx.json())
     const parentId = str(obj(body.parent).id)
     const name = str(body.name, item.name)
-    if ((await folderItem(ctx.db, ctx.tenant, parentId, ctx.clock.nowIso(false))) === null) {
+    if ((await folderItem(ctx.sql, ctx.tenant, parentId, ctx.clock.nowIso(false))) === null) {
       return notFound('parent folder')
     }
-    const taken = await childByName(ctx.db, ctx.tenant, parentId, name)
+    const taken = await childByName(ctx.sql, ctx.tenant, parentId, name)
     if (taken !== null) return nameInUse(taken)
     const made = await copyTree(
-      ctx.db,
+      ctx.sql,
       ctx.tenant,
       item,
       parentId,
@@ -383,7 +388,7 @@ function copyOf(kind: string, param: string) {
       ctx.clock.nowIso(false),
       ctx.minter,
     )
-    await recordEvent(ctx.db, ctx.tenant, 'ITEM_COPY', made, ctx.clock.lastIso(false))
+    await recordEvent(ctx.sql, ctx.tenant, 'ITEM_COPY', made, ctx.clock.lastIso(false))
     return { status: 201, body: render(made) }
   }
 }
@@ -405,7 +410,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
   // Every item is already read, so ancestry walks these rather than the store:
   // isDescendant and ancestors queried once per level, per item, which made
   // one search some 4,000 queries.
-  const items = await allItems(ctx.db, ctx.tenant)
+  const items = await allItems(ctx.sql, ctx.tenant)
   const byId = new Map(items.map((item) => [item.id, item]))
   const under = (item: Item, folderId: string): boolean => {
     let cur: Item | undefined = item
@@ -448,7 +453,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
 // and the client keeps going until a page comes back empty, as on the vendor.
 async function events(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
-  const head = await streamHead(ctx.db, ctx.tenant)
+  const head = await streamHead(ctx.sql, ctx.tenant)
   const raw = ctx.query.get('stream_position')
   if (raw === 'now') {
     return { status: 200, body: { chunk_size: 0, next_stream_position: String(head), entries: [] } }
@@ -458,7 +463,7 @@ async function events(ctx: Ctx<C>): Promise<Reply> {
     return boxError(400, 'bad_request', `stream_position: ${raw ?? ''}`)
   }
   const limit = Math.min(intQuery(ctx, 'limit', 100), 500)
-  const rows = await eventsAfter(ctx.db, ctx.tenant, from, limit)
+  const rows = await eventsAfter(ctx.sql, ctx.tenant, from, limit)
   return {
     status: 200,
     body: {

@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { first, select } from '../kit/typescript/index.ts'
+import type {
+  NotionBlock,
+  NotionDatabase,
+  NotionPage,
+  NotionUser,
+} from '../../generated/notion/index.js'
+import { DMMF } from './store.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { DEFAULT_API_VERSION, MAX_PAGE_SIZE } from './config.ts'
@@ -72,9 +80,14 @@ export { markdownReply }
 
 export async function retrievePage(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
-  const row = (await ctx.db.notionPage.findFirst({
-    where: { tenant: ctx.tenant, id },
-  })) as PageRow | null
+  const row = first<NotionPage>(
+    ctx.sql,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  ) as PageRow | null
   if (row === null) return notFound('page', id)
   const body = keepProperties(pageJson(row, apiVersion(ctx)), propertyRefs(ctx))
   return { status: 200, body }
@@ -94,9 +107,14 @@ const LISTED = new Set(['title', 'rich_text', 'people', 'relation'])
 export async function retrievePageProperty(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
   const ref = ctx.params.property ?? ''
-  const row = (await ctx.db.notionPage.findFirst({
-    where: { tenant: ctx.tenant, id },
-  })) as PageRow | null
+  const row = first<NotionPage>(
+    ctx.sql,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  ) as PageRow | null
   if (row === null) return notFound('page', id)
   const prop = propByRef({ properties: JSON.parse(row.propertiesJson) as Json }, ref)
   if (prop === undefined) return notFound('property', ref)
@@ -135,18 +153,21 @@ export async function retrievePageProperty(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export async function whoami(ctx: Ctx<C>): Promise<Reply> {
-  return { status: 200, body: botJson(await metaOf(ctx.db, ctx.tenant)) }
+  return { status: 200, body: botJson(await metaOf(ctx.sql, ctx.tenant)) }
 }
 
 // Every member and bot the integration can see, the integration's own bot
 // last, which is where both the MCP-Atlas recording and a live probe
 // (2026-09-22) put it.
 async function allUsers(ctx: Ctx<C>): Promise<Json[]> {
-  const rows = (await ctx.db.notionUser.findMany({
-    where: { tenant: ctx.tenant },
-    orderBy: [{ seq: 'asc' }, { id: 'asc' }],
-  })) as UserRow[]
-  return [...rows.map(userJson), botJson(await metaOf(ctx.db, ctx.tenant))]
+  const rows = select<NotionUser>(
+    ctx.sql,
+    DMMF,
+    'NotionUser',
+    '"tenant" = ? ORDER BY "seq" ASC, "id" ASC',
+    ctx.tenant,
+  ) as UserRow[]
+  return [...rows.map(userJson), botJson(await metaOf(ctx.sql, ctx.tenant))]
 }
 
 export async function listUsers(ctx: Ctx<C>): Promise<Reply> {
@@ -158,7 +179,7 @@ export async function retrieveUser(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
   const user = (await allUsers(ctx)).find((one) => one.id === id)
   if (user !== undefined) return { status: 200, body: user }
-  const meta = await metaOf(ctx.db, ctx.tenant)
+  const meta = await metaOf(ctx.sql, ctx.tenant)
   // Live wording (probed 2026-09-22), which unlike every other 404 names the
   // integration, whose id is its bot user's id.
   return {
@@ -186,7 +207,7 @@ async function queryRows(ctx: Ctx<C>, databaseId: string, body: Json): Promise<R
   const refused = filterRefusal(body.filter)
   if (refused !== null) return refused
   const version = apiVersion(ctx)
-  const rows = await databaseRows(ctx.db, ctx.tenant, databaseId, body, version)
+  const rows = await databaseRows(ctx.sql, ctx.tenant, databaseId, body, version)
   const refs = propertyRefs(ctx)
   const size = intOr(body.page_size, MAX_PAGE_SIZE)
   return pageOf(
@@ -199,16 +220,23 @@ async function queryRows(ctx: Ctx<C>, databaseId: string, body: Json): Promise<R
 
 export async function pageMarkdown(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
-  const row = await ctx.db.notionPage.findFirst({ where: { tenant: ctx.tenant, id } })
+  const row = first<NotionPage>(
+    ctx.sql,
+    DMMF,
+    'NotionPage',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  )
   if (row === null) return notFound('page', id)
   const lines: string[] = []
-  await markdownOf(ctx.db, ctx.tenant, id, 0, lines)
+  await markdownOf(ctx.sql, ctx.tenant, id, 0, lines)
   return markdownReply(id, lines)
 }
 
 export async function retrieveDataSource(ctx: Ctx<C>): Promise<Reply> {
   const wanted = ctx.params.id ?? ''
-  const row = await dataSourceOwner(ctx.db, ctx.tenant, wanted)
+  const row = await dataSourceOwner(ctx.sql, ctx.tenant, wanted)
   if (row === null) return notFound('data source', wanted)
   return { status: 200, body: dataSourceJson(row) }
 }
@@ -216,7 +244,7 @@ export async function retrieveDataSource(ctx: Ctx<C>): Promise<Reply> {
 export async function queryDataSource(ctx: Ctx<C>): Promise<Reply> {
   const wanted = ctx.params.id ?? ''
   const body = asObject(ctx.json())
-  const owner = await dataSourceOwner(ctx.db, ctx.tenant, wanted)
+  const owner = await dataSourceOwner(ctx.sql, ctx.tenant, wanted)
   if (owner === null) return notFound('data source', wanted)
   return queryRows(ctx, owner.id, body)
 }
@@ -226,7 +254,7 @@ export async function queryDataSource(ctx: Ctx<C>): Promise<Reply> {
 // it never handed out.
 export async function listTemplates(ctx: Ctx<C>): Promise<Reply> {
   const wanted = ctx.params.id ?? ''
-  if ((await dataSourceOwner(ctx.db, ctx.tenant, wanted)) === null) {
+  if ((await dataSourceOwner(ctx.sql, ctx.tenant, wanted)) === null) {
     return notFound('data source', wanted)
   }
   const size = intOr(ctx.query.get('page_size'), MAX_PAGE_SIZE)
@@ -237,9 +265,14 @@ export async function listTemplates(ctx: Ctx<C>): Promise<Reply> {
 
 export async function retrieveDatabase(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
-  const row = (await ctx.db.notionDatabase.findFirst({
-    where: { tenant: ctx.tenant, id },
-  })) as DatabaseRow | null
+  const row = first<NotionDatabase>(
+    ctx.sql,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  ) as DatabaseRow | null
   if (row === null) return notFound('database', id)
   return { status: 200, body: databaseJson(row, apiVersion(ctx)) }
 }
@@ -247,13 +280,20 @@ export async function retrieveDatabase(ctx: Ctx<C>): Promise<Reply> {
 export async function queryDatabase(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
   const body = asObject(ctx.json())
-  const owner = await ctx.db.notionDatabase.findFirst({ where: { tenant: ctx.tenant, id } })
+  const owner = first<NotionDatabase>(
+    ctx.sql,
+    DMMF,
+    'NotionDatabase',
+    '"tenant" = ? AND "id" = ?',
+    ctx.tenant,
+    id,
+  )
   if (owner === null) return notFound('database', id)
   return queryRows(ctx, id, body)
 }
 
 export async function blockChildren(ctx: Ctx<C>): Promise<Reply> {
-  const rows = await childrenOf(ctx.db, ctx.tenant, ctx.params.id ?? '')
+  const rows = await childrenOf(ctx.sql, ctx.tenant, ctx.params.id ?? '')
   const size = intOr(ctx.query.get('page_size'), MAX_PAGE_SIZE)
   return pageOf(rows.map(blockJson), cursorOf(ctx.query.get('start_cursor')), size, 'block')
 }
@@ -268,15 +308,29 @@ export async function blockChildren(ctx: Ctx<C>): Promise<Reply> {
 // it just trashed.
 export async function retrieveBlock(ctx: Ctx<C>): Promise<Reply> {
   const id = ctx.params.id ?? ''
-  const scope = { tenant: ctx.tenant, id }
-  const block = (await ctx.db.notionBlock.findFirst({ where: scope })) as BlockRow | null
+  const scope = '"tenant" = ? AND "id" = ?'
+  const block = first<NotionBlock>(
+    ctx.sql,
+    DMMF,
+    'NotionBlock',
+    scope,
+    ctx.tenant,
+    id,
+  ) as BlockRow | null
   if (block !== null) {
     return {
       status: 200,
       body: { ...blockJson(block), archived: block.inTrash, in_trash: block.inTrash },
     }
   }
-  const database = (await ctx.db.notionDatabase.findFirst({ where: scope })) as DatabaseRow | null
+  const database = first<NotionDatabase>(
+    ctx.sql,
+    DMMF,
+    'NotionDatabase',
+    scope,
+    ctx.tenant,
+    id,
+  ) as DatabaseRow | null
   if (database !== null) {
     return {
       status: 200,
@@ -291,9 +345,16 @@ export async function retrieveBlock(ctx: Ctx<C>): Promise<Reply> {
       },
     }
   }
-  const page = (await ctx.db.notionPage.findFirst({ where: scope })) as PageRow | null
+  const page = first<NotionPage>(
+    ctx.sql,
+    DMMF,
+    'NotionPage',
+    scope,
+    ctx.tenant,
+    id,
+  ) as PageRow | null
   if (page !== null) {
-    const kids = await childrenOf(ctx.db, ctx.tenant, id)
+    const kids = await childrenOf(ctx.sql, ctx.tenant, id)
     return {
       status: 200,
       body: {
@@ -313,7 +374,7 @@ export async function retrieveBlock(ctx: Ctx<C>): Promise<Reply> {
 export async function search(ctx: Ctx<C>): Promise<Reply> {
   const body = asObject(ctx.json())
   const version = apiVersion(ctx)
-  const results = await searchResults(ctx.db, ctx.tenant, body, version)
+  const results = await searchResults(ctx.sql, ctx.tenant, body, version)
   const size = intOr(body.page_size, MAX_PAGE_SIZE)
   return pageOf(results, cursorOf(body.start_cursor), size, listTypeOf(version))
 }
