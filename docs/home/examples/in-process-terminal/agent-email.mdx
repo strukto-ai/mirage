@@ -1,7 +1,7 @@
 ---
 title: Agent Email
 icon: envelope
-description: An agent answers a customer's email from what the team posted in Slack, as a draft, and sends only once a person approves, with no sandbox.
+description: An agent answers a customer's email with a report it builds from what the team posted in Slack, saves it as a draft, and sends only once a person approves, with no sandbox.
 ---
 
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
@@ -13,10 +13,11 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
     { cli: "himalaya", name: "Mail", text: "sends, once a person approves", dir: "out" },
   ]}
   steps={[
-    { cmd: "himalaya envelope list && himalaya message read 1", cli: "himalaya", out: "Priya asks what happened this morning" },
-    { cmd: "grep -h \"calendar sync\" /slack/channels/incidents__*/2026-11-16/chat.jsonl …", cli: "/slack", out: "the engineer's note and the report" },
+    { cmd: "himalaya envelope list && himalaya message read 1", cli: "himalaya", out: "Priya asks which appointments were hit" },
+    { cmd: "grep -h \"calendar sync\" /slack/channels/incidents__*/2026-11-16/chat.jsonl …", cli: "/slack", out: "the note and every customer's events" },
+    { cmd: "awk -F, 'NR == 1 || $1 == \"Northwind Health\"' \"$events\" > …", cli: "/slack", out: "a CSV of her 214 appointments" },
     { cmd: "himalaya message reply 1 --attach \"$report\" --save Drafts", cli: "himalaya", out: "Message successfully saved" },
-    { cmd: "himalaya message reply 1 --cc … --save Drafts", cli: "himalaya", out: "refused: replies go only to the sender" },
+    { cmd: "himalaya message reply 1 --attach \"$events\" --save Drafts", cli: "himalaya", out: "refused: other customers' data" },
     { cmd: "himalaya message reply 1 --attach \"$report\" --send", cli: "himalaya", dir: "out", out: "waits for a person, then sends" },
   ]}
   extras={[
@@ -26,10 +27,11 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 />
 
 A customer writes to support about a problem the team has already dealt
-with. The answer is in Slack: an engineer posted what happened, and the
-report. An agent reads the email, finds the note, and writes the reply with
-the report attached. A person reads the draft and decides whether it goes
-out.
+with, and asks which of their appointments it hit. The answer is in Slack:
+an engineer posted what happened, with an export of the affected events for
+every customer. An agent reads the email, finds the note, builds a report
+of this customer's events only, and drafts the reply with the report
+attached. A person reads the draft and decides whether it goes out.
 
 The agent runs in an
 [in-process terminal](/home/examples/in-process-terminal) inside one FastAPI
@@ -38,22 +40,33 @@ or Express server:
 - **Mail:** [`himalaya`](/python/cli/himalaya) reads the support inbox and
   saves replies to `Drafts` over IMAP, and sends over SMTP.
 - **Files:** `/slack` mounts [Slack](/python/vfs/slack) read-only, files
-  shared in a channel included, so the agent attaches the report straight
-  from Slack. `/workspace`, in [memory](/home/setup/ram), holds the reply's
-  text.
+  shared in a channel included, so the agent reads the export with `awk`
+  where it lies. `/workspace`, in [memory](/home/setup/ram), holds the
+  reply's text and the report it builds.
 - **Policy:** the agent may draft as much as it likes. A
-  [policy](/home/policy/overview) on the server refuses a reply to anyone
-  but the sender, or with an attachment that is not from Slack, and holds
-  every send until a person approves it.
+  [policy](/home/policy/overview) on the server reads each attachment
+  before the reply runs, and refuses one that holds more than one
+  customer's data. It also refuses a reply to anyone but the sender, and
+  holds every send until a person approves it.
 
 The commands below are what the agent runs in its terminal. An engineer
 posted this in `#incidents`:
 
 ```text
-Incident 2026-11-16: calendar sync for Northwind Health failed 06:10–07:40 UTC.
+Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
 Cause: an expired Google token on our side; no data was lost.
-Fix: token rotated, sync re-run for the window, all 214 events are back.
-Report attached for customers who ask.                    📎 incident-report.pdf
+Fix: token rotated, sync re-run for the window, every affected event is back.
+Affected events for all three customers attached. Share each customer only their own.
+                                                          📎 affected-events.csv
+```
+
+The export has one row per event, and the customer in the first column:
+
+```text
+customer,clinic,event_id,starts_at
+Harbor Dental,Ballard,evt_4101,2026-11-16T08:15:00Z
+Northwind Health,Tacoma,evt_4102,2026-11-16T08:45:00Z
+...
 ```
 
 ## Before you start
@@ -63,8 +76,8 @@ You need a Slack bot and a mailbox for support.
 **Slack.** A bot with `channels:read`, `channels:history` and `files:read`,
 plus `groups:read` and `groups:history` for a private channel. See
 [Slack](/home/setup/slack). Invite it to `#incidents`, and post the note
-above with a PDF as a message in the channel, not as a reply in a thread:
-the mount shows a channel's messages, not its threads.
+above with the CSV as a message in the channel, not as a reply in a
+thread: the mount shows a channel's messages, not its threads.
 
 **Mail.** Any IMAP and SMTP account works; see [Email](/home/setup/email).
 To try the example without one, run [GreenMail](https://greenmail-mail-test.github.io/greenmail/),
@@ -86,14 +99,17 @@ curl -s imap://localhost:3143 -u support@acme.example:any -X 'CREATE Sent'
 Then send the customer's email to the support address:
 
 ```bash
-curl -s smtp://localhost:3025 --mail-from priya@northwind.example --mail-rcpt support@acme.example -T - <<EOF
+curl -s smtp://localhost:3025 -T - \
+  --mail-from priya@northwind.example --mail-rcpt support@acme.example <<EOF
 From: Priya Shah <priya@northwind.example>
 To: support@acme.example
 Date: $(date -u -R)
+Message-ID: <calendar-sync-1@northwind.example>
 Subject: Our calendar sync failed this morning
 
 Hi, appointments were missing from our calendars this morning.
-What happened, and did we lose any data?
+What happened, did we lose any data, and which appointments were
+affected? Our clinics want to check them with patients.
 
 Priya
 EOF
@@ -127,9 +143,9 @@ installs `himalaya` with the support account. With your own mailbox, set its
 hosts and username, and drop the two ports and `use_ssl`.
 
 The `support` profile is what every terminal gets. Its allow list leaves
-the agent three mail commands, to list, read and reply: no `compose`,
-`forward`, `delete` or raw `send`. Its policy, `guard.py`, judges each reply
-before it runs:
+the agent the text tools it needs and three mail commands, to list, read
+and reply: no `compose`, `forward`, `delete` or raw `send`. Its policy,
+`guard.py`, judges each reply before it runs:
 
 ```yaml workspace.yaml
 mounts:
@@ -158,7 +174,7 @@ clis:
 profiles:
   support:
     commands:
-      allow: [cd, pwd, echo, cat, ls, grep, jq, head,
+      allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, mkdir,
               himalaya envelope list, himalaya message read, himalaya message reply]
     policy:
       pre_command:
@@ -172,12 +188,28 @@ or a glob cannot hide a recipient or a path:
 
 - A reply goes to whoever wrote in, and no one else: `--to`, `--cc` and
   `--bcc` are refused.
-- An attachment must be a file shared in Slack, under `/slack/`.
+- An attachment must be a report the agent built in `/workspace/outbox/`,
+  never a file straight from Slack.
+- `guard.py` opens each attachment and reads its first column: a report
+  with more than one customer in it is refused.
 - `--send` asks a person. Without it, a reply is only saved to `Drafts`.
 - A flag must be written apart from its value, as `--attach FILE`, not
   `--attach=FILE` or `-tADDR`, so the rules above see every value.
 
 ```python guard.py
+def customers(path):
+    names = []
+    for line in open(path).read().splitlines()[1:]:
+        name = line.split(",")[0]
+        if line and name not in names:
+            names.append(name)
+    return names
+
+
+def deny(reason):
+    return {"kind": "deny", "reason": reason}
+
+
 def pre_command(ctx):
     words = ctx["words"]
     texts = [w["text"] for w in words]
@@ -186,11 +218,15 @@ def pre_command(ctx):
     for w in words:
         t = w["text"]
         if w["kind"] == "option" and ("=" in t or (not t.startswith("--") and len(t) > 2)):
-            return {"kind": "deny", "reason": "write each flag and its value apart"}
+            return deny("write each flag and its value apart")
         if t in ("-t", "--to", "--cc", "--bcc"):
-            return {"kind": "deny", "reason": "a reply goes only to the sender"}
-        if w["option"] == "--attach" and not (w["path"] or "").startswith("/slack/"):
-            return {"kind": "deny", "reason": "attach only files shared in Slack"}
+            return deny("a reply goes only to the sender")
+        if w["option"] == "--attach":
+            path = w["path"] or ""
+            if not path.startswith("/workspace/outbox/"):
+                return deny("attach only reports from /workspace/outbox/")
+            if len(customers(path)) != 1:
+                return deny("a report holds one customer's data")
     if "--send" in texts:
         return {"kind": "ask", "reason": "a person approves every send"}
     return None
@@ -373,24 +409,25 @@ SH
 ┌────┬───────┬───────────────────────────────────────┬────────────┬────────────────────────┬───────┐
 │ ID ┆ FLAGS ┆ SUBJECT                               ┆ FROM       ┆ DATE                   ┆  SIZE │
 ╞════╪═══════╪═══════════════════════════════════════╪════════════╪════════════════════════╪═══════╡
-│ 1  ┆ *     ┆ Our calendar sync failed this morning ┆ Priya Shah ┆ 2026-11-16 09:27+00:00 ┆ 396 B │
+│ 1  ┆ *     ┆ Our calendar sync failed this morning ┆ Priya Shah ┆ 2026-11-16 11:44+00:00 ┆ 525 B │
 └────┴───────┴───────────────────────────────────────┴────────────┴────────────────────────┴───────┘
-Date: Mon, 16 Nov 2026 09:27:55 +0000
+Date: Mon, 16 Nov 2026 11:44:26 +0000
 From: Priya Shah <priya@northwind.example>
 To: support@acme.example
 Subject: Our calendar sync failed this morning
 
-[1] text/plain (111 B)
+[1] text/plain (191 B)
 
 Hi, appointments were missing from our calendars this morning.
-What happened, and did we lose any data?
+What happened, did we lose any data, and which appointments were
+affected? Our clinics want to check them with patients.
 
 Priya
 ```
 
-Priya Shah, at Northwind Health, asks two things: what happened to this
-morning's sync, and whether any data was lost. The email does not say why,
-so the agent goes to find out.
+Priya Shah, at Northwind Health, asks three things: what happened to this
+morning's sync, whether any data was lost, and which appointments were
+affected. The email does not say, so the agent goes to find out.
 
 ## 2. Find what happened
 
@@ -400,43 +437,83 @@ folder for each day: the day's messages in `chat.jsonl` and the files
 shared that day in `files/`. The email is dated 16 November and says "this
 morning", so the agent looks in that day's folder:
 
-- `grep "calendar sync"` searches for the customer's own words, and `jq -r
-  .text` prints only the text of each matching message.
-- The note it finds says a report is attached, so `ls` finds the PDF in
-  the same day's `files/`. The agent keeps its path in `$report` to attach
-  later, with no download.
+- `grep "calendar sync"` searches for the customer's own words, and
+  `jq -r .text` prints only the text of each matching message.
+- The note says the affected events are attached, so `ls` finds the CSV in
+  the same day's `files/`. The agent keeps its path in `$events`.
 
 ```bash
 run <<'SH'
 grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text
-report=$(ls -d /slack/channels/incidents__*/2026-11-16/files/incident-report__*)
-echo "$report"
+events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*)
+echo "$events"
 SH
 ```
 
 ```text
-Incident 2026-11-16: calendar sync for Northwind Health failed 06:10–07:40 UTC.
+Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
 Cause: an expired Google token on our side; no data was lost.
-Fix: token rotated, sync re-run for the window, all 214 events are back.
-Report attached for customers who ask.
-/slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/incident-report__F0CHLDGQ0NB.pdf
+Fix: token rotated, sync re-run for the window, every affected event is back.
+Affected events for all three customers attached. Share each customer only their own.
+/slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/affected-events__F0CHXFSUQSZ.csv
 ```
 
-The note answers both questions: an expired token stopped the sync from
-06:10 to 07:40 UTC, and no data was lost. The agent has the report too.
+The note answers the first two questions: an expired token stopped the
+sync from 06:10 to 07:40 UTC, and no data was lost. The export answers the
+third, but it holds three customers' events, and the note says to share
+each customer only their own.
 
-## 3. Draft the reply
+## 3. Build the report
 
-The agent has the answer, but sending is not its decision, so it writes
+The agent reads the export where it lies on the Slack mount, with no
+download, and keeps only Northwind Health's rows:
+
+- `awk -F,` splits each line on commas. `NR == 1` keeps the header, and
+  `$1 == "Northwind Health"` keeps the rows whose first column is the
+  customer. The report goes to `/workspace/outbox/`, the one place
+  `guard.py` lets an attachment come from.
+- `tail -n +2 | wc -l` counts the rows under the header, to check them
+  against the note, and the last `awk` counts the events per clinic for the
+  reply.
+
+```bash
+run <<'SH'
+mkdir -p /workspace/outbox
+report=/workspace/outbox/northwind-health-affected.csv
+awk -F, 'NR == 1 || $1 == "Northwind Health"' "$events" > "$report"
+head -4 "$report"
+tail -n +2 "$report" | wc -l
+awk -F, 'NR > 1 { n[$2]++ } END { for (c in n) print n[c], c }' "$report"
+SH
+```
+
+```text
+customer,clinic,event_id,starts_at
+Northwind Health,Tacoma,evt_4102,2026-11-16T08:45:00Z
+Northwind Health,Tacoma,evt_4103,2026-11-16T09:00:00Z
+Northwind Health,Tacoma,evt_4104,2026-11-16T09:15:00Z
+214
+75 Tacoma
+77 Bellevue
+62 Everett
+```
+
+The report holds Northwind Health's 214 events and nothing else, which
+the agent can now sum up by clinic in the reply.
+
+## 4. Draft the reply
+
+The agent has the answers, but sending is not its decision, so it writes
 the reply as a draft:
 
 - It writes the body to `/workspace/reply.txt`, in plain words for the
   customer, so the draft and a later send use the same text.
 - `himalaya message reply 1` answers Priya's message, which sets the
   recipient, the `Re:` subject and the thread headers. `--attach "$report"`
-  attaches the PDF straight from Slack.
+  attaches the report it built. Before the command runs, `guard.py` opens
+  the report and finds one customer in it.
 - `--save Drafts`, without `--send`, only stores the message in `Drafts`
-  over IMAP. Nothing leaves the mailbox, so `guard.py` lets it through.
+  over IMAP. Nothing leaves the mailbox.
 - `himalaya envelope list -m Drafts` checks that the draft is there.
 
 ```bash
@@ -444,12 +521,14 @@ run <<'SH'
 cat > /workspace/reply.txt <<'EOF'
 Hi Priya,
 
-This morning from 06:10 to 07:40 UTC, calendar sync for Northwind Health
-stopped because a Google token on our side had expired. No data was lost.
-We rotated the token and re-ran the sync for that window, and all 214
-events are back.
+This morning from 06:10 to 07:40 UTC, calendar sync stopped because a
+Google token on our side had expired. No data was lost: we rotated the
+token, re-ran the sync for that window, and every event is back.
 
-The incident report is attached.
+214 of your appointments, from today to Friday, did not sync in that
+window: 77 at Bellevue, 75 at Tacoma and 62 at Everett. The attached CSV
+lists each one with its clinic, event ID and start time, so your clinics
+can check them with patients.
 
 Best,
 Acme Support
@@ -462,21 +541,24 @@ SH
 
 ```text
 Message successfully saved
-┌────┬───────┬───────────────────────────────────────────┬──────────────────────┬────────────────────────┬──────────┐
-│ ID ┆ FLAGS ┆ SUBJECT                                   ┆ FROM                 ┆ DATE                   ┆     SIZE │
-╞════╪═══════╪═══════════════════════════════════════════╪══════════════════════╪════════════════════════╪══════════╡
-│ 1  ┆       ┆ Re: Our calendar sync failed this morning ┆ support@acme.example ┆ 2026-11-16 09:42+00:00 ┆ 2.47 KiB │
-└────┴───────┴───────────────────────────────────────────┴──────────────────────┴────────────────────────┴──────────┘
+
+┌────┬───────┬───────────────────────────────────────────┬──────────────────────┬────────────────────────┬───────────┐
+│ ID ┆ FLAGS ┆ SUBJECT                                   ┆ FROM                 ┆ DATE                   ┆      SIZE │
+╞════╪═══════╪═══════════════════════════════════════════╪══════════════════════╪════════════════════════╪═══════════╡
+│ 1  ┆       ┆ Re: Our calendar sync failed this morning ┆ support@acme.example ┆ 2026-11-16 11:44+00:00 ┆ 13.95 KiB │
+└────┴───────┴───────────────────────────────────────────┴──────────────────────┴────────────────────────┴───────────┘
 ```
 
-The reply, with the report attached, waits in `Drafts` for a person to read.
+The reply, with the report attached, waits in `Drafts` for a person to
+read.
 
-## 4. What the policy refuses
+## 5. What the policy refuses
 
-An agent can get things wrong: copy someone it should not, attach the wrong
-file, or delete mail. Each of these is refused before it runs, even as a
-draft. The agent reads what a real terminal prints for a refused command,
-and `run` prints the reason the server returned.
+An agent can get things wrong: copy someone it should not, attach the raw
+export, build a report that lets other customers' rows through, or delete
+mail. Each of these is refused before it runs, even as a draft. The agent
+reads what a real terminal prints for a refused command, and `run` prints
+the reason the server returned.
 
 Copy someone else in:
 
@@ -492,32 +574,33 @@ himalaya: Permission denied
 [deny] a reply goes only to the sender
 ```
 
-Attach a file that is not from Slack:
+Attach the export straight from Slack:
 
 ```bash
 run <<'SH'
 himalaya message reply 1 --save Drafts \
-  --attach /workspace/reply.txt
+  --attach "$events"
 SH
 ```
 
 ```text
 himalaya: Permission denied
-[deny] attach only files shared in Slack
+[deny] attach only reports from /workspace/outbox/
 ```
 
-Write the flag and its value as one word, which `guard.py` could not check:
+Copy the whole export into the outbox and attach it:
 
 ```bash
 run <<'SH'
+cat "$events" > /workspace/outbox/all.csv
 himalaya message reply 1 --save Drafts \
-  --attach=/workspace/reply.txt
+  --attach /workspace/outbox/all.csv
 SH
 ```
 
 ```text
 himalaya: Permission denied
-[deny] write each flag and its value apart
+[deny] a report holds one customer's data
 ```
 
 Delete the email:
@@ -533,11 +616,12 @@ himalaya: Permission denied
 [deny] himalaya message delete is not allowed
 ```
 
-The first three are `guard.py`. The last is the profile's allow list,
-which refuses the command before `guard.py` is asked. `Drafts` still holds
-only the reply from step 3.
+The first three are `guard.py`; the third one it refused after reading the
+file. The last is the profile's allow list, which refuses the command
+before `guard.py` is asked. `Drafts` still holds only the reply from
+step 4.
 
-## 5. Ask to send
+## 6. Ask to send
 
 The draft is ready, so the agent tries to send it: the same command, with
 `--send` in place of `--save Drafts`. `guard.py` answers with an ask, so the
@@ -555,7 +639,7 @@ himalaya: Permission denied
 [pending] a person approves every send
 ```
 
-## 6. A person approves
+## 7. A person approves
 
 A person reads the draft in `Drafts`, then lists the asks and approves this
 one. These two requests go to the server from outside the agent's terminal:
@@ -568,9 +652,9 @@ curl -s localhost:3000/asks
 {
   "items": [
     {
-      "id": "f245dd41f481",
+      "id": "316ec6bc7e20",
       "session_id": "a",
-      "command": "himalaya message reply 1 --body-file /workspace/reply.txt --attach /slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/incident-report__F0CHLDGQ0NB.pdf --send",
+      "command": "himalaya message reply 1 --body-file /workspace/reply.txt --attach /workspace/outbox/northwind-health-affected.csv --send",
       "reason": "a person approves every send"
     }
   ]
@@ -578,13 +662,15 @@ curl -s localhost:3000/asks
 ```
 
 The ask shows the command after expansion, so the person sees the exact
-file that will be attached, not `$report`.
+file that will be attached, not `$report`. They approve it by its `id`, and
+the server answers `204` with no body:
 
 ```bash
-curl -X POST localhost:3000/asks/f245dd41f481 -H 'content-type: application/json' -d '{"allow": true}'
+curl -X POST localhost:3000/asks/316ec6bc7e20 \
+  -H 'content-type: application/json' -d '{"allow": true}'
 ```
 
-## 7. Send
+## 8. Send
 
 The agent runs the same command again. The approval covers it, so this
 time it runs: `himalaya` sends over SMTP and keeps a copy in `Sent`:
