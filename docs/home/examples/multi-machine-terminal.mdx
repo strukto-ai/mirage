@@ -4,11 +4,11 @@ icon: route
 description: A unified virtual terminal across different machines that runs each task on the machine that fits it, so AI agents perform tasks more efficiently and at lower cost.
 ---
 
-import { FanOutBenchmark, GpuBenchmark, MachineBenchmark } from "/snippets/machine-benchmark.jsx"
+import { MachineBenchmark } from "/snippets/machine-benchmark.jsx"
 import { ProcessTable } from "/snippets/process-table.jsx"
-import { FlowDiagram, RoutingDiagram } from "/snippets/routing-diagram.jsx"
+import { FlowDiagram } from "/snippets/routing-diagram.jsx"
 
-<RoutingDiagram />
+<FlowDiagram kind="routing" />
 
 Mirage gives an agent a unified virtual terminal across different machines. The
 agent types every command in the same terminal, and each one runs on the machine
@@ -202,7 +202,7 @@ per quarter, so they run in parallel with no container to start. Only the numpy
 summary goes to the Cloudflare lite container, which then runs for seconds
 instead of the whole task.
 
-<FanOutBenchmark />
+<MachineBenchmark kind="fanout" />
 
 A lite container shares its 1/16 vCPU across every process in it, so counting
 the quarters in parallel there is no faster, about 16 seconds against 11.7 one
@@ -257,7 +257,7 @@ The features and the model come from the same year of page views. pandas
 builds the features on the E2B sandbox, and only the training goes to the GPU,
 so the GPU is paid for the training alone.
 
-<GpuBenchmark />
+<MachineBenchmark kind="gpu" />
 
 pandas runs about as fast on the E2B sandbox as on the GPU machine's CPU, so the
 two take about the same time. The GPU costs about 4.5 times as much a second, so

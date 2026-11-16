@@ -1,4 +1,29 @@
-export const FlowDiagram = ({ steps, policy = false, label }) => {
+export const FlowDiagram = ({ kind }) => {
+  const setups = {
+    routing: {
+      policy: false,
+      label:
+        "Monty, Cloudflare, Mirage itself, an E2B sandbox and an EC2 GPU all share one unified virtual filesystem. Each command typed in the Mirage terminal runs on one of them: a for loop forks four Monty processes, numpy runs on Cloudflare, building features on E2B and training on the EC2 GPU.",
+      steps: [
+        { line: "for f in raw/*.csv; do python3 count.py $f & done", target: 0, forks: true },
+        { line: 'python3 -c "import numpy as np; …"', target: 1 },
+        { line: "python3 build.py", target: 3 },
+        { line: "python3 train.py", target: 4 },
+      ],
+    },
+    secured: {
+      policy: true,
+      label:
+        "Every command typed in the Mirage terminal is checked first. An allowed Python script runs on Monty over the unified virtual filesystem, posting to Slack is denied, a file shown again inside a hidden folder is read by Mirage from the filesystem, and a hidden secret does not exist for the agent.",
+      steps: [
+        { line: "python3 count.py reports/q3.csv", target: 0 },
+        { line: "slack send-message --text hi", outcome: "deny" },
+        { line: "cat secrets/README.md", target: 2, outcome: "show" },
+        { line: "cat secrets/aws.txt", outcome: "hide" },
+      ],
+    },
+  }
+  const { steps, policy, label } = setups[kind] || setups.routing
   const machines = [
     ["Monty", "/images/pydantic-logo.svg"],
     ["Cloudflare", "/images/cloudflare-logo.svg"],
@@ -437,28 +462,3 @@ export const FlowDiagram = ({ steps, policy = false, label }) => {
     </div>
   )
 }
-
-export const RoutingDiagram = () => (
-  <FlowDiagram
-    label="Monty, Cloudflare, Mirage itself, an E2B sandbox and an EC2 GPU all share one unified virtual filesystem. Each command typed in the Mirage terminal runs on one of them: a for loop forks four Monty processes, numpy runs on Cloudflare, building features on E2B and training on the EC2 GPU."
-    steps={[
-      { line: "for f in raw/*.csv; do python3 count.py $f & done", target: 0, forks: true },
-      { line: 'python3 -c "import numpy as np; …"', target: 1 },
-      { line: "python3 build.py", target: 3 },
-      { line: "python3 train.py", target: 4 },
-    ]}
-  />
-)
-
-export const SecuredDiagram = () => (
-  <FlowDiagram
-    policy
-    label="Every command typed in the Mirage terminal is checked first. An allowed Python script runs on Monty over the unified virtual filesystem, posting to Slack is denied, a file shown again inside a hidden folder is read by Mirage from the filesystem, and a hidden secret does not exist for the agent."
-    steps={[
-      { line: "python3 count.py reports/q3.csv", target: 0 },
-      { line: "slack send-message --text hi", outcome: "deny" },
-      { line: "cat secrets/README.md", target: 2, outcome: "show" },
-      { line: "cat secrets/aws.txt", outcome: "hide" },
-    ]}
-  />
-)
