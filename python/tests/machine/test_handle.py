@@ -31,6 +31,7 @@ from mirage.machine.constants import (
     FIFO_NAME,
     NOT_RUNNING_STATUS,
     PROCESS,
+    RUN_DRAIN_SECONDS,
     RUN_EXIT_MARK,
     RUN_PID_HOLD,
     RUN_PID_MARK,
@@ -830,6 +831,45 @@ async def test_a_run_ends_on_its_exit_line_while_the_exec_stays_open():
         assert await materialize(io.stderr) == b""
     finally:
         await ws.close()
+
+
+class SlowStopBox(RecordingMachine):
+    started = False
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        self.started = True
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await errors(RUN_EXIT_MARK + b"0\n")
+            await asyncio.sleep(RUN_DRAIN_SECONDS + 0.3)
+            raise
+
+
+# A run a kill stopped ends as stopped, even when its program says it
+# exited 0 while the stop is still under way.
+@pytest.mark.asyncio
+async def test_a_stopped_run_ends_as_stopped_whatever_its_program_said():
+    box = SlowStopBox()
+    ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
+
+    async def run() -> int:
+        return (
+            await machine_runtime(box).run_line(None, [], [], ctx)
+        ).exit_code
+
+    runner = ProcessTable(bind=run_as_process).start(
+        session_id="s", command="train", cwd=ctx.cwd, run=run
+    )
+    async with asyncio.timeout(5):
+        while not box.started:
+            await asyncio.sleep(0.01)
+        assert runner.terminate(2)
+        assert (await runner.join()).exit == 130
 
 
 class PidLineBox(RecordingMachine):

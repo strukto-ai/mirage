@@ -390,7 +390,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     let done: RunResult
     try {
-      done = await this.outcome(execution, ended, letGo)
+      done = await this.outcome(execution, ended, letGo, ctx.signal)
       await exitLine.finish()
       await pidLine.finish()
       // An exec that returns its streams whole, or joined into stdout,
@@ -452,12 +452,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * program has exited while the exec stays open because something the
    * program left running holds its output, the status the line gave. That
    * exec is let go after a moment for the output still arriving, and what
-   * the program left running stays. Mirrors Python's `_outcome`.
+   * the program left running stays. A run stopped meanwhile ends as stopped,
+   * whatever its program said as it went, as Python's cancelled `_outcome`
+   * does. Mirrors Python's `_outcome`.
    */
   private async outcome(
     execution: Promise<RunResult>,
     ended: Promise<number>,
     letGo: AbortController,
+    signal?: AbortSignal,
   ): Promise<RunResult> {
     const closed = execution.then(
       () => null,
@@ -468,6 +471,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     if (await settledWithin(execution, RUN_DRAIN_SECONDS)) return execution
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
+    signal?.throwIfAborted()
     return { stdout: new Uint8Array(), stderr: null, exitCode: code }
   }
 

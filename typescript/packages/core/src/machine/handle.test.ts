@@ -31,6 +31,7 @@ import {
   isRun,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
+  RUN_DRAIN_SECONDS,
   RUN_EXIT_MARK,
   RUN_PID_HOLD,
   RUN_PID_MARK,
@@ -918,6 +919,61 @@ it('ends a run on its exit line while the exec stays open', async () => {
   } finally {
     await ws.close()
   }
+}, 5000)
+
+// A box whose program, once stopped, exits 0 by its own trap while the exec
+// takes longer than the drain to answer the stop.
+class SlowStopBox extends RecordingMachine {
+  started = false
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    _output?: OutputFn | null,
+    errors?: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd)
+    this.started = true
+    await new Promise<void>((resolve) => {
+      signal?.addEventListener('abort', () => {
+        resolve()
+      })
+    })
+    await errors?.(new Uint8Array([...RUN_EXIT_MARK, ...ENC.encode('0\n')]))
+    await new Promise((resolve) => setTimeout(resolve, (RUN_DRAIN_SECONDS + 0.3) * 1000))
+    throw new DOMException('execute aborted', 'AbortError')
+  }
+}
+
+// A run a kill stopped ends as stopped, even when its program says it exited
+// 0 while the stop is still under way.
+it('ends a stopped run as stopped whatever its program said meanwhile', async () => {
+  const box = new SlowStopBox()
+  const abort = new AbortController()
+  const ctx = {
+    stdin: null,
+    flags: { c: 'train' },
+    env: {},
+    cwd: PathSpec.fromStrPath('/'),
+    signal: abort.signal,
+  }
+  const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'train',
+    cwd: ctx.cwd,
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
+  })
+  await vi.waitFor(() => {
+    expect(box.started).toBe(true)
+  })
+  expect(runner.terminate(2)).toBe(true)
+  expect((await runner.join()).exit).toBe(130)
 }, 5000)
 
 // A box that writes the run's pid line as its wrapper would: on stderr when
