@@ -1,79 +1,153 @@
 ---
 title: Chroma
 icon: /images/chroma-logo.svg
-description: Mount a ChromaDB collection as a read-only virtual filesystem.
+description: Virtualize a ChromaDB collection from Python.
 ---
 
-The Chroma VFS exposes an existing ChromaDB collection as text files
-mounted at a prefix such as `/knowledge/`. It is useful when you already have a
-chunked knowledge base in Chroma and want agents to use normal filesystem
-commands like `ls`, `cat`, `grep` and `find`, and to rank chunks by meaning
-with the [`search` CLI](/python/cli/search).
+`ChromaVFS` mounts one ChromaDB collection, read-only, as a tree of text files:
+each file is its chunks joined in order. The collection's shape is set up on
+the [Chroma page](/home/setup/chroma).
 
-For collection setup, see [Chroma Setup](/home/setup/chroma).
-
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[chroma]"
 ```
 
-## Config
+## Configure
 
 ```python
-import os
-
 from mirage import MountMode, Workspace
 from mirage.vfs.chroma import ChromaConfig, ChromaVFS
 
-config = ChromaConfig(
-    host=os.environ.get("CHROMA_HOST", "localhost"),
-    port=int(os.environ.get("CHROMA_PORT", "8000")),
-    ssl=os.environ.get("CHROMA_SSL", "false").lower() == "true",
-    collection_name=os.environ["CHROMA_COLLECTION"],
-    slug_field=os.environ.get("CHROMA_SLUG_FIELD", "page_slug"),
-    chunk_index_field=os.environ.get("CHROMA_CHUNK_INDEX_FIELD", "chunk_index"),
-)
-vfs = ChromaVFS(config=config)
-ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
+config = ChromaConfig(host="localhost", port=8000, collection_name="knowledge")
+ws = Workspace({"/knowledge": ChromaVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("tree /knowledge && grep -rn refund /knowledge")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so a restored mount reads current content.
+`ssl=True` reaches the server over HTTPS. A collection whose chunks name their
+file and position with keys other than `page_slug` and `chunk_index` sets
+`slug_field` and `chunk_index_field`.
+
+### Fields
 
 {/* generated: config-table chroma start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'localhost'` | Host name of the Chroma HTTP server. |
-| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `8000` | Port of the Chroma HTTP server. |
-| <code style={{ whiteSpace: 'nowrap' }}>ssl</code><br />default `False` | Connect over HTTPS instead of HTTP. |
-| <code style={{ whiteSpace: 'nowrap' }}>collection_name</code><br />required | Name of the existing Chroma collection to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>slug_field</code><br />default `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
-| <code style={{ whiteSpace: 'nowrap' }}>chunk_index_field</code><br />default `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
+<ResponseField name="host" type={"str"} default={"'localhost'"}>
+  Host name of the Chroma HTTP server.
+</ResponseField>
+<ResponseField name="port" type={"int"} default={"8000"}>
+  Port of the Chroma HTTP server.
+</ResponseField>
+<ResponseField name="ssl" type={"bool"} default={"False"}>
+  Connect over HTTPS instead of HTTP.
+</ResponseField>
+<ResponseField name="collection_name" type={"str"} required>
+  Name of the existing Chroma collection to mount.
+</ResponseField>
+<ResponseField name="slug_field" type={"str"} default={"'page_slug'"}>
+  Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`).
+</ResponseField>
+<ResponseField name="chunk_index_field" type={"str"} default={"'chunk_index'"}>
+  Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.
+</ResponseField>
 {/* generated: config-table chroma end */}
+
+## Layout
+
+```text
+/knowledge/
+  README.md
+  guides/
+    api.md
+    quickstart.md
+  policies/
+    refunds.md
+```
+
+Paths come from the collection's path tree document, the one with the ID
+`__path_tree__`: a JSON object whose keys are file paths below the mount.
+Folders come from the `/` in those paths, and the optional `size`,
+`created_at` and `updated_at` values are used when present.
+`/knowledge/guides/quickstart.md` is every chunk whose `page_slug` is
+`guides/quickstart.md`.
+
+## Behavior
+
+- **Read-only:** no command changes the collection.
+- **Pages:** a file is its chunks sorted by `chunk_index` and joined by line
+  breaks.
+- **Tree refresh:** the path tree is fetched on the first listing and reused
+  until the index expires, so a change to `__path_tree__` shows up after that.
+  File text is always read from Chroma.
+- **Snapshots:** a snapshot keeps the config, and loading it needs the mount
+  handed back through `mounts=`. A restored mount reads current content.
+
+### Exact search with grep
+
+`grep -r` and `rg` read only the pages with a chunk holding the text, which
+Chroma's `$contains` answers, then match each page as `grep` does. No match can
+span two chunks, so the answer is exact. `$contains` matches case, so `-i`
+reads every page.
+
+### Vector search
+
+The [`search` CLI](/python/cli/search) ranks chunks by meaning with Chroma's
+vector query. Register it on the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
+
+```bash
+search "how do I get started" /knowledge/
+search --top-k 5 "billing policy" /knowledge/policies/
+search --threshold 0.8 "billing policy" /knowledge/
+```
+
+The score is 1 minus Chroma's distance, and `--threshold` keeps the hits that
+reach it. `--top-k` defaults to 10. `--method` takes only `semantic`. Each hit
+prints its page and score, then the chunk:
+
+```text
+/knowledge/guides/quickstart.md:0.82
+Use an API key to authenticate requests.
+```
+
+## Integration
+
+Chroma answers this command through its own API, so fewer pages are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: Chroma's `$contains` picks the pages to read, for any
+  text, and misses nothing; `-i` reads every page. See
+  [Exact search with grep](#exact-search-with-grep).
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`.
 
 {/* generated: vfs-md chroma start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `chroma`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
-    - One ChromaDB collection, mounted read only.
     - Paths are document slugs from the collection's path tree.
-    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
-      `grep`. Writes are not supported.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -81,7 +155,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -108,10 +182,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     ### `/<path>`
 
-    - One ChromaDB collection, mounted read only.
     - Paths are document slugs from the collection's path tree.
-    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
-      `grep`. Writes are not supported.
 
     ## Supported Unix Commands for VFS
 
@@ -133,126 +204,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md chroma end */}
-
-Chroma paths come from the path tree document stored in the collection with ID
-`__path_tree__`. The document body must be a JSON object whose keys are virtual
-file paths below the mount prefix.
-
-```json
-{
-  "README.md": {
-    "size": 1024
-  },
-  "guides/quickstart.md": {
-    "size": 4096,
-    "updated_at": "2026-01-03T00:00:00Z"
-  }
-}
-```
-
-Mounted at `/knowledge/`, this becomes:
-
-```text
-/knowledge/
-  README.md
-  guides/
-    quickstart.md
-```
-
-Mirage infers folders from path segments and stores the tree in the index cache.
-The `size`, `created_at`, and `updated_at` metadata values are used by tree and
-listing operations when present.
-
-## Reading Documents
-
-Each file is assembled from Chroma chunk documents whose metadata slug matches
-the path. Chunks are sorted by the configured chunk index field and joined with
-a single newline.
-
-```bash
-ls /knowledge/
-tree /knowledge/
-find /knowledge/ -type f
-cat /knowledge/guides/quickstart.md
-head -n 20 /knowledge/guides/quickstart.md
-tail -n 20 /knowledge/guides/quickstart.md
-grep -rin "billing" /knowledge/
-```
-
-## Exact Search with Grep
-
-`grep -r` and `rg` read only the pages with a chunk holding the text, which
-Chroma's `$contains` answers, then match each page as grep does. A page is its
-chunks joined by line breaks, so no match can span two chunks and the answer is
-exact. `$contains` matches case, so `-i` reads every page.
-
-```bash
-grep -r "refund" /knowledge/policies/
-grep -ri "quickstart" /knowledge/
-grep -n "API key" /knowledge/guides/quickstart.md
-```
-
-## Vector Search
-
-The [`search` CLI](/python/cli/search) asks Chroma's vector query API. Use it
-when semantic similarity matters more than exact text matching. Register it on
-the workspace:
-
-```python
-from mirage.commands.cli.builtin.search import SEARCH
-
-ws.register_cli("search", SEARCH)
-```
-
-```bash
-search "how do I get started" /knowledge/
-search --top-k 5 "billing policy" /knowledge/policies/
-search --top-k 3 "API authentication" /knowledge/guides/quickstart.md
-search --threshold 0.8 "billing policy" /knowledge/
-```
-
-The score is 1 minus Chroma's distance, and `--threshold` keeps the hits that
-reach it. `--top-k` defaults to 10. `--method` takes only `semantic`.
-
-Each hit prints its page and score, then the chunk:
-
-```text
-/knowledge/guides/quickstart.md:0.82
-Use an API key to authenticate requests.
-```
-
-## Cache
-
-The VFS uses Mirage's index cache for the virtual tree. The first
-directory listing or path resolution fetches `__path_tree__`; later `ls`,
-`find`, `tree`, and path resolution reuse the cached tree until the index cache
-expires or the workspace is recreated.
-
-File content is still read from Chroma when commands materialize document text.
-
-## Integration
-
-What Chroma answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Chroma |
-| --- | --- |
-| `grep -r`, `rg` | Chroma `$contains` over the chunks, for any text; `-i` reads every page. It misses nothing. |
-
-## Examples
-
-Runnable examples live under `examples/python/vfs/chroma/`:
-
-- [`chroma.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/chroma/chroma.py) — command workflow with `ls`, `tree`, `find`, `cat`, `head`, `tail`, `grep`, and `search`.
-- [`chroma_vfs.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/chroma/chroma_vfs.py) — in-process VFS workflow with `os.listdir()`, `open()`, and `os.path.*`.
-
-## Shell Commands
-
-| Command | Notes |
-| ------- | ----- |
-| `ls` | List folders and files from the path tree |
-| `tree` | Print the mounted path tree |
-| `find` | Search the virtual tree by name, type, depth, and size |
-| `cat` | Read full file text assembled from Chroma chunks |
-| `head` / `tail` | Read the first or last lines/bytes |
-| `grep` | Exact or regex matching over assembled file text |

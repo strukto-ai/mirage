@@ -23,20 +23,16 @@ VFS_MD = """\
         files/
 ```
 
-- Read only. Only configured entities are visible. Run IDs are stable;
+- Read only; only configured entities are visible. Run ids are stable,
   display names may repeat.
-- `run.json` holds identity, creator, sweep/group/job, tags, timestamps,
-  notes, system metrics, history keys and count, and file count. Its
-  `user` contains the creator's id, name, username and email, when
-  available; its `read_only` is W&B's permission, not the mount mode.
-  Missing run metadata is `null`.
-- `history.jsonl` scans unsampled history in original order, preserving
-  missing metrics and `_step`. Logged training-step keys are independent
-  of `_step`. History reads may be large; use `head` to stream a prefix.
-- `summary.json` metrics are stored values, not history maxima.
-- `files/` keeps run-relative paths; `files/wandb-metadata.json`, when
-  present, describes the machine and runtime environment.
-- Listings and reads are lazy."""
+- `run.json` holds identity, creator, sweep, group, tags, timestamps,
+  notes and system metrics; its `read_only` is W&B's permission, not the
+  mount mode.
+- `history.jsonl` is the full unsampled history in logged order and can
+  be large; `head` streams a prefix.
+- `summary.json` holds stored values, not history maxima.
+- `files/` keeps run-relative paths; `files/wandb-metadata.json`
+  describes the machine and environment."""
 
 
 class WandbVFS(BaseVFS):

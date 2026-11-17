@@ -1,70 +1,140 @@
 ---
 title: GridFS
-description: Mount a MongoDB GridFS bucket as a Mirage filesystem with revisions, server-side find, and shell commands.
+description: Virtualize a MongoDB GridFS bucket from Python.
 icon: /images/mongodb-logo.svg
 ---
-The GridFS VFS mounts a MongoDB GridFS bucket at some prefix such as
-`/gridfs/`. Files are stored inside MongoDB itself: metadata in the
-`<bucket>.files` collection, content in 255KB chunks in `<bucket>.chunks`.
-Uses pymongo's native async API.
 
-Install the extra:
+`GridFSVFS` mounts a MongoDB GridFS bucket: every file in the bucket becomes a
+file and every `/` in a filename a folder. Metadata lives in the
+`<bucket>.files` collection and content in `<bucket>.chunks`. The connection
+URI is set up on the [GridFS page](/home/setup/gridfs).
+
+## Install
 
 ```bash
 pip install "mirage-ai[gridfs]"
 ```
 
-## Config
+## Configure
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
-from mirage.vfs.gridfs import GridFSVFS, GridFSConfig
+from mirage.vfs.gridfs import GridFSConfig, GridFSVFS
 
-config = GridFSConfig(
-    uri="mongodb://localhost:27017",
-    database="app",
-    # Optional:
-    # bucket="fs",  # GridFS bucket name (default "fs")
-    # key_prefix="users/alice",  # scope the mount to a subpath
-    # chunk_size_bytes=261120,  # default 255KB
-)
+config = GridFSConfig(uri=os.environ["MONGODB_URI"], database="app")
+ws = Workspace({"/gridfs": GridFSVFS(config)}, mode=MountMode.WRITE)
 
-vfs = GridFSVFS(config)
-ws = Workspace({"/gridfs": vfs}, mode=MountMode.WRITE)
+result = await ws.shell("echo hello > /gridfs/notes/a.txt && find /gridfs -name '*.txt'")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-Both `READ` and `WRITE` modes are supported. Small files are fine: a file
-smaller than the chunk size is stored as a single chunk document, so tiny
-config files and large binaries go through the same path.
+`bucket` names a bucket other than `fs`, `key_prefix` scopes the mount to part
+of it, and `keep_revisions` bounds the history each file keeps. A mount takes
+`MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table gridfs start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI. |
-| <code style={{ whiteSpace: 'nowrap' }}>database</code><br />required | Database that holds the GridFS bucket. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />default `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Filename prefix the mount treats as its root; files outside it are not listed. |
-| <code style={{ whiteSpace: 'nowrap' }}>chunk_size_bytes</code> | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
-| <code style={{ whiteSpace: 'nowrap' }}>keep_revisions</code> | Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="uri" type={"str"} required post={["secret"]}>
+  MongoDB connection URI.
+</ResponseField>
+<ResponseField name="database" type={"str"} required>
+  Database that holds the GridFS bucket.
+</ResponseField>
+<ResponseField name="bucket" type={"str"} default={"'fs'"}>
+  GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Filename prefix the mount treats as its root; files outside it are not listed.
+</ResponseField>
+<ResponseField name="chunk_size_bytes" type={"int"}>
+  Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB.
+</ResponseField>
+<ResponseField name="keep_revisions" type={"int"}>
+  Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}
 
+## Authentication
+
+The user in the URI needs `readWrite` on the database that holds the bucket,
+or `read` for a `read` mount. On Atlas, the built-in **Read and write to any
+database** role also works.
+
+## Layout
+
+```text
+/gridfs/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+```
+
+`/gridfs/data/file.txt` is the GridFS filename `data/file.txt`. Folders come
+from the `/` in filenames; `mkdir` stores a zero-byte `data/` marker so an
+empty folder stays visible.
+
+## Behavior
+
+- **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
+  so `/gridfs/data/notes.md` is the filename `users/42/data/notes.md`. A
+  leading `/` is dropped and a trailing `/` added; an empty prefix means none.
+- **Range reads:** `head -c` and `tail -c` seek by chunk, so a large file is
+  never downloaded whole. A file smaller than the chunk size is one chunk.
+- **Trash:** `rm`, and a file `mv` overwrites, retag every revision to
+  `/trash/<filename>`. No mount path reaches the trash, so the name reads as
+  gone, and the full original filename stays traceable.
+
+### Revisions
+
+GridFS filenames are not unique: every write uploads a new revision and keeps
+the old ones. Reads and listings serve the newest revision per filename, and a
+snapshot-pinned read resolves an older revision by its `_id`. `mv` retags every
+revision's filename on the server, so history moves with the file.
+
+`keep_revisions` bounds the history. Set it, and a write or an `rm` deletes the
+revisions past that count per filename, oldest first, under the file's name and
+in the trash alike; a snapshot pinned to a pruned revision then fails to read
+it. Unset keeps every revision.
+
+## Integration
+
+GridFS answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
+- `grep -r`, `rg` and `cp -r`: one `fs.files` query for the whole tree; see
+  [Walks](/home/integration/walks).
+
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md gridfs start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -72,7 +142,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -93,7 +163,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -115,151 +185,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gridfs end */}
-
-GridFS filenames are used as slash-separated keys, exactly like S3 object
-keys. Directories are prefix-based; `mkdir` creates a zero-byte `key/`
-marker document so empty directories stay visible.
-
-```text
-data/file.txt
-data/config.json
-reports/q1.csv
-```
-
-mounted at `/gridfs/` exposes:
-
-```text
-/gridfs/
-  data/
-    file.txt
-    config.json
-  reports/
-    q1.csv
-```
-
-## Revisions
-
-GridFS filenames are not unique: every write uploads a **new revision** and
-keeps the old ones. The VFS always reads and lists the newest revision
-per filename, and snapshot-pinned reads resolve old revisions by their file
-`_id`, so time-travel reads work natively. `mv` retags every revision's
-filename server-side (history moves with the file).
-
-`rm` destroys nothing: it retags every revision of the file into the trash,
-`/trash/<filename>`, the same way `mv` does. A mount key never starts with a
-slash, so no path on any mount, whatever its `key_prefix`, can list, stat or
-read a trashed revision, and the name reads as gone; a snapshot pinned to one
-of those revisions still stats and reads it by its `_id`. A file `mv` overwrites goes
-to the trash the same way. The trash keeps the whole original filename, so a
-revision is traceable to the key it was written under.
-
-`keep_revisions` bounds the history. Set it, and a write or an `rm` deletes
-the revisions past that count per filename, oldest first, under the file's
-name and under its trash name alike; a snapshot pinned to a pruned revision
-then fails to read it. Unset, the default, keeps every revision.
-
-```python
-GridFSConfig(uri=..., database="app", keep_revisions=5)
-```
-
-## Walks
-
-GridFS metadata lives in an ordinary MongoDB collection, so a walk (`find`,
-`du`, `ls -R`, `tree`, `grep -r`, `rg`, `cp -r`) reads every file under the
-start directory with one `fs.files` query and answers each directory below it
-from that answer. See [Walks](/home/integration/walks).
-
-## Cache
-
-The GridFS VFS uses `IndexCacheStore` with `index_ttl = 600`
-(10 minutes). Directory listings are cached before being refreshed from
-MongoDB, reducing queries for repeated traversals. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
-
-## Integration
-
-What GridFS answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On GridFS |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-## Example
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.gridfs import GridFSVFS, GridFSConfig
-
-config = GridFSConfig(
-    uri="mongodb://localhost:27017",
-    database="app",
-    bucket="assets",
-)
-
-vfs = GridFSVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/gridfs/": vfs}, mode=MountMode.WRITE)
-
-    await ws.shell("echo hello | tee /gridfs/notes/a.txt > /dev/null")
-
-    r = await ws.shell("ls /gridfs/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("cat /gridfs/notes/a.txt")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /gridfs/ -name '*.txt'")
-    print(await r.stdout_str())
-
-    r = await ws.shell("grep hello /gridfs/notes/a.txt")
-    print(await r.stdout_str())
-
-    r = await ws.shell("stat /gridfs/notes/a.txt")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-The GridFS VFS supports the same full command surface as the
-[S3 VFS](/python/vfs/s3): read commands (`cat`, `head`, `tail`,
-`grep`, `rg`, `jq`, `wc`, `stat`, `find`, `tree`, `du`, checksums), text
-processing (`awk`, `sed`, `sort`, `cut`, `diff`, ...), file operations
-(`cp`, `mv`, `rm`, `mkdir`, `touch`, `tee`, `split`, ...), compression, and
-encoding. Range reads (`head -c`, `tail -c`) seek chunk-wise, so large
-files are never downloaded whole.
-
-## Scoping a VFS to a key prefix
-
-Pass `key_prefix` to `GridFSConfig` to transparently scope every operation
-to a subpath of the bucket, mirroring the S3 `key_prefix` behavior:
-
-```python
-GridFSVFS(GridFSConfig(
-    uri="mongodb://localhost:27017",
-    database="app",
-    bucket="shared",
-    key_prefix=f"users/{user_id}/",
-))
-```
-
-Agents see clean paths like `/data/notes.md`; the underlying GridFS
-filename is `users/{user_id}/data/notes.md`. Leading slashes are stripped
-and a trailing slash is added automatically; `None` and an empty string
-mean "no prefix."
-
-## Use Cases
-
-- **Files next to your data**: keep agent-visible files in the same MongoDB
-  deployment as the rest of your application state, with one backup story
-- **Revision-aware storage**: writes never destroy old content; snapshots
-  can pin reads to the exact revision they saw
-- **Cheap find on big buckets**: metadata queries replace full listings
-- **Multi-tenant mounts**: one bucket, per-tenant `key_prefix` scoping

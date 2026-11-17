@@ -1,109 +1,197 @@
 ---
 title: OneDrive
 icon: microsoft
-description: Get a Microsoft Graph access token and drive ID for the OneDrive VFS.
+description: Virtualize a OneDrive or SharePoint document library through Microsoft Graph.
 ---
 
-The OneDrive VFS talks to Microsoft OneDrive and SharePoint document
-libraries through the [Microsoft Graph API](https://learn.microsoft.com/en-us/graph/).
-It authenticates with an OAuth2 **bearer access token**, optionally scoped to a
-specific **drive**.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-## Credentials
+One OneDrive drive, or one SharePoint document library, becomes a folder tree
+of its real files, served as raw bytes.
 
-You need an **access token** and, for app-only auth or a drive other than the
-signed-in user's default, one explicit drive selector. Pick whichever token
-path fits.
+## Setup
 
-### Option A: Quick token (Graph Explorer)
+The mount needs a Microsoft Graph access token. A delegated token reads the
+signed-in user's own drive with no drive ID; an app-only token, or any other
+drive, needs one drive selector.
 
-Fastest way to try it. The token lasts about an hour, which is plenty for a test run.
+<AccordionGroup>
+  <Accordion title="Quick token (Graph Explorer)">
+    The fastest way to try it. The token lasts about an hour.
 
-1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer) and **Sign in**.
-1. Run any query (for example `GET /me/drive`) and consent when prompted.
-1. Open the **Access token** tab and copy the token.
+    1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer)
+       and sign in.
+    1. Run a query such as `GET /me/drive` and consent when asked.
+    1. Open the **Access token** tab and copy the token.
 
-This is a **delegated** token, so it works against your own `/me/drive` and you do
-**not** need a drive ID.
+    It is a delegated token, so it reaches `/me/drive` and needs no drive ID.
+  </Accordion>
+  <Accordion title="Device-code token (own app registration)">
+    A delegated token from an app registration. The first sign-in is
+    interactive, so this is a development bootstrap, not an unattended
+    credential.
 
-### Option B: Interactive device-code token
+    1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go
+       to **Entra ID** > **App registrations** > **New registration**. For a
+       personal account, choose **Any Entra ID Tenant + Personal Microsoft
+       accounts**.
+    1. Under **Authentication**, set **Allow public client flows** to **Yes**.
+    1. Under **API permissions** > **Microsoft Graph** > **Delegated
+       permissions**, add `Files.Read` for the user's own drive, or
+       `Files.ReadWrite` for writes. Other drives or SharePoint may need
+       `Files.Read.All`, `Files.ReadWrite.All` or a `Sites.*` permission.
+    1. Request a device code with the **Application (client) ID**, open
+       `https://microsoft.com/devicelogin` and enter the `user_code` it
+       prints. For writes, ask for `Files.ReadWrite`:
 
-Use this to obtain a delegated token through your own app registration; the
-initial sign-in makes it a development bootstrap, not an unattended credential.
+       ```bash
+       curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode" \
+         -d "client_id=$CLIENT_ID" \
+         -d "scope=Files.Read offline_access"
+       ```
 
-1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
-   **Identity** -> **Applications** -> **App registrations** -> **New registration**.
-   For a personal account, choose *Accounts in any organizational directory and
-   personal Microsoft accounts*.
-1. Under **Authentication** -> **Advanced settings**, set
-   **Allow public client flows** to **Yes**.
-1. Under **API permissions** -> **Microsoft Graph** -> **Delegated**, add
-   `Files.Read` for your own drive or `Files.ReadWrite` for writes. Other drives
-   or SharePoint may require the corresponding `Files.*.All` or `Sites.*` scope.
-1. Run the device-code flow with your **Application (client) ID**. For writes,
-   replace `Files.Read` with `Files.ReadWrite` in the request below:
+    1. After signing in, exchange the `device_code` for tokens:
+
+       ```bash
+       curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+         -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+         -d "client_id=$CLIENT_ID" \
+         -d "device_code=$DEVICE_CODE"
+       ```
+
+    The reply holds an access token and a refresh token. Mirage does not
+    refresh Microsoft tokens itself: a long-running program passes a callable
+    as `access_token` that returns a fresh token.
+  </Accordion>
+  <Accordion title="Find a drive ID">
+    App-only tokens cannot use `/me/drive`, so they set one of `drive_id`,
+    `site_id`, `group_id` or `user_id`. With the token in `TOKEN`:
+
+    ```bash
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      https://graph.microsoft.com/v1.0/me/drive | jq -r .id
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      https://graph.microsoft.com/v1.0/me/drives | jq '.value[] | {name, id}'
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "https://graph.microsoft.com/v1.0/sites/{hostname}:/sites/{site-path}" | jq -r .id
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
+    ```
+
+    The first two give the user's drive and every drive the user can see; the
+    last two give a SharePoint site's ID and its libraries. A drive ID looks
+    like `b!a1B2c3...`.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-CLIENT_ID="<your app client id>"
-
-# 1) request a device code
-curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode" \
-  -d "client_id=$CLIENT_ID" \
-  -d "scope=Files.Read offline_access"
-#   -> open https://microsoft.com/devicelogin and enter the user_code it prints
-
-# 2) after you sign in, exchange the device_code for a token
-curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
-  -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
-  -d "client_id=$CLIENT_ID" \
-  -d "device_code=<device_code from step 1>"
+export MS_GRAPH_DRIVE_TOKEN=eyJ0eXAi...
 ```
 
-The response includes access and refresh tokens. Mirage accepts an access
-token or provider callback but does not refresh Microsoft tokens itself, so a
-long-running application must refresh through that callback.
+## Connect
 
-### Save the token for the examples
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /onedrive:
+        vfs: onedrive
+        mode: read
+        config:
+          access_token: ${MS_GRAPH_DRIVE_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id od
+    mirage shell -w od -c 'ls /onedrive'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.onedrive import OneDriveConfig, OneDriveVFS
+
+    config = OneDriveConfig(access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"])
+    ws = Workspace({"/onedrive": OneDriveVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /onedrive")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, OneDriveVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/onedrive': new OneDriveVFS({
+          accessToken: process.env.MS_GRAPH_DRIVE_TOKEN!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /onedrive')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/onedrive/
+  Documents/
+    Q4_plan.docx
+    budget.xlsx
+  Pictures/
+  notes.md
+```
+
+- Set at most one of `drive_id`, `site_id`, `group_id` and `user_id`; with
+  none the mount is the signed-in user's drive. `key_prefix` mounts a folder.
+- Office files stay raw bytes, with no conversion.
+- Snapshots pin files through version history, which is on by default; old
+  versions read only while the library keeps them (an admin can cap or turn
+  off versioning).
+
+## Sample runs
 
 ```bash
-# .env.development
-MS_GRAPH_DRIVE_TOKEN=<token>
-MS_GRAPH_DRIVE_ID=<drive id>   # optional; use at most one drive selector
+$ ls /onedrive
+Documents
+Pictures
+notes.md
 ```
-
-For SDK configuration and the other drive selectors, see [Python OneDrive](/python/vfs/onedrive) or [TypeScript OneDrive](/typescript/setup/onedrive).
-
-### Get your drive ID (optional)
-
-<Note>
-App-only tokens cannot use `/me/drive`; set one of `drive_id`, `site_id`,
-`group_id`, or `user_id`. Delegated tokens can use `/me/drive` directly.
-</Note>
-
-Only needed when you use the `drive_id` selector. With your token exported as
-`TOKEN`:
 
 ```bash
-# your personal OneDrive drive id
-curl -s -H "Authorization: Bearer $TOKEN" \
-  https://graph.microsoft.com/v1.0/me/drive | jq -r .id
-
-# list every drive you can see (name + id)
-curl -s -H "Authorization: Bearer $TOKEN" \
-  https://graph.microsoft.com/v1.0/me/drives | jq '.value[] | {name, id}'
-
-# a SharePoint site's drives
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://graph.microsoft.com/v1.0/sites/{hostname}:/sites/{site-path}" | jq -r .id
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
+$ find /onedrive/Documents -name '*.xlsx'
+/onedrive/Documents/budget.xlsx
 ```
 
-The drive ID looks like `b!a1B2c3...`.
+```bash
+$ head -n 2 /onedrive/notes.md
+# Notes
+- renew the domain before Dec 1
+```
 
-<Note>
-Snapshots and version pinning rely on OneDrive/SharePoint **version history**,
-which is on by default. Older versions are only readable while the library
-retains them (the version cap is configurable, and an admin can disable
-versioning).
-</Note>
+On a `write` mount, `tee`, `cp`, `mv`, `rm` and `mkdir` change the drive; the
+token needs `Files.ReadWrite` or a wider write permission.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/onedrive">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/onedrive">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

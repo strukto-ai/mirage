@@ -28,20 +28,12 @@ from mirage.vfs.base import BaseVFS
 VFS_MD = """\
 ```text
 {prefix}
-  <site>/             # every SharePoint site you can reach
+  <site>/             # every SharePoint site the account reaches
     <library>/        # its document libraries (drives)
       <path>          # the drive's files and folders
 ```
 
-- SharePoint document libraries, discovered across sites and drives. An
-  unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`:
-  `ls /` lists the sites, `ls /site/` a site's libraries, and
-  `ls /site/lib/...` a drive's files and folders.
-- This is a remote mount: prefer targeted reads (`grep`, `head`) over
-  full scans, and pipe a large file to `head` or `tail` rather than
-  `cat` it whole.
-- File versions are retained; a snapshot pins and reads prior
-  versions."""
+- An unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`."""
 
 
 class SharePointVFS(BaseVFS):

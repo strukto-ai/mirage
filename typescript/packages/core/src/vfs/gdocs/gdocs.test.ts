@@ -32,10 +32,6 @@ async function jqEval(obj: unknown, expr: string): Promise<unknown[]> {
 }
 
 const ALL_TEXT = '[.. | .textRun? // empty | .content] | add'
-const TAB_NAMES = '[.. | .tabProperties? // empty | .title]'
-const TAB_COUNT = '[.. | .tabProperties? // empty] | length'
-const FIRST_TAB =
-  '[.tabs[0].documentTab.body.content[]\n      | .paragraph?.elements[]?.textRun.content] | add'
 const OLD_FLAT_RECIPE = '.body.content[].paragraph.elements[].textRun.content'
 
 interface Tab {
@@ -76,12 +72,10 @@ describe('VFS_MD', () => {
     const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
     expect(rendered).toContain('owned/')
     expect(rendered).toContain('shared/')
-    expect(rendered).toContain('shared with you by others')
-    expect(rendered).toContain('still in `owned/`')
+    expect(rendered).toContain('stay\n  in `owned/`')
     expect(rendered).toContain('`documents.get`')
     expect(rendered).toContain('.tabs[].documentTab')
     expect(rendered).toContain('childTabs')
-    expect(rendered).toContain('tabProperties')
   })
 
   it('no longer promises a top-level body', () => {
@@ -89,14 +83,11 @@ describe('VFS_MD', () => {
     // old recipe would return nothing at all on a live document.
     const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
     expect(rendered).not.toContain(OLD_FLAT_RECIPE)
-    expect(rendered).toContain('There is no top-level .body')
+    expect(rendered).toContain('there is no\n  top-level `.body`')
   })
 
-  it('states the recipes this test runs', () => {
-    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
-    for (const recipe of [ALL_TEXT, TAB_NAMES, TAB_COUNT, FIRST_TAB]) {
-      expect(rendered).toContain(recipe)
-    }
+  it('states the recipe this test runs', () => {
+    expect(VFS_MD).toContain(ALL_TEXT)
   })
 })
 
@@ -104,25 +95,11 @@ describe('VFS_MD jq recipes', () => {
   it('reads every tab at any depth', async () => {
     expect(await jqEval(DOC, ALL_TEXT)).toEqual(['first tab\nsecond tab\nchild tab\n'])
   })
-
-  it('names child tabs too', async () => {
-    expect(await jqEval(DOC, TAB_NAMES)).toEqual([['Tab 1', 'Tab 2', 'Child']])
-    expect(await jqEval(DOC, TAB_COUNT)).toEqual([3])
-  })
-
-  it('survives the leading sectionBreak', async () => {
-    // The `?` is load-bearing: content[0] is a sectionBreak with no
-    // .paragraph, and the un-guarded path raises "Cannot iterate over
-    // null" on every real document.
-    expect(await jqEval(DOC, FIRST_TAB)).toEqual(['first tab\n'])
-  })
 })
 
 describe('VFS_MD file commands', () => {
   it('documents rm and mv for a write path', () => {
-    expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gdoc.json')
-    expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gdoc.json')
-    expect(VFS_MD).toContain('Delete, on a `write` path:')
-    expect(VFS_MD).toContain('Rename to a new title, on a `write` path:')
+    expect(VFS_MD).toContain('On a `write` path, `rm` a file to delete it from Drive')
+    expect(VFS_MD).toContain('`mv` it to a\n  new `<title>`')
   })
 })

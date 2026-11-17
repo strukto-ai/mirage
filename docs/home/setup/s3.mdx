@@ -1,62 +1,152 @@
 ---
 title: S3
 icon: /images/s3-logo.svg
-description: Set up AWS S3 credentials for the S3 VFS.
+description: Virtualize an AWS S3 bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The S3 VFS needs an AWS access key pair with read (and optionally write) access to your bucket.
+An S3 bucket becomes a folder tree, with one file per object.
 
-### 1. Create an IAM User
 
-1. Go to https://console.aws.amazon.com/iam/
-1. **Users** -> **Create user**
-1. Attach the `AmazonS3ReadOnlyAccess` policy (or `AmazonS3FullAccess` for write)
-1. **Security credentials** -> **Create access key** -> **Application running outside AWS**
-1. Copy the **Access key ID** and **Secret access key**
 
-### 2. Set Environment Variables
+## Setup
+
+The S3 VFS needs an AWS access key pair that can read the bucket, and write
+to it for a `write` mount.
+
+1. Open the [IAM console](https://console.aws.amazon.com/iam/), then **Users** > **Create user**.
+1. Attach `AmazonS3ReadOnlyAccess`, or `AmazonS3FullAccess` for writes. A policy
+   that grants `s3:ListBucket`, `s3:GetObject`, `s3:PutObject` and
+   `s3:DeleteObject` on the one bucket is narrower.
+1. Open the user, then **Security credentials** > **Create access key** > **Application running outside AWS**.
+1. Copy the **Access key ID** and **Secret access key**. AWS shows the secret only once.
 
 ```bash
-# .env.development
-AWS_S3_BUCKET=my-bucket
-AWS_DEFAULT_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=wJal...
+export AWS_S3_BUCKET=my-bucket
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
 ```
 
-### Alternative: AWS Profile
+- With `~/.aws/credentials` set up, give `aws_profile` (`profile` in TypeScript)
+  instead of the key pair. With no credentials at all, the AWS credential chain
+  applies.
+- A browser mount can fetch presigned URLs from a backend instead of holding
+  keys; see the [TypeScript S3 guide](/typescript/setup/s3).
 
-If you have `~/.aws/credentials` configured, you can use a profile name instead of explicit access keys.
+## Connect
 
-For the Python VFS API, see the [S3 VFS doc](/python/vfs/s3).
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /s3:
+        vfs: s3
+        mode: read
+        config:
+          bucket: ${AWS_S3_BUCKET}
+          region: ${AWS_DEFAULT_REGION}
+          aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    ```
 
-## Scoping a VFS to a key prefix
+    ```bash
+    mirage workspace create workspace.yaml --id s3
+    mirage shell -w s3 -c 'ls /s3'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
 
-Both runtimes support a key prefix option that transparently scopes every operation to a subpath of the bucket, so agents see clean paths while the underlying S3 keys carry the full prefix.
+    from mirage import MountMode, Workspace
+    from mirage.vfs.s3 import S3Config, S3VFS
 
-<CodeGroup>
+    config = S3Config(
+        bucket=os.environ["AWS_S3_BUCKET"],
+        region=os.environ["AWS_DEFAULT_REGION"],
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/s3": S3VFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /s3")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, S3VFS, Workspace } from '@struktoai/mirage-node'
 
-```ts TypeScript
-const s3 = new S3VFS({
-  bucket: 'app-data',
-  region: 'eu-west-1',
-  keyPrefix: `users/${userId}/`,
-})
+    const ws = new Workspace(
+      {
+        '/s3': new S3VFS({
+          bucket: process.env.AWS_S3_BUCKET!,
+          region: process.env.AWS_DEFAULT_REGION!,
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /s3')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/s3/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
 ```
 
-```python Python
-S3VFS(S3Config(
-    bucket="app-data",
-    region="eu-west-1",
-    key_prefix=f"users/{user_id}/",
-))
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) scopes every operation to one
+  subpath of the bucket, such as `users/42/`. Leading slashes are dropped and
+  a trailing `/` is added; unset or empty means no prefix.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /s3 -type f
+/s3/data/events.jsonl
+/s3/data/users.parquet
+/s3/reports/2026-11/metrics.csv
+/s3/reports/2026-11/summary.md
 ```
 
-</CodeGroup>
+```bash
+$ head -n 3 /s3/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
 
-Leading slashes are stripped and a trailing slash is added automatically. `None` / `undefined` and empty strings both mean "no prefix." For browser security considerations, see the [TypeScript S3 setup doc](/typescript/setup/s3).
+```bash
+$ grep -c signup /s3/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+Set `default_content_type` (`defaultContentType` in TypeScript) to stamp every
+upload with one content type. Unset, S3 picks its own default, and the
+browser's presigned PUT sends `application/octet-stream`.
 
 ## S3-compatible VFSes
 
@@ -74,6 +164,13 @@ How `write: conditional` behaves depends on where the bucket is:
 See [read and write behavior](/home/setup/vfs#read-and-write-behavior) for
 what a conditional write does.
 
-## Content type of uploads
+## SDK guides
 
-A write carries no content type of its own, so the mount decides what S3 stores and serves back. Set `default_content_type` (`defaultContentType` in TypeScript) to stamp every upload with it. Unset, S3 picks its own default, and the browser's presigned PUT, which has to sign a type, sends `application/octet-stream`.
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/s3">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/s3">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

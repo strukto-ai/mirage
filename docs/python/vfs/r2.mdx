@@ -1,21 +1,21 @@
 ---
 title: Cloudflare R2
+description: Virtualize a Cloudflare R2 bucket from Python.
 icon: /images/cloudflare-logo.svg
-description: Mount Cloudflare R2 storage as a virtual filesystem.
 ---
-The R2 VFS mounts a Cloudflare R2 bucket at some prefix such as
-`/r2/`. All operations involve network I/O to the remote object store.
-Uses aioboto3 against R2's S3-compatible API.
 
-For credential setup, see [R2 Setup](/home/setup/r2).
+`R2VFS` mounts one Cloudflare R2 bucket: every object becomes a file and every
+`/` in a key a folder. It reaches R2 through its S3-compatible API at
+`https://<account_id>.r2.cloudflarestorage.com`. Credentials are set up on the
+[R2 page](/home/setup/r2).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[r2]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -28,57 +28,123 @@ config = R2Config(
     account_id=os.environ["R2_ACCOUNT_ID"],
     access_key_id=os.environ["R2_ACCESS_KEY_ID"],
     secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
-    # Optional:
-    # endpoint_url="https://...r2.cloudflarestorage.com",
-    # aws_profile="my-profile",
-    # region="auto",
-    # timeout=30,
-    # proxy="http://proxy:8080",
 )
-vfs = R2VFS(config=config)
-ws = Workspace({"/r2": vfs}, mode=MountMode.READ)
+ws = Workspace({"/r2": R2VFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /r2 && find /r2 -name '*.csv'")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-`R2VFS(config)` takes an `R2Config` object with the bucket name and
-either `account_id` (endpoint is auto-built as
-`https://{account_id}.r2.cloudflarestorage.com`) or an explicit
-`endpoint_url`. Both `READ` and `WRITE` modes are supported.
+A bucket in a jurisdiction has its own endpoint, such as
+`https://<account_id>.eu.r2.cloudflarestorage.com`; set `endpoint_url` to it. A
+mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table r2 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region requests are signed for; R2 addresses a bucket by account, not by region. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL that replaces the one the provider derives. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>account_id</code> | Cloudflare account ID. It builds the endpoint `https://<account_id>.r2.cloudflarestorage.com` unless `endpoint_url` is set; one of the two is required. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="bucket" type={"str"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"str"} default={"'auto'"}>
+  Region requests are signed for; R2 addresses a bucket by account, not by region.
+</ResponseField>
+<ResponseField name="endpoint_url" type={"str"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+<ResponseField name="access_key_id" type={"str"} post={["secret"]}>
+  Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain.
+</ResponseField>
+<ResponseField name="secret_access_key" type={"str"} post={["secret"]}>
+  Secret access key paired with `access_key_id`.
+</ResponseField>
+<ResponseField name="session_token" type={"str"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="aws_profile" type={"str"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="path_style" type={"bool"} default={"False"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="proxy" type={"str"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="account_id" type={"str"}>
+  Cloudflare account ID. It builds the endpoint `https://<account_id>.r2.cloudflarestorage.com` unless `endpoint_url` is set; one of the two is required.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table r2 end */}
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_key_id` and `secret_access_key`, an R2 API token's key pair, with
+   `session_token` for temporary credentials.
+2. `aws_profile`, a profile in `~/.aws/credentials`.
+3. The AWS credential chain: environment variables, then the instance or
+   container role.
+
+The token needs **Object Read only** on the bucket, or **Object Read & Write**
+to write. A request the credentials may not make answers `Permission denied`.
+
+## Layout
+
+```text
+/r2/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
+```
+
+`/r2/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; R2 stores no folder objects.
+
+## Behavior
+
+- **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
+  so `/r2/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped and
+  a trailing `/` added.
+
+## Integration
+
+R2 answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with R2 mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md r2 start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -86,7 +152,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -107,7 +173,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -129,197 +195,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md r2 end */}
-
-The R2 VFS maps object keys to virtual paths under the mount
-prefix. R2 "directories" are prefix-based — there are no real directory
-objects.
-
-For example, if bucket `my-bucket` contains:
-
-```text
-assets/logo.png
-assets/style.css
-data/export.parquet
-data/metrics.csv
-```
-
-Then mounting at `/r2/` exposes:
-
-```text
-/r2/
-  assets/
-    logo.png
-    style.css
-  data/
-    export.parquet
-    metrics.csv
-```
-
-Path mapping: virtual `/r2/assets/logo.png` maps to R2 key
-`assets/logo.png`.
-
-## Cache
-
-The R2 VFS uses `IndexCacheStore` with `index_ttl = 600`
-(10 minutes). Directory listings are cached for up to 600 seconds before
-being refreshed from R2. This reduces API calls for repeated directory
-traversals. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
-
-## Integration
-
-What R2 answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On R2 |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.r2 import R2Config, R2VFS
-
-load_dotenv(".env.development")
-
-config = R2Config(
-    bucket=os.environ["R2_BUCKET"],
-    account_id=os.environ["R2_ACCOUNT_ID"],
-    access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-    secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
-)
-
-vfs = R2VFS(config=config)
-
-
-async def main() -> None:
-    ws = Workspace({"/r2/": vfs}, mode=MountMode.READ)
-
-    r = await ws.shell("ls /r2/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("cat /r2/data/metrics.csv | head -n 10")
-    print(await r.stdout_str())
-
-    r = await ws.shell("tree /r2/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /r2/ -name '*.csv'")
-    print(await r.stdout_str())
-
-    r = await ws.shell("stat /r2/assets/logo.png")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-The R2 VFS supports the full set of shell commands since it operates
-on real file content (text, binary, JSON, CSV, etc.). Large files benefit
-from range reads to avoid downloading entire objects.
-
-### Read Commands
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `cat`           | Read file content                          |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type, modified) |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `nl`            | Number lines                               |
-| `du`            | Disk usage summary                         |
-| `file`          | Detect file type                           |
-| `strings`       | Extract printable strings from binary      |
-| `xxd`           | Hex dump                                   |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-
-### Text Processing
-
-| Command    | Notes                                       |
-| ---------- | ------------------------------------------- |
-| `awk`      | Pattern scanning and processing             |
-| `sed`      | Stream editor                               |
-| `tr`       | Translate or delete characters              |
-| `sort`     | Sort lines                                  |
-| `uniq`     | Remove duplicate lines                      |
-| `cut`      | Extract fields/columns                      |
-| `join`     | Join lines on a common field                |
-| `paste`    | Merge lines side by side                    |
-| `column`   | Columnate output                            |
-| `fold`     | Wrap lines to a specified width             |
-| `expand`   | Convert tabs to spaces                      |
-| `unexpand` | Convert spaces to tabs                      |
-| `fmt`      | Simple text formatter                       |
-| `rev`      | Reverse lines                               |
-| `tac`      | Concatenate and print in reverse            |
-| `look`     | Display lines beginning with a given string |
-| `shuf`     | Shuffle lines                               |
-| `tsort`    | Topological sort                            |
-| `comm`     | Compare two sorted files                    |
-| `cmp`      | Compare two files byte by byte              |
-| `diff`     | Compare files line by line                  |
-| `patch`    | Apply a diff patch                          |
-| `iconv`    | Character encoding conversion               |
-
-### File Operations
-
-| Command  | Notes                                 |
-| -------- | ------------------------------------- |
-| `cp`     | Copy files                            |
-| `mv`     | Move/rename files                     |
-| `rm`     | Remove files                          |
-| `mkdir`  | Create directories                    |
-| `touch`  | Create empty file or update timestamp |
-| `ln`     | Create symbolic links                 |
-| `tee`    | Write stdin to file and stdout        |
-| `mktemp` | Create temporary file                 |
-| `split`  | Split file into pieces                |
-| `csplit` | Split file by context                 |
-
-### Path Utilities
-
-| Command    | Notes                      |
-| ---------- | -------------------------- |
-| `basename` | Strip directory from path  |
-| `dirname`  | Strip filename from path   |
-| `realpath` | Resolve path               |
-| `readlink` | Print symbolic link target |
-| `ls`       | List directory contents    |
-
-### Compression
-
-| Command  | Notes                 |
-| -------- | --------------------- |
-| `gzip`   | Compress files        |
-| `gunzip` | Decompress gzip files |
-| `zip`    | Create zip archives   |
-| `unzip`  | Extract zip archives  |
-| `tar`    | Archive files         |
-| `zcat`   | Cat compressed files  |
-| `zgrep`  | Grep compressed files |
-
-### Encoding
-
-| Command  | Notes                |
-| -------- | -------------------- |
-| `base64` | Base64 encode/decode |
-
-## Use Cases
-
-- **AI agents accessing R2 data**: Mount R2 buckets for agents to read and process datasets
-- **Data pipelines**: Read and write R2 objects with shell-like commands
-- **FUSE mounting**: Expose R2 buckets through a virtual FUSE mount for external tools

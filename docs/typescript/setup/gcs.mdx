@@ -1,18 +1,21 @@
 ---
 title: Google Cloud Storage
 icon: /images/gcs-logo.svg
-description: Set up Google Cloud Storage as a MIRAGE VFS from Node or the browser.
+description: Virtualize a Google Cloud Storage bucket from Node or the browser.
 ---
 
-GCS exposes an S3-compatible API when you use HMAC keys, so MIRAGE signs GCS requests with the same AWS Signature V4 used for S3, against the endpoint `https://storage.googleapis.com`.
+`GCSVFS` mounts one Google Cloud Storage bucket: every object becomes a file and
+every `/` in a key a folder. It reaches GCS through the S3-compatible XML API at
+`https://storage.googleapis.com`, signed with an HMAC key. Credentials are set
+up on the [GCS page](/home/setup/gcs).
 
-Credentials (HMAC access key + secret for a service account) are created the same way in both runtimes, see [GCS Credentials](/home/setup/gcs).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -22,57 +25,126 @@ const gcs = new GCSVFS({
   accessKeyId: process.env.GCS_ACCESS_KEY_ID!,
   secretAccessKey: process.env.GCS_SECRET_ACCESS_KEY!,
 })
+const ws = new Workspace({ '/gcs': gcs }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': gcs }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /gcs && find /gcs -name '*.csv'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-### Config
+`endpoint` defaults to `https://storage.googleapis.com` and `region` to `auto`:
+one host serves every region. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table gcs start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region requests are signed for; GCS serves every region from one host. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://storage.googleapis.com'` | Endpoint URL of the S3 interoperability API. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'auto'"}>
+  Region requests are signed for; GCS serves every region from one host.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://storage.googleapis.com'"}>
+  Endpoint URL of the S3 interoperability API.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gcs end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from `accessKeyId` and `secretAccessKey`, a service account's
+HMAC key, with `sessionToken` for temporary credentials. Without them, the AWS
+SDK reads its own chain: environment variables, `~/.aws/credentials`, then the
+instance or container role.
+
+The service account needs **Storage Object Viewer** on the bucket, or **Storage
+Object User** (or **Storage Object Admin**) to write. A new key can take up to a
+minute to work. A request the credentials may not make answers
+`Permission denied`.
+
+## Layout
+
+```text
+/gcs/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-The browser `GCSVFS` is secret-free, your backend signs each operation using your HMAC keys and hands back a URL. Since GCS accepts AWS Signature V4, the same `@aws-sdk/s3-request-presigner` code used for S3 works, pointed at the GCS endpoint.
+`/gcs/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; GCS stores no folder objects.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/gcs start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region the presigned URLs are signed for; GCS accepts `auto`. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://storage.googleapis.com'` | Endpoint URL of the GCS XML API. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/gcs/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/gcs end */}
+## Browser
 
-### 1. Server: sign URLs with the GCS endpoint
+The browser `GCSVFS` from `@struktoai/mirage-browser` keeps credentials off the
+page: a server signs a URL for each S3 call with the GCS keys, and the browser
+fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const gcs = new GCSVFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/gcs': gcs }, { mode: MountMode.READ })
+```
+
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server.
+- `endpoint` only names the mount's storage location: requests go to the host
+  each signed URL names.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -96,77 +168,50 @@ const client = new S3Client({
 })
 const BUCKET = process.env.GCS_BUCKET!
 
-app.post('/presign/gcs', async (req, res) => {
-  const { path, op, opts } = req.body
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
   const key = path.replace(/^\/+/, '')
   const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
   let cmd
   switch (op) {
     case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
-    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
     case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'LIST':   cmd = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: opts?.listPrefix,
-      Delimiter: opts?.listDelimiter,
-      ContinuationToken: opts?.listContinuationToken,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
     }); break
     case 'COPY':   cmd = new CopyObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      CopySource: `${BUCKET}/${opts?.copySource}`,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
     }); break
   }
-  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
 })
 ```
 
-### 2. Browser: wire it up
+Google's own signer (`getSignedUrl` in `@google-cloud/storage`) works too: the
+mount only needs a URL that `fetch()` accepts, and native signing needs no HMAC
+key on the server.
 
-```ts
-import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-const gcs = new GCSVFS({
-  bucket: 'my-gcs-bucket',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign/gcs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = await r.json()
-    return url
-  },
-})
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
 
-const ws = new Workspace({ '/bucket/': gcs }, { mode: MountMode.READ })
-```
+GCS refuses the S3 `PutBucketCors` call, since its CORS schema differs. Set the
+rules with `gsutil`:
 
-<Note>
-If you prefer Google's native signer (Google-provided IAM-signed URLs via `@google-cloud/storage`'s `getSignedUrl`), you can use it here too, the presigner contract only cares that the returned URL works with `fetch()`. Native signing avoids shipping HMAC keys to your backend.
-</Note>
-
-### 3. Configure CORS on the bucket
-
-GCS rejects S3-flavored `PutBucketCors` calls, its CORS schema differs. Use **either** the native XML API (via HMAC keys, same creds your presigner uses) **or** `gsutil cors set`.
-
-**Option A, helper script (no gcloud install):**
-
-The browser example ships a signer that crafts the GCS-shaped CORS XML and submits it via AWS SigV4 to `https://storage.googleapis.com/<bucket>?cors`:
-
-```bash
-cd examples/browser
-npx tsx scripts/configure-gcs-cors.ts http://localhost:5173 https://app.example.com
-```
-
-**Option B, `gsutil`:**
-
-```bash
-brew install google-cloud-sdk
-gcloud auth login
-
-cat > cors.json <<'EOF'
+```json
 [
   {
     "origin": ["http://localhost:5173", "https://app.example.com"],
@@ -175,33 +220,74 @@ cat > cors.json <<'EOF'
     "maxAgeSeconds": 3000
   }
 ]
-EOF
+```
 
+```bash
 gsutil cors set cors.json gs://$GCS_BUCKET
 ```
 
-<Warning>
-GCS's XML API accepts `<CorsConfig><Cors><Origins>…</Origins><Methods>…</Methods><ResponseHeaders>…</ResponseHeaders><MaxAgeSec>…</MaxAgeSec></Cors></CorsConfig>`. There is no `<Headers>` / `<AllowedHeaders>` element, GCS allows all request headers through automatically.
-</Warning>
+GCS lets every request header through, so the rules name none.
 
-See the [GCS VFS](/python/vfs/gcs) docs for the equivalent Python wiring.
+  </Accordion>
+  <Accordion title="Browser fields">
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+{/* generated: config-table browser/gcs start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'auto'"}>
+  Region the presigned URLs are signed for; GCS accepts `auto`.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://storage.googleapis.com'"}>
+  Endpoint URL of the GCS XML API. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/gcs end */}
+
+  </Accordion>
+</AccordionGroup>
+
+## Integration
+
+GCS answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Google Cloud Storage mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with GCS mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md gcs start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -209,7 +295,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Cloud Storage mounte
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -230,7 +316,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Cloud Storage mounte
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -252,13 +338,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Cloud Storage mounte
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gcs end */}
-
-## Integration
-
-What GCS answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On GCS |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

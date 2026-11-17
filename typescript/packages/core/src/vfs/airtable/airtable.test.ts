@@ -116,7 +116,7 @@ describe('VFS_MD', () => {
     }
     expect(rendered).toContain('`created_time` and `fields`')
     expect(rendered).toContain('max_read_records')
-    expect(rendered).toContain('head -n 20 /airtable/bases/')
+    expect(rendered).toContain('head -n N')
     expect(rendered).not.toMatch(/[{}]/)
   })
 })

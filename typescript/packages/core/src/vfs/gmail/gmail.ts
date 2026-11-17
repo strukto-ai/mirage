@@ -36,56 +36,16 @@ export const VFS_MD = `\`\`\`text
         <attachment-filename>
 \`\`\`
 
-- \`<label>\` is a Gmail label: \`INBOX\`, \`SENT\`, \`DRAFT\`, \`IMPORTANT\`,
-  \`STARRED\`, \`TRASH\`, \`SPAM\` or any user label.
-- \`<yyyy-mm-dd>\` is the date the message was received. Listing one
-  (\`ls {prefix}/INBOX/2026-05-03/\`) pushes \`after:\`/\`before:\` into the
-  Gmail query, much cheaper than scanning the whole label.
-- \`<subject>\` is sanitized: \`ls\` the date directory rather than
-  construct it. \`<message-id>\` is the Gmail message id.
-- The email body is in the \`.gmail.json\` file; read it with \`cat\`,
-  \`head\` or \`jq\`, keeping the suffix. The sibling directory, the same
-  name without the extension, holds attachments only: \`cat\` one to
-  download its bytes. \`grep -r\` over a date directory skips these binary
-  files.
-- A \`grep\` or \`rg\` hit names the \`.gmail.json\` file, not the attachments
-  directory. To list a message's attachments, \`ls\` its path with
-  \`.gmail.json\` stripped; \`ENOENT\` means it has none:
-  \`ls {prefix}/INBOX/2026-05-03/<subject>__<message-id>/\`
-
-A \`.gmail.json\` is processed by Mirage, not the raw Gmail API response:
-
-\`\`\`jsonc
-{
-  "id": "...",
-  "thread_id": "...",
-  "from":    { "name": "...", "email": "..." },
-  "to":      [ { "name": "...", "email": "..." } ],
-  "cc":      [ ... ],
-  "subject": "...",
-  "date":    "Mon, 3 May 2026 10:00:00 -0700",
-  "body_text": "decoded plain-text body",
-  "snippet":   "first ~200 chars from Gmail",
-  "labels":  [ "INBOX", "IMPORTANT", ... ],
-  "attachments": [
-    { "id": "...", "filename": "invoice.pdf",
-      "mime_type": "application/pdf", "size": 12345 }
-  ]
-}
-\`\`\`
-
-Useful \`jq\` paths:
-
-\`\`\`jq
-.subject
-.from.email
-.body_text
-.labels[]
-.attachments[] | .filename
-\`\`\`
-
-To act on messages (read by id, triage, raw API calls), use the \`gws\`
-CLI if installed (\`gws gmail --help\`).`
+- \`<label>\` is a Gmail label (\`INBOX\`, \`SENT\`, \`STARRED\`, ... or a user
+  label); \`<yyyy-mm-dd>\` is the received date, and listing one queries
+  only that day.
+- \`ls\` a date directory for the names rather than building \`<subject>\`.
+- A \`.gmail.json\` is the email processed by Mirage, not the raw API
+  response: \`.from\`, \`.to\`, \`.subject\`, \`.date\`, \`.body_text\`, \`.labels\`,
+  \`.attachments[]\`.
+- The sibling directory holds attachments only (\`cat\` one for its bytes)
+  and is absent when there are none; \`grep -r\` skips its binary files.
+- Triage and other changes go through the \`gws gmail\` CLI.`
 
 export class GmailVFS extends BaseVFS {
   override readonly name: string = VFSName.GMAIL

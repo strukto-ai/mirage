@@ -1,14 +1,20 @@
 ---
 title: Trello
-description: Mount Trello workspaces, boards, lists, cards, members, and labels as a Mirage filesystem for Python agents.
+description: Virtualize Trello boards from Python.
 icon: /images/trello-logo.svg
 ---
-The Trello VFS exposes workspaces, boards, lists, cards, members, and
-labels as a virtual filesystem mounted at some prefix such as `/trello/`.
 
-For API key setup, see [Trello Setup](/home/setup/trello).
+`TrelloVFS` mounts Trello as read-only JSON files: workspaces, boards, lists,
+cards with their comments, members and labels. The API key and token are set
+up on the [Trello page](/home/setup/trello).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -20,39 +26,130 @@ config = TrelloConfig(
     api_key=os.environ["TRELLO_API_KEY"],
     api_token=os.environ["TRELLO_API_TOKEN"],
 )
-vfs = TrelloVFS(config=config)
-ws = Workspace({"/trello": vfs}, mode=MountMode.READ)
+ws = Workspace({"/trello": TrelloVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("tree -L 4 /trello/workspaces")
+print(await result.stdout_str())
+await ws.close()
 ```
 
+`workspace_id` or `board_ids` limits the mount to one workspace or some
+boards. `base_url` points at a proxy.
+
+### Fields
+
 {/* generated: config-table trello start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Trello API key. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_token</code><br />required, secret | Trello API token. |
-| <code style={{ whiteSpace: 'nowrap' }}>workspace_id</code> | Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member. |
-| <code style={{ whiteSpace: 'nowrap' }}>board_ids</code> | Only these boards are listed or readable. Unset shows every open board of the shown workspaces. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.trello.com/1'` | Trello API root; override to point at a fake or proxy. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} required post={["secret"]}>
+  Trello API key.
+</ResponseField>
+<ResponseField name="api_token" type={"str"} required post={["secret"]}>
+  Trello API token.
+</ResponseField>
+<ResponseField name="workspace_id" type={"str"}>
+  Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member.
+</ResponseField>
+<ResponseField name="board_ids" type={"list[str]"}>
+  Only these boards are listed or readable. Unset shows every open board of the shown workspaces.
+</ResponseField>
+<ResponseField name="base_url" type={"str"} default={"'https://api.trello.com/1'"}>
+  Trello API root; override to point at a fake or proxy.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table trello end */}
+
+## Authentication
+
+The mount needs an API key and a token authorized for it. `scope=read` is
+enough for the mount; the [`trello`](/home/setup/cli/trello) CLI needs
+`write`. Keep the token secret: with the key it reaches the whole account.
+
+## Layout
+
+```text
+/trello/
+  workspaces/
+    Acme_Product__<workspace-id>/
+      workspace.json
+      boards/
+        Sprint_Board__<board-id>/
+          board.json
+          members/
+            Alice_Chen__<member-id>.json
+          labels/
+            bug__<label-id>.json
+          lists/
+            Doing__<list-id>/
+              list.json
+              cards/
+                Fix_login_redirect__<card-id>/
+                  card.json
+                  comments.jsonl
+```
+
+- **Names:** every name ends in `__<id>`, so a command can take the id
+  without a lookup. The readable part is sanitized, so `ls` the parent to
+  find a name.
+- **`workspace.json`, `board.json`:** the workspace's and the board's
+  metadata.
+- **`list.json`:** the list, with fields such as `list_id`, `list_name`,
+  `board_id`, `closed` and `pos`.
+- **`card.json`:** the card, with fields such as `card_id`, `board_id`,
+  `list_id`, `member_ids`, `label_ids`, `due` and `url` that commands take as
+  they are.
+- **`comments.jsonl`:** the card's comments, one JSON object per line, ordered
+  by `created_at`. It is a Mirage format, not a Trello one.
+- **Members:** each file carries `member_id` and `username`, ready for
+  commands such as `trello card assign`.
+- **Labels:** each file carries `label_id`, `label_name`, `color` and
+  `board_id`.
+
+## Behavior
+
+- **Read only:** create, move, assign and comment on cards with the [`trello`](/python/cli/trello)
+  CLI; the tree serves the same entities as JSON files. The CLI takes
+  `workspace_id` and `board_ids` in its own config, so it covers the boards
+  the mount lists only when both are configured alike.
+- **Recent writes:** Trello indexes a write some time after it lands, so a
+  search can miss a recent change. See Integration.
+
+## Integration
+
+Trello answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Trello search runs for each word, and only the cards
+  that hold every word are read, where the search names it or the listing
+  keeps it. The listing keeps each card's other fields (ids, due date, flags,
+  link) and each name or description word the search can miss, such as one
+  inside a link; the cards are listed once more, so a change since the last
+  listing is still found. Comments and the board's other files are always
+  read. Every card is read when the word is a key of the card JSON (`desc`,
+  `due`) or a JSON literal, has a digit or only the letters a to f, or when a
+  search fails, returns 1,000 cards or finds nothing. `walk_limit: -1` in the
+  mount's `"@all"` [command limit](/home/core/output-limits) reads every file
+  instead.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`.
 
 {/* generated: vfs-md trello start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `trello`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -75,12 +172,11 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                       comments.jsonl
     ```
 
-    - `ls` directories first to discover exact names.
-    - To act on boards and cards (list boards, members, lists, labels, cards
-      and comments; create, update, move, assign, label and comment on
-      cards), use the `trello` CLI if installed (`trello --help`).
+    - A named segment is `<name>__<id>`; `ls` the parent for exact names.
+    - To create, update, move, assign, label or comment on cards, use the
+      `trello` CLI if installed (`trello --help`).
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -88,7 +184,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `trello` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -136,10 +232,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                       comments.jsonl
     ```
 
-    - `ls` directories first to discover exact names.
-    - To act on boards and cards (list boards, members, lists, labels, cards
-      and comments; create, update, move, assign, label and comment on
-      cards), use the `trello` CLI if installed (`trello --help`).
+    - A named segment is `<name>__<id>`; `ls` the parent for exact names.
+    - To create, update, move, assign, label or comment on cards, use the
+      `trello` CLI if installed (`trello --help`).
 
     ## Supported Unix Commands for VFS
 
@@ -161,220 +256,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md trello end */}
-
-Directory and file names embed the Trello ID after `__` so that
-[trello CLI](/python/cli/trello) commands can take an ID without extra
-lookups.
-
-### Workspaces
-
-Each workspace directory is named:
-
-```text
-<workspace-name>__<workspace-id>
-```
-
-Inside the workspace directory:
-
-- `workspace.json` is the normalized workspace metadata
-- `boards/` contains one directory per board
-
-### Boards
-
-Each board directory is named:
-
-```text
-<board-name>__<board-id>
-```
-
-Inside the board directory:
-
-- `board.json` is the normalized board metadata
-- `members/` contains one JSON file per board member
-- `labels/` contains one JSON file per board label
-- `lists/` contains one directory per list
-
-### Lists
-
-Each list directory is named:
-
-```text
-<list-name>__<list-id>
-```
-
-Each list directory contains:
-
-- `list.json` -- normalized list metadata with fields such as `list_id`,
-  `list_name`, `board_id`, `closed`, `pos`
-- `cards/` contains one directory per card
-
-### Cards
-
-Each card directory is named:
-
-```text
-<card-name>__<card-id>
-```
-
-Each card directory contains:
-
-- `card.json` -- normalized card metadata with command-aligned fields such as
-  `card_id`, `board_id`, `list_id`, `member_ids`, `label_ids`, `due`, `url`
-- `comments.jsonl` -- normalized comment stream ordered by `created_at`
-
-`comments.jsonl` is a Mirage representation chosen for shell-friendly
-workflows. It is not a native Trello file format.
-
-### Members
-
-Each member file is named:
-
-```text
-<full-name>__<member-id>.json
-```
-
-Member JSON includes command-aligned identifiers such as `member_id` and
-`username` so the value can be reused directly in commands like
-`trello card assign`.
-
-### Labels
-
-Each label file is named:
-
-```text
-<label-name>__<label-id>.json
-```
-
-Label JSON includes `label_id`, `label_name`, `color`, and `board_id`.
-
-## Integration
-
-What Trello answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Trello |
-| --- | --- |
-| `grep -r`, `rg` | Trello search and the text the listing keeps, for whole words. It can miss recent writes. |
-
-`grep -rw` and
-`rg -w` ask Trello search for each word and read only the cards that hold every
-word, where the search names it or the listing keeps it. The listing keeps the
-card's other fields (ids, due date, flags, link) and each name or description
-word the search can miss, such as one inside a link; the cards are listed once
-more for this, so a change since the last listing is still found. Comments and
-the board's other files are always read.
-
-Every card is read when the word is a key of the card JSON (`desc`, `due`) or a
-JSON literal, has a digit or only the letters a to f, which an id can hold, and
-when a search fails, returns 1,000 cards or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Trello indexes a write some time after it lands.
-
-## Cache
-
-Uses `IndexCacheStore` (same as other mounts).
-
-## Example
-
-See [`examples/python/vfs/trello/trello.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/trello/trello.py) for the full working example.
-
-```bash
-# List workspaces
-ls /trello/workspaces/
-
-# Read workspace metadata
-cat /trello/workspaces/engineering__abc123/workspace.json
-
-# List boards
-ls /trello/workspaces/engineering__abc123/boards/
-
-# Read board metadata
-cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/board.json
-
-# List lists
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/
-
-# Read a card
-cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json
-
-# Read card comments
-cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/comments.jsonl
-
-# Extract card ID with jq
-cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json \
-  | jq '.card_id'
-
-# Read last 5 comments
-tail -n 5 /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/comments.jsonl
-
-# List members
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/members/
-
-# List labels
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/labels/
-
-# Tree view
-tree -L 2 /trello/workspaces/
-```
-
-## Finding IDs
-
-IDs are embedded in directory and file names after `__`:
-
-```bash
-# Workspace ID -- embedded in directory name
-ls /trello/workspaces/
-# -> engineering__abc123   <- workspace_id = abc123
-
-# Board ID -- embedded in board directory name
-ls /trello/workspaces/engineering__abc123/boards/
-# -> roadmap__brd_001   <- board_id = brd_001
-
-# List ID -- embedded in list directory name
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/
-# -> backlog__lst_001   <- list_id = lst_001
-
-# Card ID -- embedded in card directory name
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/
-# -> fix-login__crd_001   <- card_id = crd_001
-
-# Member ID -- embedded in member file name
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/members/
-# -> alice__mem_001.json   <- member_id = mem_001
-
-# Label ID -- embedded in label file name
-ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/labels/
-# -> bug__lbl_001.json   <- label_id = lbl_001
-
-# Use stat for structured metadata
-stat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json
-
-# Extract fields with jq
-cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json \
-  | jq '{card_id, board_id, list_id, member_ids, label_ids}'
-```
-
-## Shell Commands
-
-Standard commands available on the mounted Trello tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List workspaces, boards, lists, cards      |
-| `cat`           | Read .json metadata or .jsonl comments     |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type)           |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `basename`      | Extract file name from path                |
-| `dirname`       | Extract directory from path                |
-| `realpath`      | Resolve path to absolute form              |
-
-## Acting on Trello
-
-Reads and writes on Trello entities by ID (boards, members, lists, labels,
-cards, comments) go through the [trello CLI](/python/cli/trello) when
-installed; the mounted tree serves the same entities as normalized JSON files.
-The CLI takes `workspace_id` and `board_ids` in its own config, so it covers
-the boards the mount lists only when both are configured alike.

@@ -1,98 +1,122 @@
 ---
 title: HF Spaces
 icon: /images/huggingface-logo.svg
-description: Mount a Hugging Face Space repo as a Mirage filesystem in TypeScript.
+description: Virtualize a Hugging Face Space repository from Node.
 ---
 
-`HfSpacesVFS` mounts a [Hugging Face Space](https://huggingface.co/spaces)
-repo (app code, README, config, requirements) at a prefix such as `/s/`.
-The TypeScript backend mirrors the [Python one](/python/vfs/hf_spaces) and
-returns identical results.
+`HfSpacesVFS` mounts one [Hugging Face Space](https://huggingface.co/spaces)
+repository as read-only files: its app code, README, config and requirements.
+A token for a private Space is set up on the
+[HF Spaces page](/home/setup/hf_spaces).
 
-For credential setup, see [HF Spaces Setup](/home/setup/hf_spaces).
-
-<Note>
-Node only: the VFS ships in `@struktoai/mirage-node`. It needs no native
-binding, though, because it speaks the Hub API over the runtime's own `fetch`.
-The [opendal](https://www.npmjs.com/package/opendal) binding belongs to
-[HF Buckets](/typescript/setup/hf_buckets), which is a different product.
-</Note>
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { HfSpacesVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const space = new HfSpacesVFS({
-  repoId: 'HuggingFaceBio/carbon-demo', // "namespace/space-name"
-  token: process.env.HF_TOKEN, // optional for public spaces
-  // Optional:
-  // endpoint: 'https://huggingface.co',
-  // revision: 'main',
+  repoId: process.env.HF_SPACE_REPO!,
+  token: process.env.HF_TOKEN,
 })
+const ws = new Workspace({ '/space': space }, { mode: MountMode.READ })
 
-const ws = new Workspace({ '/s/': space }, { mode: MountMode.READ })
-
-console.log((await ws.shell('ls /s/')).stdoutText)
-console.log((await ws.shell("find /s/ -name '*.py'")).stdoutText)
-console.log((await ws.shell('cat /s/README.md | head -n 15')).stdoutText)
+const result = await ws.shell("ls /space && find /space -name '*.py'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-### Config
+`revision` picks a branch, tag or commit (`main` when unset), `keyPrefix`
+mounts one folder of the repository, and `endpoint` points at a mirror or a
+self-hosted Hub. The class ships in `@struktoai/mirage-node` only.
+
+### Fields
 
 {/* generated: config-table hf_spaces start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>repoId</code><br />required | Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token; unset sends anonymous requests, which reach public repositories only. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Path inside the repository that becomes the mount root; files outside it are not listed. |
-| <code style={{ whiteSpace: 'nowrap' }}>revision</code> | Branch, tag or commit the mount reads; unset reads `main`. |
-| <code style={{ whiteSpace: 'nowrap' }}>expandCommits</code> | Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page. |
+<ResponseField name="repoId" type={"string"} required>
+  Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner.
+</ResponseField>
+<ResponseField name="token" type={"string"} post={["secret"]}>
+  Hugging Face access token; unset sends anonymous requests, which reach public repositories only.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://huggingface.co'"}>
+  Hub origin requests go to, for a mirror or a self-hosted Hub.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Path inside the repository that becomes the mount root; files outside it are not listed.
+</ResponseField>
+<ResponseField name="revision" type={"string"}>
+  Branch, tag or commit the mount reads; unset reads `main`.
+</ResponseField>
+<ResponseField name="expandCommits" type={"boolean"}>
+  Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_spaces end */}
 
-## Reading, not writing
+## Authentication
 
-This mount is read-only, the way a [`github`](/typescript/setup/github) mount is. A Hub write is
-a **commit**, and a POSIX write cannot say where a commit ends, so `echo >`,
-`rm`, `cp` and `mv` are refused here rather than silently making one commit
-per file. The [`hf` CLI](/typescript/cli/hf) is the write half: `hf download --local-dir`
-puts a copy on a ram or disk mount, which is an ordinary writable filesystem,
-and `hf upload` sends it back as a single commit.
+A public Space needs no token: unset `token` sends anonymous requests, which
+reach public repositories only. A private Space needs a **Read** token, or a
+**Fine-grained** one with read access to that Space's repository.
 
-## Listings under `fresh`
+## Layout
 
-Under `read: fresh`, a cached listing is checked against the commit the
-`revision` resolves to: one small check per command
-(`revision/{rev}?expand[]=sha`), after which every cached listing of the
-mount at that commit is served. A mount whose `revision` is a full 40- or
-64-hex commit sha is checked the same way, with that one small request
-per command: a branch or tag named like the sha could take the name, and
-mirage does not assume which one the Hub resolves. With a
-`keyPrefix`, the stored version is that commit joined with the prefix, so mounts
-of different subtrees sharing an index never share a version.
+```text
+/space/
+  Dockerfile
+  README.md
+  app.py
+  requirements.txt
+  scripts/
+    precompute.py
+```
+
+`repoId` is `namespace/space-name`, set at mount time, and the tree mirrors
+the repository at `revision`: `/space/app.py` is `app.py`.
+
+## Behavior
+
+- **Read only:** a Hub write is a commit, and a POSIX write cannot say where a
+  commit ends, so `echo >`, `rm`, `cp` and `mv` are refused rather than making
+  one commit per file. The [`hf` CLI](/typescript/cli/hf) is the write half:
+  `hf download --local-dir` puts a copy on a RAM or disk mount, and
+  `hf upload` sends it back as one commit.
+- **Fresh reads:** under `read: fresh`, each command checks the commit
+  `revision` resolves to with one small request, also when `revision` is a
+  full commit SHA, since a branch or tag could carry the same name.
+
+## Integration
+
+The Hub answers this command through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `sha256sum`: the LFS sha256 the Hub keeps; other files are read.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with HF Spaces mounted at `/<path>`.
 
 {/* generated: vfs-md hf_spaces start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | read |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -100,7 +124,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Spaces mounted at `/<pat
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -143,19 +167,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Spaces mounted at `/<pat
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md hf_spaces end */}
-
-## Integration
-
-What Hugging Face Spaces answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Hugging Face Spaces |
-| --- | --- |
-| `sha256sum` | The LFS sha256 the Hub keeps; other files are read |
-
-## Shell Commands
-
-Every read command in [HF Buckets'](/typescript/setup/hf_buckets#read-commands) set works here, as
-do the text processing and path utilities, which only read. What does not is
-the [File Operations](/typescript/setup/hf_buckets#file-operations) group: this mount is read-only,
-so `rm` and `touch` are refused, as is any command asked to write into it.

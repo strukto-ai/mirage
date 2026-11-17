@@ -1,33 +1,113 @@
 ---
 title: Disk
 icon: hard-drive
-description: Make a directory on your host available as workspace files.
+description: Virtualize a directory on the host as workspace files.
 ---
 
-Disk mounts a host directory at a workspace path. Available in Python and
-Node; for browser storage, use [OPFS](/home/setup/opfs).
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-## Configuration
+Disk mounts a host directory at a workspace path. Its files and folders show
+up as they are on disk.
 
-Replace `root` with the directory you want to access:
+## Connect
 
-```yaml
-mounts:
-  /data:
-    vfs: disk
-    mode: read
-    config:
-      root: /path/to/files
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /data:
+        vfs: disk
+        mode: read
+        config:
+          root: /srv/files
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id files
+    mirage shell -w files -c 'ls /data'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.disk import DiskVFS
+
+    ws = Workspace({"/data": DiskVFS(root="/srv/files")}, mode=MountMode.READ)
+    result = await ws.shell("ls /data")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiskVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new DiskVFS({ root: '/srv/files' }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /data')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/data/
+  config.json
+  notes.md
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-`ls /data` lists that directory. Set `mode: write` to allow changes to its
-files through Mirage. Add `capacity: 1GB` under `config` to cap the bytes the
-directory holds; see [capacity](/home/setup/vfs#mount-capacity).
+- The mount mirrors `root`; a path such as `../../etc/passwd` never leaves it.
+- A second disk mount whose `root` resolves to a folder already mounted is
+  refused; a folder inside one is fine.
+- Python and Node only. In a browser, use [OPFS](/home/setup/opfs).
 
-A second disk mount whose `root` resolves to a folder already mounted is
-refused; a folder inside one is fine.
+## Sample runs
+
+```bash
+$ tree /data
+/data
+|-- config.json
+|-- notes.md
+`-- reports
+    |-- q1.csv
+    `-- q2.csv
+
+2 directories, 4 files
+```
+
+```bash
+$ grep -r west /data/reports
+/data/reports/q1.csv:west,120
+/data/reports/q2.csv:west,140
+```
+
+```bash
+$ jq -r .region /data/config.json
+us-east-1
+```
+
+Set `mode: write` to let commands change the directory's files. Add
+`capacity: 1GB` under `config` to cap the bytes it holds; see
+[capacity](/home/setup/vfs#mount-capacity).
 
 ## SDK guides
 
-- [Python Disk VFS](/python/vfs/disk)
-- [TypeScript Disk setup](/typescript/setup/disk)
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/disk">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/disk">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

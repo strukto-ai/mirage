@@ -1,18 +1,23 @@
 ---
 title: Email
-description: Mount an IMAP mailbox as a Mirage filesystem and send messages through SMTP from Python workspaces.
+description: Virtualize an IMAP mailbox from Python.
 icon: envelope
 ---
-The Email VFS exposes any IMAP mailbox as a virtual filesystem
-mounted at some prefix such as `/email/`. Sending is handled via SMTP.
 
-Sending through `himalaya` needs the extra:
+`EmailVFS` mounts an IMAP mailbox as read-only files: each folder holds one
+folder per day of messages as JSON, with their attachments. The
+[`himalaya`](/python/cli/himalaya) CLI sends mail over SMTP. Credentials are
+set up on the [Email page](/home/setup/email).
+
+## Install
 
 ```bash
 pip install "mirage-ai[email]"
 ```
 
-## Config
+The `email` extra is for sending through `himalaya`; reading needs no extra.
+
+## Configure
 
 ```python
 import os
@@ -26,59 +31,142 @@ config = EmailConfig(
     username=os.environ["EMAIL_USERNAME"],
     password=os.environ["EMAIL_PASSWORD"],
 )
-vfs = EmailVFS(config=config)
-ws = Workspace({"/email": vfs}, mode=MountMode.READ)
+ws = Workspace({"/email": EmailVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell('ls /email && rg -l quarterly /email/INBOX')
+print(await result.stdout_str())
+await ws.close()
 ```
 
-### Config Reference
+`imap_port` (993) and `smtp_port` (587) change the ports, and `max_messages`
+how many messages each folder lists. `save_copy`, `sent_folder` and
+`trash_folder` shape what `himalaya` does after a send or delete.
+
+### Fields
 
 {/* generated: config-table email start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>imap_host</code><br />required | IMAP server hostname. |
-| <code style={{ whiteSpace: 'nowrap' }}>imap_port</code><br />default `993` | IMAP server port. |
-| <code style={{ whiteSpace: 'nowrap' }}>smtp_host</code><br />required | SMTP server hostname `himalaya` sends mail through. |
-| <code style={{ whiteSpace: 'nowrap' }}>smtp_port</code><br />default `587` | SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it. |
-| <code style={{ whiteSpace: 'nowrap' }}>username</code><br />required | Login for both IMAP and SMTP, usually the email address. |
-| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />required, secret | Password or app password for `username`. |
-| <code style={{ whiteSpace: 'nowrap' }}>use_ssl</code><br />default `True` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtp_port` instead. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_messages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
-| <code style={{ whiteSpace: 'nowrap' }}>save_copy</code><br />default `True` | After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
-| <code style={{ whiteSpace: 'nowrap' }}>sent_folder</code> | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
-| <code style={{ whiteSpace: 'nowrap' }}>trash_folder</code> | Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\Trash` and falls back to `Trash`. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="imap_host" type={"str"} required>
+  IMAP server hostname.
+</ResponseField>
+<ResponseField name="imap_port" type={"int"} default={"993"}>
+  IMAP server port.
+</ResponseField>
+<ResponseField name="smtp_host" type={"str"} required>
+  SMTP server hostname `himalaya` sends mail through.
+</ResponseField>
+<ResponseField name="smtp_port" type={"int"} default={"587"}>
+  SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it.
+</ResponseField>
+<ResponseField name="username" type={"str"} required>
+  Login for both IMAP and SMTP, usually the email address.
+</ResponseField>
+<ResponseField name="password" type={"str"} required post={["secret"]}>
+  Password or app password for `username`.
+</ResponseField>
+<ResponseField name="use_ssl" type={"bool"} default={"True"}>
+  Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtp_port` instead.
+</ResponseField>
+<ResponseField name="max_messages" type={"int"} default={"200"}>
+  How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.
+</ResponseField>
+<ResponseField name="save_copy" type={"bool"} default={"True"}>
+  After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox.
+</ResponseField>
+<ResponseField name="sent_folder" type={"str"}>
+  Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`.
+</ResponseField>
+<ResponseField name="trash_folder" type={"str"}>
+  Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\Trash` and falls back to `Trash`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}
 
-### Common VFS Settings
+## Authentication
 
-| Provider    | IMAP Host               | SMTP Host             | Notes                      |
-| ----------- | ----------------------- | --------------------- | -------------------------- |
-| Yahoo       | `imap.mail.yahoo.com`   | `smtp.mail.yahoo.com` | App password required      |
-| Fastmail    | `imap.fastmail.com`     | `smtp.fastmail.com`   | App password               |
-| iCloud      | `imap.mail.me.com`      | `smtp.mail.me.com`    | App password               |
-| ProtonMail  | `127.0.0.1` (Bridge)    | `127.0.0.1` (Bridge)  | Requires ProtonMail Bridge |
-| Self-hosted | Your server hostname    | Your server hostname  | Whatever you configured    |
+The mount logs in to IMAP with `username` and `password`; sending through
+`himalaya` uses the same pair on SMTP. Most providers want an app password
+instead of the account password. Microsoft 365 is unsupported: it requires
+OAuth for IMAP, and the mount accepts only passwords.
 
-For credentials and provider support, see [Email setup](/home/setup/email).
+| Provider | IMAP host | SMTP host | Notes |
+| --- | --- | --- | --- |
+| Yahoo | `imap.mail.yahoo.com` | `smtp.mail.yahoo.com` | App password |
+| Fastmail | `imap.fastmail.com` | `smtp.fastmail.com` | App password |
+| iCloud | `imap.mail.me.com` | `smtp.mail.me.com` | App password |
+| ProtonMail | `127.0.0.1` | `127.0.0.1` | Proton Mail Bridge |
+| Self-hosted | the server's hostname | the server's hostname | The server's own login |
+
+## Layout
+
+```text
+/email/
+  INBOX/
+    2026-11-16/
+      Meeting_Notes__12345.email.json
+      Meeting_Notes__12345/
+        report.pdf
+        screenshot.png
+  Sent/
+    2026-11-16/
+      ...
+```
+
+- **Folders:** the root lists the IMAP folders under their own names
+  (`INBOX`, `Sent`, `Drafts`).
+- **Days:** inside a folder, messages are grouped by the `YYYY-MM-DD` of their
+  `Date` header.
+- **Messages:** each message is `<subject>__<uid>.email.json`, with a
+  sanitized subject, so `ls` the day rather than build the name. The UID
+  after `__` is what `himalaya` takes.
+- **Attachments:** a message with attachments gets a folder of the same base
+  name holding them.
+
+## Behavior
+
+- **Read only:** list, read, send, reply and forward with the [`himalaya`](/python/cli/himalaya) CLI,
+  which uses the SMTP settings.
+- **Newest messages:** each folder lists its newest `max_messages` messages
+  (200).
+- **TLS:** IMAP speaks TLS from the first byte (IMAPS) by default. `use_ssl=False`
+  connects in plaintext with no STARTTLS upgrade. SMTP follows its port.
+
+## Integration
+
+The IMAP server answers this command, so fewer messages are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: IMAP `SEARCH TEXT` names the messages to read in each
+  folder or day they walk (from the mount root, in every folder), and the
+  output matches reading every message. IMAP matches headers and body in any
+  case. Attachments are always read. Every message is read when the text is a
+  key of the message JSON or a flag name, holds anything but ASCII letters and
+  spaces, matches more than `max_messages` messages in a folder, or the search
+  fails. A server that answers `SEARCH` from a full-text index (Dovecot with
+  an FTS plugin, for one) matches words rather than substrings, so a narrowed
+  scan can miss a message there; `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
 
 {/* generated: vfs-md email start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `email`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -94,7 +182,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     - To list, search, read, compose, reply or forward, use the `himalaya`
       CLI if installed (`himalaya --help`).
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -102,7 +190,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `email` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -163,179 +251,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md email end */}
-
-Folder directories appear at the root, using IMAP folder names
-(e.g., `INBOX`, `Sent`, `Drafts`).
-
-### Date Directories
-
-Inside each folder, messages are grouped into date subdirectories
-formatted as `YYYY-MM-DD`. The date is derived from the message's
-`Date` header.
-
-### Message Files
-
-Each message is stored as a `.email.json` file. The filename shape is:
-
-```text
-<sanitized-subject>__<uid>.email.json
-```
-
-### Attachments
-
-Messages that have attachments get a companion subdirectory with
-the same base name (without `.email.json`):
-
-```text
-Meeting_Notes__12345.email.json    # message JSON
-Meeting_Notes__12345/              # attachment directory
-  report.pdf
-  screenshot.png
-```
-
-## Cache
-
-The Email VFS uses `IndexCacheStore` (same as Gmail, Slack,
-Discord, and other mounts). Index entries store folder names,
-message UIDs, and message metadata.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.himalaya import HIMALAYA
-from mirage.vfs.email import EmailConfig, EmailVFS
-
-load_dotenv(".env.development")
-
-config = EmailConfig(
-    imap_host=os.environ["IMAP_HOST"],
-    smtp_host=os.environ["SMTP_HOST"],
-    username=os.environ["EMAIL_USERNAME"],
-    password=os.environ["EMAIL_PASSWORD"],
-)
-vfs = EmailVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/email": vfs}, mode=MountMode.READ)
-    ws.register_cli("himalaya", HIMALAYA, config)
-
-    # List folders
-    r = await ws.shell("ls /email/")
-    print(await r.stdout_str())
-
-    # List date directories in INBOX
-    r = await ws.shell("ls /email/INBOX/")
-    print(await r.stdout_str())
-
-    # List messages for a specific date
-    r = await ws.shell("ls /email/INBOX/2026-04-14/")
-    print(await r.stdout_str())
-
-    # Read a message
-    r = await ws.shell(
-        "cat /email/INBOX/2026-04-14/Meeting_Notes__12345.email.json")
-    print(await r.stdout_str())
-
-    # Extract subject with jq
-    r = await ws.shell(
-        'jq ".subject"'
-        " /email/INBOX/2026-04-14/Meeting_Notes__12345.email.json")
-    print(await r.stdout_str())
-
-    # List attachments
-    r = await ws.shell("ls /email/INBOX/2026-04-14/Meeting_Notes__12345/")
-    print(await r.stdout_str())
-
-    # Search across all messages
-    r = await ws.shell('rg "quarterly" /email/INBOX/')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 2 /email/INBOX/")
-    print(await r.stdout_str())
-
-    # Triage unread messages
-    r = await ws.shell(
-        "himalaya envelope search -m INBOX --page-size 5 not flag seen")
-    print(await r.stdout_str())
-
-    # Send an email
-    r = await ws.shell(
-        'himalaya message compose --to "user@example.com"'
-        ' --subject "Hello from MIRAGE"'
-        ' --body "This email was sent via the MIRAGE email VFS." --send')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Finding UIDs
-
-VFS-specific commands require message UIDs. These can be
-extracted from the filesystem:
-
-```bash
-# UID is embedded in filename after "__"
-ls /email/INBOX/2026-04-14/
-# -> Meeting_Notes__12345.email.json   <- uid = 12345
-
-# Read a message, then send a reply
-himalaya message read -m INBOX 12345
-himalaya message reply -m INBOX 12345 --body "Thanks for the notes" --send
-```
-
-For composing and sending mail, see the
-[Himalaya CLI](/python/cli/himalaya#compose-reply-and-send).
-
-## Shell Commands
-
-Standard commands available on the mounted email tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List folders, dates, messages, attachments |
-| `cat`           | Read message JSON or attachment content    |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query message JSON fields                  |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type)           |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `basename`      | Extract filename from path                 |
-| `dirname`       | Extract directory from path                |
-| `realpath`      | Resolve path to absolute form              |
-| `nl`            | Number lines of output                     |
-
-Acting on mail (list, read, send, reply, forward) goes through the
-[himalaya CLI](/python/cli/himalaya) when installed.
-
-## Integration
-
-What Email answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Email |
-| --- | --- |
-| `grep -r`, `rg` | IMAP `SEARCH TEXT`, for any text. It can miss on a server that searches words rather than substrings (Dovecot with full-text search). |
-
-`grep -r` and `rg` read only the
-messages IMAP `SEARCH TEXT` names in each folder or day they walk (from the
-mount root, in every folder), and print what reading every message would. IMAP matches the headers and body in any
-case; each hit's file is named from a header-only fetch. Attachments are always
-read.
-
-Every message is read when the text is a key of the message JSON or a flag
-name, holds anything but ASCII letters and spaces, matches more than
-`max_messages` messages in a folder, or the search fails. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since a server that answers `SEARCH` from a full-text index (Dovecot
-with an FTS plugin, for one) matches words rather than substrings, so a
-narrowed scan could miss a message there.

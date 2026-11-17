@@ -1,66 +1,150 @@
 ---
 title: Postgres
 icon: /images/postgres-logo.svg
-description: Mount a Postgres database as a read-only filesystem of schemas, tables, and rows.
+description: Virtualize a Postgres database from Python.
 ---
 
-`PostgresVFS` connects to a Postgres database via a DSN and exposes its schemas and tables as a tree the agent can list, read, and grep.
+`PostgresVFS` turns a Postgres database into a read-only tree: every schema is a
+folder of tables and views, and each one holds its column types, a summary of
+what it means and its rows as JSON lines. The connection string and a read-only
+role are set up on the [Postgres page](/home/setup/postgres).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[postgres]"
 ```
 
-## Config
+## Configure
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
 from mirage.vfs.postgres import PostgresConfig, PostgresVFS
 
-vfs = PostgresVFS(PostgresConfig(
-    dsn="postgres://user:pass@host:5432/db?sslmode=require",
-    schemas=["public", "analytics"],   # optional allowlist
-    default_row_limit=1000,
-    max_read_rows=10_000,
-    max_read_bytes=10 * 1024 * 1024,
-))
-ws = Workspace({"/pg": vfs}, mode=MountMode.READ)
+config = PostgresConfig(dsn=os.environ["DATABASE_URL"], schemas=["public"])
+ws = Workspace({"/pg": PostgresVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("head -n 3 /pg/public/tables/customers/rows.jsonl")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-For DSN format and permissions, see [Postgres Setup](/home/setup/postgres). To
-inspect data, run `find /pg/ -name rows.jsonl`, then `head -n 3` on a returned
-path.
+`schemas` limits the tree to those schemas. `max_read_rows` and
+`max_read_bytes` set how much one read of `rows.jsonl` may return.
+
+### Fields
 
 {/* generated: config-table postgres start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>dsn</code><br />required, secret | Postgres connection string. |
-| <code style={{ whiteSpace: 'nowrap' }}>schemas</code> | Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_row_limit</code><br />default `1000` | Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_read_rows</code><br />default `10000` | Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_read_bytes</code><br />default `10485760` (10 MiB) | Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`). |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="dsn" type={"str"} required post={["secret"]}>
+  Postgres connection string.
+</ResponseField>
+<ResponseField name="schemas" type={"list[str]"}>
+  Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.
+</ResponseField>
+<ResponseField name="default_row_limit" type={"int"} default={"1000"}>
+  Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.
+</ResponseField>
+<ResponseField name="max_read_rows" type={"int"} default={"10000"}>
+  Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.
+</ResponseField>
+<ResponseField name="max_read_bytes" type={"int"} default={"10485760 (10 MiB)"}>
+  Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table postgres end */}
+
+## Authentication
+
+The role in `dsn` needs `USAGE` on each schema the mount shows and `SELECT` on
+its tables and views. Add `?sslmode=require` when the server needs TLS.
+
+## Layout
+
+```text
+/pg/
+  database.json
+  public/
+    tables/
+      customers/
+        schema.json
+        semantic.json
+        rows.jsonl
+    views/
+      paid_orders/
+        schema.json
+        semantic.json
+        rows.jsonl
+```
+
+- `database.json`: every table with its estimated rows and size, and the
+  relationships between them.
+- `schema.json`: columns, keys and indexes.
+- `semantic.json`: what a table means: dimensions, time dimensions and facts,
+  comments, enum domains and example values.
+- `rows.jsonl`: one row per line.
+
+## Behavior
+
+- **Read-only:** the mount only reads; no command changes the database.
+- **Read limits:** a whole read of `rows.jsonl` past `max_read_rows` (counted on
+  the rows the table really has) or `max_read_bytes` fails with
+  `File too large`, and so does a `head -n` or `tail -n` count past it; `wc -l`
+  counts past it. `default_row_limit` is what a windowed read with an offset
+  but no limit returns.
+- **File size:** `rows.jsonl` is rendered on demand, so `stat -c %s` and
+  `ls -l` show `-` while its byte length is unknown. `wc -c rows.jsonl` counts
+  it, within the read limits. The estimates in the metadata files are named as
+  estimates.
+- **Snapshots:** the DSN is redacted. Hand the mount back at load (`mounts=`,
+  or a config over the server and CLI).
+
+## Integration
+
+Postgres answers these commands through its own API, so fewer rows are read.
+See [Integration](/home/integration/overview).
+
+- `grep` and `rg` on one file: `LIKE` (`ILIKE` for `-i`) fetches only the rows
+  that may match.
+- `head -n N`: `LIMIT N`.
+- `tail -n N`: the last N rows by one query.
+- `wc -l`: `COUNT(*)`.
+- `tail -f`: polls for rows past the last key, on a table with a primary key.
+
+For one plain text in a `rows.jsonl`, grep and rg search the rows a `LIKE` over
+each column returns, in the order a plain read returns them. A column is
+searched through its cast when a line spells it the same way: text, an integer,
+a boolean, a uuid, an enum, `jsonb`, `char(n)` for a text without a space, and
+an array of text, integers or uuids. A number, date or time column is left out
+when the text holds a character it never spells (`ada` in a `float8`). The file
+is read as usual when another column type is present (`json`, `interval`,
+`bytea`), when the text could lie inside one of those values, match a key,
+`null` or the JSON between values, or when more than `max_read_rows` rows
+match. A relation too large to read can still be searched when the output
+shows no line numbers or context.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path>`.
 
 {/* generated: vfs-md postgres start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `postgres`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -76,16 +160,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
           rows.jsonl
     ```
 
-    - Read `database.json` first to plan joins.
-    - Read `semantic.json` to learn what a table means: it splits columns
-      into dimensions (group by), time_dimensions and facts (aggregate), and
-      carries COMMENTs, enum domains and example values.
-    - Reading `rows.jsonl` is refused for a table above the configured row
-      or byte threshold. Use `head`, `tail` or `wc`, which ask SQL for only
-      what they need, or `grep`, which fetches only the matching rows when
-      SQL can find every match.
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -93,7 +173,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `postgres` for the matching lines. `head`, `tail` and `wc -l` ask `postgres` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -134,14 +214,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
           rows.jsonl
     ```
 
-    - Read `database.json` first to plan joins.
-    - Read `semantic.json` to learn what a table means: it splits columns
-      into dimensions (group by), time_dimensions and facts (aggregate), and
-      carries COMMENTs, enum domains and example values.
-    - Reading `rows.jsonl` is refused for a table above the configured row
-      or byte threshold. Use `head`, `tail` or `wc`, which ask SQL for only
-      what they need, or `grep`, which fetches only the matching rows when
-      SQL can find every match.
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
 
     ## Supported Unix Commands for VFS
 
@@ -163,44 +239,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md postgres end */}
-
-## Mount mode
-
-`read` only. Postgres mounts are read-only at the VFS level.
-
-## Snapshot behavior
-
-The DSN is redacted on snapshot. Hand the mount back at load (`mounts=`, or a config over the server and CLI).
-
-## File size and `du`
-
-`rows.jsonl` is rendered on demand. `stat -c %s` and `ls -l` show `-` when its rendered byte length is unknown; physical table storage is never used as a file size. `stat` checks existence and type without fetching columns, row counts, or relation sizes. Planner counts cannot identify content changes, so they are not used as a content fingerprint.
-
-The metadata JSON files expose explicitly named row and storage estimates. Use `wc -c rows.jsonl` for the rendered byte count; reading the whole export is subject to the configured row and byte limits.
-
-## Integration
-
-What PostgreSQL answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On PostgreSQL |
-| --- | --- |
-| `grep`, `rg` on one file | `LIKE` (`ILIKE` for `-i`) fetches only the rows that may match |
-| `head -n N` | `LIMIT N` |
-| `tail -n N` | The last N rows by one query |
-| `wc -l` | `COUNT(*)` |
-| `tail -f` | Polls for rows past the last key, on a table with a primary key |
-
-For one plain text in a table's or view's `rows.jsonl`, grep and rg ask
-Postgres for the rows that hold it, with a `LIKE` over each column
-(`ILIKE` under `-i`), in the order a plain read returns them, and search
-those rows instead of the whole relation. A column is searched through its
-cast when a line spells it the same way: text, an integer, a boolean, a uuid,
-an enum, `jsonb`, `char(n)` for a text without a space, and an array of text,
-integers or uuids. A number, date or time column is left out when the text
-holds a character it never spells (`ada` in a `float8`). The file is read as
-usual when another column type is present (`json`, `interval`, `bytea`), when
-the text could lie inside one of those values, match a key, `null` or the JSON
-between values, or when more than `max_read_rows` rows match. Since only the
-matching rows are fetched, a relation too large to read can still be searched
-when the output shows no line numbers or context.

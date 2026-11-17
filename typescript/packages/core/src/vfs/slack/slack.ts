@@ -45,22 +45,16 @@ export const VFS_MD = `\`\`\`text
     <username>__<user-id>.json  # user profile
 \`\`\`
 
-- A channel, DM or user name is \`<display-name>__<id>\`. The display name
-  keeps Slack's spelling; only \`/\` becomes \`∕\` (U+2215). \`ls\` the parent
-  first to find exact names, and quote a name that has spaces.
-- Messages are JSONL; use \`jq\` for fields such as \`.text\`, \`.user\`,
-  \`.ts\` and \`.files\`. A day's \`files/\` may be empty.
-- \`.user\` is a user ID (\`U…\`), not a username; resolve it through
-  \`users/<username>__<user-id>.json\` and filter messages by the ID.
-- Without \`start_time\`/\`end_time\`, a channel lists the latest 90 days up
-  to its newest message; a date glob finds earlier days.
-- With \`start_time\`/\`end_time\`, listings cover that scope; messages and
-  attachments outside it are absent, direct paths included, and \`grep\`
-  and \`rg\` see only the in-scope files. Users and channel metadata stay
-  available as context.
-- Unless \`walk_limit\` is -1, \`grep -rw\` and \`rg -w\` read only the channel
-  and DM days Slack search names; attachments under \`files/\` are always
-  read.`
+- A channel, DM or user name is \`<display-name>__<id>\`; only \`/\` becomes
+  \`∕\` (U+2215). \`ls\` the parent for exact names and quote names with
+  spaces.
+- \`chat.jsonl\` holds one message per line (\`.text\`, \`.user\`, \`.ts\`,
+  \`.files\`). \`.user\` is a user id (\`U…\`); match it against
+  \`users/<username>__<user-id>.json\`.
+- Without \`start_time\`/\`end_time\`, a channel lists the 90 days up to its
+  newest message; a date glob finds earlier days.
+- Unless \`walk_limit\` is -1, \`grep -rw\` and \`rg -w\` read only the days
+  Slack search names; \`files/\` is always read.`
 
 /**
  * Slack's functions over its accessor, which the node and browser

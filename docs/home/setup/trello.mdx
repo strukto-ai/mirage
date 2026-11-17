@@ -1,34 +1,166 @@
 ---
 title: Trello
 icon: /images/trello-logo.svg
-description: Set up Trello API credentials for the Trello VFS and CLI.
+description: Virtualize Trello workspaces, boards, lists and cards as read-only JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Get an API Key
+Every workspace the token's member belongs to becomes a folder of boards. A
+board holds its members, labels and lists; each card is a folder with
+`card.json` and its comments as `comments.jsonl`.
 
-1. Go to [https://trello.com/power-ups/admin](https://trello.com/power-ups/admin)
-1. Create a new Power-Up (or use an existing one)
-1. Copy the **API Key** from the Power-Up's API Key page
+## Setup
 
-### 2. Generate a Token
+Get an API key from a Power-Up, authorize a token for it, and export both:
 
-Open the following URL in your browser, replacing `YOUR_API_KEY`:
+<AccordionGroup>
+  <Accordion title="Get the API key and token">
+    1. Open the [Power-Up admin portal](https://trello.com/apps/admin) and
+       create a Power-Up, or open an existing one.
+    2. On its **Trello Auth** tab, click **Generate a new API Key** and copy
+       the key.
+    3. Click the **Token** link next to the key, or open this URL with the
+       key filled in:
 
-```
-https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_API_KEY
-```
+       ```text
+       https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_API_KEY
+       ```
 
-Click **Allow** and copy the token string.
+    4. Click **Allow** and copy the token. Keep it secret: with the key it
+       reaches the whole account.
 
-### 3. Set Environment Variables
+    `scope=read` is enough for the mount; the [`trello`](/home/setup/cli/trello)
+    CLI needs `write`. `expiration` also takes `1hour`, `1day` or `30days`.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-TRELLO_API_KEY=your-api-key
-TRELLO_API_TOKEN=your-api-token
+export TRELLO_API_KEY=...
+export TRELLO_API_TOKEN=...
 ```
 
-For SDK guides, see [Trello (Python)](/python/vfs/trello) and [Trello (TypeScript)](/typescript/setup/trello).
-The same key and token register the [Trello CLI](/home/setup/cli/trello).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /trello:
+        vfs: trello
+        mode: read
+        config:
+          api_key: ${TRELLO_API_KEY}
+          api_token: ${TRELLO_API_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id trello
+    mirage shell -w trello -c 'ls /trello/workspaces'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.trello import TrelloConfig, TrelloVFS
+
+    config = TrelloConfig(
+        api_key=os.environ["TRELLO_API_KEY"],
+        api_token=os.environ["TRELLO_API_TOKEN"],
+    )
+    ws = Workspace({"/trello": TrelloVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /trello/workspaces")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, TrelloVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/trello': new TrelloVFS({
+          apiKey: process.env.TRELLO_API_KEY!,
+          apiToken: process.env.TRELLO_API_TOKEN!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /trello/workspaces')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/trello/
+  workspaces/
+    Acme_Product__<workspace-id>/
+      workspace.json
+      boards/
+        Sprint_Board__<board-id>/
+          board.json
+          members/
+            Alice_Chen__<member-id>.json
+          labels/
+            bug__<label-id>.json
+          lists/
+            Doing__<list-id>/
+              list.json
+              cards/
+                Fix_login_redirect__<card-id>/
+                  card.json
+                  comments.jsonl
+```
+
+- Names are sanitized and end in `__<id>`; `ls` the parent to find them.
+- `workspace_id` or `board_ids` limits the mount to one workspace or some
+  boards.
+- The same key and token register the [`trello`](/home/setup/cli/trello) CLI.
+
+## Sample runs
+
+```bash
+$ ls /trello/workspaces/Acme_Product__64f1a2b3c4d5e6f708192a3b/boards
+Roadmap__64f1a2b3c4d5e6f708192a40
+Sprint_Board__64f1a2b3c4d5e6f708192a3c
+```
+
+```bash
+$ ls /trello/workspaces/Acme_Product__64f1a2b3c4d5e6f708192a3b/boards/Sprint_Board__64f1a2b3c4d5e6f708192a3c/lists
+Doing__64f1a2b3c4d5e6f708192a3e
+Done__64f1a2b3c4d5e6f708192a3f
+To_Do__64f1a2b3c4d5e6f708192a3d
+```
+
+```bash
+$ jq -r '.card_name, .due, .url' /trello/workspaces/Acme_Product__64f1a2b3c4d5e6f708192a3b/boards/Sprint_Board__64f1a2b3c4d5e6f708192a3c/lists/Doing__64f1a2b3c4d5e6f708192a3e/cards/Fix_login_redirect__64f1a2b3c4d5e6f708192a51/card.json
+Fix login redirect
+2026-11-20T17:00:00.000Z
+https://trello.com/c/Xq3mB7kP
+```
+
+The mount is read-only. Create, move, assign and comment on cards with the
+[`trello`](/home/setup/cli/trello) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/trello">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/trello">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

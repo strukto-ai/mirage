@@ -1,79 +1,165 @@
 ---
 title: Linear
 icon: /images/linear-logo.svg
-description: Mount Linear teams, projects, and issues as a Mirage filesystem.
+description: Virtualize a Linear workspace from Node or the browser.
 ---
 
-`LinearVFS` exposes a Linear workspace as a tree of teams, projects, and issues. Reads route through the Linear GraphQL API.
+`LinearVFS` mounts a Linear workspace as read-only JSON files: teams, members,
+issues with their comments, projects, cycles and documents. The API key is set
+up on the [Linear page](/home/setup/linear).
 
-Setup steps for the API key live at [Linear Credentials](/home/setup/linear).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const linear = new LinearVFS({
-  apiKey: process.env.LINEAR_API_KEY!,
-})
-
+const linear = new LinearVFS({ apiKey: process.env.LINEAR_API_KEY! })
 const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
-await ws.shell('ls /linear/teams/')
+
+const result = await ws.shell('ls /linear/teams && tree -L 2 /linear/teams')
+console.log(result.stdoutText)
+await ws.close()
 ```
+
+`teamIds` limits the mount to some teams. `baseUrl` points at another GraphQL
+endpoint, such as a proxy.
+
+### Fields
+
+{/* generated: config-table linear start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="apiKey" type={"string"} required post={["secret"]}>
+  Linear personal API key.
+</ResponseField>
+<ResponseField name="teamIds" type={"string[]"}>
+  Only these teams are listed or readable. Unset shows every team the key can reach.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://api.linear.app/graphql'"}>
+  Linear GraphQL endpoint; override to point at a fake or proxy.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table linear end */}
+
+## Authentication
+
+The mount reads with a personal API key. The key's **Read** permission is
+enough; the [`linear`](/home/setup/cli/linear) CLI needs **Write** or the
+create permissions to change issues. A key limited to some teams sees only
+those teams.
+
+## Layout
+
+```text
+/linear/
+  teams/
+    ENG__Engineering__<team-id>/
+      team.json
+      members/
+        Alice_Chen__<user-id>.json
+      issues/
+        ENG-142__<issue-id>/
+          issue.json
+          comments.jsonl
+      projects/
+        Q4_Launch__<project-id>.json
+      cycles/
+        Cycle_12__<cycle-id>.json
+      documents/
+        Roadmap_2027__<document-id>.json
+```
+
+- **Names:** every name ends in `__<id>`: a team is
+  `<team-key>__<team-name>__<team-id>`, an issue `<issue-key>__<issue-id>`, a
+  member `<display-name>__<user-id>.json`, and a project, cycle or document
+  `<name>__<id>.json`. The readable part is sanitized, so `ls` the parent
+  instead of building a name.
+- **`team.json`:** the team's metadata.
+- **`issue.json`:** the issue, with fields such as `issue_id`, `issue_key`,
+  `team_id`, `state_id` and `assignee_id` that commands take as they are.
+- **`comments.jsonl`:** the issue's comments, one JSON object per line, ordered
+  by `created_at`. It is a Mirage format, not a Linear one.
+- **Members:** each file carries `user_id` and `email`, ready for commands such
+  as `linear issue assign`.
+- **Projects and cycles:** a project lists its related issues; a cycle carries
+  its start and end dates.
+- **Documents:** each file holds the title, the markdown content, the linked
+  project and the creator.
+
+Files hold Mirage's JSON with snake_case keys, not Linear's raw GraphQL
+response.
+
+## Behavior
+
+- **Read only:** create, update, assign and comment on issues with the
+  `linear` CLI; the tree serves the same entities as JSON files.
+- **Recent writes:** Linear indexes a write some time after it lands, so a
+  search can miss a recent issue change. See Integration.
 
 ## Browser
 
+The browser `LinearVFS` from `@struktoai/mirage-browser` takes the same fields.
+
 ```bash
-pnpm add @struktoai/mirage-browser
+npm install @struktoai/mirage-browser
 ```
 
 ```ts
 import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const linear = new LinearVFS({
-  apiKey: LINEAR_API_KEY,
-})
+const linear = new LinearVFS({ apiKey: LINEAR_API_KEY })
+const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
 ```
 
-## Config
+- The API key reaches the page, so give it only the **Read** permission.
 
-{/* generated: config-table linear start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Linear personal API key. |
-| <code style={{ whiteSpace: 'nowrap' }}>teamIds</code> | Only these teams are listed or readable. Unset shows every team the key can reach. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.linear.app/graphql'` | Linear GraphQL endpoint; override to point at a fake or proxy. |
+## Integration
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table linear end */}
+Linear answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
 
-## Mount mode
-
-`read`.
-
-For the mounted layout (`teams/`, `projects/`, `issues/`) see the [Python Linear docs](/python/vfs/linear).
+- `grep -rw` and `rg -w`: Linear's issue search runs for each word, and only
+  the issues that hold every word are read, where the search names it or the
+  listing keeps it. The listing keeps each issue's other fields (team,
+  project, cycle, state, people, labels, dates, link) and each title or
+  description word the search can miss, such as one inside a link. Every issue
+  is read when the word is a key of the issue JSON (`title`, `priority`) or a
+  JSON literal, has a digit or only the letters a to f, or when a search
+  fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's
+  `"@all"` [command limit](/home/core/output-limits) reads every file instead.
+- `grep -r` and `rg` on members, projects, cycles and documents: the listing
+  keeps their whole JSON, so only the files whose text holds the pattern's
+  text in any case are read, whatever `walk_limit` is. Issues are listed once
+  more, so a change since the last listing is still found. A file over 8 KiB,
+  and every file for a text that is not ASCII, is read as usual. Comments are
+  always read: they are fetched per issue, and Linear's comment search can
+  miss a word inside a link.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`.
 
 {/* generated: vfs-md linear start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `linear`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -94,128 +180,17 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
             <title>__<document-id>.json
     ```
 
-    - `ls` directories first to discover exact names.
-    - Every entity-named segment is `<sanitized-human-readable>__<id>`. The
-      human-readable part is sanitized, so don't construct it; `ls` the
-      parent directory instead.
-    - The id is the last `__`-separated segment:
+    - A named segment is `<sanitized-name>__<id>`; the id after the last `__`
+      is exact. `ls` the parent for exact names rather than building them.
+    - Files are JSON normalized by Mirage with snake_case keys (`issue_key`,
+      `state_name`, `assignee_email`, `label_names`), not Linear's GraphQL
+      shape. `comments.jsonl` holds one comment per line.
+    - `team.json` lists the team's workflow states; a project file lists its
+      issues with their state.
+    - To create, update, assign, transition or comment on issues, use the
+      `linear` CLI if installed (`linear --help`).
 
-    ```text
-    /<path>/teams/STR__Strukto-ai__<team-id>/         -> <team-id>
-    /<path>/teams/.../issues/STR-42__<issue-id>/      -> <issue-id>
-    /<path>/teams/.../members/Alice__<user-id>.json   -> <user-id>
-    ```
-
-    All `cat` output is normalized by Mirage (snake_case keys), not the raw
-    Linear GraphQL response. The shapes:
-
-    `team.json`:
-
-    ```jsonc
-    {
-      "team_id": "...", "team_key": "STR", "team_name": "Strukto",
-      "name": "...", "description": "...", "timezone": "...",
-      "updated_at": "...",
-      "states": [
-        { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
-        ...                              // one element per workflow state
-      ]
-    }
-    ```
-
-    `issue.json`:
-
-    ```jsonc
-    {
-      "issue_id": "...", "issue_key": "STR-42",
-      "title": "...", "description": "...",
-      "team_id": "...", "team_key": "...", "team_name": "...",
-      "project_id": "...",   "project_name": "...",
-      "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
-      "state_id": "...",     "state_name": "In Progress",
-      "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
-      "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
-      "priority": 2,         // 0=none 1=urgent 2=high 3=medium 4=low
-      "label_ids":   ["..."],
-      "label_names": ["bug", "frontend"],
-      "created_at": "...", "updated_at": "...", "url": "..."
-    }
-    ```
-
-    `comments.jsonl`, one normalized comment per line:
-
-    ```jsonc
-    { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
-      "user_id": "...", "user_email": "...", "user_name": "...",
-      "body": "...", "created_at": "...", "updated_at": "...",
-      "url": "..." }
-    ```
-
-    A project (`projects/<name>__<project-id>.json`):
-
-    ```jsonc
-    {
-      "project_id": "...", "team_id": "...",
-      "name": "...", "description": "...", "state": "started",
-      "lead_id": "...", "updated_at": "...", "url": "...",
-      "issue_count": 12,
-      "issues": [
-        { "issue_id": "...", "issue_key": "STR-42", "title": "...",
-          "state_id": "...", "state_name": "In Progress", "url": "..." }
-      ]
-    }
-    ```
-
-    A cycle (`cycles/<name>__<cycle-id>.json`):
-
-    ```jsonc
-    {
-      "cycle_id": "...", "team_id": "...",
-      "name": "...", "number": 7,
-      "starts_at": "...", "ends_at": "...",
-      "updated_at": "...", "url": "..."
-    }
-    ```
-
-    A member (`members/<display-name>__<user-id>.json`):
-
-    ```jsonc
-    {
-      "user_id": "...", "name": "...", "display_name": "...",
-      "email": "...", "is_active": true, "is_admin": false,
-      "updated_at": "...", "url": "..."
-    }
-    ```
-
-    A document (`documents/<title>__<document-id>.json`):
-
-    ```jsonc
-    {
-      "document_id": "...", "title": "...", "content": "...",
-      "project_id": "...", "project_name": "...",
-      "creator_id": "...", "creator_name": "...", "creator_email": "...",
-      "created_at": "...", "updated_at": "...", "url": "..."
-    }
-    ```
-
-    Useful `jq` paths:
-
-    ```jq
-    .issue_key                                          # issue.json
-    .state_name                                         # issue.json
-    .assignee_email                                     # issue.json
-    .label_names[]                                      # issue.json
-    .issues[] | select(.state_name == "In Progress")    # a project
-    .states[].state_name                                # team.json
-    [inputs] | length                                   # comments.jsonl: count
-    [inputs | select(.user_email == "x")] | length      # comments.jsonl
-    ```
-
-    To act on issues (list, get, create, update, assign, transition,
-    comments, projects, cycles, labels, users, documents, search), use the
-    `linear` CLI if installed (`linear --help`).
-
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -223,7 +198,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `linear` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -269,126 +244,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
             <title>__<document-id>.json
     ```
 
-    - `ls` directories first to discover exact names.
-    - Every entity-named segment is `<sanitized-human-readable>__<id>`. The
-      human-readable part is sanitized, so don't construct it; `ls` the
-      parent directory instead.
-    - The id is the last `__`-separated segment:
-
-    ```text
-    /<path>/teams/STR__Strukto-ai__<team-id>/         -> <team-id>
-    /<path>/teams/.../issues/STR-42__<issue-id>/      -> <issue-id>
-    /<path>/teams/.../members/Alice__<user-id>.json   -> <user-id>
-    ```
-
-    All `cat` output is normalized by Mirage (snake_case keys), not the raw
-    Linear GraphQL response. The shapes:
-
-    `team.json`:
-
-    ```jsonc
-    {
-      "team_id": "...", "team_key": "STR", "team_name": "Strukto",
-      "name": "...", "description": "...", "timezone": "...",
-      "updated_at": "...",
-      "states": [
-        { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
-        ...                              // one element per workflow state
-      ]
-    }
-    ```
-
-    `issue.json`:
-
-    ```jsonc
-    {
-      "issue_id": "...", "issue_key": "STR-42",
-      "title": "...", "description": "...",
-      "team_id": "...", "team_key": "...", "team_name": "...",
-      "project_id": "...",   "project_name": "...",
-      "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
-      "state_id": "...",     "state_name": "In Progress",
-      "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
-      "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
-      "priority": 2,         // 0=none 1=urgent 2=high 3=medium 4=low
-      "label_ids":   ["..."],
-      "label_names": ["bug", "frontend"],
-      "created_at": "...", "updated_at": "...", "url": "..."
-    }
-    ```
-
-    `comments.jsonl`, one normalized comment per line:
-
-    ```jsonc
-    { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
-      "user_id": "...", "user_email": "...", "user_name": "...",
-      "body": "...", "created_at": "...", "updated_at": "...",
-      "url": "..." }
-    ```
-
-    A project (`projects/<name>__<project-id>.json`):
-
-    ```jsonc
-    {
-      "project_id": "...", "team_id": "...",
-      "name": "...", "description": "...", "state": "started",
-      "lead_id": "...", "updated_at": "...", "url": "...",
-      "issue_count": 12,
-      "issues": [
-        { "issue_id": "...", "issue_key": "STR-42", "title": "...",
-          "state_id": "...", "state_name": "In Progress", "url": "..." }
-      ]
-    }
-    ```
-
-    A cycle (`cycles/<name>__<cycle-id>.json`):
-
-    ```jsonc
-    {
-      "cycle_id": "...", "team_id": "...",
-      "name": "...", "number": 7,
-      "starts_at": "...", "ends_at": "...",
-      "updated_at": "...", "url": "..."
-    }
-    ```
-
-    A member (`members/<display-name>__<user-id>.json`):
-
-    ```jsonc
-    {
-      "user_id": "...", "name": "...", "display_name": "...",
-      "email": "...", "is_active": true, "is_admin": false,
-      "updated_at": "...", "url": "..."
-    }
-    ```
-
-    A document (`documents/<title>__<document-id>.json`):
-
-    ```jsonc
-    {
-      "document_id": "...", "title": "...", "content": "...",
-      "project_id": "...", "project_name": "...",
-      "creator_id": "...", "creator_name": "...", "creator_email": "...",
-      "created_at": "...", "updated_at": "...", "url": "..."
-    }
-    ```
-
-    Useful `jq` paths:
-
-    ```jq
-    .issue_key                                          # issue.json
-    .state_name                                         # issue.json
-    .assignee_email                                     # issue.json
-    .label_names[]                                      # issue.json
-    .issues[] | select(.state_name == "In Progress")    # a project
-    .states[].state_name                                # team.json
-    [inputs] | length                                   # comments.jsonl: count
-    [inputs | select(.user_email == "x")] | length      # comments.jsonl
-    ```
-
-    To act on issues (list, get, create, update, assign, transition,
-    comments, projects, cycles, labels, users, documents, search), use the
-    `linear` CLI if installed (`linear --help`).
+    - A named segment is `<sanitized-name>__<id>`; the id after the last `__`
+      is exact. `ls` the parent for exact names rather than building them.
+    - Files are JSON normalized by Mirage with snake_case keys (`issue_key`,
+      `state_name`, `assignee_email`, `label_names`), not Linear's GraphQL
+      shape. `comments.jsonl` holds one comment per line.
+    - `team.json` lists the team's workflow states; a project file lists its
+      issues with their state.
+    - To create, update, assign, transition or comment on issues, use the
+      `linear` CLI if installed (`linear --help`).
 
     ## Supported Unix Commands for VFS
 
@@ -410,14 +274,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md linear end */}
-
-## Integration
-
-What Linear answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Linear |
-| --- | --- |
-| `grep -r`, `rg` | Issues: Linear search, for whole words. Other files: the text the listing keeps. It can miss recent issue writes. |
-
-The [Python Linear docs](/python/vfs/linear#integration) list when each search answers and what it can miss.

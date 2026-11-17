@@ -1,94 +1,146 @@
 ---
 title: Databricks Volume
 icon: /images/databricks-logo.svg
-description: Set up a Databricks Unity Catalog volume as a MIRAGE VFS from Node.
+description: Virtualize a Databricks Unity Catalog volume from Node.
 ---
 
-`DatabricksVolumeVFS` exposes files from a Unity Catalog volume through
-MIRAGE's standard filesystem interface. Agents can list, stat, read, stream,
-glob, and write files under the configured volume root.
+`DatabricksVolumeVFS` mounts one Unity Catalog volume, or one folder of it:
+its files and folders appear with their own names and bytes. The host, token
+and volume grants are set up on the [Databricks page](/home/setup/databricks).
+It ships in `@struktoai/mirage-node` only: Databricks refuses cross-origin
+browser requests, so there is no browser variant.
 
-MIRAGE ships it in `@struktoai/mirage-node` only. The TypeScript client calls
-the Databricks Files REST API directly with `fetch`; the Databricks API does
-not allow cross-origin browser requests, so there is no browser runtime.
-
-For auth and environment setup, see [Databricks Volume Setup](/home/setup/databricks).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
 
-```ts
-import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
+## Configure
 
-const vfs = await buildVfs('databricks_volume', {
+```ts
+import { DatabricksVolumeVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const dbx = await DatabricksVolumeVFS.create({
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
-  root_path: '/reports',
-  host: process.env.DATABRICKS_HOST,
-  token: process.env.DATABRICKS_TOKEN,
+  host: process.env.DATABRICKS_HOST!,
+  token: process.env.DATABRICKS_TOKEN!,
 })
-const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
-const res = await ws.shell('ls /dbx/')
-console.log(res.stdoutText)
+const ws = new Workspace({ '/dbx': dbx }, { mode: MountMode.WRITE })
+
+const result = await ws.shell("ls /dbx && find /dbx -name '*.md'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
+`rootPath`, such as `/reports`, mounts one folder of the volume. Use
+`MountMode.EXEC` when `python3` or `js` should run scripts from the mount.
+
+### Fields
+
 {/* generated: config-table databricks_volume start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>catalog</code><br />required | Unity Catalog catalog name; one path segment, no `/`. |
-| <code style={{ whiteSpace: 'nowrap' }}>schema</code><br />required | Unity Catalog schema name; one path segment, no `/`. |
-| <code style={{ whiteSpace: 'nowrap' }}>volume</code><br />required | Unity Catalog volume name; one path segment, no `/`. |
-| <code style={{ whiteSpace: 'nowrap' }}>rootPath</code><br />default `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="catalog" type={"string"} required>
+  Unity Catalog catalog name; one path segment, no `/`.
+</ResponseField>
+<ResponseField name="schema" type={"string"} required>
+  Unity Catalog schema name; one path segment, no `/`.
+</ResponseField>
+<ResponseField name="volume" type={"string"} required>
+  Unity Catalog volume name; one path segment, no `/`.
+</ResponseField>
+<ResponseField name="rootPath" type={"string"} default={"'/'"}>
+  Subdirectory inside the volume that becomes the mount root; `..` segments are refused.
+</ResponseField>
+<ResponseField name="host" type={"string"} required>
+  Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials.
+</ResponseField>
+<ResponseField name="token" type={"string | function"} required post={["secret"]}>
+  Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}
 
-Pass `host` and `token` explicitly. Mirage does not discover environment
-variables, SDK profiles, or default credentials. An application can read its
-environment as shown above or use its own credential broker.
+## Authentication
 
-For rotating credentials, pass a callback that returns a token or a promise
-of one. Mirage resolves it once for each outbound request, including listing
-pages and metadata probes. A stream resolves it when iteration starts. The
-provider owns token caching, refresh, and concurrent refresh coordination.
-Authentication failures propagate without a fallback or automatic replay.
+Pass `host` and `token` explicitly: Mirage reads no environment variables, SDK
+profiles or default credentials. `token` is a personal access token or an
+OAuth access token, or a function, sync or async, that returns the current
+one, or a promise of one. A function is called before each request,
+including each listing page; it owns refresh, caching and concurrent
+refreshes.
 
 ```ts
-const rotating = await buildVfs('databricks_volume', {
+const dbx = await DatabricksVolumeVFS.create({
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
-  host: process.env.DATABRICKS_HOST,
+  host: process.env.DATABRICKS_HOST!,
   token: async () => broker.getAccessToken(),
 })
 ```
 
-Keep the principal and permission scope fixed for a VFS and its workspace.
-Different identities require isolated workspaces, file caches, indexes, and
-external cache prefixes. If permissions change, rebuild or invalidate those
-caches before further access.
+The token's principal needs `USE CATALOG`, `USE SCHEMA` and `READ VOLUME`,
+plus `WRITE VOLUME` for a write mount; a scoped token needs the `files` API
+scope. A refused request fails as Databricks answered it: Mirage never replays
+it after a `401` or tries another credential.
+
+Bind each VFS and workspace to one principal. Keep file caches, indexes and
+external cache prefixes apart across identities, and rebuild the workspace or
+drop its caches when the principal or its permissions change. A token refresh
+for the same principal keeps the VFS.
+
+## Layout
+
+```text
+/dbx/
+  reports/
+    2026/
+      q1/
+        summary.md
+  datasets/
+    orders.csv
+```
+
+`/dbx/reports/2026/q1/summary.md` is
+`/Volumes/main/default/agent_files/reports/2026/q1/summary.md`. With
+`rootPath: '/reports/2026'`, the same file is `/dbx/q1/summary.md`.
+
+## Behavior
+
+- **Folder root:** `rootPath` is normalized, `..` segments are refused, and
+  no path can reach above it.
+- **Partial reads:** reads use range requests, so `head -c` does not download
+  the whole file.
+- **Copy and move:** the Files API has no server-side rename, so `cp` and
+  `mv` download and upload the file and are not atomic. A directory `mv`
+  removes only what it copied: a file written into the source after the copy
+  listed it stays there, and `mv` fails with `Directory not empty`.
+- **Snapshots:** a snapshot never stores the token or calls a token function.
+  Loading it needs a live mount with fresh credentials.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Databricks Volume mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md databricks_volume start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -96,7 +148,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Databricks Volume mounted a
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -117,7 +169,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Databricks Volume mounted a
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -139,42 +191,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Databricks Volume mounted a
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md databricks_volume end */}
-
-MIRAGE maps the configured mount prefix onto the configured volume subtree.
-With `root_path: '/reports/2026'` and mount prefix `/dbx/`, the volume path
-
-```text
-/Volumes/main/default/agent_files/reports/2026/q1/summary.md
-```
-
-appears in MIRAGE as
-
-```text
-/dbx/q1/summary.md
-```
-
-`root_path` is normalized before use, and MIRAGE rejects any virtual path that
-would escape above that configured subtree.
-
-## Supported operations
-
-Reads: `readdir`, `stat`, `exists`, `read` (streamed whole or a byte range),
-and glob resolution. Writes: `write`, `create`, `mkdir`, `rmdir`, `unlink`,
-recursive `rm`, `cp`, and `mv`.
-
-Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
-`find`, `tree`, `touch`, `mkdir`, `rm`, `cp`, and `mv` work through those
-primitives. `mv`/`cp` are non-atomic download + upload — the Files API has no
-server-side rename. A directory `mv` removes only what it copied: a file or directory written into the source after the copy listed its directory stays there, and `mv` fails with `Directory not empty`.
-
-## Snapshot behavior
-
-`token` is redacted in VFS state. A callback is never called or serialized
-during a snapshot. Loading the snapshot requires a live VFS override with
-fresh credentials.
-
-## Example
-
-See `examples/typescript/vfs/databricks_volume/databricks_volume.ts`, which
-mirrors `examples/python/vfs/databricks_volume/databricks_volume.py`.

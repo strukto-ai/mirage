@@ -1,56 +1,174 @@
 ---
 title: LanceDB
-icon: database
-description: Set up a LanceDB connection for the LanceDB VFS.
+icon: /images/lancedb-logo.svg
+description: Virtualize a LanceDB table as folders of row cards and blob files.
 ---
 
-LanceDB mounts a table as a read-only filesystem: group-by columns become nested
-folders, each row is a card plus an optional blob file, and semantic search is
-the [`search` CLI](/python/cli/search).
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-## Connection
+A LanceDB table becomes nested folders, one level per group-by column. Each
+row is a Markdown card plus an optional blob file, such as its image.
 
-### Local / embedded
+## Setup
 
-Point `uri` at a directory. LanceDB stores the table there, no server needed.
+A local directory needs no setup: LanceDB stores the table there, with no
+server. Object storage and LanceDB Cloud need credentials.
+
+<AccordionGroup>
+  <Accordion title="Object storage">
+    `uri` also takes `s3://`, `gs://` and `az://` URIs. Pass the store's
+    credentials or endpoint in `storage_options`.
+  </Accordion>
+  <Accordion title="LanceDB Cloud and Enterprise">
+    1. In the LanceDB Cloud UI, open the project and copy its database URI
+       (it starts with `db://`) and an API key.
+    1. Note the project's region; `region` defaults to `us-east-1`.
+    1. LanceDB Enterprise: the LanceDB team provides the URI, the API key and
+       the endpoint that goes in `host_override`.
+    1. In the config, set `uri: ${LANCEDB_URI}`, `api_key: ${LANCEDB_API_KEY}`
+       and `region: ${LANCEDB_REGION}`.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-LANCEDB_URI=/data/fashion.lancedb
+export LANCEDB_URI=db://my-database
+export LANCEDB_API_KEY=...
+export LANCEDB_REGION=us-east-1
 ```
 
-### Object storage
+## Connect
 
-`uri` also accepts `s3://`, `gs://`, and `az://` prefixes for tables backed by
-object storage.
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /fashion:
+        vfs: lancedb
+        mode: read
+        config:
+          uri: /data/fashion.lancedb
+          table: fashion
+          group_by: [gender, articleType, baseColour]
+          title_column: productDisplayName
+          blob_column: image_bytes
+          blob_ext: jpg
+    ```
 
-### Cloud and Enterprise
+    ```bash
+    mirage workspace create workspace.yaml --id lance
+    mirage shell -w lance -c 'ls /fashion'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
 
-`db://` URIs connect to LanceDB Cloud (`api_key` + `region`) or Enterprise
-(`api_key` + `host_override`):
+    config = LanceDBConfig(
+        uri="/data/fashion.lancedb",
+        table="fashion",
+        group_by=["gender", "articleType", "baseColour"],
+        title_column="productDisplayName",
+        blob_column="image_bytes",
+        blob_ext="jpg",
+    )
+    ws = Workspace({"/fashion": LanceDBVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /fashion")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { LanceDBVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/fashion': new LanceDBVFS({
+          uri: '/data/fashion.lancedb',
+          table: 'fashion',
+          groupBy: ['gender', 'articleType', 'baseColour'],
+          titleColumn: 'productDisplayName',
+          blobColumn: 'image_bytes',
+          blobExt: 'jpg',
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /fashion')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      Black/
+        7.jpg
+        7.md
+      White/
+        3.jpg
+        3.md
+    Watches/
+      Silver/
+        15.jpg
+        15.md
+  Women/
+    Tops/
+      Blue/
+        12.jpg
+        12.md
+```
+
+- Without `table`, every table is a top-level folder.
+- A card lists the row's columns, without the vector and blob columns.
+- The [`search` CLI](/python/cli/search) ranks rows by meaning and returns
+  their `<id>.md` paths, `search_limit` (10) by default. The table needs an
+  embedding function on a source column.
+
+## Sample runs
 
 ```bash
-# .env.development
-LANCEDB_URI=db://my-database
-LANCEDB_API_KEY=sk_...
-LANCEDB_REGION=us-east-1
-# Enterprise only
-LANCEDB_HOST_OVERRIDE=https://my-database.us-east-1.api.lancedb.com
+$ ls /fashion/Men/Shoes/White
+3.jpg
+3.md
 ```
 
-## Search
+```bash
+$ cat /fashion/Men/Shoes/White/3.md
+# Nike Men White Running Sneakers
 
-Search is the [`search` CLI](/python/cli/search)'s `search "<query>" <path>`. It returns ranked rows as their
-canonical `<id>.md` file paths plus a score, so results compose with `cat`, `wc`,
-and pipes (`grep`/`rg` stay lexical). It requires a table built with an embedding
-function on a source field, so `tbl.search(text)` auto-embeds the query.
+id: 3
+gender: Men
+articleType: Shoes
+baseColour: White
+productDisplayName: Nike Men White Running Sneakers
+blob: 3.jpg
+```
 
-## Limits
+```bash
+$ grep -rl Sneakers /fashion
+/fashion/Men/Shoes/White/3.md
+```
 
-The VFS is read-only and bounds how much an agent can pull:
+The mount is read-only. One folder listing reads at most `max_rows` (1,000)
+rows, so keep `group_by` to low-cardinality columns.
 
-- `search_limit` (10): default top-k returned by `search`.
-- `max_rows` (1,000): hard ceiling on rows listed per folder.
+## SDK guides
 
-See the [Python](/python/vfs/lancedb) and [TypeScript](/typescript/setup/lancedb)
-VFS pages for full config.
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/lancedb">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/lancedb">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

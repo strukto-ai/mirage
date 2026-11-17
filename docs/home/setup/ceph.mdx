@@ -1,33 +1,154 @@
 ---
 title: Ceph (Rados Gateway)
 icon: /images/ceph-logo.svg
-description: Set up Ceph Rados Gateway (RGW) credentials for the Ceph VFS.
+description: Virtualize a Ceph Rados Gateway bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an RGW user
+A bucket on a Ceph Rados Gateway (RGW) becomes a folder tree, with one file
+per object.
 
-On a host with `radosgw-admin` access:
+
+
+## Setup
+
+RGW signs S3 requests with an RGW user's key pair. On a host with
+`radosgw-admin` access, create the user:
 
 ```bash
 radosgw-admin user create --uid=mirage --display-name="Mirage"
 ```
 
-The output includes a `keys` block with `access_key` and `secret_key`. Note your
-gateway **endpoint** (e.g. `https://ceph.example.com`) and the **bucket** name.
-
-Ceph RGW is self-hosted, so there is no region-derived endpoint, the
-`endpoint_url` is required and RGW uses path-style addressing.
-
-### 2. Set environment variables
+Copy `access_key` and `secret_key` from the `keys` block of the output;
+`radosgw-admin user info --uid=mirage` prints them again. If a key holds a
+`\` JSON escape, remove the backslash or generate a new key.
 
 ```bash
-# .env.development
-CEPH_BUCKET=my-bucket
-CEPH_ENDPOINT_URL=https://ceph.example.com
-CEPH_ACCESS_KEY_ID=...
-CEPH_SECRET_ACCESS_KEY=...
+export CEPH_BUCKET=my-bucket
+export CEPH_ENDPOINT_URL=https://ceph.example.com
+export CEPH_ACCESS_KEY_ID=...
+export CEPH_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [Ceph (Rados Gateway) (Python)](/python/vfs/ceph) and [Ceph (Rados Gateway) (TypeScript)](/typescript/setup/ceph).
+- RGW is self-hosted, so the endpoint is required and requests are path-style.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /ceph:
+        vfs: ceph
+        mode: read
+        config:
+          bucket: ${CEPH_BUCKET}
+          endpoint_url: ${CEPH_ENDPOINT_URL}
+          access_key_id: ${CEPH_ACCESS_KEY_ID}
+          secret_access_key: ${CEPH_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id ceph
+    mirage shell -w ceph -c 'ls /ceph'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.ceph import CephConfig, CephVFS
+
+    config = CephConfig(
+        bucket=os.environ["CEPH_BUCKET"],
+        endpoint_url=os.environ["CEPH_ENDPOINT_URL"],
+        access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/ceph": CephVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /ceph")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/ceph': new CephVFS({
+          bucket: process.env.CEPH_BUCKET!,
+          endpoint: process.env.CEPH_ENDPOINT_URL!,
+          accessKeyId: process.env.CEPH_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.CEPH_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /ceph')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/ceph/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /ceph -type f
+/ceph/data/events.jsonl
+/ceph/data/users.parquet
+/ceph/reports/2026-11/metrics.csv
+/ceph/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /ceph/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /ceph/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/ceph">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/ceph">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -44,71 +44,15 @@ VFS_MD = """\
 ```
 
 - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-  `2026-05-*` narrows by it.
-- `<title>` is sanitized: spaces and any character outside
-  `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-- `<spreadsheet-id>` is the Google Sheets spreadsheet id.
-- `shared/` holds sheets shared with you by others; ones you own
-  and shared with others are still in `owned/`.
-
-A `.gsheet.json` matches the Google Sheets API `spreadsheets.get`
-response:
-
-```jsonc
-{
-  "spreadsheetId": "...",
-  "spreadsheetUrl": "...",
-  "properties": { "title": "...", "locale": "...", "timeZone": "..." },
-  "sheets": [
-    {                                      // one element per tab
-      "properties": {
-        "sheetId": 0, "title": "...", "index": 0,
-        "gridProperties": { "rowCount": 1000, "columnCount": 26 }
-      },
-      "data": [
-        {
-          "rowData": [
-            { "values": [
-                { "formattedValue": "...",
-                  "userEnteredValue": {...},
-                  "effectiveValue": {...} }
-            ]}    // an empty cell is {}, a trailing one absent
-          ]
-        }
-      ]
-    }
-  ],
-  "namedRanges": [...]
-}
-```
-
-Useful `jq` paths:
-
-```jq
-.properties.title
-.sheets[].properties.title                              # tab names
-.sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
-.namedRanges[]
-```
-
-Delete, on a `write` path:
-
-```sh
-rm {prefix}/owned/<file>.gsheet.json   # deletes it from Drive for good
-rm -f <path>                       # ignores a missing file
-```
-
-Only `.gsheet.json` files can be removed; `owned/` and `shared/` cannot.
-
-Rename to a new title, on a `write` path:
-
-```sh
-mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
-   {prefix}/owned/<date>_<new>__<id>.gsheet.json
-```
-
-Keep the folder, the date and the id, and spell the title the way the
-listing does (spaces become `_`); any other name is refused."""
+  `2026-05-*` narrows the query; `<title>` turns spaces and characters
+  outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+- `shared/` holds sheets others shared; sheets owned and shared out stay
+  in `owned/`.
+- A file is the Sheets API `spreadsheets.get` response with cell data.
+  Tab names: `.sheets[].properties.title`; first tab's cells:
+  `.sheets[0].data[0].rowData[]?.values[]?.formattedValue`.
+- On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+  new `<title>` with the same folder, date and id to rename it."""
 
 
 class GSheetsVFS(BaseVFS):

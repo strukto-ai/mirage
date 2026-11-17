@@ -1,54 +1,102 @@
 ---
 title: Redis
 icon: /images/redis-logo.svg
-description: Mount a Redis-backed virtual filesystem.
+description: Virtualize a Redis database from Python.
 ---
-The Redis VFS creates a persistent virtual filesystem backed by
-Redis. It supports full read and write operations.
 
-Install the extra:
+`RedisVFS` keeps a filesystem in Redis: every file is one key under
+`key_prefix`, and the tree is whatever commands write. Files persist across
+processes, and every workspace pointed at the same URL and prefix sees them.
+The server is set up on the [Redis page](/home/setup/redis).
+
+## Install
 
 ```bash
 pip install "mirage-ai[redis]"
 ```
 
-## Config
+## Configure
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
 from mirage.vfs.redis import RedisVFS
 
-vfs = RedisVFS(
-    url="redis://localhost:6379/0",
-    key_prefix="mirage:fs:",
-)
+vfs = RedisVFS(url=os.environ["REDIS_URL"], key_prefix="mirage:fs:")
 ws = Workspace({"/redis": vfs}, mode=MountMode.WRITE)
+
+result = await ws.shell("echo hello > /redis/note.txt && ls /redis")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-| Parameter    | Required | Default                  | Description             |
-| ------------ | -------- | ------------------------ | ----------------------- |
-| `url`        | no       | `redis://localhost:6379/0` | Redis connection URL  |
-| `key_prefix` | no       | `mirage:fs:`             | Key namespace prefix    |
+`capacity="100MB"` caps the bytes the files hold; see
+[capacity](/home/setup/vfs#mount-capacity). A mount takes `MountMode.READ`,
+`WRITE` or `EXEC`.
 
-Keys are stored as:
-- `{prefix}file:{path}` - file content (raw bytes)
-- `{prefix}dir` - Redis set of directory paths
-- `{prefix}modified:{path}` - modification timestamps
+### Fields
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `url` | `redis://localhost:6379/0` | Redis connection URL. Redacted in snapshots. |
+| `key_prefix` | `mirage:fs:` | Prefix of every key the mount reads and writes. |
+| `capacity` | none | The most bytes the files may hold, a size like `100MB` or a count of bytes. |
+
+## Authentication
+
+The password goes in the URL, `redis://:<password>@<host>:6379/0`, or
+`rediss://` for TLS. An [Upstash](/typescript/setup/upstash) database works with
+the `rediss://` URL its console prints.
+
+## Layout
+
+```text
+/redis/
+  config.json
+  logs/
+    app.log
+    error.log
+  cache/
+    session-abc.json
+```
+
+`/redis/logs/app.log` is the key `<prefix>file:/logs/app.log`. Folders live in
+the set `<prefix>dir`, and modified times in `<prefix>modified:<path>`.
+
+## Behavior
+
+- **Key prefix:** a different `key_prefix` keeps one workspace's files apart
+  from another's, and from other data in the same database.
+- **Shared database:** the Node, browser and Cloudflare mounts use the same key
+  layout, so all of them can mount one database at the same time.
+
+## Integration
+
+Redis answers these commands through its own API, so fewer keys are read. See
+[Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Redis mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md redis start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -56,7 +104,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Redis mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -77,7 +125,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Redis mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -99,103 +147,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Redis mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md redis end */}
-
-```text
-/redis/
-  <file>
-  <directory>/
-    <file>
-    <subdirectory>/
-      <file>
-```
-
-The filesystem is fully user-defined - create any directory structure
-with `mkdir`, `touch`, `tee`, etc.
-
-Example:
-
-```text
-/redis/
-  config.json
-  logs/
-    app.log
-    error.log
-  cache/
-    session-abc.json
-```
-
-## Cache
-
-Index TTL is `0`, so listings are read from Redis every time. A
-workspace `index:` block still applies its `ttl` to this mount.
-
-## Integration
-
-What Redis answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Redis |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-## Example
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.redis import RedisVFS
-
-vfs = RedisVFS(url="redis://localhost:6379/0")
-
-
-async def main():
-    ws = Workspace({"/redis": vfs}, mode=MountMode.WRITE)
-
-    # Create directories and files
-    await ws.shell("mkdir -p /redis/data/")
-    await ws.shell('echo "hello world" | tee /redis/data/hello.txt')
-
-    # Read back
-    r = await ws.shell("cat /redis/data/hello.txt")
-    print(await r.stdout_str())
-
-    # List files
-    r = await ws.shell("ls /redis/data/")
-    print(await r.stdout_str())
-
-    # Copy and move
-    await ws.shell("cp /redis/data/hello.txt /redis/data/copy.txt")
-    await ws.shell("mv /redis/data/copy.txt /redis/data/renamed.txt")
-
-    # Search
-    r = await ws.shell('grep -r "hello" /redis/data/')
-    print(await r.stdout_str())
-
-    # Clean up
-    await ws.shell("rm -r /redis/data/")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-| Command                | Notes                                      |
-| ---------------------- | ------------------------------------------ |
-| `ls`                   | List files and directories                 |
-| `cat`                  | Read file content                          |
-| `head` / `tail`        | First/last N lines                         |
-| `grep` / `rg`          | Pattern search                             |
-| `wc`                   | Line/word/byte counts                      |
-| `find`                 | Recursive search with `-name`, `-maxdepth` |
-| `tree`                 | Directory tree view                        |
-| `mkdir`                | Create directories                         |
-| `touch`                | Create empty files                         |
-| `cp` / `mv` / `rm`    | Copy, move, delete                         |
-| `tee`                  | Write stdin to file                        |
-| `diff` / `cmp`         | Compare files                              |
-| `sort` / `cut` / `tr`  | Text processing                            |
-| `tar` / `zip` / `gzip` | Compression                                |
-| `base64` / `md5` / `sha256sum` | Encoding and checksums           |

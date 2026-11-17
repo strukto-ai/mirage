@@ -1,18 +1,21 @@
 ---
 title: Google Slides
+description: Virtualize Google Slides presentations from Node or the browser.
 icon: /images/gslides-logo.svg
-description: Mount Google Slides decks as Mirage files from Node or the browser.
 ---
 
-`GSlidesVFS` exposes Slides decks as `.gslide.json` files containing the deck structure, slides, and text content.
+`GSlidesVFS` mounts the Google Slides an account can see: each presentation
+becomes a `.gslide.json` file holding the Slides API's JSON, split into the
+presentations it owns and those shared with it. Credentials are set up on the
+[Google Workspace page](/home/setup/google).
 
-Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { GSlidesVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -22,65 +25,153 @@ const slides = new GSlidesVFS({
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
+const ws = new Workspace({ '/gslides': slides }, { mode: MountMode.READ })
 
-const ws = new Workspace({ '/slides': slides }, { mode: MountMode.READ })
-await ws.shell('ls /slides/owned/')
+const result = await ws.shell("ls /gslides/owned && jq '.slides | length' /gslides/owned/2026-*.gslide.json")
+console.log(result.stdoutText)
+await ws.close()
 ```
+
+`accessToken` replaces the client and refresh token with a token or a
+function that returns one. A `MountMode.WRITE` mount also allows `mv` and `rm`.
+
+### Fields
+
+{/* generated: config-table gslides omit=folderId start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="accessToken" type={"string | function"} post={["secret"]}>
+  OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`.
+</ResponseField>
+<ResponseField name="clientId" type={"string"}>
+  Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself.
+</ResponseField>
+<ResponseField name="clientSecret" type={"string"} post={["secret"]}>
+  Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client.
+</ResponseField>
+<ResponseField name="refreshToken" type={"string"} post={["secret"]}>
+  User's OAuth refresh token. Required with `clientId` when `accessToken` is unset.
+</ResponseField>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
+  Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.
+</ResponseField>
+<ResponseField name="apiBase" type={"string"}>
+  One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table gslides end */}
+
+## Authentication
+
+Credentials come from the first of:
+
+1. `accessToken`, a token or a function, sync or async, that returns one.
+2. `clientId` and `refreshToken`, with `clientSecret` unless the client uses
+   PKCE. Mirage trades the refresh token for access tokens on its own, or
+   hands it to `refreshFn` when set, so the secret can stay on a backend.
+
+The mount needs the Google Slides API with the
+`https://www.googleapis.com/auth/presentations` scope, and the Drive API with the
+`https://www.googleapis.com/auth/drive` scope, since the listing comes from
+Drive. A read-only mount can use the `readonly` variants of both scopes.
+
+## Layout
+
+```text
+/gslides/
+  owned/
+    2026-11-14_QBR_Deck__1Xk9rT2bQ.gslide.json
+  shared/
+    2026-10-02_Launch_Plan__1Pq7sV4mN.gslide.json
+```
+
+- `owned/` holds the presentations the account owns, shared or not;
+  `shared/` holds those others shared with it.
+- A file is named `<YYYY-MM-DD>_<title>__<presentation-id>.gslide.json`. The date
+  is the last modified day and is left out when Drive gives none.
+- A file holds the Slides API's JSON for the presentation: its slides,
+  layouts and text.
+
+## Behavior
+
+- **Shared Drives:** a presentation in a Shared Drive has no owner, so it is
+  listed under `shared/`, as on the `gdrive` mount.
+- **Date globs:** a glob on the date prefix, such as `2026-05-*`, asks Drive
+  only for the presentations modified on those days.
+- **Incomplete listings:** Drive may skip part of the account's files and say
+  so. The short listing is still shown, and the next `ls` lists again.
+- **Rename:** on a `write` mount, `mv` to a new name in the same folder
+  changes the title. The date and the id must stay, and the title is spelled
+  as the listing spells it (spaces become `_`).
+- **Delete:** on a `write` mount, `rm` deletes the presentation for good, not to
+  the trash. `owned/` and `shared/` cannot be removed.
+- **Edits:** creating presentations, batch updates and raw API calls go
+  through the [`gws`](/typescript/cli/gws) CLI.
 
 ## Browser
 
+The same `GSlidesVFS` comes from `@struktoai/mirage-browser`. In a page, an
+`accessToken` function fetches a fresh token from a backend, so the client
+secret never reaches the browser.
+
 ```bash
-pnpm add @struktoai/mirage-browser
+npm install @struktoai/mirage-browser
 ```
 
 ```ts
 import { GSlidesVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const slides = new GSlidesVFS({
-  clientId: GOOGLE_CLIENT_ID,
-  clientSecret: GOOGLE_CLIENT_SECRET,
-  refreshToken: localStorage.getItem('gslides.refresh_token')!,
+  accessToken: async () => (await fetch('/api/google-token')).text(),
 })
+const ws = new Workspace({ '/gslides': slides }, { mode: MountMode.READ })
 ```
 
-## Config
+- `/api/google-token` stands for a backend endpoint that returns an access
+  token.
+- A PKCE OAuth client needs no secret: `clientId` and `refreshToken` alone
+  mount it.
+- `refreshFn` sends each refresh to a backend instead of Google's token
+  endpoint.
 
-{/* generated: config-table gslides omit=folderId start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />secret | OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`. |
-| <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself. |
-| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />secret | User's OAuth refresh token. Required with `clientId` when `accessToken` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`. |
-| <code style={{ whiteSpace: 'nowrap' }}>apiBase</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+## Integration
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table gslides end */}
+Google Slides answers these commands through its own API, so fewer files are
+read. See [Integration](/home/integration/overview).
 
-## Mount mode
-
-`read`. A `MountMode.WRITE` mount also allows `mv` (retitle) and `rm` (delete). Edit a deck with the [gws CLI](/typescript/cli/gws).
-
-For the JSON structure (slides, layouts, text frames) see the [Python Slides docs](/python/vfs/gslides).
+- `grep -r` and `rg` with `-w`: Drive full-text search names the
+  presentations to read. Every one is read when the search fails or finds
+  nothing, and when the word may be in any presentation's JSON whatever the
+  text says: a word with a digit, a Slides API name or value
+  (`pageElements`, `SLIDE`), or a word every presentation carries (`https`,
+  `arial`). Drive indexes a write some time after it lands and searches the
+  presentation's text, so it can leave out one whose JSON holds the word only
+  in another value (a font, a link or image address, a layout name, an id) or
+  only inside a word that styling splits (`snow` in bold inside `snowman`). `walkLimit: -1` in the mount's
+  `"@all"` [command limit](/home/core/output-limits) turns the search off and
+  reads every file.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at
+`/<path>`. `<mode>` is the mount's mode: `read`, `write` or `exec`. The
+commands shown are those of a `write` mount.
 
 {/* generated: vfs-md gslides start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gslides`, write |
+    | `/<path>` | `gslides`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -91,76 +182,17 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/
     ```
 
     - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-      `2026-05-*` narrows by it.
-    - `<title>` is sanitized: spaces and any character outside
-      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-    - `<presentation-id>` is the Google Slides presentation id.
-    - `shared/` holds presentations shared with you by others; ones you own
-      and shared with others are still in `owned/`.
+      `2026-05-*` narrows the query; `<title>` turns spaces and characters
+      outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+    - `shared/` holds presentations others shared; presentations owned and
+      shared out stay in `owned/`.
+    - A file is the Slides API `presentations.get` response, one `.slides[]`
+      entry per slide. All text:
+      `[.. | .textRun? // empty | .content] | add`.
+    - On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+      new `<title>` with the same folder, date and id to rename it.
 
-    A `.gslide.json` matches the Google Slides API `presentations.get`
-    response:
-
-    ```jsonc
-    {
-      "presentationId": "...",
-      "title": "...",
-      "pageSize": { "width": {...}, "height": {...} },
-      "slides": [
-        {                                      // one element per slide
-          "objectId": "...",
-          "pageElements": [
-            {
-              "objectId": "...",
-              "shape": {
-                "shapeType": "TEXT_BOX",
-                "text": {
-                  "textElements": [
-                    { "textRun": { "content": "the actual text\n",
-                                   "style": {...} } }
-                  ]
-                }
-              }
-            },
-            { "image": {...} },
-            { "table": {...} }
-          ]
-        }
-      ],
-      "masters": [...],
-      "layouts": [...]
-    }
-    ```
-
-    Useful `jq` paths:
-
-    ```jq
-    .title
-    .slides | length                                                    # slide count
-    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
-    .slides[0].objectId
-    ```
-
-    Delete, on a `write` path:
-
-    ```sh
-    rm /<path>/owned/<file>.gslide.json   # deletes it from Drive for good
-    rm -f <path>                       # ignores a missing file
-    ```
-
-    Only `.gslide.json` files can be removed; `owned/` and `shared/` cannot.
-
-    Rename to a new title, on a `write` path:
-
-    ```sh
-    mv /<path>/owned/<date>_<old>__<id>.gslide.json \
-       /<path>/owned/<date>_<new>__<id>.gslide.json
-    ```
-
-    Keep the folder, the date and the id, and spell the title the way the
-    listing does (spaces become `_`); any other name is refused.
-
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -168,7 +200,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gslides` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -189,7 +221,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gslides`, write |
+    | `/<path>` | `gslides`, `<mode>` |
 
     ## VFS Layout
 
@@ -204,74 +236,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/
     ```
 
     - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-      `2026-05-*` narrows by it.
-    - `<title>` is sanitized: spaces and any character outside
-      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-    - `<presentation-id>` is the Google Slides presentation id.
-    - `shared/` holds presentations shared with you by others; ones you own
-      and shared with others are still in `owned/`.
-
-    A `.gslide.json` matches the Google Slides API `presentations.get`
-    response:
-
-    ```jsonc
-    {
-      "presentationId": "...",
-      "title": "...",
-      "pageSize": { "width": {...}, "height": {...} },
-      "slides": [
-        {                                      // one element per slide
-          "objectId": "...",
-          "pageElements": [
-            {
-              "objectId": "...",
-              "shape": {
-                "shapeType": "TEXT_BOX",
-                "text": {
-                  "textElements": [
-                    { "textRun": { "content": "the actual text\n",
-                                   "style": {...} } }
-                  ]
-                }
-              }
-            },
-            { "image": {...} },
-            { "table": {...} }
-          ]
-        }
-      ],
-      "masters": [...],
-      "layouts": [...]
-    }
-    ```
-
-    Useful `jq` paths:
-
-    ```jq
-    .title
-    .slides | length                                                    # slide count
-    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
-    .slides[0].objectId
-    ```
-
-    Delete, on a `write` path:
-
-    ```sh
-    rm /<path>/owned/<file>.gslide.json   # deletes it from Drive for good
-    rm -f <path>                       # ignores a missing file
-    ```
-
-    Only `.gslide.json` files can be removed; `owned/` and `shared/` cannot.
-
-    Rename to a new title, on a `write` path:
-
-    ```sh
-    mv /<path>/owned/<date>_<old>__<id>.gslide.json \
-       /<path>/owned/<date>_<new>__<id>.gslide.json
-    ```
-
-    Keep the folder, the date and the id, and spell the title the way the
-    listing does (spaces become `_`); any other name is refused.
+      `2026-05-*` narrows the query; `<title>` turns spaces and characters
+      outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+    - `shared/` holds presentations others shared; presentations owned and
+      shared out stay in `owned/`.
+    - A file is the Slides API `presentations.get` response, one `.slides[]`
+      entry per slide. All text:
+      `[.. | .textRun? // empty | .content] | add`.
+    - On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+      new `<title>` with the same folder, date and id to rename it.
 
     ## Supported Unix Commands for VFS
 
@@ -293,14 +266,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gslides end */}
-
-## Integration
-
-What Google Slides answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Google Slides |
-| --- | --- |
-| `grep -r`, `rg` | Drive full-text search, for whole words. It can miss words only in non-text values (fonts, links, layout names and ids) or split by styling. |
-
-The [Python Google Slides docs](/python/vfs/gslides#integration) list when each search answers and what it can miss.

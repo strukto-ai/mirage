@@ -40,18 +40,16 @@ VFS_MD = """\
         rows.jsonl
 ```
 
-- `page.json` holds the page's metadata, its body rendered as Markdown
-  and its raw blocks (nested blocks under `children`).
-- A database is a container plus one or more data sources.
-  `database.json` holds the container's identity and its `data_sources`
-  stubs, `data_source.json` the typed property schema, and `rows.jsonl`
-  the rows, one JSON line each: the row page's `page.json` without the
-  body, plus `path`, that `page.json`'s path below the data source
-  directory. Row directories are not listed; open one by its path.
-- Titles are sanitized. Don't construct paths: `ls` the parent
-  directory, or take a row's `path` from `rows.jsonl`.
-- `ntn` takes ids as positional operands, not flags:
-  `ntn pages get <page-id>`, `ntn datasources query <data-source-id>`,
+- `page.json` holds the page's metadata, its body as Markdown and its raw
+  blocks.
+- `database.json` lists a database's data sources, `data_source.json`
+  holds the property schema and `rows.jsonl` one row per line, with its
+  `path` below the data source directory. Row directories are not
+  listed; open one by that `path`.
+- Titles are sanitized: `ls` the parent or take a row's `path` instead of
+  building paths.
+- `ntn` takes ids as positional operands: `ntn pages get <page-id>`,
+  `ntn datasources query <data-source-id>`,
   `ntn datasources resolve <database-id>`."""
 
 

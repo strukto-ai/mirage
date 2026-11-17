@@ -1,57 +1,167 @@
 ---
 title: Databricks Volume
 icon: /images/databricks-logo.svg
-description: Set up Databricks credentials for the Unity Catalog volume VFS.
+description: Virtualize a Databricks Unity Catalog volume as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The VFS accesses a Unity Catalog volume through the Databricks Files REST API.
-Both Python and TypeScript require an explicit workspace host and token.
-The token can be a personal access token, an OAuth access token, or a callback
-that supplies the current access token. No extra Python package is required.
+One Unity Catalog volume, or a folder inside it, becomes a directory tree of
+its files, read and written through the Databricks Files API.
 
-Obtain a workspace access token. For local testing, you can create a personal
-access token under **Settings → Developer → Access tokens**. Scoped tokens
-need the [`files` API scope](https://docs.databricks.com/api/files/v2/file).
+## Setup
 
-### Set the workspace host
+Create a workspace access token, pick a volume and grant the token's principal
+access to it, then export the workspace host and token.
 
-Use your workspace origin, such as
-`https://dbc-xxxxxxxx-xxxx.cloud.databricks.com` on AWS or
-`https://adb-xxxxxxxxxxxx.xx.azuredatabricks.net` on Azure.
-The host accepts HTTP or HTTPS and rejects a path, query, fragment, or userinfo.
-A trailing slash is allowed.
+<AccordionGroup>
+  <Accordion title="Create a token and grant volume access">
+    1. In the workspace, click the username in the top bar, then **Settings**,
+       **Developer**, and **Manage** next to **Access tokens**.
+    2. Click **Generate new token** and give it a name and a lifetime. A scoped
+       token needs the [`files` API scope](https://docs.databricks.com/api/workspace/scopes).
+       Copy the token: it is shown once.
+    3. Pick a volume in Catalog Explorer. Its
+       `/Volumes/<catalog>/<schema>/<volume>/` path gives the `catalog`,
+       `schema` and `volume` fields.
+    4. Grant the principal `USE CATALOG`, `USE SCHEMA` and `READ VOLUME`, plus
+       `WRITE VOLUME` for a write mount. See
+       [volume privileges](https://docs.databricks.com/aws/en/volumes/utility-commands).
 
-### Find a readable volume
-
-Choose a volume in Catalog Explorer. Its
-`/Volumes/<catalog>/<schema>/<volume>/...` path supplies the three config
-fields. The principal needs `USE CATALOG`, `USE SCHEMA`, and `READ VOLUME`; a
-write mount also needs `WRITE VOLUME`. See [volume
-permissions](https://docs.databricks.com/aws/en/volumes/utility-commands).
-
-### Supply a token
-
-Pass your token and host to the VFS configuration. For example, your application
-can read them from environment variables:
+    Databricks recommends OAuth over personal access tokens; an OAuth access
+    token works the same way.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
-DATABRICKS_TOKEN=dapi...
+export DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
+export DATABRICKS_TOKEN=dapi...
 ```
 
-Mirage does not discover environment variables, SDK profiles, or default
-credentials. Your application can use an external SDK or credential broker to
-obtain a token, then pass the token or a callback to Mirage. A callback owns
-refresh, caching, and coordination between concurrent requests. Mirage does not
-retry an unauthorized request with another credential source.
+- `DATABRICKS_HOST` is the workspace origin, such as
+  `https://adb-xxxxxxxxxxxx.xx.azuredatabricks.net` on Azure: `http://` or
+  `https://`, no path, query, fragment or user info. A trailing slash is fine.
+- `token` also takes a function, sync or async, that returns the current
+  token. The function owns refresh, caching and concurrent refreshes.
+- Mirage reads no environment variables, SDK profiles or default credentials,
+  and never retries a refused request with another credential.
+- Bind each VFS and workspace to one principal and keep caches apart across
+  identities. Rebuild the workspace or drop its caches when the principal or
+  its permissions change; a token refresh for the same principal keeps the VFS.
 
-Keep each VFS and workspace bound to one principal and permission scope. Isolate
-file caches, indexes, and external cache prefixes across identities. If the
-principal or permission scope changes, rebuild the workspace or invalidate its
-caches. Token refresh for the same principal and scope can use the existing VFS.
+## Connect
 
-See the [Python Databricks Volume VFS](/python/vfs/databricks_volume) or
-[TypeScript Databricks Volume VFS](/typescript/setup/databricks_volume) page for
-configuration and first-read examples.
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /dbx:
+        vfs: databricks_volume
+        mode: read
+        config:
+          catalog: main
+          schema: default
+          volume: agent_files
+          host: ${DATABRICKS_HOST}
+          token: ${DATABRICKS_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id dbx
+    mirage shell -w dbx -c 'ls /dbx'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.databricks_volume import DatabricksVolumeConfig, DatabricksVolumeVFS
+
+    config = DatabricksVolumeConfig(
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+        host=os.environ["DATABRICKS_HOST"],
+        token=os.environ["DATABRICKS_TOKEN"],
+    )
+    ws = Workspace({"/dbx": DatabricksVolumeVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /dbx")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const dbx = await buildVfs('databricks_volume', {
+      catalog: 'main',
+      schema: 'default',
+      volume: 'agent_files',
+      host: process.env.DATABRICKS_HOST!,
+      token: process.env.DATABRICKS_TOKEN!,
+    })
+    const ws = new Workspace({ '/dbx': dbx }, { mode: MountMode.READ })
+    const result = await ws.shell('ls /dbx')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/dbx/
+  reports/
+    2026/
+      q1/
+        summary.md
+  datasets/
+    orders.csv
+```
+
+- `/dbx/reports/2026/q1/summary.md` is
+  `/Volumes/main/default/agent_files/reports/2026/q1/summary.md`.
+- `root_path: /reports` mounts only that folder of the volume; `..` is refused.
+- Files keep their own names and bytes; nothing is converted.
+
+## Sample runs
+
+```bash
+$ ls /dbx
+datasets
+reports
+```
+
+```bash
+$ head -n 3 /dbx/datasets/orders.csv
+order_id,customer,total
+1001,acme,129.50
+1002,globex,48.00
+```
+
+```bash
+$ cat /dbx/reports/2026/q1/summary.md
+# Q1 summary
+Revenue grew 12% over Q4.
+```
+
+On a `write` mount, `>`, `cp`, `mv`, `rm` and `mkdir` change the volume, as far
+as the principal's `WRITE VOLUME` grant allows.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/databricks_volume">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/databricks_volume">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

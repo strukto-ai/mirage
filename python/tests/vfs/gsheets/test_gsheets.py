@@ -19,14 +19,11 @@ def test_vfs_md_includes_buckets_and_structure():
     rendered = VFS_MD.replace("{prefix}", "/gsheets")
     assert "owned/" in rendered
     assert "shared/" in rendered
-    assert "shared with you by others" in rendered
-    assert "still in `owned/`" in rendered
+    assert "stay\n  in `owned/`" in rendered
     assert "`spreadsheets.get`" in rendered
     assert ".sheets[].properties.title" in rendered
 
 
 def test_vfs_md_documents_rm_and_mv_for_a_write_path():
-    assert "rm {prefix}/owned/<file>.gsheet.json" in VFS_MD
-    assert "mv {prefix}/owned/<date>_<old>__<id>.gsheet.json" in VFS_MD
-    assert "Delete, on a `write` path:" in VFS_MD
-    assert "Rename to a new title, on a `write` path:" in VFS_MD
+    assert "On a `write` path, `rm` a file to delete it from Drive" in VFS_MD
+    assert "`mv` it to a\n  new `<title>`" in VFS_MD

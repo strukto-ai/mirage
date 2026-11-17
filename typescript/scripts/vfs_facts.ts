@@ -1063,6 +1063,103 @@ export function fieldDoc(field: FieldShape, packagesRoot: string): FieldDoc {
   return doc
 }
 
+const ZOD_KINDS: Record<string, string> = {
+  string: 'string',
+  url: 'string',
+  email: 'string',
+  number: 'number',
+  int: 'number',
+  bigint: 'number',
+  boolean: 'boolean',
+  object: 'object',
+  record: 'object',
+  map: 'object',
+  function: 'function',
+  any: 'any',
+  unknown: 'any',
+  date: 'Date',
+}
+
+/**
+ * A schema field's type as a reader writes it: `string`, `number[]`, an
+ * enum as its values. The chain is followed inward past `.optional()`,
+ * `.describe()` and the like to the `z.<kind>()` call that builds it, and
+ * a helper is followed to the expression it returns. An unknown shape is
+ * an empty string.
+ *
+ * Args:
+ *   field: the field as `configShapes` found it.
+ *   packagesRoot: absolute path to `typescript/packages`.
+ */
+export function fieldType(field: FieldShape, packagesRoot: string): string {
+  return typeOf(field.expr, field.source, field.env, packagesRoot, 0)
+}
+
+function typeOf(
+  start: ts.Expression | undefined,
+  startSource: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  depth: number,
+): string {
+  let node = start
+  let source = startSource
+  for (let step = 0; node !== undefined && step < 64 && depth < 8; step++) {
+    if (ts.isParenthesizedExpression(node)) {
+      node = node.expression
+      continue
+    }
+    if (ts.isIdentifier(node)) {
+      const bound = bindingOf(node.text, source, env, packagesRoot)
+      if (bound === undefined) return ''
+      node = bound.expr
+      source = bound.source
+      continue
+    }
+    if (!ts.isCallExpression(node)) return ''
+    const callee = node.expression
+    const args = node.arguments
+    if (ts.isIdentifier(callee)) {
+      if (callee.text === 'secretStr') return 'string'
+      if (callee.text === 'secretSchema' && args[0] !== undefined) {
+        node = args[0]
+        continue
+      }
+      const fn = resolveFunction(callee.text, source, packagesRoot)
+      if (fn === undefined) return ''
+      node = returnExpression(fn.decl)
+      source = fn.source
+      continue
+    }
+    if (!ts.isPropertyAccessExpression(callee)) return ''
+    const method = callee.name.text
+    if (ts.isIdentifier(callee.expression) && callee.expression.text === 'z') {
+      const inner = (i: number): string => typeOf(args[i], source, env, packagesRoot, depth + 1)
+      if (method === 'array') {
+        const item = inner(0)
+        return item === '' ? 'array' : item.includes(' ') ? `(${item})[]` : `${item}[]`
+      }
+      if (method === 'enum' && args[0] !== undefined && ts.isArrayLiteralExpression(args[0]))
+        return args[0].elements.map((e) => e.getText(source)).join(' | ')
+      if (method === 'literal' && args[0] !== undefined)
+        return ts.isArrayLiteralExpression(args[0])
+          ? args[0].elements.map((e) => e.getText(source)).join(' | ')
+          : args[0].getText(source)
+      if (method === 'custom') {
+        const kind = args[0]?.getText(source).match(/typeof \w+ === '(\w+)'/)?.[1]
+        return kind === undefined ? '' : (ZOD_KINDS[kind] ?? '')
+      }
+      if (method === 'union' && args[0] !== undefined && ts.isArrayLiteralExpression(args[0])) {
+        const parts = args[0].elements.map((e) => typeOf(e, source, env, packagesRoot, depth + 1))
+        return [...new Set(parts.filter((p) => p !== ''))].join(' | ')
+      }
+      return ZOD_KINDS[method] ?? ''
+    }
+    node = callee.expression
+  }
+  return ''
+}
+
 function resolveFunction(
   name: string,
   source: ts.SourceFile,

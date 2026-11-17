@@ -1,29 +1,137 @@
 ---
 title: HF Buckets
 icon: /images/huggingface-logo.svg
-description: Set up Hugging Face Buckets credentials for the HF Buckets VFS.
+description: Virtualize a Hugging Face Storage Bucket as a tree of files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-### 1. Create a Bucket
+A [Hugging Face Storage Bucket](https://huggingface.co/docs/hub/storage-buckets) mounts as a tree of files, with every `/` in a file's path as a folder.
 
-1. Go to https://huggingface.co/new-bucket and create a bucket
-2. Note the full name in `namespace/bucket-name` form
-   (e.g. `your-user/my-data`)
 
-### 2. Create an Access Token
 
-1. Go to https://huggingface.co/settings/tokens
-2. Create a fine-grained token with **Read** (or **Write** if you need
-   to upload) access to the bucket's namespace
+## Setup
 
-### 3. Set Environment Variables
+1. Create a bucket at [huggingface.co/new-bucket](https://huggingface.co/new-bucket):
+   pick the owner (an account or an organization), a name and the visibility.
+   The bucket's id is `<owner>/<name>`, for example `my-user/my-data`.
+1. Create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens):
+   **Read** for a read mount, **Write** to upload. A fine-grained token needs
+   read access, or write access to upload, on the bucket's namespace.
 
 ```bash
-# .env.development
-HF_BUCKET_NAME=your-user/my-data
-HF_TOKEN=hf_...
+export HF_BUCKET_NAME=my-user/my-data
+export HF_TOKEN=hf_...
 ```
 
-For SDK guides, see [HF Buckets (Python)](/python/vfs/hf_buckets) and [HF Buckets (TypeScript)](/typescript/setup/hf_buckets).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /hf:
+        vfs: hf_buckets
+        mode: read
+        config:
+          bucket: ${HF_BUCKET_NAME}
+          token: ${HF_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id hf
+    mirage shell -w hf -c 'ls /hf'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.hf_buckets import HfBucketsConfig, HfBucketsVFS
+
+    config = HfBucketsConfig(
+        bucket=os.environ["HF_BUCKET_NAME"],
+        token=os.environ["HF_TOKEN"],
+    )
+    ws = Workspace({"/hf": HfBucketsVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /hf")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { HfBucketsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/hf': new HfBucketsVFS({
+          bucket: process.env.HF_BUCKET_NAME!,
+          token: process.env.HF_TOKEN,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /hf')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/hf/
+  checkpoints/
+    step-1000/
+      config.json
+    step-2000/
+      config.json
+  logs/
+    train.log
+```
+
+- A folder exists only while it holds a file, so `mkdir` creates nothing.
+  `key_prefix` (`keyPrefix` in TypeScript) mounts one folder as the root.
+- `mv` and `rmdir` are not supported. `grep -r`, `find` and `du` stop after
+  1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+- TypeScript runs it in Node only, with the `opendal` package installed.
+  Python needs the `hf-buckets` extra.
+
+## Sample runs
+
+```bash
+$ ls /hf
+checkpoints
+logs
+```
+
+```bash
+$ find /hf -name '*.json'
+/hf/checkpoints/step-1000/config.json
+/hf/checkpoints/step-2000/config.json
+```
+
+```bash
+$ tail -n 1 /hf/logs/train.log
+step=2000 loss=1.497
+```
+
+On a `write` mount, `cp`, `>` and `rm` change the bucket in place. A bucket
+keeps no history, so a removed file is gone for good.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/hf_buckets">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/hf_buckets">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,92 +1,157 @@
 ---
 title: Slack
 icon: /images/slack-logo.svg
-description: Mount a Slack workspace as a virtual filesystem from Node or the browser.
+description: Virtualize a Slack workspace from Node or the browser.
 ---
 
-MIRAGE ships `SlackVFS` in **two runtimes**:
+`SlackVFS` mounts a Slack workspace as read-only files: channels and DMs as
+one folder per day of messages and attachments, plus user profiles. The tokens
+are set up on the [Slack page](/home/setup/slack).
 
-- `@struktoai/mirage-node`, talks to `https://slack.com/api/*` directly using a bot token (and optionally a user token for `search.messages`).
-- `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/slack/*` to `https://slack.com/api/*`. The browser only ever sees the proxy URL.
-
-Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/`, `/slack/users/`) and the same shell commands, and both pair with the [slack CLI](/typescript/cli/slack) for acting on the workspace.
-
-## Get a bot token
-
-1. Visit the [Slack API basics page](https://api.slack.com/authentication/basics) and create an app for your workspace.
-2. Under **OAuth & Permissions**, add the bot scopes you need. For read access:
-   - `channels:history`, `channels:read`
-   - `groups:history`, `groups:read` (optional, private channels)
-   - `im:history`, `im:read` (optional, direct messages)
-   - `mpim:history`, `mpim:read` (optional, group direct messages)
-   - `users:read`
-3. For the CLI `send-message` command, also add `chat:write`. The mount never posts.
-4. For [`search.messages`](https://api.slack.com/methods/search.messages), Slack requires a **user token** (`xoxp-…`) with `search:read`. Bot tokens (`xoxb-…`) get `not_allowed_token_type`. Provide it via the optional `searchToken` field.
-5. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-…`).
+## Install
 
 ```bash
-# .env.development
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_USER_TOKEN=xoxp-...   # optional, only needed for slack search
+npm install @struktoai/mirage-node
 ```
 
-## Node (server-side)
-
-```bash
-pnpm add @struktoai/mirage-node
-```
+## Configure
 
 ```ts
 import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
 
 const slack = new SlackVFS({
   token: process.env.SLACK_BOT_TOKEN!,
-  searchToken: process.env.SLACK_USER_TOKEN,  // optional
+  searchToken: process.env.SLACK_USER_TOKEN!,
 })
-
 const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
-const res = await ws.shell('ls /slack/channels/')
-console.log(res.stdoutText)
+
+const result = await ws.shell('ls /slack/channels && grep -rlw refund /slack/channels')
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-### Config
+`searchToken` is optional: without it, `grep` reads the files. `startTime` and
+`endTime` bound the mount to a time range.
+
+### Fields
 
 {/* generated: config-table slack start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). |
-| <code style={{ whiteSpace: 'nowrap' }}>searchToken</code><br />secret | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"string"} required post={["secret"]}>
+  Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`).
+</ResponseField>
+<ResponseField name="searchToken" type={"string"} post={["secret"]}>
+  User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://slack.com/api'"}>
+  Slack Web API root; override to point at a fake or proxy.
+</ResponseField>
+<ResponseField name="startTime" type={"string"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="endTime" type={"string"}>
+  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table slack end */}
 
-## Browser
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+`token` is a bot token (`xoxb-...`) with these bot scopes:
+
+- `channels:read`, `channels:history`: public channels.
+- `groups:read`, `groups:history`: private channels (optional).
+- `im:read`, `im:history`: direct messages (optional).
+- `mpim:read`, `mpim:history`: group DMs (optional).
+- `users:read`: the `users/` folder.
+- `files:read`: attachments under `files/`.
+
+Invite the bot to each channel it should read with `/invite @Mirage`; a
+channel it is not in answers `Permission denied`. The mount never posts.
+
+Slack's search refuses bot tokens (`not_allowed_token_type`). The optional
+`searchToken` is a user token (`xoxp-...`) with `search:read`, used only for
+Slack's search methods; the bot token still does every read. For `grep` and
+`rg`, that user token also needs `channels:read`, `groups:read`, `im:read` and
+`mpim:read`, so Mirage can tell which channels and DMs its search covers.
+
+## Layout
+
+```text
+/slack/
+  channels/
+    general__C04KEPWF6V7/
+      2026-11-16/
+        chat.jsonl
+        files/
+          roadmap__F07AB12CD.pdf
+  dms/
+    alice__D0AQDJ5FP9V/
+      2026-11-16/
+        chat.jsonl
+  users/
+    alice__U12345678.json
 ```
 
-The browser package never sees the bot token. Instead, point it at a relative URL that your backend proxies to `https://slack.com/api/*`, attaching the `Authorization: Bearer …` header server-side.
+- **Names:** a channel, DM or user is `<display-name>__<id>`, so the CLI's
+  channel and user flags take the id from the path. Only `/` in a name
+  becomes `∕` (U+2215); `ls` the parent for exact names and quote names with
+  spaces.
+- **Days:** each channel and DM lists one folder per day for the 90 days up
+  to its newest message; a date glob finds earlier days.
+- **`chat.jsonl`:** one message per line as Slack's API returns it (`.text`,
+  `.user`, `.ts`, `.files`). `.user` is a user id, matched against
+  `users/<name>__<user-id>.json`.
+- **`files/`:** the attachments shared that day.
+- **`users/`:** one file per user that is not deleted or a bot, holding the
+  full profile from Slack.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/slack start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxyUrl</code><br />required | URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment. |
-| <code style={{ whiteSpace: 'nowrap' }}>getHeaders</code><br />secret | Function returning extra headers sent with every request to the proxy, such as your own session credential. |
+- **Read only:** send messages, react, pin, look up members, search and upload
+  files with the [`slack`](/typescript/cli/slack) CLI.
+- **Time scope:** `startTime` and `endTime` bound the mount with RFC 3339
+  timestamps that carry a timezone, at most to the millisecond. Start is
+  inclusive, end exclusive, and an unset bound is open. Listings then cover
+  that period instead of the recent window, day folders use UTC, messages are
+  picked by creation time and attachments follow their messages. Direct
+  paths, `stat`, date globs, `grep` and `rg` cannot leave the scope. Users and
+  channel metadata stay visible. The scope applies to the mount, not to the
+  `slack` CLI; rebuild the mount to change it.
+- **Upstream changes:** a `read` mount refuses writes through Mirage; it does
+  not freeze edits or deletions made in Slack.
+- **Rate limits:** many reads of `chat.jsonl` can hit Slack's per-method rate
+  limits, and history limits depend on how the app is distributed; see
+  Slack's
+  [`conversations.history` limits](https://docs.slack.dev/reference/methods/conversations.history/).
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/slack end */}
+## Browser
 
-### 1. Server: minimal proxy
+The browser `SlackVFS` from `@struktoai/mirage-browser` never sees a token: a
+proxy on the backend holds it and forwards `/api/slack/*` to
+`https://slack.com/api/*`.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-browser'
+
+const slack = new SlackVFS({ proxyUrl: '/api/slack' })
+const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+```
+
+- The proxy is required: Slack sets no permissive CORS headers, so a call to
+  `https://slack.com/api/*` from the page fails.
+- `getHeaders` returns extra headers for each request to the proxy, such as a
+  per-user session credential.
+
+<AccordionGroup>
+  <Accordion title="Proxy server">
 
 ```ts
 import { createServer } from 'node:http'
@@ -124,42 +189,70 @@ createServer(async (req, res) => {
 }).listen(8901, '127.0.0.1')
 ```
 
-### 2. Browser: wire it up
+  </Accordion>
+  <Accordion title="Browser fields">
 
-```ts
-import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-browser'
+{/* generated: config-table browser/slack start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="startTime" type={"string"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="endTime" type={"string"}>
+  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
+<ResponseField name="proxyUrl" type={"string"} required>
+  URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment.
+</ResponseField>
+<ResponseField name="getHeaders" type={"function"} post={["secret"]}>
+  Function returning extra headers sent with every request to the proxy, such as your own session credential.
+</ResponseField>
 
-const slack = new SlackVFS({
-  proxyUrl: '/api/slack',
-  // For multi-tenant setups, return per-request auth headers:
-  // getHeaders: async () => ({ Authorization: `Bearer ${userJwt}` }),
-})
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/slack end */}
 
-const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
-const res = await ws.shell('ls /slack/channels/')
-console.log(res.stdoutText)
-```
+  </Accordion>
+</AccordionGroup>
 
-<Warning>
-Calling `https://slack.com/api/*` directly from a browser fails CORS. The proxy is mandatory, Slack does not set permissive CORS headers.
-</Warning>
+## Integration
+
+Slack answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: with a user token, only the channel and DM days
+  Slack search names are read, and the output matches reading every day.
+  Search covers message text, file names and titles, and reactions
+  (`has::name:`); a file hit names each day the file was shared. Users, file
+  blobs and a day searched on its own are always read. Every day is read when
+  the word is a key or fixed value of the message JSON, a file-type or URL
+  word, a join or leave message word, or part of a user's name or of the
+  workspace's domain, and when a search fails, returns more than 1,000
+  messages or finds nothing. With a separate `searchToken`, every day is also
+  read when the scope holds a private channel or DM that token's user is not
+  in (a bot's own DMs). Slack indexes a message some time after it is posted,
+  and a word held only in another field (a bot's username, an unfurled link)
+  is not searched; `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
+- `tail -f`: each new message as it is posted.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
 
 {/* generated: vfs-md slack start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `slack`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -179,26 +272,20 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
         <username>__<user-id>.json  # user profile
     ```
 
-    - A channel, DM or user name is `<display-name>__<id>`. The display name
-      keeps Slack's spelling; only `/` becomes `∕` (U+2215). `ls` the parent
-      first to find exact names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.text`, `.user`,
-      `.ts` and `.files`. A day's `files/` may be empty.
-    - `.user` is a user ID (`U…`), not a username; resolve it through
-      `users/<username>__<user-id>.json` and filter messages by the ID.
-    - Without `start_time`/`end_time`, a channel lists the latest 90 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included, and `grep`
-      and `rg` see only the in-scope files. Users and channel metadata stay
-      available as context.
-    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the channel
-      and DM days Slack search names; attachments under `files/` are always
-      read.
+    - A channel, DM or user name is `<display-name>__<id>`; only `/` becomes
+      `∕` (U+2215). `ls` the parent for exact names and quote names with
+      spaces.
+    - `chat.jsonl` holds one message per line (`.text`, `.user`, `.ts`,
+      `.files`). `.user` is a user id (`U…`); match it against
+      `users/<username>__<user-id>.json`.
+    - Without `start_time`/`end_time`, a channel lists the 90 days up to its
+      newest message; a date glob finds earlier days.
+    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the days
+      Slack search names; `files/` is always read.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -206,7 +293,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `slack` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -251,24 +338,18 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
         <username>__<user-id>.json  # user profile
     ```
 
-    - A channel, DM or user name is `<display-name>__<id>`. The display name
-      keeps Slack's spelling; only `/` becomes `∕` (U+2215). `ls` the parent
-      first to find exact names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.text`, `.user`,
-      `.ts` and `.files`. A day's `files/` may be empty.
-    - `.user` is a user ID (`U…`), not a username; resolve it through
-      `users/<username>__<user-id>.json` and filter messages by the ID.
-    - Without `start_time`/`end_time`, a channel lists the latest 90 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included, and `grep`
-      and `rg` see only the in-scope files. Users and channel metadata stay
-      available as context.
-    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the channel
-      and DM days Slack search names; attachments under `files/` are always
-      read.
+    - A channel, DM or user name is `<display-name>__<id>`; only `/` becomes
+      `∕` (U+2215). `ls` the parent for exact names and quote names with
+      spaces.
+    - `chat.jsonl` holds one message per line (`.text`, `.user`, `.ts`,
+      `.files`). `.user` is a user id (`U…`); match it against
+      `users/<username>__<user-id>.json`.
+    - Without `start_time`/`end_time`, a channel lists the 90 days up to its
+      newest message; a date glob finds earlier days.
+    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the days
+      Slack search names; `files/` is always read.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
     ## Supported Unix Commands for VFS
 
@@ -290,96 +371,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md slack end */}
-
-Each channel or DM directory contains day-partitioned directories for the last 90 days (or since channel creation). Each date directory contains `chat.jsonl` plus a `files/` directory for attachments shared that day. Each user file is the full profile JSON returned by `users.profile.get`. The Slack ID is embedded after `__` in directory and file names so you can extract it for the VFS-specific commands without an extra lookup.
-
-## Shell commands
-
-Every standard MIRAGE shell command works on the mounted Slack tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List channels, DMs, users, dates           |
-| `cat`           | Read `chat.jsonl`, user `.json`, or files  |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON, once per JSONL line (`-s` all) |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type)           |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `pwd` / `cd`    | Navigate the virtual tree                  |
-| `echo` (glob)   | Glob expansion via the derived `glob` op   |
-
-Acting on Slack (sending, reacting, pins, member info, search) goes
-through the [slack CLI](/typescript/cli/slack) when installed; the
-mounted tree stays read-oriented.
-
-## Integration
-
-What Slack answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Slack |
-| --- | --- |
-| `grep -r`, `rg` | Slack search, for whole words, with a user token. It can miss recent messages, words only in other fields (bot names and link previews). |
-| `tail -f` | Each new message as it is posted |
-
-The [Python Slack docs](/python/vfs/slack#integration) list when each search answers and what it can miss.
-
-## Troubleshooting
-
-<AccordionGroup>
-  <Accordion title="`not_allowed_token_type` on `slack search`">
-    The account CLI's `slack search` command calls `search.messages`, which requires a **user token** (`xoxp-…`) with `search:read` scope. Include `searchToken` in the config passed to `ws.registerCli`; see the [Slack CLI setup](/typescript/cli/slack). Without it, `slack search` fails. VFS `grep` and `rg` still scan the mounted files; they simply skip the optional Slack-search optimization.
-  </Accordion>
-  <Accordion title="CORS error in browser">
-    The browser cannot call `https://slack.com/api/*` directly, Slack does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.
-  </Accordion>
-  <Accordion title="`rate_limited` from Slack">
-    `SlackVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate channel / user / date listings, but high-volume reads of `.jsonl` files can still hit Slack's per-method rate limits. Cache hits avoid the API entirely; raise the index `ttl` (`index: { ttl }`) together with the mount's `ttl` if your workspace changes slowly.
-
-    History limits depend on app distribution. Check Slack's current
-    [`conversations.history` method limits](https://docs.slack.dev/reference/methods/conversations.history/)
-    for your installation.
-  </Accordion>
-</AccordionGroup>
-
-## Examples
-
-- [`examples/typescript/vfs/slack/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack.ts), shell commands against `/slack/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
-- [`examples/typescript/vfs/slack/slack_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
-- [`examples/typescript/vfs/slack/slack_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack_fuse.ts), FUSE-mount the workspace so external processes can browse `/slack/` as a real filesystem.
-- [`examples/browser/vfs/slack/`](https://github.com/strukto-ai/mirage/tree/main/examples/browser/vfs/slack), proxy server + `@struktoai/mirage-browser` SlackVFS demo.
-
-See [Python Slack VFS](/python/vfs/slack) for the equivalent Python wiring.
-
-## Time scope
-
-Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
-`start_time`/`end_time` to Python; `startTime`/`endTime` to the TypeScript
-constructor). Bounds are RFC3339 timestamps with an explicit timezone and
-at most millisecond precision. Start is inclusive; end is exclusive.
-An omitted or null bound is open. Start must precede end.
-
-```yaml
-mounts:
-  /history:
-    vfs: slack
-    mode: read
-    config:
-      token: "<bot-token>"
-      start_time: "2026-06-01T10:00:00Z"
-      end_time: "2026-06-02T00:00:00Z"
-```
-
-With a bound configured, channel listings cover the selected period rather
-than the default recent window. Day directories use UTC. Messages are selected
-by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope: a search only rules
-out files, so scoped searches scan the filtered files. User/member
-and channel/server metadata remain visible as context.
-
-These settings apply to the VFS, not to separately installed account CLIs.
-`mode: read` prevents mount writes; it does not freeze upstream edits or deletions.
-Rebuild/remount the VFS to change its scope so cached listings and bytes are cleared.

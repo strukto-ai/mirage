@@ -1,24 +1,21 @@
 ---
 title: LanceDB
-description: Mount a LanceDB table as a Mirage filesystem, with label folders, multimodal blobs, and semantic search through the search CLI for Python agents.
-icon: database
+description: Virtualize a LanceDB table from Python.
+icon: /images/lancedb-logo.svg
 ---
 
-The LanceDB VFS exposes a LanceDB table as a virtual filesystem mounted at
-some prefix such as `/fashion/`. Group-by columns become nested folders, each
-row becomes a card plus an optional blob file, and semantic search is the
-[`search` CLI](/python/cli/search), which returns ranked rows as canonical file paths.
+`LanceDBVFS` mounts a LanceDB table, read-only, as nested folders, one level per
+group-by column. Each row is a Markdown card plus an optional blob file, such
+as its image. Local, object storage and LanceDB Cloud connections are set up on
+the [LanceDB page](/home/setup/lancedb).
 
-For connection setup (LanceDB OSS, object storage, Cloud, Enterprise), see
-[LanceDB Setup](/home/setup/lancedb).
-
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[lancedb]"
 ```
 
-## Config
+## Configure
 
 ```python
 from mirage import MountMode, Workspace
@@ -28,67 +25,199 @@ config = LanceDBConfig(
     uri="/data/fashion.lancedb",
     table="fashion",
     group_by=["gender", "articleType", "baseColour"],
-    id_column="id",
     title_column="productDisplayName",
     blob_column="image_bytes",
     blob_ext="jpg",
     vector_column="vector",
-    search_limit=5,
 )
-vfs = LanceDBVFS(config)
-ws = Workspace({"/fashion/": vfs}, mode=MountMode.READ)
+ws = Workspace({"/fashion": LanceDBVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.md")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-The mapping is config-driven; nothing about the dataset is hardcoded. Point
-`group_by` at different columns and the folder tree changes.
+`id_column` (default `id`) names each row's files. Without `table`, every table
+is a top-level folder.
+
+### Fields
 
 {/* generated: config-table lancedb start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />secret | API key for LanceDB Cloud or Enterprise. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
-| <code style={{ whiteSpace: 'nowrap' }}>host_override</code> | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
-| <code style={{ whiteSpace: 'nowrap' }}>storage_options</code> | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
-| <code style={{ whiteSpace: 'nowrap' }}>table</code> | Table the mount root shows; unset lists every table as a top-level folder. |
-| <code style={{ whiteSpace: 'nowrap' }}>group_by</code><br />default `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
-| <code style={{ whiteSpace: 'nowrap' }}>id_column</code><br />default `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blob_ext>`). |
-| <code style={{ whiteSpace: 'nowrap' }}>title_column</code> | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
-| <code style={{ whiteSpace: 'nowrap' }}>blob_column</code> | Column of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the card; unset adds no blob file. |
-| <code style={{ whiteSpace: 'nowrap' }}>blob_ext</code><br />default `'bin'` | File extension of the blob file, without the dot. |
-| <code style={{ whiteSpace: 'nowrap' }}>vector_column</code> | Embedding column left out of cards and listings. |
-| <code style={{ whiteSpace: 'nowrap' }}>search_limit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_rows</code><br />default `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="uri" type={"str"} required>
+  Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} post={["secret"]}>
+  API key for LanceDB Cloud or Enterprise.
+</ResponseField>
+<ResponseField name="region" type={"str"} default={"'us-east-1'"}>
+  LanceDB Cloud region of a `db://` database; ignored for other URIs.
+</ResponseField>
+<ResponseField name="host_override" type={"str"}>
+  Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs.
+</ResponseField>
+<ResponseField name="storage_options" type={"dict"}>
+  Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI.
+</ResponseField>
+<ResponseField name="table" type={"str"}>
+  Table the mount root shows; unset lists every table as a top-level folder.
+</ResponseField>
+<ResponseField name="group_by" type={"list[str]"} default={"[]"}>
+  Columns that become folder levels, one per column in order; unset puts every row's files directly under the table.
+</ResponseField>
+<ResponseField name="id_column" type={"str"} default={"'id'"}>
+  Column whose value names each row's files (`<id>.md`, `<id>.<blob_ext>`).
+</ResponseField>
+<ResponseField name="title_column" type={"str"}>
+  Column whose value heads a row's card as a `# ` title; unset leaves the card without one.
+</ResponseField>
+<ResponseField name="blob_column" type={"str"}>
+  Column of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the card; unset adds no blob file.
+</ResponseField>
+<ResponseField name="blob_ext" type={"str"} default={"'bin'"}>
+  File extension of the blob file, without the dot.
+</ResponseField>
+<ResponseField name="vector_column" type={"str"}>
+  Embedding column left out of cards and listings.
+</ResponseField>
+<ResponseField name="search_limit" type={"int"} default={"10"}>
+  Results `search` returns when `--top-k` is not given.
+</ResponseField>
+<ResponseField name="max_rows" type={"int"} default={"1000"}>
+  Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table lancedb end */}
+
+## Authentication
+
+A local directory needs no credentials. LanceDB Cloud takes its `db://` URI
+with `api_key` and `region` (default `us-east-1`); LanceDB Enterprise adds its
+endpoint in `host_override`. An `s3://`, `gs://` or `az://` URI takes the
+store's credentials or endpoint in `storage_options`.
+
+```python
+import os
+
+config = LanceDBConfig(
+    uri=os.environ["LANCEDB_URI"],
+    api_key=os.environ["LANCEDB_API_KEY"],
+    region=os.environ["LANCEDB_REGION"],
+    table="fashion",
+    group_by=["gender"],
+)
+```
+
+## Layout
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      White/
+        3.jpg
+        3.md
+    Watches/
+      Silver/
+        15.jpg
+        15.md
+  Women/
+    Tops/
+      Blue/
+        12.jpg
+        12.md
+```
+
+Each folder level filters on one `group_by` column, in order:
+`/fashion/Men/Shoes/White/` lists the rows whose `gender` is `Men`,
+`articleType` is `Shoes` and `baseColour` is `White`. Once every column is
+bound, the folder lists each row's `<id>.md` and, with `blob_column`, its
+`<id>.<blob_ext>`. A value
+holding `/` renders as `∕`, and a blank or dot-led value is led by `⁄`, so
+every value keeps its own folder that lists and opens.
+
+A card lists the row's columns, headed by `title_column`, without the vector
+and blob columns:
+
+```text
+# Nike Men White Running Sneakers
+
+id: 3
+gender: Men
+articleType: Shoes
+baseColour: White
+productDisplayName: Nike Men White Running Sneakers
+blob: 3.jpg
+```
+
+## Behavior
+
+- **Read-only:** no command changes the table.
+- **Listing cap:** one folder listing reads at most `max_rows` (1,000) rows;
+  rows past it are left out. Keep `group_by` to low-cardinality columns on a
+  large table.
+
+### Semantic search
+
+The [`search` CLI](/python/cli/search) runs LanceDB's vector search with the
+table's embedding function, so the table needs one on a source column. Register
+it on the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
+
+Each hit prints its card's path with the vector distance, then the card, so
+results work with `cat`, pipes and `wc`:
+
+```text
+$ search "white running sneakers" /fashion
+/fashion/Men/Shoes/White/3.md:0.2679
+# Nike Men White Running Sneakers
+...
+```
+
+`--top-k` defaults to `search_limit` (10). `--threshold` is the largest
+distance kept. `--method` takes only `semantic`.
+
+## Integration
+
+LanceDB answers this command through its own API, so fewer cards are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: a `LIKE` query over each row's string columns picks the
+  cards to read, for any text, and misses nothing. A text that could match a
+  column's name, a boolean or `null`, or the `column: ` prefix reads every
+  card, as does a table that renders a list, struct or bytes column.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>`.
 
 {/* generated: vfs-md lancedb start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `lancedb`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
-    - A LanceDB table, exposed as a filesystem.
     - Directories are the configured group-by columns; descending one narrows
       a filter.
     - Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file.
-    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
-      usual.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -96,7 +225,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `lancedb` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -123,12 +252,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
 
     ### `/<path>`
 
-    - A LanceDB table, exposed as a filesystem.
     - Directories are the configured group-by columns; descending one narrows
       a filter.
     - Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file.
-    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
-      usual.
 
     ## Supported Unix Commands for VFS
 
@@ -150,126 +276,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md lancedb end */}
-
-Every path is translated into a LanceDB query. Descending a folder adds one
-`WHERE` clause; the leaf level lists rows.
-
-```text
-/                                  # list tables (omitted when `table` is pinned)
-/<table>/                          # distinct group_by[0] values
-  <v1>/                            # distinct group_by[1] WHERE group_by[0]=v1
-    .../<vN>/                      # all group-by columns bound -> row files
-      <id>.md                      # rendered card (text)
-      <id>.<ext>                   # raw blob / image bytes
-```
-
-A group value holding `/` renders as `∕`, and a blank or dot-led value is led
-by `⁄`, so every value keeps its own directory that lists and opens, and
-descending into it filters for exactly that value.
-
-When `table` is set the table level is elided, so the mount root is that table:
-
-```text
-/fashion/
-  Men/
-    Shoes/
-      White/
-        3.md
-        3.jpg
-```
-
-### Row cards
-
-A `<id>.md` card renders the row's columns as readable text and points at its
-blob. The vector and blob columns are omitted from the card body.
-
-```text
-# Nike Men White Running Sneakers
-
-id: 3
-gender: Men
-articleType: Shoes
-baseColour: White
-productDisplayName: Nike Men White Running Sneakers
-blob: 3.jpg
-```
-
-## Semantic search
-
-Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
-workspace:
-
-```python
-from mirage.commands.cli.builtin.search import SEARCH
-
-ws.register_cli("search", SEARCH)
-```
-
-It returns each ranked row as its **canonical
-file path** (the same `<id>.md` you would `cat` while browsing) annotated with
-the vector distance, followed by the card body. Results point back at the real
-files, so search composes with `cat`, pipes, and `wc`:
-
-```text
-$ search "white running sneakers" /fashion
-/fashion/Men/Shoes/White/3.md:0.2679
-# Nike Men White Running Sneakers
-
-id: 3
-gender: Men
-articleType: Shoes
-baseColour: White
-productDisplayName: Nike Men White Running Sneakers
-blob: 3.jpg
-...
-```
-
-Flags: `--top-k <n>` (default `search_limit`), `--threshold <max-distance>`,
-`--method semantic` (the only supported method; `grep`/`rg` stay lexical).
-
-## Integration
-
-What LanceDB answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On LanceDB |
-| --- | --- |
-| `grep -r`, `rg` | The string columns of each row, for any text; a table with list, struct or bytes columns reads every card. It misses nothing. |
-
-## Supported commands
-
-All commands delegate to Mirage's shared implementations.
-
-| Command       | Behaviour on a LanceDB mount                                   |
-| ------------- | ------------------------------------------------------------- |
-| `ls`          | list tables, label folders, or row files                      |
-| `cd`          | navigate (each level narrows the filter)                      |
-| `tree`        | render the label hierarchy                                    |
-| `cat`         | print a row card, or dump raw blob/image bytes                |
-| `stat`        | directory vs file, blob size, image mime type                 |
-| `find`        | walk the tree (e.g. `find /fashion -name '*.md'`)             |
-| `grep` / `rg` | lexical search over the rendered cards                        |
-| `head` / `tail` | first/last lines of a card                                  |
-| `wc`          | count lines/bytes of a card                                   |
-
-`grep`/`rg` stay lexical (literal/regex). The `search` CLI is the semantic path: it
-auto-embeds the query via the table's embedding function and returns ranked
-rows as canonical file paths, which compose with `cat`, `wc`, and pipes.
-
-`grep -r` and `rg` read only the cards whose string columns hold the text, which
-a `LIKE` query answers. A text that could match a column's name, a boolean or
-`null`, or the `column: ` prefix reads every card, as does a table that renders
-a list, struct or bytes column.
-
-## Access pattern
-
-The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
-read modes are:
-
-- **Browse** by label folders: pure metadata `WHERE` filters, no embedding.
-- **Search** by meaning: the `search` CLI's `search "<query>" <path>` runs vector search using the
-  table's embedding function and returns canonical row paths.
-
-Folder listings scan one column with `SELECT DISTINCT` and are capped by
-`max_rows`, so very large tables should keep `group_by` to low-cardinality
-columns.

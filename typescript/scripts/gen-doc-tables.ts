@@ -28,6 +28,7 @@ import {
   configShapes,
   factsOfSchema,
   fieldDoc,
+  fieldType,
   moduleFile,
   parse,
 } from './vfs_facts.ts'
@@ -36,6 +37,8 @@ const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 const PACKAGES = resolve(ROOT, 'typescript', 'packages')
 const DOCS = resolve(ROOT, 'docs', 'typescript')
 const SECRET_NOTE = 'Fields marked secret are redacted in snapshots.'
+const BOX = '<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">'
+const MODE_CELL = /^(\| `\/<path>` \| (?:[^|]*, )?)write \|/m
 const MIB = 1024 * 1024
 const MARKER =
   /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+)(?: omit=(?<omit>[\w,]+))? start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
@@ -143,13 +146,13 @@ function nameCell(name: string): string {
 // A default as written in the schema; a constant product such as
 // `10 * 1024 * 1024` is shown as its value, with MiB when it is whole.
 function defaultText(text: string): string {
-  if (!/^[\d_\s*]+$/.test(text)) return `default \`${text.replaceAll('|', '\\|')}\``
+  if (!/^[\d_\s*]+$/.test(text)) return text
   const value = text
     .split('*')
     .map((part) => Number(part.trim().replaceAll('_', '')))
     .reduce((a, b) => a * b, 1)
   const mib = value >= MIB && value % MIB === 0 ? ` (${String(value / MIB)} MiB)` : ''
-  return `default \`${String(value)}\`${mib}`
+  return `${String(value)}${mib}`
 }
 
 function escapeProse(text: string): string {
@@ -159,6 +162,11 @@ function escapeProse(text: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('{', '&#123;')
     .replaceAll('}', '&#125;')
+}
+
+// Prose for MDX outside a table, as `cell` escapes it inside one.
+function prose(text: string): string {
+  return cell(text).replaceAll('\\|', '|')
 }
 
 // Prose for one Markdown table cell in MDX. Code spans keep their text,
@@ -174,11 +182,11 @@ function cell(text: string): string {
   return out + escapeProse(flat.slice(last))
 }
 
-// Two columns: the name cell carries whether the field is required, its
-// default and whether it is secret, so the description gets the width.
-// `omit` drops fields the page's mount ignores.
+// One `ResponseField` per field: its name, type, whether it is required,
+// its default and whether it is secret. `omit` drops fields the page's
+// mount ignores.
 function configTable(shape: ConfigShape, omit: ReadonlySet<string>): Rendered {
-  const rows = ['| Field | Description |', '| --- | --- |']
+  const blocks: string[] = []
   const bare: string[] = []
   let showsSecret = false
   for (const [name, field] of Object.entries(shape.fields)) {
@@ -186,17 +194,21 @@ function configTable(shape: ConfigShape, omit: ReadonlySet<string>): Rendered {
     const doc = fieldDoc(field, PACKAGES)
     const description = doc.description?.trim() ?? ''
     if (description === '') bare.push(name)
-    const tags = [
+    const kind = fieldType(field, PACKAGES)
+    const attrs = [
+      `name="${name}"`,
+      ...(kind !== '' ? [`type={${JSON.stringify(kind)}}`] : []),
       ...(field.required ? ['required'] : []),
-      ...(!field.required && doc.default !== undefined ? [defaultText(doc.default)] : []),
-      ...(doc.secret ? ['secret'] : []),
+      ...(!field.required && doc.default !== undefined
+        ? [`default={${JSON.stringify(defaultText(doc.default))}}`]
+        : []),
+      ...(doc.secret ? ['post={["secret"]}'] : []),
     ]
     if (doc.secret) showsSecret = true
-    const head = tags.length > 0 ? `${nameCell(name)}<br />${tags.join(', ')}` : nameCell(name)
-    rows.push(`| ${head} | ${cell(description)} |`)
+    blocks.push(`<ResponseField ${attrs.join(' ')}>\n  ${prose(description)}\n</ResponseField>`)
   }
   return {
-    body: rows.join('\n') + (showsSecret ? `\n\n${SECRET_NOTE}` : ''),
+    body: blocks.join('\n') + (showsSecret ? `\n\n${SECRET_NOTE}` : ''),
     bare,
     unknown: [...omit].filter((name) => !(name in shape.fields)),
   }
@@ -426,8 +438,8 @@ function fenced(text: string, info: string): string {
   return `${'`'.repeat(Math.max(3, ...runs))}${info}\n${text}\n${'`'.repeat(Math.max(3, ...runs))}`
 }
 
-// A VFS.md as a docs page shows it: no frontmatter, and every heading two
-// levels down, below the page's own.
+// A VFS.md as a docs page shows it: no frontmatter, and every heading a
+// bold line, so none joins the page's own outline.
 function rendered(markdown: string): string {
   const lines: string[] = []
   let fence = 0
@@ -436,7 +448,7 @@ function rendered(markdown: string): string {
     const bare = line.trim()
     if (fence === 0 && run !== null) fence = run[0].length
     else if (fence > 0 && /^`+$/.test(bare) && bare.length >= fence) fence = 0
-    else if (fence === 0 && line.startsWith('#')) line = `##${line}`
+    else if (fence === 0 && line.startsWith('#')) line = `**${line.replace(/^#+/, '').trim()}**`
     lines.push(line)
   }
   return lines.join('\n')
@@ -449,8 +461,8 @@ function indent(text: string): string {
 // A VFS.md rendered in one tab and as its source in another.
 function tabs(markdown: string): string {
   return (
-    `<Tabs>\n  <Tab title="Rendered">\n${indent(rendered(markdown))}\n  </Tab>\n` +
-    `  <Tab title="Raw">\n${indent(fenced(markdown, 'markdown'))}\n  </Tab>\n</Tabs>`
+    `${BOX}\n<Tabs>\n  <Tab title="Rendered">\n${indent(rendered(markdown))}\n  </Tab>\n` +
+    `  <Tab title="Raw">\n${indent(fenced(markdown, 'markdown'))}\n  </Tab>\n</Tabs>\n</div>`
   )
 }
 
@@ -490,7 +502,8 @@ async function vfsMd(name: string, fields: Record<string, { required: boolean }>
   ws.mount('/').visible = () => false
   ws.mount('/dev').visible = () => false
   try {
-    return (await ws.vfsMd()).replace(`${INTRO}\n\n`, '').replace(/\n+$/, '')
+    const markdown = (await ws.vfsMd()).replace(`${INTRO}\n\n`, '').replace(/\n+$/, '')
+    return markdown.replace(MODE_CELL, '$1`<mode>` |')
   } finally {
     await ws.close()
   }
@@ -569,8 +582,12 @@ function selftest(): void {
     assert.ok(!markersPaired(broken), broken)
   }
   const document = '---\nname: x\n---\n\n# T\n\n```text\n# kept\n```\n\n## S'
-  assert.equal(rendered(document), '### T\n\n```text\n# kept\n```\n\n#### S')
+  assert.equal(rendered(document), '**T**\n\n```text\n# kept\n```\n\n**S**')
   assert.equal(tabs(document).split('    # kept').length, 3)
+  assert.equal(
+    '| `/<path>` | `gcal`, write |\n| `/<path>` | write |'.replace(MODE_CELL, '$1`<mode>` |'),
+    '| `/<path>` | `gcal`, `<mode>` |\n| `/<path>` | write |',
+  )
   const schema = ts.createSourceFile(
     'schema.ts',
     "z.object({ a: z.string() }).register(FIELD_NORMALIZERS, { rename: { b: 'a' } })" +
@@ -600,6 +617,22 @@ function selftest(): void {
   assert.deepEqual(Object.keys(facts.fields), ['a'])
   assert.equal(facts.fields.a?.required, true)
   assert.deepEqual(facts.rename, { b: 'a' })
+  const kinds = ts.createSourceFile(
+    'kinds.ts',
+    `z.literal([1, 7, 30]);
+    z.union([z.string(), z.custom<() => string>((value) => typeof value === 'function')]);
+    z.custom<Bytes>((value) => value instanceof Uint8Array)`,
+    ts.ScriptTarget.ESNext,
+    true,
+  )
+  assert.deepEqual(
+    kinds.statements.map((s) =>
+      ts.isExpressionStatement(s)
+        ? fieldType({ required: true, expr: s.expression, source: kinds, env: new Map() }, PACKAGES)
+        : undefined,
+    ),
+    ['1 | 7 | 30', 'string | function', ''],
+  )
   console.log('gen-doc-tables selftest: ok')
 }
 

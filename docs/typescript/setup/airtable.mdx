@@ -1,85 +1,184 @@
 ---
 title: Airtable
+description: Virtualize Airtable bases from Node or the browser.
 icon: /images/airtable-logo.svg
-description: Mount Airtable bases, tables, and records as a Mirage filesystem.
 ---
 
-`AirtableVFS` exposes the bases a personal access token can reach as a
-read-only tree of tables, records, and saved views. Reads go through the
-Airtable Web API with plain `fetch`, so one class serves Node and the browser.
+`AirtableVFS` turns the bases a personal access token can reach into a
+read-only tree: every table holds its field schema, its records as JSON lines
+and one file per saved view. Writes go through the
+[airtable CLI](/typescript/cli/airtable), which takes the same config. The token is set up on the
+[Airtable page](/home/setup/airtable).
 
-Setup steps for the token live at [Airtable Credentials](/home/setup/airtable).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { AirtableVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const airtable = new AirtableVFS({ token: process.env.AIRTABLE_TOKEN! })
-
 const ws = new Workspace({ '/airtable': airtable }, { mode: MountMode.READ })
-await ws.shell('ls /airtable/bases/')
+
+const result = await ws.shell('ls /airtable/bases')
+console.log(result.stdoutText)
+await ws.close()
 ```
+
+`baseIds` limits the mount to those bases, and `maxReadRecords` bounds a full read
+of one file. Unknown keys are refused, so a misspelled `baseIds` fails loudly
+instead of widening the mount to every base.
+
+### Fields
+
+{/* generated: config-table airtable start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"string"} required post={["secret"]}>
+  Personal access token (or OAuth access token), sent as `Authorization: Bearer`.
+</ResponseField>
+<ResponseField name="baseIds" type={"string[]"}>
+  Only these bases are listed or readable. Unset shows every base the token can reach.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://api.airtable.com/v0'"}>
+  Airtable API root; override to point at a fake or proxy.
+</ResponseField>
+<ResponseField name="maxReadRecords" type={"number"} default={"10000"}>
+  The most records one file renders. A full read of a larger table or view fails with `File too large` once it passes the cap; `head -n N` still reads its first records.
+</ResponseField>
+<ResponseField name="requestsPerSecond" type={"number"} default={"5"}>
+  Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table airtable end */}
+
+## Authentication
+
+The token needs the scopes `data.records:read` and `schema.bases:read`; without
+`schema.bases:read` it cannot list tables. Only the bases (or workspaces) under
+the token's **Access** are visible: a base left out reads as if it did not
+exist. The [airtable CLI](/typescript/cli/airtable)'s writes also need `data.records:write`.
+
+## Layout
+
+```text
+/airtable/
+  bases/
+    Product_Roadmap__appRoadmapBase001/
+      base.json
+      Features__tblFeatures000001/
+        table.json
+        records.jsonl
+        views/
+          Done_shipped__viwDone0000000001.jsonl
+```
+
+Each folder is `<name>__<id>`. Names are sanitized (`Ops / Finance` becomes
+`Ops_Finance`); the id after the last `__` is exact. List a folder to find
+names rather than building them.
+
+- `base.json`: the base id, name, the token's permission level and the tables.
+- `table.json`: the typed field schema, with each field's options (select
+  choices, number precision, link targets), and the saved views.
+- `records.jsonl`: one record per line, `{"record_id", "created_time",
+  "fields"}`, with `fields` keyed by field name and valued exactly as Airtable
+  returns them.
+- `views/<view>.jsonl`: the records the view shows, filtered and ordered by
+  the view.
+
+## Behavior
+
+- **Read-only:** a record write is not a file write, so the mount refuses it.
+  The [airtable CLI](/typescript/cli/airtable) names a base, a table and a record by the id after
+  the last `__` of the mount's folder names, and a `records.jsonl` line is its
+  stdin shape, so an edit pipes straight back:
+
+  ```bash
+  jq -c 'select(.fields.Status == "Todo") | .fields.Status = "Done"' \
+    /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl \
+    | airtable record update --base appRoadmapBase001 --table tblFeatures000001
+  ```
+
+  The CLI also reaches what a file cannot: server-side filters
+  (`airtable record list --formula` or `--view`), one record by id
+  (`airtable record get`) and comments.
+- **Read limit:** a file holding more than `maxReadRecords` records ends with
+  `File too large` (`cat: <path>: File too large`) instead of paging for
+  minutes. `cat` and `grep` print each page as it arrives, so the first
+  `maxReadRecords` records come before the error, and a reader that stops first
+  (`head -c 100`, `grep -l`) never reaches it. Every command reports it per
+  file and moves on, so `grep -l x a b` still answers for the files under the
+  cap. Use `head`, a view, or raise the cap.
+- **Order:** `records.jsonl` follows the API's own order, which Airtable calls
+  arbitrary but keeps stable; a view file applies the view's sort.
+- **Empty cells:** Airtable omits empty values from a record, a `false`
+  checkbox included, so a missing key means empty.
+- **Links and attachments:** a linked-record field is a list of record ids. An
+  attachment URL expires two hours after it was read, so re-read the record
+  before downloading.
+- **Sizes:** `base.json` and `table.json` report their exact size. Record files
+  have no size until read, which is what `ls -l` and `stat` show.
+- **Freshness:** records are always read live; listings of bases, tables and
+  views may be cached.
+- **Rate limits:** requests are spaced to `requestsPerSecond` per base. A `429` that says
+  `RATE_LIMIT_REACHED` is retried after Airtable's 30-second penalty; a `429`
+  for an exhausted monthly quota is reported at once, since waiting cannot fix
+  it.
 
 ## Browser
 
+`@struktoai/mirage-browser` exports the same `AirtableVFS`. The Airtable API
+sends `access-control-allow-origin: *`, so the page calls it directly.
+
 ```bash
-pnpm add @struktoai/mirage-browser
+npm install @struktoai/mirage-browser
 ```
 
 ```ts
 import { AirtableVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const airtable = new AirtableVFS({ token: AIRTABLE_TOKEN })
+const ws = new Workspace({ '/airtable': airtable }, { mode: MountMode.READ })
 ```
 
-The Airtable API sends `access-control-allow-origin: *`, so the browser calls
-it directly; a token in a page is visible to that page's user.
+- A token in a page is visible to that page's user.
 
-## Config
+## Integration
 
-{/* generated: config-table airtable start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Personal access token (or OAuth access token), sent as `Authorization: Bearer`. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseIds</code> | Only these bases are listed or readable. Unset shows every base the token can reach. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.airtable.com/v0'` | Airtable API root; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>maxReadRecords</code><br />default `10000` | The most records one file renders. A full read of a larger table or view fails with `File too large` once it passes the cap; `head -n N` still reads its first records. |
-| <code style={{ whiteSpace: 'nowrap' }}>requestsPerSecond</code><br />default `5` | Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty. |
+Airtable answers these commands through its own API, so fewer records are
+read. See [Integration](/home/integration/overview).
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table airtable end */}
+- `grep` and `rg` on one file: a `filterByFormula` fetches only the records
+  that may match.
+- `head -n N`: fetches N records, through `maxRecords`, so the first lines of
+  a large table cost one request.
 
-## Mount mode
-
-`read`. Writes go through the [airtable CLI](/typescript/cli/airtable), which
-takes the same config and names a base, a table and a record by the id after
-the last `__` of the mount's directory names.
-
-For the mounted layout (`bases/`, `table.json`, `records.jsonl`, `views/`)
-and the reading rules see the [Python Airtable docs](/python/vfs/airtable).
+The [Python Airtable page](/python/vfs/airtable#integration) lists when each
+search answers and what it can miss.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path>`.
 
 {/* generated: vfs-md airtable start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `airtable`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -93,28 +192,20 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path
               <view-name>__<view-id>.jsonl  # records the view shows, in order
     ```
 
-    - `ls` a directory first to find exact names: the name part of a segment
-      is sanitized, the id after the last `__` is exact.
-    - A `records.jsonl` line is a normalized record: `record_id`,
-      `created_time` and `fields`, keyed by field name with values as
-      Airtable returns them. `table.json` gives each field's type.
-    - Airtable omits empty cells, so a missing key means empty, a `false`
-      checkbox included. A link field is a list of record ids; an attachment
-      URL expires two hours after it was read.
-    - `records.jsonl` lists in the API's own order; a view file applies the
-      view's filter and sort.
-    - A file over `max_read_records` records stops with `File too large`
-      after that many, while `head -n N` fetches just N records.
-    - The `airtable` CLI, if installed, reaches what a file cannot:
-      server-side filters (`airtable record list --formula` or `--view`), one
-      record by id (`airtable record get`) and comments
-      (`airtable comment list`).
+    - The name part of a segment is sanitized, the id after the last `__` is
+      exact; `ls` a directory for exact names.
+    - A `records.jsonl` line holds `record_id`, `created_time` and `fields`,
+      keyed by field name; `table.json` gives each field's type. A missing
+      key is an empty cell, a `false` checkbox included.
+    - `records.jsonl` keeps the API's order; a view file applies the view's
+      filter and sort.
+    - A file over `max_read_records` records stops with `File too large`;
+      `head -n N` fetches just N records.
+    - The `airtable` CLI, if installed, adds server-side filters
+      (`airtable record list --formula` or `--view`), one record by id
+      (`airtable record get`) and comments (`airtable comment list`).
 
-    ```sh
-    head -n 20 /<path>/bases/<base>/<table>/records.jsonl | jq .fields
-    ```
-
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -122,7 +213,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `airtable` for the matching lines. `head` asks `airtable` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -161,26 +252,18 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path
               <view-name>__<view-id>.jsonl  # records the view shows, in order
     ```
 
-    - `ls` a directory first to find exact names: the name part of a segment
-      is sanitized, the id after the last `__` is exact.
-    - A `records.jsonl` line is a normalized record: `record_id`,
-      `created_time` and `fields`, keyed by field name with values as
-      Airtable returns them. `table.json` gives each field's type.
-    - Airtable omits empty cells, so a missing key means empty, a `false`
-      checkbox included. A link field is a list of record ids; an attachment
-      URL expires two hours after it was read.
-    - `records.jsonl` lists in the API's own order; a view file applies the
-      view's filter and sort.
-    - A file over `max_read_records` records stops with `File too large`
-      after that many, while `head -n N` fetches just N records.
-    - The `airtable` CLI, if installed, reaches what a file cannot:
-      server-side filters (`airtable record list --formula` or `--view`), one
-      record by id (`airtable record get`) and comments
-      (`airtable comment list`).
-
-    ```sh
-    head -n 20 /<path>/bases/<base>/<table>/records.jsonl | jq .fields
-    ```
+    - The name part of a segment is sanitized, the id after the last `__` is
+      exact; `ls` a directory for exact names.
+    - A `records.jsonl` line holds `record_id`, `created_time` and `fields`,
+      keyed by field name; `table.json` gives each field's type. A missing
+      key is an empty cell, a `false` checkbox included.
+    - `records.jsonl` keeps the API's order; a view file applies the view's
+      filter and sort.
+    - A file over `max_read_records` records stops with `File too large`;
+      `head -n N` fetches just N records.
+    - The `airtable` CLI, if installed, adds server-side filters
+      (`airtable record list --formula` or `--view`), one record by id
+      (`airtable record get`) and comments (`airtable comment list`).
 
     ## Supported Unix Commands for VFS
 
@@ -202,15 +285,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md airtable end */}
-
-## Integration
-
-What Airtable answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Airtable |
-| --- | --- |
-| `grep`, `rg` on one file | A `filterByFormula` fetches only the records that may match |
-| `head -n N` | Fetches N records |
-
-The [Python Airtable docs](/python/vfs/airtable#integration) list when each search answers and what it can miss.

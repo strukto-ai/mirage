@@ -1,35 +1,152 @@
 ---
 title: Langfuse
 icon: /images/langfuse-logo.svg
-description: Set up Langfuse API keys for the Langfuse VFS.
+description: Virtualize Langfuse traces, sessions, prompts and datasets as read-only JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Get API Keys
+A Langfuse project becomes four folders: traces as JSON files, sessions of
+traces, prompt versions, and datasets with their items and experiment runs.
 
-#### Langfuse Cloud
+## Setup
 
-1. Go to https://cloud.langfuse.com
-1. Select your project -> **Settings** -> **API Keys**
-1. Copy the **Public Key** and **Secret Key**
-
-#### Self-hosted
-
-1. Go to your Langfuse instance (e.g., `https://langfuse.yourcompany.com`)
-1. Select your project -> **Settings** -> **API Keys**
-1. Copy the **Public Key** and **Secret Key**
-
-The VFS reads the Langfuse v4 API, so a self-hosted instance must run
-Langfuse v4.
-
-### 2. Set Environment Variables
+Open the project in Langfuse, go to **Settings**, **API Keys**, create a key
+pair and copy the **Public Key** (`pk-lf-...`) and **Secret Key**
+(`sk-lf-...`). Set the host to the project's region: `https://cloud.langfuse.com`
+(EU), `https://us.cloud.langfuse.com` (US), `https://jp.cloud.langfuse.com`
+(Japan), `https://hipaa.cloud.langfuse.com` (HIPAA US), or a self-hosted URL
+such as `https://langfuse.example.com`. The VFS reads the Langfuse v4 API, so a
+self-hosted instance must run Langfuse v4.
 
 ```bash
-# .env.development
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_HOST=https://cloud.langfuse.com
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+export LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
-For SDK guides, see [Langfuse (Python)](/python/vfs/langfuse) and [Langfuse (TypeScript)](/typescript/setup/langfuse).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /langfuse:
+        vfs: langfuse
+        mode: read
+        config:
+          public_key: ${LANGFUSE_PUBLIC_KEY}
+          secret_key: ${LANGFUSE_SECRET_KEY}
+          host: ${LANGFUSE_HOST}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id lf
+    mirage shell -w lf -c 'ls /langfuse/traces'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
+
+    config = LangfuseConfig(
+        public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+        secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+        host=os.environ["LANGFUSE_HOST"],
+    )
+    ws = Workspace({"/langfuse": LangfuseVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /langfuse/traces")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { LangfuseVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/langfuse': new LangfuseVFS({
+          publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+          secretKey: process.env.LANGFUSE_SECRET_KEY!,
+          host: process.env.LANGFUSE_HOST!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /langfuse/traces')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/langfuse/
+  traces/
+    <trace-id>.json
+  sessions/
+    <session-id>/
+      <trace-id>.json
+  prompts/
+    <prompt-name>/
+      1.json
+      2.json
+  datasets/
+    <dataset-name>/
+      items.jsonl
+      runs/
+        <run-name>.jsonl
+```
+
+- `traces/` lists up to `default_trace_limit` traces (100); an older trace is
+  still readable by its id.
+- A trace file is its root observation, with the other observations in
+  `observations` and its scores in `scores`.
+- `grep -r` reads every listed file; Langfuse has no count endpoint, so
+  `wc -l traces/` is not supported.
+
+## Sample runs
+
+```bash
+$ ls /langfuse
+datasets
+prompts
+sessions
+traces
+```
+
+```bash
+$ ls /langfuse/prompts/classify-ticket
+1.json
+2.json
+3.json
+```
+
+```bash
+$ jq -r '.name, (.observations | length), (.scores | length)' /langfuse/traces/4f1c9e2a7b3d48e6a0c5d2f8b1e7a934.json
+classify-ticket
+3
+1
+```
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/langfuse">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/langfuse">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,72 +1,171 @@
 ---
 title: Email
 icon: envelope
-description: Mount an IMAP/SMTP mailbox as a Mirage filesystem (Node only).
+description: Virtualize an IMAP mailbox from Node.
 ---
 
-`EmailVFS` reads the mailbox over IMAP as a tree of folders and messages. The [himalaya CLI](/typescript/cli/himalaya) sends mail.
-
-<Note>
-  Node only. Requires `imapflow`, `mailparser`, and `nodemailer` peers. The browser cannot speak raw TCP for IMAP/SMTP.
-</Note>
+`EmailVFS` mounts an IMAP mailbox as read-only files: each folder holds one
+folder per day of messages as JSON, with their attachments. The
+[`himalaya`](/typescript/cli/himalaya) CLI sends mail over SMTP. Credentials
+are set up on the [Email page](/home/setup/email).
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-node imapflow mailparser nodemailer
+npm install @struktoai/mirage-node imapflow mailparser nodemailer
 ```
 
-## Config
+`imapflow`, `mailparser` and `nodemailer` are peer packages. The class ships
+in `@struktoai/mirage-node` only: a browser cannot open the raw TCP
+connections IMAP and SMTP need.
+
+## Configure
 
 ```ts
 import { EmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const email = new EmailVFS({
-  imapHost: 'imap.example.com',
-  smtpHost: 'smtp.example.com',
+  imapHost: process.env.IMAP_HOST!,
+  smtpHost: process.env.SMTP_HOST!,
   username: process.env.EMAIL_USERNAME!,
   password: process.env.EMAIL_PASSWORD!,
 })
+const ws = new Workspace({ '/email': email }, { mode: MountMode.READ })
 
-const ws = new Workspace({ '/mail': email }, { mode: MountMode.READ })
-await ws.shell('ls /mail/INBOX/')
+const result = await ws.shell('ls /email && rg -l quarterly /email/INBOX')
+console.log(result.stdoutText)
+await ws.close()
 ```
 
+`imapPort` (993) and `smtpPort` (587) change the ports, and `maxMessages` how
+many messages each folder lists. `saveCopy`, `sentFolder` and `trashFolder`
+shape what `himalaya` does after a send or delete.
+
+### Fields
+
 {/* generated: config-table email start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>imapHost</code><br />required | IMAP server hostname. |
-| <code style={{ whiteSpace: 'nowrap' }}>imapPort</code><br />default `993` | IMAP server port. |
-| <code style={{ whiteSpace: 'nowrap' }}>smtpHost</code><br />required | SMTP server hostname `himalaya` sends mail through. |
-| <code style={{ whiteSpace: 'nowrap' }}>smtpPort</code><br />default `587` | SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it. |
-| <code style={{ whiteSpace: 'nowrap' }}>username</code><br />required | Login for both IMAP and SMTP, usually the email address. |
-| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />required, secret | Password or app password for `username`. |
-| <code style={{ whiteSpace: 'nowrap' }}>useSsl</code><br />default `true` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtpPort` instead. |
-| <code style={{ whiteSpace: 'nowrap' }}>maxMessages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
-| <code style={{ whiteSpace: 'nowrap' }}>saveCopy</code><br />default `true` | After `himalaya` sends a message, append a copy to `sentFolder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
-| <code style={{ whiteSpace: 'nowrap' }}>sentFolder</code><br />default `null` | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
-| <code style={{ whiteSpace: 'nowrap' }}>trashFolder</code><br />default `null` | Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\Trash` and falls back to `Trash`. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="imapHost" type={"string"} required>
+  IMAP server hostname.
+</ResponseField>
+<ResponseField name="imapPort" type={"number"} default={"993"}>
+  IMAP server port.
+</ResponseField>
+<ResponseField name="smtpHost" type={"string"} required>
+  SMTP server hostname `himalaya` sends mail through.
+</ResponseField>
+<ResponseField name="smtpPort" type={"number"} default={"587"}>
+  SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it.
+</ResponseField>
+<ResponseField name="username" type={"string"} required>
+  Login for both IMAP and SMTP, usually the email address.
+</ResponseField>
+<ResponseField name="password" type={"string"} required post={["secret"]}>
+  Password or app password for `username`.
+</ResponseField>
+<ResponseField name="useSsl" type={"boolean"} default={"true"}>
+  Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtpPort` instead.
+</ResponseField>
+<ResponseField name="maxMessages" type={"number"} default={"200"}>
+  How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.
+</ResponseField>
+<ResponseField name="saveCopy" type={"boolean"} default={"true"}>
+  After `himalaya` sends a message, append a copy to `sentFolder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox.
+</ResponseField>
+<ResponseField name="sentFolder" type={"string"} default={"null"}>
+  Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`.
+</ResponseField>
+<ResponseField name="trashFolder" type={"string"} default={"null"}>
+  Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\Trash` and falls back to `Trash`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}
+
+## Authentication
+
+The mount logs in to IMAP with `username` and `password`; sending through
+`himalaya` uses the same pair on SMTP. Most providers want an app password
+instead of the account password. Microsoft 365 is unsupported: it requires
+OAuth for IMAP, and the mount accepts only passwords.
+
+| Provider | IMAP host | SMTP host | Notes |
+| --- | --- | --- | --- |
+| Yahoo | `imap.mail.yahoo.com` | `smtp.mail.yahoo.com` | App password |
+| Fastmail | `imap.fastmail.com` | `smtp.fastmail.com` | App password |
+| iCloud | `imap.mail.me.com` | `smtp.mail.me.com` | App password |
+| ProtonMail | `127.0.0.1` | `127.0.0.1` | Proton Mail Bridge |
+| Self-hosted | the server's hostname | the server's hostname | The server's own login |
+
+## Layout
+
+```text
+/email/
+  INBOX/
+    2026-11-16/
+      Meeting_Notes__12345.email.json
+      Meeting_Notes__12345/
+        report.pdf
+        screenshot.png
+  Sent/
+    2026-11-16/
+      ...
+```
+
+- **Folders:** the root lists the IMAP folders under their own names
+  (`INBOX`, `Sent`, `Drafts`).
+- **Days:** inside a folder, messages are grouped by the `YYYY-MM-DD` of their
+  `Date` header.
+- **Messages:** each message is `<subject>__<uid>.email.json`, with a
+  sanitized subject, so `ls` the day rather than build the name. The UID
+  after `__` is what `himalaya` takes.
+- **Attachments:** a message with attachments gets a folder of the same base
+  name holding them.
+
+## Behavior
+
+- **Read only:** list, read, send, reply and forward with the [`himalaya`](/typescript/cli/himalaya) CLI,
+  which uses the SMTP settings.
+- **Newest messages:** each folder lists its newest `maxMessages` messages
+  (200).
+- **TLS:** IMAP speaks TLS from the first byte (IMAPS) by default. `useSsl: false`
+  connects in plaintext with no STARTTLS upgrade. SMTP follows its port.
+
+## Integration
+
+The IMAP server answers this command, so fewer messages are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: IMAP `SEARCH TEXT` names the messages to read in each
+  folder or day they walk (from the mount root, in every folder), and the
+  output matches reading every message. IMAP matches headers and body in any
+  case. Attachments are always read. Every message is read when the text is a
+  key of the message JSON or a flag name, holds anything but ASCII letters and
+  spaces, matches more than `maxMessages` messages in a folder, or the search
+  fails. A server that answers `SEARCH` from a full-text index (Dovecot with
+  an FTS plugin, for one) matches words rather than substrings, so a narrowed
+  scan can miss a message there; `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
 
 {/* generated: vfs-md email start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `email`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -82,7 +181,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     - To list, search, read, compose, reply or forward, use the `himalaya`
       CLI if installed (`himalaya --help`).
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -90,7 +189,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `email` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -151,20 +250,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Email mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md email end */}
-
-## Integration
-
-What Email answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Email |
-| --- | --- |
-| `grep -r`, `rg` | IMAP `SEARCH TEXT`, for any text. It can miss on a server that searches words rather than substrings (Dovecot with full-text search). |
-
-The [Python Email docs](/python/vfs/email#integration) list when each search answers and what it can miss.
-
-## Mount mode
-
-`read`. Send mail through the [himalaya CLI](/typescript/cli/himalaya).
-
-For mailbox layout, search behavior, and synthesized date directories see the [Python Email docs](/python/vfs/email).

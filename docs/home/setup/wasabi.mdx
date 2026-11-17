@@ -1,29 +1,160 @@
 ---
 title: Wasabi
 icon: /images/wasabi-logo.svg
-description: Set up Wasabi credentials for the Wasabi VFS.
+description: Virtualize a Wasabi bucket as a tree of files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an access key
+Every object in a Wasabi bucket becomes a file, and every `/` in a key becomes a folder.
 
-1. Sign in to the [Wasabi console](https://console.wasabisys.com/)
-1. Go to **Access Keys** -> **Create New Access Key**
-1. Copy the **Access Key** and **Secret Key**
-1. Note your bucket's **region** (e.g. `us-east-2`) and **bucket** name
 
-The endpoint is derived from `region` as `s3.<region>.wasabisys.com`
-(`s3.wasabisys.com` for `us-east-1`).
 
-### 2. Set environment variables
+## Setup
+
+Create an access key in the [Wasabi console](https://console.wasabisys.com/), then export it.
+
+<AccordionGroup>
+  <Accordion title="Create a Wasabi access key">
+
+1. Open **Access Keys** and click **Create Access Key**.
+1. Pick **Root User** or **Sub-User**. A sub-user whose policy covers only the
+   bucket is the safer choice.
+1. Click **Create**, then copy or download the **Access Key** and
+   **Secret Key**. The secret key cannot be shown again.
+1. Note the bucket's region, for example `us-east-2`.
+
+Each user holds at most two access keys.
+
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-WASABI_BUCKET=my-bucket
-WASABI_REGION=us-east-2
-WASABI_ACCESS_KEY_ID=...
-WASABI_SECRET_ACCESS_KEY=...
+export WASABI_BUCKET=my-bucket
+export WASABI_REGION=us-east-2
+export WASABI_ACCESS_KEY_ID=...
+export WASABI_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [Wasabi (Python)](/python/vfs/wasabi) and [Wasabi (TypeScript)](/typescript/setup/wasabi).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /wasabi:
+        vfs: wasabi
+        mode: read
+        config:
+          bucket: ${WASABI_BUCKET}
+          region: ${WASABI_REGION}
+          access_key_id: ${WASABI_ACCESS_KEY_ID}
+          secret_access_key: ${WASABI_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id wasabi
+    mirage shell -w wasabi -c 'ls /wasabi'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
+
+    config = WasabiConfig(
+        bucket=os.environ["WASABI_BUCKET"],
+        region=os.environ["WASABI_REGION"],
+        access_key_id=os.environ["WASABI_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["WASABI_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/wasabi": WasabiVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /wasabi")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/wasabi': new WasabiVFS({
+          bucket: process.env.WASABI_BUCKET!,
+          region: process.env.WASABI_REGION!,
+          accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /wasabi')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/wasabi/
+  README.md
+  logs/
+    app-2026-11-15.log
+    app-2026-11-16.log
+  reports/
+    2026-q3.csv
+    2026-q4.csv
+```
+
+- The endpoint comes from `region`: `s3.<region>.wasabisys.com`, or
+  `s3.wasabisys.com` for `us-east-1`, the default. `endpoint_url` (`endpoint`
+  in TypeScript) overrides it.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one folder of the bucket as
+  the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more,
+  `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ ls /wasabi
+README.md
+logs
+reports
+```
+
+```bash
+$ find /wasabi -name '*.csv'
+/wasabi/reports/2026-q3.csv
+/wasabi/reports/2026-q4.csv
+```
+
+```bash
+$ grep -r ERROR /wasabi/logs
+/wasabi/logs/app-2026-11-15.log:2026-11-15T08:01:13Z ERROR timeout reaching db
+/wasabi/logs/app-2026-11-16.log:2026-11-16T09:12:40Z ERROR timeout reaching db
+```
+
+On a `write` mount, `cp`, `mv`, `rm` and `>` change objects in the bucket. For
+`write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/wasabi">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/wasabi">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

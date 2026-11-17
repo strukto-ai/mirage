@@ -42,26 +42,18 @@ export const VFS_MD = `\`\`\`text
           <view-name>__<view-id>.jsonl  # records the view shows, in order
 \`\`\`
 
-- \`ls\` a directory first to find exact names: the name part of a segment
-  is sanitized, the id after the last \`__\` is exact.
-- A \`records.jsonl\` line is a normalized record: \`record_id\`,
-  \`created_time\` and \`fields\`, keyed by field name with values as
-  Airtable returns them. \`table.json\` gives each field's type.
-- Airtable omits empty cells, so a missing key means empty, a \`false\`
-  checkbox included. A link field is a list of record ids; an attachment
-  URL expires two hours after it was read.
-- \`records.jsonl\` lists in the API's own order; a view file applies the
-  view's filter and sort.
-- A file over \`max_read_records\` records stops with \`File too large\`
-  after that many, while \`head -n N\` fetches just N records.
-- The \`airtable\` CLI, if installed, reaches what a file cannot:
-  server-side filters (\`airtable record list --formula\` or \`--view\`), one
-  record by id (\`airtable record get\`) and comments
-  (\`airtable comment list\`).
-
-\`\`\`sh
-head -n 20 {prefix}/bases/<base>/<table>/records.jsonl | jq .fields
-\`\`\``
+- The name part of a segment is sanitized, the id after the last \`__\` is
+  exact; \`ls\` a directory for exact names.
+- A \`records.jsonl\` line holds \`record_id\`, \`created_time\` and \`fields\`,
+  keyed by field name; \`table.json\` gives each field's type. A missing
+  key is an empty cell, a \`false\` checkbox included.
+- \`records.jsonl\` keeps the API's order; a view file applies the view's
+  filter and sort.
+- A file over \`max_read_records\` records stops with \`File too large\`;
+  \`head -n N\` fetches just N records.
+- The \`airtable\` CLI, if installed, adds server-side filters
+  (\`airtable record list --formula\` or \`--view\`), one record by id
+  (\`airtable record get\`) and comments (\`airtable comment list\`).`
 
 /**
  * Airtable bases as directories, tables as records.jsonl files. Records are

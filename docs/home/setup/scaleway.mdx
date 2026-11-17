@@ -1,28 +1,163 @@
 ---
 title: Scaleway
 icon: /images/scaleway-logo.svg
-description: Set up Scaleway Object Storage credentials for the Scaleway VFS.
+description: Virtualize a Scaleway Object Storage bucket as a tree of files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an API key
+Every object in a Scaleway Object Storage bucket becomes a file, and every `/` in a key becomes a folder.
 
-1. Sign in to the [Scaleway console](https://console.scaleway.com/)
-1. Go to **IAM** -> **API Keys** -> **Generate API Key**
-1. Copy the **Access Key** and **Secret Key**
-1. Note your bucket's **region** (e.g. `fr-par`) and **bucket** name
 
-The endpoint is derived from `region` as `s3.<region>.scw.cloud`.
 
-### 2. Set environment variables
+## Setup
+
+Create an API key in the [Scaleway console](https://console.scaleway.com/), then export it.
+
+<AccordionGroup>
+  <Accordion title="Create a Scaleway API key">
+
+1. In **IAM**, give the user or application that will hold the key a policy
+   with `ObjectStorageReadOnly`, or `ObjectStorageFullAccess` for a write
+   mount, on the bucket's Project.
+1. Open **API Keys** and click **Generate API key**. Pick that user or
+   application as the bearer.
+1. For Object Storage, choose **Yes, set up preferred Project** and pick the
+   bucket's Project.
+1. Copy the **Access Key** and **Secret Key**. The secret key is shown only
+   once.
+1. Note the bucket's region, for example `fr-par`.
+
+The key reaches Object Storage in its preferred Project only.
+
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-SCW_BUCKET=my-bucket
-SCW_REGION=fr-par
-SCW_ACCESS_KEY=...
-SCW_SECRET_KEY=...
+export SCW_BUCKET=my-bucket
+export SCW_REGION=fr-par
+export SCW_ACCESS_KEY=...
+export SCW_SECRET_KEY=...
 ```
 
-For SDK guides, see [Scaleway (Python)](/python/vfs/scaleway) and [Scaleway (TypeScript)](/typescript/setup/scaleway).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /scw:
+        vfs: scaleway
+        mode: read
+        config:
+          bucket: ${SCW_BUCKET}
+          region: ${SCW_REGION}
+          access_key_id: ${SCW_ACCESS_KEY}
+          secret_access_key: ${SCW_SECRET_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id scw
+    mirage shell -w scw -c 'ls /scw'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.scaleway import ScalewayConfig, ScalewayVFS
+
+    config = ScalewayConfig(
+        bucket=os.environ["SCW_BUCKET"],
+        region=os.environ["SCW_REGION"],
+        access_key_id=os.environ["SCW_ACCESS_KEY"],
+        secret_access_key=os.environ["SCW_SECRET_KEY"],
+    )
+    ws = Workspace({"/scw": ScalewayVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /scw")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/scw': new ScalewayVFS({
+          bucket: process.env.SCW_BUCKET!,
+          region: process.env.SCW_REGION!,
+          accessKeyId: process.env.SCW_ACCESS_KEY!,
+          secretAccessKey: process.env.SCW_SECRET_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /scw')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/scw/
+  README.md
+  logs/
+    app-2026-11-15.log
+    app-2026-11-16.log
+  reports/
+    2026-q3.csv
+    2026-q4.csv
+```
+
+- The endpoint comes from `region`: `s3.<region>.scw.cloud`.
+  `endpoint_url` (`endpoint` in TypeScript) overrides it.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one folder of the bucket as
+  the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more,
+  `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ ls /scw
+README.md
+logs
+reports
+```
+
+```bash
+$ find /scw -name '*.csv'
+/scw/reports/2026-q3.csv
+/scw/reports/2026-q4.csv
+```
+
+```bash
+$ grep -r ERROR /scw/logs
+/scw/logs/app-2026-11-15.log:2026-11-15T08:01:13Z ERROR timeout reaching db
+/scw/logs/app-2026-11-16.log:2026-11-16T09:12:40Z ERROR timeout reaching db
+```
+
+On a `write` mount, `cp`, `mv`, `rm` and `>` change objects in the bucket. For
+`write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/scaleway">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/scaleway">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

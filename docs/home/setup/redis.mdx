@@ -1,35 +1,139 @@
 ---
 title: Redis
 icon: /images/redis-logo.svg
-description: Store workspace files in Redis.
+description: Store workspace files in a Redis database.
 ---
 
-Redis stores workspace files in a Redis database. Available in Python, Node,
-Cloudflare Workers and browsers. File persistence depends on the database's
-configuration.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-## Configuration
+Redis keeps workspace files as keys in a Redis database, under one key prefix.
+The files last as long as the database keeps its data.
 
-For Python, Node or Cloudflare Workers, set `url` to your Redis connection URL. Use `key_prefix`
-to keep this workspace's files separate from other data:
+## Setup
 
-```yaml
-mounts:
-  /data:
-    vfs: redis
-    mode: write
-    config:
-      url: redis://localhost:6379/0
-      key_prefix: "mirage:fs:"
+Start a local server (`redis-server` listens on `redis://localhost:6379/0`,
+the default) or use a managed one. For Redis Cloud, the endpoint is in the
+database's **Configuration** tab and the password of the `default` user under
+**Security** (Pro) or **Default user > Configure** (Essentials). Use
+`rediss://` when the server needs TLS.
+
+```bash
+export REDIS_URL=redis://default:<password>@<host>:<port>/0
 ```
 
-Add `capacity: 100MB` under `config` to cap the bytes the files hold. See
-[capacity](/home/setup/vfs#mount-capacity).
+Python needs `pip install "mirage-ai[redis]"`; Node needs the `redis@^5` peer
+dependency (`pnpm add @struktoai/mirage-node redis`).
 
-Browsers connect through a compatible HTTP endpoint, such as Upstash REST.
-See [browser Redis setup](/typescript/setup/redis#browser) for configuration.
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /redis:
+        vfs: redis
+        mode: write
+        config:
+          url: ${REDIS_URL}
+          key_prefix: "mirage:fs:"
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id kv
+    mirage shell -w kv -c 'ls /redis'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.redis import RedisVFS
+
+    vfs = RedisVFS(url=os.environ["REDIS_URL"], key_prefix="mirage:fs:")
+    ws = Workspace({"/redis": vfs}, mode=MountMode.WRITE)
+    result = await ws.shell("ls /redis")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/redis': new RedisVFS({
+          url: process.env.REDIS_URL!,
+          keyPrefix: 'mirage:fs:',
+        }),
+      },
+      { mode: MountMode.WRITE },
+    )
+    const result = await ws.shell('ls /redis')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/redis/
+  config.json
+  cache/
+    session-abc.json
+  logs/
+    app.log
+```
+
+- The tree is whatever commands write. Each file is a `<prefix>file:<path>`
+  key; a different `key_prefix` keeps a workspace apart from other data.
+- Runs in Python, Node and Cloudflare Workers over the Redis protocol.
+- A browser has no socket, so it mounts Redis through the Upstash REST API;
+  see [browser Redis setup](/typescript/setup/redis#browser).
+
+## Sample runs
+
+```bash
+$ tree /redis
+/redis
+|-- cache
+|   `-- session-abc.json
+|-- config.json
+`-- logs
+    `-- app.log
+
+3 directories, 3 files
+```
+
+```bash
+$ grep -rn retry /redis/logs
+/redis/logs/app.log:2:retry 1
+```
+
+```bash
+$ cat /redis/config.json
+{"theme": "dark"}
+```
+
+Every command that writes works on a `write` mount. Add `capacity: 100MB`
+under `config` to cap the bytes the files hold; see
+[capacity](/home/setup/vfs#mount-capacity).
 
 ## SDK guides
 
-- [Python Redis VFS](/python/vfs/redis)
-- [TypeScript Redis setup](/typescript/setup/redis)
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/redis">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/redis">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,151 +1,110 @@
 ---
-title: Custom VFS
-icon: code
-description: Mount a service Mirage does not ship by writing your own VFS in Python or TypeScript.
+title: Adding a New VFS
+icon: plus
+description: Virtualize a service Mirage does not ship by writing one VFS class in Python or TypeScript.
 ---
 
-A VFS is a class that extends `BaseVFS`. Override `readdir`, `stat` and
-`read`, and `ls`, `cat`, `grep`, `find` and the other read commands work on
-your service. Every other method is optional: override one, and the commands
-that need it start working, or complete with fewer requests.
+A VFS is a class that extends `BaseVFS`. Three methods make every reading
+command work; each optional method adds a command or makes one cheaper.
+TypeScript names the same methods in camelCase (`rm_r` is `rmR`).
 
-## The base class
-
-The methods you can override, with the arguments you normally use:
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    class BaseVFS:
-        name: str
-        vfs_md: str
-
-        async def readdir(self, path: PathSpec) -> list[FileStat]: ...
-        async def stat(self, path: PathSpec) -> FileStat: ...
-        async def read(self, path: PathSpec) -> bytes | AsyncIterator[bytes]: ...
-
-        async def write(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
-        async def append(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
-        async def copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None: ...
-        async def truncate(self, path: PathSpec, length: int, no_create: bool = False) -> FileStat | None: ...
-        async def rename(self, src: PathSpec, dst: PathSpec) -> FileStat | None: ...
-        async def unlink(self, path: PathSpec) -> None: ...
-        async def mkdir(self, path: PathSpec, parents: bool = False) -> FileStat | None: ...
-        async def rmdir(self, path: PathSpec) -> None: ...
-        async def rm_r(self, path: PathSpec) -> None: ...
-        async def dir_copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None: ...
-        async def setattr(self, path: PathSpec, *, mode: int | None = None, uid: int | str | None = None, gid: int | str | None = None, atime: str | None = None, mtime: str | None = None) -> dict[str, int | str]: ...
-
-        async def files_containing(self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool) -> list[PathSpec] | None: ...
-        async def lines_containing(self, path: PathSpec, text: str, *, ignore_case: bool) -> bytes | AsyncIterator[bytes] | None: ...
-        async def first_lines(self, path: PathSpec, n: int) -> bytes | None: ...
-        async def last_lines(self, path: PathSpec, n: int) -> bytes | None: ...
-        async def line_count(self, path: PathSpec) -> int | None: ...
-        async def follow(self, path: PathSpec, n: int, interval: float) -> AsyncIterator[bytes] | None: ...
-        async def checksum(self, path: PathSpec, algorithm: str) -> str | None: ...
-        async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None: ...
-
-        async def close(self) -> None: ...
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    declare class BaseVFS {
-      name: string
-      vfsMd: string
-
-      readdir(path: PathSpec): Promise<FileStat[]>
-      stat(path: PathSpec): Promise<FileStat>
-      read(path: PathSpec): Promise<Uint8Array | AsyncIterable<Uint8Array>> | AsyncIterable<Uint8Array>
-
-      write(path: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>): Promise<unknown>
-      append(path: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>): Promise<unknown>
-      copy(src: PathSpec, dst: PathSpec): Promise<unknown>
-      truncate(path: PathSpec, length: number, noCreate?: boolean): Promise<unknown>
-      rename(src: PathSpec, dst: PathSpec): Promise<unknown>
-      unlink(path: PathSpec): Promise<void>
-      mkdir(path: PathSpec, parents?: boolean): Promise<unknown>
-      rmdir(path: PathSpec): Promise<void>
-      rmR(path: PathSpec): Promise<void>
-      dirCopy(src: PathSpec, dst: PathSpec): Promise<unknown>
-      setattr(path: PathSpec, fields: SetAttrFields): Promise<Record<string, number | string>>
-
-      filesContaining(path: PathSpec, text: string, opts: { wholeWord: boolean; ignoreCase: boolean }): Promise<PathSpec[] | null>
-      linesContaining(path: PathSpec, text: string, opts: { ignoreCase: boolean }): Promise<Uint8Array | AsyncIterable<Uint8Array> | null>
-      firstLines(path: PathSpec, n: number): Promise<Uint8Array | null>
-      lastLines(path: PathSpec, n: number): Promise<Uint8Array | null>
-      lineCount(path: PathSpec): Promise<number | null>
-      follow(path: PathSpec, n: number, interval: number): Promise<AsyncIterable<Uint8Array> | null>
-      checksum(path: PathSpec, algorithm: string): Promise<string | null>
-      readTree(path: PathSpec): Promise<Map<string, FileStat> | null>
-
-      close(): Promise<void>
-    }
-    ```
-  </Tab>
-</Tabs>
-
-## How to integrate your service
+## Methods
 
 ### Required
 
-| Method | Used by |
-| --- | --- |
-| `readdir` | `ls`, `find`, `tree`, globs |
-| `stat` | every command |
-| `read` | `cat`, `grep`, `head`, `wc` and every other command that reads |
+<ResponseField name="readdir" required>
+  Lists a folder. `ls`, `find`, `tree` and globs use it.
+</ResponseField>
+<ResponseField name="stat" required>
+  Describes one path. Every command uses it.
+</ResponseField>
+<ResponseField name="read" required>
+  Returns a file's bytes. `cat`, `grep`, `head`, `wc` and every other reading command use it.
+</ResponseField>
 
-### Write
+### Writes
 
 Writes need a writable mount: `MountMode.WRITE`, or `mode: write` in YAML.
+[VFS.md](/home/setup/vfs-md) tells the agent which commands work, from the
+methods the VFS overrides.
 
-| Method | With it | Without it |
-| --- | --- | --- |
-| `write` | `>`, `tee`, `touch` and `sed -i` work. | They fail. |
-| `append` | `>>` calls it. | `>>` reads the file and calls `write`. |
-| `copy` | `cp` calls it. | `cp` reads the file and calls `write`. |
-| `truncate` | `truncate` calls it. | `truncate` calls `write`, and `truncate -c` fails with `Operation not supported`. |
-| `rename` | `mv` works. | `mv` fails with `Operation not supported`. |
-| `unlink` | `rm` works. | `rm` fails with `Operation not supported`. |
-| `mkdir` | `mkdir` works. | `mkdir` fails with `Operation not supported`. |
-| `rmdir` | `rmdir` works. | `rmdir` fails with `Operation not supported`. |
-| `rm_r` | `rm -r` calls it once. | `rm -r` calls `unlink` and `rmdir` for each entry. |
-| `dir_copy` | `cp -r` calls it once when it copies a folder to a new place and `copy` is overridden too. | `cp -r` calls `mkdir` for each folder and `copy`, or a read and `write`, for each file. |
-| `setattr` | `chmod` and `touch -d` call it. | Mirage keeps the mode and times itself. |
+<ResponseField name="write">
+  `>`, `tee`, `touch` and `sed -i` work. Without it they fail.
+</ResponseField>
+<ResponseField name="append">
+  `>>` calls it. Without it, `>>` reads the file and calls `write`.
+</ResponseField>
+<ResponseField name="copy">
+  `cp` calls it. Without it, `cp` reads the file and calls `write`.
+</ResponseField>
+<ResponseField name="truncate">
+  `truncate` calls it. Without it, `truncate` calls `write` and `truncate -c` fails.
+</ResponseField>
+<ResponseField name="rename">
+  `mv` works. Without it, `mv` fails with `Operation not supported`.
+</ResponseField>
+<ResponseField name="unlink">
+  `rm` works. Without it, `rm` fails with `Operation not supported`.
+</ResponseField>
+<ResponseField name="mkdir">
+  `mkdir` works. Without it, `mkdir` fails with `Operation not supported`.
+</ResponseField>
+<ResponseField name="rmdir">
+  `rmdir` works. Without it, `rmdir` fails with `Operation not supported`.
+</ResponseField>
+<ResponseField name="rm_r">
+  `rm -r` calls it once. Without it, `rm -r` calls `unlink` and `rmdir` for each entry.
+</ResponseField>
+<ResponseField name="dir_copy">
+  `cp -r` of a folder to a new place calls it once, when `copy` is overridden too. Without it, `cp -r` copies entry by entry.
+</ResponseField>
+<ResponseField name="setattr">
+  `chmod` and `touch -d` call it. Without it, Mirage keeps the mode and times itself.
+</ResponseField>
 
-[VFS.md](/home/setup/vfs-md) tells the agent which of these commands work on
-each mount, from the methods its VFS overrides.
+### Faster commands
 
-### Answer commands with your service
+Each answers a command from the service's own search, query or metadata API
+instead of reading files. Returning `None` (`null`) falls back to reading.
 
-Override these to answer from your service's own search, query or metadata API
-instead of reading files. Each links to its guide.
-
-| Method | With it | Without it |
-| --- | --- | --- |
-| [`files_containing`](/home/integration/search) | `grep -r` and `rg` read only the files it names. | They read every file. |
-| [`lines_containing`](/home/integration/search) | `grep` and `rg` match only the lines it returns. | They read the file. |
-| [`first_lines`, `last_lines`](/home/integration/lines) | `head` and `tail` do not read the file. | They read the file. |
-| [`line_count`](/home/integration/lines) | `wc -l` reads nothing. | `wc -l` reads the file. |
-| [`follow`](/home/integration/lines) | `tail -f` waits on it. | `tail -f` re-reads the file every second. |
-| [`checksum`](/home/integration/checksums) | `md5sum` and `sha256sum` read nothing. | They read the file and hash it. |
-| [`read_tree`](/home/integration/walks) | `find`, `du`, `ls -R` and `tree` call it once. | They list each folder. |
+<ResponseField name="files_containing">
+  `grep -r` and `rg` read only the files it names, instead of every file. See [Search](/home/integration/search).
+</ResponseField>
+<ResponseField name="lines_containing">
+  `grep` and `rg` match only the lines it returns, instead of reading the file. See [Search](/home/integration/search).
+</ResponseField>
+<ResponseField name="first_lines, last_lines">
+  `head` and `tail` answer without reading the file. See [Lines](/home/integration/lines).
+</ResponseField>
+<ResponseField name="line_count">
+  `wc -l` reads nothing. See [Lines](/home/integration/lines).
+</ResponseField>
+<ResponseField name="follow">
+  `tail -f` waits on it, instead of reading the file again every second. See [Lines](/home/integration/lines).
+</ResponseField>
+<ResponseField name="checksum">
+  `md5sum` and `sha256sum` read nothing. See [Checksums](/home/integration/checksums).
+</ResponseField>
+<ResponseField name="read_tree">
+  `find`, `du`, `ls -R` and `tree` call it once, instead of listing each folder. See [Walks](/home/integration/walks).
+</ResponseField>
 
 ### Attributes
 
-| Attribute | Does |
-| --- | --- |
-| `name` | Names the VFS. |
-| `vfs_md` | The mount's layout and file formats in its VFS.md, in Markdown: a `text` tree, then notes. Leave it empty for plain files. `{prefix}` becomes the mount's folder. |
-| `whole_word_search` | `files_containing` answers only a whole-word search (`grep -w`, `rg -w`); VFS.md tells the agent so. |
+Set them as class attributes, or pass `name` and `vfs_md` (`vfsMd`) to the
+base constructor. Setting `vfs_md` on a built-in VFS replaces its description.
 
-Set them as class attributes. `name` and `vfs_md` can also be passed to
-`super().__init__()` (`super({...})` in TypeScript, with `vfsMd`).
+<ResponseField name="name">
+  The VFS's name.
+</ResponseField>
+<ResponseField name="vfs_md">
+  The mount's layout in its [VFS.md](/home/setup/vfs-md): a `text` tree, then a few notes. Leave it empty for plain files. `{prefix}` becomes the mount's folder.
+</ResponseField>
+<ResponseField name="whole_word_search">
+  `files_containing` answers only a whole-word search (`grep -w`, `rg -w`), and VFS.md says so.
+</ResponseField>
 
-To replace a built-in VFS's description, set `vfs_md` on it (`vfsMd` in
-TypeScript).
-
-## Example: a read-only VFS
+## Example: A Read-only VFS
 
 This VFS serves pages from a dictionary:
 
@@ -258,7 +217,7 @@ the YAML file, and `config` is what its constructor gets; the TypeScript server
 takes `./notes.ts:NotesVFS`. To name it `vfs: notes` instead, register it with
 `register_vfs` in Python or `registerVfs` in TypeScript.
 
-## Example: make it writable
+## Example: Make it Writable
 
 Override `write` and `unlink`:
 
@@ -300,9 +259,9 @@ Override `write` and `unlink`:
 
 On a writable mount, `echo hi > /notes/new.txt`, `sed -i` and `rm` now work,
 and `>>` reads the page and writes it back. `mv` still answers
-`Operation not supported` until you override `rename`.
+`Operation not supported` until `rename` is overridden.
 
-## Example: let grep use your search
+## Example: Let grep Use a Search API
 
 Override `files_containing` to name the files that may contain the text
 (the TypeScript sample needs `pnpm add @struktoai/mirage-core`):
@@ -353,17 +312,17 @@ Override `files_containing` to name the files that may contain the text
 
 `grep -rn mirage /notes` now reads only the pages this returns, and Mirage
 still checks each line, so the output is the same. The dictionary stands in
-for your service's search API. `mounted_path` turns a name inside the mount
+for the service's search API. `mounted_path` turns a name inside the mount
 into a path. `grep -ri` gets `None` here, so it reads every page.
 
-For a real one, see [Chroma](/python/vfs/chroma#exact-search-with-grep), the
+For a real one, see [Chroma](/python/vfs/chroma), the
 search behind a RAG knowledge base: its `files_containing` asks Chroma for the
 chunks whose text contains the word (`$contains`) and returns their pages, and
 it also returns `None` for `-i`. Source:
 [Python](https://github.com/strukto-ai/mirage/blob/main/python/mirage/core/chroma/search.py),
 [TypeScript](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/src/core/chroma/search.ts).
 
-## Example: count lines without reading
+## Example: Count Lines without Reading
 
 Override `line_count`:
 
@@ -400,5 +359,11 @@ also counts words and bytes.
 
 ## Next
 
-The [Python](/python/vfs/new) and [TypeScript](/typescript/vfs/new) guides add
-folders, snapshots, packaging and contributing a VFS to Mirage.
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/new">
+    Folders, snapshots, packaging and contributing a VFS to Mirage.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/vfs/new">
+    Folders, snapshots, packaging and contributing a VFS to Mirage.
+  </Card>
+</CardGroup>

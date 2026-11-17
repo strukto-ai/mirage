@@ -1,80 +1,119 @@
 ---
 title: SQL
 icon: database
-description: Keep a Mirage filesystem in SQL tables.
+description: Virtualize a filesystem kept in SQL tables from Python.
 ---
-The SQL VFS keeps a filesystem in a database's tables. It supports full read
-and write operations and needs no extra for a SQLite file: it uses Python's
-own `sqlite3`.
 
-## Config
+`SqlVFS` keeps a filesystem in a database's tables: a SQLite file, or a
+Postgres server through its driver. Every command that writes works, and the
+files persist with the database. Setup is on the [SQL page](/home/setup/sql).
+
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+A SQLite file needs no extra: the mount uses Python's own `sqlite3`. Postgres
+needs `pip install "mirage-ai[postgres]"`.
+
+## Configure
 
 ```python
 from mirage import MountMode, Workspace
 from mirage.vfs.sql import SqlVFS
 
-vfs = SqlVFS("./workspace.db")
-ws = Workspace({"/sql": vfs}, mode=MountMode.WRITE)
+ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
+
+result = await ws.shell("echo hello > /sql/note.txt && ls /sql")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-| Parameter  | Required | Default   | Description                                                   |
-| ---------- | -------- | --------- | ------------------------------------------------------------- |
-| `path`     | no       | in memory | The SQLite file, opened and closed with the mount             |
-| `capacity` | no       | none      | The most bytes the database's files may hold, like `100MB`    |
-| `driver`   | no       | none      | A `SqlDriver` to borrow instead of a file; you close it      |
-| `root`     | no       | `/`       | The folder of the database the mount serves, made if missing |
-
-The tables are laid out as
-[AgentFS](https://github.com/tursodatabase/agentfs)'s:
-
-- `fs_inode`: one row per file and directory, with its size and mtime
-- `fs_dentry`: each entry's name under its parent directory
-- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
-- `fs_config`: the chunk size
-
-The TypeScript mount reads and writes the same tables, so a Python and a Node
-process on one file serve one filesystem.
-
-## Several mounts on one database
-
-A mount serves one folder of its database, `/` by default. Hand two mounts one
-driver to serve the whole database at `/` and its `/workspace` folder as a mount
-of its own:
+Leave out the path to keep the database in memory. `capacity="100MB"` caps the
+bytes the database's files hold; see [capacity](/home/setup/vfs#mount-capacity).
+To keep the tables in Postgres, pass its driver:
 
 ```python
-from mirage.vfs.sql import SqliteDriver
+import os
 
-driver = SqliteDriver("./workspace.db")
-ws = Workspace(
-    {
-        "/": SqlVFS(driver=driver, capacity="1GB"),
-        "/workspace": SqlVFS(driver=driver, root="/workspace", capacity="1GB"),
-    },
-    mode=MountMode.WRITE,
-)
+from mirage.vfs.sql import PostgresSqlDriver, SqlVFS
+
+driver = PostgresSqlDriver(os.environ["DATABASE_URL"])
+vfs = SqlVFS(driver=driver)
 ```
 
-- `capacity` counts every file in the database, whichever mount wrote it.
-  Mounts on one driver with the same `capacity` share one count, so their writes
-  together stay within it. Mounts on separate drivers count apart, even on one
-  file, and together they can pass it.
-- `get_state` and `load_state` keep and replace the mount's own folder. A
-  restore leaves the rest of the database as it was.
+### Fields
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `path` | in memory | The SQLite file, opened and closed with the mount. |
+| `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
+| `driver` | none | A database to borrow instead of a file: `SqliteDriver` or `PostgresSqlDriver`. The caller closes it. Not with `path`. |
+| `root` | `/` | The folder of the database the mount serves, made if missing. |
+
+## Layout
+
+```text
+/sql/
+  notes/
+    hello.txt
+  users.csv
+```
+
+The tables are laid out as [AgentFS](https://github.com/tursodatabase/agentfs)'s:
+
+- `fs_inode`: one row per file and folder, with its size and mtime.
+- `fs_dentry`: each entry's name under its parent folder.
+- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless
+  the database says otherwise).
+- `fs_config`: the chunk size.
+
+## Behavior
+
+- **One filesystem, both runtimes:** the TypeScript mount reads and writes the
+  same tables, so a Python and a Node process on one file serve one filesystem.
+- **Several mounts on one database:** a mount serves one folder of its
+  database, `/` by default. Hand two mounts one driver to serve the whole
+  database and one folder as a mount of its own:
+
+  ```python
+  from mirage.vfs.sql import SqliteDriver
+
+  driver = SqliteDriver("./workspace.db")
+  ws = Workspace(
+      {
+          "/": SqlVFS(driver=driver, capacity="1GB"),
+          "/workspace": SqlVFS(driver=driver, root="/workspace", capacity="1GB"),
+      },
+      mode=MountMode.WRITE,
+  )
+  ```
+
+- **Capacity:** `capacity` counts every file in the database, whichever mount
+  wrote it. Mounts on one driver with the same `capacity` share one count, so
+  their writes together stay within it. Mounts on separate drivers count apart,
+  even on one file, and together they can pass it.
+- **Snapshots:** a snapshot keeps the mount's own folder, and loading it
+  replaces that folder. The rest of the database stays as it was.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md sql start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -82,7 +121,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -103,7 +142,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -125,33 +164,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md sql end */}
-
-## Cache
-
-Index TTL is `0`, so listings are read from the database every time. A
-workspace `index:` block still applies its `ttl` to this mount.
-
-## Example
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.sql import SqlVFS
-
-
-async def main():
-    ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
-    try:
-        await ws.shell("mkdir -p /sql/data/")
-        await ws.shell('echo "hello world" | tee /sql/data/hello.txt')
-        r = await ws.shell("cat /sql/data/hello.txt")
-        print(await r.stdout_str())
-    finally:
-        await ws.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```

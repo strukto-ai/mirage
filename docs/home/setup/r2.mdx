@@ -1,28 +1,153 @@
 ---
 title: Cloudflare R2
 icon: /images/cloudflare-logo.svg
-description: Set up Cloudflare R2 credentials for the R2 VFS.
+description: Virtualize a Cloudflare R2 bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create R2 API Token
+An R2 bucket becomes a folder tree, with one file per object.
 
-1. Go to https://dash.cloudflare.com/ -> **R2 Object Storage**
-1. **Manage R2 API Tokens** -> **Create API Token**
-1. Set permissions: **Object Read** (or **Object Read & Write**)
-1. Scope to your bucket
-1. Copy the **Access Key ID** and **Secret Access Key**
-1. Note your **Account ID** from the Cloudflare dashboard URL
 
-### 2. Set Environment Variables
+
+## Setup
+
+R2 signs S3 requests with an R2 API token's key pair.
+
+1. In the [Cloudflare dashboard](https://dash.cloudflare.com/), open **R2 object storage** > **Overview**.
+1. Under **Account Details**, pick **Manage** next to **API Tokens**, then **Create Account API token** (or **Create User API token**).
+1. Under **Permissions**, choose **Object Read only**, or **Object Read & Write** for writes, and scope the token to the bucket.
+1. Create the token and copy the **Access Key ID** and **Secret Access Key**. Cloudflare shows the secret only once.
+1. Copy the **Account ID** from **Account Details** (it is also in the dashboard URL).
 
 ```bash
-# .env.development
-R2_BUCKET=my-bucket
-R2_ACCOUNT_ID=abc123...
-R2_ACCESS_KEY_ID=...
-R2_SECRET_ACCESS_KEY=...
+export R2_BUCKET=my-bucket
+export R2_ACCOUNT_ID=...
+export R2_ACCESS_KEY_ID=...
+export R2_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [Cloudflare R2 (Python)](/python/vfs/r2) and [Cloudflare R2 (TypeScript)](/typescript/setup/r2).
+- The account ID builds the endpoint `https://<account-id>.r2.cloudflarestorage.com`.
+- A bucket in a jurisdiction has its own endpoint, such as
+  `https://<account-id>.eu.r2.cloudflarestorage.com`; set `endpoint_url`
+  (`endpoint` in TypeScript) to it.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /r2:
+        vfs: r2
+        mode: read
+        config:
+          bucket: ${R2_BUCKET}
+          account_id: ${R2_ACCOUNT_ID}
+          access_key_id: ${R2_ACCESS_KEY_ID}
+          secret_access_key: ${R2_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id r2
+    mirage shell -w r2 -c 'ls /r2'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.r2 import R2Config, R2VFS
+
+    config = R2Config(
+        bucket=os.environ["R2_BUCKET"],
+        account_id=os.environ["R2_ACCOUNT_ID"],
+        access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/r2": R2VFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /r2")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/r2': new R2VFS({
+          bucket: process.env.R2_BUCKET!,
+          accountId: process.env.R2_ACCOUNT_ID!,
+          accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /r2')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/r2/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /r2 -type f
+/r2/data/events.jsonl
+/r2/data/users.parquet
+/r2/reports/2026-11/metrics.csv
+/r2/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /r2/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /r2/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/r2">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/r2">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

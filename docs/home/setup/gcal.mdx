@@ -4,58 +4,35 @@ icon: /images/gcal-logo.svg
 description: Virtualize Google Calendar calendars and events as JSON files.
 ---
 
-The Google Calendar VFS mounts every calendar the account can see as a
-directory of date buckets, with one JSON file per event. It uses the same
-OAuth credentials as the other Google mounts; enable the Google Calendar API
-and its scope as described in [Google Workspace Setup](/home/setup/google).
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Calendar (TypeScript)](/typescript/setup/gcal).
+Every calendar the account can see becomes a folder of days, with one JSON
+file per event.
+
+
+
+
+## Setup
+
+Turn on the Google Calendar API and get an OAuth client and refresh token, as
+in [Google Workspace Setup](/home/setup/google). Then export them:
+
+```bash
+export GOOGLE_CLIENT_ID=...
+export GOOGLE_CLIENT_SECRET=...
+export GOOGLE_REFRESH_TOKEN=...
+```
 
 ## Connect
 
 <Tabs>
-  <Tab title="Python">
-    ```python
-    import asyncio
-    import os
-
-    from mirage import MountMode, Workspace
-    from mirage.vfs.gcal import GCalConfig, GCalVFS
-
-
-    async def main() -> None:
-        config = GCalConfig(
-            client_id=os.environ["GOOGLE_CLIENT_ID"],
-            client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-            refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-        )
-        ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
-        result = await ws.shell("ls /gcal/primary")
-        print(await result.stdout_str(), end="")
-        await ws.close()
-
-
-    asyncio.run(main())
-    ```
-  </Tab>
-  <Tab title="TypeScript">
-    ```typescript
-    import { GCalVFS, MountMode, Workspace } from '@struktoai/mirage-node'
-
-    const ws = new Workspace({
-      '/gcal': new GCalVFS({
-        clientId: process.env.GOOGLE_CLIENT_ID!,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
-      }),
-    }, { mode: MountMode.READ })
-    const result = await ws.shell('ls /gcal/primary')
-    process.stdout.write(result.stdoutText)
-    await ws.close()
-    ```
-  </Tab>
-  <Tab title="YAML">
-    ```yaml
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
     mounts:
       /gcal:
         vfs: gcal
@@ -65,29 +42,99 @@ For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Cal
           client_secret: ${GOOGLE_CLIENT_SECRET}
           refresh_token: ${GOOGLE_REFRESH_TOKEN}
     ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id cal
+    mirage shell -w cal -c 'ls /gcal'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.gcal import GCalConfig, GCalVFS
+
+    config = GCalConfig(
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+    )
+    ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /gcal")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { GCalVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/gcal': new GCalVFS({
+          clientId: process.env.GOOGLE_CLIENT_ID!,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /gcal')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
   </Tab>
 </Tabs>
 
-## Browse events
+## Layout
 
 ```text
 /gcal/
   primary/
     calendar.json
-    <YYYY-MM-DD>/
-      <event-id>__<HHMM-HHMM>_<title>.gcal.json
-  <name>__<calendar-id>/
-    ...
+    2026-11-16/
+      7kq2m9__0900-0930_Team_Standup.gcal.json
+  Engineering__team@group.calendar.google.com/
+    2026-11-16/
+      ...
 ```
 
-The primary calendar is always `primary`; every other calendar directory ends
-in `__<calendar-id>`. Each date directory holds the events of one day by
-default; set `bucket_days` to `7` or `30` for 7-day or 30-day buckets. Without
-`start_time` or `end_time`, a calendar lists all of its history up to 90 days
-after today.
+- The primary calendar is `primary`; every other one ends in `__<calendar-id>`.
+- One folder per day, back through history and 90 days ahead. `bucket_days: 7`
+  or `30` makes 7- or 30-day folders.
+- An event file holds the Calendar API's payload.
 
-Use `ls` and date globs such as `ls /gcal/primary/2026-11-*` to find events,
-then `cat` or `jq` to read the Calendar API payload. On a mount in write mode,
-`rm` an event file to delete that event for every attendee; that needs the
-`owner` or `writer` role on its calendar. Create and edit events with the
-[`gws calendar`](/home/setup/cli/gws) CLI.
+## Sample runs
+
+```bash
+$ ls /gcal
+Engineering__team@group.calendar.google.com
+primary
+```
+
+```bash
+$ ls /gcal/primary/2026-11-16
+7kq2m9__0900-0930_Team_Standup.gcal.json
+p31xd0__1400-1500_Design_Review.gcal.json
+```
+
+```bash
+$ jq -r '.summary, .start.dateTime' /gcal/primary/2026-11-16/7kq2m9__0900-0930_Team_Standup.gcal.json
+Team Standup
+2026-11-16T09:00:00-08:00
+```
+
+On a `write` mount, `rm` an event file to delete the event for every attendee.
+Create and edit events with the [`gws calendar`](/home/setup/cli/gws) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/gcal">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/gcal">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

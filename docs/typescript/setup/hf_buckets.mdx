@@ -1,76 +1,125 @@
 ---
 title: HF Buckets
 icon: /images/huggingface-logo.svg
-description: Mount Hugging Face Buckets as a Mirage filesystem in TypeScript with lazy reads and writes.
+description: Virtualize a Hugging Face Storage Bucket from Node.
 ---
 
-`HfBucketsVFS` mounts a [Hugging Face Bucket](https://huggingface.co/docs/hub/storage-buckets)
-at a prefix such as `/hf/`. The TypeScript backend mirrors the
-[Python one](/python/vfs/hf_buckets) and returns identical results.
+`HfBucketsVFS` mounts one
+[Hugging Face Storage Bucket](https://huggingface.co/docs/hub/storage-buckets):
+every file in it becomes a file and every `/` in its path a folder. The bucket
+and token are set up on the [HF Buckets page](/home/setup/hf_buckets).
 
-For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
-
-<Note>
-Node only. The backend uses the native [opendal](https://www.npmjs.com/package/opendal)
-binding, which does not run in the browser.
-</Note>
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node opendal
+npm install @struktoai/mirage-node opendal
 ```
+
+`opendal` is a native binding, so the mount runs in Node only, not in the
+browser.
+
+## Configure
 
 ```ts
 import { HfBucketsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const bucket = new HfBucketsVFS({
-  bucket: process.env.HF_BUCKET_NAME!, // "namespace/bucket-name"
-  token: process.env.HF_TOKEN,
-  // Optional:
-  // endpoint: 'https://huggingface.co',
-  // keyPrefix: 'data/',
+const hf = new HfBucketsVFS({
+  bucket: process.env.HF_BUCKET_NAME!,
+  token: process.env.HF_TOKEN!,
 })
+const ws = new Workspace({ '/hf': hf }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/hf/': bucket }, { mode: MountMode.READ })
-
-console.log((await ws.shell('ls /hf/')).stdoutText)
-console.log((await ws.shell('tree /hf/')).stdoutText)
-console.log((await ws.shell("find /hf/ -name '*.json'")).stdoutText)
-console.log((await ws.shell('stat /hf/data/file.txt')).stdoutText)
+const result = await ws.shell("ls /hf && find /hf -name '*.json'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-`HfBucketsVFS` takes the bucket in `namespace/bucket-name` form plus an
-optional access token. Both `READ` and `WRITE` modes are supported out of the box.
+`bucket` is the bucket's id, `<owner>/<name>`. `endpoint` points the mount at
+a mirror or a self-hosted Hub. A mount takes `MountMode.READ`, `WRITE` or
+`EXEC`.
 
-### Config
+### Fields
 
 {/* generated: config-table hf_buckets start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Bucket id in `namespace/name` form. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Path inside the bucket that becomes the mount root; files outside it are not listed. |
+<ResponseField name="bucket" type={"string"} required>
+  Bucket id in `namespace/name` form.
+</ResponseField>
+<ResponseField name="token" type={"string"} post={["secret"]}>
+  Hugging Face access token.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} default={"'https://huggingface.co'"}>
+  Hub origin requests go to, for a mirror or a self-hosted Hub.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Path inside the bucket that becomes the mount root; files outside it are not listed.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_buckets end */}
 
+## Authentication
+
+`token` is a Hugging Face access token: **Read** for a read mount, **Write** to
+upload. A fine-grained token needs read access, or write access to upload, on
+the bucket's namespace. A bucket the token cannot reach, or one that does not
+exist, answers `Permission denied`.
+
+## Layout
+
+```text
+/hf/
+  checkpoints/
+    step-1000/
+      config.json
+    step-2000/
+      config.json
+  logs/
+    train.log
+```
+
+`/hf/logs/train.log` is the file `logs/train.log` in the bucket. Folders come
+from the `/` in file paths.
+
+## Behavior
+
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket, so
+  `/hf/notes.md` is the file `users/42/notes.md`. A leading `/` is dropped and
+  a trailing `/` added.
+- **Folders:** a folder exists only while it holds a file, so `mkdir` creates
+  nothing.
+- **No move:** `mv` and `rmdir` are not supported.
+- **No history:** a bucket keeps no history, so a removed file is gone for
+  good.
+
+## Integration
+
+HF Buckets answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
+
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with HF Buckets mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md hf_buckets start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -78,7 +127,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Buckets mounted at `/<pa
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -99,7 +148,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Buckets mounted at `/<pa
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -121,66 +170,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Buckets mounted at `/<pa
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md hf_buckets end */}
-
-Bucket object keys map to virtual paths under the mount prefix: virtual
-`/hf/data/file.txt` maps to bucket key `data/file.txt`.
-
-## Cache
-
-Directory listings are cached with `indexTtl = 600` (10 minutes) and populate
-file-size/type entries that `stat` reads via a fast path, so a `readdir`
-followed by per-entry `stat` calls (what `ls` and most shell commands trigger)
-costs one HTTP request instead of N. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
-
-## Integration
-
-What Hugging Face buckets answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Hugging Face buckets |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-## Shell Commands
-
-The same command set as the Python backend, operating on real file content.
-Large files benefit from range reads to avoid downloading entire objects.
-
-### Read Commands
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `cat`           | Read file content                          |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type, modified) |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `nl`            | Number lines                               |
-| `du`            | Disk usage summary                         |
-| `file`          | Detect file type                           |
-| `strings`       | Extract printable strings from binary      |
-| `xxd`           | Hex dump                                   |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-
-### Text Processing
-
-`awk`, `sed`, `tr`, `sort`, `uniq`, `cut`, `join`, `paste`, `column`, `fold`,
-`expand`, `unexpand`, `fmt`, `rev`, `tac`, `look`, `shuf`, `tsort`, `comm`,
-`cmp`, `diff`, `iconv`, `base64`.
-
-### File Operations
-
-`rm` (`-r` removes a subtree), `mkdir` (a no-op: a directory exists only while
-it holds a file), `touch`, `mktemp`, `split`, `csplit`.
-
-### Path Utilities
-
-`ls`, `basename`, `dirname`, `realpath`, `readlink`.
-
-### Compression
-
-`gzip`, `gunzip`, `zcat`, `zgrep`, `tar`, `zip`, `unzip`.

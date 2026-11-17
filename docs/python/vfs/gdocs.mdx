@@ -1,14 +1,21 @@
 ---
 title: Google Docs
-description: Mount Google Docs as JSON-backed files so Python agents can read document structure and content through Mirage.
+description: Virtualize Google Docs documents from Python.
 icon: /images/gdocs-logo.svg
 ---
-The Google Docs VFS exposes Docs documents as a virtual filesystem
-mounted at some prefix such as `/gdocs/`.
 
-For Google OAuth setup, see [Google Workspace Setup](/home/setup/google).
+`GDocsVFS` mounts the Google Docs an account can see: each document becomes a
+`.gdoc.json` file holding the Docs API's JSON, split into the documents it owns
+and those shared with it. Credentials are set up on the
+[Google Workspace page](/home/setup/google).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -21,39 +28,122 @@ config = GDocsConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-vfs = GDocsVFS(config=config)
-ws = Workspace({"/gdocs": vfs}, mode=MountMode.READ)
+ws = Workspace({"/gdocs": GDocsVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /gdocs/owned && jq -r '.title' /gdocs/owned/2026-*.gdoc.json")
+print(await result.stdout_str())
+await ws.close()
 ```
 
+`access_token` replaces the client and refresh token with a token or a
+callable that returns one. A `MountMode.WRITE` mount also allows `mv` and `rm`.
+
+### Fields
+
 {/* generated: config-table gdocs omit=folder_id start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
-| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
-| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="access_token" type={"str | callable"} post={["secret"]}>
+  OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`.
+</ResponseField>
+<ResponseField name="client_id" type={"str"}>
+  Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself.
+</ResponseField>
+<ResponseField name="client_secret" type={"str"} post={["secret"]}>
+  Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client.
+</ResponseField>
+<ResponseField name="refresh_token" type={"str"} post={["secret"]}>
+  User's OAuth refresh token. Required with `client_id` when `access_token` is unset.
+</ResponseField>
+<ResponseField name="api_base" type={"str"}>
+  One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gdocs end */}
 
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_token`, a token or a callable that returns one.
+2. `client_id` and `refresh_token`, with `client_secret` unless the client
+   uses PKCE. Mirage trades the refresh token for access tokens on its own.
+
+The mount needs the Google Docs API with the
+`https://www.googleapis.com/auth/documents` scope, and the Drive API with the
+`https://www.googleapis.com/auth/drive` scope, since the listing comes from
+Drive. A read-only mount can use the `readonly` variants of both scopes.
+
+## Layout
+
+```text
+/gdocs/
+  owned/
+    2026-11-14_Meeting_Notes__1Xk9rT2bQ.gdoc.json
+  shared/
+    2026-10-02_Design_Review__1Pq7sV4mN.gdoc.json
+```
+
+- `owned/` holds the documents the account owns, shared or not; `shared/`
+  holds those others shared with it.
+- A file is named `<YYYY-MM-DD>_<title>__<document-id>.gdoc.json`. The date
+  is the last modified day and is left out when Drive gives none.
+- A file holds the Docs API's JSON for the document, with every tab.
+
+## Behavior
+
+- **Shared Drives:** a document in a Shared Drive has no owner, so it is
+  listed under `shared/`, as on the `gdrive` mount.
+- **Date globs:** a glob on the date prefix, such as `2026-05-*`, asks Drive
+  only for the documents modified on those days.
+- **Incomplete listings:** Drive may skip part of the account's files and say
+  so. The short listing is still shown, and the next `ls` lists again.
+- **Rename:** on a `write` mount, `mv` to a new name in the same folder
+  changes the title. The date and the id must stay, and the title is spelled
+  as the listing spells it (spaces become `_`).
+- **Delete:** on a `write` mount, `rm` deletes the document for good, not to
+  the trash. `owned/` and `shared/` cannot be removed.
+- **Edits:** writing text into a document, and raw API calls, go through the
+  [`gws`](/python/cli/gws) CLI.
+
+## Integration
+
+Google Docs answers these commands through its own API, so fewer files are
+read. See [Integration](/home/integration/overview).
+
+- `grep -r` and `rg` with `-w`: Drive full-text search names the documents to
+  read. Every one is read when the search fails or finds nothing, and when
+  the word may be in any document's JSON whatever the text says: a word with
+  a digit, a Docs API name or value (`paragraph`, `NORMAL_TEXT`), or a word
+  every document carries (`https`, `arial`). Drive indexes a write some time
+  after it lands and searches the document's text, so it can leave out one
+  whose JSON holds the word only in another value (a font, a link or image
+  address, a tab title, an id) or only inside a word that styling splits
+  (`snow` in bold inside `snowman`). `walk_limit: -1` in the mount's
+  `"@all"` [command limit](/home/core/output-limits) turns the search off and
+  reads every file.
+
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at
+`/<path>`. `<mode>` is the mount's mode: `read`, `write` or `exec`. The
+commands shown are those of a `write` mount.
 
 {/* generated: vfs-md gdocs start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gdocs`, write |
+    | `/<path>` | `gdocs`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -64,98 +154,17 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     ```
 
     - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-      `2026-05-*` narrows by it.
-    - `<title>` is sanitized: spaces and any character outside
-      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-    - `<doc-id>` is the Google Docs document id.
-    - `shared/` holds docs shared with you by others; ones you own
-      and shared with others are still in `owned/`.
+      `2026-05-*` narrows the query; `<title>` turns spaces and characters
+      outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+    - `shared/` holds docs others shared; docs owned and shared out stay
+      in `owned/`.
+    - A file is the Docs API `documents.get` response with every tab under
+      `.tabs[].documentTab`, nested through `.childTabs`; there is no
+      top-level `.body`. All text: `[.. | .textRun? // empty | .content] | add`.
+    - On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+      new `<title>` with the same folder, date and id to rename it.
 
-    A `.gdoc.json` holds the Google Docs API `documents.get` response, read
-    with `includeTabsContent=true` so every tab is present:
-
-    ```jsonc
-    {
-      "documentId": "...",
-      "title": "...",
-      "tabs": [                            // one entry per top-level tab
-        {
-          "tabProperties": {
-            "tabId": "t.0",                // names a tab for gws docs write
-            "title": "Tab 1",
-            "index": 0
-          },
-          "documentTab": {
-            "body": {
-              "content": [
-                {                          // one element per block
-                  "paragraph": {
-                    "elements": [
-                      { "textRun": { "content": "the actual text\n",
-                                     "textStyle": {...} } }
-                    ],
-                    "paragraphStyle": {...}
-                  }
-                },
-                { "table": {...} },
-                { "sectionBreak": {...} }
-              ]
-            },
-            "documentStyle": {...},
-            "namedStyles": {...}
-          },
-          "childTabs": [ { ...same shape, nested to any depth... } ]
-                                           // a nested tab also carries
-                                           // parentTabId and nestingLevel;
-                                           // a root tab carries neither
-        }
-      ],
-      "revisionId": "..."
-    }
-    ```
-
-    There is no top-level .body. A tab-aware response leaves the singleton
-    fields (`.body`, `.documentStyle`, `.namedStyles`) empty and hangs every
-    tab's content off `.tabs[].documentTab` instead. Tabs also nest, so text
-    can sit at any depth under `.childTabs`; the recursive recipes below read
-    a one-tab and a fifty-tab document alike.
-
-    Useful `jq` paths:
-
-    ```jq
-    .title
-    [.. | .tabProperties? // empty | .title]             # every tab name
-    [.. | .textRun? // empty | .content] | add           # all text, any depth
-    [.. | .tabProperties? // empty] | length             # tab count
-    [.tabs[0].documentTab.body.content[]
-          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-    .revisionId
-    ```
-
-    The first block of a body is always a `sectionBreak`, which carries no
-    `.paragraph`, so a path through `.paragraph` needs the `?` or it fails
-    with `Cannot iterate over null`.
-
-    Delete, on a `write` path:
-
-    ```sh
-    rm /<path>/owned/<file>.gdoc.json   # deletes it from Drive for good
-    rm -f <path>                       # ignores a missing file
-    ```
-
-    Only `.gdoc.json` files can be removed; `owned/` and `shared/` cannot.
-
-    Rename to a new title, on a `write` path:
-
-    ```sh
-    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
-       /<path>/owned/<date>_<new>__<id>.gdoc.json
-    ```
-
-    Keep the folder, the date and the id, and spell the title the way the
-    listing does (spaces become `_`); any other name is refused.
-
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -163,7 +172,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gdocs` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -184,7 +193,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gdocs`, write |
+    | `/<path>` | `gdocs`, `<mode>` |
 
     ## VFS Layout
 
@@ -199,96 +208,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     ```
 
     - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-      `2026-05-*` narrows by it.
-    - `<title>` is sanitized: spaces and any character outside
-      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-    - `<doc-id>` is the Google Docs document id.
-    - `shared/` holds docs shared with you by others; ones you own
-      and shared with others are still in `owned/`.
-
-    A `.gdoc.json` holds the Google Docs API `documents.get` response, read
-    with `includeTabsContent=true` so every tab is present:
-
-    ```jsonc
-    {
-      "documentId": "...",
-      "title": "...",
-      "tabs": [                            // one entry per top-level tab
-        {
-          "tabProperties": {
-            "tabId": "t.0",                // names a tab for gws docs write
-            "title": "Tab 1",
-            "index": 0
-          },
-          "documentTab": {
-            "body": {
-              "content": [
-                {                          // one element per block
-                  "paragraph": {
-                    "elements": [
-                      { "textRun": { "content": "the actual text\n",
-                                     "textStyle": {...} } }
-                    ],
-                    "paragraphStyle": {...}
-                  }
-                },
-                { "table": {...} },
-                { "sectionBreak": {...} }
-              ]
-            },
-            "documentStyle": {...},
-            "namedStyles": {...}
-          },
-          "childTabs": [ { ...same shape, nested to any depth... } ]
-                                           // a nested tab also carries
-                                           // parentTabId and nestingLevel;
-                                           // a root tab carries neither
-        }
-      ],
-      "revisionId": "..."
-    }
-    ```
-
-    There is no top-level .body. A tab-aware response leaves the singleton
-    fields (`.body`, `.documentStyle`, `.namedStyles`) empty and hangs every
-    tab's content off `.tabs[].documentTab` instead. Tabs also nest, so text
-    can sit at any depth under `.childTabs`; the recursive recipes below read
-    a one-tab and a fifty-tab document alike.
-
-    Useful `jq` paths:
-
-    ```jq
-    .title
-    [.. | .tabProperties? // empty | .title]             # every tab name
-    [.. | .textRun? // empty | .content] | add           # all text, any depth
-    [.. | .tabProperties? // empty] | length             # tab count
-    [.tabs[0].documentTab.body.content[]
-          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-    .revisionId
-    ```
-
-    The first block of a body is always a `sectionBreak`, which carries no
-    `.paragraph`, so a path through `.paragraph` needs the `?` or it fails
-    with `Cannot iterate over null`.
-
-    Delete, on a `write` path:
-
-    ```sh
-    rm /<path>/owned/<file>.gdoc.json   # deletes it from Drive for good
-    rm -f <path>                       # ignores a missing file
-    ```
-
-    Only `.gdoc.json` files can be removed; `owned/` and `shared/` cannot.
-
-    Rename to a new title, on a `write` path:
-
-    ```sh
-    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
-       /<path>/owned/<date>_<new>__<id>.gdoc.json
-    ```
-
-    Keep the folder, the date and the id, and spell the title the way the
-    listing does (spaces become `_`); any other name is refused.
+      `2026-05-*` narrows the query; `<title>` turns spaces and characters
+      outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+    - `shared/` holds docs others shared; docs owned and shared out stay
+      in `owned/`.
+    - A file is the Docs API `documents.get` response with every tab under
+      `.tabs[].documentTab`, nested through `.childTabs`; there is no
+      top-level `.body`. All text: `[.. | .textRun? // empty | .content] | add`.
+    - On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+      new `<title>` with the same folder, date and id to rename it.
 
     ## Supported Unix Commands for VFS
 
@@ -310,150 +238,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gdocs end */}
-
-Documents are split into `owned` (documents you created) and `shared`
-(documents shared with you). The filename shape is:
-
-```text
-<YYYY-MM-DD>_<sanitized-title>__<document-id>.gdoc.json
-```
-
-If the modified date is unavailable, the date prefix is omitted.
-Reading a document file returns the full Google Docs API JSON for
-that document.
-
-### Shared Drives
-
-The listing covers every corpus the account can reach, so a document that
-lives in a Shared Drive appears here too. A Shared Drive document has no
-owner (the drive owns it), so it lands under `shared`, which is what that
-directory means. This matches the `gdrive` mount, where Shared Drives are
-top-level directories: without it the same account would see a document
-under one Google mount and not the other, with no error explaining the
-difference.
-
-Drive answers an all-corpora search best-effort. When it reports that it
-skipped a corpus, the short listing is still returned but is not cached as
-the directory, so the next `ls` re-lists instead of serving the gap until
-the cache expires.
-
-## Cache
-
-The Google Docs VFS uses `IndexCacheStore`. Index entries store
-document IDs and metadata. File bytes go through the workspace
-file cache; a rendered read through FUSE, `ws.vfs`, a
-`< file` redirect or a cross-mount `cp`, `sed` or `diff` is not cached.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.gws import GWS
-from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
-
-load_dotenv(".env.development")
-
-config = GDocsConfig(
-    client_id=os.environ["GOOGLE_CLIENT_ID"],
-    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-)
-vfs = GDocsVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/gdocs": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config)
-
-    # List structure
-    r = await ws.shell("ls /gdocs/")
-    print(await r.stdout_str())
-
-    # List owned documents
-    r = await ws.shell("ls /gdocs/owned/")
-    print(await r.stdout_str())
-
-    # Read a document
-    r = await ws.shell(
-        "cat /gdocs/owned/2026-04-04_Project_Plan__1AbCdEf.gdoc.json")
-    print(await r.stdout_str())
-
-    # Extract title with jq
-    r = await ws.shell(
-        'jq ".title"'
-        " /gdocs/owned/2026-04-04_Project_Plan__1AbCdEf.gdoc.json")
-    print(await r.stdout_str())
-
-    # Search across all documents
-    r = await ws.shell('rg "quarterly" /gdocs/owned/')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 1 /gdocs/")
-    print(await r.stdout_str())
-
-    # Create a new document
-    r = await ws.shell(
-        'gws docs documents create --json \'{"title":"MIRAGE Example Doc"}\'')
-    print(await r.stdout_str())
-
-    # Append text to a document
-    r = await ws.shell(
-        'gws docs write --document 1AbCdEf --text "Appended via MIRAGE."')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-See [`examples/python/vfs/gdocs/gdocs.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/gdocs/gdocs.py) for the full working example.
-
-## Shell Commands
-
-Standard commands available on the mounted Google Docs tree:
-
-| Command                             | Notes                       |
-| ----------------------------------- | --------------------------- |
-| `ls`                                | List owned/shared documents |
-| `cat`                               | Read document JSON          |
-| `head` / `tail`                     | First/last N lines          |
-| `grep` / `rg`                       | Pattern search              |
-| `jq`                                | Query JSON fields           |
-| `wc`                                | Line/word/byte counts       |
-| `stat`                              | File metadata               |
-| `find`                              | Recursive search            |
-| `tree`                              | Directory tree view         |
-| `basename` / `dirname` / `realpath` | Path utilities              |
-| `nl`                                | Number lines                |
-| `mv`                                | Retitle a document (`MountMode.WRITE`) |
-| `rm`                                | Delete a document (`MountMode.WRITE`)  |
-
-
-## Integration
-
-What Google Docs answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Google Docs |
-| --- | --- |
-| `grep -r`, `rg` | Drive full-text search, for whole words. It can miss words only in non-text values (fonts, links and ids) or split by styling. |
-
-`grep -rw` and
-`rg -w` read only the documents Drive full-text search names; every one is read
-when the search fails or finds nothing. A word the rendered JSON may hold
-whatever the text says is never asked: one with a digit, a property name or
-enum value of the Docs API (`paragraph`, `NORMAL_TEXT`), or a word every
-rendering carries (`https`, `arial`). `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Drive indexes a
-write some time after it lands and searches the file's text, so one whose JSON
-holds the word only in another value (a font, a link or image address, a tab
-title or an id), or only as part of a word styling splits into text runs
-(`snow` bold in `snowman`), can be left out.
-
-Acting on documents (appending text, raw API calls) goes through
-the [gws CLI](/python/cli/gws) when installed.

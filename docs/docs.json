@@ -151,23 +151,18 @@
             "group": "VFS",
             "pages": [
               "home/setup/vfs",
-              "home/setup/custom-vfs",
-              "home/setup/vfs-md",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
                   "home/setup/ram",
                   "home/setup/disk",
-                  "home/setup/opfs",
-                  "home/setup/redis",
-                  "home/setup/sql",
-                  "home/setup/ssh"
+                  "home/setup/opfs"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "home/setup/s3",
                   "home/setup/r2",
@@ -188,43 +183,36 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
                   "home/setup/google",
-                  "home/setup/gcal",
                   "home/setup/onedrive",
                   "home/setup/sharepoint",
                   "home/setup/dropbox",
                   "home/setup/box",
                   "home/setup/nextcloud",
                   "home/setup/databricks",
-                  "home/setup/tidb"
+                  "home/setup/tidb",
+                  "home/setup/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "home/setup/github",
-                  "home/setup/hf_spaces",
-                  "home/setup/linear",
-                  "home/setup/wandb",
-                  "home/setup/langfuse",
-                  "home/setup/jaeger",
-                  "home/setup/slack",
-                  "home/setup/discord",
-                  "home/setup/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "home/setup/postgres",
                   "home/setup/mongodb",
                   "home/setup/gridfs",
-                  "home/setup/postgres",
-                  "home/setup/airtable",
+                  "home/setup/redis",
+                  "home/setup/sql",
+                  "home/setup/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "home/setup/chroma",
                   "home/setup/lancedb",
                   "home/setup/qdrant",
@@ -235,23 +223,48 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "home/setup/github",
+                  "home/setup/hf_spaces",
+                  "home/setup/linear",
+                  "home/setup/wandb",
+                  "home/setup/langfuse",
+                  "home/setup/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "home/setup/slack",
+                  "home/setup/discord",
+                  "home/setup/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "home/setup/gcal",
                   "home/setup/notion",
                   "home/setup/trello"
                 ]
-              }
-            ]
-          },
-          {
-            "group": "Integration",
-            "pages": [
-              "home/integration/overview",
-              "home/integration/search",
-              "home/integration/lines",
-              "home/integration/checksums",
-              "home/integration/walks"
+              },
+              {
+                "group": "VFS Integration",
+                "icon": "plug",
+                "pages": [
+                  "home/integration/overview",
+                  "home/integration/search",
+                  "home/integration/lines",
+                  "home/integration/checksums",
+                  "home/integration/walks"
+                ]
+              },
+              "home/setup/custom-vfs",
+              "home/setup/vfs-md"
             ]
           },
           {
@@ -428,27 +441,23 @@
             "group": "VFS",
             "pages": [
               "python/vfs/index",
-              "python/vfs/new",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
-                  "python/vfs/disk",
                   "python/vfs/ram",
-                  "python/vfs/redis",
-                  "python/vfs/sql",
-                  "python/vfs/ssh"
+                  "python/vfs/disk"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "python/vfs/s3",
                   "python/vfs/r2",
                   "python/vfs/gcs",
-                  "python/vfs/supabase",
                   "python/vfs/oci",
+                  "python/vfs/supabase",
                   "python/vfs/minio",
                   "python/vfs/ceph",
                   "python/vfs/seaweedfs",
@@ -463,47 +472,39 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
-                  "python/vfs/gmail",
                   "python/vfs/gdrive",
                   "python/vfs/gdocs",
                   "python/vfs/gsheets",
                   "python/vfs/gslides",
-                  "python/vfs/gcal",
                   "python/vfs/onedrive",
                   "python/vfs/sharepoint",
-                  "python/vfs/box",
                   "python/vfs/dropbox",
+                  "python/vfs/box",
                   "python/vfs/nextcloud",
                   "python/vfs/databricks_volume",
-                  "python/vfs/tidb_filesystem"
+                  "python/vfs/tidb_filesystem",
+                  "python/vfs/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "python/vfs/github",
-                  "python/vfs/hf_spaces",
-                  "python/vfs/linear",
-                  "python/vfs/wandb",
-                  "python/vfs/langfuse",
-                  "python/vfs/jaeger",
-                  "python/vfs/slack",
-                  "python/vfs/discord",
-                  "python/vfs/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "python/vfs/postgres",
                   "python/vfs/mongodb",
                   "python/vfs/gridfs",
-                  "python/vfs/postgres",
-                  "python/vfs/airtable",
+                  "python/vfs/redis",
+                  "python/vfs/sql",
+                  "python/vfs/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "python/vfs/chroma",
                   "python/vfs/lancedb",
                   "python/vfs/qdrant",
@@ -514,13 +515,37 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "python/vfs/github",
+                  "python/vfs/hf_spaces",
+                  "python/vfs/linear",
+                  "python/vfs/wandb",
+                  "python/vfs/langfuse",
+                  "python/vfs/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "python/vfs/slack",
+                  "python/vfs/discord",
+                  "python/vfs/gmail",
+                  "python/vfs/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "python/vfs/gcal",
                   "python/vfs/notion",
                   "python/vfs/trello"
                 ]
-              }
+              },
+              "python/vfs/new"
             ]
           },
           {
@@ -620,23 +645,18 @@
             "group": "VFS",
             "pages": [
               "typescript/setup/vfs",
-              "typescript/vfs/new",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
-                  "typescript/setup/disk",
                   "typescript/setup/ram",
-                  "typescript/setup/opfs",
-                  "typescript/setup/redis",
-                  "typescript/setup/sql",
-                  "typescript/setup/upstash",
-                  "typescript/setup/ssh"
+                  "typescript/setup/disk",
+                  "typescript/setup/opfs"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "typescript/setup/s3",
                   "typescript/setup/r2",
@@ -657,47 +677,40 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
-                  "typescript/setup/gmail",
                   "typescript/setup/gdrive",
                   "typescript/setup/gdocs",
                   "typescript/setup/gsheets",
                   "typescript/setup/gslides",
-                  "typescript/setup/gcal",
                   "typescript/setup/onedrive",
                   "typescript/setup/sharepoint",
                   "typescript/setup/dropbox",
                   "typescript/setup/box",
                   "typescript/setup/nextcloud",
                   "typescript/setup/databricks_volume",
-                  "typescript/setup/tidb_filesystem"
+                  "typescript/setup/tidb_filesystem",
+                  "typescript/setup/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "typescript/setup/github",
-                  "typescript/setup/hf_spaces",
-                  "typescript/setup/linear",
-                  "typescript/setup/wandb",
-                  "typescript/setup/langfuse",
-                  "typescript/setup/jaeger",
-                  "typescript/setup/slack",
-                  "typescript/setup/discord",
-                  "typescript/setup/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "typescript/setup/postgres",
                   "typescript/setup/mongodb",
                   "typescript/setup/gridfs",
-                  "typescript/setup/postgres",
-                  "typescript/setup/airtable",
+                  "typescript/setup/redis",
+                  "typescript/setup/upstash",
+                  "typescript/setup/sql",
+                  "typescript/setup/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",
                   "typescript/setup/qdrant",
@@ -708,13 +721,37 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "typescript/setup/github",
+                  "typescript/setup/hf_spaces",
+                  "typescript/setup/linear",
+                  "typescript/setup/wandb",
+                  "typescript/setup/langfuse",
+                  "typescript/setup/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "typescript/setup/slack",
+                  "typescript/setup/discord",
+                  "typescript/setup/gmail",
+                  "typescript/setup/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "typescript/setup/gcal",
                   "typescript/setup/notion",
                   "typescript/setup/trello"
                 ]
-              }
+              },
+              "typescript/vfs/new"
             ]
           },
           {

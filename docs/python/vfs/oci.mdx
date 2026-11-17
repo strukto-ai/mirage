@@ -1,22 +1,21 @@
 ---
 title: OCI Object Storage
+description: Virtualize an Oracle Cloud Infrastructure Object Storage bucket from Python.
 icon: /images/oracle-logo.svg
-description: Mount Oracle Cloud Infrastructure Object Storage as a virtual filesystem.
 ---
-The OCI VFS mounts an Oracle Cloud Infrastructure Object Storage
-bucket at some prefix such as `/oci/`. All operations involve network
-I/O to the remote object store. Uses aioboto3 against OCI's
-S3-compatible API.
 
-For credential setup, see [OCI Setup](/home/setup/oci).
+`OCIVFS` mounts one Oracle Cloud Infrastructure Object Storage bucket: every
+object becomes a file and every `/` in a key a folder. It reaches OCI through
+the Amazon S3 Compatibility API. Credentials are set up on the
+[OCI page](/home/setup/oci).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[oci]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -30,56 +29,126 @@ config = OCIConfig(
     region=os.environ["OCI_REGION"],
     access_key_id=os.environ["OCI_ACCESS_KEY_ID"],
     secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
-    # Optional:
-    # endpoint_url="https://{namespace}.compat.objectstorage.{region}.oci.customer-oci.com",
-    # timeout=30,
-    # proxy="http://proxy:8080",
 )
-vfs = OCIVFS(config=config)
-ws = Workspace({"/oci": vfs}, mode=MountMode.READ)
+ws = Workspace({"/oci": OCIVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /oci && find /oci -name '*.csv'")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-`OCIVFS(config)` takes an `OCIConfig` object with the bucket name,
-OCI tenancy `namespace`, `region`, and Customer Secret Key credentials.
-The S3-compatible endpoint is auto-built from `namespace` + `region`
-unless `endpoint_url` is supplied. Both `READ` and `WRITE` modes are
-supported.
+`namespace` and `region` build the endpoint
+`https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com`;
+`endpoint_url` replaces it. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table oci start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL that replaces the one the provider derives. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `True` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>namespace</code><br />required | Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint_url` is set. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="bucket" type={"str"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"str"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set.
+</ResponseField>
+<ResponseField name="endpoint_url" type={"str"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+<ResponseField name="access_key_id" type={"str"} post={["secret"]}>
+  Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain.
+</ResponseField>
+<ResponseField name="secret_access_key" type={"str"} post={["secret"]}>
+  Secret access key paired with `access_key_id`.
+</ResponseField>
+<ResponseField name="session_token" type={"str"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="aws_profile" type={"str"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="path_style" type={"bool"} default={"True"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="proxy" type={"str"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="namespace" type={"str"} required>
+  Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint_url` is set.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table oci end */}
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_key_id` and `secret_access_key`, a Customer Secret Key, with
+   `session_token` for temporary credentials.
+2. `aws_profile`, a profile in `~/.aws/credentials`.
+3. The AWS credential chain: environment variables, then the instance or
+   container role.
+
+The user's group needs policies such as
+`Allow group <group> to read buckets in compartment <compartment>` and
+`Allow group <group> to manage objects in compartment <compartment>`
+(`read objects` for a read-only mount). A request the credentials may not make
+answers `Permission denied`.
+
+## Layout
+
+```text
+/oci/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
+```
+
+`/oci/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; OCI stores no folder objects.
+
+## Behavior
+
+- **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
+  so `/oci/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+- **Path style:** the S3 Compatibility API takes only path-style URLs, so
+  `path_style` defaults to `True`.
+
+## Integration
+
+OCI answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with OCI Object Storage mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with OCI mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md oci start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -87,7 +156,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OCI Object Storage mounted 
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -108,7 +177,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OCI Object Storage mounted 
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -130,194 +199,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OCI Object Storage mounted 
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md oci end */}
-
-The OCI VFS maps object keys to virtual paths under the mount
-prefix. OCI "directories" are prefix-based — there are no real
-directory objects.
-
-For example, if bucket `my-bucket` contains:
-
-```text
-data/users.csv
-data/logs/2026-04-01.jsonl
-config.json
-```
-
-Then mounting at `/oci/` exposes:
-
-```text
-/oci/
-  data/
-    users.csv
-    logs/
-      2026-04-01.jsonl
-  config.json
-```
-
-Path mapping: virtual `/oci/data/users.csv` maps to OCI key
-`data/users.csv`.
-
-## Cache
-
-The OCI VFS uses `IndexCacheStore` with `index_ttl = 600`
-(10 minutes). Directory listings are cached for up to 600 seconds before
-being refreshed from OCI. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
-
-## Integration
-
-What OCI answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On OCI |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.oci import OCIConfig, OCIVFS
-
-load_dotenv(".env.development")
-
-config = OCIConfig(
-    bucket=os.environ["OCI_BUCKET"],
-    namespace=os.environ["OCI_NAMESPACE"],
-    region=os.environ["OCI_REGION"],
-    access_key_id=os.environ["OCI_ACCESS_KEY_ID"],
-    secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
-)
-
-vfs = OCIVFS(config=config)
-
-
-async def main() -> None:
-    ws = Workspace({"/oci/": vfs}, mode=MountMode.READ)
-
-    r = await ws.shell("ls /oci/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("cat /oci/data/users.csv | head -n 5")
-    print(await r.stdout_str())
-
-    r = await ws.shell("tree /oci/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /oci/ -name '*.jsonl'")
-    print(await r.stdout_str())
-
-    r = await ws.shell("stat /oci/config.json")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-The OCI VFS supports the full set of shell commands since it operates
-on real file content (text, binary, JSON, CSV, etc.). Large files benefit
-from range reads to avoid downloading entire objects.
-
-### Read Commands
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `cat`           | Read file content                          |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type, modified) |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `nl`            | Number lines                               |
-| `du`            | Disk usage summary                         |
-| `file`          | Detect file type                           |
-| `strings`       | Extract printable strings from binary      |
-| `xxd`           | Hex dump                                   |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-
-### Text Processing
-
-| Command    | Notes                                       |
-| ---------- | ------------------------------------------- |
-| `awk`      | Pattern scanning and processing             |
-| `sed`      | Stream editor                               |
-| `tr`       | Translate or delete characters              |
-| `sort`     | Sort lines                                  |
-| `uniq`     | Remove duplicate lines                      |
-| `cut`      | Extract fields/columns                      |
-| `join`     | Join lines on a common field                |
-| `paste`    | Merge lines side by side                    |
-| `column`   | Columnate output                            |
-| `fold`     | Wrap lines to a specified width             |
-| `expand`   | Convert tabs to spaces                      |
-| `unexpand` | Convert spaces to tabs                      |
-| `fmt`      | Simple text formatter                       |
-| `rev`      | Reverse lines                               |
-| `tac`      | Concatenate and print in reverse            |
-| `look`     | Display lines beginning with a given string |
-| `shuf`     | Shuffle lines                               |
-| `tsort`    | Topological sort                            |
-| `comm`     | Compare two sorted files                    |
-| `cmp`      | Compare two files byte by byte              |
-| `diff`     | Compare files line by line                  |
-| `patch`    | Apply a diff patch                          |
-| `iconv`    | Character encoding conversion               |
-
-### File Operations
-
-| Command  | Notes                                 |
-| -------- | ------------------------------------- |
-| `cp`     | Copy files                            |
-| `mv`     | Move/rename files                     |
-| `rm`     | Remove files                          |
-| `mkdir`  | Create directories                    |
-| `touch`  | Create empty file or update timestamp |
-| `ln`     | Create symbolic links                 |
-| `tee`    | Write stdin to file and stdout        |
-| `mktemp` | Create temporary file                 |
-| `split`  | Split file into pieces                |
-| `csplit` | Split file by context                 |
-
-### Path Utilities
-
-| Command    | Notes                      |
-| ---------- | -------------------------- |
-| `basename` | Strip directory from path  |
-| `dirname`  | Strip filename from path   |
-| `realpath` | Resolve path               |
-| `readlink` | Print symbolic link target |
-| `ls`       | List directory contents    |
-
-### Compression
-
-| Command  | Notes                 |
-| -------- | --------------------- |
-| `gzip`   | Compress files        |
-| `gunzip` | Decompress gzip files |
-| `zip`    | Create zip archives   |
-| `unzip`  | Extract zip archives  |
-| `tar`    | Archive files         |
-| `zcat`   | Cat compressed files  |
-| `zgrep`  | Grep compressed files |
-
-### Encoding
-
-| Command  | Notes                |
-| -------- | -------------------- |
-| `base64` | Base64 encode/decode |
-
-## Use Cases
-
-- **AI agents accessing OCI data**: Mount OCI buckets for agents to read and process datasets
-- **Data pipelines**: Read and write OCI objects with shell-like commands
-- **FUSE mounting**: Expose OCI buckets through a virtual FUSE mount for external tools

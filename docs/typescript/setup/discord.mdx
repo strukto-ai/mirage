@@ -1,90 +1,153 @@
 ---
 title: Discord
 icon: /images/discord-logo.svg
-description: Mount Discord guilds, channels, and members as a virtual filesystem from Node or the browser.
+description: Virtualize Discord servers from Node or the browser.
 ---
 
-MIRAGE ships `DiscordVFS` in **two runtimes**:
+`DiscordVFS` mounts the Discord servers a bot is in as read-only files: each
+channel as one folder per day of messages and attachments, plus members. The
+bot token is set up on the [Discord page](/home/setup/discord).
 
-- `@struktoai/mirage-node`, talks to `https://discord.com/api/v10/*` directly using a bot token.
-- `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/discord/*` to `https://discord.com/api/v10/*`. The browser only ever sees the proxy URL.
-
-Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<channel>/<date>/{chat.jsonl,files/}`, `/discord/<guild>/members/`) and the same shell commands, and both pair with the [discord CLI](/typescript/cli/discord) for acting on the server.
-
-## Get a bot token
-
-1. Visit the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
-2. Under **Bot**, add a bot user and copy the **Bot Token**.
-3. Under **Bot → Privileged Gateway Intents**, enable:
-   - **Server Members Intent**, required for `/discord/<guild>/members/` listings.
-   - **Message Content Intent**, required to read message text in `.jsonl` history files.
-4. Under **OAuth2 → URL Generator**, select the `bot` scope and the following bot permissions:
-   - `Read Messages/View Channels`
-   - `Read Message History`
-   - `Send Messages` (only if you'll use `discord send`)
-   - `Add Reactions` (only if you'll use `discord react`)
-5. Open the generated URL in a browser and invite the bot to your guild.
+## Install
 
 ```bash
-# .env.development
-DISCORD_BOT_TOKEN=...
+npm install @struktoai/mirage-node
 ```
 
-## Node (server-side)
-
-```bash
-pnpm add @struktoai/mirage-node
-```
+## Configure
 
 ```ts
 import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const discord = new DiscordVFS({
-  token: process.env.DISCORD_BOT_TOKEN!,
-})
-
+const discord = new DiscordVFS({ token: process.env.DISCORD_BOT_TOKEN! })
 const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
-const res = await ws.shell('ls /discord/')
-console.log(res.stdoutText)
+
+const result = await ws.shell('ls /discord && tree -L 2 /discord')
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-### Config
+`startTime` and `endTime` bound the mount to a time range.
+
+### Fields
 
 {/* generated: config-table discord start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Discord bot token, sent as `Authorization: Bot <token>`. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://discord.com/api/v10'` | Discord API root; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"string"} required post={["secret"]}>
+  Discord bot token, sent as `Authorization: Bot <token>`.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://discord.com/api/v10'"}>
+  Discord API root; override to point at a fake or proxy.
+</ResponseField>
+<ResponseField name="startTime" type={"string"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="endTime" type={"string"}>
+  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table discord end */}
 
-## Browser
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+`token` is a bot token, sent with Discord's `Bot <token>` scheme. The bot
+needs:
+
+- **Message Content Intent**: without it, message text and attachments come
+  back empty.
+- **Server Members Intent**: for the `members/` folder; without it, `members/`
+  is empty.
+- The **View Channels** and **Read Message History** permissions in each
+  server it reads. The mount never posts.
+
+A channel the bot cannot read answers `Permission denied`: `ls` names it and
+fails, `find` reports it and walks on. A channel deleted since it was listed
+answers `No such file or directory`.
+
+## Layout
+
+```text
+/discord/
+  Acme Labs__1098765432101234567/
+    channels/
+      general__1098765432101234570/
+        2026-11-16/
+          chat.jsonl
+          files/
+            diagram__1174567890123456789.png
+    members/
+      alice__1012345678901234567.json
 ```
 
-The browser package never sees the bot token. Instead, point it at a relative URL that your backend proxies to `https://discord.com/api/v10/*`, attaching the `Authorization: Bot …` header server-side.
+- **Names:** a server, channel, member or attachment is
+  `<display-name>__<id>`, so the CLI's flags take the snowflake id from the
+  path and two entities with one name never collide. Spaces, apostrophes and
+  emoji are kept; only `/` becomes `∕` (U+2215). Quote names with spaces.
+  `stat` also shows the id.
+- **Servers:** the root lists one folder per server the bot is in.
+- **`channels/`:** text channels (types 0, 5 and 15), each with one folder per
+  day for the 30 days up to its newest message, so an inactive channel shows
+  days around its last activity, not today.
+- **`chat.jsonl`:** one message per line as Discord's API returns it, with
+  `.id`, `.content`, `.author.username` and `.attachments`.
+- **`files/`:** the attachments posted that day, named
+  `<stem>__<attachment-id>.<ext>`. `cat` downloads one from Discord's CDN.
+- **`members/`:** one file per member, holding the member as Discord's API
+  returns it.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/discord start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxyUrl</code><br />required | URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment. |
-| <code style={{ whiteSpace: 'nowrap' }}>getHeaders</code><br />secret | Function returning extra headers sent with every request to the proxy, such as your own session credential. |
+- **Read only:** send, edit, react, open threads and polls, look up members
+  and servers, and search with the [`discord`](/typescript/cli/discord) CLI.
+- **Search:** `grep -r` and `rg` read every day's `chat.jsonl` under the folder
+  they walk, one history fetch per day, so name a day folder or a date glob
+  for a large channel. Discord's own search is not used: it cannot say which
+  days hold a word, since a reply carries the message it answers
+  (`referenced_message`).
+- **Time scope:** `startTime` and `endTime` bound the mount with RFC 3339
+  timestamps that carry a timezone, at most to the millisecond. Start is
+  inclusive, end exclusive, and an unset bound is open. Listings then cover
+  that period instead of the recent window, day folders use UTC, messages are
+  picked by creation time and attachments follow their messages. Direct
+  paths, `stat`, date globs, `grep` and `rg` cannot leave the scope. Members
+  and server metadata stay visible. The scope applies to the mount, not to
+  the `discord` CLI; rebuild the mount to change it.
+- **Upstream changes:** a `read` mount refuses writes through Mirage; it does
+  not freeze edits or deletions made in Discord.
+- **Rate limits:** many reads of `chat.jsonl` can hit Discord's per-route rate
+  limits. A read that gets a 429 waits the `retry_after` Discord sends and
+  retries; one that outlasts the retries fails, so slow down or name specific
+  channels.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/discord end */}
+## Browser
 
-### 1. Server: minimal proxy
+The browser `DiscordVFS` from `@struktoai/mirage-browser` never sees the
+token: a proxy on the backend holds it and forwards `/api/discord/*` to
+`https://discord.com/api/v10/*`.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const discord = new DiscordVFS({ proxyUrl: '/api/discord' })
+const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
+```
+
+- The proxy is required: Discord sets no permissive CORS headers for the bot
+  API, so a call to `https://discord.com/api/v10/*` from the page fails.
+- The proxy sends `Authorization: Bot <token>`, not `Bearer`; `Bearer` answers
+  `401 Unauthorized`.
+- `getHeaders` returns extra headers for each request to the proxy, such as a
+  per-user session credential.
+
+<AccordionGroup>
+  <Accordion title="Proxy server">
 
 ```ts
 import { createServer } from 'node:http'
@@ -122,46 +185,58 @@ createServer(async (req, res) => {
 }).listen(8902, '127.0.0.1')
 ```
 
-<Warning>
-Discord bot tokens use the `Bot <token>` auth scheme, **not** `Bearer`. Sending `Bearer …` returns `401 Unauthorized`.
-</Warning>
+  </Accordion>
+  <Accordion title="Browser fields">
 
-### 2. Browser: wire it up
+{/* generated: config-table browser/discord start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="startTime" type={"string"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="endTime" type={"string"}>
+  End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open.
+</ResponseField>
+<ResponseField name="proxyUrl" type={"string"} required>
+  URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.
+</ResponseField>
+<ResponseField name="getHeaders" type={"function"} post={["secret"]}>
+  Function returning extra headers sent with every request to the proxy, such as your own session credential.
+</ResponseField>
 
-```ts
-import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/discord end */}
 
-const discord = new DiscordVFS({
-  proxyUrl: '/api/discord',
-  // For multi-tenant setups, return per-request auth headers:
-  // getHeaders: async () => ({ Authorization: `Bearer ${userJwt}` }),
-})
+  </Accordion>
+</AccordionGroup>
 
-const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
-const res = await ws.shell('ls /discord/')
-console.log(res.stdoutText)
-```
+## Integration
 
-<Warning>
-Calling `https://discord.com/api/v10/*` directly from a browser fails CORS. The proxy is mandatory, Discord does not set permissive CORS headers for the bot API.
-</Warning>
+Discord answers these commands through its own API, so less is read. See
+[Integration](/home/integration/overview).
+
+- `head` and `tail`: on a `chat.jsonl` file, the messages API answers instead
+  of a download of the whole day.
+- `tail -f`: each new message as it is posted.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>`.
 
 {/* generated: vfs-md discord start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `discord`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -176,25 +251,19 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
           <username>__<user-id>.json    # member profile
     ```
 
-    - A guild, channel, member or attachment name is `<display-name>__<id>`.
-      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
-      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
-      names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.content`,
-      `.author.username` and `.attachments`. A day's `files/` may be empty.
-    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included. Users and
-      channel metadata stay available as context.
-    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
-      directory. Under a channel that reads every listed day, attachments
-      included: they download from the CDN, and binary ones such as JPG or
-      PDF produce noise.
+    - A guild, channel, member or attachment name is `<display-name>__<id>`;
+      only `/` becomes `∕` (U+2215). `ls` the parent for exact names and
+      quote names with spaces.
+    - `chat.jsonl` holds one message per line (`.content`,
+      `.author.username`, `.attachments`).
+    - Without `start_time`/`end_time`, a channel lists the 30 days up to its
+      newest message; a date glob finds earlier days.
+    - `grep -r` on a channel reads every listed day, attachments included;
+      they download from the CDN and binary ones produce noise.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -202,7 +271,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -242,23 +311,17 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
           <username>__<user-id>.json    # member profile
     ```
 
-    - A guild, channel, member or attachment name is `<display-name>__<id>`.
-      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
-      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
-      names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.content`,
-      `.author.username` and `.attachments`. A day's `files/` may be empty.
-    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included. Users and
-      channel metadata stay available as context.
-    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
-      directory. Under a channel that reads every listed day, attachments
-      included: they download from the CDN, and binary ones such as JPG or
-      PDF produce noise.
+    - A guild, channel, member or attachment name is `<display-name>__<id>`;
+      only `/` becomes `∕` (U+2215). `ls` the parent for exact names and
+      quote names with spaces.
+    - `chat.jsonl` holds one message per line (`.content`,
+      `.author.username`, `.attachments`).
+    - Without `start_time`/`end_time`, a channel lists the 30 days up to its
+      newest message; a date glob finds earlier days.
+    - `grep -r` on a channel reads every listed day, attachments included;
+      they download from the CDN and binary ones produce noise.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
     ## Supported Unix Commands for VFS
 
@@ -280,98 +343,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md discord end */}
-
-The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned **directories** for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. Each day directory holds `chat.jsonl` (one JSON object per message) and a `files/` directory with that day's attachments, `cat`'ing a blob downloads it from the Discord CDN. Soft errors (403 missing permissions, 404 unknown channel, 429 rate limit) on a single day are swallowed so listings, `find`, and `grep` keep working across the rest of the tree.
-
-Display names keep their original spelling from Discord (spaces, apostrophes, emoji are all preserved). Only `/` is replaced with `∕` (U+2215) so it cannot collide with a directory boundary. The Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so VFS-specific commands can extract it without an extra lookup, and so two same named entities never collide. Quote names containing spaces in shell commands.
-
-## Shell commands
-
-Every standard MIRAGE shell command works on the mounted Discord tree:
-
-| Command         | Notes                                                            |
-| --------------- | ---------------------------------------------------------------- |
-| `ls`            | List guilds, channels, members, dates, attachments               |
-| `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment     |
-| `head` / `tail` | Smart: uses messages API for file scope                          |
-| `grep` / `rg`   | Pattern search (file or directory level)                         |
-| `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all)   |
-| `wc`            | Line/word/byte counts                                            |
-| `stat`          | File metadata (name, size, type, ID via `extra`)                 |
-| `find`          | Recursive search with `-name`, `-maxdepth`                       |
-| `tree`          | Directory tree view                                              |
-| `pwd` / `cd`    | Navigate the virtual tree                                        |
-| `echo` (glob)   | Glob expansion via the derived `glob` op                         |
-
-Acting on Discord (sending, editing, reactions, threads, polls,
-member and guild info, search) goes through the
-[discord CLI](/typescript/cli/discord) when installed; the mounted
-tree stays read-oriented.
-
-## Troubleshooting
-
-<AccordionGroup>
-  <Accordion title="Empty `/discord/<guild>/members/` listing">
-    Listing members requires the **Server Members Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, `members/` returns an empty directory and `discord members` fails.
-  </Accordion>
-  <Accordion title="Empty `content` field in JSONL messages">
-    Reading message text requires the **Message Content Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, the `content` field on every message is empty.
-  </Accordion>
-  <Accordion title="`401 Unauthorized` from the proxy">
-    Discord bot tokens use the `Authorization: Bot <token>` scheme, **not** `Bearer`. Double-check the proxy server attaches the correct prefix.
-  </Accordion>
-  <Accordion title="CORS error in browser">
-    The browser cannot call `https://discord.com/api/v10/*` directly, Discord does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.
-  </Accordion>
-  <Accordion title="`rate_limited` from Discord">
-    `DiscordVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate guild / channel / member listings, but high-volume reads of `.jsonl` files can still hit Discord's per-route rate limits. The HTTP transport retries 429 responses honoring `retry_after` up to 3 times, repeated failures usually mean you should slow down or scope reads to specific channels.
-  </Accordion>
-</AccordionGroup>
-
-## Integration
-
-What Discord answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Discord |
-| --- | --- |
-| `tail -f` | Each new message as it is posted |
-
-## Examples
-
-- [`examples/typescript/vfs/discord/discord.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord.ts), shell commands against `/discord/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
-- [`examples/typescript/vfs/discord/discord_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
-- [`examples/typescript/vfs/discord/discord_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord_fuse.ts), FUSE-mount the workspace so external processes can browse `/discord/` as a real filesystem.
-- [`examples/browser/vfs/discord/`](https://github.com/strukto-ai/mirage/tree/main/examples/browser/vfs/discord), proxy server + `@struktoai/mirage-browser` DiscordVFS demo.
-
-See [Python Discord VFS](/python/vfs/discord) for the equivalent Python wiring.
-
-## Time scope
-
-Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
-`start_time`/`end_time` to Python; `startTime`/`endTime` to the TypeScript
-constructor). Bounds are RFC3339 timestamps with an explicit timezone and
-at most millisecond precision. Start is inclusive; end is exclusive.
-An omitted or null bound is open. Start must precede end.
-
-```yaml
-mounts:
-  /history:
-    vfs: discord
-    mode: read
-    config:
-      token: "<bot-token>"
-      start_time: "2026-06-01T10:00:00Z"
-      end_time: "2026-06-02T00:00:00Z"
-```
-
-With a bound configured, channel listings cover the selected period rather
-than the default recent window. Day directories use UTC. Messages are selected
-by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files. User/member
-and channel/server metadata remain visible as context.
-
-These settings apply to the VFS, not to separately installed account CLIs.
-`mode: read` prevents mount writes; it does not freeze upstream edits or deletions.
-Rebuild/remount the VFS to change its scope so cached listings and bytes are cleared.

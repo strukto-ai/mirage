@@ -22,12 +22,9 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.lancedb.config import LanceDBConfig
 
 VFS_MD = """\
-- A LanceDB table, exposed as a filesystem.
 - Directories are the configured group-by columns; descending one narrows
   a filter.
-- Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file.
-- `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
-  usual."""
+- Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file."""
 
 _REMOTE_SCHEMES = ("s3://", "gs://", "az://", "hf://", "db://")
 

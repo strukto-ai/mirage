@@ -1,42 +1,137 @@
 ---
 title: GridFS
 icon: /images/mongodb-logo.svg
-description: Set up a MongoDB connection for the GridFS file-storage VFS.
+description: Store workspace files in a MongoDB GridFS bucket.
 ---
 
-GridFS stores files inside MongoDB (metadata in `fs.files`, content chunks in `fs.chunks`). The GridFS VFS only needs a MongoDB connection URI plus a database name; the connection is set up exactly like the [MongoDB VFS](/home/setup/mongodb).
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-## Credentials
+GridFS keeps files inside MongoDB: names and sizes in `<bucket>.files`,
+content in chunks in `<bucket>.chunks`. Slash-separated file names become
+folders.
 
-### 1. Get Your Connection URI
+## Setup
 
-#### Local MongoDB
-
-```bash
-# Default local instance
-MONGODB_URI=mongodb://localhost:27017
-```
-
-#### MongoDB Atlas (Cloud)
-
-1. Go to https://cloud.mongodb.com
-1. Select your cluster -> **Connect** -> **Drivers**
-1. Copy the connection string:
-   ```
-   mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
-   ```
-
-#### Self-hosted with Authentication
+Get a MongoDB connection URI as for the [MongoDB VFS](/home/setup/mongodb),
+for a user with `readWrite` on the database that holds the bucket (`read` for
+a `read` mount). In Atlas, the built-in **Read and write to any database**
+role also works. Then export it:
 
 ```bash
-MONGODB_URI=mongodb://username:password@host:27017/?authSource=admin
+export MONGODB_URI="mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/"
 ```
 
-### 2. Set Environment Variables
+Python needs `pip install "mirage-ai[gridfs]"`; Node needs the `mongodb` peer
+dependency (`pnpm add @struktoai/mirage-node mongodb`).
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /gridfs:
+        vfs: gridfs
+        mode: write
+        config:
+          uri: ${MONGODB_URI}
+          database: app
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id files
+    mirage shell -w files -c 'ls /gridfs'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.gridfs import GridFSConfig, GridFSVFS
+
+    config = GridFSConfig(uri=os.environ["MONGODB_URI"], database="app")
+    ws = Workspace({"/gridfs": GridFSVFS(config)}, mode=MountMode.WRITE)
+    result = await ws.shell("ls /gridfs")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { GridFSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/gridfs': new GridFSVFS({
+          uri: process.env.MONGODB_URI!,
+          database: 'app',
+        }),
+      },
+      { mode: MountMode.WRITE },
+    )
+    const result = await ws.shell('ls /gridfs')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/gridfs/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+```
+
+- The bucket is `fs` unless `bucket` names another; `key_prefix` scopes the
+  mount to the files under that prefix.
+- A write adds a revision and the newest one is read. `rm` moves every
+  revision to a trash no mount path reaches; `keep_revisions` bounds how many
+  are kept.
+- `mkdir` stores a zero-byte `data/` marker so an empty folder stays visible.
+
+## Sample runs
 
 ```bash
-# .env.development
-MONGODB_URI=mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/
+$ tree /gridfs
+/gridfs
+|-- data
+|   |-- config.json
+|   `-- file.txt
+`-- reports
+    `-- q1.csv
+
+3 directories, 3 files
 ```
 
-For usage, see the [Python GridFS VFS](/python/vfs/gridfs) or the [TypeScript GridFS setup](/typescript/setup/gridfs).
+```bash
+$ grep -r west /gridfs
+/gridfs/reports/q1.csv:west,120
+```
+
+```bash
+$ find /gridfs -name '*.csv'
+/gridfs/reports/q1.csv
+```
+
+Every command that writes works on a `write` mount; `mv` renames every
+revision on the server.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/gridfs">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/gridfs">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

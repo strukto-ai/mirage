@@ -13,10 +13,7 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
 
 VFS_MD = """\
-- One ChromaDB collection, mounted read only.
-- Paths are document slugs from the collection's path tree.
-- Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
-  `grep`. Writes are not supported."""
+- Paths are document slugs from the collection's path tree."""
 
 
 class ChromaVFS(BaseVFS):
