@@ -18,6 +18,8 @@ import { ProcessTable } from '../../../execution/process/table.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { Runtime } from '../../../runtime/base.ts'
+import { HOST } from '../../../runtime/constants.ts'
+import { MachineName } from '../../../execution/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
@@ -239,4 +241,30 @@ describe('an engine', () => {
       await ws.close()
     }
   })
+})
+
+/** A runtime whose programs run on the host, under its entry's name. */
+class HostRun extends Runtime {
+  readonly name = 'run'
+
+  constructor() {
+    super({}, ['perl'])
+  }
+
+  override get machine(): MachineName {
+    return new MachineName(HOST, this.name)
+  }
+}
+
+it('has a script read the engine programs run on by default', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, machines: [new ProcessReach(), new HostRun()] },
+  )
+  try {
+    expect(await shown(ws, 'echo $(hostname) $(nproc)')).toBe('mirage 1\n')
+    expect(await shown(ws, 'hostname')).toMatch(/^mirage\nmirage\n/)
+  } finally {
+    await ws.close()
+  }
 })

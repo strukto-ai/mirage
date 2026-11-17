@@ -131,13 +131,37 @@ def _default_machine(
     return every[0]
 
 
+def _default_engine(
+    routing: RouteDecision[RuntimeIdentity], host: str
+) -> str | None:
+    """The ``in_process`` machine of the engine programs run on by
+    default, in ``_default_machine``'s order; None when a machine of
+    its own comes first.
+
+    Args:
+        routing (RouteDecision): the line's placement.
+        host (str): the host's id.
+    """
+    bindings = routing.bindings
+    for runtime in (bindings.get(EXTERNAL_COMMANDS), *bindings.values()):
+        if runtime is None:
+            continue
+        machine = Runtime.require(runtime).machine
+        if machine is not None and machine.provider == IN_PROCESS:
+            return str(machine)
+        if _machine_of(runtime, host) is not None:
+            return None
+    return None
+
+
 def machine_scope(
     processes: ProcessTable, name: str | None, workspace: bool = False
 ) -> MachineScope | None:
     """Which machines a command answers for: the one ``--machine``
     names; in a command substitution, whose reader
-    is a script, only the default one, the workspace when there is no
-    machine; otherwise every one. The host
+    is a script, only the default one, an engine's when programs run on
+    it by default, the workspace when there is no machine; otherwise
+    every one. The host
     counts only while a runtime runs programs on it, so a workspace that
     runs none says nothing of it. An engine's ``in_process`` machine runs
     in the workspace, so it answers only where the workspace does, with
@@ -189,6 +213,13 @@ def machine_scope(
     substituted = (
         frame is not None and frame.substitution and routing is not None
     )
+    default = (
+        _default_engine(routing, host)
+        if substituted and routing is not None
+        else None
+    )
+    if default is not None and default in engines:
+        return MachineScope((), engines=(default,))
     if substituted and routing is not None and len(every) > 1:
         return MachineScope((_default_machine(routing, every, host),))
     return MachineScope(

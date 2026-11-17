@@ -17,8 +17,10 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import HOST
 from mirage.runtime.types import RunResult, RuntimeReach
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
@@ -202,5 +204,30 @@ async def test_an_engine_answers_as_the_workspace_never_as_the_server():
         )
         assert "in_process:engine" in await shown(ws, "free")
         assert await shown(ws, "uptime") == ""
+    finally:
+        await ws.close()
+
+
+class HostRun(Engine):
+    """A runtime whose programs run on the host, under its entry's name."""
+
+    name = "run"
+    reach: RuntimeReach = "process"
+
+    @property
+    def machine(self) -> MachineName:
+        return MachineName(HOST, self.name)
+
+
+@pytest.mark.asyncio
+async def test_a_script_reads_the_engine_programs_run_on_by_default():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines=[ProcessReach(["hold"]), HostRun(["perl"])],
+    )
+    try:
+        assert await shown(ws, "echo $(hostname) $(nproc)") == "mirage 1\n"
+        assert (await shown(ws, "hostname")).startswith("mirage\nmirage\n")
     finally:
         await ws.close()

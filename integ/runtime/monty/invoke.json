@@ -256,6 +256,30 @@
       ]
     },
     {
+      "id": "an_engine_answers_resource_views_as_mirage",
+      "world": {
+        "machines": {
+          "monty": { "provider": "in_process", "runtime": "monty", "captures": ["python3"] },
+          "local": { "provider": "host", "captures": ["perl"] }
+        }
+      },
+      "steps": [
+        {
+          "command": "nproc --machine monty; hostname --machine monty; lscpu --machine monty",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\nmirage\nByte Order:                              Little Endian\nCPU(s):                                  1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo $(nproc) $(hostname)",
+          "expect": { "exit": 0, "stdout": "1 mirage\n", "stderr": "" }
+        }
+      ],
+      "note": "Monty runs in Mirage, so once a line runs programs past it nproc, hostname, lscpu and free answer for its machine with Mirage's own figures, never the host's; --machine names it, and a script reads it when programs run on it by default."
+    },
+    {
       "id": "background_runs_are_processes_on_their_machine",
       "world": {
         "machines": {

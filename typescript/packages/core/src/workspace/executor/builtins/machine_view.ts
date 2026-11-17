@@ -94,10 +94,25 @@ function defaultMachine(
 }
 
 /**
+ * The `in_process` machine of the engine programs run on by default, in
+ * `defaultMachine`'s order; null when a machine of its own comes first.
+ * Mirrors Python's `_default_engine`.
+ */
+function defaultEngine(bindings: Record<string, unknown>, host: string): string | null {
+  for (const runtime of [bindings[EXTERNAL_COMMANDS], ...Object.values(bindings)]) {
+    if (runtime == null) continue
+    const machine = (runtime as { machine?: MachineName | null }).machine
+    if (machine?.provider === IN_PROCESS) return machine.toString()
+    if (machineOf(runtime, host) !== null) return null
+  }
+  return null
+}
+
+/**
  * Which machines a command answers for: the one `--machine` names; in a
  * command substitution, whose reader is a script, only
- * the default one, the workspace when there is no machine; otherwise every
- * one. The host counts only while a runtime
+ * the default one, an engine's when programs run on it by default, the
+ * workspace when there is no machine; otherwise every one. The host counts only while a runtime
  * runs programs on it. A command that also answers for the workspace passes
  * `workspace`, which is `mirage` to `--machine` as it is to `ps`. An
  * engine's `in_process` machine runs in the workspace, so it answers only
@@ -136,6 +151,9 @@ export function machineScope(
       : { ids: [], picked: true, several: false, workspace: false, engines: [engine] }
   }
   const substituted = frame?.substitution === true && routing !== undefined
+  const fallback = substituted ? defaultEngine(routing.bindings, host) : null
+  if (fallback !== null && engines.includes(fallback))
+    return { ids: [], picked: false, several: false, workspace: false, engines: [fallback] }
   if (substituted && every.length > 1)
     return {
       ids: [defaultMachine(routing.bindings, every, host)],
