@@ -492,7 +492,7 @@ export function wordRefusalError(
   kind: WordRefusalKind = 'invalid',
 ): UsageError {
   const [message, code] = invalidArgumentError(cmdName, option, value, choices, exitCode, kind)
-  return new UsageError(decodeText(message).replace(/\n+$/, ''), code)
+  return new UsageError(rstripNewlines(decodeText(message)), code)
 }
 
 /**
