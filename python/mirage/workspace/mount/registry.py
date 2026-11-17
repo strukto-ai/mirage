@@ -798,11 +798,15 @@ class MountRegistry:
         return candidates[0] if candidates else None
 
     def _fallback_candidates(
-        self, cmd_name: str, access: SessionAccess | None = None
+        self,
+        cmd_name: str,
+        access: SessionAccess | None = None,
+        visible: list[MountEntry] | None = None,
     ) -> list[MountEntry]:
-        visible = self.visible_mounts(
-            access.session_id if access is not None else None
-        )
+        if visible is None:
+            visible = self.visible_mounts(
+                access.session_id if access is not None else None
+            )
         candidates = (
             [self._root]
             if self._root is not None and self._root in visible
@@ -901,7 +905,7 @@ class MountRegistry:
             return [mount]
         if mount is not None and path_scopes:
             return []
-        return self._fallback_candidates(cmd_name, access)
+        return self._fallback_candidates(cmd_name, access, visible)
 
     def invocation_candidates(
         self,

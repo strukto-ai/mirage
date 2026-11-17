@@ -258,18 +258,17 @@ class Caller:
 class CallerToken:
     """What one binding changed, for its reset to put back.
 
-    A reset restores only the fields its binding set, so bindings undone
-    out of order leave each other's fields alone. Undone in order, the
-    caller is still the one the binding made, and ``before`` is the
-    answer as it stands.
+    A reset restores only the fields its binding set, the ones ``after``
+    holds apart from ``before``, so bindings undone out of order leave
+    each other's fields alone. Undone in order, the caller is still the
+    one the binding made, and ``before`` is the answer as it stands,
+    so the fields are read only for a reset out of order.
 
     Args:
-        names (tuple[str, ...]): the fields the binding set.
         before (Caller): the caller the binding replaced.
         after (Caller): the caller the binding made.
     """
 
-    names: tuple[str, ...]
     before: Caller
     after: Caller
 
@@ -312,24 +311,14 @@ def bind_caller(caller: Caller) -> CallerToken:
     """
     before = _caller.get()
     _caller.set(caller)
-    names = tuple(
-        name
-        for name in Caller.__slots__
-        if getattr(caller, name) is not getattr(before, name)
-    )
-    return CallerToken(names, before, caller)
+    return CallerToken(before, caller)
 
 
 def _bind(**changes: Any) -> CallerToken:
     before = _caller.get()
     after = before.changed(changes)
     _caller.set(after)
-    names = tuple(
-        name
-        for name, value in changes.items()
-        if value is not getattr(before, name)
-    )
-    return CallerToken(names, before, after)
+    return CallerToken(before, after)
 
 
 def reset_caller(token: CallerToken) -> None:
@@ -342,7 +331,12 @@ def reset_caller(token: CallerToken) -> None:
     if current is token.after:
         _caller.set(token.before)
         return
-    restored = {name: getattr(token.before, name) for name in token.names}
+    before, after = token.before, token.after
+    restored = {
+        name: getattr(before, name)
+        for name in Caller.__slots__
+        if getattr(after, name) is not getattr(before, name)
+    }
     _caller.set(current.changed(restored))
 
 

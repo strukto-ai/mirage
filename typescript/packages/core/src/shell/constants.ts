@@ -15,6 +15,16 @@
 import { compareCodePoints } from '../utils/sort.ts'
 import { BuiltinGroup, BuiltinTier, NodeType, ShellBuiltin } from './types.ts'
 
+// A word that reads as itself in an argument list: no quoting, expansion,
+// glob, brace or tilde character, ASCII only. Its fields are its text, so the
+// shell is framed as for any word but not asked to expand it.
+export const PLAIN_WORD = /^[A-Za-z0-9_./:%+,=@-]+$/
+export const PLAIN_WORD_TYPES: ReadonlySet<string> = new Set([
+  NodeType.WORD,
+  NodeType.COMMAND_NAME,
+  NodeType.NUMBER,
+])
+
 // How deep the shell may re-enter itself: function calls, sourced files,
 // `eval` lines and nested shells (`bash -c`, a script) together. bash limits
 // none of them unless FUNCNEST names a limit on functions; mirage serves every

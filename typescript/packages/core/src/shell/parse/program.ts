@@ -16,16 +16,14 @@ import { ShellTreeNode } from '../../rs/shell.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 /** One parse of a line: its tree, where each of its chars sits in the line as
- * typed, and the references that keep it readable. Mirrors Python's
- * ParsedProgram. */
+ * typed, and the references that keep it readable. Each node read has one
+ * wrapper, kept until the final release. Mirrors Python's ParsedProgram. */
 export class ParsedProgram {
   private parsedRoot: ProgramNode | undefined
-  private cachedChildren = new WeakMap<
-    ProgramNode,
-    { all?: ProgramNode[]; named?: ProgramNode[] }
-  >()
+  private nodes = new Map<number, ProgramNode>()
   references = 1
   readonly readRows = new Map<number, number>()
+  readonly lineRows = new Map<number, number>()
   private released = false
 
   private sourceOffsets: Uint32Array | undefined
@@ -35,7 +33,7 @@ export class ParsedProgram {
     root: ShellTreeNode,
   ) {
     this.sourceOffsets = root.offsets
-    this.parsedRoot = new ProgramNode(root, this)
+    this.parsedRoot = this.wrap(root)
   }
 
   get root(): ProgramNode {
@@ -43,18 +41,16 @@ export class ParsedProgram {
     return this.parsedRoot
   }
 
-  children(node: ProgramNode, named: boolean): ProgramNode[] {
+  /** The one wrapper of a node of this program, built on its first read.
+   * Mirrors Python's wrap. */
+  wrap(node: ShellNode): ProgramNode {
     this.check()
-    let cached = this.cachedChildren.get(node)
-    if (cached === undefined) {
-      cached = {}
-      this.cachedChildren.set(node, cached)
+    let wrapped = this.nodes.get(node.id)
+    if (wrapped === undefined) {
+      wrapped = new ProgramNode(node, this)
+      this.nodes.set(node.id, wrapped)
     }
-    const key = named ? 'named' : 'all'
-    cached[key] ??= (named ? node.borrowed.namedChildren : node.borrowed.children).map(
-      (child) => new ProgramNode(child, this),
-    )
-    return [...cached[key]]
+    return wrapped
   }
 
   get original(): string {
@@ -91,12 +87,14 @@ export class ParsedProgram {
     if (this.references === 0) {
       const borrowed = this.parsedRoot?.borrowed
       if (borrowed instanceof ShellTreeNode) borrowed.tree.dispose()
-      this.cachedChildren = new WeakMap()
+      for (const node of this.nodes.values()) node.forget()
+      this.nodes = new Map()
       this.parsedRoot = undefined
       this.sourceOffsets = undefined
       this.originalText = ''
       this.newlines = null
       this.readRows.clear()
+      this.lineRows.clear()
     }
   }
 
@@ -124,8 +122,12 @@ export class ParsedProgram {
 }
 
 /** A node of a parsed program; every read checks the program is still held.
- * The wrappers of a node's children are built once and kept, as in Python. */
+ * Its program builds it once (`ParsedProgram.wrap`), and the wrappers of its
+ * parent and children are read once and kept, as in Python. */
 export class ProgramNode implements ShellNode {
+  private up: ProgramNode | null | undefined
+  private all: ProgramNode[] | undefined
+  private named: ProgramNode[] | undefined
   constructor(
     readonly borrowed: ShellNode,
     readonly program: ParsedProgram,
@@ -133,6 +135,12 @@ export class ProgramNode implements ShellNode {
   private get node(): ShellNode {
     this.program.check()
     return this.borrowed
+  }
+  /** Drop the wrappers it keeps, as its program's final release does. */
+  forget(): void {
+    this.up = undefined
+    this.all = undefined
+    this.named = undefined
   }
   get heredoc() {
     return this.node.heredoc
@@ -187,16 +195,22 @@ export class ProgramNode implements ShellNode {
     return this.wrap(this.node.child(index))
   }
   get children(): ProgramNode[] {
-    return this.program.children(this, false)
+    const node = this.node
+    this.all ??= node.children.map((child) => this.program.wrap(child))
+    return [...this.all]
   }
   get namedChildren(): ProgramNode[] {
-    return this.program.children(this, true)
+    const node = this.node
+    this.named ??= node.namedChildren.map((child) => this.program.wrap(child))
+    return [...this.named]
   }
   private wrap(node: ShellNode | null): ProgramNode | null {
-    return node === null ? null : new ProgramNode(node, this.program)
+    return node === null ? null : this.program.wrap(node)
   }
   get parent(): ProgramNode | null {
-    return this.wrap(this.node.parent)
+    const node = this.node
+    if (this.up === undefined) this.up = this.wrap(node.parent)
+    return this.up
   }
   get previousSibling(): ProgramNode | null {
     return this.wrap(this.node.previousSibling)

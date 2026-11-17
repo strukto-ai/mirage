@@ -80,9 +80,21 @@ export function sourceRow(node: TSNodeLike, end = false): number {
  * bash has read by the time it makes the command (a redirect's operator, the
  * element itself when none follows), or where that element ends when it is
  * an assignment, which bash takes without reading on; any other node's is the
- * row it starts on. Mirrors Python's line_row.
+ * row it starts on. A program's node is numbered once, and the parse keeps its
+ * row. Mirrors Python's line_row.
  */
 export function lineRow(node: TSNodeLike): number {
+  if (!(node instanceof ProgramNode)) return numberedRow(node)
+  const rows = node.program.lineRows
+  let row = rows.get(node.id)
+  if (row === undefined) {
+    row = numberedRow(node)
+    rows.set(node.id, row)
+  }
+  return row
+}
+
+function numberedRow(node: TSNodeLike): number {
   const parent = node.parent
   if (node.type === NT.VARIABLE_ASSIGNMENT) {
     if (parent?.type !== NT.VARIABLE_ASSIGNMENTS) return sourceRow(node, true)

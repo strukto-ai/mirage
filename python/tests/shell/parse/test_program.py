@@ -28,6 +28,7 @@ def test_release_drops_heavy_state_before_collection():
     root = program.root
     child = root.named_children[0]
     sibling = child.children[0].parent
+    assert sibling is child
     assert isinstance(program.offsets, range)
     assert program.offsets[-1] == 1048583
     hold = program.retain()

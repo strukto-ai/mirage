@@ -527,27 +527,60 @@ export type Item =
 const SURROGATE = /[\uD800-\uDFFF]/
 
 let scratch = new Uint8Array(4096)
+let scratchView = new DataView(scratch.buffer)
 let used = 0
+
+// A string this short is copied a unit at a time when it is ASCII, rather than
+// encoded into a buffer of its own.
+const SHORT_TEXT = 64
 
 function room(len: number): void {
   if (used + len <= scratch.length) return
   const grown = new Uint8Array(Math.max(scratch.length * 2, used + len))
   grown.set(scratch.subarray(0, used))
   scratch = grown
+  scratchView = new DataView(scratch.buffer)
 }
 
 function putWord(tag: number, value: number): void {
   room(5)
   scratch[used] = tag
-  new DataView(scratch.buffer).setUint32(used + 1, value, true)
+  scratchView.setUint32(used + 1, value, true)
   used += 5
 }
 
 function putWide(tag: number, value: bigint): void {
   room(9)
   scratch[used] = tag
-  new DataView(scratch.buffer).setBigInt64(used + 1, value, true)
+  scratchView.setBigInt64(used + 1, value, true)
   used += 9
+}
+
+/** A safe integer as the engine's int, its two halves written as they are. */
+function putInt(value: number): void {
+  room(9)
+  const high = Math.floor(value / 0x100000000)
+  scratch[used] = 3
+  scratchView.setUint32(used + 1, value - high * 0x100000000, true)
+  scratchView.setInt32(used + 5, high, true)
+  used += 9
+}
+
+/** A short ASCII string's units as its bytes; false, writing nothing, for any other. */
+function putAscii(text: string): boolean {
+  const len = text.length
+  if (len > SHORT_TEXT) return false
+  room(5 + len)
+  const start = used + 5
+  for (let index = 0; index < len; index++) {
+    const unit = text.charCodeAt(index)
+    if (unit > 0x7f) return false
+    scratch[start + index] = unit
+  }
+  scratch[used] = 4
+  scratchView.setUint32(used + 1, len, true)
+  used = start + len
+  return true
 }
 
 function putBytes(tag: number, bytes: Uint8Array): void {
@@ -565,11 +598,15 @@ function encodeItem(item: Item): void {
     room(1)
     scratch[used++] = item ? 2 : 1
   } else if (typeof item === 'number') {
-    putWide(3, BigInt(Math.trunc(item)))
+    const whole = Math.trunc(item)
+    if (Number.isSafeInteger(whole)) putInt(whole)
+    else putWide(3, BigInt(whole))
   } else if (typeof item === 'bigint') {
     putWide(7, item)
   } else if (typeof item === 'string') {
-    putBytes(4, SURROGATE.test(item) ? encodeText(item) : encoder.encode(item))
+    if (!putAscii(item)) {
+      putBytes(4, SURROGATE.test(item) ? encodeText(item) : encoder.encode(item))
+    }
   } else if (item instanceof Uint8Array) {
     putBytes(8, item)
   } else if (item instanceof Map) {
@@ -587,16 +624,6 @@ function encodeItem(item: Item): void {
 
 function decodeItem(bytes: Uint8Array, view: DataView, at: { pos: number }): Item {
   const tag = bytes[at.pos++]
-  const word = (): number => {
-    const value = view.getUint32(at.pos, true)
-    at.pos += 4
-    return value
-  }
-  const wide = (): bigint => {
-    const value = view.getBigInt64(at.pos, true)
-    at.pos += 8
-    return value
-  }
   switch (tag) {
     case 0:
       return null
@@ -604,22 +631,28 @@ function decodeItem(bytes: Uint8Array, view: DataView, at: { pos: number }): Ite
       return false
     case 2:
       return true
-    case 3:
-      return Number(wide())
+    case 3: {
+      const value = view.getInt32(at.pos + 4, true) * 0x100000000 + view.getUint32(at.pos, true)
+      at.pos += 8
+      return value
+    }
     case 4:
     case 8: {
-      const len = word()
+      const len = view.getUint32(at.pos, true)
+      at.pos += 4
       const body = bytes.subarray(at.pos, (at.pos += len))
       return tag === 4 ? decodeText(body) : body.slice()
     }
     case 5: {
-      const count = word()
+      const count = view.getUint32(at.pos, true)
+      at.pos += 4
       const items: Item[] = []
       for (let index = 0; index < count; index++) items.push(decodeItem(bytes, view, at))
       return items
     }
     case 6: {
-      const count = word()
+      const count = view.getUint32(at.pos, true)
+      at.pos += 4
       const map = new Map<Item, Item>()
       for (let index = 0; index < count; index++) {
         const key = decodeItem(bytes, view, at)
@@ -627,8 +660,11 @@ function decodeItem(bytes: Uint8Array, view: DataView, at: { pos: number }): Ite
       }
       return map
     }
-    case 7:
-      return wide()
+    case 7: {
+      const value = view.getBigInt64(at.pos, true)
+      at.pos += 8
+      return value
+    }
     default:
       throw new Error(`the engine replied with tag ${String(tag)}`)
   }

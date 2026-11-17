@@ -257,7 +257,12 @@ export async function fillTreeEnv(
   registry: MountRegistry,
   skip: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
-  if (registry.fillEnv === undefined || registry.clis.get(name) !== null) return false
+  if (
+    registry.fillEnv === undefined ||
+    registry.clis.get(name) !== null ||
+    lookup(name, session, registry) !== Consumer.MOUNT
+  )
+    return false
   const candidates = registry.invocationCandidates(
     name,
     [],
@@ -267,7 +272,7 @@ export async function fillTreeEnv(
   )
   if (candidates.length !== 1) return false
   const tree = candidates[0]?.cliFor(name) ?? null
-  if (tree === null || lookup(name, session, registry) !== Consumer.MOUNT) return false
+  if (tree === null) return false
   const verbs = new Set(args.filter((w) => !w.startsWith('-')))
   const supplied = suppliedEnvNames(tree.spec, [...args])
   const names = new Set(

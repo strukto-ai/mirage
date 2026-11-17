@@ -24,6 +24,7 @@ from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
+from mirage.shell.constants import PLAIN_WORD, PLAIN_WORD_TYPES
 from mirage.shell.literal import LiteralNode
 from mirage.shell.parse import parse
 from mirage.shell.parse.program import ProgramNode, shell_node
@@ -137,7 +138,7 @@ class ExpandHost:
     def _node(self, node: ShellNode) -> TSNodeLike:
         if self.program is None:
             return node
-        return ProgramNode(node, self.program)
+        return self.program.wrap(node)
 
     async def substitute(
         self,
@@ -231,6 +232,10 @@ async def expand(
         return [(text, True)] if mode == "pattern" else text
     session = context.session
     frame(session, call_stack)
+    if mode == "fields" and word.type in PLAIN_WORD_TYPES:
+        raw = word.text or b""
+        if PLAIN_WORD.fullmatch(raw):
+            return [raw.decode()]
     task = session.vars.shell.expand(node, mode)
     host = ExpandHost(context, execute_fn, call_stack, word)
     return await drive(task, host, context.frame.diagnostics)
