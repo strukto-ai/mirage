@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use super::builtin::{Fault, array_limit, type_error};
+use super::fault::{Fault, array_limit, type_error};
+use super::meter::Limits;
 use super::meter::{self, Charge};
 use super::onig::{Options, Regex, Region, Search};
 use super::value::{Key, Object, Text, Value};
-use super::vm::Limits;
 use crate::regex::Step;
 
 /// One `_match_impl` call in progress: jq's f_match, whose search can stop

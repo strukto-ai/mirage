@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
-use super::Span;
+pub(super) type Span = (usize, usize);
 
 const QUOTED: &[u8] = b"*?[@+!()|";
 

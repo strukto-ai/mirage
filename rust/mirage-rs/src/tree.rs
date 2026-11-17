@@ -10,7 +10,7 @@ use serde_json::Value as Json;
 
 use crate::StreamError;
 use crate::number;
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     if let Some((name, _)) = options

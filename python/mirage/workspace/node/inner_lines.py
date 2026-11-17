@@ -14,7 +14,6 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.shell.helpers import get_text, literal_word
@@ -22,21 +21,19 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.lookup.constants import read_wrapper
 from mirage.workspace.lookup.lookup import lookup, path_program
 from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
     cond_leaves,
     cond_tokens,
 )
-
-if TYPE_CHECKING:
-    from mirage.workspace.dispatcher.reader import NamespaceReader
-    from mirage.workspace.mount import MountRegistry
-    from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,9 +431,9 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
 
 def program_lines(
     words: Sequence[Word],
-    session: "SessionState",
-    registry: "MountRegistry",
-    links: "NamespaceReader | None" = None,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader | None = None,
     open_: bool = False,
 ) -> list[InnerLine]:
     """``inner_lines`` of a command, a ``/usr/bin`` path running its
@@ -462,7 +459,7 @@ def program_lines(
 
 
 def runs_function(
-    head: str, session: "SessionState", registry: "MountRegistry"
+    head: str, session: SessionState, registry: MountRegistry
 ) -> bool:
     """Whether a function of the head's name runs instead of it, so the
     words it was given run nothing: the function's own lines each pass

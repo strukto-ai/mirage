@@ -14,21 +14,19 @@
 
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from bson import Timestamp
 from pymongo import AsyncMongoClient
 from pymongo.errors import OperationFailure, PyMongoError
 
+from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb.types import (
     NOT_A_REPLICA_SET,
     SYSTEM_DATABASES,
     EntityKind,
 )
 from mirage.vfs.mongodb.config import MongoDBConfig
-
-if TYPE_CHECKING:
-    from mirage.accessor.mongodb import MongoDBAccessor
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +59,7 @@ async def database_exists(
     client: AsyncMongoClient[Any],
     config: MongoDBConfig,
     database: str,
-    accessor: "MongoDBAccessor | None" = None,
+    accessor: MongoDBAccessor | None = None,
 ) -> bool:
     if accessor is not None:
         dbs = await accessor.listings.get(
@@ -79,7 +77,7 @@ async def entity_exists(
     database: str,
     name: str,
     kind: EntityKind | None = None,
-    accessor: "MongoDBAccessor | None" = None,
+    accessor: MongoDBAccessor | None = None,
 ) -> bool:
     if not await database_exists(client, config, database, accessor):
         return False

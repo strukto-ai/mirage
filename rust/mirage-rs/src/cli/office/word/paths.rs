@@ -4,11 +4,12 @@
 //! Paths into a Word document: what each names and how a path that misses
 //! says what is there.
 
-use super::super::Fail;
+use super::super::errors::Fail;
 use super::super::node::{Node, number_text};
 use super::super::tree::{E, Id, MC, W, W14};
+use super::doc::Word;
 use super::{
-    Segment, Word, fail, has_ancestor_within, is_math_wrapper, jsn, para_id, parse_path, row_cells,
+    Segment, fail, has_ancestor_within, is_math_wrapper, jsn, para_id, parse_path, row_cells,
     table_rows, w_child, w_val,
 };
 

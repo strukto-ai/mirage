@@ -4,7 +4,51 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{NAMEREF, UNASSIGNED, letters};
+/// `declare -i`: a value assigned is evaluated as arithmetic.
+pub const INTEGER: u8 = 1;
+/// `declare -n`: the name stands for the variable its value names.
+pub const NAMEREF: u8 = 1 << 1;
+pub const READONLY: u8 = 1 << 2;
+pub const TRACE: u8 = 1 << 3;
+pub const EXPORT: u8 = 1 << 4;
+/// `declare -l`: a value assigned is lowercased.
+pub const LOWER: u8 = 1 << 5;
+/// `declare -u`: a value assigned is uppercased.
+pub const UPPER: u8 = 1 << 6;
+/// An array `declare -a` / `-A` made and nothing assigned yet: it lists
+/// with no value and no letter, and the first write clears it.
+pub const UNASSIGNED: u8 = 1 << 7;
+
+/// The stored attributes as `declare -p` prints them, in bash's own order,
+/// pinned over every ordered pair of `a A i l n r t u x`: `i n r t x`, then
+/// `l`/`u`. `-a` and `-A` are the value's kind, never stored.
+const LETTERS: [(u8, char); 7] = [
+    (INTEGER, 'i'),
+    (NAMEREF, 'n'),
+    (READONLY, 'r'),
+    (TRACE, 't'),
+    (EXPORT, 'x'),
+    (LOWER, 'l'),
+    (UPPER, 'u'),
+];
+/// The stored attribute letters, in print order.
+pub fn letters(attrs: u8) -> String {
+    LETTERS
+        .iter()
+        .filter(|(attr, _)| attrs & attr != 0)
+        .map(|(_, letter)| *letter)
+        .collect()
+}
+
+/// The attributes a stored letter cluster spells. A letter naming none is
+/// skipped: the cluster is shared with the other host and later versions,
+/// and refusing a session over one letter loses more than the letter.
+pub fn attrs_of(cluster: &str) -> u8 {
+    cluster
+        .chars()
+        .filter_map(|c| LETTERS.iter().find(|(_, letter)| *letter == c))
+        .fold(0, |attrs, (attr, _)| attrs | attr)
+}
 
 /// An indexed array as bash keeps one: only its assigned elements, by
 /// index. `a[1000000000]=x` holds one element, and an index no write

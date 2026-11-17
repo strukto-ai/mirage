@@ -338,3 +338,39 @@ pub(super) fn retag(tag: &Tag<'_>, changes: &[(&str, Option<&str>)], kind: Kind)
     out.extend_from_slice(if kind == Kind::Empty { b"/>" } else { b">" });
     out
 }
+
+pub(super) const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+pub(super) const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(super) const HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+
+/// `xml` with an empty `name` element holding `attrs` put just inside the
+/// end of its `root` element, under the root's prefix so it shares the
+/// root's namespace.
+pub(super) fn before_end(xml: &[u8], root: &str, name: &str, attrs: &str) -> Option<Vec<u8>> {
+    let end = tags(xml)
+        .filter(|t| t.kind == Kind::End && t.is(root))
+        .last()?;
+    let prefix = String::from_utf8_lossy(end.prefix());
+    let entry = format!("<{prefix}{name} {attrs}/>");
+    Some([&xml[..end.start], entry.as_bytes(), &xml[end.start..]].concat())
+}
+
+pub(super) fn strip(xml: &[u8], name: &str, hit: impl Fn(&Tag<'_>) -> bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(xml.len());
+    let mut last = 0;
+    let mut skip = 0;
+    for tag in tags(xml) {
+        if tag.start < skip || tag.kind == Kind::End || !tag.is(name) || !hit(&tag) {
+            continue;
+        }
+        let end = element_end(xml, &tag).unwrap_or(tag.end);
+        out.extend_from_slice(&xml[last..tag.start]);
+        (last, skip) = (end, end);
+    }
+    out.extend_from_slice(&xml[last..]);
+    out
+}
+
+pub(super) fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}

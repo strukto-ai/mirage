@@ -4,13 +4,16 @@ use super::accessor::{
     Flags, Out, body_value, csv_values, export_out, json_fields, limit_or_refuse, named_repo,
     one_line, repo_for, repo_number, subject_number, time_field, tsv, typed_out,
 };
+use super::comment::{
+    add_comment, check_comment_flags, comment_body, comment_run, comments_for, comments_text,
+};
 use super::constants::SEARCH_CAPPED;
-use super::editable::Editable;
+use super::editable::{Editable, me_login, with_special_names};
 use super::fields::{
     Fetch, FieldTable, exported_node, names, nodes_of, plain, read_rest, references, selection,
     shared_fields,
 };
-use super::pull::{assignee_list, close_pull, project_list, sorted_labels};
+use super::fields::{assignee_list, project_list, sorted_labels};
 use super::search::{ListQuery, has_state_clause, list_query, search_features};
 use super::shape::Shape;
 use crate::core::github::client::{Account, Failure, Result, usage, value};
@@ -20,6 +23,7 @@ use crate::core::github::issue::{
 };
 use crate::core::github::json::{Json, Obj, quoted};
 use crate::core::github::metadata::{Wanted, repo_metadata};
+use crate::core::github::pull::{close_pull, reopen_pull};
 use crate::core::github::repo::{RepoRef, current_login, github_repo, graphql_data, mutate};
 
 /// Every field `gh issue view --json` and `gh issue list --json` accept
@@ -226,52 +230,6 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
         out.stderr = SEARCH_CAPPED.as_bytes().to_vec();
     }
     Ok(out)
-}
-
-/// The login `@me` stands for, a failure in MeReplacer's words.
-async fn me_login(account: &Account) -> Result<String> {
-    current_login(account).await.map_err(|failure| {
-        Failure::Value(format!(
-            "failed resolving `@me` to your user handle: {}",
-            failure.text()
-        ))
-    })
-}
-
-/// A list of handles with `@me` read as the account's login.
-pub(crate) async fn with_me(account: &Account, handles: Vec<String>) -> Result<Vec<String>> {
-    if !handles.iter().any(|handle| handle == "@me") {
-        return Ok(handles);
-    }
-    let login = me_login(account).await?;
-    Ok(handles
-        .into_iter()
-        .map(|handle| {
-            if handle == "@me" {
-                login.clone()
-            } else {
-                handle
-            }
-        })
-        .collect())
-}
-
-/// Assignee handles with `@me` and `@copilot` read as logins.
-pub(crate) async fn with_special_names(
-    account: &Account,
-    handles: Vec<String>,
-) -> Result<Vec<String>> {
-    Ok(with_me(account, handles)
-        .await?
-        .into_iter()
-        .map(|handle| {
-            if handle.eq_ignore_ascii_case("@copilot") {
-                COPILOT_LOGIN.to_owned()
-            } else {
-                handle
-            }
-        })
-        .collect())
 }
 
 /// `@me`, read once however many flags name it.
@@ -505,20 +463,6 @@ pub(crate) async fn reopen_cmd(account: &Account, flags: &Flags, texts: &[String
     Ok(Out::warned(format!("✓ Reopened issue {name}\n")))
 }
 
-pub(crate) async fn reopen_pull(account: &Account, id: &str) -> Result<Obj> {
-    let mut input = Obj::new();
-    input.set("pullRequestId", id);
-    mutate(
-        account,
-        "PullRequestReopen",
-        "ReopenPullRequestInput",
-        "reopenPullRequest",
-        "pullRequest{id}",
-        input,
-    )
-    .await
-}
-
 pub(crate) async fn comment_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
     check_comment_flags(flags)?;
     let (repo, number) = target(account, texts, flags)?;
@@ -530,38 +474,6 @@ pub(crate) async fn comment_cmd(account: &Account, flags: &Flags, texts: &[Strin
         Vec::new()
     };
     comment_run(account, flags, node.get("id").text(), &comments, &text).await
-}
-
-/// The comments `--comments` asks for, None without it.
-pub(crate) async fn comments_for(
-    account: &Account,
-    flags: &Flags,
-    repo: &RepoRef,
-    number: i128,
-) -> Result<Option<Vec<Json>>> {
-    if !flags.gh_bool("comments") {
-        return Ok(None);
-    }
-    issue_comments(account, repo, number).await.map(Some)
-}
-
-pub(crate) fn comments_text(rows: &[Json]) -> String {
-    rows.iter()
-        .map(|row| {
-            let status = if row.get("isMinimized").truthy() {
-                row.get("minimizedReason").text().to_lowercase()
-            } else {
-                "none".to_owned()
-            };
-            format!(
-                "author:\t{}\nassociation:\t{}\nedited:\t{}\nstatus:\t{status}\n--\n{}\n--\n",
-                row.get("author").get("login").show(),
-                row.get("authorAssociation").text().to_lowercase(),
-                row.get("includesCreatedEdit").truthy(),
-                row.get("body").show()
-            )
-        })
-        .collect()
 }
 
 /// An issue or pull request by number, as gh's FindIssueOrPR reads it.
@@ -583,33 +495,8 @@ pub(crate) async fn find_subject(
     issue_fields(account, repo, number, &halves, None).await
 }
 
-const COPILOT_LOGIN: &str = "copilot-swe-agent";
-
 fn is_pull(node: &Obj) -> bool {
     node.get("__typename").as_str() == Some("PullRequest")
-}
-
-/// Post a comment on what `id` names, its URL back.
-pub(crate) async fn add_comment(account: &Account, id: &str, body: &str) -> Result<String> {
-    let mut input = Obj::new();
-    input.set("body", body);
-    input.set("subjectId", id);
-    let data = mutate(
-        account,
-        "CommentCreate",
-        "AddCommentInput",
-        "addComment",
-        "commentEdge{node{url}}",
-        input,
-    )
-    .await?;
-    Ok(data
-        .get("addComment")
-        .get("commentEdge")
-        .get("node")
-        .get("url")
-        .text()
-        .to_owned())
 }
 
 pub(crate) async fn close_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
@@ -944,114 +831,4 @@ pub(crate) async fn status_cmd(account: &Account, flags: &Flags, texts: &[String
         repository.get("authored"),
     );
     Ok(Out::text(out))
-}
-
-/// `--edit-last`, `--delete-last` and a plain new comment, for the issue
-/// or pull request `id` names. `comments` are its comments, oldest first.
-pub(crate) async fn comment_run(
-    account: &Account,
-    flags: &Flags,
-    id: &str,
-    comments: &[Json],
-    text: &str,
-) -> Result<Out> {
-    let edit_last = flags.gh_bool("edit_last");
-    let delete_last = flags.gh_bool("delete_last");
-    let create_if_none = flags.gh_bool("create_if_none");
-    let mine: Vec<&Json> = comments
-        .iter()
-        .filter(|row| row.get("viewerDidAuthor").truthy())
-        .collect();
-    if delete_last {
-        let Some(last) = mine.last() else {
-            return value("no comments found for current user");
-        };
-        let mut input = Obj::new();
-        input.set("id", last.get("id").text());
-        mutate(
-            account,
-            "CommentDelete",
-            "DeleteIssueCommentInput",
-            "deleteIssueComment",
-            "clientMutationId",
-            input,
-        )
-        .await?;
-        return Ok(Out::warned("Comment deleted\n"));
-    }
-    if edit_last {
-        if let Some(last) = mine.last() {
-            let mut input = Obj::new();
-            input.set("body", text);
-            input.set("id", last.get("id").text());
-            let data = mutate(
-                account,
-                "CommentUpdate",
-                "UpdateIssueCommentInput",
-                "updateIssueComment",
-                "issueComment{url}",
-                input,
-            )
-            .await?;
-            return Ok(Out::text(format!(
-                "{}\n",
-                data.get("updateIssueComment")
-                    .get("issueComment")
-                    .get("url")
-                    .text()
-            )));
-        }
-        if !create_if_none {
-            return value("no comments found for current user");
-        }
-    }
-    Ok(Out::text(format!(
-        "{}\n",
-        add_comment(account, id, text).await?
-    )))
-}
-
-/// The text of a comment, read before anything is asked of GitHub.
-pub(crate) async fn comment_body(account: &Account, flags: &Flags) -> Result<String> {
-    if flags.gh_bool("delete_last") {
-        return Ok(String::new());
-    }
-    Ok(body_value(
-        account,
-        flags,
-        "body",
-        "body_file",
-        true,
-        Some("specify only one of `--body`, `--body-file`, `--editor`, or `--web`"),
-    )
-    .await?
-    .unwrap_or_default())
-}
-
-/// Refuse the combinations gh's comment flags refuse.
-pub(crate) fn check_comment_flags(flags: &Flags) -> Result<()> {
-    let inputs =
-        usize::from(flags.as_str("body").is_some()) + usize::from(flags.raw("body_file").is_some());
-    if flags.gh_bool("create_if_none") && !flags.gh_bool("edit_last") {
-        return usage("`--create-if-none` can only be used with `--edit-last`");
-    }
-    if flags.gh_bool("yes") && !flags.gh_bool("delete_last") {
-        return usage("`--yes` should only be used with `--delete-last`");
-    }
-    if flags.gh_bool("delete_last") {
-        if inputs > 0 {
-            return usage("should not provide comment body when using `--delete-last`");
-        }
-        if !flags.gh_bool("yes") {
-            return usage("should provide `--yes` to confirm deletion in non-interactive mode");
-        }
-        return Ok(());
-    }
-    if inputs == 0 {
-        return usage("flags required when not running interactively");
-    }
-    if inputs > 1 {
-        return usage("specify only one of `--body`, `--body-file`, `--editor`, or `--web`");
-    }
-    Ok(())
 }

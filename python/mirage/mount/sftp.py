@@ -368,7 +368,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def open56(
         self,
         path: bytes,
-        desired_access: int,
+        _desired_access: int,
         flags: int,
         attrs: asyncssh.SFTPAttrs,
     ) -> OpenFile:

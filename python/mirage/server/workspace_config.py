@@ -14,13 +14,11 @@
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from mirage.concurrency.limiter import run_blocking
+from mirage.config import build_mcp_clis, load_config, resolve_secrets
 from mirage.utils.ids import new_workspace_id
-
-if TYPE_CHECKING:
-    from mirage.workspace.workspace import Workspace
+from mirage.workspace.workspace import Workspace
 
 WORKSPACE_CONFIG_CANDIDATES = (
     ".mirage/workspace.yaml",
@@ -87,7 +85,7 @@ def resolve_workspace_config(
     )
 
 
-async def build_workspace_from_config(config_path: str | Path) -> "Workspace":
+async def build_workspace_from_config(config_path: str | Path) -> Workspace:
     """Build a workspace from a config file, kernel mounts included.
 
     Args:
@@ -96,16 +94,6 @@ async def build_workspace_from_config(config_path: str | Path) -> "Workspace":
     Returns:
         Workspace: the constructed workspace.
     """
-    # Imported here, as the TypeScript twin awaits mirage-node: a CLI
-    # spawn that only resolves the config path must not load the
-    # workspace.
-    from mirage.config import (  # noqa: PLC0415
-        build_mcp_clis,
-        load_config,
-        resolve_secrets,
-    )
-    from mirage.workspace.workspace import Workspace  # noqa: PLC0415
-
     config = await resolve_secrets(load_config(config_path))
     kwargs = config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config))
     kwargs["workspace_id"] = kwargs.get("workspace_id") or new_workspace_id()

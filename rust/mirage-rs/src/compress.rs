@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 mod bz2;
+mod codec;
 mod xz;
+
+use codec::{Failure, Pack, Step, Unpack};
 
 const INPUT: usize = 16 * 1024;
 const EOF: &str = "\ngzip: {}: unexpected end of file";
@@ -74,28 +77,6 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             Format::Gzip => Box::new(Decoder::new(test, passthrough)),
         }),
     }
-}
-
-/// What one call into a codec past gzip did: the input it consumed, the
-/// output it wrote, and whether its data ended or failed there.
-#[derive(Default)]
-struct Step {
-    consumed: usize,
-    produced: usize,
-    ended: bool,
-    failure: Option<Failure>,
-}
-
-/// A decoder whose failures are its program's own lines. With `eof` no
-/// input follows `input`, and a call that can make no progress then ends
-/// or fails.
-trait Unpack: Send + Sync {
-    fn unpack(&mut self, input: &[u8], output: &mut [u8], eof: bool) -> Step;
-}
-
-/// An encoder; with `eof` it flushes and ends its data.
-trait Pack: Send + Sync {
-    fn pack(&mut self, input: &[u8], output: &mut [u8], eof: bool) -> Result<Step, StreamError>;
 }
 
 /// The bounded stream over an `Unpack`: a feed is held and decoded a window
@@ -247,15 +228,6 @@ impl<P: Pack> Stream for Packer<P> {
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.step(out)
     }
-}
-
-#[derive(Serialize)]
-struct Failure {
-    reasons: Vec<String>,
-    fatal: bool,
-    exit_code: i32,
-    keeps_output: bool,
-    first_header: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

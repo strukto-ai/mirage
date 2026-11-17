@@ -789,7 +789,7 @@ pub struct Tree {
     /// Where each byte of `source` came from in `original`, then the end.
     pub offsets: SourceMap,
     /// The heredocs folded into `source`, in its order.
-    pub heredocs: Vec<super::lower::Heredoc>,
+    pub heredocs: Vec<Heredoc>,
     /// Each substitution that closes with heredocs opened inside still to
     /// read: its `)` and their `<<`s, in the line as typed.
     pub closes: Vec<(usize, Vec<usize>)>,
@@ -891,4 +891,50 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<Refusal>) ->
 
 pub(super) fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+/// A heredoc the line reads, folded into the tree's source as a `<`
+/// redirect from a double-quoted word that holds its body.
+#[derive(Debug, Clone)]
+pub struct Heredoc {
+    /// Where its `<` stands in the tree's source.
+    pub at: usize,
+    /// Where its `<<` stands in the line as typed.
+    pub operator: usize,
+    /// Where its delimiter word ends in the line as typed.
+    pub word_end: usize,
+    /// The delimiter word as typed.
+    pub word: Vec<u8>,
+    pub delimiter: Vec<u8>,
+    /// A quoted delimiter: the body is not expanded.
+    pub quoted: bool,
+    /// `<<-`: its lines lose their leading tabs.
+    pub dash: bool,
+    /// Where the body starts in the line as typed.
+    pub body_start: usize,
+    /// Past its delimiter line, or the end of the line as typed.
+    pub end: usize,
+    /// The body as bash reads it.
+    pub body: Vec<u8>,
+    /// Whether the delimiter line ended it, not the end of the input.
+    pub terminated: bool,
+    /// The line bash names the heredoc by when the input ends inside it.
+    pub line: usize,
+    /// The line bash's reader stands on when the input ends inside it.
+    pub eof_line: usize,
+    /// Where expanding the body fails, if it does.
+    pub deferred: Option<Deferred>,
+}
+
+/// Where expanding a heredoc's body fails: bash reads a `$( )` there that
+/// does not parse, or a `$( )` or `${` or backtick it leaves open, only as
+/// it expands the body.
+#[derive(Debug, Clone, Copy)]
+pub struct Deferred {
+    /// Where in the body the construct opens; the rest is folded in as
+    /// text.
+    pub at: usize,
+    /// The row the body starts on in the line as typed, which bash counts
+    /// a substitution's lines in it from.
+    pub row: usize,
 }

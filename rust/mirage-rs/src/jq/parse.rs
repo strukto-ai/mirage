@@ -1963,7 +1963,7 @@ impl Stream for Scanner {
     }
 
     fn begin(&mut self, config: &[u8]) -> Result<(), StreamError> {
-        let config: super::BeginConfig = crate::parse_config(config)?;
+        let config: super::config::BeginConfig = crate::parse_config(config)?;
         if !config.discard {
             return Err(StreamError::new("jq scanner begin requires discard=true"));
         }

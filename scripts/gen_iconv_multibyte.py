@@ -439,7 +439,7 @@ def render(data: dict[str, dict[str, tuple[tuple[int, int], ...]]]) -> str:
         )
     return (
         "\n".join(f"// {line}" for line in NOTE.split("\n"))
-        + "\n\nuse crate::iconv::table::Corrections;\n\n"
+        + "\n\nuse crate::iconv::corrections::Corrections;\n\n"
         + "\n".join(body)
     )
 

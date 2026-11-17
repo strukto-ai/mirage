@@ -4,8 +4,8 @@ use crate::constants::MAX_HELD;
 use crate::printf::number::Rendered;
 use crate::regex::Step;
 
+use super::text::no_memory;
 use super::value::{FloatSpec, NumberScan, Text, Value, fixed_number, render_int, to_int};
-use super::vm::no_memory;
 
 enum Piece {
     Bytes(Text, usize, usize),

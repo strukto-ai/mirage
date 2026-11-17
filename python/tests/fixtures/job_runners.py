@@ -52,20 +52,6 @@ async def run_forever(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
     return IOResult(), ExecutionNode()
 
 
-async def emit_after(
-    job: JobHandle, gate: asyncio.Event
-) -> tuple[IOResult, ExecutionNode]:
-    """A runner that prints only once the test opens ``gate``, so it is
-    still running while ``fg`` picks a job.
-
-    Args:
-        job (JobHandle): the job being run.
-        gate (asyncio.Event): what the runner waits on before printing.
-    """
-    await gate.wait()
-    return await emit_and_settle(job, stdout=b"late")
-
-
 async def submit_settled(
     table: JobTable,
     command: str = "foo",

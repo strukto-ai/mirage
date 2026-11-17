@@ -6,12 +6,12 @@
 //! with shape ids from 100000, properties set, and slides and shapes
 //! removed, moved and swapped.
 
+use super::super::errors::{Fail, SetFail};
 use super::super::media::{self, Media};
 use super::super::package::{Pkg, relative, resolve_target};
 use super::super::tree::{self, A, Id, Kid, P, R, Tree, insert_at, set_attr, set_attr_ns};
-use super::super::word::edit::{Added, Place};
-use super::super::{Fail, SetFail};
-use super::Deck;
+use super::super::types::{Added, Place};
+use super::deck::Deck;
 
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const SLIDE_TYPE: &str = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
@@ -2039,7 +2039,7 @@ fn finish(
     took: &[String],
     element: &'static str,
 ) -> Result<(String, Vec<String>), SetFail> {
-    super::super::partial(
+    super::super::errors::partial(
         path,
         props,
         took,

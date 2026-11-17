@@ -2,21 +2,18 @@ import asyncio
 import codecs
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
 
 import anyio
 
 from mirage.concurrency.limiter import on_loop, settle
 from mirage.io.types import IOResult, OutputEvent, StreamName
+from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.tools.io_text import io_to_str
 from mirage.workspace.tools.tool_operations import (
     MirageToolOperations,
     ToolResult,
 )
 from mirage.workspace.workspace import Session, Workspace
-
-if TYPE_CHECKING:
-    from mirage.workspace.shell_execution import ShellExecution
 
 LIMIT = 2048
 INTERVAL = 0.25
@@ -117,7 +114,7 @@ class OutputProgress:
 
 
 async def collect_execution(
-    execution: "ShellExecution", progress: OutputProgress | None = None
+    execution: ShellExecution, progress: OutputProgress | None = None
 ) -> IOResult:
     """Drain one SDK execution, preserving its full tool result and cleanup.
 

@@ -10,6 +10,7 @@ mod create;
 mod header;
 mod options;
 mod read;
+pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
 mod transform;
@@ -22,9 +23,9 @@ use serde::Deserialize;
 use self::options::{Overwrites, Owner};
 use self::transform::{Scope, Transforms};
 
+use crate::Stream;
 use crate::request::{Opening, Reply, Request, failed, failure_text};
 use crate::task::Host;
-use crate::{Stream, StreamError, parse_config, task};
 
 const FATAL: &str = "tar: Error is not recoverable: exiting now";
 const TRAILER: &str = "tar: Exiting with failure status due to previous errors";
@@ -212,25 +213,6 @@ struct Config {
     status: i32,
 }
 
-pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let mut config: Config = parse_config(config)?;
-    if let Some(typed) = &config.typed {
-        let read = options::read(typed)?;
-        config.strip = read.strip;
-        config.overwrites = read.overwrites;
-        config.owner = read.owner;
-        config.group = read.group;
-        config.transforms = Mutex::new(read.transforms);
-    }
-    Ok(task::spawn(|host| async move {
-        match config.mode {
-            Mode::Create => create::run(&host, &config).await,
-            Mode::List | Mode::Extract => read::run(&host, &config).await,
-            Mode::Append | Mode::Update | Mode::Delete => update::run(&host, &config).await,
-        }
-    }))
-}
-
 impl Config {
     /// `name` as `--transform` leaves it.
     fn transformed(&self, name: &[u8], scope: Scope) -> Vec<u8> {
@@ -365,4 +347,12 @@ async fn read(
         return Err(Box::new(reply));
     }
     Ok((data, reply.end))
+}
+
+/// The most a codec stream takes a feed.
+pub(super) const FEED: usize = 16 * 1024;
+
+/// `name` without its trailing slashes.
+pub(super) fn trimmed(name: &[u8]) -> &[u8] {
+    &name[..name.len() - name.iter().rev().take_while(|&&b| b == b'/').count()]
 }

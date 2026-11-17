@@ -26,7 +26,6 @@ from mirage.cli.client import DaemonClient, DaemonUnreachable, make_client
 from mirage.cli.credentials import LoginError
 from mirage.cli.output import fail, handle_list, handle_response
 from mirage.cli.workspace import resolve_config
-from mirage.server.workspace_config import resolve_workspace_config
 
 MCP_ENV_NAMES = ("MIRAGE_MCP_CONFIG", "MIRAGE_CONFIG")
 
@@ -86,6 +85,10 @@ def mcp_cmd(
     and ``explain`` on ``shell`` and on each of them.
     """
     if workspace_id is None:
+        from mirage.server.workspace_config import (  # noqa: PLC0415
+            resolve_workspace_config,
+        )
+
         try:
             path: Path | None = resolve_workspace_config(
                 config, env_names=MCP_ENV_NAMES

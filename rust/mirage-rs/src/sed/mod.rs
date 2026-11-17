@@ -6,6 +6,7 @@
 mod debug;
 mod exec;
 mod io;
+mod program;
 mod script;
 mod text;
 
@@ -20,7 +21,8 @@ use crate::{Stream, StreamError, constants::DRAIN_STEPS, parse_config};
 
 use self::exec::{Machine, Options};
 use self::io::Input;
-use self::script::{Piece, Syntax, compile};
+use self::program::Piece;
+use self::script::{Syntax, compile};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -9,7 +9,7 @@
 
 use fancy_regex::Regex;
 
-use super::super::Fail;
+use super::super::errors::Fail;
 use super::super::node::{Node, Value};
 use super::super::package::{
     contains_ci, contains_text, generic_query, predicates, take_nth, word_char,
@@ -17,9 +17,10 @@ use super::super::package::{
 use super::super::query::{emu, filter_selector};
 use super::super::tree::{A, E, M, MC, P};
 use super::super::units::format_emu_lossy;
+use super::deck::Deck;
 use super::deck::{Graphic, Slide};
 use super::text::shape_text;
-use super::{A14, Deck, cnvpr_of, fail, id_of, is_title_shape, long, ph_of, segment};
+use super::{A14, cnvpr_of, fail, id_of, is_title_shape, long, ph_of, segment};
 
 /// A selector as `ParseShapeSelector` reads it.
 #[derive(Default)]

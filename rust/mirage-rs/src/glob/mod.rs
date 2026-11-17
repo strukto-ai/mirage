@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use serde::Deserialize;
 
 mod compile;
@@ -17,9 +15,6 @@ use flat::Flat;
 use reverse::Reverse;
 
 const WORK: usize = 2048;
-type Span = (usize, usize);
-type Positions = Arc<Vec<Span>>;
-type Key = (usize, usize, usize);
 
 pub(crate) struct CompiledGlob {
     program: Program,

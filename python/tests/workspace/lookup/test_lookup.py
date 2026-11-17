@@ -37,13 +37,13 @@ from mirage.workspace.lookup import (
     Consumer,
     execs,
     is_tool,
-    lookup,
     lookup_all,
     program,
     program_note,
     programs,
 )
 from mirage.workspace.lookup.lookup import (
+    lookup,
     routed_consumer,
     runs_on_machine,
     runs_wrapper,

@@ -1,3 +1,4 @@
+mod input;
 pub(crate) mod number;
 mod scan;
 #[cfg(test)]
@@ -9,45 +10,9 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
+use input::{Input, STEP, hex};
 use number::Rendered;
 use scan::{NumberScan, NumberValue};
-
-const STEP: usize = 16 * 1024;
-
-#[derive(Default)]
-struct Input {
-    pages: BTreeMap<usize, Vec<u8>>,
-    len: usize,
-}
-
-impl Input {
-    fn push(&mut self, mut bytes: &[u8]) {
-        while !bytes.is_empty() {
-            let n = bytes.len().min(STEP - self.len % STEP);
-            if self.len % STEP == 0 {
-                self.pages.insert(self.len / STEP, Vec::with_capacity(n));
-            }
-            self.pages
-                .get_mut(&(self.len / STEP))
-                .expect("input page")
-                .extend_from_slice(&bytes[..n]);
-            self.len += n;
-            bytes = &bytes[n..];
-        }
-    }
-
-    fn get(&self, at: usize) -> Option<u8> {
-        (at < self.len).then(|| self.pages[&(at / STEP)][at % STEP])
-    }
-
-    fn copy(&self, at: usize, n: usize, out: &mut Vec<u8>) -> usize {
-        let n = n.min(self.len - at).min(STEP - at % STEP);
-        if n != 0 {
-            out.extend_from_slice(&self.pages[&(at / STEP)][at % STEP..at % STEP + n]);
-        }
-        n
-    }
-}
 
 #[derive(Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -1090,10 +1055,6 @@ fn quote_byte(byte: u8, at: usize, style: QuoteStyle, out: &mut Vec<u8>) {
         }
         out.push(byte);
     }
-}
-
-fn hex(byte: u8) -> Option<u32> {
-    (byte as char).to_digit(16)
 }
 
 fn escape(raw: &Input, at: usize, argument: bool) -> (Vec<u8>, usize, bool, Option<Vec<u8>>) {

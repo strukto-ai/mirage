@@ -15,7 +15,6 @@
 import dataclasses
 import logging
 from collections.abc import Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
 from mirage.context.session_context import is_program_invocation
@@ -26,6 +25,7 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
 from mirage.vfs.bin import BinViewVFS
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
     EXEC_WRAPPERS,
@@ -42,11 +42,8 @@ from mirage.workspace.lookup.constants import (
     read_wrapper,
 )
 from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
-
-if TYPE_CHECKING:
-    from mirage.workspace.dispatcher.reader import NamespaceReader
-    from mirage.workspace.mount import MountRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +51,8 @@ logger = logging.getLogger(__name__)
 def path_program(
     word: str,
     session: SessionState,
-    registry: "MountRegistry",
-    links: "NamespaceReader | None" = None,
+    registry: MountRegistry,
+    links: NamespaceReader | None = None,
 ) -> str | None:
     """The program a path-spelled command word runs through the
     ``/usr/bin`` view (``/usr/bin/python3`` runs ``python3``); None for a
@@ -142,7 +139,7 @@ def picks_machine(words: Sequence[str]) -> bool:
 def runtime_refused(
     name: str,
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> bool:
     """Whether routing explicitly refused the external runtime for ``name``."""
@@ -179,7 +176,7 @@ def routed_consumer(
     name: str,
     args: Sequence[str],
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[Consumer, RouteDecision[RuntimeIdentity] | None]:
     """``lookup``'s answer, with ``lscpu`` the session's own when it
@@ -204,7 +201,7 @@ def routed_consumer(
 
 
 def runs_on_machine(
-    registry: "MountRegistry",
+    registry: MountRegistry,
     words: Sequence[str | None],
     session: SessionState,
     routing: RouteDecision[RuntimeIdentity],
@@ -239,7 +236,7 @@ def _unwrapped(
     head: str,
     args: list[str],
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity],
 ) -> tuple[str, list[str]]:
     """The program a chain of wrappers Mirage runs comes to, and its
@@ -283,7 +280,7 @@ def runs_wrapper(
     name: str,
     args: Sequence[str],
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> bool:
     """Whether Mirage runs a wrapper itself (``handle_wrapper``): one no
@@ -335,7 +332,7 @@ def _function_first(name: str, session: SessionState) -> bool:
 def _layers(
     name: str,
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
@@ -413,7 +410,7 @@ def _layers(
 def lookup(
     name: str,
     session: SessionState,
-    registry: "MountRegistry",
+    registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Consumer:
     """Route a command name to the layer that consumes it.
@@ -457,7 +454,7 @@ def lookup(
 
 
 def lookup_all(
-    name: str, session: SessionState, registry: "MountRegistry"
+    name: str, session: SessionState, registry: MountRegistry
 ) -> list[Consumer]:
     """Every layer holding the name, most-preferred first.
 
@@ -474,7 +471,7 @@ def lookup_all(
 
 
 def program(
-    name: str, session: SessionState, registry: "MountRegistry"
+    name: str, session: SessionState, registry: MountRegistry
 ) -> Consumer | None:
     """The layer a name runs from as a program, None when it is none.
 
@@ -526,7 +523,7 @@ def program(
     return Consumer.UNKNOWN if name in RUNNERS else None
 
 
-def execs(name: str, session: SessionState, registry: "MountRegistry") -> bool:
+def execs(name: str, session: SessionState, registry: MountRegistry) -> bool:
     """Whether a builtin that execs its operand (xargs, timeout) finds it.
 
     GNU execs the name, so a shell word with no file on PATH (cd,
@@ -549,7 +546,7 @@ def execs(name: str, session: SessionState, registry: "MountRegistry") -> bool:
 
 
 def program_note(
-    name: str, session: SessionState, registry: "MountRegistry"
+    name: str, session: SessionState, registry: MountRegistry
 ) -> str | None:
     """What a program's ``/usr/bin`` file says about it, None when the
     name is no program.
@@ -591,7 +588,7 @@ def program_note(
     return f"{name} is built into mirage."
 
 
-def runs_as(name: str, registry: "MountRegistry") -> str:
+def runs_as(name: str, registry: MountRegistry) -> str:
     """The program a command word runs: a wrapper no mount registers
     (``egrep``) runs the program it names, any other word itself.
 
@@ -604,7 +601,7 @@ def runs_as(name: str, registry: "MountRegistry") -> str:
     return name
 
 
-def programs(session: SessionState, registry: "MountRegistry") -> list[str]:
+def programs(session: SessionState, registry: MountRegistry) -> list[str]:
     """Every program name the session can run, sorted: the ``/usr/bin``
     listing.
 

@@ -5,7 +5,6 @@ use std::io::{Read, Write};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 pub type XDREndian = BigEndian;
-use super::nfs::nfsstring;
 
 /// See https://datatracker.ietf.org/doc/html/rfc1014
 #[allow(clippy::upper_case_acronyms)]
@@ -133,15 +132,6 @@ impl XDR for Vec<u8> {
         let mut zeros: [u8; 4] = [0, 0, 0, 0];
         src.read_exact(&mut zeros[..pad])?;
         Ok(())
-    }
-}
-
-impl XDR for nfsstring {
-    fn serialize<R: Write>(&self, dest: &mut R) -> std::io::Result<()> {
-        self.0.serialize(dest)
-    }
-    fn deserialize<R: Read>(&mut self, src: &mut R) -> std::io::Result<()> {
-        self.0.deserialize(src)
     }
 }
 

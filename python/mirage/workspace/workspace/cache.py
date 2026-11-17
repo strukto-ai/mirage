@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
@@ -20,9 +20,6 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.utils.clock import Clock
 from mirage.utils.loader import optional_attr
-
-if TYPE_CHECKING:
-    from mirage.cache.file.redis import RedisFileCacheStore
 
 
 def build_file_cache(
@@ -46,7 +43,7 @@ def build_file_cache(
         ImportError: a Redis cache was asked for without the extra.
     """
     if isinstance(cache, RedisCacheConfig):
-        redis_store: type[RedisFileCacheStore] = optional_attr(
+        redis_store: Callable[..., FileCacheMixin] = optional_attr(
             "mirage.cache.file.redis:RedisFileCacheStore",
             "redis",
             "RedisCacheConfig",

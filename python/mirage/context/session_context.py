@@ -26,12 +26,28 @@ from collections.abc import (
 )
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
+from mirage.cache.types import CacheInvalidator, WriteContext
 from mirage.errors.fs import eacces, enoent, erofs
+from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import PLAIN_TRAITS, ProcessTraits
+from mirage.execution.types import ProcessId
+from mirage.io.types import ByteSource, IOResult
+from mirage.observe.record import OpRecord, Recorder
+from mirage.policy.types import (
+    CommandContext,
+    DecisionOwner,
+    DryRun,
+    EntryGate,
+    HandOff,
+    VfsExplanation,
+)
 from mirage.rs.document import from_units, units
 from mirage.rs.policy import visibility_matcher
+from mirage.shell.console import JobConsole
+from mirage.shell.descriptors import FileDescription
+from mirage.shell.types import Redirect
 from mirage.shell.voice import use_voice
 from mirage.types import (
     Limit,
@@ -48,29 +64,10 @@ from mirage.utils.hidden import (
 )
 from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
-
-if TYPE_CHECKING:
-    from mirage.cache.types import CacheInvalidator, WriteContext
-    from mirage.execution.process.handle import ProcessHandle
-    from mirage.execution.types import ProcessId
-    from mirage.io.types import ByteSource, IOResult
-    from mirage.observe.record import OpRecord, Recorder
-    from mirage.policy.types import (
-        CommandContext,
-        DecisionOwner,
-        DryRun,
-        EntryGate,
-        HandOff,
-        VfsExplanation,
-    )
-    from mirage.shell.console import JobConsole
-    from mirage.shell.descriptors import FileDescription
-    from mirage.shell.types import Redirect
-    from mirage.workspace.evaluation import EvaluationContext
-    from mirage.workspace.history.line import LineHistory
-    from mirage.workspace.session.session import SessionState
-    from mirage.workspace.types import ExecutionNode, StatusWriter
-
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.history.line import LineHistory
+from mirage.workspace.session.session import SessionState
+from mirage.workspace.types import ExecutionNode, StatusWriter
 
 T = TypeVar("T")
 

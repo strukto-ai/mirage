@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use super::Fail;
+use super::errors::Fail;
 use super::package::{Pkg, relative};
 use super::tree::{self, Kid, Tree};
 use crate::request::{Opening, Request, failed, failure_text};

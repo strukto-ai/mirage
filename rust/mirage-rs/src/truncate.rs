@@ -6,7 +6,7 @@
 use serde_json::json;
 
 use crate::number::{self, BLANKS, EOVERFLOW};
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 use crate::{StreamError, quoted};
 
 /// The size letters truncate takes: every power in upper case, `g`, `k`,

@@ -12,6 +12,7 @@ mod compound;
 mod cond;
 mod expansion;
 mod heredoc;
+mod heredoc_body;
 mod lex;
 mod lower;
 mod parser;
@@ -24,28 +25,9 @@ mod word;
 #[cfg(test)]
 mod tests;
 
-pub use lower::Heredoc;
+pub use parser::Options;
 pub use reread::reread_lines;
-pub use tree::{FIELDS, KINDS, Node, Refusal, SourceMap, Tree, field_id};
-
-/// How a line is read: the names the shell expands as aliases, each a
-/// command where a command starts, as bash expands it before it reads a
-/// reserved word; and whether extglob's pattern groups are on, which a
-/// `[[` pattern reads either way.
-#[derive(Debug, Clone)]
-pub struct Options {
-    pub aliases: Vec<Vec<u8>>,
-    pub extglob: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            aliases: Vec::new(),
-            extglob: true,
-        }
-    }
-}
+pub use tree::{FIELDS, Heredoc, KINDS, Node, Refusal, SourceMap, Tree, field_id};
 
 /// Parse a program, extglob's groups on.
 pub fn parse(source: &[u8]) -> Tree {

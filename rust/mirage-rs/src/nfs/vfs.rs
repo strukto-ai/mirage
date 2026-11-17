@@ -5,45 +5,6 @@ use std::cmp::Ordering;
 
 use super::host::HostFs;
 use super::nfs::*;
-#[derive(Default, Debug)]
-pub struct DirEntrySimple {
-    pub fileid: fileid3,
-    pub name: filename3,
-}
-#[derive(Default, Debug)]
-pub struct ReadDirSimpleResult {
-    pub entries: Vec<DirEntrySimple>,
-    pub end: bool,
-}
-
-#[derive(Default, Debug)]
-pub struct DirEntry {
-    pub fileid: fileid3,
-    pub name: filename3,
-    pub attr: fattr3,
-}
-#[derive(Default, Debug)]
-pub struct ReadDirResult {
-    pub entries: Vec<DirEntry>,
-    pub end: bool,
-}
-
-impl ReadDirSimpleResult {
-    pub(super) fn from_readdir_result(result: &ReadDirResult) -> ReadDirSimpleResult {
-        let entries: Vec<DirEntrySimple> = result
-            .entries
-            .iter()
-            .map(|e| DirEntrySimple {
-                fileid: e.fileid,
-                name: e.name.clone(),
-            })
-            .collect();
-        ReadDirSimpleResult {
-            entries,
-            end: result.end,
-        }
-    }
-}
 
 impl HostFs {
     /// Simple version of readdir.

@@ -2,7 +2,7 @@
 //! verbose table and zipinfo's (`-Z`) rows, header and totals, as UnZip
 //! 6.00's list.c and zipinfo.c lay them out.
 
-use super::Entry;
+use super::format::Entry;
 
 /// zipinfo's host names, by the host byte of "version made by"; a host past
 /// the table reads as its last slot.

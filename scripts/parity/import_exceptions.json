@@ -1,6 +1,8 @@
 {
  "cycle_files": 0,
  "cycle_reason": "No Python or TypeScript import cycles, including type-only and deferred dependencies. Shared shapes belong in types modules, configuration belongs in config modules, and capability guards and routing containers must not import concrete runtime implementations. Cancellation primitives sit below their I/O and workspace consumers. Any new cycle fails the gate.",
+ "rust_cycle_files": 0,
+ "rust_cycle_reason": "No Rust module cycles inside any crate, outside #[cfg(test)] code. A crate root, a family's mod.rs and a dispatcher sit above what they call: shared shapes live in types, errors, config and constants modules below every user, an entry point that dispatches lives in its own module, and code that must call back up (a heredoc body that re-parses) takes the callee as a parameter. Any new cycle fails the gate.",
  "edges": {
   "typescript/packages/core/src/vfs/base.ts -> typescript/packages/core/src/commands/cli/types.ts": "A VFS carries the command trees it hands its mount (the public `commands` option) typed as CLI, a type-only import; Python types the list as callables.",
   "typescript/packages/core/src/vfs/base.ts -> typescript/packages/core/src/commands/config.ts": "A VFS carries its bespoke commands (the public `commands` option) typed as Command, a type-only import; Python types the list as callables. S15 reshapes Command into the invocation commands and CLIs share.",

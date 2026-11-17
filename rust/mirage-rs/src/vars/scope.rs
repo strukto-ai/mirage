@@ -1,14 +1,5 @@
 use super::*;
 
-/// The scope a function call or a prefix assignment opens: the records it
-/// shadowed, None for a name that had none. `temp` marks a prefix
-/// assignment's scope, bash's temporary environment of `x=1 f`.
-#[derive(Clone, Debug, Default)]
-pub(super) struct Frame {
-    pub(super) saved: HashMap<String, Option<Arc<Var>>>,
-    pub(super) temp: bool,
-}
-
 impl Store {
     /// The innermost scope on the call path that saved `name`.
     fn shadowing(&self, name: &str) -> Option<usize> {

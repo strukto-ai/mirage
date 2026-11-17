@@ -14,9 +14,9 @@
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -76,7 +76,7 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.clock import parse_system_time
-from mirage.utils.loader import optional_attr
+from mirage.utils.loader import load_attr, optional_attr
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
 from mirage.vfs.registry import build_vfs
@@ -94,23 +94,6 @@ from mirage.workspace.store import (
     RAMWorkspaceStateStore,
     WorkspaceStateStore,
 )
-
-if TYPE_CHECKING:
-    from mirage.workspace.store.redis import (
-        RedisWorkspaceStateStore as _RedisStore,
-    )
-    from mirage.workspace.store.s3 import S3WorkspaceStateStore as _S3Store
-
-S3WorkspaceStateStore: "type[_S3Store] | None"
-
-try:
-    from mirage.workspace.store import (
-        S3WorkspaceStateStore as _S3WorkspaceStateStore,
-    )
-except ImportError:
-    S3WorkspaceStateStore = None
-else:
-    S3WorkspaceStateStore = _S3WorkspaceStateStore
 
 
 def _coerce_mount_mode(value: Any) -> Any:
@@ -973,8 +956,8 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
     return IndexConfig(ttl=block.ttl)
 
 
-def _redis_state_store() -> "type[_RedisStore]":
-    store: type[_RedisStore] = optional_attr(
+def _redis_state_store() -> Callable[..., WorkspaceStateStore]:
+    store: Callable[..., WorkspaceStateStore] = optional_attr(
         "mirage.workspace.store.redis:RedisWorkspaceStateStore",
         "redis",
         "A redis store",
@@ -990,12 +973,16 @@ def _build_store_group(
     if isinstance(block, RedisStoreBlock):
         return _redis_state_store()(url=block.url, key_prefix=block.key_prefix)
     if isinstance(block, S3StoreBlock):
-        if S3WorkspaceStateStore is None:
+        try:
+            s3_store: Callable[[S3StoreBlock], WorkspaceStateStore] = (
+                load_attr("mirage.workspace.store.s3:S3WorkspaceStateStore")
+            )
+        except ImportError as exc:
             raise ImportError(
                 "An s3 store requires the 's3' extra. "
                 "Install with: pip install mirage-ai[s3]"
-            )
-        return S3WorkspaceStateStore(block)
+            ) from exc
+        return s3_store(block)
     return RAMWorkspaceStateStore()
 
 

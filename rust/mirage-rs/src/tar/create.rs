@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 
 use super::header::{self, BLOCK, Kind, RECORD, Stamp, padding};
-use super::read::{FEED, trimmed};
 use super::transform::Scope;
 use super::{
-    Config, Entry, FAILED, Planned, READ, TRAILER, WINDOW, escaped, lines, open_failure, read,
+    Config, Entry, FAILED, FEED, Planned, READ, TRAILER, WINDOW, escaped, lines, open_failure,
+    read, trimmed,
 };
 use crate::Stream;
 use crate::request::{Opening, Reply, Request, WriteMode, failed, failure_text};

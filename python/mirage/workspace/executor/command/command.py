@@ -129,11 +129,14 @@ from mirage.workspace.lookup import (
     JOB_BUILTINS,
     Consumer,
     line_facts,
-    lookup,
     runs_as,
 )
 from mirage.workspace.lookup.constants import EXEC_WRAPPERS, MACHINE_VIEW
-from mirage.workspace.lookup.lookup import picks_machine, runs_programs
+from mirage.workspace.lookup.lookup import (
+    lookup,
+    picks_machine,
+    runs_programs,
+)
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,

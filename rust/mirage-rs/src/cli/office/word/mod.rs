@@ -8,6 +8,7 @@
 //! section and style nodes. Divergence: an inline equation's text is
 //! plain, not LaTeX.
 
+pub(super) mod api;
 mod doc;
 pub(super) mod edit;
 mod paragraph;
@@ -18,13 +19,10 @@ mod run;
 mod table;
 mod things;
 
+use super::errors::Fail;
 use super::node::{Node, Value, number_text};
-use super::package::Pkg;
 use super::tree::{E, M, MC, W, W14, is_on, on_off};
 use super::units::{f2, half_points, hex_color, js_number};
-use super::{Fail, SetFail};
-
-pub(super) use self::doc::Word;
 
 pub(super) const WPG: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
 
@@ -917,24 +915,4 @@ pub(super) fn fill_unknown(container: Option<E<'_>>, node: &mut Node) {
             }
         }
     }
-}
-
-pub(super) fn get(pkg: &Pkg<'_>, path: &str, depth: usize) -> Result<Node, Fail> {
-    Word::new(pkg).get(path, depth)
-}
-
-pub(super) fn query(pkg: &Pkg<'_>, selector: &str) -> Result<Vec<Node>, Fail> {
-    Word::new(pkg).query(selector)
-}
-
-pub(super) fn set(
-    pkg: &mut Pkg<'_>,
-    path: &str,
-    props: &[(String, String)],
-) -> Result<(String, Vec<String>), SetFail> {
-    edit::set(pkg, path, props)
-}
-
-pub(super) fn remove(pkg: &mut Pkg<'_>, path: &str) -> Result<(String, Vec<String>), Fail> {
-    edit::remove(pkg, path)
 }

@@ -8,8 +8,9 @@ use super::super::node::{Node, Value, number_text};
 use super::super::package::{core_properties, extended_properties, theme_properties};
 use super::super::tree::{E, R, W, is_on, on_off};
 use super::super::units::{f2, hex_color, twips_to_cm, twips_to_pt};
+use super::doc::Word;
 use super::{
-    COMPAT_FLAGS, Word, float_value, is_digits, is_int, jsn, num_value, read_border, w_child, w_val,
+    COMPAT_FLAGS, float_value, is_digits, is_int, jsn, num_value, read_border, w_child, w_val,
 };
 
 const MARGINS: [(&str, &str, bool); 7] = [

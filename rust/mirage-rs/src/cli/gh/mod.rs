@@ -8,6 +8,7 @@ mod api;
 mod args;
 mod auth;
 mod cache;
+mod comment;
 mod constants;
 mod editable;
 mod fields;

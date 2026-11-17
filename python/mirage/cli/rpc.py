@@ -18,7 +18,6 @@ import typer
 
 from mirage.cli.mcp import relay_workspace
 from mirage.cli.output import fail
-from mirage.server.workspace_config import resolve_workspace_config
 
 RPC_ENV_NAMES = ("MIRAGE_RPC_CONFIG", "MIRAGE_CONFIG")
 
@@ -48,6 +47,10 @@ def rpc_cmd(
     rules.
     """
     if workspace_id is None:
+        from mirage.server.workspace_config import (  # noqa: PLC0415
+            resolve_workspace_config,
+        )
+
         try:
             path: Path | None = resolve_workspace_config(
                 config, env_names=RPC_ENV_NAMES

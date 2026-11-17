@@ -11,7 +11,7 @@ use serde_json::{Value as Json, json};
 use crate::head;
 use crate::number::{EOVERFLOW, unsigned_decimal};
 use crate::printf::number::parse_float;
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 use crate::word::{self, Choice};
 use crate::{StreamError, quoted};
 

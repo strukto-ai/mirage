@@ -13,15 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
 from mirage.context.session_context import Caller
+from mirage.policy.decisions import Decisions
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.types import VfsCall
-
-if TYPE_CHECKING:
-    from mirage.policy.decisions import Decisions
 
 T = TypeVar("T")
 
@@ -43,7 +41,7 @@ class Boundary:
     policies: Policies
     prefix: str = ""
     mode: MountMode | None = None
-    decisions: "Decisions | None" = None
+    decisions: Decisions | None = None
     caller: Caller = Caller()
 
     @property

@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use super::compile::compile;
 use super::eval::{DEBUG, ERROR, HALT, OUTPUT, PRINT, STDERR};
+use super::meter::Limits;
 use super::meter::{self, Meter};
 use super::value::{Value, parse_json};
-use super::vm::{Limits, Next, Vm};
+use super::vm::{Next, Vm};
 use crate::Stream;
 
 const LIMITS: Limits = Limits {
@@ -3694,7 +3695,7 @@ fn regex_array_limit_keeps_named_owners_until_matching_drops() {
                 break result;
             }
         };
-        assert!(matches!(&result, Err(super::builtin::Fault::Error(_))));
+        assert!(matches!(&result, Err(super::fault::Fault::Error(_))));
         drop(result);
         assert_eq!(meter.live(), before);
         drop(matching);

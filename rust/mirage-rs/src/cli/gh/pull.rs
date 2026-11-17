@@ -7,16 +7,15 @@ use super::accessor::{
     instant, json_fields, list_limit, numbered_subject, one_line, repo_for, time_field, tsv,
     typed_out,
 };
-use super::constants::{PR_INVALID_LIMIT, SEARCH_CAPPED};
-use super::editable::{Editable, PR_EDIT_FIELDS};
-use super::fields::{
-    At, Fetch, Field, FieldTable, Pages, Select, View, contexts, custom, exported_node, login,
-    names, nodes, nodes_of, paged, plain, plain_as, read_rest, references, selection,
-    shared_fields,
-};
-use super::issue::{
+use super::comment::{
     add_comment, check_comment_flags, comment_body, comment_run, comments_for, comments_text,
-    reopen_pull, with_special_names,
+};
+use super::constants::{PR_INVALID_LIMIT, SEARCH_CAPPED};
+use super::editable::{Editable, PR_EDIT_FIELDS, with_special_names};
+use super::fields::{
+    At, Fetch, Field, FieldTable, Pages, Select, View, assignee_list, contexts, custom,
+    exported_node, login, names, nodes, nodes_of, paged, plain, plain_as, project_list, read_rest,
+    references, selection, shared_fields, sorted_labels,
 };
 use super::search::{ListQuery, has_state_clause, list_query, search_features};
 use super::shape::{Shape, exported, or_null, pointer, strukt};
@@ -27,8 +26,8 @@ use crate::core::github::issue::issue_comments;
 use crate::core::github::json::{Json, Obj, quoted};
 use crate::core::github::metadata::{Wanted, repo_metadata};
 use crate::core::github::pull::{
-    BranchFilter, PullListFilter, diff_pull, head_branch, list_pull_request_fields,
-    pull_for_branch, pull_request_fields, search_pull_request_fields, status_contexts,
+    BranchFilter, PullListFilter, close_pull, diff_pull, head_branch, list_pull_request_fields,
+    pull_for_branch, pull_request_fields, reopen_pull, search_pull_request_fields, status_contexts,
 };
 use crate::core::github::repo::{RepoRef, github_repo, graphql_data, mutate};
 use crate::request::Request;
@@ -509,44 +508,6 @@ const VIEW_FIELDS: [&str; 19] = [
     "baseRefName",
     "headRefName",
 ];
-
-/// A label list sorted as gh's view sorts one, ignoring case.
-pub(crate) fn sorted_labels(row: &Json) -> String {
-    let mut names: Vec<String> = row
-        .get("labels")
-        .items()
-        .iter()
-        .map(|label| label.get("name").text().to_owned())
-        .collect();
-    names.sort_by_key(|name| name.to_lowercase());
-    names.join(", ")
-}
-
-pub(crate) fn assignee_list(row: &Json) -> String {
-    row.get("assignees")
-        .items()
-        .iter()
-        .map(|person| person.get("login").text().to_owned())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub(crate) fn project_list(row: &Json) -> String {
-    row.get("projectItems")
-        .items()
-        .iter()
-        .map(|item| {
-            let status = item.get("status").get("name").text();
-            let column = if status.is_empty() {
-                "No Status"
-            } else {
-                status
-            };
-            format!("{} ({column})", item.get("title").text())
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 fn reviewer_list(row: &Json, author: &str) -> String {
     let mut states: Vec<(String, String)> = Vec::new();
@@ -1202,21 +1163,6 @@ async fn find(
     let (repo, number) = target(account, texts, flags).await?;
     let node = pull_request_fields(account, &repo, number, fields, None).await?;
     Ok((repo, number, node))
-}
-
-pub(crate) async fn close_pull(account: &Account, id: &str) -> Result<()> {
-    let mut input = Obj::new();
-    input.set("pullRequestId", id);
-    mutate(
-        account,
-        "PullRequestClose",
-        "ClosePullRequestInput",
-        "closePullRequest",
-        "pullRequest{id}",
-        input,
-    )
-    .await
-    .map(|_| ())
 }
 
 async fn delete_remote_branch(account: &Account, repo: &RepoRef, branch: &str) -> Result<Json> {

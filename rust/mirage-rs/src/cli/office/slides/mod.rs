@@ -9,6 +9,7 @@
 //! slide carries. Divergences: a chart shows its frame and name but not
 //! its plot properties, and an equation's text is plain, not LaTeX.
 
+pub(super) mod api;
 mod cascade;
 mod color;
 mod deck;
@@ -20,12 +21,9 @@ mod query;
 mod tables;
 mod text;
 
+use super::errors::Fail;
 use super::node::{Node, Value};
-use super::package::Pkg;
 use super::tree::{E, P};
-use super::{Fail, SetFail};
-
-pub(super) use self::deck::Deck;
 
 pub(super) const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
 pub(super) const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
@@ -177,24 +175,4 @@ pub(super) fn placeholder_type_name(t: Option<&str>) -> String {
 /// A refusal with the code and hints OfficeCLI reads off its message.
 pub(super) fn fail(message: String) -> Fail {
     super::package::enriched(message)
-}
-
-pub(super) fn get(pkg: &Pkg<'_>, path: &str, depth: usize) -> Result<Node, Fail> {
-    Deck::new(pkg).get(path, depth)
-}
-
-pub(super) fn query(pkg: &Pkg<'_>, selector: &str) -> Result<Vec<Node>, Fail> {
-    Deck::new(pkg).query(selector)
-}
-
-pub(super) fn set(
-    pkg: &mut Pkg<'_>,
-    path: &str,
-    props: &[(String, String)],
-) -> Result<(String, Vec<String>), SetFail> {
-    edit::set(pkg, path, props)
-}
-
-pub(super) fn remove(pkg: &mut Pkg<'_>, path: &str) -> Result<(String, Vec<String>), Fail> {
-    edit::remove(pkg, path)
 }

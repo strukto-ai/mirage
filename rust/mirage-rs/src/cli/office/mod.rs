@@ -16,6 +16,8 @@
 mod batch;
 mod blank;
 mod book;
+mod document;
+mod errors;
 mod media;
 mod node;
 mod package;
@@ -23,19 +25,20 @@ mod query;
 mod read;
 mod sheet;
 mod slides;
+pub(crate) mod stream;
 mod style;
 #[cfg(test)]
 mod tests;
 mod tree;
+mod types;
 mod units;
 mod word;
 mod workbook;
 mod xml;
 
-use serde::Deserialize;
-
 use self::batch::Item;
 use self::book::{Book, Refusal, package, relationships, rels_of};
+use self::errors::{Fail, SetFail};
 use self::node::{Json, Node, lines, matches};
 use self::query::Scope;
 use self::read::{Doc, Grid, comment_node, comments, related};
@@ -43,214 +46,11 @@ use self::sheet::{
     Edits, Refused, Styles, Val, cell_ref, col_name, date_serial, notes, without_refs,
     without_shape,
 };
-use self::xml::{Kind, retag, tags};
+use self::types::{Advice, Config, Out, Outcome, Output, unsupported_text};
+use self::xml::{HEAD, Kind, MAIN, REL, before_end, retag, strip, tags, text};
 use crate::request::{Opening, Request, WriteMode, failed, failure_text};
 use crate::task::Host;
 use crate::zip::{Piece, write_out};
-use crate::{Stream, StreamError, parse_config, task};
-
-#[derive(Deserialize)]
-struct Config {
-    command: String,
-    /// The workbook as typed, which messages name.
-    #[serde(deserialize_with = "crate::latin1")]
-    file: Vec<u8>,
-    /// The workbook's absolute path, which the host reads and writes.
-    #[serde(deserialize_with = "crate::latin1")]
-    absolute: Vec<u8>,
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    props: Vec<String>,
-    #[serde(default)]
-    force: bool,
-    #[serde(default)]
-    json: bool,
-    #[serde(default)]
-    depth: Option<i64>,
-    #[serde(default)]
-    find: Option<String>,
-    #[serde(default)]
-    commands: Option<String>,
-    /// `--input` as typed, the stream's second operand.
-    #[serde(default, deserialize_with = "crate::latin1_opt")]
-    input: Option<Vec<u8>>,
-    #[serde(default, deserialize_with = "crate::latin1_opt")]
-    input_absolute: Option<Vec<u8>>,
-    #[serde(default)]
-    stop_on_error: bool,
-    #[serde(default)]
-    best_effort: bool,
-    /// `add --type`.
-    #[serde(default, rename = "type")]
-    kind: Option<String>,
-    #[serde(default)]
-    from: Option<String>,
-    #[serde(default)]
-    index: Option<i64>,
-    #[serde(default)]
-    after: Option<String>,
-    #[serde(default)]
-    before: Option<String>,
-    /// `move --to`.
-    #[serde(default)]
-    to: Option<String>,
-    /// `swap`'s second path.
-    #[serde(default)]
-    path2: Option<String>,
-}
-
-pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config: Config = parse_config(config)?;
-    Ok(task::spawn(|host| run(host, config)))
-}
-
-/// A refusal: the message `Error:` prints and the code `--json` names.
-#[derive(Debug)]
-pub(super) struct Fail {
-    message: String,
-    code: Option<&'static str>,
-    suggestion: Option<String>,
-    help: Option<String>,
-    valid: Option<Vec<String>>,
-}
-
-impl Fail {
-    /// A refusal its message names the code of, as OfficeCLI infers one.
-    pub(super) fn of(message: String) -> Fail {
-        let code =
-            if message.starts_with("Sheet not found:") || message.starts_with("Path not found:") {
-                Some("not_found")
-            } else if message.contains("Unsupported file type") {
-                Some("unsupported_type")
-            } else if message.starts_with("invalid ") {
-                Some("invalid_value")
-            } else {
-                None
-            };
-        Fail {
-            message,
-            code,
-            suggestion: None,
-            help: None,
-            valid: None,
-        }
-    }
-
-    pub(super) fn coded(message: String, code: &'static str) -> Fail {
-        Fail {
-            message,
-            code: Some(code),
-            suggestion: None,
-            help: None,
-            valid: None,
-        }
-    }
-
-    fn missing(absolute: &[u8]) -> Fail {
-        Fail {
-            message: format!("File not found: {}", text(absolute)),
-            code: Some("file_not_found"),
-            suggestion: Some(
-                "Check the file path. Use an absolute path or a path relative to the current directory."
-                    .to_string(),
-            ),
-            help: Some("office create <path> --type docx|xlsx|pptx".to_string()),
-            valid: None,
-        }
-    }
-
-    fn envelope(&self) -> Json {
-        let mut error = vec![
-            ("error", Json::Str(self.message.clone())),
-            (
-                "code",
-                Json::Str(self.code.unwrap_or("internal_error").to_string()),
-            ),
-        ];
-        if let Some(suggestion) = &self.suggestion {
-            error.push(("suggestion", Json::Str(suggestion.clone())));
-        }
-        if let Some(help) = &self.help {
-            error.push(("help", Json::Str(help.clone())));
-        }
-        if let Some(valid) = &self.valid {
-            error.push((
-                "validValues",
-                Json::Arr(valid.iter().map(|v| Json::Str(v.clone())).collect()),
-            ));
-        }
-        Json::obj(vec![
-            ("success", Json::Bool(false)),
-            ("error", Json::obj(error)),
-        ])
-    }
-}
-
-/// Why a set did not apply every property: the refusal, the properties it
-/// does not take, or those it left once the rest were applied.
-enum SetFail {
-    Fail(Fail),
-    Unsupported {
-        keys: Vec<String>,
-        element: &'static str,
-        valid: &'static [&'static str],
-    },
-    Partial {
-        message: String,
-        warnings: Vec<String>,
-        keys: Vec<String>,
-        element: &'static str,
-        valid: &'static [&'static str],
-    },
-}
-
-/// The set's outcome once some props were applied: `Partial` when others
-/// were left, else the line and warnings.
-fn partial(
-    path: &str,
-    props: &[(String, String)],
-    took: &[String],
-    warnings: Vec<String>,
-    element: &'static str,
-    valid: &'static [&'static str],
-) -> Result<(String, Vec<String>), SetFail> {
-    let taken = |k: &str| took.iter().any(|t| t.eq_ignore_ascii_case(k));
-    let shown: Vec<String> = props
-        .iter()
-        .filter(|(k, _)| taken(k))
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect();
-    let message = format!("Updated {path}: {}", shown.join(", "));
-    let keys: Vec<String> = props
-        .iter()
-        .map(|(k, _)| k.clone())
-        .filter(|k| !taken(k))
-        .collect();
-    if keys.is_empty() {
-        return Ok((message, warnings));
-    }
-    if shown.is_empty() {
-        return Err(SetFail::Unsupported {
-            keys,
-            element,
-            valid,
-        });
-    }
-    Err(SetFail::Partial {
-        message,
-        warnings,
-        keys,
-        element,
-        valid,
-    })
-}
-
-impl From<Fail> for SetFail {
-    fn from(f: Fail) -> SetFail {
-        SetFail::Fail(f)
-    }
-}
 
 /// What a path names; a sheet as typed, resolved against the workbook.
 #[derive(Debug, PartialEq)]
@@ -354,118 +154,6 @@ fn unsupported_path(command: &str, path: &str) -> Fail {
     }
 }
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
-/// Where a command's output goes: as text, or as one JSON envelope.
-struct Out<'h> {
-    host: &'h Host,
-    json: bool,
-}
-
-impl Out<'_> {
-    fn fail(&self, f: &Fail) -> i32 {
-        if self.json {
-            self.host
-                .print(format!("{}\n", f.envelope().pretty()).as_bytes());
-        } else {
-            self.host.warn(format!("Error: {}\n", f.message).as_bytes());
-        }
-        1
-    }
-
-    /// A command's one-line success message.
-    fn done(&self, message: &str) -> i32 {
-        if self.json {
-            let env = Json::obj(vec![
-                ("success", Json::Bool(true)),
-                ("data", Json::Str(message.to_string())),
-                ("message", Json::Str(message.to_string())),
-            ]);
-            self.host.print(format!("{}\n", env.pretty()).as_bytes());
-        } else {
-            self.host.print(format!("{message}\n").as_bytes());
-        }
-        0
-    }
-
-    fn data(&self, data: Json, warnings: Option<Json>, success: bool) {
-        let mut env = vec![("success", Json::Bool(success)), ("data", data)];
-        if let Some(w) = warnings {
-            env.push(("warnings", w));
-        }
-        self.host
-            .print(format!("{}\n", Json::obj(env).pretty()).as_bytes());
-    }
-
-    /// The line of a set that applied some props, then the ones it left.
-    fn partly(&self, message: &str, keys: &[String], element: &str, valid: &[&str]) -> i32 {
-        if self.json {
-            let env = Json::obj(vec![
-                ("success", Json::Bool(true)),
-                ("data", Json::Str(message.to_string())),
-                ("message", Json::Str(message.to_string())),
-                ("warnings", unsupported_warnings(keys, element, valid)),
-            ]);
-            self.host.print(format!("{}\n", env.pretty()).as_bytes());
-        } else {
-            self.host.print(format!("{message}\n").as_bytes());
-            self.host
-                .warn(format!("{}\n", unsupported_text(keys, element, valid)).as_bytes());
-        }
-        2
-    }
-
-    fn unsupported(&self, path: &str, keys: &[String], element: &str, valid: &[&str]) -> i32 {
-        if self.json {
-            let env = Json::obj(vec![
-                ("success", Json::Bool(false)),
-                (
-                    "message",
-                    Json::Str(format!("Error: No properties applied to {path}")),
-                ),
-                ("warnings", unsupported_warnings(keys, element, valid)),
-            ]);
-            self.host.print(format!("{}\n", env.pretty()).as_bytes());
-        } else {
-            self.host
-                .print(format!("Error: No properties applied to {path}\n").as_bytes());
-            self.host
-                .warn(format!("{}\n", unsupported_text(keys, element, valid)).as_bytes());
-        }
-        2
-    }
-}
-
-/// One `unsupported_property` warning per key, as `--json` lists them.
-fn unsupported_warnings(keys: &[String], element: &str, valid: &[&str]) -> Json {
-    Json::Arr(
-        keys.iter()
-            .map(|k| {
-                Json::obj(vec![
-                    (
-                        "message",
-                        Json::Str(format!(
-                            "Unsupported property: {k} (valid {element} props: {})",
-                            valid.join(", ")
-                        )),
-                    ),
-                    ("code", Json::Str("unsupported_property".to_string())),
-                ])
-            })
-            .collect(),
-    )
-}
-
-fn unsupported_text(keys: &[String], element: &str, valid: &[&str]) -> String {
-    format!(
-        "UNSUPPORTED props: {} (valid {element} props: {}). Run 'office help <format> <element>' to see valid props, or raw-set for raw XML.",
-        keys.join(", "),
-        valid.join(", ")
-    )
-}
-
 async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc), Fail> {
     let mut book = match Book::open(host, &config.file).await {
         Ok(book) => book,
@@ -488,9 +176,6 @@ async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc
 }
 
 async fn run(host: Host, config: Config) -> i32 {
-    if let Some(kind) = package::Kind::of(&text(&config.file)) {
-        return package::run(&host, &config, kind).await;
-    }
     let out = Out {
         host: &host,
         json: config.json,
@@ -661,14 +346,6 @@ fn add_usage(config: &Config) -> Option<Fail> {
         return Some(fail);
     }
     None
-}
-
-/// An advisory line `add` or `set` prints on stderr: its message, the code
-/// `--json` names and a suggestion.
-struct Advice {
-    message: String,
-    code: &'static str,
-    suggestion: Option<String>,
 }
 
 /// The line `add` prints once the element is made, a placed shape's
@@ -901,10 +578,6 @@ async fn create(out: &Out<'_>, config: &Config) -> i32 {
     }
     status
 }
-
-const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 const STYLES_TYPE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
 
 /// The styles part of a blank workbook: one font, fill pair, border and
@@ -1145,18 +818,6 @@ async fn styles_or_new(book: &mut Book<'_>, wb_part: &str) -> Option<(String, St
     book.put(&rels_part, rels);
     book.put("[Content_Types].xml", types);
     Some((part, Styles::new(xml)))
-}
-
-/// `xml` with an empty `name` element holding `attrs` put just inside the
-/// end of its `root` element, under the root's prefix so it shares the
-/// root's namespace.
-fn before_end(xml: &[u8], root: &str, name: &str, attrs: &str) -> Option<Vec<u8>> {
-    let end = tags(xml)
-        .filter(|t| t.kind == Kind::End && t.is(root))
-        .last()?;
-    let prefix = String::from_utf8_lossy(end.prefix());
-    let entry = format!("<{prefix}{name} {attrs}/>");
-    Some([&xml[..end.start], entry.as_bytes(), &xml[end.start..]].concat())
 }
 
 /// Why a cell cannot hold `value`, in OfficeCLI's words: past Excel's
@@ -1413,22 +1074,6 @@ async fn drop_calc_chain(book: &mut Book<'_>, wb_part: &str) {
     book.drop_part(&chain);
 }
 
-fn strip(xml: &[u8], name: &str, hit: impl Fn(&xml::Tag<'_>) -> bool) -> Vec<u8> {
-    let mut out = Vec::with_capacity(xml.len());
-    let mut last = 0;
-    let mut skip = 0;
-    for tag in tags(xml) {
-        if tag.start < skip || tag.kind == Kind::End || !tag.is(name) || !hit(&tag) {
-            continue;
-        }
-        let end = xml::element_end(xml, &tag).unwrap_or(tag.end);
-        out.extend_from_slice(&xml[last..tag.start]);
-        (last, skip) = (end, end);
-    }
-    out.extend_from_slice(&xml[last..]);
-    out
-}
-
 async fn remove(book: &mut Book<'_>, doc: &Doc, goal: &Target, path: &str) -> Result<String, Fail> {
     if let Target::Sheet(name) = goal {
         let (_, entry) = resolve_sheet(doc, name, None)?;
@@ -1482,18 +1127,6 @@ async fn remove(book: &mut Book<'_>, doc: &Doc, goal: &Target, path: &str) -> Re
         }
     }
     Ok(format!("Removed {path}"))
-}
-
-/// What a batch item answered: a line of text, or nodes when `--json`.
-enum Output {
-    Text(String),
-    Data(Json),
-}
-
-struct Outcome {
-    index: usize,
-    result: Result<Output, (String, Option<&'static str>)>,
-    warnings: Vec<String>,
 }
 
 const VERBS: [&str; 14] = [

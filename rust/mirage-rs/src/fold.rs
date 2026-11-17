@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::number::{self, ERANGE};
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::utf8::{Char, char_at};
 use crate::width::{TAB_WIDTH, char_width, is_space};
 use crate::{Stream, StreamError, parse_config, quoted};
