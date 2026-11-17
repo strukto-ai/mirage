@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../shell/voice.ts'
-import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
@@ -24,14 +23,11 @@ import {
   redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
-  runAsProgram,
-  setTraits,
   runWithCaller,
   runWithRedirectPaths,
   sessionAccess,
   syntaxHead,
 } from '../../context/session_context.ts'
-import { ensureStream } from '../../io/stream.ts'
 import { type ByteSource, type OutputState, IOResult, materialize } from '../../io/types.ts'
 import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -46,13 +42,12 @@ import {
   resolveProducer,
   type Route,
 } from '../../policy/index.ts'
-import type { ProcessTraits } from '../../execution/process/types.ts'
 import { agreed } from '../../policy/policies.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { DispatchFn, OutputFn, RouteDecision, RunResult } from '../../runtime/types.ts'
+import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
@@ -61,7 +56,6 @@ import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../execution/job/index.ts'
-import { shellJoin } from '../../shell/join.ts'
 import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -93,6 +87,7 @@ import {
   handleReadlink,
   handleSetfattr,
   handleTouch,
+  handleWrapper,
   operandFollow,
   prepareMv,
   stripLinkOperands,
@@ -108,13 +103,7 @@ import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
-import {
-  lookup,
-  routedConsumer,
-  runsWrapper,
-  wrapperAnswer,
-  wrapperTraits,
-} from '../lookup/lookup.ts'
+import { lookup, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -1188,107 +1177,6 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
   return lines.filter((line) => !spoken.has(line.trim()))
 }
 
-/** A console that hands each chunk a line writes on as it comes. */
-class Relay extends JobConsole {
-  constructor(
-    private readonly output: OutputFn,
-    private readonly errors: OutputFn,
-  ) {
-    super()
-  }
-
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    await (channel === Channel.STDOUT ? this.output : this.errors)(data)
-  }
-}
-
-/**
- * Run the program a wrapper runs, as a program, its output handed over as it
- * runs. Mirrors Python's `_run_program`.
- */
-/**
- * Run a wrapper's program in Mirage, as the program it execs, its output
- * handed over as it runs: the process it runs as, and all it starts, carry
- * what the wrapper changed. `warned` is what the wrapper says before it runs
- * the program. Mirrors Python's `_run_program`.
- */
-function runProgram(
-  executeFn: ExecuteFn,
-  name: string,
-  line: string,
-  session: SessionState,
-  stdin: ByteSource | null,
-  traits: ProcessTraits,
-  warned = '',
-): RedirectResult {
-  const node = new ExecutionNode({ command: name })
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn,
-    signal: AbortSignal,
-  ): Promise<RunResult> => {
-    if (warned !== '') await errors(encodeText(warned))
-    const ran = await runAsProgram(session, () =>
-      setTraits(traits, () =>
-        executeFn(line, {
-          sessionId: session.sessionId,
-          signal,
-          sink: new Relay(output, errors),
-          ...(stdin !== null ? { stdin } : {}),
-        }),
-      ),
-    )
-    if (ran.stdout !== null) {
-      for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
-    }
-    const said = await ran.materializeStderr()
-    node.exitCode = ran.exitCode
-    return {
-      stdout: new Uint8Array(),
-      stderr: said.byteLength > 0 ? said : null,
-      exitCode: ran.exitCode,
-    }
-  }
-  const [stdout, io] = runOutput(run)
-  return [stdout, io, node]
-}
-
-/**
- * A wrapper Mirage runs (`nice`, `nohup`, `setsid`, `stdbuf`, `ionice`): it
- * answers for itself (`nice` alone, a bad option, a program it cannot exec),
- * or execs its program with what it changes (`wrapperTraits`). The runner it
- * runs as, when it is a job's or a stage's one command, becomes the program;
- * the program is judged, placed and run as any command is, and a machine with
- * processes of its own is handed the wrapper's words before it. Mirrors
- * Python's `_run_wrapper`.
- */
-function runWrapper(
-  executeFn: ExecuteFn,
-  name: string,
-  args: readonly string[],
-  session: SessionState,
-  registry: MountRegistry,
-  stdin: ByteSource | null,
-): RedirectResult {
-  const caller = currentCaller()
-  const answer = wrapperAnswer(name, args, session, registry, caller.traits.niceness)
-  if (answer.runsFrom === null) {
-    const err = encodeText(answer.stderr)
-    return [
-      answer.stdout === '' ? null : encodeText(answer.stdout),
-      new IOResult({
-        exitCode: answer.exitCode,
-        ...(err.byteLength > 0 ? { stderr: err } : {}),
-      }),
-      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
-    ]
-  }
-  const [traits, warned] = wrapperTraits(name, args, answer.runsFrom, caller.traits)
-  const line = shellJoin(args.slice(answer.runsFrom))
-  caller.process?.wrap(traits, line)
-  return runProgram(executeFn, name, line, session, stdin, traits, warned)
-}
-
 /** A command the gate refused, as its run answers it. */
 function refused(command: string, verdict: Refused): RedirectResult {
   return [
@@ -1484,7 +1372,7 @@ async function routeArgv(
   }
 
   if (runsWrapper(name, argv.args, session, context.frame.routing)) {
-    return runWrapper(executeFn, name, argv.args, session, registry, stdin)
+    return handleWrapper(executeFn, name, argv.args, session, registry, stdin)
   }
 
   const [consumer, routing] = routedConsumer(

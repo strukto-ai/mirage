@@ -52,8 +52,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
-import { PLAIN_TRAITS, type ProcessTraits } from '../../execution/process/types.ts'
-import { routedConsumer, wrapperTraits } from './lookup.ts'
+import { routedConsumer } from './lookup.ts'
 import { buildRuntime } from '../../runtime/table.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
@@ -1283,34 +1282,5 @@ describe('lscpu, the view of the machines', () => {
       fallback: sandbox,
     } as never
     expect(routedConsumer('lscpu', [], session, ws.registry, routing)[0]).toBe(Consumer.EXTERNAL)
-  })
-})
-
-describe('wrapperTraits', () => {
-  const traits = (over: Partial<ProcessTraits>): ProcessTraits => ({ ...PLAIN_TRAITS, ...over })
-
-  it.each([
-    ['nice', ['gcc'], 0, traits({ niceness: 10, wrappers: ['nice'] }), ''],
-    ['nice', ['-n', '5', 'gcc'], 2, traits({ niceness: 5, wrappers: ['nice', '-n', '5'] }), ''],
-    [
-      'nice',
-      ['-n', '-5', 'gcc'],
-      2,
-      traits({ wrappers: ['nice', '-n', '-5'] }),
-      'nice: cannot set niceness: Permission denied\n',
-    ],
-    ['nohup', ['gcc'], 0, traits({ ignores: new Set([1]), wrappers: ['nohup'] }), ''],
-    ['setsid', ['-w', 'gcc'], 1, traits({ leads: true, wrappers: ['setsid', '-w'] }), ''],
-    ['stdbuf', ['-oL', 'gcc'], 1, traits({ wrappers: ['stdbuf', '-oL'] }), ''],
-  ] as [string, string[], number, ProcessTraits, string][])(
-    '%s %j changes the traits of its program',
-    (name, args, at, worn, warned) => {
-      expect(wrapperTraits(name, args, at, PLAIN_TRAITS)).toEqual([worn, warned])
-    },
-  )
-
-  it('never sets the niceness past 19', () => {
-    const [worn] = wrapperTraits('nice', ['-n', '9', 'gcc'], 2, traits({ niceness: 15 }))
-    expect(worn.niceness).toBe(19)
   })
 })

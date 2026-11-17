@@ -18,26 +18,18 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
-from mirage.commands.spec.help import render_help
-from mirage.commands.spec.shell import SHELL_SPECS
-from mirage.commands.spec.standard import version_line
-from mirage.commands.spec.synopsis import SYNOPSES
-from mirage.execution.process.types import ProcessTraits
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
-from mirage.shell.constants import SIGHUP
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
 from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
-    DEFAULT_NICENESS,
     EXEC_WRAPPERS,
     INTERPRETER_NAMES,
     KEYWORDS,
-    LOWEST_PRIORITY,
     MACHINE_ONLY_BUILTINS,
     MACHINE_VIEW,
     NAMESPACE_COMMANDS,
@@ -46,10 +38,9 @@ from mirage.workspace.lookup.constants import (
     RUNNERS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
-    nice_adjustment,
     read_wrapper,
 )
-from mirage.workspace.lookup.types import Consumer, WrapperAnswer
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
@@ -305,144 +296,6 @@ def runs_wrapper(
     ):
         return False
     return name in RUNNERS or read_wrapper(name, args)[0] is not None
-
-
-def wrapper_traits(
-    name: str,
-    args: Sequence[str],
-    at: int,
-    traits: ProcessTraits,
-) -> tuple[ProcessTraits, str]:
-    """What a wrapper changes for the program at ``at`` in its words, over
-    the traits it runs under, and what it warns first: ``nice`` the
-    niceness (10 more, or its adjustment, never past 19; a negative one
-    is refused, as for a user who is not root), ``nohup`` HUP ignored,
-    ``setsid`` a group and session of its own. Each records its words for
-    a machine with processes of its own.
-
-    Args:
-        name (str): a ``PROGRAM_WRAPPERS`` name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        at (int): where its program stands in them.
-        traits (ProcessTraits): the traits it runs under.
-    """
-    worn = dataclasses.replace(
-        traits, wrappers=(*traits.wrappers, name, *args[:at])
-    )
-    if name == "nice":
-        adjustment = nice_adjustment(args[:at])
-        if adjustment is not None and adjustment < 0:
-            return worn, "nice: cannot set niceness: Permission denied\n"
-        step = DEFAULT_NICENESS if adjustment is None else adjustment
-        level = min(traits.niceness + step, LOWEST_PRIORITY)
-        return dataclasses.replace(worn, niceness=level), ""
-    if name == "nohup":
-        return dataclasses.replace(worn, ignores=worn.ignores | {SIGHUP}), ""
-    if name == "setsid":
-        return dataclasses.replace(worn, leads=True), ""
-    return worn, ""
-
-
-def wrapper_refusal(
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: "MountRegistry",
-) -> tuple[int, str] | None:
-    """The status and stderr GNU's wrapper answers instead of running
-    its program: a bad option, or a word it cannot exec (``nice cd``).
-
-    Args:
-        name (str): a ``PROGRAM_WRAPPERS`` name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
-    """
-    grammar = PROGRAM_WRAPPERS[name]
-    at, error = read_wrapper(name, args)
-    if error is not None:
-        return grammar.status, error
-    if at is None:
-        return None
-    inner = args[at]
-    if inner not in PROGRAM_WRAPPERS and not execs(inner, session, registry):
-        return 127, grammar.missing.format(inner)
-    return None
-
-
-def _usage(name: str, line: str, status: int) -> WrapperAnswer:
-    return WrapperAnswer(
-        exit_code=status,
-        stderr=f"{line}\nTry '{name} --help' for more information.\n",
-    )
-
-
-def _help_word(args: Sequence[str]) -> str | None:
-    """The ``--help`` or ``--version`` a wrapper's options stopped at.
-
-    Args:
-        args (Sequence[str]): its words.
-    """
-    for word in args:
-        if word == "--" or not word.startswith("-"):
-            return None
-        if len(word) > 2 and "--help".startswith(word):
-            return "--help"
-        if len(word) > 2 and "--version".startswith(word):
-            return "--version"
-    return None
-
-
-def _niceness(args: Sequence[str], niceness: int) -> WrapperAnswer:
-    """``nice`` with nothing to run: the niceness it runs at, an
-    adjustment with nothing to run refused.
-
-    Args:
-        args (Sequence[str]): its words, argv[0] excluded.
-        niceness (int): the niceness of the process it runs as.
-    """
-    if nice_adjustment(args) is not None:
-        return _usage(
-            "nice", "nice: a command must be given with an adjustment", 125
-        )
-    return WrapperAnswer(stdout=f"{niceness}\n")
-
-
-def wrapper_answer(
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: "MountRegistry",
-    niceness: int = 0,
-) -> WrapperAnswer:
-    """What a wrapper Mirage runs does: refuse the line, say what it is,
-    print the niceness, or run its program (``runs_from``).
-
-    Args:
-        name (str): a ``PROGRAM_WRAPPERS`` name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
-        niceness (int): the niceness of the process it runs as.
-    """
-    refused = wrapper_refusal(name, args, session, registry)
-    if refused is not None:
-        code, said = refused
-        return WrapperAnswer(exit_code=code, stderr=said)
-    at = read_wrapper(name, args)[0]
-    if at is not None:
-        return WrapperAnswer(runs_from=at)
-    word = _help_word(args)
-    if word == "--version":
-        return WrapperAnswer(stdout=version_line(name).decode())
-    if word == "--help":
-        page = render_help(name, SHELL_SPECS[name], synopsis=SYNOPSES[name])
-        return WrapperAnswer(stdout=page)
-    if name == "nice":
-        return _niceness(args, niceness)
-    if name == "setsid":
-        return _usage(name, "setsid: no command specified", 1)
-    return _usage(name, f"{name}: missing operand", 125)
 
 
 def _layers(

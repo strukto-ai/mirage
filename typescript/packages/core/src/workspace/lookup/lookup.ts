@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../commands/spec/compile.ts'
-import { renderHelp } from '../../commands/spec/help.ts'
-import { SHELL_SPECS } from '../../commands/spec/shell.ts'
-import { versionLine } from '../../commands/spec/standard.ts'
-import { SYNOPSES } from '../../commands/spec/synopsis.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { ProcessTraits } from '../../execution/process/types.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
@@ -28,11 +23,9 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import {
   CAPTURABLE_BUILTINS,
-  DEFAULT_NICENESS,
   EXEC_WRAPPERS,
   INTERPRETER_NAMES,
   KEYWORDS,
-  LOWEST_PRIORITY,
   MACHINE_ONLY_BUILTINS,
   MACHINE_VIEW,
   NAMESPACE_COMMANDS,
@@ -41,11 +34,9 @@ import {
   RUNNERS,
   SHELL_NAMES,
   SHELL_ONLY_BUILTINS,
-  niceAdjustment,
   readWrapper,
 } from './constants.ts'
-import { Consumer, WrapperAnswer } from './types.ts'
-import { SIGHUP } from '../../shell/constants.ts'
+import { Consumer } from './types.ts'
 import { CycleError, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -257,112 +248,6 @@ export function runsWrapper(
   )
     return false
   return RUNNERS.has(name) || readWrapper(name, args)[0] !== null
-}
-
-/**
- * What a wrapper changes for the program at `at` in its words, over the
- * traits it runs under, and what it warns first: `nice` the niceness (10
- * more, or its adjustment, never past 19; a negative one is refused, as for a
- * user who is not root), `nohup` HUP ignored, `setsid` a group and session of
- * its own. Each records its words for a machine with processes of its own.
- * Mirrors Python's `wrapper_traits`.
- */
-export function wrapperTraits(
-  name: string,
-  args: readonly string[],
-  at: number,
-  traits: ProcessTraits,
-): [ProcessTraits, string] {
-  const worn: ProcessTraits = {
-    ...traits,
-    wrappers: [...traits.wrappers, name, ...args.slice(0, at)],
-  }
-  if (name === 'nice') {
-    const adjustment = niceAdjustment(args.slice(0, at))
-    if (adjustment !== null && adjustment < 0)
-      return [worn, 'nice: cannot set niceness: Permission denied\n']
-    const step = adjustment ?? DEFAULT_NICENESS
-    return [{ ...worn, niceness: Math.min(traits.niceness + step, LOWEST_PRIORITY) }, '']
-  }
-  if (name === 'nohup') return [{ ...worn, ignores: new Set([...worn.ignores, SIGHUP]) }, '']
-  if (name === 'setsid') return [{ ...worn, leads: true }, '']
-  return [worn, '']
-}
-
-export function wrapperRefusal(
-  name: string,
-  args: readonly string[],
-  session: SessionState,
-  registry: MountRegistry,
-): [number, string] | null {
-  const grammar = PROGRAM_WRAPPERS.get(name)
-  if (grammar === undefined) return null
-  const [at, error] = readWrapper(name, args)
-  if (error !== null) return [grammar.status, error]
-  if (at === null) return null
-  const inner = args[at] ?? ''
-  if (!PROGRAM_WRAPPERS.has(inner) && !execs(inner, session, registry)) {
-    return [127, grammar.missing.replace('{}', inner)]
-  }
-  return null
-}
-
-function usage(name: string, line: string, status: number): WrapperAnswer {
-  return new WrapperAnswer({
-    exitCode: status,
-    stderr: `${line}\nTry '${name} --help' for more information.\n`,
-  })
-}
-
-/** The `--help` or `--version` a wrapper's options stopped at. */
-function helpWord(args: readonly string[]): string | null {
-  for (const word of args) {
-    if (word === '--' || !word.startsWith('-')) return null
-    if (word.length > 2 && '--help'.startsWith(word)) return '--help'
-    if (word.length > 2 && '--version'.startsWith(word)) return '--version'
-  }
-  return null
-}
-
-/**
- * `nice` with nothing to run: the niceness it runs at, an adjustment with
- * nothing to run refused. Mirrors Python's `_niceness`.
- */
-function niceness(args: readonly string[], level: number): WrapperAnswer {
-  if (niceAdjustment(args) !== null)
-    return usage('nice', 'nice: a command must be given with an adjustment', 125)
-  return new WrapperAnswer({ stdout: `${String(level)}\n` })
-}
-
-/**
- * What a wrapper Mirage runs does: refuse the line, say what it is, print the
- * niceness, or run its program (`runsFrom`). `level` is the niceness of the
- * process it runs as. Mirrors Python's `wrapper_answer`.
- */
-export function wrapperAnswer(
-  name: string,
-  args: readonly string[],
-  session: SessionState,
-  registry: MountRegistry,
-  level = 0,
-): WrapperAnswer {
-  const refused = wrapperRefusal(name, args, session, registry)
-  if (refused !== null) {
-    const [code, said] = refused
-    return new WrapperAnswer({ exitCode: code, stderr: said })
-  }
-  const [at] = readWrapper(name, args)
-  if (at !== null) return new WrapperAnswer({ runsFrom: at })
-  const word = helpWord(args)
-  if (word === '--version') return new WrapperAnswer({ stdout: versionLine(name) })
-  if (word === '--help') {
-    const spec = SHELL_SPECS[name]
-    if (spec === undefined) throw new Error(`${name}: no spec`)
-    return new WrapperAnswer({ stdout: renderHelp(name, spec, [], undefined, SYNOPSES[name]) })
-  }
-  if (name === 'nice') return niceness(args, level)
-  if (name === 'setsid') return usage(name, 'setsid: no command specified', 1)
-  return usage(name, `${name}: missing operand`, 125)
 }
 
 /**

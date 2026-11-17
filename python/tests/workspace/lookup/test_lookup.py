@@ -18,7 +18,6 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.execution.process.types import ProcessTraits
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
@@ -42,7 +41,7 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
-from mirage.workspace.lookup.lookup import routed_consumer, wrapper_traits
+from mirage.workspace.lookup.lookup import routed_consumer
 from mirage.workspace.session import SessionState
 
 
@@ -790,63 +789,3 @@ def test_lscpu_captured_by_name_stays_the_program():
     )
     consumer, _ = routed_consumer("lscpu", (), session, ws.registry, routing)
     assert consumer is Consumer.EXTERNAL
-
-
-@pytest.mark.parametrize(
-    ("name", "args", "at", "traits", "warned"),
-    [
-        (
-            "nice",
-            ["gcc"],
-            0,
-            ProcessTraits(niceness=10, wrappers=("nice",)),
-            "",
-        ),
-        (
-            "nice",
-            ["-n", "5", "gcc"],
-            2,
-            ProcessTraits(niceness=5, wrappers=("nice", "-n", "5")),
-            "",
-        ),
-        (
-            "nice",
-            ["-n", "-5", "gcc"],
-            2,
-            ProcessTraits(wrappers=("nice", "-n", "-5")),
-            "nice: cannot set niceness: Permission denied\n",
-        ),
-        (
-            "nohup",
-            ["gcc"],
-            0,
-            ProcessTraits(ignores=frozenset({1}), wrappers=("nohup",)),
-            "",
-        ),
-        (
-            "setsid",
-            ["-w", "gcc"],
-            1,
-            ProcessTraits(leads=True, wrappers=("setsid", "-w")),
-            "",
-        ),
-        (
-            "stdbuf",
-            ["-oL", "gcc"],
-            1,
-            ProcessTraits(wrappers=("stdbuf", "-oL")),
-            "",
-        ),
-    ],
-)
-def test_a_wrapper_changes_the_traits_of_its_program(
-    name, args, at, traits, warned
-):
-    assert wrapper_traits(name, args, at, ProcessTraits()) == (traits, warned)
-
-
-def test_nice_never_sets_the_niceness_past_19():
-    worn, _ = wrapper_traits(
-        "nice", ["-n", "9", "gcc"], 2, ProcessTraits(niceness=15)
-    )
-    assert worn.niceness == 19

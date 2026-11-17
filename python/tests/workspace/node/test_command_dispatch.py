@@ -834,35 +834,3 @@ async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
         assert b"No such file or directory" in r.stderr
     finally:
         await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_nohup_job_survives_a_hangup():
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
-    try:
-        io = await ws.shell(
-            "nohup sleep 3 & p=$!; sleep 0.2; kill -HUP $p; sleep 0.2; "
-            "kill -0 $p && echo alive; kill $p; wait $p; echo rc=$?"
-        )
-        assert await io.stdout_str() == "alive\nrc=143\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("line", "out"),
-    [
-        ("nice nice", "10\n"),
-        ("nice sh -c nice", "10\n"),
-        ("nice -n 3 sh -c 'nice -n 2 nice'", "5\n"),
-        ("nohup nice -n 4 nice", "4\n"),
-        ("nice -n 15 nice -n 9 nice", "19\n"),
-    ],
-)
-async def test_nice_prints_the_niceness_its_wrappers_gave_it(line, out):
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
-    try:
-        assert await (await ws.shell(line)).stdout_str() == out
-    finally:
-        await ws.close()

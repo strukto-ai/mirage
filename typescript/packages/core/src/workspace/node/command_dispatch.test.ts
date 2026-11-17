@@ -794,31 +794,3 @@ describe('a path no file of Mirage answers', () => {
     }
   })
 })
-
-it('a nohup job survives a hangup', async () => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
-  try {
-    const io = await ws.shell(
-      'nohup sleep 3 & p=$!; sleep 0.2; kill -HUP $p; sleep 0.2; ' +
-        'kill -0 $p && echo alive; kill $p; wait $p; echo rc=$?',
-    )
-    expect(text(io.stdout)).toBe('alive\nrc=143\n')
-  } finally {
-    await ws.close()
-  }
-})
-
-it.each([
-  ['nice nice', '10\n'],
-  ['nice sh -c nice', '10\n'],
-  ["nice -n 3 sh -c 'nice -n 2 nice'", '5\n'],
-  ['nohup nice -n 4 nice', '4\n'],
-  ['nice -n 15 nice -n 9 nice', '19\n'],
-])('nice prints the niceness its wrappers gave it: %s', async (line, out) => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
-  try {
-    expect(text((await ws.shell(line)).stdout)).toBe(out)
-  } finally {
-    await ws.close()
-  }
-})

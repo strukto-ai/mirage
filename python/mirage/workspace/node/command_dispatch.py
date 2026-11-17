@@ -25,7 +25,6 @@ from functools import partial
 from itertools import accumulate
 from typing import Any, TypeVar
 
-from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
     guard_io,
 )
@@ -38,9 +37,7 @@ from mirage.context import (
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
-    set_program_invocation,
     set_redirect_paths,
-    set_traits,
 )
 from mirage.context.session_context import (
     RedirectResult,
@@ -48,9 +45,7 @@ from mirage.context.session_context import (
     syntax_head,
 )
 from mirage.execution.job import JobTable
-from mirage.execution.process.types import ProcessTraits
 from mirage.io import IOResult
-from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.observe.context import command_records
 from mirage.policy import (
@@ -66,7 +61,7 @@ from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
-from mirage.runtime.types import DispatchFn, OutputFn, RunResult
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -85,7 +80,6 @@ from mirage.shell.helpers import (
     read_row,
     split_env_prefix,
 )
-from mirage.shell.join import shell_join
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
@@ -111,6 +105,7 @@ from mirage.workspace.executor.builtins import (
     handle_readlink,
     handle_setfattr,
     handle_touch,
+    handle_wrapper,
     operand_follow,
     prepare_mv,
     strip_link_operands,
@@ -145,8 +140,6 @@ from mirage.workspace.lookup.lookup import (
     lookup,
     routed_consumer,
     runs_wrapper,
-    wrapper_answer,
-    wrapper_traits,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -1135,123 +1128,6 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
     return [line for line in lines if line.strip() not in spoken]
 
 
-class _Relay(JobConsole):
-    """A console that hands each chunk a line writes on as it comes.
-
-    Args:
-        output (OutputFn): takes stdout.
-        errors (OutputFn): takes stderr.
-    """
-
-    def __init__(self, output: OutputFn, errors: OutputFn) -> None:
-        super().__init__()
-        self._output = output
-        self._errors = errors
-
-    async def emit(self, channel: Channel, data: bytes) -> None:
-        await (self._output if channel == Channel.STDOUT else self._errors)(
-            data
-        )
-
-
-def _run_program(
-    execute_fn: ExecuteFn,
-    name: str,
-    line: str,
-    session: SessionState,
-    stdin: ByteSource | None,
-    traits: ProcessTraits,
-    warned: str = "",
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run a wrapper's program in Mirage, as the program it execs, its
-    output handed over as it runs: the process it runs as, and all it
-    starts, carry what the wrapper changed.
-
-    Args:
-        execute_fn (ExecuteFn): runs a line in the session.
-        name (str): the wrapper, which the node records.
-        line (str): the program's words, quoted.
-        session (SessionState): the session it runs in.
-        stdin (ByteSource | None): its input.
-        traits (ProcessTraits): what the wrappers around it changed.
-        warned (str): what the wrapper says before it runs the program.
-    """
-    node = ExecutionNode(command=name)
-
-    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
-        if warned:
-            await errors(encode_text(warned))
-        token = set_program_invocation(session)
-        worn = set_traits(traits)
-        try:
-            ran = await execute_fn(
-                line,
-                session_id=session.session_id,
-                stdin=stdin,
-                sink=_Relay(output, errors),
-            )
-            if ran.stdout is not None:
-                async for chunk in ensure_stream(ran.stdout):
-                    await output(chunk)
-            said = await ran.materialize_stderr()
-        finally:
-            reset_caller(worn)
-            reset_caller(token)
-        node.exit_code = ran.exit_code
-        return RunResult(
-            stdout=b"", stderr=said or None, exit_code=ran.exit_code
-        )
-
-    stdout, io = run_output(run)
-    return stdout, io, node
-
-
-def _run_wrapper(
-    execute_fn: ExecuteFn,
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: MountRegistry,
-    stdin: ByteSource | None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """A wrapper Mirage runs (``nice``, ``nohup``, ``setsid``,
-    ``stdbuf``, ``ionice``): it answers for itself (``nice`` alone, a bad
-    option, a program it cannot exec), or execs its program with what it
-    changes (``wrapper_traits``). The runner it runs as, when it is a
-    job's or a stage's one command, becomes the program; the program is
-    judged, placed and run as any command is, and a machine with
-    processes of its own is handed the wrapper's words before it.
-
-    Args:
-        execute_fn (ExecuteFn): runs a line in the session.
-        name (str): the wrapper.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): the session it runs in.
-        registry (MountRegistry): mount registry (command registration).
-        stdin (ByteSource | None): its input.
-    """
-    caller = current_caller()
-    answer = wrapper_answer(
-        name, args, session, registry, caller.traits.niceness
-    )
-    if answer.runs_from is None:
-        err = encode_text(answer.stderr)
-        return (
-            encode_text(answer.stdout) if answer.stdout else None,
-            IOResult(exit_code=answer.exit_code, stderr=err or None),
-            ExecutionNode(
-                command=name, exit_code=answer.exit_code, stderr=err
-            ),
-        )
-    traits, warned = wrapper_traits(
-        name, args, answer.runs_from, caller.traits
-    )
-    line = shell_join(args[answer.runs_from :])
-    if caller.process is not None:
-        caller.process.wrap(traits, line)
-    return _run_program(execute_fn, name, line, session, stdin, traits, warned)
-
-
 async def _run_namespace_program(
     name: str,
     namespace: Namespace,
@@ -1652,7 +1528,7 @@ async def _route_argv(
         )
 
     if runs_wrapper(name, argv.args, session, context.frame.routing):
-        return _run_wrapper(
+        return handle_wrapper(
             execute_fn, name, argv.args, session, registry, stdin
         )
 
