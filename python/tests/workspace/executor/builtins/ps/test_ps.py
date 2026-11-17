@@ -156,6 +156,24 @@ async def test_ps_names_a_program_by_its_unquoted_word(command):
     await table.kill(job.id)
 
 
+# A process a scan found carries the machine's arguments as read, so its
+# first word is the program's name as it stands, quotes and backslashes
+# and all.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,name",
+    [("foo\\bar 1", "foo\\bar"), ("it's 1", "it's"), ('/opt/"q" 1', '"q"')],
+)
+async def test_ps_names_a_found_process_by_its_word_as_read(command, name):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    assert job.process is not None
+    job.process.set_machine_pid(MachinePid(4242, 1.0))
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm="])
+    assert (out.decode(), io.exit_code) == (f"{name}\n", 0)
+    await table.kill(job.id)
+
+
 @pytest.mark.asyncio
 async def test_ps_adds_a_name_selection_to_a_pid_selection():
     table = JobTable()

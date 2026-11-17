@@ -125,19 +125,23 @@ def _comm_cut(name: str) -> tuple[str, bool]:
     return name, False
 
 
-def _comm(command: str) -> str:
-    """A command line's name as procps keeps it: the base name of its
-    program, the first word with its quotes removed, cut as the kernel
-    cuts it.
+def _comm(info: Process) -> str:
+    """A process's name as procps keeps it: the base name of its program,
+    cut as the kernel cuts it. A command Mirage spells (a line as typed,
+    a program's words joined) names the program in its first word, its
+    quotes removed; a process a scan found carries the machine's
+    arguments as read, spaces between, so its first word is the
+    program's as it stands.
 
     Args:
-        command (str): the command line.
+        info (Process): the process.
     """
-    try:
-        words = shlex.split(command)
-    except ValueError as exc:
-        logger.debug("ps: %r read word by word: %s", command, exc)
-        words = command.split()
+    words = info.command.split()
+    if info.program or info.machine_pid is None:
+        try:
+            words = shlex.split(info.command)
+        except ValueError as exc:
+            logger.debug("ps: %r read word by word: %s", info.command, exc)
     head = words[0] if words else ""
     return _comm_cut(head.rsplit("/", 1)[-1])[0]
 
@@ -376,7 +380,7 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
         )
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
-        return branch + _comm(info.command)
+        return branch + _comm(info)
     if fact in ("user", "group"):
         own = info.session_id == ctx.session_id
         return (ctx.group if own else None) or UNKNOWN_NAME
@@ -577,7 +581,7 @@ async def handle_ps(
         if (
             every
             or info.shown_pid in options.pids
-            or _comm(info.command) in options.names
+            or _comm(info) in options.names
         )
         and on_machine(info, options.machine)
     ]

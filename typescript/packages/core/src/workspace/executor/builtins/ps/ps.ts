@@ -96,16 +96,20 @@ function commCut(name: string): [string, boolean] {
 }
 
 /**
- * A command line's name as procps keeps it: the base name of its program,
- * the first word with its quotes removed, cut as the kernel cuts it.
+ * A process's name as procps keeps it: the base name of its program, cut as
+ * the kernel cuts it. A command Mirage spells (a line as typed, a program's
+ * words joined) names the program in its first word, its quotes removed; a
+ * process a scan found carries the machine's arguments as read, spaces
+ * between, so its first word is the program's as it stands.
  */
-function comm(command: string): string {
-  let words: string[]
-  try {
-    words = shlexSplit(command)
-  } catch (err) {
-    logger.debug?.(`ps: ${JSON.stringify(command)} read word by word: ${String(err)}`)
-    words = command.split(/\s+/).filter((word) => word !== '')
+function comm(info: Process): string {
+  let words = info.command.split(/\s+/).filter((word) => word !== '')
+  if (info.program || info.machinePid === null) {
+    try {
+      words = shlexSplit(info.command)
+    } catch (err) {
+      logger.debug?.(`ps: ${JSON.stringify(info.command)} read word by word: ${String(err)}`)
+    }
   }
   const head = words[0] ?? ''
   return commCut(head.split('/').pop() ?? '')[0]
@@ -306,7 +310,7 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
       (info.id.pid === ctx.running && info.state === 'running' ? 'R' : constants.STATES[info.state])
     return state + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
-  if (fact === 'comm') return branch + comm(info.command)
+  if (fact === 'comm') return branch + comm(info)
   if (fact === 'user' || fact === 'group') {
     return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
   }
@@ -440,7 +444,7 @@ export async function handlePs(
   )
   const rows = listed.filter(
     (info) =>
-      (every || options.pids.has(shownPid(info)) || options.names.has(comm(info.command))) &&
+      (every || options.pids.has(shownPid(info)) || options.names.has(comm(info))) &&
       onMachine(info, options.machine),
   )
   const columns = options.columns.length > 0 ? options.columns : constants.PLAIN

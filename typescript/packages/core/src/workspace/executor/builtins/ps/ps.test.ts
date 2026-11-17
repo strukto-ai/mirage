@@ -144,6 +144,23 @@ describe('handlePs', () => {
     },
   )
 
+  // A process a scan found carries the machine's arguments as read, so its
+  // first word is the program's name as it stands, quotes and backslashes
+  // and all.
+  it.each([
+    ['foo\\bar 1', 'foo\\bar'],
+    ["it's 1", "it's"],
+    ['/opt/"q" 1', '"q"'],
+  ] as const)('names a found process by its word as read: %s', async (command, name) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+    if (job.process == null) throw new Error('the job has no process')
+    job.process.setMachinePid({ pid: 4242, started: 1 })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm='])
+    expect([decode(out as Uint8Array), io.exitCode]).toEqual([`${name}\n`, 0])
+  })
+
   it('prints its header alone when no job is running', async () => {
     const jt = new JobTable()
     const [out, io] = await handlePs(jt, ['ps'])
