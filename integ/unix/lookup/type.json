@@ -204,7 +204,7 @@
         "ram",
         "opfs"
       ],
-      "command": "timeout() { builtin echo fn-timeout \"$@\"; }; env() { builtin echo fn-env; }; sleep() { builtin echo fn-sleep; }; echo() { builtin echo \"fn:$*\"; }; timeout 1 echo x; env true; sleep 5; echo hi; command timeout 1 echo y; command env printf 'z\\n'; command echo plain; type -t timeout env sleep echo; builtin timeout 1 true; unset -f timeout echo; timeout 1 sleep 0; timeout 1 echo w",
+      "command": "timeout() { builtin echo fn-timeout \"$@\"; }; env() { builtin echo fn-env; }; sleep() { builtin echo fn-sleep; }; echo() { builtin echo \"fn:$*\"; }; timeout 1 echo x; env true; sleep 5; echo hi; command timeout 1 echo y; command env printf 'z\\n'; command echo plain; type -t timeout env sleep echo; builtin timeout 1 true; unset -f timeout echo; timeout 1 sleep 0; timeout 1 echo w; unset -f env sleep",
       "expect": {
         "exit": 0,
         "stdout": "fn-timeout 1 echo x\nfn-env\nfn-sleep\nfn:hi\ny\nz\nplain\nfunction\nfunction\nfunction\nfunction\nw\n",
