@@ -56,6 +56,21 @@ export enum WordKind {
 export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
 
 /**
+ * A value typed onto its option word (`--file=x`, `-fx`, `-cfx`): the option
+ * word's argv position, the option as typed without the value or its `=`
+ * (`--file`, `-f`, `-cf`), the value as typed, the directory a PATH value
+ * resolves against and the value's declared type. Mirrors Python's
+ * `Attached`.
+ */
+export interface Attached {
+  readonly slot: number
+  readonly option: string
+  readonly value: string
+  readonly base: string
+  readonly kind: ValueType | null
+}
+
+/**
  * Which program's voice a CLI answers usage questions in.
  *
  * An installed CLI is not a GNU tool, so a leaf that refuses an option it does

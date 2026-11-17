@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { cliSpecFor } from '../../../commands/cli/specs.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { DeviceInput } from '../../../io/types.ts'
@@ -21,14 +20,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { runResult } from '../../../../tests/workspace/fixtures/integration_fixture.ts'
-import {
-  commandWords,
-  defaultCwdOperand,
-  optionLoopExits,
-  pathFlagScopes,
-  programTokens,
-  routableScopes,
-} from './routing.ts'
+import { defaultCwdOperand, optionLoopExits, pathFlagScopes, routableScopes } from './routing.ts'
 
 describe('optionLoopExits', () => {
   it.each([
@@ -108,46 +100,6 @@ describe('pathFlagScopes', () => {
     // The handler reaches them through the dispatcher, so they name no
     // mount the line has to run on (DISPATCH_FLAG_KEYS).
     expect(pathFlagScopes(cmd, argv, '/')).toEqual([])
-  })
-})
-
-describe('programTokens', () => {
-  it('walks a CLI verb path and keeps the rest raw', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
-    try {
-      ws.registerCli('git', cliSpecFor('git'))
-      const reg = ws.registry
-      // Options before the verb are not the verb; an alias reads as its
-      // canonical name; the leaf's own words follow untouched.
-      expect(programTokens(reg, 'git', ['-C', '/r', 'reset', '--hard', 'HEAD'], '/')).toEqual([
-        ['git', 'reset', '--hard', 'HEAD'],
-        ['git', 'reset'],
-      ])
-      expect(programTokens(reg, 'git', ['log', '-1'], '/')).toEqual([
-        ['git', 'log', '-1'],
-        ['git', 'log'],
-      ])
-      // A walk the tree refuses (unknown verb, bare head) reads raw.
-      expect(programTokens(reg, 'git', ['frobnicate', 'x'], '/')).toEqual([
-        ['git', 'frobnicate', 'x'],
-        ['git'],
-      ])
-      expect(programTokens(reg, 'git', [], '/')).toEqual([['git'], ['git']])
-      // Anything else is the name and the raw argv.
-      expect(programTokens(reg, 'rm', ['-rf', '/x'], '/')).toEqual([['rm', '-rf', '/x'], ['rm']])
-      // A group option's value is never read as a verb, even one that
-      // spells one (`-C status`, a directory named status).
-      const words = commandWords(reg, 'git', ['-C', 'status', 'log'], [], [], '/')
-      expect(words.map((w) => [w.text, w.kind, w.option])).toEqual([
-        ['git', 'name', null],
-        ['-C', 'option', null],
-        ['status', 'value', '-C'],
-        ['log', 'subcommand', null],
-      ])
-    } finally {
-      await ws.close()
-    }
   })
 })
 

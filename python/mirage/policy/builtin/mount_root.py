@@ -376,19 +376,22 @@ class MountRootPolicy(Policy):
                         error=eisdir(p),
                     )
         elif cmd == "ln":
-            # A mount root is refused only as the link NAME. Without -T
-            # a directory operand is the directory to link into, GNU's
+            # A mount root is refused only as the link NAME, the last
+            # operand: a redirect on the line is no name. Without -T a
+            # directory operand is the directory to link into, GNU's
             # rule, and creating inside a mount is ordinary.
-            if has_no_target_flag(ctx.argv) and names_root(
-                self._registry, ctx.paths[-1]
+            name = operands[-1] if operands else None
+            if (
+                name is not None
+                and has_no_target_flag(ctx.argv)
+                and names_root(self._registry, name)
             ):
                 kind = (
                     "symbolic link" if has_symlink_flag(ctx.argv) else "link"
                 )
                 return Deny(
-                    f"failed to create {kind} "
-                    f"'{ctx.paths[-1].virtual}': File exists",
-                    error=eexist(ctx.paths[-1]),
+                    f"failed to create {kind} '{name.virtual}': File exists",
+                    error=eexist(name),
                 )
         elif cmd == "tar":
             # Only -c reads the filesystem; -t and -x match their

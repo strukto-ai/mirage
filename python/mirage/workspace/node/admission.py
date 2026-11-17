@@ -60,27 +60,26 @@ from mirage.types import Follow, LineFacts, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import resolve_path
-from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.condition.errors import CondRefused
 from mirage.workspace.executor.builtins.condition.operands import (
     TEST_NAMES,
     file_operands,
 )
 from mirage.workspace.executor.builtins.links.links import follow_paths
-from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.command.cli import reaches_service
+from mirage.workspace.executor.command.reading import (
+    context_words,
+    line_paths,
+    read_line,
+)
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     command_tree,
-    command_words,
     default_cwd_operand,
     merge_scopes,
     path_flag_scopes,
-    program_tokens,
     routable_scopes,
     routed_operands,
-    tree_path_scopes,
 )
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.classify.path import classify_bare_path
@@ -204,96 +203,6 @@ class Admitted:
         if _norm(virtual) in self.judged:
             return None
         return io_refusal(self.rules, self.ctx.tokens, virtual, self.granted)
-
-
-def policy_scopes(
-    name: str,
-    args: list[str],
-    operands: Sequence[str | PathSpec],
-    follows: bool,
-    links: NamespaceLinks | None,
-    cwd: str,
-    implied: PathSpec | None = None,
-    redirects: Sequence[PathSpec] = (),
-    tree_flags: Sequence[PathSpec] = (),
-) -> list[PathSpec]:
-    """The paths a path-pattern guard reads for a line.
-
-    The operands as typed and the values of path-valued flags, a command
-    tree's group and leaf options among them, then, for
-    a command that follows links, the targets they resolve to: ``cat
-    /data/link`` reads ``/data/secret``, so a rule protecting the target
-    has to see it, and a command-scoped rule never runs at the dispatcher
-    where the resolved path would otherwise be checked. The follow
-    policy is the command's own (``LineFacts.follows``: ``rm``,
-    ``mv``, ``ln``, ``stat``, ``tar`` ... act on the link itself, ``-L``
-    turns following back on), the same one the router applies to the
-    operands before the handler runs, so a rule sees exactly the path
-    the command will touch. A loop is left to that later step to
-    report; here the typed paths stand. Then the operand a bare
-    ``ls``/``find``/``du``/``tree``/``grep -r`` implies, the working
-    directory, which the executor injects after the gate and which a
-    rule on that directory has to see. Last come the statement's
-    redirect targets: ``cat < /data/secret`` reads the file and ``echo
-    x > /data/secret`` truncates it, on the shell's own fds outside the
-    admitted command's gate window, so the admission is the one place a
-    rule can see them. A redirect always dereferences (the shell opens
-    the target), so its link targets ride along whatever the command's
-    own follow policy says.
-
-    Args:
-        name (str): command name.
-        args (list[str]): the words after it, as typed.
-        operands (Sequence[str | PathSpec]): the same words, classified.
-        follows (bool): whether the command may resolve an operand's
-            last component (``LineFacts.follows`` is not NONE).
-        links (NamespaceLinks | None): the session's link table
-            (``Namespace.session_links``); None where no link stands.
-        cwd (str): session working directory.
-        implied (PathSpec | None): the working-directory operand the
-            command reads when typed bare, None when it names a path.
-        redirects (Sequence[PathSpec]): the statement's expanded
-            redirect targets, empty when it has none.
-        tree_flags (Sequence[PathSpec]): the path-valued options a
-            command tree's walk resolves (``tree_path_scopes``), empty
-            for a command with no tree.
-    """
-    scopes = [p for p in operands if isinstance(p, PathSpec)]
-    scopes.extend(path_flag_scopes(name, args, cwd))
-    typed = {p.virtual for p in scopes}
-    scopes.extend(p for p in tree_flags if p.virtual not in typed)
-    if "/" in name:
-        # A slash-carrying head word is a file the line executes, and it
-        # lives in argv[0], not the operands, so a path-pattern guard
-        # would never see it without this row.
-        scopes.insert(0, _to_scope(resolve_path(name, cwd)))
-    if links is not None and operands:
-        followed = follow_paths(
-            links,
-            list(operands),
-            follows,
-            slash_follows=name not in SLASH_KEEPS_LAST,
-        )
-        seen = {p.virtual for p in scopes}
-        for item in followed:
-            if isinstance(item, PathSpec) and item.virtual not in seen:
-                seen.add(item.virtual)
-                scopes.append(item)
-    if implied is not None and implied.virtual not in {
-        p.virtual for p in scopes
-    }:
-        scopes.append(implied)
-    if redirects:
-        targets: list[str | PathSpec] = list(redirects)
-        if links is not None:
-            followed = follow_paths(links, list(redirects), True)
-            targets.extend(p for p in followed if isinstance(p, PathSpec))
-        seen = {p.virtual for p in scopes}
-        for item in targets:
-            if isinstance(item, PathSpec) and item.virtual not in seen:
-                seen.add(item.virtual)
-                scopes.append(item)
-    return scopes
 
 
 def _seen(
@@ -588,7 +497,7 @@ async def gate(
     """
     tool = intrinsic or is_tool(name, session, registry)
     env = env_snapshot(session)
-    tokens, program = program_tokens(registry, name, args, session.cwd, env)
+    reading = read_line(registry, name, args, operands, session.cwd, env)
     implied = (
         default_cwd_operand(
             [name, *operands], name, registry, session.cwd, stdin
@@ -610,10 +519,9 @@ async def gate(
     follows = facts.follows is not Follow.NONE
     paths = _seen(
         session,
-        policy_scopes(
+        line_paths(
             name,
-            args,
-            operands,
+            reading,
             follows,
             (
                 namespace.session_links(session)
@@ -623,17 +531,11 @@ async def gate(
             session.cwd,
             implied,
             redirects,
-            tree_path_scopes(registry, name, args, session.cwd, env),
         ),
         unread,
     )
-    await budget.run()
     words = _seen_words(
-        session,
-        command_words(
-            registry, name, args, operands, redirects, session.cwd, env
-        ),
-        unread,
+        session, context_words(name, reading, redirects), unread
     )
     await budget.run()
     write = _writes(
@@ -648,8 +550,8 @@ async def gate(
         cwd=session.cwd,
         line=line,
         session_id=session.session_id,
-        tokens=tokens,
-        program=program,
+        tokens=reading.tokens,
+        program=reading.program,
         tool=tool,
         walks=facts.walks,
         write=write,
@@ -665,7 +567,7 @@ async def gate(
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(
-            f"{' '.join(program)} is not allowed",
+            f"{' '.join(reading.program)} is not allowed",
             policy=PermissionsPolicy.__name__,
         )
         answers = (refused, *answers)

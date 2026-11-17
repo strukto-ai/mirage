@@ -134,6 +134,21 @@ describe('MountRootPolicy', () => {
     )
   })
 
+  it('ln judges its link name, not a redirect after it', () => {
+    const policy = new MountRootPolicy(registry())
+    const refused = policy.preCommand(
+      ctx(
+        'ln',
+        [path('/data/k.txt'), path('/data'), path('/data/o.txt')],
+        ['-sT'],
+        [path('/data/k.txt'), path('/data')],
+      ),
+    )
+    expect(refused && 'reason' in refused ? refused.reason : '').toBe(
+      "failed to create symbolic link '/data': File exists",
+    )
+  })
+
   it('the ln flag scan honors option boundaries', () => {
     const noTarget = (argv: string[]) => lnFlagPresent(argv, 'T', '--no-target-directory')
     const symbolic = (argv: string[]) => lnFlagPresent(argv, 's', '--symbolic')

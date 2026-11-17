@@ -24,12 +24,11 @@ import { PolicyDenied } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import type { AdmissionRules, CommandContext, CommandRule } from '../../policy/types.ts'
 import { parse } from '../../shell/parse/parse.ts'
-import { Follow, MountMode } from '../../types.ts'
+import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
-import { lineFacts } from '../lookup/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { admit, Admitted, policyScopes } from './admission.ts'
+import { admit, Admitted } from './admission.ts'
 import { admitLine } from './explain.ts'
 
 const DEC = new TextDecoder()
@@ -89,19 +88,6 @@ function ws(profile: SessionProfile | null = DOC): Workspace {
   return w
 }
 
-async function virtuals(w: Workspace, name: string, ...args: string[]): Promise<string[]> {
-  const words = await classifyParts([name, ...args], w.registry, '/')
-  return policyScopes(
-    name,
-    args,
-    words.slice(1),
-    lineFacts(name, words, '/').follows !== Follow.NONE,
-    w.namespace,
-    '/',
-    null,
-  ).map((p) => p.virtual)
-}
-
 describe('admission', () => {
   it('cats 9000 long absolute operands with an unrelated path rule', async () => {
     const ram = new RAMVFS()
@@ -127,25 +113,6 @@ describe('admission', () => {
     expect(DEC.decode(await materialize(result.stdout))).toBe('x'.repeat(9000))
     expect(DEC.decode(await materialize(result.stderr))).toBe('')
   }, 30000)
-
-  it('policy scopes follow links only for a following command', async () => {
-    const w = ws()
-    await w.shell('echo top > /data/secret && ln -s /data/secret /data/link')
-    // cat opens the target: the typed path first, then what it resolves
-    // to; rm and `ls -l` act on the link itself.
-    expect(await virtuals(w, 'cat', '/data/link')).toEqual(['/data/link', '/data/secret'])
-    expect(await virtuals(w, 'rm', '/data/link')).toEqual(['/data/link'])
-    expect(await virtuals(w, 'ls', '-l', '/data/link')).toEqual(['/data/link'])
-    expect(await virtuals(w, 'ls', '/data/link')).toEqual(['/data/link', '/data/secret'])
-    // A path that is not a link reads once; no namespace reads typed.
-    expect(await virtuals(w, 'cat', '/data/secret')).toEqual(['/data/secret'])
-    const words = await classifyParts(['cat', '/data/link'], w.registry, '/')
-    expect(
-      policyScopes('cat', ['/data/link'], words.slice(1), true, null, '/', null).map(
-        (p) => p.virtual,
-      ),
-    ).toEqual(['/data/link'])
-  })
 
   it('a bare listing reads the working directory', async () => {
     // `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the cwd,

@@ -191,6 +191,23 @@ async def test_ln_wording_follows_the_link_kind():
     assert deny.reason == "failed to create link '/data': File exists"
 
 
+@pytest.mark.asyncio
+async def test_ln_judges_its_link_name_not_a_redirect_after_it():
+    policy = MountRootPolicy(_registry())
+    deny = await policy.pre_command(
+        _ctx(
+            "ln",
+            [_path("/data/k.txt"), _path("/data"), _path("/data/o.txt")],
+            ["-sT"],
+            [_path("/data/k.txt"), _path("/data")],
+        )
+    )
+    assert deny is not None
+    assert deny.reason == (
+        "failed to create symbolic link '/data': File exists"
+    )
+
+
 def test_ln_flag_scan_honors_option_boundaries():
     assert has_no_target_flag(("-sT", "a", "b"))
     assert has_no_target_flag(("-s", "--no-target-directory", "a", "b"))

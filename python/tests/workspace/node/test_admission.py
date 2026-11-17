@@ -25,15 +25,13 @@ from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
 from mirage.shell.parse import parse
-from mirage.types import Follow, MountMode
+from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.expand.classify import classify_parts
-from mirage.workspace.lookup import line_facts
 from mirage.workspace.node.admission import (
     Admitted,
     admit,
-    policy_scopes,
 )
 from mirage.workspace.node.explain import admit_line
 from mirage.workspace.tools.io_text import with_decision
@@ -79,57 +77,10 @@ def _ws() -> Workspace:
     )
 
 
-async def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
-    words = await classify_parts([name, *args], ws._registry, "/")
-    return [
-        p.virtual
-        for p in policy_scopes(
-            name,
-            list(args),
-            words[1:],
-            line_facts(name, words, "/").follows is not Follow.NONE,
-            ws._namespace,
-            "/",
-        )
-    ]
-
-
 def _voiced(refused) -> str:
     """stderr as bash prints it, then the record as one more line: what
     an agent reading through the text adapters sees."""
     return with_decision(refused.stderr.decode(), refused.decision)
-
-
-@pytest.mark.asyncio
-async def test_policy_scopes_follow_links_only_for_a_following_command():
-    ws = _ws()
-    try:
-        await ws.shell(
-            "echo top > /data/secret && ln -s /data/secret /data/link"
-        )
-        # cat opens the target: the typed path first, then what it
-        # resolves to; rm and `ls -l` act on the link itself.
-        assert await _virtuals(ws, "cat", "/data/link") == [
-            "/data/link",
-            "/data/secret",
-        ]
-        assert await _virtuals(ws, "rm", "/data/link") == ["/data/link"]
-        assert await _virtuals(ws, "ls", "-l", "/data/link") == ["/data/link"]
-        assert await _virtuals(ws, "ls", "/data/link") == [
-            "/data/link",
-            "/data/secret",
-        ]
-        # A path that is not a link reads once; no namespace reads typed.
-        assert await _virtuals(ws, "cat", "/data/secret") == ["/data/secret"]
-        words = await classify_parts(["cat", "/data/link"], ws._registry, "/")
-        assert [
-            p.virtual
-            for p in policy_scopes(
-                "cat", ["/data/link"], words[1:], True, None, "/"
-            )
-        ] == ["/data/link"]
-    finally:
-        await ws.close()
 
 
 @pytest.mark.asyncio

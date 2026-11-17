@@ -21,7 +21,9 @@ from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.cli.walk import walk
 from mirage.commands.config import Context, command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command
@@ -44,6 +46,7 @@ from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import (
     CLIContext,
     handle_cli,
+    leaf_parse,
     reaches_service,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -1641,3 +1644,19 @@ async def test_a_mounts_tree_runs_like_an_installed_cli_on_its_mount():
         assert vfs.accessor.store.files["/a.md"] == b"tags: work\n"
     finally:
         await ws.close()
+
+
+def test_leaf_parse_refuses_an_abbreviation_under_cobra():
+    gh = cli_spec_for("gh")
+    result = walk("gh", gh.spec, ["auth", "token", "--ho", "x"], "/", None)
+    assert result.leaf is not None
+    rules = leaf_parse(gh, result.leaf, result.path)
+    parsed = parse_command(
+        rules.spec,
+        list(result.argv),
+        "/",
+        "gh",
+        unknown_is_operand=rules.unknown_is_operand,
+        abbreviations=rules.abbreviations,
+    )
+    assert parsed.invalid_options == ["--ho"]

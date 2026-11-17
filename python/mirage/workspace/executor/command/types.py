@@ -15,11 +15,11 @@
 from collections.abc import Awaitable, Sequence
 from typing import NamedTuple, Protocol
 
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.word_choice import WordChoices
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.policy.types import HandOff
+from mirage.policy.types import CommandWord, HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.types import TSNodeLike
@@ -76,3 +76,47 @@ class ParsedCommand(NamedTuple):
     missing_required_operands: Sequence[str] = ()
     typed_dests: Sequence[str] = ()
     builtin: bool = False
+
+
+class LineReading(NamedTuple):
+    """One command read once, as its grammar reads it: every view a
+    policy gets of the line comes from here.
+
+    Args:
+        words (tuple[CommandWord, ...]): one per word after the name, in
+            argv order, each with its kind, the option it belongs to and
+            the path it names.
+        supplied (tuple[PathSpec, ...]): PATH option values no word
+            typed, which a default or the environment supplied.
+        tokens (tuple[str, ...]): the line as an admission pattern reads
+            it: a tree's verb path and leaf words, else the raw words.
+        program (tuple[str, ...]): the program the line runs: the name
+            and a tree's verb path.
+    """
+
+    words: tuple[CommandWord, ...]
+    supplied: tuple[PathSpec, ...]
+    tokens: tuple[str, ...]
+    program: tuple[str, ...]
+
+
+class LeafParse(NamedTuple):
+    """How a CLI leaf's words are parsed, the one setting the run and a
+    policy's reading of the line share.
+
+    Args:
+        spec (CommandSpec): the grammar to parse with: the leaf, with
+            the injected ``--help`` or a script's pass-through rest.
+        mirage_help (bool): whether the injected ``--help`` is
+            mirage's to answer.
+        unknown_is_operand (bool): whether an undeclared dashed word is
+            an operand; under the cobra dialect it is an error.
+        abbreviations (tuple[str, ...] | None): git's full long-option
+            table for the verb, which resolves an abbreviated long
+            option; None for any other program.
+    """
+
+    spec: CommandSpec
+    mirage_help: bool
+    unknown_is_operand: bool
+    abbreviations: tuple[str, ...] | None

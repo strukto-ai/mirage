@@ -23,7 +23,12 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.mcp.types import MCPSource
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.flag_view import FlagBag
-from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
+from mirage.commands.spec.types import (
+    Argument,
+    CommandSpec,
+    FlagValue,
+    WordKind,
+)
 from mirage.runtime.constants import HOST, IN_PROCESS, SCRIPT_MACHINES
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
@@ -232,6 +237,24 @@ def _validate_tree(
     return leaves
 
 
+@dataclass(frozen=True, slots=True)
+class WalkWord:
+    """One word a walk consumed before its leaf: a verb, a group option
+    or a group option's value.
+
+    Args:
+        kind (WordKind): SUBCOMMAND, OPTION or VALUE.
+        option (str | None): for an option word carrying its value
+            attached (``-Cb``, ``--file=x``), the option as typed.
+        path (PathSpec | None): the PATH value the word carries,
+            resolved as the run resolves it.
+    """
+
+    kind: WordKind
+    option: str | None = None
+    path: PathSpec | None = None
+
+
 @dataclass(frozen=True)
 class WalkResult:
     """A resolved leaf and remaining argv, or a rendered help/refusal.
@@ -239,8 +262,8 @@ class WalkResult:
     Args:
         leaf (CommandSpec | None): resolved grammar; None for rendered output.
         path (tuple[str, ...]): canonical subcommand names below the head.
-        verb_positions (tuple[int, ...]): where each of ``path`` stands
-            in the walked argv.
+        words (tuple[WalkWord, ...]): what each word the walk consumed
+            before the leaf's is, in argv order.
         group_flags (WalkFlagBag): group flags keyed by canonical spelling.
         operand_bases (tuple[PathSpec, ...]): ordered directory changes.
         argv (tuple[str, ...]): remaining words for the leaf parser.
@@ -251,7 +274,7 @@ class WalkResult:
 
     leaf: "CommandSpec | None" = None
     path: tuple[str, ...] = ()
-    verb_positions: tuple[int, ...] = ()
+    words: tuple["WalkWord", ...] = ()
     group_flags: WalkFlagBag = field(default_factory=FlagBag)
     operand_bases: tuple[PathSpec, ...] = ()
     argv: tuple[str, ...] = ()

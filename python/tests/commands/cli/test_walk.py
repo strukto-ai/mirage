@@ -838,3 +838,115 @@ def test_group_help_and_abbreviation_settings_apply_to_the_whole_node():
         assert result.exit_code != 0
         assert b"unknown option" in result.output
     assert "--help" not in node_help("tool", tree)
+
+
+def _based_tree() -> CommandSpec:
+    pair = Argument(
+        "--pair",
+        nargs=2,
+        type="path",
+        value_types=("str", "path"),
+        action="extend",
+    )
+    return CommandSpec(
+        name="r",
+        operand_base="-C",
+        arguments=(
+            Argument("-C", type="path", default="."),
+            Argument("--dir", type="path"),
+            pair,
+        ),
+        subcommands=(
+            CommandSpec(
+                name="mid",
+                arguments=(pair,),
+                subcommands=(CommandSpec(name="leaf"),),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "argv, words",
+    [
+        (
+            ["-C", "a", "-Cb", "mid", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, "/w/a"),
+                ("option", "-C", "/w/a/b"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
+        ),
+        (
+            ["-C", "a", "--dir=d", "mid", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, "/w/a"),
+                ("option", "--dir", "/w/a/d"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
+        ),
+        (
+            ["-C", "-x", "mid", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, "/w/-x"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
+        ),
+        (
+            ["--pair", "n1", "f1", "mid", "--pair", "n2", "f2", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, None),
+                ("value", None, "/w/f1"),
+                ("subcommand", None, None),
+                ("option", None, None),
+                ("value", None, None),
+                ("value", None, "/w/f2"),
+                ("subcommand", None, None),
+            ],
+        ),
+    ],
+)
+def test_walk_names_each_word_it_consumes_and_the_path_it_carries(argv, words):
+    result = walk("r", _based_tree(), argv, "/w")
+    assert [
+        (w.kind.value, w.option, w.path.virtual if w.path else None)
+        for w in result.words
+    ] == words
+
+
+def _nested_base_tree() -> CommandSpec:
+    base = Argument("-C", type="path", default=".")
+    return CommandSpec(
+        name="r",
+        operand_base="-C",
+        arguments=(base,),
+        subcommands=(
+            CommandSpec(
+                name="mid",
+                operand_base="-C",
+                arguments=(base,),
+                subcommands=(CommandSpec(name="leaf"),),
+            ),
+        ),
+    )
+
+
+def test_walk_chains_a_directory_change_across_groups():
+    argv = ["-C", "a", "mid", "-C", "b", "leaf"]
+    result = walk("r", _nested_base_tree(), argv, "/w")
+    assert [b.virtual for b in result.operand_bases] == ["/w/a", "/w/a/b"]
+    assert [w.path.virtual if w.path else None for w in result.words] == [
+        None,
+        "/w/a",
+        None,
+        None,
+        "/w/a/b",
+        None,
+    ]

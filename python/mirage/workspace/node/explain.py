@@ -66,7 +66,6 @@ from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.env.env import env_child, env_vars
-from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount import MountRegistry
@@ -101,7 +100,7 @@ from mirage.workspace.node.occurrence import (
     segment_frames,
     whole_occurrence,
 )
-from mirage.workspace.session import SessionState, env_snapshot
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import tilde_home
 from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
 
@@ -569,15 +568,6 @@ async def _judge_words(
         read_words, kinds, session.cwd, lost and not whole_line
     )
     redirects = redirect_paths(redirect_words, registry, session.cwd)
-    words_read = command_words(
-        registry,
-        name,
-        args,
-        classified[1:],
-        redirects,
-        session.cwd,
-        env_snapshot(session),
-    )
     ctx, asked, answers = await gate(
         name,
         args,
@@ -629,7 +619,7 @@ async def _judge_words(
     )
     if refused is not None:
         yield Judged(
-            dataclasses.replace(_denied(name, refused), words=words_read),
+            dataclasses.replace(_denied(name, refused), words=ctx.words),
             occurrence,
             stated,
             intrinsic,
@@ -639,7 +629,7 @@ async def _judge_words(
     yield Judged(
         dataclasses.replace(
             await _explained(ctx, registry, asked, answers),
-            words=words_read,
+            words=ctx.words,
         ),
         occurrence,
         stated,

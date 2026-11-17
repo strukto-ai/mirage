@@ -314,10 +314,11 @@ export class MountRootPolicy implements Policy {
     }
 
     if (cmd === 'ln') {
-      // A mount root is refused only as the link NAME. Without -T a
-      // directory operand is the directory to link into, GNU's rule, and
-      // creating inside a mount is ordinary.
-      const last = ctx.paths[ctx.paths.length - 1]
+      // A mount root is refused only as the link NAME, the last operand:
+      // a redirect on the line is no name. Without -T a directory operand
+      // is the directory to link into, GNU's rule, and creating inside a
+      // mount is ordinary.
+      const last = operands[operands.length - 1]
       if (last !== undefined && hasNoTargetFlag(ctx.argv) && namesRoot(this.registry, last)) {
         const kind = hasSymlinkFlag(ctx.argv) ? 'symbolic link' : 'link'
         return deny(`failed to create ${kind} '${last.virtual}': File exists`, eexist(last))
