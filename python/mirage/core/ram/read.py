@@ -48,8 +48,11 @@ async def read(
         if key in store.dirs:
             raise eisdir(path_spec)
         raise lookup_error(store, path_spec, key)
-    data = store.files[key]
-    if offset or size is not None:
-        data = slice_window(data, offset, size)
+    if offset == 0 and size is None:
+        data = store.files[key]
+    elif hasattr(store.files, "read_window"):
+        data = store.files.read_window(key, offset, size)
+    else:
+        data = slice_window(store.files[key], offset, size)
     record("read", virtual, "ram", len(data), timer)
     return data

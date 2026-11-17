@@ -61,7 +61,7 @@ def test_run_groups_hold_the_writes_each_run_folds():
         [(10, b"q")],
         [(0, b"z")],
     ]
-    assert [write_runs(group)[0] for group in groups] == write_runs(writes)
+    assert write_runs(writes) == [(0, b"aXcd"), (10, b"q"), (0, b"z")]
 
 
 @pytest.mark.asyncio

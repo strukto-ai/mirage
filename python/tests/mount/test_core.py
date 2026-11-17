@@ -1950,6 +1950,116 @@ BLOCK = bytes(range(256)) * 256
 
 
 @pytest.mark.asyncio
+async def test_repeated_full_overwrites_read_only_the_last_spooled_run(
+    monkeypatch,
+):
+    core, store = _streamed_core()
+    fh = await core.create("/f")
+    size = MEMORY_LIMIT + 1
+    for byte in b"abc":
+        await core.write("/f", bytes([byte]) * size, 0, fh)
+    await core.write("/f", b"head", 0, fh)
+    spool = core.handles.get(fh).spool
+    assert spool.size == size
+    reads = []
+    read = spool.read
+
+    async def counted(offset, length):
+        reads.append(length)
+        return await read(offset, length)
+
+    monkeypatch.setattr(spool, "read", counted)
+    assert await core.read("/f", 6, 0, None) == b"headcc"
+    assert reads == [6]
+    await core.release(fh)
+    assert store._store.files["/f"] == b"head" + b"c" * (size - 4)
+
+
+@pytest.mark.asyncio
+async def test_a_full_overwrite_keeps_a_read_of_the_old_spool_alive():
+    core, _ = _streamed_core()
+    fh = await core.create("/f")
+    size = MEMORY_LIMIT + 1
+    await core.write("/f", b"a" * size, 0, fh)
+    old = core.handles.get(fh).spool
+    reading, go = _held_up(old)
+    pending = asyncio.create_task(core.read("/f", 2, 0, None))
+    await reading.wait()
+    try:
+        await core.write("/f", b"b" * (size + 1), 0, fh)
+    finally:
+        go.set()
+    assert await pending == b"aa"
+    assert old.closed
+    assert await core.read("/f", 2, size - 1, None) == b"bb"
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending", [b"", b"!"])
+async def test_flush_closes_a_spool_fully_superseded_by_a_peer(pending):
+    core, store = _streamed_core()
+    first = await core.create("/f")
+    peer = await core.open("/f", open_mode(os.O_WRONLY))
+    body = b"x" * (MEMORY_LIMIT + 1)
+    await core.write("/f", body, 0, first)
+    spool = core.handles.get(first).spool
+    await core.write("/f", body, 0, peer)
+    if pending:
+        await core.write("/f", pending, len(body), first)
+    await core.flush("/f", first)
+    assert spool.closed
+    await core.release(peer)
+    await core.release(first)
+    assert store._store.files["/f"] == body + pending
+
+
+@pytest.mark.asyncio
+async def test_path_read_with_a_pending_write_copies_only_its_window():
+    core, store = _streamed_core()
+    store._store.files["/f"] = b"x" * (8 << 20)
+    writer = await core.open("/f", open_mode(os.O_WRONLY))
+    await core.write("/f", b"y", 32, writer)
+    tracemalloc.start()
+    try:
+        assert await core.read("/f", 4, 31, None) == b"xyxx"
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        await core.release(writer)
+    assert peak < 1 << 20
+
+
+@pytest.mark.asyncio
+async def test_spill_counts_restored_writes_and_the_bytes_a_peer_cut(
+    monkeypatch,
+):
+    store = RAMVFS()
+    ws = Workspace({"/": store}, mode=MountMode.WRITE)
+    core = MountCore(ws.vfs)
+    first = await core.create("/f")
+    peer = await core.open("/f", open_mode(os.O_WRONLY))
+    await core.write("/f", bytes(MEMORY_LIMIT), 0, first)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            store,
+            "pwrite",
+            AsyncMock(side_effect=PermissionError(errno.EACCES, "denied")),
+        )
+        with pytest.raises(PermissionError):
+            await core.flush("/f", first)
+    await core.write("/f", b"x", 0, peer)
+    await core.write("/f", b"y", MEMORY_LIMIT, first)
+    ctx = core.handles.get(first)
+    assert ctx.spool is None
+    await core.write("/f", b"z", MEMORY_LIMIT + 1, first)
+    assert ctx.spool is not None
+    await core.release(first)
+    await core.release(peer)
+    assert store._store.files["/f"] == b"x" + bytes(MEMORY_LIMIT - 1) + b"yz"
+
+
+@pytest.mark.asyncio
 async def test_a_write_past_the_memory_limit_waits_in_a_spool_and_streams():
     core, store = _streamed_core()
     fh = await core.open(

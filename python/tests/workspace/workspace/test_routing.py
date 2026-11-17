@@ -57,6 +57,15 @@ def _whole(*policies: Policy) -> Workspace:
     )
 
 
+def _mixed(*policies: Policy) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _box("a", "@line"), "b": _box("b", "hostname")},
+        policies=list(policies),
+    )
+
+
 class _OnB(Policy):
     def pre_execute(self, ctx):
         return Route(machine="b", reason="the other box")
@@ -168,8 +177,111 @@ async def test_a_line_run_whole_keeps_a_route_that_moves_nothing():
 
 
 @pytest.mark.asyncio
+async def test_a_line_naming_another_machine_leaves_the_whole_line_machine():
+    ws = _mixed()
+    try:
+        assert (await ws.shell("hostname; echo hi")).stdout == b"a\n"
+        said = await ws.shell("hostname; echo hi", machine="a")
+        assert said.stdout == b"a\n"
+        said = await ws.shell("hostname; echo hi", machine="b")
+        assert said.stdout == b"b\nhi\n"
+    finally:
+        await ws.close()
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _box("a", "@line", "gcc"), "b": _box("b", "hostname")},
+    )
+    try:
+        said = await ws.shell("gcc x; hostname", machine="b")
+        assert said.stdout == b"a\nb\n"
+    finally:
+        await ws.close()
+    ws = _mixed(_OnB())
+    try:
+        assert (await ws.shell("hostname; echo hi")).stdout == b"b\nhi\n"
+        said = await ws.explain("hostname; echo hi")
+        assert [c.machine for c in said.node.children] == ["b", ""]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_run_whole_refuses_a_command_routed_to_its_capturer():
+    ws = _mixed(_ShortOnB())
+    try:
+        said = await ws.shell("hostname; hostname -s")
+        assert (said.exit_code, said.stdout) == (126, b"")
+        explained = await ws.explain("hostname; hostname -s")
+        assert (explained.outcome, explained.exit_code) == (Outcome.DENY, 126)
+    finally:
+        await ws.close()
+
+
+class _EchoOnB(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "echo" else None
+
+
+class _PythonOnB(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "python3" else None
+
+
+@pytest.mark.asyncio
+async def test_a_route_to_a_capturer_of_a_word_mirage_keeps_moves_nothing():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _box("a", "@line"), "b": _box("b", "echo")},
+        policies=[_EchoOnB()],
+    )
+    try:
+        said = await ws.shell("echo hi")
+        assert (said.exit_code, said.stdout) == (0, b"a\n")
+    finally:
+        await ws.close()
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _box("a", "@line"), "b": _box("b", "@external")},
+        policies=[_PythonOnB()],
+    )
+    try:
+        said = await ws.shell("python3 --version")
+        assert (said.exit_code, said.stdout) == (0, b"a\n")
+    finally:
+        await ws.close()
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"b": _box("b", "echo")},
+        policies=[_EchoOnB()],
+    )
+    try:
+        assert (await ws.shell("echo hi")).stdout == b"hi\n"
+        said = await ws.explain("echo hi")
+        assert [c.machine for c in said.node.children] == [""]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_line_run_whole_keeps_a_route_to_where_it_runs():
     ws = _whole(_OnA())
+    try:
+        assert (await ws.shell("hostname -s")).stdout == b"a\n"
+    finally:
+        await ws.close()
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "a": _box("a", "@line", "hostname"),
+            "b": _box("b", "hostname"),
+        },
+        policies=[_OnA()],
+    )
     try:
         assert (await ws.shell("hostname -s")).stdout == b"a\n"
     finally:

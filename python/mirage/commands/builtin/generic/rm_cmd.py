@@ -20,6 +20,7 @@ from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.path import parent
 from mirage.view.types import MountView
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,12 @@ async def remove_tree(
     roots = (
         set(mounts.descendants(root.virtual)) if mounts is not None else set()
     )
+    mount_parents = {"/"} if roots else set()
+    for mount in roots:
+        directory = parent(mount)
+        while directory not in mount_parents:
+            mount_parents.add(directory)
+            directory = parent(directory)
     removed: list[tuple[PathSpec, bool]] = []
     failures: list[tuple[PathSpec, OSError]] = []
 
@@ -95,7 +102,6 @@ async def remove_tree(
                 return True
             failures.append((path, exc))
             return False
-        base = path.virtual.rstrip("/")
         cleared = True
         for name in names:
             child = descendant_path(root, name.rstrip("/"))
@@ -114,7 +120,7 @@ async def remove_tree(
                 continue
             gone = await remove(child, info.type == FileType.DIRECTORY)
             cleared = cleared and gone
-        if not cleared or any(r.startswith(f"{base}/") for r in roots):
+        if not cleared or (path.virtual.rstrip("/") or "/") in mount_parents:
             return False
         try:
             await rmdir(path)

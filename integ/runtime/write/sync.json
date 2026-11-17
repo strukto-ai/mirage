@@ -59,6 +59,47 @@
           }
         }
       ]
+    },
+    {
+      "id": "quota_refused_flush_keeps_writes_for_a_spooled_retry",
+      "runtimes": [
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {
+              "capacity": 1048578
+            },
+            "files": {
+              "reserved": "abc",
+              "f": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno, os\nlimit = 1 << 20\na = os.open('/data/f', os.O_RDWR)\nb = os.open('/data/f', os.O_RDWR)\ntry:\n    os.pwrite(a, b'.' * limit, 0)\n    try:\n        os.fsync(a)\n    except OSError as exc:\n        if exc.errno != errno.EDQUOT:\n            raise\n        print('quota')\n    os.unlink('/data/reserved')\n    os.pwrite(b, b'P', 0)\n    os.pwrite(a, b'yz', limit)\n    os.fsync(a)\n    os.fsync(b)\nfinally:\n    os.close(b)\n    os.close(a)",
+            "node": "const fs = require('node:fs').promises\nconst limit = 1 << 20\nconst a = await fs.open('/data/f', 'r+')\nconst b = await fs.open('/data/f', 'r+')\ntry {\n  await a.write(Buffer.alloc(limit, '.'))\n  try {\n    await a.sync()\n  } catch (error) {\n    if (error.code !== 'EDQUOT') throw error\n    console.log('quota')\n  }\n  await fs.unlink('/data/reserved')\n  await b.write('P', 0)\n  await a.write('yz', limit)\n  await a.sync()\n  await b.sync()\n} finally {\n  await b.close()\n  await a.close()\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "quota\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "sha256sum /data/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "a5f17e2d29677f327a8bfc6fee6d56a4a36b9e33dcbb6402bc44e9a101fdb3be  /data/f\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

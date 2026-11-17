@@ -12,12 +12,37 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import tracemalloc
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.read import read
 from mirage.types import PathSpec
+from mirage.vfs.dev.store import DevStore
 from mirage.vfs.ram.store import RAMStore
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("factory", [RAMStore, DevStore])
+async def test_small_read_of_a_modified_file_allocates_only_the_window(
+    factory,
+):
+    store = factory()
+    accessor = RAMAccessor(store)
+    path = PathSpec.from_str_path("/log")
+    store.files["/log"] = bytes(4 << 20)
+    store.files.splice("/log", 32, b"before")
+    tracemalloc.start()
+    try:
+        snapshot = await read(accessor, path, 32, 6)
+        store.files.splice("/log", 32, b"after!")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1 << 20
+    assert snapshot == b"before"
+    assert await read(accessor, path, 32, 6) == b"after!"
 
 
 @pytest.fixture
@@ -29,6 +54,12 @@ def store():
     s.dirs.add("/sub")
     s.files["/sub/nested.txt"] = b"nested"
     return a
+
+
+@pytest.mark.asyncio
+async def test_read_window_from_a_plain_file_mapping():
+    accessor = RAMAccessor(RAMStore(files={"/log": b"hello"}))
+    assert await read(accessor, PathSpec.from_str_path("/log"), 1, 3) == b"ell"
 
 
 @pytest.mark.asyncio

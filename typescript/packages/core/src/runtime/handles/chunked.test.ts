@@ -45,6 +45,23 @@ async function filled(file: ChunkedHandle, size: number): Promise<void> {
 }
 
 describe('ChunkedHandle', () => {
+  it('keeps a bounded chunk and returns independent windows for Buffer reads', async () => {
+    const source = Buffer.alloc(8 << 20, 65)
+    const fetch = vi.fn((at: number, size: number) =>
+      Promise.resolve(source.subarray(at, at + size)),
+    )
+    const file = new ChunkedHandle('/f', source.length, fetch)
+    const first = await file.pread(0, 1)
+    expect(first.buffer.byteLength).toBe(1)
+    first.fill(66)
+    source[1] = 67
+    const cached = await file.pread(0, 2)
+    expect(cached).toEqual(Uint8Array.of(65, 65))
+    cached.fill(0)
+    expect(await file.pread(1, 1)).toEqual(Uint8Array.of(65))
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('answers small reads with one fetch per chunk', async () => {
     const { file, fetched } = handle()
     expect(fetched).toEqual([])

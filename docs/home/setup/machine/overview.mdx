@@ -59,7 +59,12 @@ machines:
 A line or a command can also name its machine: `execute(machine=)`, a
 `machine` on the shell request, or a policy's `Route(machine=)`: see
 [Route Machine](/home/policy/route-machine). A named machine runs what it
-captures; everything else stays where it would run.
+captures; everything else stays where it would run. When a machine takes
+`@line`, a line that names a different machine does not run whole on the
+`@line` machine: the named machine runs what it captures, and each other
+command runs where its own capture sends it, or in Mirage. On a line the
+`@line` machine runs whole, a command that a `pre_command` policy routes to
+another machine capturing it exits 126.
 
 ## Captures
 

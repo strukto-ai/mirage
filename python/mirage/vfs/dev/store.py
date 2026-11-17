@@ -21,6 +21,7 @@ from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, einval, enoent, fs_error
 from mirage.errors.types import FsCondition
+from mirage.utils.ranges import slice_window
 from mirage.vfs.dev.types import DevFileState, PipeRow
 from mirage.vfs.ram.store import RAMStore
 
@@ -181,6 +182,11 @@ class DevFiles(PipeFiles):
         if key in self.state.files:
             return self.state.files.size(key)
         return len(self.get(key, b""))
+
+    def read_window(self, key: str, offset: int, size: int | None) -> bytes:
+        if not key.startswith("/fd/") and key in self.state.files:
+            return self.state.files.read_window(key, offset, size)
+        return slice_window(self[key], offset, size)
 
     def splice(self, key: str, offset: int, data: bytes) -> None:
         """Write ``data`` at ``offset`` of ``key`` in place, as pwrite(2)

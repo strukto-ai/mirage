@@ -71,25 +71,7 @@ export function rangeHeader(offset: number, size: number | null): string | null 
  * @param size how many bytes, or null for the rest
  */
 export function sliceWindow(data: Uint8Array, offset: number, size: number | null): Uint8Array {
-  return data.slice(offset, size === null ? undefined : offset + size)
-}
-
-/**
- * Bytes in hand with `payload` written at `offset`, as pwrite(2) leaves a
- * file. The answer when nothing remote can write a range: what lies before
- * and after the window stays, and a gap past the end reads as zeros.
- * Writing nothing changes nothing, even past the end.
- *
- * @param data the whole content
- * @param offset first byte the payload replaces
- * @param payload the bytes written there
- */
-export function spliceWindow(data: Uint8Array, offset: number, payload: Uint8Array): Uint8Array {
-  if (payload.byteLength === 0) return data
-  const out = new Uint8Array(Math.max(data.byteLength, offset + payload.byteLength))
-  out.set(data)
-  out.set(payload, offset)
-  return out
+  return new Uint8Array(data.subarray(offset, size === null ? undefined : offset + size))
 }
 
 // HTTP 416, and the spellings the stores put on it. S3 and its clones answer
