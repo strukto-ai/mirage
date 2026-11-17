@@ -533,7 +533,7 @@ describe('MontyRuntime', () => {
     expect(result.exitCode).toBe(0)
     expect(appends).toEqual([])
     expect(text(files.get('/s3/log.txt') ?? new Uint8Array())).toBe('abc')
-    // One failed probe per mount, then whole-content writes.
+    // Each append's probe fails, then the bridge writes the whole content.
     expect(writes.map(([p, b]) => [p, text(b)])).toEqual([
       ['/s3/log.txt', 'ab'],
       ['/s3/log.txt', 'abc'],
