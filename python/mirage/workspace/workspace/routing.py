@@ -45,7 +45,10 @@ from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
 from mirage.workspace.dispatcher.reader import NamespaceReader
-from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
+from mirage.workspace.lookup.constants import (
+    INTERPRETER_NAMES,
+    PROGRAM_WRAPPERS,
+)
 from mirage.workspace.lookup.lookup import routed_consumer, runs_wrapper
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
@@ -78,6 +81,29 @@ def _apart(
             if name != WHOLE_LINE
         },
     )
+
+
+def _named_line(
+    decision: RouteDecision[RuntimeIdentity], machine: str | None
+) -> RouteDecision[RuntimeIdentity]:
+    """A line's decision as the machine it names places it: a whole-line
+    runtime that is not that machine no longer takes the line, so the
+    machine runs what it captures and each other command runs where its
+    own capture sends it, or in Mirage.
+
+    Args:
+        decision (RouteDecision): the line's placement, the machine's
+            captures over it.
+        machine (str | None): the machine the line names.
+    """
+    whole = whole_line_runtime(decision.bindings)
+    if (
+        machine is None
+        or not isinstance(whole, Runtime)
+        or whole.name == machine
+    ):
+        return decision
+    return _apart(decision)
 
 
 def _wrapped_programs(
@@ -300,7 +326,8 @@ class Router:
     def _routed(
         self, entries: list[Runtime[Any]], route: Route
     ) -> RouteDecision[RuntimeIdentity]:
-        """The decision a policy's route places a line on (``routed``).
+        """The decision a policy's route places a line on (``routed``),
+        off a whole-line runtime it does not name.
 
         Args:
             entries (list[Runtime]): the workspace's ordered entries.
@@ -310,11 +337,12 @@ class Router:
             RouteError: no machine has the name.
         """
         try:
-            return routed(
+            decision = routed(
                 entries, self._registry.runtime_bindings, route.machine
             )
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
+        return _named_line(decision, route.machine)
 
     def _unplaced(
         self, entries: list[Runtime[Any]]
@@ -516,8 +544,10 @@ class Router:
     ) -> bool:
         """Whether a command's ``pre_command`` route places it off the
         machine its line runs whole on, which that one run
-        cannot honor: a route that leaves the command where it stands
-        (a runtime that does not capture it) holds.
+        cannot honor. A route to a runtime that does not capture the
+        command leaves it where it stands, so it is not off the line; a
+        route to another machine that captures it is, even when that
+        machine captured it already.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -532,17 +562,21 @@ class Router:
         if route is None or not isinstance(whole, Runtime):
             return False
         placed = self._overlaid(decision, route)
-        return whole_line_runtime(
-            placed.bindings
-        ) is not whole or self._serving(one, _apart(placed)) != self._serving(
-            one, _apart(decision)
+        serving = self._serving(one, _apart(placed))
+        return (
+            whole_line_runtime(placed.bindings) is not whole
+            or serving != self._serving(one, _apart(decision))
+            or (serving == route.machine and serving != whole.name)
         )
 
     def _serving(
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
         """The machine that serves a command under a decision that places
-        each command on its own, as ``placement_for`` answers it.
+        each command on its own, as ``placement_for`` answers it: a name
+        a machine captures runs there only when Mirage hands it over, as
+        a program or an interpreter, so a shell word such as ``echo``, a
+        function or an installed CLI stays in Mirage.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -560,6 +594,10 @@ class Router:
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = rerouted or decision
+            if consumer is not Consumer.EXTERNAL and not (
+                consumer is Consumer.SESSION and command in INTERPRETER_NAMES
+            ):
+                return ""
             if consumer is Consumer.EXTERNAL and "/" not in command:
                 fallback = decision.bindings.get(EXTERNAL_COMMANDS)
         serving = decision.bindings.get(command, fallback)
@@ -573,7 +611,8 @@ class Router:
         self, entries: list[Runtime[Any]], machine: str
     ) -> RouteDecision[RuntimeIdentity]:
         """The decision that serves a line on one named machine, its
-        captures over the static bindings.
+        captures over the static bindings, off a whole-line runtime that
+        is another machine.
 
         Args:
             entries (list[Runtime]): the workspace's ordered entries.
@@ -587,9 +626,12 @@ class Router:
             overlay = machine_bindings_for(entries, machine)
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
-        return RouteDecision(
-            bindings={**self._registry.runtime_bindings, **overlay},
-            fallback=catch_all(entries),
+        return _named_line(
+            RouteDecision(
+                bindings={**self._registry.runtime_bindings, **overlay},
+                fallback=catch_all(entries),
+            ),
+            machine,
         )
 
     def context(

@@ -78,6 +78,17 @@ function whole(...policies: Policy[]): Workspace {
   )
 }
 
+function mixed(...policies: Policy[]): Workspace {
+  return new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: box('a', '@line'), b: box('b', 'hostname') },
+      policies,
+    },
+  )
+}
+
 class ProgramOnB implements Policy {
   preCommand(ctx: CommandContext): Route | null {
     return ctx.command === 'hostname' ? { kind: 'route', machine: 'b' } : null
@@ -230,8 +241,113 @@ describe('routing on machines', () => {
     }
   })
 
+  it('leaves the whole-line machine for a line naming another machine', async () => {
+    let ws = mixed()
+    try {
+      expect(DEC.decode((await ws.shell('hostname; echo hi')).stdout)).toBe('a\n')
+      const kept = await ws.shell('hostname; echo hi', { machine: 'a' })
+      expect(DEC.decode(kept.stdout)).toBe('a\n')
+      const said = await ws.shell('hostname; echo hi', { machine: 'b' })
+      expect(DEC.decode(said.stdout)).toBe('b\nhi\n')
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: box('a', '@line', 'gcc'), b: box('b', 'hostname') },
+      },
+    )
+    try {
+      const said = await ws.shell('gcc x; hostname', { machine: 'b' })
+      expect(DEC.decode(said.stdout)).toBe('a\nb\n')
+    } finally {
+      await ws.close()
+    }
+    ws = mixed(new OnB())
+    try {
+      expect(DEC.decode((await ws.shell('hostname; echo hi')).stdout)).toBe('b\nhi\n')
+      const said = await ws.explain('hostname; echo hi')
+      expect([...commands(said.node)].map((c) => c.machine)).toEqual(['b', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a line run whole when a route places a command on its capturer', async () => {
+    const ws = mixed(new ShortOnB())
+    try {
+      const said = await ws.shell('hostname; hostname -s')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([126, ''])
+      const explained = await ws.explain('hostname; hostname -s')
+      expect([explained.outcome, explained.exitCode]).toEqual([Outcome.DENY, 126])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('moves nothing for a route to a capturer of a word Mirage keeps', async () => {
+    let ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: box('a', '@line'), b: box('b', 'echo') },
+        policies: [new Answers('echo', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      const said = await ws.shell('echo hi')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'a\n'])
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: box('a', '@line'), b: box('b', '@external') },
+        policies: [new Answers('python3', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      const said = await ws.shell('python3 --version')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'a\n'])
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { b: box('b', 'echo') },
+        policies: [new Answers('echo', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      expect(DEC.decode((await ws.shell('echo hi')).stdout)).toBe('hi\n')
+      const said = await ws.explain('echo hi')
+      expect([...commands(said.node)].map((c) => c.machine)).toEqual([''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('keeps a route to where a line run whole runs', async () => {
-    const ws = whole(new OnA())
+    let ws = whole(new OnA())
+    try {
+      expect(DEC.decode((await ws.shell('hostname -s')).stdout)).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: box('a', '@line', 'hostname'), b: box('b', 'hostname') },
+        policies: [new OnA()],
+      },
+    )
     try {
       expect(DEC.decode((await ws.shell('hostname -s')).stdout)).toBe('a\n')
     } finally {

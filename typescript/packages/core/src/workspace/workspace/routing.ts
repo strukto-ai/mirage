@@ -29,7 +29,7 @@ import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
-import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { INTERPRETER_NAMES, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
@@ -88,6 +88,21 @@ function apart(decision: RouteDecision<Runtime>): RouteDecision<Runtime> {
     if (name !== WHOLE_LINE) bindings[name] = runtime
   }
   return { ...decision, bindings }
+}
+
+/**
+ * A line's decision as the machine it names places it: a whole-line runtime
+ * that is not that machine no longer takes the line, so the machine runs what
+ * it captures and each other command runs where its own capture sends it, or
+ * in Mirage. Mirrors Python's `_named_line`.
+ */
+function namedLine(
+  decision: RouteDecision<Runtime>,
+  machine: string | undefined,
+): RouteDecision<Runtime> {
+  const whole = wholeLineRuntime(decision.bindings)
+  if (machine === undefined || whole === null || whole.name === machine) return decision
+  return apart(decision)
 }
 
 /**
@@ -200,15 +215,18 @@ export class Router {
   }
 
   /**
-   * The decision a policy's route places a line on (`routed`). Mirrors
-   * Python's `Router._routed`.
+   * The decision a policy's route places a line on (`routed`), off a
+   * whole-line runtime it does not name. Mirrors Python's `Router._routed`.
    *
    * Throws:
    *   RouteError: no machine has the name.
    */
   private routed(route: Route): RouteDecision<Runtime> {
     try {
-      return routed(this.runtimes.entries, this.registry.runtimeBindings, route.machine)
+      return namedLine(
+        routed(this.runtimes.entries, this.registry.runtimeBindings, route.machine),
+        route.machine,
+      )
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,
@@ -354,26 +372,31 @@ export class Router {
 
   /**
    * Whether a command's `preCommand` route places it off the machine its
-   * line runs whole on, which that one run cannot honor: a route that
-   * leaves the command where it stands (a runtime that does not capture it)
-   * holds. Throws a `RouteError` for a route that names no machine. Mirrors
-   * Python's `Router.off_line`.
+   * line runs whole on, which that one run cannot honor. A route to a
+   * runtime that does not capture the command leaves it where it stands, so
+   * it is not off the line; a route to another machine that captures it is,
+   * even when that machine captured it already. Throws a `RouteError` for a
+   * route that names no machine. Mirrors Python's `Router.off_line`.
    */
   offLine(one: Judged, decision: RouteDecision<Runtime>): boolean {
     const route = commandRoute(one.judgment.answers)
     const whole = wholeLineRuntime(decision.bindings)
     if (route === null || whole === null) return false
     const placed = this.overlaid(decision, route)
+    const serving = this.serving(one, apart(placed))
     return (
       wholeLineRuntime(placed.bindings) !== whole ||
-      this.serving(one, apart(placed)) !== this.serving(one, apart(decision))
+      serving !== this.serving(one, apart(decision)) ||
+      (serving === route.machine && serving !== whole.name)
     )
   }
 
   /**
    * The machine that serves a command under a decision that places each
-   * command on its own, as `placementFor` answers it. Mirrors Python's
-   * `Router._serving`.
+   * command on its own, as `placementFor` answers it: a name a machine
+   * captures runs there only when Mirage hands it over, as a program or an
+   * interpreter, so a shell word such as `echo`, a function or an installed
+   * CLI stays in Mirage. Mirrors Python's `Router._serving`.
    */
   private serving(one: Judged, placed: RouteDecision<Runtime>): string {
     const command = one.judgment.command
@@ -389,6 +412,12 @@ export class Router {
         placed,
       )
       decision = rerouted ?? placed
+      if (
+        consumer !== Consumer.EXTERNAL &&
+        !(consumer === Consumer.SESSION && INTERPRETER_NAMES.has(command))
+      ) {
+        return ''
+      }
       if (consumer === Consumer.EXTERNAL && !command.includes('/')) {
         fallback = Object.hasOwn(decision.bindings, EXTERNAL_COMMANDS)
           ? (decision.bindings[EXTERNAL_COMMANDS] ?? null)
@@ -404,7 +433,7 @@ export class Router {
 
   /**
    * The decision that serves a line on one named machine, its captures over
-   * the static bindings.
+   * the static bindings, off a whole-line runtime that is another machine.
    *
    * Throws:
    *   RouteError: no machine has the name, or it cannot be selected.
@@ -418,14 +447,17 @@ export class Router {
         cause: caught,
       })
     }
-    return {
-      bindings: Object.assign(
-        Object.create(null) as Record<string, Runtime>,
-        this.registry.runtimeBindings,
-        overlay,
-      ),
-      fallback: catchAll(this.runtimes.entries),
-    }
+    return namedLine(
+      {
+        bindings: Object.assign(
+          Object.create(null) as Record<string, Runtime>,
+          this.registry.runtimeBindings,
+          overlay,
+        ),
+        fallback: catchAll(this.runtimes.entries),
+      },
+      machine,
+    )
   }
 
   /**
