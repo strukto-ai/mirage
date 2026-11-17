@@ -19,7 +19,8 @@ starts the daemon on this machine, in local auth mode with a token file.
 or ``serve.ts`` with every setting from the environment: one fixed token,
 or the mock issuer's JWTs, and their event loop timed into
 ``loop_lag.json`` (and, on Python, each workspace loop's turns per shell
-request counted into ``loop_turns.json``). SSH is on in all three, with
+request counted into ``loop_turns.json``), and their spans appended to
+``spans.jsonl``. SSH is on in all three, with
 three keys: a plain one, one bound to the ``guarded`` profile, and one
 never authorized.
 """
@@ -42,6 +43,7 @@ from issuer import ACCOUNT, AUTHORIZED_PARTY, CLIENT_ID, Issuer
 from loop_lag import LOOP_LAG_ENV
 from loop_turns import LOOP_TURNS_ENV
 from moto.server import ThreadedMotoServer
+from spans import SPANS_ENV
 
 ROOT = Path(__file__).resolve().parents[2]
 INTEG = ROOT / "integ"
@@ -151,6 +153,10 @@ class Deployment:
     @property
     def loop_turns(self) -> Path:
         return self.root / "loop_turns.json"
+
+    @property
+    def spans(self) -> Path:
+        return self.root / "spans.jsonl"
 
     def bearer(self) -> str:
         """A token this deployment accepts, minted now for ``jwt``."""
@@ -279,6 +285,7 @@ def _start(d: Deployment) -> None:
                 **d.server_env(),
                 LOOP_LAG_ENV: str(d.loop_lag),
                 LOOP_TURNS_ENV: str(d.loop_turns),
+                SPANS_ENV: str(d.spans),
             },
             stdout=out,
             stderr=subprocess.STDOUT,

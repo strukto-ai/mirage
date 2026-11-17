@@ -23,9 +23,11 @@ from typing import Any
 
 import asyncssh
 from asyncssh.connection import SSHConnection
+from opentelemetry import context
 
 from mirage import Workspace
 from mirage.concurrency.limiter import on_loop
+from mirage.server.env import trace_headers
 from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
@@ -36,6 +38,7 @@ from mirage.server.ssh.stream import (
     deliver,
 )
 from mirage.server.stdin import LoopStdin
+from mirage.server.trace import request_context
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.utils.abort import MirageAbortError
@@ -549,5 +552,11 @@ async def handle_channel(
     if opened is None:
         return
     entry, session_id = opened
-    status = await ShellChannel(registry, entry, session_id, process).serve()
+    token = context.attach(request_context(trace_headers(process.env)))
+    try:
+        status = await ShellChannel(
+            registry, entry, session_id, process
+        ).serve()
+    finally:
+        context.detach(token)
     process.exit(status)

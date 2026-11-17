@@ -312,9 +312,9 @@ def test_the_token_is_the_settings_own_else_the_login(tmp_path, monkeypatch):
         assert client.token() == "set"
     with DaemonClient(DaemonSettings(url=login.url, login=login)) as client:
         assert client.token() == "from-login"
-        assert client._headers() == {"Authorization": "Bearer from-login"}
+        assert client.headers() == {"Authorization": "Bearer from-login"}
     with DaemonClient(DaemonSettings(url=login.url)) as client:
-        assert client._headers() == {}
+        assert client.headers() == {}
 
 
 def test_an_ended_login_stops_the_command(tmp_path, monkeypatch):
@@ -412,3 +412,34 @@ def test_a_new_login_stops_a_client_bound_to_the_old_one(
         )
         with pytest.raises(LoginError, match="changed"):
             client.token()
+
+
+# A CLI started under a trace sends its TRACEPARENT as the W3C header, so
+# the line it runs goes under the caller's span.
+def test_requests_carry_the_trace_context_in_the_environment(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    monkeypatch.setenv("TRACEPARENT", traceparent)
+    seen = []
+
+    class Recording(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("traceparent"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Recording)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with DaemonClient(DaemonSettings(url=url, auth_token="t")) as client:
+            client.request("GET", "/v1/health")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [traceparent]

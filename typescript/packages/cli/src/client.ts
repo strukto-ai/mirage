@@ -26,6 +26,7 @@ import {
   readTokenFile,
 } from '@struktoai/mirage-server/auth/storage'
 import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/daemon_config'
+import { traceHeaders } from '@struktoai/mirage-server/env'
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
@@ -87,7 +88,7 @@ export class DaemonClient {
   }
 
   private async headers(extra?: Record<string, string>): Promise<Record<string, string>> {
-    const h: Record<string, string> = { ...extra }
+    const h: Record<string, string> = { ...traceHeaders(process.env), ...extra }
     const token = await this.token()
     if (token !== '') h.Authorization = `Bearer ${token}`
     return h

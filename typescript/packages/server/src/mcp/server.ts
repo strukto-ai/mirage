@@ -14,11 +14,13 @@
 
 import { stderr } from 'node:process'
 import { format } from 'node:util'
+import { context, propagation } from '@opentelemetry/api'
 import { VERSION } from '@struktoai/mirage-core/version'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   fromJsonSchema,
   McpServer,
+  type CallToolResult,
   ProtocolError,
   ProtocolErrorCode,
   type JsonSchemaType,
@@ -201,56 +203,61 @@ export function createMirageMcpServer(
       ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
     })),
   }))
-  server.server.setRequestHandler('tools/call', async (request, ctx) => {
-    const name = request.params.name
-    const tool = (await listed()).find((candidate) => candidate.name === name)
-    if (tool === undefined) {
-      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`)
-    }
-    const args = request.params.arguments ?? {}
-    const valid = await fromJsonSchema(tool.inputSchema)['~standard'].validate(args)
-    if (valid.issues !== undefined) {
-      const why = valid.issues.map((issue) => issue.message).join('; ')
-      const text = `Input validation error: Invalid arguments for tool ${name}: ${why}`
-      return { content: [{ type: 'text', text }], isError: true }
-    }
-    const { explain, ...given } = args
-    const vfs = VFS_TOOLS.get(name)
-    try {
-      if (vfs !== undefined) {
-        return json(
-          bodyOf(
-            vfs.call,
-            await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
-            explain === true,
-          ),
-        )
-      }
-      if (tool === EXPLAINED_SHELL && explain === true) {
-        return json(explanationToDict(await session.explain.shell(String(given.command))))
-      }
-      if (name === 'shell' && operations instanceof McpToolOperations) {
-        const token = ctx.mcpReq._meta?.progressToken
-        const progress =
-          token === undefined
-            ? undefined
-            : new OutputProgress((value, message) =>
-                ctx.mcpReq.notify({
-                  method: 'notifications/progress',
-                  params: { progressToken: token, progress: value, message },
-                }),
-              )
-        return await operations.shell(String(given.command), ctx.mcpReq.signal, progress)
-      }
-      return await operations.call(name, given, ctx.mcpReq.signal)
-    } catch (err) {
-      logger.debug('mcp tool %s failed', name, err)
-      // A call that failed is a tool result the agent reads, not a
-      // protocol error.
-      if (vfs !== undefined) return json(fsError(err).record(), true)
-      const text = err instanceof Error ? err.message : String(err)
-      return { content: [{ type: 'text', text }], isError: true }
-    }
-  })
+  server.server.setRequestHandler('tools/call', (request, ctx) =>
+    context.with(
+      propagation.extract(context.active(), ctx.mcpReq._meta ?? {}),
+      async (): Promise<CallToolResult> => {
+        const name = request.params.name
+        const tool = (await listed()).find((candidate) => candidate.name === name)
+        if (tool === undefined) {
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`)
+        }
+        const args = request.params.arguments ?? {}
+        const valid = await fromJsonSchema(tool.inputSchema)['~standard'].validate(args)
+        if (valid.issues !== undefined) {
+          const why = valid.issues.map((issue) => issue.message).join('; ')
+          const text = `Input validation error: Invalid arguments for tool ${name}: ${why}`
+          return { content: [{ type: 'text', text }], isError: true }
+        }
+        const { explain, ...given } = args
+        const vfs = VFS_TOOLS.get(name)
+        try {
+          if (vfs !== undefined) {
+            return json(
+              bodyOf(
+                vfs.call,
+                await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
+                explain === true,
+              ),
+            )
+          }
+          if (tool === EXPLAINED_SHELL && explain === true) {
+            return json(explanationToDict(await session.explain.shell(String(given.command))))
+          }
+          if (name === 'shell' && operations instanceof McpToolOperations) {
+            const token = ctx.mcpReq._meta?.progressToken
+            const progress =
+              token === undefined
+                ? undefined
+                : new OutputProgress((value, message) =>
+                    ctx.mcpReq.notify({
+                      method: 'notifications/progress',
+                      params: { progressToken: token, progress: value, message },
+                    }),
+                  )
+            return await operations.shell(String(given.command), ctx.mcpReq.signal, progress)
+          }
+          return await operations.call(name, given, ctx.mcpReq.signal)
+        } catch (err) {
+          logger.debug('mcp tool %s failed', name, err)
+          // A call that failed is a tool result the agent reads, not a
+          // protocol error.
+          if (vfs !== undefined) return json(fsError(err).record(), true)
+          const text = err instanceof Error ? err.message : String(err)
+          return { content: [{ type: 'text', text }], isError: true }
+        }
+      },
+    ),
+  )
   return server
 }

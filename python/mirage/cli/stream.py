@@ -171,8 +171,7 @@ async def stream_shell(
         piped (bool): Whether to stream standard input.
         json_output (bool): Collect bytes into one JSON result at completion.
     """
-    token = client.token()
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    headers = client.headers()
     body = None
     if piped:
         body = aiohttp.FormData()

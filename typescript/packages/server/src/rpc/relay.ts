@@ -14,6 +14,7 @@
 
 import { debuglog } from 'node:util'
 import { createInterface } from 'node:readline'
+import { traceHeaders } from '../env.ts'
 import { RPC_PARSE_ERROR } from './constants.ts'
 import { CANCEL_REQUEST, errorResponse } from './server.ts'
 
@@ -35,6 +36,7 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
     const response = await fetch(url, {
       method: 'POST',
       headers: {
+        ...traceHeaders(process.env),
         ...(bearer !== '' ? { Authorization: `Bearer ${bearer}` } : {}),
         'content-type': 'application/json',
       },

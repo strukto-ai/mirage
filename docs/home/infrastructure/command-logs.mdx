@@ -375,12 +375,35 @@ workspace runs its first line.
   </Tab>
 </Tabs>
 
+## Join a caller's trace
+
+Send the caller's W3C trace context with a line and its `shell` span goes
+under the caller's span, so your service's spans and Mirage's land in one
+trace. Each access carries it the standard way:
+
+| Access | Where the trace context goes |
+| --- | --- |
+| In-app | The OpenTelemetry context current when you call `ws.shell` |
+| HTTP, RPC | The `traceparent` header |
+| MCP | `_meta.traceparent` on `tools/call` |
+| CLI, `mirage mcp`, `mirage rpc` | The `TRACEPARENT` environment variable |
+| SSH | `TRACEPARENT`, sent with `ssh -o SetEnv=TRACEPARENT=...` |
+
+```bash
+TRACEPARENT=00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 mirage shell -w demo -c 'cat /data/a.txt'
+```
+
+`tracestate` travels the same way. A line without a trace context starts
+a trace of its own. In TypeScript, the process running the
+workspace needs a context manager and the W3C propagator; `NodeSDK`
+registers both.
+
 ## Spans
 
-Each trace covers one line and everything it started. A process sits under
-the process that started it, and a background job's process under its `job`
-span. Use the span and attribute names in your backend's queries, dashboards
-and alerts.
+Each line's spans form one tree: the `shell` span and everything it
+started. A process sits under the process that started it, and a background
+job's process under its `job` span. Use the span and attribute names in your
+backend's queries, dashboards and alerts.
 
 | To find | Filter on |
 | --- | --- |

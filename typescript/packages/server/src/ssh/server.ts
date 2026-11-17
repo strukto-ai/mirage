@@ -23,6 +23,7 @@ import type {
   PseudoTtyInfo,
   ServerChannel,
   ServerConfig,
+  SetEnvInfo,
 } from 'ssh2'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { SSHConfig } from './config.ts'
@@ -34,6 +35,7 @@ import {
   KEEPALIVE_INTERVAL_SECONDS,
   PROFILE_OPTION,
 } from './constants.ts'
+import { ENV_TRACE_CONTEXT } from '../env.ts'
 import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
 import {
@@ -231,8 +233,18 @@ function serveConnection(
       const session = accept()
       let term: string | null = null
       let shell: ShellChannel | null = null
+      const env: Record<string, string> = {}
       const start = (channel: ServerChannel, command: string | null): void => {
-        const request: ChannelRequest = { username, profile, account, command, term, peer, local }
+        const request: ChannelRequest = {
+          username,
+          profile,
+          account,
+          command,
+          term,
+          env,
+          peer,
+          local,
+        }
         void handleChannel(registry, channel, request, (s) => {
           shell = s
         })
@@ -241,6 +253,23 @@ function serveConnection(
         term = (info as PseudoTtyInfo & { term?: string }).term ?? ''
         acceptPty()
       })
+      // OpenSSH asks no reply to an env request, and ssh2 then passes no
+      // accept or reject.
+      session.on(
+        'env',
+        (
+          acceptEnv: (() => void) | undefined,
+          rejectEnv: (() => void) | undefined,
+          info: SetEnvInfo,
+        ) => {
+          if (!(ENV_TRACE_CONTEXT as readonly string[]).includes(info.key)) {
+            rejectEnv?.()
+            return
+          }
+          env[info.key] = info.val
+          acceptEnv?.()
+        },
+      )
       session.on('window-change', (acceptResize) => {
         acceptResize()
       })
@@ -269,6 +298,7 @@ function serveConnection(
           account,
           command: null,
           term: null,
+          env,
           peer,
           local,
         }

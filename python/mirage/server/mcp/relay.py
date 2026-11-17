@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -29,6 +30,7 @@ from mcp.types import (
 
 from mirage import __version__
 from mirage.concurrency.limiter import run_blocking
+from mirage.server.env import trace_headers
 
 
 class McpRelay:
@@ -128,7 +130,9 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
 
     async with (
         httpx2.AsyncClient(
-            auth=Bearer(), timeout=httpx2.Timeout(30.0, read=None)
+            auth=Bearer(),
+            headers=trace_headers(os.environ),
+            timeout=httpx2.Timeout(30.0, read=None),
         ) as http,
         Client(streamable_http_client(url, http_client=http)) as upstream,
         stdio_server() as (read_stream, write_stream),
