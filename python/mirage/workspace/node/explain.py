@@ -447,9 +447,7 @@ def _line_decision(
         ):
             return "expands a pattern only the runtime can read"
     if coded or reads_args(rules, name):
-        unread = next(
-            (w.raw for w in words if w.text is None or w.glob), None
-        )
+        unread = next((w.raw for w in words if w.text is None or w.glob), None)
         if unread is not None:
             return unreadable(unread)
         if open_:
@@ -547,11 +545,7 @@ async def _judge_words(
         return
     if head.text is None and not whole_line:
         return
-    if (
-        whole_line
-        and (head.text is None or head.glob)
-        and has_rules(rules)
-    ):
+    if whole_line and (head.text is None or head.glob) and has_rules(rules):
         yield Judged(
             _denied(head.raw, unreadable(head.raw)), occurrence, False
         )
