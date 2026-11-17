@@ -317,7 +317,6 @@ Asked before each connection carries a byte, whoever opens it. For
     {"text": "/repo/mirage", "kind": "operand", "option": null, "path": "/repo/mirage"}
   ],
   "line": "git clone https://github.com/strukto-ai/mirage /repo/mirage",
-  "mount": "",
   ...
 }
 ```
@@ -327,7 +326,6 @@ Asked before each connection carries a byte, whoever opens it. For
 | `host` | the name the program asked for; empty for a bare address |
 | `address`, `port` | where the connection goes |
 | `command`, `program`, `words`, `line` | the command that opened it, as `pre_command` reads it |
-| `mount` | the prefix of the mount whose VFS opened it, empty when none did |
 
 The URL, method and status are not there: under HTTPS only the program and
 the server see them. To refuse a clone by its size, look the repository up

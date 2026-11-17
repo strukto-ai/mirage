@@ -830,7 +830,7 @@ describe('the fenced remnant cascade rides the mount frame', () => {
       const mounts = new Set<string | null>()
       ram.readdir = (path) => {
         seen = revisionFor('/ram/d/h.txt')
-        mounts.add(currentCaller().vfsMount)
+        mounts.add(currentCaller().write?.prefix ?? null)
         return original(path)
       }
       const internals = ws as unknown as {

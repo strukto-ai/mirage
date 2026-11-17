@@ -364,7 +364,7 @@ describe('a workspace network rule', () => {
     }
   }
 
-  it('names the mount and the command a mount connection opens for', async () => {
+  it('names the command a mount connection opens for', async () => {
     const watch = new Watch()
     const ws = new Workspace({ '/remote': new Remote() })
     ws.policies.add(watch)
@@ -374,9 +374,7 @@ describe('a workspace network rule', () => {
     } finally {
       await ws.close()
     }
-    expect(watch.asked.map((ctx) => [ctx.mount, ctx.command, ctx.port])).toEqual([
-      ['/remote', 'ls', port],
-    ])
+    expect(watch.asked.map((ctx) => [ctx.command, ctx.port])).toEqual([['ls', port]])
     expect(watch.ended.map((ctx) => ctx.ended)).toEqual(['closed'])
   })
 
@@ -410,14 +408,6 @@ describe('a workspace network rule', () => {
       'acme deploy',
     ])
     expect(asked?.words?.map((word) => word.text)).toEqual(['acme', 'deploy'])
-    expect(asked?.mount).toBe('')
-  })
-
-  it('names no mount for a command run from inside one', async () => {
-    const watch = new Watch()
-    const url = `http://127.0.0.1:${String(port)}/`
-    expect(await held(`cd /data && curl -sS ${url}`, [watch])).toBe(0)
-    expect(watch.asked.map((ctx) => [ctx.command, ctx.mount])).toEqual([['curl', '']])
   })
 
   it('judges a positional connect as any other', async () => {
@@ -474,7 +464,7 @@ describe('a workspace network rule', () => {
     } finally {
       await ws.close()
     }
-    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+    expect(watch.asked.map((ctx) => ctx.port)).toEqual([port])
   })
 
   it('lets a mount go when its file stream is closed unread', async () => {
@@ -534,7 +524,7 @@ describe('a workspace network rule', () => {
     } finally {
       await ws.close()
     }
-    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+    expect(watch.asked.map((ctx) => ctx.port)).toEqual([port])
   })
 
   // A RAM mount whose follow hands out a separate iterator whose close tells
@@ -566,7 +556,7 @@ describe('a workspace network rule', () => {
     } finally {
       await ws.close()
     }
-    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+    expect(watch.asked.map((ctx) => ctx.port)).toEqual([port])
   })
 
   it('holds each session to its profile network besides the workspace one', async () => {

@@ -27,7 +27,6 @@ a connection they refuse reaches no policy.
 | --- | --- |
 | `host`, `address`, `port` | where it goes; `host` is empty for a bare address |
 | `command`, `program`, `words`, `line` | the command that opened it |
-| `mount` | the mount whose VFS opened it, empty when none did |
 | `bytes_sent`, `bytes_received`, `seconds`, `ended` | `post_network`: how it went. `ended` is `closed`, `refused`, `limit` or `error` |
 
 The URL is not there: under HTTPS only the program and the server see it.

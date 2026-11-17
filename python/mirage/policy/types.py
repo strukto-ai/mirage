@@ -973,8 +973,6 @@ class NetworkContext:
             as its spec read it, as ``CommandContext.words`` holds it;
             empty outside a command.
         line (str): the line the command runs in; empty outside one.
-        mount (str): the prefix of the mount whose VFS opened it, empty
-            when no mount did.
         session_id (str): the session it opens for; empty outside one.
         session (SessionView | None): the session, read only.
         vfs (FileView | None): the session's files, read only.
@@ -988,7 +986,6 @@ class NetworkContext:
     program: tuple[str, ...] = ()
     words: tuple[CommandWord, ...] = ()
     line: str = ""
-    mount: str = ""
     session_id: str = ""
     session: SessionView | None = None
     vfs: FileView | None = None
