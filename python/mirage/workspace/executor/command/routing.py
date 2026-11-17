@@ -228,7 +228,9 @@ def tree_path_scopes(
         unknown_is_operand=True,
     )
     found += [
-        path for path in word_paths(leaf, result.argv, cwd) if path is not None
+        path
+        for path in word_paths(leaf, result.argv, cwd, operands=True)
+        if path is not None
     ]
     found += [
         PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
@@ -456,7 +458,9 @@ def _parsed_words(
         cmd_name (str): command name.
         env (Mapping[str, str] | None): session environment.
         cli (bool): whether the spec is an installed CLI's node, whose
-            undeclared dashed words are the program's own operands.
+            undeclared dashed words are the program's own operands and
+            whose path operands name their paths; a builtin's operand
+            paths are the classifier's.
     """
     if spec is None:
         return [
@@ -474,7 +478,9 @@ def _parsed_words(
     return [
         (role or WordKind.OPERAND, path)
         for role, path in zip(
-            parsed.word_roles, word_paths(parsed, argv, cwd), strict=True
+            parsed.word_roles,
+            word_paths(parsed, argv, cwd, operands=cli),
+            strict=True,
         )
     ]
 
@@ -565,10 +571,7 @@ def command_words(
             *_parsed_words(result.leaf, argv[lead:], cwd, name, env, cli=True),
         ]
     else:
-        read = [
-            (kind, None if kind is WordKind.OPERAND else path)
-            for kind, path in _parsed_words(SPECS.get(name), argv, cwd, name)
-        ]
+        read = _parsed_words(SPECS.get(name), argv, cwd, name)
     words = [CommandWord(name, WordKind.NAME)]
     option: str | None = None
     for index, (text, (kind, spec_path)) in enumerate(

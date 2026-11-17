@@ -21,7 +21,7 @@ from typing import Any
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.parser import word_paths
-from mirage.commands.spec.types import ValueType, WordKind
+from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
@@ -227,10 +227,8 @@ def _option_scopes(name: str, args: list[str], cwd: str) -> list[PathSpec]:
     parsed = parse_command(spec, args, cwd, name)
     typed = [
         path
-        for path, role in zip(
-            word_paths(parsed, args, cwd), parsed.word_roles, strict=True
-        )
-        if path is not None and role is not WordKind.OPERAND
+        for path in word_paths(parsed, args, cwd, operands=False)
+        if path is not None
     ]
     return typed + [_to_scope(v) for v in parsed.supplied_path_values]
 

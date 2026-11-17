@@ -1532,25 +1532,32 @@ def parse_command(
 
 
 def word_paths(
-    parsed: ParsedArgs, argv: Sequence[str], cwd: str
+    parsed: ParsedArgs, argv: Sequence[str], cwd: str, *, operands: bool
 ) -> list[PathSpec | None]:
     """The path each word of a parsed line names, aligned with argv.
 
     A PATH value or operand resolves against its word's base and an
     attached value lands on its option word; a ``-`` (standard input or
     output) or an empty value names no file. Built on demand, because
-    every line is parsed and only a reader of its words needs this.
+    every line is parsed and only a reader of its words needs this, and
+    operands only when asked, because a builtin's operand paths come
+    from the classifier and a line can carry many thousands of them.
 
     Args:
         parsed (ParsedArgs): the parse of ``argv``.
         argv (Sequence[str]): the words the parse read.
         cwd (str): the working directory they were read under.
+        operands (bool): whether a path operand gets its path too, or
+            only the options' values.
     """
+    skip = (
+        {WordKind.OPTION} if operands else {WordKind.OPTION, WordKind.OPERAND}
+    )
     typed = [
         (slot, word, parsed.word_bases[slot] or cwd)
         for slot, word in enumerate(argv)
         if parsed.word_kinds[slot] == "path"
-        and parsed.word_roles[slot] is not WordKind.OPTION
+        and parsed.word_roles[slot] not in skip
     ]
     paths: list[PathSpec | None] = [None] * len(argv)
     for slot, value, against in (*typed, *parsed.attached_paths):

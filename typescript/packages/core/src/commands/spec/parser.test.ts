@@ -2260,7 +2260,7 @@ describe('declared words', () => {
 
 describe('wordPaths', () => {
   const virtuals = (argv: string[], name: string): (string | null)[] =>
-    wordPaths(parseCommand(specOf(name), argv, '/d', name), argv, '/d').map(
+    wordPaths(parseCommand(specOf(name), argv, '/d', name), argv, '/d', true).map(
       (p) => p?.virtual ?? null,
     )
 

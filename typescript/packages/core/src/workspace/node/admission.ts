@@ -15,7 +15,7 @@
 import { walk } from '../../commands/cli/walk.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { parseCommand, wordPaths } from '../../commands/spec/parser.ts'
-import { type ValueType, WordKind } from '../../commands/spec/types.ts'
+import type { ValueType } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
@@ -223,8 +223,8 @@ function optionScopes(name: string, args: readonly string[], cwd: string): PathS
   const spec = SPECS[name]
   if (spec === undefined) return []
   const parsed = parseCommand(spec, [...args], cwd, name)
-  const typed = wordPaths(parsed, args, cwd).filter(
-    (path, slot): path is PathSpec => path !== null && parsed.wordRoles[slot] !== WordKind.OPERAND,
+  const typed = wordPaths(parsed, args, cwd, false).filter(
+    (path): path is PathSpec => path !== null,
   )
   return [...typed, ...parsed.suppliedPathValues.map((value) => toScope(value))]
 }
