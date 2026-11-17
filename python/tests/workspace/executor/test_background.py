@@ -34,6 +34,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor import background
 from mirage.workspace.store import RAMWorkspaceStateStore
+from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
 
 def _workspace() -> Workspace:
@@ -829,21 +830,39 @@ class _Held(JobConsole):
         await asyncio.Event().wait()
 
 
-@pytest.mark.asyncio
-async def test_a_stopped_job_past_its_limit_still_ends():
+# Cold preflight must not spend the launcher's budget before it creates a
+# job; move the unchanged deadline only once the job is held and its
+# runner, which starts on the loop's next turn, has begun. The held clock
+# never moves alone, so each step drains a bounded number of turns.
+async def _end_a_stopped_job(loop: HeldLoop) -> int | None:
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
         command_limits={"@line": Limit(timeout_seconds=0.2)},
     )
     try:
-        await ws.shell("sleep 30 & p=$!; kill -STOP $p")
-        async with asyncio.timeout(5):
-            await ws.job_table.wait(1, ws.default_session_id)
+        line = await ws.shell("sleep 30 & p=$!; kill -STOP $p")
+        assert line.exit_code == 0
         job = ws.job_table.get(1, ws.default_session_id)
-        assert job.exit_code == 124
+        assert job is not None and job.process is not None
+        assert job.process.paused
+        waiting = asyncio.ensure_future(
+            ws.job_table.wait(1, ws.default_session_id)
+        )
+        await asyncio.sleep(0)
+        assert job.process.begun
+        for step, ended in ((0.199, False), (0.001, True)):
+            loop.now += step
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert waiting.done() is ended
+        return waiting.result().exit_code
     finally:
         await ws.close()
+
+
+def test_a_stopped_job_past_its_limit_still_ends() -> None:
+    assert run_on_held_loop(_end_a_stopped_job) == 124
 
 
 @pytest.mark.asyncio
