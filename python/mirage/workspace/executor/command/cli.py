@@ -88,22 +88,40 @@ def parse_spec_for(
 ) -> tuple[CommandSpec, bool]:
     """Add help or the script's pass-through grammar before parsing.
 
+    The grammar rides on the leaf, as its compiled tables do, so each
+    parse of the leaf reuses one spec object and hits the parse cache.
+
     Args:
         leaf (CommandSpec): selected grammar.
         style (UsageStyle): root help dialect.
         passthrough (bool): whether a script owns raw argv.
     """
+    stored = leaf.__dict__.get("_parse_specs")
+    kept: dict[tuple[UsageStyle, bool], tuple[CommandSpec, bool]] = (
+        stored if isinstance(stored, dict) else {}
+    )
+    if kept is not stored:
+        object.__setattr__(leaf, "_parse_specs", kept)
+    found = kept.get((style, passthrough))
+    if found is not None:
+        return found
+    grammar = leaf
     if passthrough:
-        return replace(
-            leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)
-        ), False
-    if style is UsageStyle.COBRA:
-        leaf = replace(leaf, allow_abbrev=False)
-    if not leaf.add_help or any(
-        "--help" in arg.names for arg in leaf.arguments
-    ):
-        return leaf, False
-    return listed_node(leaf, style), True
+        found = (
+            replace(leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)),
+            False,
+        )
+    else:
+        if style is UsageStyle.COBRA:
+            grammar = replace(leaf, allow_abbrev=False)
+        found = (
+            (grammar, False)
+            if not grammar.add_help
+            or any("--help" in arg.names for arg in grammar.arguments)
+            else (listed_node(grammar, style), True)
+        )
+    kept[(style, passthrough)] = found
+    return found
 
 
 def leaf_parse(cli: CLI, leaf: CommandSpec, path: Sequence[str]) -> LeafParse:

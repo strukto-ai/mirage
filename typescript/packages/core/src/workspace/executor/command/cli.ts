@@ -69,6 +69,10 @@ import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 // which is why basename has one and still refuses an option it does not know.
 const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
 
+// Each leaf's parse grammar, kept so every parse of the leaf reuses one
+// spec object and hits the parse cache, as compileSpec keeps its tables.
+const GRAMMARS = new WeakMap<CommandSpec, Map<string, [CommandSpec, boolean]>>()
+
 /**
  * The spec a leaf's argv parses against, and who answers `--help`.
  *
@@ -81,24 +85,38 @@ const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
  * the tier unusable, since a YAML `clis:` entry cannot declare options at
  * all. Returns the spec to parse with and whether the injected `--help`
  * is mirage's to answer. CLI init accepts instance fields, so each
- * spread is a plain init bag (the withHelpSupport pattern).
+ * spread is a plain init bag (the withHelpSupport pattern). The grammar is
+ * kept per leaf, so each parse of the leaf reuses one spec object.
  */
 function parseSpecFor(
   leaf: CommandSpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
   passthrough = false,
 ): [CommandSpec, boolean] {
+  let kept = GRAMMARS.get(leaf)
+  if (kept === undefined) {
+    kept = new Map()
+    GRAMMARS.set(leaf, kept)
+  }
+  const key = `${style}:${String(passthrough)}`
+  const cached = kept.get(key)
+  if (cached !== undefined) return cached
+  let found: [CommandSpec, boolean]
   if (passthrough) {
     const spec: CommandSpecInit = leaf
-    return [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+    found = [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+  } else {
+    const grammar =
+      style === UsageStyle.COBRA
+        ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
+        : leaf
+    found =
+      !grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help'))
+        ? [grammar, false]
+        : [listedNode(grammar, style), true]
   }
-  const grammar =
-    style === UsageStyle.COBRA
-      ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
-      : leaf
-  if (!grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help')))
-    return [grammar, false]
-  return [listedNode(grammar, style), true]
+  kept.set(key, found)
+  return found
 }
 
 /**
