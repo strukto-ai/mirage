@@ -160,6 +160,55 @@ describe('DevFiles descriptor rows', () => {
   })
 })
 
+describe('DevFiles splice', () => {
+  const text = (bytes: Uint8Array | undefined): string => new TextDecoder().decode(bytes)
+  const enc = (value: string): Uint8Array => new TextEncoder().encode(value)
+
+  it('lands a run of splices in place and a reader keeps its bytes', () => {
+    const f = new DevFiles()
+    const buffers = new Set<ArrayBufferLike>()
+    for (let at = 0; at < 256; at += 4) {
+      f.splice('/log', at, enc('abcd'))
+      buffers.add((f.get('/log') ?? new Uint8Array()).buffer)
+    }
+    expect(buffers.size).toBeLessThan(16)
+    const held = f.get('/log')
+    f.splice('/log', 256, enc('tail'))
+    f.splice('/log', 0, enc('ABCD'))
+    expect(text(held)).toBe('abcd'.repeat(64))
+    expect(text(f.get('/log'))).toBe('ABCD' + 'abcd'.repeat(63) + 'tail')
+  })
+
+  it('fills a gap past the end and creates a file from an empty splice', () => {
+    const f = new DevFiles()
+    f.splice('/gap', 0, enc('ab'))
+    f.splice('/gap', 4, enc('z'))
+    expect([...(f.get('/gap') ?? [])]).toEqual([97, 98, 0, 0, 122])
+    f.splice('/empty', 3, new Uint8Array())
+    expect(f.get('/empty')?.byteLength).toBe(0)
+  })
+
+  it('swallows a splice into a device until it is removed', () => {
+    const f = new DevFiles()
+    f.splice('/null', 0, enc('lost'))
+    expect(f.get('/null')?.byteLength).toBe(0)
+    f.delete('/null')
+    f.splice('/null', 0, enc('kept'))
+    expect(text(f.get('/null'))).toBe('kept')
+    expect(f.deviceOf('/null')).toBeNull()
+  })
+
+  it('refuses a splice into a pipe row', () => {
+    const [files, key] = withPipe()
+    expect(
+      codeOf(() => {
+        files.splice(key, 0, enc('lost'))
+      }),
+    ).toBe('EINVAL')
+    expect(files.pipeOf(key)).not.toBeNull()
+  })
+})
+
 it('shares ordinary files but hides descriptors between bound sessions', () => {
   const root = new DevFiles()
   const left = root.forSession('left')

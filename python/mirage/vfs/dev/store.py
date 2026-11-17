@@ -21,7 +21,6 @@ from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, einval, enoent, fs_error
 from mirage.errors.types import FsCondition
-from mirage.utils.ranges import splice_window
 from mirage.vfs.dev.types import DevFileState, PipeRow
 from mirage.vfs.ram.store import RAMStore
 
@@ -179,10 +178,30 @@ class DevFiles(PipeFiles):
         raise KeyError(key)
 
     def size(self, key: str) -> int:
+        if key in self.state.files:
+            return self.state.files.size(key)
         return len(self.get(key, b""))
 
     def splice(self, key: str, offset: int, data: bytes) -> None:
-        self[key] = splice_window(self.get(key, b""), offset, data)
+        """Write ``data`` at ``offset`` of ``key`` in place, as pwrite(2)
+        leaves a file, the RAM table's way (``RAMFiles.splice``): a run of
+        appends grows one buffer rather than copying the file each time,
+        and a reader keeps the bytes it read. An active device swallows
+        the write and a descriptor refuses it, as a whole write does.
+
+        Args:
+            key (str): the store key.
+            offset (int): where the bytes land.
+            data (bytes): the bytes to write.
+        """
+        if key == "/fd" or key.startswith("/fd/"):
+            self[key] = data
+            return
+        name = key.strip("/")
+        if self._synthetic_active(name):
+            return
+        self.state.files.splice(key, offset, data)
+        self.state.tombstones.discard(name)
 
     @overload
     def pop(self, key: str, /) -> bytes: ...

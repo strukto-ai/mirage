@@ -17,10 +17,9 @@ import type { DevicePipe } from '../../core/dev/pipe.ts'
 import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
-import { spliceWindow } from '../../utils/ranges.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { StorageUsage } from '../capacity.ts'
-import type { RAMAttrs } from '../ram/store.ts'
+import { RAMFiles, type RAMAttrs } from '../ram/store.ts'
 
 const DEV_NAMES = new Set(['null', 'zero'])
 
@@ -39,7 +38,7 @@ export class DevFiles extends PipeFiles {
   constructor(
     private readonly boundOwner?: string,
     readonly state: DevFileState = {
-      files: new Map(),
+      files: new RAMFiles(),
       dirs: new Set(['/']),
       tombstones: new Set(),
       inputs: new Map(),
@@ -144,8 +143,22 @@ export class DevFiles extends PipeFiles {
     return this
   }
 
+  /**
+   * Write `data` at `offset` of `key` in place, as pwrite(2) leaves a file,
+   * the RAM table's way (`RAMFiles.splice`): a run of appends grows one
+   * buffer rather than copying the file each time, and a reader's view never
+   * changes. An active device swallows the write and a descriptor refuses
+   * it, as a whole write does. Mirrors Python's `DevFiles.splice`.
+   */
   splice(key: string, offset: number, data: Uint8Array): void {
-    this.set(key, spliceWindow(this.get(key) ?? new Uint8Array(), offset, data))
+    if (key === '/fd' || key.startsWith('/fd/')) {
+      this.set(key, data)
+      return
+    }
+    const name = stripSlash(key)
+    if (this.syntheticActive(name)) return
+    this.state.files.splice(key, offset, data)
+    this.state.tombstones.delete(name)
   }
 
   override delete(key: string): boolean {

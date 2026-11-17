@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DevicePipe } from '../../core/dev/pipe.ts'
+import type { RAMFiles } from '../ram/store.ts'
 
 export interface PipeRow {
   owner: string
@@ -21,7 +22,7 @@ export interface PipeRow {
 }
 
 export interface DevFileState {
-  files: Map<string, Uint8Array>
+  files: RAMFiles
   dirs: Set<string>
   tombstones: Set<string>
   inputs: Map<string, PipeRow>

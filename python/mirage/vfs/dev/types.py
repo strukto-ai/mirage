@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.core.dev.pipe import DevicePipe
+from mirage.vfs.ram.store import RAMFiles
 
 
 @dataclass
@@ -26,7 +27,7 @@ class PipeRow:
 
 @dataclass
 class DevFileState:
-    files: dict[str, bytes] = field(default_factory=dict)
+    files: RAMFiles = field(default_factory=RAMFiles)
     dirs: set[str] = field(default_factory=lambda: {"/"})
     tombstones: set[str] = field(default_factory=set)
     inputs: dict[str, PipeRow] = field(default_factory=dict)

@@ -18,6 +18,8 @@ import pytest
 
 from mirage.core.dev.pipe import DevicePipe
 from mirage.vfs.dev.store import DevFiles, DevStore
+from mirage.vfs.dev.types import DevFileState
+from mirage.vfs.ram.store import RAMFiles
 
 
 def _with_pipe() -> tuple[DevFiles, str]:
@@ -179,3 +181,59 @@ def test_session_views_share_files_but_hide_each_others_descriptors():
     assert replacement == path
     assert not left.release_input(path, allocation)
     assert right.release_input(replacement, next_allocation)
+
+
+class _CountedReads(RAMFiles):
+    """A RAM table that counts the reads that copy a whole file out."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads = 0
+
+    def __getitem__(self, key: str) -> bytes:
+        self.reads += 1
+        return super().__getitem__(key)
+
+
+def test_a_run_of_splices_lands_in_place_and_a_reader_keeps_its_bytes():
+    table = _CountedReads()
+    files = DevFiles(state=DevFileState(files=table))
+    for at in range(0, 64, 4):
+        files.splice("/log", at, b"abcd")
+    assert table.reads == 0
+    held = files["/log"]
+    files.splice("/log", 64, b"tail")
+    files.splice("/log", 0, b"ABCD")
+    assert held == b"abcd" * 16
+    assert files["/log"] == b"ABCD" + b"abcd" * 15 + b"tail"
+    assert files.size("/log") == 68
+
+
+def test_a_splice_past_the_end_fills_the_gap_and_an_empty_one_creates():
+    files = DevFiles()
+    files.splice("/gap", 0, b"ab")
+    files.splice("/gap", 4, b"z")
+    assert files["/gap"] == b"ab\0\0z"
+    files.splice("/empty", 3, b"")
+    assert files["/empty"] == b""
+
+
+def test_a_splice_into_a_device_is_swallowed_until_it_is_removed():
+    files = DevFiles()
+    files.splice("/null", 0, b"lost")
+    assert files["/null"] == b""
+    del files["/null"]
+    files.splice("/null", 0, b"kept")
+    assert files["/null"] == b"kept"
+    assert files.device_of("/null") is None
+
+
+@pytest.mark.parametrize("access", ["splice", "size"])
+def test_a_pipe_row_refuses_a_splice_and_its_size(access):
+    files, key = _with_pipe()
+    with pytest.raises(OSError) as caught:
+        if access == "splice":
+            files.splice(key, 0, b"lost")
+        else:
+            files.size(key)
+    assert caught.value.errno == errno.EINVAL
