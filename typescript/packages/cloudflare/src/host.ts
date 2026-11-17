@@ -116,7 +116,7 @@ export class Workspace extends CoreWorkspace {
   }
 
   override addMachine(name: string, spec: MachineSpec): Runtime {
-    refuseQuickJs(spec)
+    refuseOnWorkers(spec)
     return super.addMachine(name, spec)
   }
 
