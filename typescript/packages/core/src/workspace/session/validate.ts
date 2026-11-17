@@ -15,7 +15,7 @@
 import { SPECS } from '../../commands/spec/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
-import { patternProblem } from '../../policy/match/grammar.ts'
+import { allowPatterns, patternProblem, STAR } from '../../policy/match/grammar.ts'
 import { expandPattern, splitPattern } from '../../policy/match/pattern.ts'
 import type { AdmissionRules, CommandRule, Grammar } from '../../policy/types.ts'
 
@@ -173,9 +173,10 @@ export function checkPatterns(
 
 /**
  * What a document writes that loads but may not mean what it says: a group
- * in the command name (`{rm,mv} -f` reads as two rules on two commands),
- * and a subcommand `*` in the allow list, which admits a subcommand the
- * command gains later.
+ * in the command name (`{rm,mv} -f` reads as two rules on two commands), a
+ * subcommand `*` in the allow list, which admits a subcommand the command
+ * gains later, and each command an allow entry closes beside `*`
+ * (`commands.allow closes gh to: gh pr view`).
  */
 export function patternWarnings(rules: AdmissionRules | null): string[] {
   if (rules === null) return []
@@ -191,6 +192,17 @@ export function patternWarnings(rules: AdmissionRules | null): string[] {
       out.add(
         `commands.allow: ${writtenAs}: a * admits every subcommand there, including any added later`,
       )
+  }
+  const allowed = allowPatterns(rules)
+  if (allowed.includes(STAR)) {
+    const closed = new Map<string, string[]>()
+    for (const pattern of allowed) {
+      const head = splitPattern(pattern)[0]
+      if (head === undefined || head === STAR) continue
+      closed.set(head, [...(closed.get(head) ?? []), pattern])
+    }
+    for (const [head, entries] of closed)
+      out.add(`commands.allow closes ${head} to: ${entries.join(', ')}`)
   }
   return [...out]
 }

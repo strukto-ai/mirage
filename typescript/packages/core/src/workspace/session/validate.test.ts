@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
+import { cliSpecFor } from '../../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -25,7 +26,7 @@ import {
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { checkCliPatterns, checkRules, logger } from './validate.ts'
+import { checkCliPatterns, checkRules, logger, patternWarnings } from './validate.ts'
 
 function rules(over: Partial<AdmissionRules> = {}): AdmissionRules {
   return { allow: null, ask: [], deny: [], ...over }
@@ -221,6 +222,39 @@ describe('checkCliPatterns', () => {
   ])('loads %s, which its tree reads', (pattern) => {
     checkCliPatterns(deny(pattern), trees)
     checkCliPatterns(null, trees)
+  })
+})
+
+describe('a cobra pattern reads as its run does', () => {
+  const trees = new Map<string, Grammar>([
+    ['gh', { spec: cliSpecFor('gh').spec, tree: true, passthrough: false }],
+  ])
+
+  it.each([
+    ['gh pr merge --adm', '--adm is a prefix of an option'],
+    ['gh pr merge --bogus', 'gh pr merge does not read --bogus'],
+  ])('refuses %s', (pattern, says) => {
+    expect(() => {
+      checkCliPatterns(deny(pattern), trees)
+    }).toThrow(says)
+  })
+
+  it('may leave out an operand and an option value', () => {
+    checkCliPatterns(deny('gh pr merge --admin', 'gh * list --state'), trees)
+    checkRules(deny('cp -r', 'mv -f', 'head -n'))
+  })
+})
+
+describe('the allow list names each command an entry closes', () => {
+  it('lists the entries beside *', () => {
+    const said = patternWarnings(
+      rules({ allow: ['*', 'gh pr {view,diff}', new AllowFlags('rm', ['-f'])] }),
+    )
+    expect(said).toContain('commands.allow closes gh to: gh pr view, gh pr diff')
+    expect(said).toContain('commands.allow closes rm to: rm -f')
+    expect(patternWarnings(rules({ allow: ['ls', 'rm'] })).some((m) => m.includes('closes'))).toBe(
+      false,
+    )
   })
 })
 

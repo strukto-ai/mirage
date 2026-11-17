@@ -691,25 +691,34 @@
     {"op": "exec", "session": "agent", "command": "rm -vf /data/b/f", "expect": {"value": {"exit_code": 0, "stdout": "removed '/data/b/f'\n", "stderr": "", "decision": null, "matched": null}}},
     {"op": "exec", "session": "agent", "command": "rm /data/b/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
     {"op": "exec", "session": "agent", "command": "rm -rf /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": []}}}},
-    {"op": "explain", "session": "agent", "command": "cat /data/a/f", "expect": {"value": {"commands": [{"command": "cat", "outcome": "allow"}]}}}
+    {"op": "explain", "session": "agent", "command": "cat /data/a/f", "expect": {"value": {"commands": [{"command": "cat", "outcome": "allow"}]}}},
+    {"op": "exec", "command": "mkdir -p /data/c && touch /data/c/f /data/x", "expect": {"value": {"exit_code": 0}}},
+    {"op": "session", "id": "has", "profile": {"commands": {"allow": ["*", "rm -f"]}}},
+    {"op": "exec", "session": "has", "command": "rm -rf /data/c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "has", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed", "matched": {"command": ["rm"], "flags": []}}}}
    ]
   },
   {
    "id": "a_cli_rule_reads_flags_groups_and_a_subcommand_star",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"gh": {"cli": "gh", "machine": "in_process", "config": {"token": "t"}}, "git": {"cli": "git", "machine": "in_process"}}},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"commands": {"deny": ["gh pr merge --admin", "gh pr {close,reopen}", "git * --force", "git status"]}}},
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": ["gh pr merge --admin", "gh pr {close,reopen}", "git * --force", "git status", "gh * list --state"]}}},
     {"op": "exec", "session": "agent", "command": "gh pr merge 5 --squash --admin", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["gh", "pr", "merge"], "flags": ["--admin"]}}}},
     {"op": "explain", "session": "agent", "command": "gh pr merge 5 --squash", "expect": {"value": {"commands": [{"command": "gh", "outcome": "allow"}]}}},
     {"op": "exec", "session": "agent", "command": "gh pr close 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["gh", "pr", "close"], "flags": []}}}},
     {"op": "exec", "session": "agent", "command": "gh pr reopen 5", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["gh", "pr", "reopen"], "flags": []}}}},
     {"op": "exec", "session": "agent", "command": "git add -f x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
     {"op": "exec", "session": "agent", "command": "git add --force x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
+    {"op": "exec", "session": "agent", "command": "git add --forc x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["git", "add"], "flags": ["--force"]}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr merge 5 --admin --bogus", "expect": {"value": {"exit_code": 1, "stdout": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "agent", "command": "gh issue list --state=closed", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["gh", "issue", "list"], "flags": ["--state"]}}}},
+    {"op": "exec", "session": "agent", "command": "gh pr list --state open", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["gh", "pr", "list"], "flags": ["--state"]}}}},
     {"op": "explain", "session": "agent", "command": "git log", "expect": {"value": {"commands": [{"command": "git", "outcome": "allow"}]}}},
     {"op": "exec", "session": "agent", "command": "git -C /data status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["git", "status"], "flags": []}}}},
     {"op": "session", "id": "viewer", "profile": {"commands": {"allow": ["*", "gh pr view"]}}},
     {"op": "explain", "session": "viewer", "command": "gh pr view 5", "expect": {"value": {"commands": [{"command": "gh", "outcome": "allow"}]}}},
     {"op": "exec", "session": "viewer", "command": "gh pr list", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr list is not allowed", "matched": {"command": ["gh", "pr", "list"], "flags": []}}}},
+    {"op": "exec", "session": "viewer", "command": "gh --help", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh is not allowed", "matched": {"command": ["gh"], "flags": []}}}},
     {"op": "explain", "session": "viewer", "command": "cat /data/x", "expect": {"value": {"commands": [{"command": "cat", "outcome": "allow"}]}}}
    ]
   },

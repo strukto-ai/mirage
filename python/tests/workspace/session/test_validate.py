@@ -17,6 +17,7 @@ import re
 import pytest
 
 from mirage import Workspace
+from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.errors import PolicyError
@@ -28,7 +29,11 @@ from mirage.policy.types import (
 )
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.session.validate import check_cli_patterns, check_rules
+from mirage.workspace.session.validate import (
+    check_cli_patterns,
+    check_rules,
+    pattern_warnings,
+)
 
 
 def _rules(allow=None, ask=(), deny=()) -> AdmissionRules:
@@ -286,6 +291,39 @@ def test_a_builtin_pattern_in_any_spelling_loads():
     check_rules(_rules(allow=(AllowFlags("rm", ("-f", "-v")),)))
     with pytest.raises(PolicyError, match="rm has no option -Z"):
         check_rules(_rules(allow=(AllowFlags("rm", ("-Z",)),)))
+
+
+GH = Grammar(cli_spec_for("gh").spec, tree=True)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "says"),
+    [
+        ("gh pr merge --adm", "--adm is a prefix of an option"),
+        ("gh pr merge --bogus", "gh pr merge does not read --bogus"),
+    ],
+)
+def test_a_cobra_pattern_reads_as_its_run_does(pattern, says):
+    with pytest.raises(PolicyError, match=re.escape(says)):
+        check_cli_patterns(_deny(pattern), {"gh": GH})
+
+
+def test_a_pattern_may_leave_out_an_operand_and_an_options_value():
+    check_cli_patterns(
+        _deny("gh pr merge --admin", "gh * list --state"), {"gh": GH}
+    )
+    check_rules(_deny("cp -r", "mv -f", "head -n"))
+
+
+def test_the_allow_list_names_each_command_an_entry_closes():
+    said = pattern_warnings(
+        _rules(allow=("*", "gh pr {view,diff}", AllowFlags("rm", ("-f",))))
+    )
+    assert "commands.allow closes gh to: gh pr view, gh pr diff" in said
+    assert "commands.allow closes rm to: rm -f" in said
+    assert not any(
+        "closes" in m for m in pattern_warnings(_rules(allow=("ls", "rm")))
+    )
 
 
 def test_a_group_in_the_name_and_a_star_in_allow_are_warned(caplog):

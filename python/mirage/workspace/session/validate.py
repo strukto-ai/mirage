@@ -19,7 +19,7 @@ from types import MappingProxyType
 from mirage.commands.spec import SPECS
 from mirage.policy.errors import PolicyError
 from mirage.policy.match import expand_pattern, head_allowed, split_pattern
-from mirage.policy.match.grammar import pattern_problem
+from mirage.policy.match.grammar import STAR, allow_patterns, pattern_problem
 from mirage.policy.types import (
     AdmissionRules,
     AllowFlags,
@@ -218,8 +218,9 @@ def check_patterns(
 def pattern_warnings(rules: AdmissionRules | None) -> list[str]:
     """What a document writes that loads but may not mean what it says:
     a group in the command name (``{rm,mv} -f`` reads as two rules on
-    two commands), and a subcommand ``*`` in the allow list, which
-    admits a subcommand the command gains later.
+    two commands), a subcommand ``*`` in the allow list, which admits a
+    subcommand the command gains later, and each command an allow entry
+    closes beside ``*`` (``commands.allow closes gh to: gh pr view``).
 
     Args:
         rules (AdmissionRules | None): the compiled document.
@@ -239,6 +240,17 @@ def pattern_warnings(rules: AdmissionRules | None) -> list[str]:
                 f"commands.allow: {written}: a * admits every subcommand "
                 "there, including any added later"
             )
+    allowed = allow_patterns(rules)
+    if STAR in allowed:
+        closed: dict[str, list[str]] = {}
+        for pattern in allowed:
+            head = split_pattern(pattern)[:1]
+            if head and head[0] != STAR:
+                closed.setdefault(head[0], []).append(pattern)
+        out += [
+            f"commands.allow closes {head} to: {', '.join(entries)}"
+            for head, entries in closed.items()
+        ]
     return list(dict.fromkeys(out))
 
 
