@@ -152,25 +152,28 @@ export function restricted(path: PathSpec): boolean {
 }
 
 /**
- * Whether `path` resolves on a machine, through the machine's own links, to
+ * The machines on which `path` resolves, through the machine's own links, to
  * a name the running session hides: `/tmp/public` linked to a hidden
- * `/tmp/secret` reads the secret on the machine, where Mirage checks only
- * its own link table. Asked only of a session that hides something in the
- * mount. Mirrors Python's `leads_to_hidden`.
+ * `/tmp/secret` reads the secret on the machine, where Mirage checks only its
+ * own link table. Each machine answers for itself, so another machine's
+ * visible files at the path stay; none is asked for a session that hides
+ * nothing in the mount. Mirrors Python's `hidden_on`.
  *
  * @param accessor the mount's machines.
  * @param path the path an op names.
  */
-export async function leadsToHidden(accessor: MachineAccessor, path: PathSpec): Promise<boolean> {
+export async function hiddenOn(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
   const vis = currentCaller().session?.visibility ?? null
-  if (!hiddenUnder(vis, mountBase(path))) return false
+  if (!hiddenUnder(vis, mountBase(path))) return []
   const q = singleQuote(remote(accessor, path))
+  const hidden: string[] = []
   for (const machine of accessor.names()) {
     const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
     if (status !== 0) continue
     const real = new TextDecoder().decode(out).replace(/\n$/, '')
     const seen = virtualOf(accessor, path, real)
-    if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen)) return true
+    if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen))
+      hidden.push(machine)
   }
-  return false
+  return hidden
 }

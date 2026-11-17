@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
-from mirage.core.machine.stat import stat_row
+from mirage.core.machine.stat import hidden_on, stat_row
 from mirage.errors.fs import einval, enoent
 from mirage.types import PathSpec
 
@@ -37,14 +37,17 @@ def stage(accessor: MachineAccessor) -> str | None:
 
 async def holders(accessor: MachineAccessor, path: PathSpec) -> list[str]:
     """The machines that hold a name, asked in parallel; a mount on one
-    machine asks nothing and lets the op itself report a missing name.
+    machine asks nothing and lets the op itself report a missing name. A
+    machine whose own links lead the name to one the session hides holds
+    nothing there.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the name.
     """
-    names = accessor.names()
-    if len(names) == 1:
+    hidden = await hidden_on(accessor, path)
+    names = [name for name in accessor.names() if name not in hidden]
+    if len(accessor.names()) == 1:
         return names
     found = await asyncio.gather(
         *(stat_row(accessor, m, path) for m in names), return_exceptions=True
@@ -106,4 +109,7 @@ async def lands(accessor: MachineAccessor, path: PathSpec) -> str:
     held = await holders(accessor, path)
     if held:
         return chosen(accessor, path, held)
-    return stage(accessor) or accessor.default_machine
+    target = stage(accessor) or accessor.default_machine
+    if target in await hidden_on(accessor, path):
+        raise enoent(path)
+    return target

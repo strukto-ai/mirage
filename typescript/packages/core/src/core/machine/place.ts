@@ -16,7 +16,7 @@ import type { MachineAccessor } from '../../accessor/machine.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import { einval, enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
-import { statRow } from './stat.ts'
+import { hiddenOn, statRow } from './stat.ts'
 
 /**
  * The machine the running command's program runs on, when it is one of the
@@ -33,14 +33,16 @@ export function stage(accessor: MachineAccessor): string | null {
 
 /**
  * The machines that hold a name, asked in parallel; a mount on one machine
- * asks nothing and lets the op itself report a missing name.
+ * asks nothing and lets the op itself report a missing name. A machine whose
+ * own links lead the name to one the session hides holds nothing there.
  *
  * @param accessor the mount's machines.
  * @param path the name.
  */
 export async function holders(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
-  const names = accessor.names()
-  if (names.length === 1) return names
+  const hidden = await hiddenOn(accessor, path)
+  const names = accessor.names().filter((name) => !hidden.includes(name))
+  if (accessor.names().length === 1) return names
   const found = await Promise.allSettled(names.map((m) => statRow(accessor, m, path)))
   const held: string[] = []
   for (const [at, result] of found.entries()) {
@@ -96,5 +98,7 @@ export async function holder(accessor: MachineAccessor, path: PathSpec): Promise
 export async function lands(accessor: MachineAccessor, path: PathSpec): Promise<string> {
   const held = await holders(accessor, path)
   if (held.length > 0) return chosen(accessor, path, held)
-  return stage(accessor) ?? accessor.defaultMachine
+  const target = stage(accessor) ?? accessor.defaultMachine
+  if ((await hiddenOn(accessor, path)).includes(target)) throw enoent(path)
+  return target
 }

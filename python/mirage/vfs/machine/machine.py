@@ -33,7 +33,7 @@ from mirage.core.machine.rm import rm_r as _rm_r
 from mirage.core.machine.rmdir import rmdir as _rmdir
 from mirage.core.machine.search import files_containing as _files_containing
 from mirage.core.machine.set_attrs import set_attrs as _set_attrs
-from mirage.core.machine.stat import leads_to_hidden as _leads_to_hidden
+from mirage.core.machine.stat import hidden_on as _hidden_on
 from mirage.core.machine.stat import restricted as _restricted
 from mirage.core.machine.stat import stat as _stat
 from mirage.core.machine.stat import tree as _tree
@@ -107,11 +107,13 @@ class MachineVFS(BaseVFS):
         )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
-        await self._shown(path)
-        return await _readdir(self.accessor, self.accessor.names(), path)
+        hidden = await _hidden_on(self.accessor, path)
+        machines = [m for m in self.accessor.names() if m not in hidden]
+        if not machines:
+            raise enoent(path)
+        return await _readdir(self.accessor, machines, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
-        await self._shown(path)
         held = await place.holders(self.accessor, path)
         if not held:
             raise enoent(path)
@@ -126,27 +128,22 @@ class MachineVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
     ) -> ByteSource:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _read(self.accessor, machine, path, offset, size)
 
     async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _first_lines(self.accessor, machine, path, n)
 
     async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _last_lines(self.accessor, machine, path, n)
 
     async def line_count(self, path: PathSpec) -> int | None:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _line_count(self.accessor, machine, path)
 
     async def checksum(self, path: PathSpec, algorithm: str) -> str | None:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _checksum(self.accessor, machine, path, algorithm)
 
@@ -176,29 +173,24 @@ class MachineVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        await self._shown(path)
         machine = await place.lands(self.accessor, path)
         await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        await self._shown(path)
         machine = await place.lands(self.accessor, path)
         await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        await self._shown(path)
         machine = await place.lands(self.accessor, path)
         await _pwrite(self.accessor, machine, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
-        await self._shown(path)
         machine = await place.lands(self.accessor, path)
         await _create(self.accessor, machine, path)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        await self._shown(path)
         machine = await place.lands(self.accessor, path)
         await _truncate(self.accessor, machine, path, length, no_create)
 
@@ -219,7 +211,6 @@ class MachineVFS(BaseVFS):
             await _rm_r(self.accessor, machine, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        await self._shown(src, dst)
         machine = await place.holder(self.accessor, src)
         several = len(self.accessor.names()) > 1
         held = await place.holders(self.accessor, dst) if several else []
@@ -251,12 +242,10 @@ class MachineVFS(BaseVFS):
                 await _unlink(self.accessor, other, dst)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await self._shown(src, dst)
         machine = await self._same_machine(src, dst)
         await _copy(self.accessor, machine, src, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await self._shown(src, dst)
         machine = await self._same_machine(src, dst)
         await _dir_copy(self.accessor, machine, src, dst)
 
@@ -270,7 +259,6 @@ class MachineVFS(BaseVFS):
         atime: str | None = None,
         mtime: str | None = None,
     ) -> dict[str, int | str]:
-        await self._shown(path)
         machine = await place.holder(self.accessor, path)
         return await _set_attrs(
             self.accessor,
@@ -296,17 +284,6 @@ class MachineVFS(BaseVFS):
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
-
-    async def _shown(self, *paths: PathSpec) -> None:
-        """Refuse a path the machine's own links lead to a name the
-        session hides, as the hide itself answers: no such file.
-
-        Args:
-            *paths (PathSpec): the paths an op names.
-        """
-        for path in paths:
-            if await _leads_to_hidden(self.accessor, path):
-                raise enoent(path)
 
     async def _everywhere(self, path: PathSpec) -> list[str]:
         """The machines holding a directory, every one of which a removal

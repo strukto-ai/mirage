@@ -129,6 +129,18 @@ async def test_mv_into_a_folder_no_machine_holds_fails():
 
 
 @pytest.mark.asyncio
+async def test_a_link_to_a_hidden_name_drops_only_its_machine():
+    a = FakeFiles({"/tmp/cache/x": b"x"})
+    b = FakeFiles({"/tmp/secret/s": b"s"})
+    b.links["/tmp/cache"] = "/tmp/secret"
+    ws = two(a, b, profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}})
+    agent = await ws.session("agent", profile="agent")
+    done = await agent.shell("ls /tmp/cache")
+    assert (done.exit_code, await done.stdout_str()) == (0, "x\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_program_s_output_lands_on_the_machine_running_it():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)

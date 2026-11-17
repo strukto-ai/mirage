@@ -33,7 +33,7 @@ import { rmdir as machineRmdir } from '../../core/machine/rmdir.ts'
 import { filesContaining as machineFilesContaining } from '../../core/machine/search.ts'
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
 import {
-  leadsToHidden,
+  hiddenOn,
   restricted,
   stat as machineStat,
   tree as machineTree,
@@ -112,12 +112,13 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async readdir(path: PathSpec): Promise<FileStat[]> {
-    await this.shown(path)
-    return machineReaddir(this.accessor, this.accessor.names(), path)
+    const hidden = await hiddenOn(this.accessor, path)
+    const machines = this.accessor.names().filter((m) => !hidden.includes(m))
+    if (machines.length === 0) throw enoent(path)
+    return machineReaddir(this.accessor, machines, path)
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    await this.shown(path)
     const held = await holders(this.accessor, path)
     const [first] = held
     if (first === undefined) throw enoent(path)
@@ -135,27 +136,22 @@ export class MachineVFS extends BaseVFS {
     offset = 0,
     size: number | null = null,
   ): Promise<ByteSource> {
-    await this.shown(path)
     return machineRead(this.accessor, await holder(this.accessor, path), path, offset, size)
   }
 
   override async firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
-    await this.shown(path)
     return machineFirstLines(this.accessor, await holder(this.accessor, path), path, n)
   }
 
   override async lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
-    await this.shown(path)
     return machineLastLines(this.accessor, await holder(this.accessor, path), path, n)
   }
 
   override async lineCount(path: PathSpec): Promise<number | null> {
-    await this.shown(path)
     return machineLineCount(this.accessor, await holder(this.accessor, path), path)
   }
 
   override async checksum(path: PathSpec, algorithm: string): Promise<string | null> {
-    await this.shown(path)
     return machineChecksum(this.accessor, await holder(this.accessor, path), path, algorithm)
   }
 
@@ -181,27 +177,22 @@ export class MachineVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    await this.shown(path)
     await machineWrite(this.accessor, await lands(this.accessor, path), path, data, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    await this.shown(path)
     await machineWrite(this.accessor, await lands(this.accessor, path), path, data, true)
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    await this.shown(path)
     await machinePwrite(this.accessor, await lands(this.accessor, path), path, data, offset)
   }
 
   override async create(path: PathSpec): Promise<void> {
-    await this.shown(path)
     await machineCreate(this.accessor, await lands(this.accessor, path), path)
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    await this.shown(path)
     await machineTruncate(this.accessor, await lands(this.accessor, path), path, length, noCreate)
   }
 
@@ -226,7 +217,6 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.shown(src, dst)
     const machine = await holder(this.accessor, src)
     const several = this.accessor.names().length > 1
     const held = several ? await holders(this.accessor, dst) : []
@@ -257,12 +247,10 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.shown(src, dst)
     await machineCopy(this.accessor, await this.sameMachine(src, dst), src, dst)
   }
 
   override async dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.shown(src, dst)
     await machineDirCopy(this.accessor, await this.sameMachine(src, dst), src, dst)
   }
 
@@ -270,7 +258,6 @@ export class MachineVFS extends BaseVFS {
     path: PathSpec,
     fields: SetAttrFields,
   ): Promise<Record<string, number | string>> {
-    await this.shown(path)
     return machineSetAttrs(this.accessor, await holder(this.accessor, path), path, fields)
   }
 
@@ -291,16 +278,6 @@ export class MachineVFS extends BaseVFS {
   }
 
   /** The machines holding a directory, every one of which a removal reaches. */
-  /**
-   * Refuse a path the machine's own links lead to a name the session hides,
-   * as the hide itself answers: no such file. Mirrors Python's `_shown`.
-   *
-   * @param paths the paths an op names.
-   */
-  private async shown(...paths: PathSpec[]): Promise<void> {
-    for (const path of paths) if (await leadsToHidden(this.accessor, path)) throw enoent(path)
-  }
-
   private async everywhere(path: PathSpec): Promise<string[]> {
     const held = await holders(this.accessor, path)
     if (held.length === 0) throw enoent(path)

@@ -154,12 +154,13 @@ def restricted(path: PathSpec) -> bool:
     return hidden_under(current_caller().visibility, mount_base(path))
 
 
-async def leads_to_hidden(accessor: MachineAccessor, path: PathSpec) -> bool:
-    """Whether ``path`` resolves on a machine, through the machine's own
+async def hidden_on(accessor: MachineAccessor, path: PathSpec) -> list[str]:
+    """The machines on which ``path`` resolves, through the machine's own
     links, to a name the running session hides: ``/tmp/public`` linked to
-    a hidden ``/tmp/secret`` reads the secret on the machine, where
-    Mirage checks only its own link table. Asked only of a session that
-    hides something in the mount.
+    a hidden ``/tmp/secret`` reads the secret on the machine, where Mirage
+    checks only its own link table. Each machine answers for itself, so
+    another machine's visible files at the path stay; none is asked for a
+    session that hides nothing in the mount.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -167,8 +168,9 @@ async def leads_to_hidden(accessor: MachineAccessor, path: PathSpec) -> bool:
     """
     vis = current_caller().visibility
     if not hidden_under(vis, mount_base(path)):
-        return False
+        return []
     q = single_quote(remote(accessor, path))
+    hidden: list[str] = []
     for machine in accessor.names():
         status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
         if status != 0:
@@ -180,5 +182,5 @@ async def leads_to_hidden(accessor: MachineAccessor, path: PathSpec) -> bool:
             and seen != norm(path.virtual)
             and not path_visible(vis, seen)
         ):
-            return True
-    return False
+            hidden.append(machine)
+    return hidden

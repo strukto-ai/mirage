@@ -120,6 +120,24 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('drops only the machine whose link leads to a hidden name', async () => {
+    const a = new FakeFiles({ '/tmp/cache/x': 'x' })
+    const b = new FakeFiles({ '/tmp/secret/s': 's' })
+    b.links.set('/tmp/cache', '/tmp/secret')
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+        profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
+      },
+    )
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const done = await agent.shell('ls /tmp/cache')
+    expect([done.exitCode, DEC.decode(done.stdout)]).toEqual([0, 'x\n'])
+    await ws.close()
+  })
+
   it("lands a program's output on the machine running it", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
