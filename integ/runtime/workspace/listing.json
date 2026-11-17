@@ -101,6 +101,82 @@
           }
         }
       ]
+    },
+    {
+      "id": "recursive_rm_reports_only_first_mount_boundaries",
+      "world": {
+        "machines": {},
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "tree/discard/me": "gone",
+              "tree/a.b/extra": "gone",
+              "tree/quiet/extra": "gone"
+            }
+          },
+          "/data/tree/a/child": {
+            "vfs": "ram",
+            "files": {
+              "keep": "child\n"
+            }
+          },
+          "/data/tree/a-b": {
+            "vfs": "ram",
+            "files": {
+              "keep": "dash\n"
+            }
+          },
+          "/data/tree/a.b/leaf": {
+            "vfs": "ram",
+            "files": {
+              "keep": "dot\n"
+            }
+          },
+          "/data/tree/a": {
+            "vfs": "ram",
+            "files": {
+              "keep": "outer\n"
+            }
+          },
+          "/data/tree/quiet/secret": {
+            "vfs": "ram",
+            "files": {
+              "keep": "hidden\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/data/tree/quiet/secret"
+              ]
+            }
+          }
+        },
+        {
+          "command": "rm -rf /data/tree",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "rm: skipping '/data/tree/a', since it's on a different device\nrm: skipping '/data/tree/a-b', since it's on a different device\nrm: skipping '/data/tree/a.b/leaf', since it's on a different device\n"
+          }
+        },
+        {
+          "profile": {}
+        },
+        {
+          "command": "test ! -e /data/tree/discard && test ! -e /data/tree/a.b/extra && test ! -e /data/tree/quiet/extra && cat /data/tree/a/keep /data/tree/a/child/keep /data/tree/a-b/keep /data/tree/a.b/leaf/keep /data/tree/quiet/secret/keep",
+          "expect": {
+            "exit": 0,
+            "stdout": "outer\nchild\ndash\ndot\nhidden\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

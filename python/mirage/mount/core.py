@@ -44,6 +44,7 @@ from mirage.runtime.handles import (
     run_groups,
     run_stream,
     window_writes,
+    write_end,
     write_runs,
 )
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -510,7 +511,7 @@ class MountCore:
         writes = self._writes_on(key, ctx)
         if writes:
             stored = content_size(s) if size is None else size
-            size = max(stored, *(o + len(d) for o, d in writes))
+            size = write_end(writes, stored)
         if size is not None and size != s.size:
             s = replace(s, size=size)
         # A row the stat above fetched was judged there; a held one is
@@ -581,7 +582,7 @@ class MountCore:
             stored = ctx.chunked.size
         else:
             stored = ctx.size
-        return max([stored, *(o + len(d) for o, d in ctx.write_buf)])
+        return write_end(ctx.write_buf, stored)
 
     async def readdir(self, path: str) -> list[str]:
         """Entry names under a directory, including "." and "..".
@@ -684,13 +685,14 @@ class MountCore:
             # Whole, as a handle's first read is: the read that fills the
             # cache and records the version a conditional write sends.
             data = await self._op(self._files.read(self.resolve(path)))
+            stored = data[offset : offset + size]
             writes = self._writes_on(self.identity(path), None)
             if writes:
                 laid = await window_writes(writes, offset, size)
                 return await self._read_cached(
-                    path, overlaid(data[offset:], offset, size, laid)
+                    path, overlaid(stored, offset, size, laid)
                 )
-            return data[offset : offset + size]
+            return stored
         if not ctx.mode.readable:
             raise ebadf(ctx.path)
         if ctx.lost is not None and ctx.data is None:
@@ -898,7 +900,7 @@ class MountCore:
             end = start + len(last)
             if isinstance(last, bytearray) and start <= offset <= end:
                 last[offset - start : offset - start + len(data)] = data
-                await MountCore._spill(ctx)
+                await MountCore._spill(ctx, max(0, offset + len(data) - end))
                 return
             if (
                 isinstance(last, ByteSlice)
@@ -913,11 +915,19 @@ class MountCore:
                 ctx.spooled += len(data)
                 await asyncio.shield(owned_task(last.source.append(data)))
                 return
+            if (
+                isinstance(last, ByteSlice)
+                and offset == start
+                and len(data) >= len(last)
+            ):
+                ctx.write_buf[-1] = (offset, bytearray(data))
+                await MountCore._spill(ctx, len(data))
+                return
         ctx.write_buf.append((offset, bytearray(data)))
-        await MountCore._spill(ctx)
+        await MountCore._spill(ctx, len(data))
 
     @staticmethod
-    async def _spill(ctx: Handle) -> None:
+    async def _spill(ctx: Handle, growth: int) -> None:
         """Move a handle's runs held in memory to its spool once they hold
         more than ``MEMORY_LIMIT``. Each takes its place in the spool
         before the spool has its bytes, in one append, so a write or a
@@ -925,15 +935,26 @@ class MountCore:
 
         Args:
             ctx (Handle): the handle writing.
+            growth (int): bytes added to the in-memory runs by this write.
         """
+        if ctx.buffered_bytes is not None:
+            ctx.buffered_bytes += growth
+            if ctx.buffered_bytes <= MEMORY_LIMIT:
+                return
         held = [
             (index, run)
             for index, (_, run) in enumerate(ctx.write_buf)
             if isinstance(run, bytearray)
         ]
-        if sum(len(run) for _, run in held) <= MEMORY_LIMIT:
+        ctx.buffered_bytes = sum(len(run) for _, run in held)
+        if ctx.buffered_bytes <= MEMORY_LIMIT:
             return
-        if ctx.spool is None:
+        retired = None
+        if ctx.spool is None or (
+            len(held) == len(ctx.write_buf) and ctx.cuts is None
+        ):
+            # Only rotate a spool when no buffered or flushing run still needs it.
+            retired = ctx.spool
             ctx.spool, ctx.spooled = ByteSpool(), 0
         for index, run in held:
             at = ctx.write_buf[index][0]
@@ -942,9 +963,14 @@ class MountCore:
                 ByteSlice(ctx.spool, ctx.spooled, len(run)),
             )
             ctx.spooled += len(run)
-        await asyncio.shield(
-            owned_task(ctx.spool.append(b"".join(run for _, run in held)))
-        )
+        ctx.buffered_bytes = 0
+        try:
+            await asyncio.shield(
+                owned_task(ctx.spool.append(b"".join(run for _, run in held)))
+            )
+        finally:
+            if retired is not None:
+                await retired.close()
 
     def _supersede(
         self, key: str, offset: int, size: int, ctx: Handle | None
@@ -1006,6 +1032,7 @@ class MountCore:
         for offset, size in ctx.cuts or ():
             writes = self._cut(writes, offset, size)
         ctx.write_buf = [*writes, *ctx.write_buf]
+        ctx.buffered_bytes = None
 
     async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
@@ -1314,6 +1341,8 @@ class MountCore:
             ctx (Handle): the handle whose buffer to land.
         """
         if not ctx.write_buf:
+            if ctx.spool is not None:
+                await self._free_spool(ctx)
             return
         if ctx.detached is not None:
             await self._land_held(ctx, ctx.detached)
@@ -1326,6 +1355,7 @@ class MountCore:
         if len(held) < len(ctx.write_buf):
             groups = run_groups(ctx.write_buf)
             ctx.write_buf, ctx.cuts = [], []
+            ctx.buffered_bytes = 0
             try:
                 await self._land_spooled(ctx, groups)
             except BaseException:
@@ -1339,6 +1369,7 @@ class MountCore:
             return
         runs = write_runs(held)
         ctx.write_buf, ctx.cuts = [], []
+        ctx.buffered_bytes = 0
         try:
             await self._apply_writes(ctx.path, runs, ctx.mode.append)
         except BaseException:
@@ -1346,6 +1377,9 @@ class MountCore:
             raise
         finally:
             ctx.cuts = None
+
+        if ctx.spool is not None:
+            await self._free_spool(ctx)
 
     async def _land_spooled(self, ctx: Handle, groups: list[WriteBuf]) -> None:
         """Land a buffer whose writes wait in its spool, each group of
@@ -1368,7 +1402,7 @@ class MountCore:
         try:
             for group in groups:
                 start = group[0][0]
-                end = max(at + len(run) for at, run in group)
+                end = write_end(group, start)
                 if ctx.mode.append:
                     await self._append(target, group)
                 elif start == 0 and await self._ends_by(ctx.path, end):
@@ -1440,6 +1474,7 @@ class MountCore:
         end = self._end(ctx)
         marker = bytearray()
         writes, ctx.write_buf = ctx.write_buf, [(end, marker)]
+        ctx.buffered_bytes = 0
         ctx.cuts = []
         try:
             data = overlaid(held, 0, end, await window_writes(writes, 0, end))

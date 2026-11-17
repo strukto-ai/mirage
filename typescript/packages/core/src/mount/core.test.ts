@@ -104,6 +104,22 @@ async function mkCore(): Promise<MountCore> {
 }
 
 describe('MountCore', () => {
+  it('returns independent byte windows through a handle and by path', async () => {
+    const core = await mkCore()
+    const path = '/data/greeting.txt'
+    const reader = await core.open(path)
+    try {
+      for (const fd of [reader, -1]) {
+        const result = await core.read(path, fd, 1, 3)
+        expect(result.buffer.byteLength).toBe(3)
+        result.fill(0)
+        expect(new TextDecoder().decode(await core.read(path, fd, 1, 3))).toBe('ell')
+      }
+    } finally {
+      await core.release(reader)
+    }
+  })
+
   it('refuses a truncate the mount cannot do and keeps the bytes', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello' > /data/f.txt")
@@ -2029,6 +2045,90 @@ describe('MountCore past the memory limit', () => {
   const landed = (store: RAMVFS, want: Uint8Array): void => {
     expect(Buffer.compare(store.store.files.get('/f') ?? new Uint8Array(), want)).toBe(0)
   }
+
+  it('counts restored writes and the bytes a peer cut when spilling', async () => {
+    const store = new RAMVFS()
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs)
+    const path = '/data/f'
+    const first = await core.create(path)
+    const peer = await core.open(path, flags(fsConstants.O_WRONLY))
+    await core.write(path, first, new Uint8Array(MEMORY_LIMIT), 0)
+    vi.spyOn(store, 'pwrite').mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
+    await expect(core.flush(path, first)).rejects.toMatchObject({ code: 'EACCES' })
+    await core.write(path, peer, enc.encode('x'), 0)
+    await core.write(path, first, enc.encode('y'), MEMORY_LIMIT)
+    const ctx = core.handles.get(first)
+    expect(ctx?.spool).toBeUndefined()
+    await core.write(path, first, enc.encode('z'), MEMORY_LIMIT + 1)
+    expect(ctx?.spool).toBeDefined()
+    await core.release(first)
+    await core.release(peer)
+    const want = new Uint8Array(MEMORY_LIMIT + 2)
+    want.set(enc.encode('x'))
+    want.set(enc.encode('yz'), MEMORY_LIMIT)
+    landed(store, want)
+  })
+
+  it('reads only the last spooled run after repeated full overwrites', async () => {
+    const { core, store } = streamed()
+    const path = '/data/f'
+    const fd = await core.create(path)
+    const size = MEMORY_LIMIT + 1
+    for (const byte of enc.encode('abc')) {
+      await core.write(path, fd, new Uint8Array(size).fill(byte), 0)
+    }
+    await core.write(path, fd, enc.encode('head'), 0)
+    const spool = core.handles.get(fd)?.spool
+    if (spool === undefined) throw new Error('expected writes to spill')
+    expect(spool.size).toBe(size)
+    const read = vi.spyOn(spool, 'read')
+    expect(await core.read(path, 0, 0, 6)).toEqual(enc.encode('headcc'))
+    expect(read).toHaveBeenCalledTimes(1)
+    await core.release(fd)
+    const want = new Uint8Array(size).fill(99)
+    want.set(enc.encode('head'))
+    landed(store, want)
+  })
+
+  it('keeps a read of the old spool alive through a full overwrite', async () => {
+    const { core } = streamed()
+    const path = '/data/f'
+    const fd = await core.create(path)
+    const size = MEMORY_LIMIT + 1
+    await core.write(path, fd, new Uint8Array(size).fill(97), 0)
+    const old = core.handles.get(fd)?.spool
+    if (old === undefined) throw new Error('expected writes to spill')
+    const { waiting, go } = heldUp(old)
+    const pending = core.read(path, 0, 0, 2)
+    await waiting
+    try {
+      await core.write(path, fd, new Uint8Array(size + 1).fill(98), 0)
+    } finally {
+      go()
+    }
+    expect(await pending).toEqual(enc.encode('aa'))
+    expect(old.closed).toBe(true)
+    expect(await core.read(path, 0, size - 1, 2)).toEqual(enc.encode('bb'))
+    await core.release(fd)
+  })
+
+  it.each(['', '!'])('closes a fully superseded spool on flush with %j pending', async (tail) => {
+    const { core, store } = streamed()
+    const path = '/data/f'
+    const first = await core.create(path)
+    const peer = await core.open(path, flags(fsConstants.O_WRONLY))
+    const body = new Uint8Array(MEMORY_LIMIT + 1).fill(120)
+    await core.write(path, first, body, 0)
+    const spool = core.handles.get(first)?.spool
+    await core.write(path, peer, body, 0)
+    if (tail) await core.write(path, first, enc.encode(tail), body.length)
+    await core.flush(path, first)
+    expect(spool?.closed).toBe(true)
+    await core.release(peer)
+    await core.release(first)
+    landed(store, Buffer.concat([body, enc.encode(tail)]))
+  })
 
   it('keeps the writes in a spool and lands them as one streamed write', async () => {
     const { core, store } = streamed()

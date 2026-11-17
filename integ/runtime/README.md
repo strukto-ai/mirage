@@ -96,8 +96,9 @@ because the runners run one case at a time. No CLI reaches a process's own
 - `parallel` holds steps that run at once, each on a session of its own;
   each is checked against its own `expect` once all have ended. A branch
   cannot check the op ledger, which holds every branch's ops.
-- `backends` repeats a case over `ram`, `disk`, `ssh`, `s3` and `redis`;
-  each mount gets its own key space or directory. `ssh` mounts a fresh
+- `backends` repeats a case over `ram`, `disk`, `ssh`, `s3`, `gdrive` and `redis`.
+  Each Drive mount gets its own run on the Google Workspace fake at `GWS_URL`.
+  The other mounts get their own key space or directory. `ssh` mounts a fresh
   directory on the ssh runtime's box over SFTP. `<backend>+cache` serves
   repeat reads from the workspace file cache, as `s3` does already; its
   `expect_on` takes the backend's entry, then its own.

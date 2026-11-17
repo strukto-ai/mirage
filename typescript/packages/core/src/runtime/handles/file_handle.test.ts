@@ -73,9 +73,11 @@ describe('runGroups', () => {
     ]
     const groups = runGroups(writes)
     expect(groups.map((group) => group.length)).toEqual([3, 1, 1])
-    expect(groups.map((group) => writeRuns(group as [number, Uint8Array][])[0])).toEqual(
-      writeRuns(writes),
-    )
+    expect(writeRuns(writes)).toEqual([
+      [0, enc.encode('aXcd')],
+      [10, enc.encode('q')],
+      [0, enc.encode('z')],
+    ])
   })
 })
 

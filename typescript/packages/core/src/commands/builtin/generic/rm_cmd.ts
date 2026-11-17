@@ -18,6 +18,7 @@ import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandFnResult } from '../../config.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { descendantPath } from '../utils/paths.ts'
+import { parent } from '../../../utils/path.ts'
 import type { MountView } from '../../../view/types.ts'
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
@@ -53,6 +54,14 @@ export async function removeTree(
   },
 ): Promise<{ removed: { path: string; isDir: boolean }[]; failures: [PathSpec, unknown][] }> {
   const roots = new Set(ops.mounts?.descendants(root.virtual) ?? [])
+  const mountParents = new Set<string>(roots.size > 0 ? ['/'] : [])
+  for (const mount of roots) {
+    let directory = parent(mount)
+    while (!mountParents.has(directory)) {
+      mountParents.add(directory)
+      directory = parent(directory)
+    }
+  }
   const removed: { path: string; isDir: boolean }[] = []
   const failures: [PathSpec, unknown][] = []
   const remove = async (path: PathSpec, isDir: boolean): Promise<boolean> => {
@@ -70,7 +79,6 @@ export async function removeTree(
       failures.push([path, err])
       return false
     }
-    const base = path.virtual.replace(/\/+$/, '')
     let cleared = true
     for (const name of names) {
       const child = descendantPath(root, name.replace(/\/+$/, ''))
@@ -88,7 +96,7 @@ export async function removeTree(
       const gone = await remove(child, info.type === FileType.DIRECTORY)
       cleared = cleared && gone
     }
-    if (!cleared || [...roots].some((r) => r.startsWith(`${base}/`))) return false
+    if (!cleared || mountParents.has(path.virtual.replace(/\/+$/, '') || '/')) return false
     try {
       await ops.rmdir(path)
     } catch (err) {

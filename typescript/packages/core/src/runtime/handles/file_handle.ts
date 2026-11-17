@@ -13,41 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSlice, MEMORY_LIMIT, type ByteSpool } from '../../io/spool.ts'
-import { concat } from '../../utils/bytes.ts'
-import { spliceWindow } from '../../utils/ranges.ts'
+
+/** Where the file ends after the buffered writes. Mirrors Python's `write_end`. */
+export function writeEnd(
+  writes: readonly [number, Uint8Array | ByteSlice][],
+  stored: number,
+): number {
+  let end = stored
+  for (const [offset, chunk] of writes) end = Math.max(end, offset + chunk.byteLength)
+  return end
+}
 
 /**
- * Buffered (offset, payload) writes as the fewest pwrites that leave a file
- * as the writes did, in arrival order.
- *
- * The kernel adapters buffer each write on its handle and owe the mount the
- * lot at flush. A write that starts inside the last run, or right at its
- * end, folds into it, so a sequential stream is one run. Any other starts a
- * run of its own; the runs apply in order, so a later run still overwrites
- * what it overlaps of an earlier one.
+ * Merge each run into one pwrite payload for flush. Apply edits in arrival
+ * order so the latest write wins wherever two overlap.
  *
  * Args:
  *   writes: the buffered writes, in arrival order.
  */
 export function writeRuns(writes: readonly [number, Uint8Array][]): [number, Uint8Array][] {
-  const runs: { start: number; parts: Uint8Array[]; length: number }[] = []
-  for (const [offset, chunk] of writes) {
-    const last = runs.at(-1)
-    if (last !== undefined && last.start <= offset && offset <= last.start + last.length) {
-      const at = offset - last.start
-      if (at === last.length) {
-        last.parts.push(chunk.slice())
-        last.length += chunk.byteLength
-        continue
-      }
-      const merged = spliceWindow(concat(last.parts), at, chunk)
-      last.parts = [merged]
-      last.length = merged.byteLength
-      continue
-    }
-    runs.push({ start: offset, parts: [chunk.slice()], length: chunk.byteLength })
+  const runs: [number, Uint8Array][] = []
+  for (const { start, end, parts } of grouped(writes)) {
+    const buf = new Uint8Array(end - start)
+    for (const [offset, chunk] of parts) buf.set(chunk, offset - start)
+    runs.push([start, buf])
   }
-  return runs.map((run): [number, Uint8Array] => [run.start, concat(run.parts)])
+  return runs
 }
 
 /**
@@ -70,9 +61,7 @@ export function overlaid(
   size: number,
   writes: readonly [number, Uint8Array][],
 ): Uint8Array {
-  let reach = offset + stored.byteLength
-  for (const [start, data] of writes) reach = Math.max(reach, start + data.byteLength)
-  const end = Math.min(offset + size, reach)
+  const end = Math.min(offset + size, writeEnd(writes, offset + stored.byteLength))
   if (end <= offset) return new Uint8Array()
   const out = new Uint8Array(end - offset)
   out.set(stored.subarray(0, end - offset))
@@ -85,31 +74,27 @@ export function overlaid(
 }
 
 /**
- * Buffered writes in the groups `writeRuns` folds into one run each,
- * unfolded, for a buffer some of whose writes wait in a spool. Mirrors
- * Python's `run_groups`.
- *
- * Args:
- *   writes: the buffered writes, in arrival order.
+ * A write inside the current run or at its end joins it. A gap or a write
+ * before its start opens another run. Mirrors Python's `_grouped`.
  */
-export function runGroups(
-  writes: readonly [number, Uint8Array | ByteSlice][],
-): [number, Uint8Array | ByteSlice][][] {
-  const groups: [number, Uint8Array | ByteSlice][][] = []
-  let start = 0
-  let end = 0
+function* grouped<T extends Uint8Array | ByteSlice>(writes: readonly [number, T][]) {
+  let group: { start: number; end: number; parts: [number, T][] } | undefined
   for (const [offset, chunk] of writes) {
-    const last = groups.at(-1)
-    if (last !== undefined && start <= offset && offset <= end) {
-      last.push([offset, chunk])
-      end = Math.max(end, offset + chunk.byteLength)
-      continue
+    if (group === undefined || offset < group.start || offset > group.end) {
+      if (group !== undefined) yield group
+      group = { start: offset, end: offset, parts: [] }
     }
-    groups.push([[offset, chunk]])
-    start = offset
-    end = offset + chunk.byteLength
+    group.parts.push([offset, chunk])
+    group.end = Math.max(group.end, offset + chunk.byteLength)
   }
-  return groups
+  if (group !== undefined) yield group
+}
+
+/** Keep each run's original writes for a streamed flush or a retry. Mirrors Python's `run_groups`. */
+export function runGroups<T extends Uint8Array | ByteSlice>(
+  writes: readonly [number, T][],
+): [number, T][][] {
+  return Array.from(grouped(writes), (group) => group.parts)
 }
 
 /**
@@ -166,8 +151,7 @@ export async function* runStream(
   const first = group[0]
   if (first === undefined) return
   const start = first[0]
-  let end = start
-  for (const [at, run] of group) end = Math.max(end, at + run.byteLength)
+  const end = writeEnd(group, start)
   const windows = Array.from(
     { length: Math.ceil((end - start) / MEMORY_LIMIT) },
     (): [number, Uint8Array | ByteSlice][] => [],

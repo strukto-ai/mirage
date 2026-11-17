@@ -82,25 +82,6 @@ def slice_window(data: bytes, offset: int, size: int | None) -> bytes:
     return data[offset : None if size is None else offset + size]
 
 
-def splice_window(data: bytes, offset: int, payload: bytes) -> bytes:
-    """Bytes in hand with ``payload`` written at ``offset``, as pwrite(2)
-    leaves a file.
-
-    The answer when nothing remote can write a range: what lies before
-    and after the window stays, and a gap past the end reads as zeros.
-    Writing nothing changes nothing, even past the end.
-
-    Args:
-        data (bytes): the whole content.
-        offset (int): first byte the payload replaces.
-        payload (bytes): the bytes written there.
-    """
-    if not payload:
-        return data
-    head = data[:offset].ljust(offset, b"\0")
-    return head + payload + data[offset + len(payload) :]
-
-
 # HTTP 416, and the spellings the stores put on it. S3 and its clones
 # answer ``InvalidRange``, Azure/OneDrive ``InvalidRange`` too, and a
 # bare WebDAV or static host only sets the status line.

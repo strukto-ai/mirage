@@ -80,7 +80,7 @@ from mirage.types import (
 )
 from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.ranges import slice_window, splice_window
+from mirage.utils.ranges import slice_window
 from mirage.utils.stat_view import ident
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
@@ -2290,20 +2290,16 @@ async def test_the_caller_never_reaches_the_op(monkeypatch):
         await ws.close()
 
 
-class _SplicingRAMVFS(RAMVFS):
-    """A RAM mount that answers pwrite the way S3 and redis do: read the
-    file, give the loop a turn, and write the whole file back."""
+class _RewrittenRAM(RAMVFS):
+    """Use the mount's pwrite fallback and yield before replacing the file."""
 
-    async def pwrite(
-        self,
-        path: PathSpec,
-        data: bytes,
-        offset: int,
-        index: IndexCacheStore = NULL_INDEX,
+    pwrite = BaseVFS.pwrite
+
+    async def write(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        whole = await self.read(path)
         await asyncio.sleep(0)
-        await self.write(path, splice_window(whole, offset, data))
+        await super().write(path, data, atomic=atomic)
 
 
 @pytest.mark.asyncio
@@ -2311,7 +2307,7 @@ async def test_offset_writes_to_one_path_all_land_on_a_splicing_store():
     # Four sessions' edits at once: each pwrite reads the file before any
     # writes it back, so without one writer at a time per path every
     # write puts back three bytes the others had just replaced.
-    with Workspace({"/data/": _SplicingRAMVFS()}, mode=MountMode.WRITE) as ws:
+    with Workspace({"/data/": _RewrittenRAM()}, mode=MountMode.WRITE) as ws:
         f = PathSpec.from_str_path("/data/f")
         await ws.dispatch("write", f, data=b"0123456789")
         await asyncio.gather(
@@ -3611,12 +3607,6 @@ async def test_named_outputs_reach_native_stream_writers(
         assert max(destination.chunk_sizes) <= 16384
     finally:
         await ws.close()
-
-
-class _RewrittenRAM(RAMVFS):
-    """A store with no pwrite, as S3, whose pwrite is a rewrite."""
-
-    pwrite = BaseVFS.pwrite
 
 
 @pytest.mark.asyncio

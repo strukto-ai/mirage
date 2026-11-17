@@ -67,6 +67,9 @@ class Handle:
     live: bool = False
     data: bytes | None = None
     write_buf: WriteBuf = field(default_factory=list)
+    # Upper bound on in-memory run bytes. Cuts can leave it high and a failed
+    # flush clears it.
+    buffered_bytes: int | None = field(default=None, init=False)
     # Where its writes wait past what memory holds, and the bytes handed it.
     spool: ByteSpool | None = None
     spooled: int = 0

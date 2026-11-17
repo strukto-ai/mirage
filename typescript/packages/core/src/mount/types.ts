@@ -50,6 +50,8 @@ export interface Handle {
   mode: OpenMode
   data?: Uint8Array
   writeBuf?: WriteBuf
+  /** Upper bound on in-memory run bytes. Cuts can leave it high and a failed flush clears it. */
+  bufferedBytes?: number
   /** Where its writes wait past what memory holds, and the bytes handed it. */
   spool?: ByteSpool
   spooled?: number

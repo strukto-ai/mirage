@@ -19,7 +19,6 @@ from mirage.utils.ranges import (
     is_unsatisfiable_range,
     range_header,
     slice_window,
-    splice_window,
     window_for,
 )
 
@@ -67,17 +66,6 @@ def test_slicing_a_bounded_window():
 
 def test_slicing_to_the_end():
     assert slice_window(DATA, 7, None) == b"789"
-
-
-def test_splicing_keeps_both_sides_of_the_window():
-    assert splice_window(DATA, 2, b"ab") == b"01ab456789"
-    assert splice_window(DATA, 8, b"xyz") == b"01234567xyz"
-
-
-def test_splicing_past_the_end_fills_zeros():
-    assert splice_window(b"ab", 4, b"z") == b"ab\0\0z"
-    assert splice_window(b"", 0, b"new") == b"new"
-    assert splice_window(b"ab", 4, b"") == b"ab"
 
 
 def test_slicing_the_whole_thing():

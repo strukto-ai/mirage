@@ -348,6 +348,9 @@ jobs:
             runtime:
               - 'integ/runtime/**'
               - 'integ/fixtures/runtime/**'
+              - 'integ/server/{gws,kit}/**'
+              - 'integ/prisma/gws.prisma'
+              - 'integ/fixtures/gws/**'
               - 'integ/package.json'
               - 'integ/tsconfig.json'
               - 'python/**'
@@ -363,8 +366,8 @@ jobs:
               - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,pydantic_ai}/**'
               - '!typescript/packages/{browser,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
               - '!typescript/scripts/**'
-              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcal,gcs}{.py,/**}'
-              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
+              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcs}{.py,/**}'
+              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gh,github,gridfs,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,tidb_filesystem,trello,wandb,wasabi}{.py,/**}'
             # Shared backends full: the six SaaS targets with every case on
@@ -2184,6 +2187,7 @@ jobs:
           # would pass without running them.
           names=()
           minio_suites=()
+          gdrive_suites=()
           wasi_suites=()
           box_suites=()
           ssh_suites=()
@@ -2203,9 +2207,12 @@ jobs:
             names+=("$n")
             # A case's `backends` runs it once per backend, and the backend
             # folder reads real S3, so either needs MinIO wherever it lands.
-            if [[ "$n" == backend/* ]] || \
-                jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "s3"))' "$f" >/dev/null; then
+            backends=$(jq -r '[.cases[]?.backends[]? | split("+")[0]] | unique | join(" ")' "$f")
+            if [[ "$n" == backend/* || " $backends " == *" s3 "* ]]; then
               minio_suites+=("$n")
+            fi
+            if [[ " $backends " == *" gdrive "* ]]; then
+              gdrive_suites+=("$n")
             fi
             # A case naming a runtime, through a `runtimes` matrix or a
             # world machine's `runtime` or `provider`, needs what that
@@ -2217,7 +2224,7 @@ jobs:
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi
             # The ssh backend mounts the ssh runtime's box over SFTP.
-            if jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "ssh"))' "$f" >/dev/null; then
+            if [[ " $backends " == *" ssh "* ]]; then
               ssh_suites+=("$n")
             fi
             if jq -e 'any(.cases[]?; any((.world.mounts // {})[]; .vfs == "mongodb"))' "$f" >/dev/null; then
@@ -2290,6 +2297,9 @@ jobs:
           for s in "${minio_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_MINIO=1" >> "$GITHUB_ENV"; break; fi
           done
+          for s in "${gdrive_suites[@]}"; do
+            if in_leg "$s"; then echo "NEEDS_GDRIVE=1" >> "$GITHUB_ENV"; break; fi
+          done
           for s in "${box_suites[@]}"; do
             if in_leg "$s"; then
               {
@@ -2342,6 +2352,21 @@ jobs:
           github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
+
+      - name: Start Google Drive for runtime cases
+        if: env.NEEDS_GDRIVE == '1'
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-generate.db
+        run: |
+          pnpm exec prisma generate --schema prisma/gws.prisma
+          nohup pnpm exec tsx server/gws/main.ts --port 19999 > /tmp/gws-runtime.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "GWS_URL=" /tmp/gws-runtime.log && break
+            sleep 1
+          done
+          cat /tmp/gws-runtime.log
+          grep '^GWS_URL=' /tmp/gws-runtime.log >> "$GITHUB_ENV"
 
       - name: Cache the quickjs WASI build
         id: quickjs-cache

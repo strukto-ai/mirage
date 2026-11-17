@@ -21,6 +21,7 @@ import {
   runGroups,
   runStream,
   windowWrites,
+  writeEnd,
   writeRuns,
   type OpenMode,
 } from '../runtime/handles/index.ts'
@@ -34,6 +35,7 @@ import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
 import { parent, posixNormpath } from '../utils/path.ts'
+import { sliceWindow } from '../utils/ranges.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
@@ -500,11 +502,7 @@ export class MountCore {
     // direct_io keeps its reads whole regardless.
     if (size === null && s.size === null) size = this.heldSize(path)
     const writes = this.writesOn(ctx === null ? this.identity(path, follow) : ctx.key, ctx)
-    if (writes.length > 0) {
-      let end = size ?? contentSize(s)
-      for (const [offset, data] of writes) end = Math.max(end, offset + data.byteLength)
-      size = end
-    }
+    if (writes.length > 0) size = writeEnd(writes, size ?? contentSize(s))
     if (size !== null && size !== s.size) s = s.with({ size })
     // A row the stat above fetched was judged there; a held one is judged
     // here, with the size the handle answers.
@@ -553,9 +551,8 @@ export class MountCore {
    * saw, and past them what it wrote.
    */
   private static end(ctx: Handle): number {
-    let end = ctx.data?.byteLength ?? ctx.chunked?.size ?? ctx.size ?? 0
-    for (const [offset, data] of ctx.writeBuf ?? []) end = Math.max(end, offset + data.byteLength)
-    return end
+    const stored = ctx.data?.byteLength ?? ctx.chunked?.size ?? ctx.size ?? 0
+    return writeEnd(ctx.writeBuf ?? [], stored)
   }
 
   /**
@@ -641,9 +638,9 @@ export class MountCore {
       const writes = this.writesOn(this.identity(path), null)
       if (writes.length > 0) {
         const laid = await windowWrites(writes, pos, len)
-        return this.readCached(path, overlaid(data.subarray(pos), pos, len, laid))
+        return this.readCached(path, overlaid(data.subarray(pos, pos + len), pos, len, laid))
       }
-      return data.subarray(pos, pos + len)
+      return sliceWindow(data, pos, len)
     }
     if (!ctx.mode.readable) throw ebadf(ctx.path)
     if (ctx.lost !== undefined && ctx.data === undefined) throw ctx.lost
@@ -653,6 +650,7 @@ export class MountCore {
     const raw = ctx.mode.writable
     let stored: Uint8Array
     let retained = false
+    let borrowed = false
     if (ctx.live === true) {
       stored = await this.op(() =>
         this.files.read(this.resolve(ctx.path), {
@@ -664,7 +662,7 @@ export class MountCore {
     } else if (ctx.chunked !== undefined && ctx.data === undefined) {
       // A fetch joins what it brings onto bytes kept at `pos`, so any kept
       // byte there makes the answer held.
-      retained = ctx.chunked.holds(pos, len) || ctx.chunked.peek(pos, 1).byteLength > 0
+      retained = ctx.chunked.holds(pos, Math.min(len, 1))
       stored = await ctx.chunked.pread(pos, len)
     } else {
       let held = ctx.data
@@ -678,11 +676,17 @@ export class MountCore {
         retained = true
       }
       stored = held.subarray(pos, pos + len)
+      borrowed = true
     }
     const writes = this.writesOn(ctx.key, ctx)
-    const data =
-      writes.length > 0 ? overlaid(stored, pos, len, await windowWrites(writes, pos, len)) : stored
-    return retained || writes.length > 0 ? this.readCached(ctx.path, data) : data
+    if (writes.length > 0) {
+      return this.readCached(
+        ctx.path,
+        overlaid(stored, pos, len, await windowWrites(writes, pos, len)),
+      )
+    }
+    const data = borrowed ? new Uint8Array(stored) : stored
+    return retained ? this.readCached(ctx.path, data) : data
   }
 
   /**
@@ -725,8 +729,7 @@ export class MountCore {
   /**
    * Keep a write on its handle, a copy: one that starts inside the last run
    * or right at its end folds into it, so a stream of writes stays one run;
-   * any other starts a run of its own, laid over the earlier ones in order,
-   * and every 64 of those fold together while none waits in the spool. Past
+   * any other starts a run of its own, laid over the earlier ones in order. Past
    * `MEMORY_LIMIT` held in memory, the handle's runs move to its spool, and
    * a stream goes on at the spool's end. A spool append is queued as it is
    * called, ahead of any read of the window it publishes. Mirrors Python's
@@ -741,7 +744,7 @@ export class MountCore {
       const end = start + run.byteLength
       if (run instanceof Uint8Array && start <= pos && pos <= end) {
         last[1] = MountCore.folded(run, pos - start, data)
-        await MountCore.spill(ctx)
+        await MountCore.spill(ctx, Math.max(0, pos + data.byteLength - end))
         return
       }
       if (
@@ -755,18 +758,14 @@ export class MountCore {
         await run.source.append(data)
         return
       }
+      if (run instanceof ByteSlice && pos === start && data.byteLength >= run.size) {
+        ctx.writeBuf[ctx.writeBuf.length - 1] = [pos, new Uint8Array(data)]
+        await MountCore.spill(ctx, data.byteLength)
+        return
+      }
     }
     ctx.writeBuf.push([pos, new Uint8Array(data)])
-    if (ctx.writeBuf.length >= 64) {
-      const held = MountCore.held(ctx.writeBuf)
-      if (held.length === ctx.writeBuf.length) ctx.writeBuf = writeRuns(held)
-    }
-    await MountCore.spill(ctx)
-  }
-
-  /** The buffered writes held in memory, in arrival order. */
-  private static held(writes: WriteBuf): [number, Uint8Array][] {
-    return writes.filter((write): write is [number, Uint8Array] => write[1] instanceof Uint8Array)
+    await MountCore.spill(ctx, data.byteLength)
   }
 
   /**
@@ -775,7 +774,11 @@ export class MountCore {
    * has its bytes, in one append, so a write or a read meanwhile finds the
    * run where it will be. Mirrors Python's `_spill`.
    */
-  private static async spill(ctx: Handle): Promise<void> {
+  private static async spill(ctx: Handle, growth: number): Promise<void> {
+    if (ctx.bufferedBytes !== undefined) {
+      ctx.bufferedBytes += growth
+      if (ctx.bufferedBytes <= MEMORY_LIMIT) return
+    }
     const writes = ctx.writeBuf ?? []
     const held: Uint8Array[] = []
     let size = 0
@@ -785,8 +788,12 @@ export class MountCore {
         size += run.byteLength
       }
     }
+    ctx.bufferedBytes = size
     if (size <= MEMORY_LIMIT) return
-    if (ctx.spool === undefined) {
+    let retired: ByteSpool | undefined
+    if (ctx.spool === undefined || (held.length === writes.length && ctx.cuts === undefined)) {
+      // Only rotate a spool when no buffered or flushing run still needs it.
+      retired = ctx.spool
       ctx.spool = new ByteSpool()
       ctx.spooled = 0
     }
@@ -797,7 +804,12 @@ export class MountCore {
       write[1] = new ByteSlice(spool, ctx.spooled ?? 0, run.byteLength)
       ctx.spooled = (ctx.spooled ?? 0) + run.byteLength
     }
-    await spool.append(concat(held))
+    ctx.bufferedBytes = 0
+    try {
+      await spool.append(held.length === 1 && held[0] !== undefined ? held[0] : concat(held))
+    } finally {
+      await retired?.close()
+    }
   }
 
   /**
@@ -862,6 +874,7 @@ export class MountCore {
     let kept = writes
     for (const [pos, size] of ctx.cuts ?? []) kept = MountCore.cut(kept, pos, size)
     ctx.writeBuf = [...kept, ...(ctx.writeBuf ?? [])]
+    delete ctx.bufferedBytes
   }
 
   /**
@@ -1178,6 +1191,7 @@ export class MountCore {
     const writes = ctx.writeBuf ?? []
     const marker = new Uint8Array()
     ctx.writeBuf = [[end, marker]]
+    ctx.bufferedBytes = 0
     ctx.cuts = []
     let data: Uint8Array
     try {
@@ -1235,15 +1249,19 @@ export class MountCore {
   }
 
   private async persistBuffered(ctx: Handle): Promise<void> {
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return
+    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) {
+      if (ctx.spool !== undefined) await MountCore.freeSpool(ctx)
+      return
+    }
     if (ctx.detached !== undefined) {
       await this.landHeld(ctx, ctx.detached)
       return
     }
-    const held = MountCore.held(ctx.writeBuf)
-    if (held.length < ctx.writeBuf.length) {
-      const groups = runGroups(ctx.writeBuf)
+    const writes = ctx.writeBuf
+    if (!writes.every((write): write is [number, Uint8Array] => write[1] instanceof Uint8Array)) {
+      const groups = runGroups(writes)
       ctx.writeBuf = []
+      ctx.bufferedBytes = 0
       ctx.cuts = []
       try {
         await this.landSpooled(ctx, groups)
@@ -1256,8 +1274,9 @@ export class MountCore {
       await MountCore.freeSpool(ctx)
       return
     }
-    const runs = writeRuns(held)
+    const runs = writeRuns(writes)
     ctx.writeBuf = []
+    ctx.bufferedBytes = 0
     ctx.cuts = []
     try {
       await this.applyWrites(ctx.path, runs, ctx.mode.append)
@@ -1267,6 +1286,7 @@ export class MountCore {
     } finally {
       delete ctx.cuts
     }
+    if (ctx.spool !== undefined) await MountCore.freeSpool(ctx)
   }
 
   /**
@@ -1285,8 +1305,7 @@ export class MountCore {
     try {
       for (const group of groups) {
         const start = group[0]?.[0] ?? 0
-        let end = start
-        for (const [at, run] of group) end = Math.max(end, at + run.byteLength)
+        const end = writeEnd(group, start)
         if (ctx.mode.append) await this.appendTo(target, group)
         else if (start === 0 && (await this.endsBy(ctx.path, end))) {
           // TODO(MIRAGE-34): hand a whole spool over, not a second copy.

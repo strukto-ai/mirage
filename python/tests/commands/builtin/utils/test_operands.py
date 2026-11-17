@@ -18,12 +18,39 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.builtin.utils.operands import (
+    mount_points,
     normalized_read,
     operands_io,
     split_readable,
 )
 from mirage.io.stream import close_quietly
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView
+
+
+def test_mount_points_skips_nested_mounts_and_sorts_siblings():
+    roots = [
+        "/a/child/deeper",
+        "/😀",
+        "/a-b",
+        "/a/child",
+        "/a.b/c",
+        "/a",
+        "/\ue000",
+    ]
+    mounts = MountView(
+        descendants=lambda p: roots + ["/hidden"],
+        visible_descendants=lambda p: roots,
+        is_root=lambda p: p in roots,
+        root_of=lambda p: "/",
+    )
+    assert mount_points(mounts, "/") == [
+        "/a",
+        "/a-b",
+        "/a.b/c",
+        "/\ue000",
+        "/😀",
+    ]
 
 
 def _stat_over(files: dict[str, bytes], dirs: set[str] | None = None):

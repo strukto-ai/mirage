@@ -18,6 +18,7 @@ from mirage.runtime.handles.file_handle import (
     run_groups,
     run_stream,
     window_writes,
+    write_end,
     write_runs,
 )
 from mirage.runtime.handles.file_table import FileTable
@@ -31,5 +32,6 @@ __all__ = [
     "run_groups",
     "run_stream",
     "window_writes",
+    "write_end",
     "write_runs",
 ]

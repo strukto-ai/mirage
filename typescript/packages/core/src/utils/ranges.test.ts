@@ -14,13 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  isUnsatisfiableRange,
-  rangeHeader,
-  sliceWindow,
-  spliceWindow,
-  windowFor,
-} from './ranges.js'
+import { isUnsatisfiableRange, rangeHeader, sliceWindow, windowFor } from './ranges.js'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -60,20 +54,15 @@ describe('rangeHeader', () => {
   })
 })
 
-describe('spliceWindow', () => {
-  it('keeps both sides of the window', () => {
-    expect(DEC.decode(spliceWindow(DATA, 2, ENC.encode('ab')))).toBe('01ab456789')
-    expect(DEC.decode(spliceWindow(DATA, 8, ENC.encode('xyz')))).toBe('01234567xyz')
-  })
-
-  it('fills a gap past the end with zeros', () => {
-    expect([...spliceWindow(ENC.encode('ab'), 4, ENC.encode('z'))]).toEqual([97, 98, 0, 0, 122])
-    expect(DEC.decode(spliceWindow(new Uint8Array(), 0, ENC.encode('new')))).toBe('new')
-    expect(DEC.decode(spliceWindow(ENC.encode('ab'), 4, new Uint8Array()))).toBe('ab')
-  })
-})
-
 describe('sliceWindow', () => {
+  it('owns just the requested bytes of a Node buffer', () => {
+    const source = Buffer.alloc(8 * 1024 * 1024, 1)
+    const window = sliceWindow(source, 32, 16)
+    source[32] = 2
+    expect(window[0]).toBe(1)
+    expect(window.buffer.byteLength).toBe(16)
+  })
+
   it('slices a bounded window', () => {
     expect(DEC.decode(sliceWindow(DATA, 2, 4))).toBe('2345')
   })
