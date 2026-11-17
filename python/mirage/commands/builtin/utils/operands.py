@@ -56,11 +56,15 @@ def mount_points(mounts: MountView | None, directory: str) -> list[str]:
     if mounts is None:
         return []
     roots = mounts.visible_descendants(directory)
-    return sorted(
-        root
-        for root in roots
-        if not any(root.startswith(other + "/") for other in roots)
-    )
+    first: list[str] = []
+    parent = None
+    # Sorting with a trailing slash keeps a mount next to its descendants,
+    # even when a sibling such as /a-b sorts between /a and /a/child.
+    for root in sorted(roots, key=lambda path: path + "/"):
+        if parent is None or not root.startswith(parent):
+            first.append(root)
+            parent = root + "/"
+    return sorted(first)
 
 
 def operand_name(path: PathSpec) -> str:

@@ -17,7 +17,7 @@ import type { MountView } from '../../../view/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { splitReadable } from './operands.ts'
+import { mountPoints, splitReadable } from './operands.ts'
 import { mountParentReaddir, mountParentStat } from './wrap.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
@@ -69,6 +69,11 @@ function mountsOf(descendants: string[], hidden: string[] = []): MountView {
     searchable: () => null,
   }
 }
+
+it('skips nested mounts and sorts the first boundaries by code point', () => {
+  const mounts = mountsOf(['/a/child/deeper', '/😀', '/a-b', '/a/child', '/a.b/c', '/a', '/\ue000'])
+  expect(mountPoints(mounts, '/')).toEqual(['/a', '/a-b', '/a.b/c', '/\ue000', '/😀'])
+})
 
 const absentDir = (p: string) => Promise.reject(enoent(spec(p)))
 const deniedDir = (p: string) => Promise.reject(eacces(spec(p)))

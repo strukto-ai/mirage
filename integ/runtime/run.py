@@ -96,6 +96,7 @@ BACKEND_REQUIRES: dict[str, list[str]] = {
     "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
     "redis": ["env:REDIS_URL"],
     "s3": ["s3"],
+    "gdrive": ["env:GWS_URL"],
 }
 # The guest language of every runtime a case's `runtimes` may name, and
 # the line head a step's program runs under in it. A sandbox has none: it
@@ -882,6 +883,16 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
             url=os.environ["REDIS_URL"],
             key_prefix=f"mirage-integ-runtime-{run_id}/",
         )
+    if kind == "gdrive":
+        from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+
+        return GoogleDriveVFS(
+            GoogleDriveConfig(
+                client_id="integ",
+                refresh_token="gws-integ-token",
+                api_base=f"{os.environ['GWS_URL'].rstrip('/')}/_run/py-{run_id}",
+            )
+        )
     if kind == "s3":
         from mirage.vfs.s3 import S3VFS
 
@@ -1011,7 +1022,9 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         # mkdir creates the whole chain.
         parent = f"{prefix}/{name.rpartition('/')[0]}"
         if "/" in name and parent not in made_dirs:
-            await ws.dispatch("mkdir", PathSpec.from_str_path(parent))
+            await ws.dispatch(
+                "mkdir", PathSpec.from_str_path(parent), parents=True
+            )
             made_dirs.add(parent)
         await ws.dispatch(
             "write", PathSpec.from_str_path(f"{prefix}/{name}"), data=data

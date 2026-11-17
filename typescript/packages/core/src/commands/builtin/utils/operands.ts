@@ -95,10 +95,18 @@ export async function operandStat(
  */
 export function mountPoints(mounts: MountView | null | undefined, directory: string): string[] {
   if (mounts === undefined || mounts === null) return []
-  const roots = mounts.visibleDescendants(directory)
-  return roots
-    .filter((root) => !roots.some((other) => root.startsWith(`${other}/`)))
-    .sort(compareCodePoints)
+  const prefixes = mounts.visibleDescendants(directory).map((root) => `${root}/`)
+  const first: string[] = []
+  let parent: string | undefined
+  // A trailing slash keeps /a next to its descendants even when /a-b is mounted.
+  for (const prefix of prefixes.sort(compareCodePoints)) {
+    const root = prefix.slice(0, -1)
+    if (parent === undefined || !root.startsWith(parent)) {
+      first.push(root)
+      parent = prefix
+    }
+  }
+  return first.sort(compareCodePoints)
 }
 
 // Partition operands into readable paths and GNU stderr lines. Read-family

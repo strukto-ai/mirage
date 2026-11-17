@@ -239,6 +239,51 @@
         "stderr": "",
         "check": ""
       }
+    },
+    {
+      "id": "range_nonzero_offset_across_eof_after_an_overwrite",
+      "seq": 950006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gdrive",
+        "gdrive-folder",
+        "nextcloud"
+      ],
+      "command": "printf 'old-longer-body' > {mount}/range_tail.txt && printf 'new-' > {mount}/range_tail.txt && printf 'tail' >> {mount}/range_tail.txt",
+      "check": {
+        "read": "{mount}/range_tail.txt",
+        "offset": 4,
+        "size": 64
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": "tail"
+      }
+    },
+    {
+      "id": "range_on_a_rendered_google_document",
+      "seq": 519999,
+      "targets": [
+        "gapps"
+      ],
+      "command": ":",
+      "check": {
+        "read": "/docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json",
+        "offset": 2,
+        "size": 10
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": "documentId"
+      }
     }
   ]
 }

@@ -172,7 +172,7 @@ def selftest(
     prefix = "set -euo pipefail\nexport LC_ALL=C\n"
     prefix += "names=(" + " ".join(names) + ")\n"
     prefix += (
-        "minio_suites=(unused)\nwasi_suites=(unused)\n"
+        "minio_suites=(unused)\ngdrive_suites=(write/pwrite)\nwasi_suites=(unused)\n"
         "box_suites=(unused)\nssh_suites=(unused)\nmongo_suites=(unused)\n"
     )
     base = {
@@ -224,6 +224,12 @@ def selftest(
                 if actual != expected:
                     raise ValueError(
                         f"workflow resolver differs for leg {leg}"
+                    )
+                if ("NEEDS_GDRIVE=1" in output.read_text().splitlines()) != (
+                    "write/pwrite" in expected
+                ):
+                    raise ValueError(
+                        f"Drive service selection differs for leg {leg}"
                     )
     print(
         f"runtime resolver: {len(probes)} positive and rejection probes passed"

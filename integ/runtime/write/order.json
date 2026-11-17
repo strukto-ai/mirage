@@ -49,6 +49,49 @@
           }
         }
       ]
+    },
+    {
+      "id": "scattered_writes_across_a_spill_and_peer_flush",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ram+cache",
+        "disk+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nlimit = 1 << 20\na = os.open('/data/f', os.O_RDWR)\nb = os.open('/data/f', os.O_RDWR)\ntry:\n    os.pwrite(a, b'.' * limit + b'EOF', 0)\n    for i in range(96):\n        os.pwrite(a, b'x', 2 * i)\n    os.pwrite(b, b'Y!', 190)\n    os.pwrite(a, b'Z', limit + 5)\n    print(os.pread(b, 6, 188).decode())\n    print(os.pread(b, 16, limit - 1).hex())\n    os.fsync(b)\n    os.fsync(a)\nfinally:\n    os.close(b)\n    os.close(a)",
+            "node": "const fs = require('node:fs').promises\nconst limit = 1 << 20\nconst a = await fs.open('/data/f', 'r+')\nconst b = await fs.open('/data/f', 'r+')\ntry {\n  await a.write(Buffer.concat([Buffer.alloc(limit, '.'), Buffer.from('EOF')]))\n  for (let i = 0; i < 96; i++) await a.write('x', 2 * i)\n  await b.write('Y!', 190)\n  await a.write('Z', limit + 5)\n  const middle = await b.read(Buffer.alloc(6), 0, 6, 188)\n  console.log(middle.buffer.subarray(0, middle.bytesRead).toString())\n  const tail = await b.read(Buffer.alloc(16), 0, 16, limit - 1)\n  console.log(tail.buffer.subarray(0, tail.bytesRead).toString('hex'))\n  await b.sync()\n  await a.sync()\n} finally {\n  await b.close()\n  await a.close()\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "x.Y!..\n2e454f4600005a\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "sha256sum /data/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "5692ea6e98a8bc597d6760fb23736c65d17a793885185024a7d49d498748da81  /data/f\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

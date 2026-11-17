@@ -36,6 +36,7 @@ import {
   CLI,
   CommandSpec,
   DiskVFS,
+  GoogleDriveVFS,
   Limit,
   MongoDBVFS,
   MountMode,
@@ -68,6 +69,7 @@ import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { norm } from '@struktoai/mirage-core/utils/path'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import {
   EXTERNAL_COMMANDS,
@@ -885,6 +887,13 @@ async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
       keyPrefix: `mirage-integ-runtime-ts-${runId}/`,
     })
   }
+  if (spec.vfs === 'gdrive') {
+    return new GoogleDriveVFS({
+      clientId: 'integ',
+      refreshToken: 'gws-integ-token',
+      apiBase: `${rstripSlash(process.env.GWS_URL ?? '')}/_run/ts-${runId}`,
+    })
+  }
   if (spec.vfs === 's3') {
     await ensureS3()
     return new S3VFS({
@@ -1012,7 +1021,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     if (slash > 0) {
       const dir = `${prefix}/${name.slice(0, slash)}`
       if (!madeDirs.has(dir)) {
-        await ws.dispatch('mkdir', dir, [])
+        await ws.dispatch('mkdir', dir, [], { parents: true })
         madeDirs.add(dir)
       }
     }
@@ -1397,6 +1406,7 @@ const BACKEND_REQUIRES: Record<string, string[]> = {
   ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
   redis: ['env:REDIS_URL'],
   s3: ['s3'],
+  gdrive: ['env:GWS_URL'],
 }
 // The guest language of every runtime a case's `runtimes` may name, and
 // the line head a step's program runs under in it. A sandbox has none: it

@@ -47,7 +47,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { followedDay } from '../../core/time_range.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
 import { ident } from '../../utils/stat_view.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import {
@@ -257,11 +257,15 @@ it.each([
   }
 })
 
-/** A store with no pwrite, as S3, whose pwrite is a rewrite. */
+/** Use the mount's pwrite fallback and yield before replacing the file. */
 class RewrittenRAM extends RAMVFS {
-  constructor() {
-    super()
-    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  override supports(name: string): boolean {
+    return name !== 'pwrite' && super.supports(name)
+  }
+
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await super.write(path, data)
   }
 }
 
@@ -1892,25 +1896,13 @@ class TreeCopyRAM extends RAMVFS {
   }
 }
 
-/**
- * A RAM mount that answers pwrite the way S3 and redis do: read the file,
- * give the loop a turn, and write the whole file back.
- */
-class SplicingRAMVFS extends RAMVFS {
-  override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    const whole = await materialize(await this.read(path))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await this.write(path, spliceWindow(whole, offset, data))
-  }
-}
-
 describe('dispatch runs writers to one path one at a time', () => {
   it('lands every offset write on a store that splices', async () => {
     // Four sessions' edits at once: each pwrite reads the file before any
     // writes it back, so without one writer at a time per path every
     // write puts back three bytes the others had just replaced. Mirrors
     // python's test_offset_writes_to_one_path_all_land_on_a_splicing_store.
-    const ws = new Workspace({ '/data': new SplicingRAMVFS() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': new RewrittenRAM() }, { mode: MountMode.WRITE })
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
       await Promise.all(

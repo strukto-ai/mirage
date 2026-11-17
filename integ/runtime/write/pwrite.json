@@ -107,6 +107,127 @@
           }
         }
       ]
+    },
+    {
+      "id": "overlapping_edits_to_one_spooled_run_land_in_one_backend_write",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gdrive"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f": "seed"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/f', os.O_RDWR)\ntry:\n    os.pwrite(fd, b'.' * ((1 << 20) + 1), 0)\n    for i in range(96):\n        os.pwrite(fd, b'x', 2 * i)\n    os.fsync(fd)\nfinally:\n    os.close(fd)",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/f', 'r+')\ntry {\n  await f.write(Buffer.alloc((1 << 20) + 1, '.'))\n  for (let i = 0; i < 96; i++) await f.write('x', 2 * i)\n  await f.sync()\n} finally {\n  await f.close()\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "ops_count": {
+              "write /data/f": 1,
+              "pwrite /data/f": 0,
+              "append /data/f": 0
+            }
+          }
+        },
+        {
+          "command": "sha256sum /data/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "d151a7a66f56a019dbb35ac6604dcb09094c772e48044e3d5206277b4076adb1  /data/f\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "spooled_replacement_preserves_stored_prefix_and_tail",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gdrive"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "(printf BEGIN; head -c 1048577 /dev/zero; printf END) > /data/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "program": {
+            "python": "import os\npath = '/data/f'\nsize = (1 << 20) + 1\nfd = os.open(path, os.O_RDWR)\ntry:\n    os.pwrite(fd, b'a' * size, 5)\n    os.pwrite(fd, b'b' * size, 5)\n    os.pwrite(fd, b'XY', 5)\n    peer = os.open(path, os.O_RDWR)\n    try:\n        os.pwrite(peer, b'Z', size + 3)\n        print(os.pread(peer, 9, 0).decode())\n        print(os.pread(peer, 8, size + 3).decode())\n        os.fsync(peer)\n    finally:\n        os.close(peer)\n    os.fsync(fd)\nfinally:\n    os.close(fd)",
+            "node": "const fs = require('node:fs').promises\nconst path = '/data/f'\nconst size = (1 << 20) + 1\nconst f = await fs.open(path, 'r+')\ntry {\n  await f.write(Buffer.alloc(size, 'a'), 0, size, 5)\n  await f.write(Buffer.alloc(size, 'b'), 0, size, 5)\n  await f.write('XY', 5)\n  const peer = await fs.open(path, 'r+')\n  try {\n    await peer.write('Z', size + 3)\n    for (const [offset, length] of [[0, 9], [size + 3, 8]]) {\n      const { buffer, bytesRead } = await peer.read(Buffer.alloc(length), 0, length, offset)\n      console.log(buffer.subarray(0, bytesRead).toString())\n    }\n    await peer.sync()\n  } finally {\n    await peer.close()\n  }\n  await f.sync()\n} finally {\n  await f.close()\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "BEGINXYbb\nZbEND\n",
+            "stderr": "",
+            "ops_contain": [
+              "pwrite /data/f"
+            ]
+          },
+          "expect_on": {
+            "redis": {
+              "ops_contain": [
+                "read /data/f",
+                "write /data/f"
+              ]
+            },
+            "s3": {
+              "ops_contain": [
+                "read /data/f",
+                "write /data/f"
+              ]
+            },
+            "gdrive": {
+              "ops_contain": [
+                "read /data/f",
+                "write /data/f"
+              ]
+            }
+          }
+        },
+        {
+          "command": "sha256sum /data/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "0c4cae5eadfe6df5ac444b6f7968440926abb9303b456e039209a6405941c134  /data/f\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

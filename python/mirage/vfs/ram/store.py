@@ -63,7 +63,7 @@ class RAMFiles(MutableMapping[str, bytes]):
     before it stores, under ``RAMStore.lock``, as one step.
 
     A file ``splice`` changed is a ``bytearray`` it grows and overwrites
-    where it lies, so a run of appends or pwrites copies nothing; a read
+    where it lies, so a run of appends or pwrites copies nothing; a whole read
     takes a ``bytes`` copy, kept in its place until the next change, so
     a reader holds what was there when it read. The table's own lock
     keeps a read's copy and a change apart across threads, so no change
@@ -97,6 +97,21 @@ class RAMFiles(MutableMapping[str, bytes]):
             delta = len(value) - self.size(key)
             self._data[key] = bytes(value)
         self._count(delta)
+
+    def read_window(self, key: str, offset: int, size: int | None) -> bytes:
+        """Take a snapshot of just the requested bytes under the file lock.
+
+        Args:
+            key (str): the store key.
+            offset (int): first byte to read.
+            size (int | None): how many bytes, or None for the rest.
+        """
+        with self._lock:
+            data = self._data[key]
+            end = None if size is None else offset + size
+            if isinstance(data, bytes):
+                return data[offset:end]
+            return bytes(memoryview(data)[offset:end])
 
     def size(self, key: str) -> int:
         """A key's length without copying it, 0 for a missing one.

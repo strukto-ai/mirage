@@ -2,7 +2,6 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec, ReadRange } from '@struktoai/mirage-core/types'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
 
@@ -35,9 +34,8 @@ export async function read(
     } catch (rangeError) {
       const message = rangeError instanceof Error ? rangeError.message : String(rangeError)
       if (!windowed || !/got too little data|reader got too little/i.test(message)) throw rangeError
-      const from = Number(readOptions.offset ?? 0n)
-      const whole = await op.read(nextcloudKey(path), { offset: BigInt(from) })
-      data = Buffer.from(sliceWindow(new Uint8Array(whole), 0, options.size ?? null))
+      const tail = await op.read(nextcloudKey(path), { offset: readOptions.offset ?? 0n })
+      data = tail.subarray(0, options.size)
     }
     const bytes = new Uint8Array(data)
     record('read', path.virtual, VFSName.NEXTCLOUD, bytes.byteLength, timer)

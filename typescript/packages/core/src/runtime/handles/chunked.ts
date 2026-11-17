@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { sliceWindow } from '../../utils/ranges.ts'
 import { READ_CHUNK } from './constants.ts'
 
 /**
@@ -50,7 +51,7 @@ export class ChunkedHandle {
   async pread(offset: number, size: number): Promise<Uint8Array> {
     if (size <= 0 || this.atEnd(offset)) return new Uint8Array()
     if (this.covers(offset, size)) return this.slice(offset, size)
-    return (await this.load(offset, size)).slice(0, size)
+    return sliceWindow(await this.load(offset, size), 0, size)
   }
 
   /** Whether the kept bytes or known EOF answer without fetching. */
@@ -106,7 +107,7 @@ export class ChunkedHandle {
 
   private slice(offset: number, size: number): Uint8Array {
     const low = offset - this.start
-    return this.kept.slice(low, low + Math.max(0, size))
+    return sliceWindow(this.kept, low, Math.max(0, size))
   }
 
   /**
@@ -139,7 +140,7 @@ export class ChunkedHandle {
         this.size = bytes.length > 0 || seen ? this.end : Math.min(this.size, this.end)
       }
       this.start = offset
-      this.kept = joined
+      this.kept = joined.byteLength === joined.buffer.byteLength ? joined : new Uint8Array(joined)
     }
     return joined
   }

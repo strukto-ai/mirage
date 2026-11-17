@@ -12,36 +12,48 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator
+from itertools import groupby
+from typing import TypeVar
 
 from mirage.io.spool import MEMORY_LIMIT, ByteSlice
+
+_Chunk = TypeVar("_Chunk", bound=bytes | bytearray | ByteSlice)
+
+
+def write_end(
+    writes: Iterable[tuple[int, bytes | bytearray | ByteSlice]], stored: int
+) -> int:
+    """Where the file ends after the buffered writes.
+
+    Args:
+        writes (Iterable): offsets and their in-memory or spooled payloads.
+        stored (int): the end before the writes.
+    """
+    end = stored
+    for offset, chunk in writes:
+        end = max(end, offset + len(chunk))
+    return end
 
 
 def write_runs(
     writes: Iterable[tuple[int, bytes | bytearray]],
 ) -> list[tuple[int, bytes]]:
-    """Buffered (offset, payload) writes as the fewest pwrites that leave
-    a file as the writes did, in arrival order.
-
-    The kernel adapters buffer each write on its handle and owe the mount
-    the lot at flush. A write that starts inside the last run, or right
-    at its end, folds into it, so a sequential stream is one run. Any
-    other starts a run of its own; the runs apply in order, so a later
-    run still overwrites what it overlaps of an earlier one.
+    """Merge each run into one pwrite payload for flush. Apply edits in
+    arrival order so the latest write wins wherever two overlap.
 
     Args:
         writes (Iterable[tuple[int, bytes | bytearray]]): the buffered
             writes, in arrival order.
     """
-    runs: list[tuple[int, bytearray]] = []
-    for offset, chunk in writes:
-        if runs:
-            start, buf = runs[-1]
-            if start <= offset <= start + len(buf):
-                buf[offset - start : offset - start + len(chunk)] = chunk
-                continue
-        runs.append((offset, bytearray(chunk)))
-    return [(start, bytes(buf)) for start, buf in runs]
+    runs: list[tuple[int, bytes]] = []
+    for start, group in _grouped(writes):
+        buf = bytearray()
+        for offset, chunk in group:
+            at = offset - start
+            buf[at : at + len(chunk)] = chunk
+        runs.append((start, bytes(buf)))
+    return runs
 
 
 def overlaid(
@@ -66,8 +78,7 @@ def overlaid(
             writes, in arrival order.
     """
     runs = list(writes)
-    reach = max([offset + len(stored)] + [o + len(d) for o, d in runs])
-    end = min(offset + size, reach)
+    end = min(offset + size, write_end(runs, offset + len(stored)))
     if end <= offset:
         return b""
     out = bytearray(stored[: end - offset])
@@ -81,26 +92,38 @@ def overlaid(
     return bytes(out)
 
 
-def run_groups(
-    writes: Iterable[tuple[int, bytearray | ByteSlice]],
-) -> list[list[tuple[int, bytearray | ByteSlice]]]:
-    """Buffered writes in the groups ``write_runs`` folds into one run
-    each, unfolded, for a buffer some of whose writes wait in a spool.
+def _grouped(
+    writes: Iterable[tuple[int, _Chunk]],
+) -> Iterator[tuple[int, Iterator[tuple[int, _Chunk]]]]:
+    """Group writes by the start of the current run. A write inside the
+    run or at its end joins it. A gap or a write before its start opens
+    another run.
 
     Args:
-        writes (Iterable[tuple[int, bytearray | ByteSlice]]): the buffered
-            writes, in arrival order.
+        writes (Iterable): offsets and their in-memory or spooled payloads.
     """
-    groups: list[list[tuple[int, bytearray | ByteSlice]]] = []
-    end = 0
-    for offset, chunk in writes:
-        if groups and groups[-1][0][0] <= offset <= end:
-            groups[-1].append((offset, chunk))
-            end = max(end, offset + len(chunk))
-            continue
-        groups.append([(offset, chunk)])
-        end = offset + len(chunk)
-    return groups
+    start = end = 0
+
+    def run_start(write: tuple[int, _Chunk]) -> int:
+        nonlocal start, end
+        offset, chunk = write
+        if not start <= offset <= end:
+            start = end = offset
+        end = max(end, offset + len(chunk))
+        return start
+
+    return groupby(writes, run_start)
+
+
+def run_groups(
+    writes: Iterable[tuple[int, _Chunk]],
+) -> list[list[tuple[int, _Chunk]]]:
+    """Keep each run's original writes for a streamed flush or a retry.
+
+    Args:
+        writes (Iterable): offsets and their in-memory or spooled payloads.
+    """
+    return [list(group) for _, group in _grouped(writes)]
 
 
 async def window_writes(
@@ -161,7 +184,7 @@ async def run_stream(
             ``run_groups``.
     """
     start = group[0][0]
-    end = max(at + len(run) for at, run in group)
+    end = write_end(group, start)
     windows: list[list[tuple[int, bytearray | ByteSlice]]] = [
         [] for _ in range(-(-(end - start) // MEMORY_LIMIT))
     ]
