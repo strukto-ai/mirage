@@ -377,8 +377,9 @@ native build or compiles it when missing.
 Python-only battery jobs use the same install path because their fake servers
 do not import mirage packages. Jobs that build TypeScript still run prepare.
 
-The three shared shards per host still run every eligible target once with
-four processes each; only the six shared-contract targets select fewer cases,
+The shared shards (three Python, two TypeScript, whose targets run faster)
+still run every eligible target once with four processes each; only the six
+shared-contract targets select fewer cases,
 and a pull request that runs `Shared backends full` leaves them out
 (`shard.py --skip-targets`).
 `ci/shard_seconds.json` uses successful target timings from run 41797128971:
@@ -423,35 +424,53 @@ under `integ/fixtures/` are fixture content and still count. The same goes
 for `typescript/scripts/`: the docs and parity generators there are a pnpm
 member with no dependencies or build, and no integ job imports or runs them.
 
+Each filter counts only the trees its jobs load. Rust counts by host:
+`rust/python` builds only Python's `mirage._rs`, `rust/wasm` only the
+TypeScript core's module, and the rest of `rust/` builds into both. Unit tests
+and the agent adapter packages select no job. The batteries load neither
+`mirage.server` nor `mirage.cli`, which no library module imports, nor the
+`server`, `cli` and `cloudflare` packages, which `core`, `node` and `browser`
+do not depend on; a change there runs only the jobs that start a server, the
+CLI or a worker. A directory of `integ/` that one job owns (`runtime`,
+`cloudflare`, `hosting`, `interrupt`, `fuse`, `browser`, and `access` with
+`cross.sh`, which the CLI workflow runs) selects only that job. The shared
+shards run both hosts whenever either is selected, since their parity diff
+needs both outputs.
+
 ```mermaid
 flowchart LR
-    PY["python/**"] --> core & data
-    TSX["typescript/**"] --> ts & data & database
-    IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
-    RS["rust/**<br/>mirage-rs, built into both hosts"] --> core & ts & data & database & runtime
+    PY["python/**<br/>minus server, cli, agents"] --> battery & hosting
+    SRV["python/mirage/server"] --> hosting
+    TSX["typescript/**<br/>core · node · browser"] --> ts & battery & hosting & cloudflare & database
+    SRVTS["server package"] --> ts & hosting & cloudflare
+    CFP["cloudflare package"] --> cloudflare
+    IN["integ/**<br/>minus each job's own directory"] --> ts & battery & hosting & cloudflare
+    RS["rust/** minus rust/python<br/>mirage-rs and the wasm module"] --> ts & battery & hosting & cloudflare & database & runtime
+    RSP["rust/python<br/>Python's mirage._rs"] --> battery & hosting & database & runtime
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, the search CLI,<br/>integ/vfs/&lt;name&gt;, integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
     FS["fuse and mount core modules,<br/>workspace fuse and nfs wiring<br/>integ/fuse, check_json.py"] --> fuse
     FP["shared Rust policy and glob,<br/>native and Wasm bindings,<br/>rs/policy, rs/approvals, hidden, path and session context adapters"] --> fuse
     CA["store capacity,<br/>the RAM mutators<br/>and store"] --> fuse
     RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
-    core --> J1["integ"]
     ts --> J2["integ-ts"]
-    core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
-    core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
-    core & ts --> CLOUDFLARE["integ-cloudflare<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
-    NC["Nextcloud tuning and full workflow"] --> ts & data
+    battery --> J3["integ-shared-py (3) · integ-shared-ts (2)<br/>integ-shared-parity · integ-selftests<br/>integ-facets with wandb · integ-shell-coverage"]
+    hosting --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack<br/>python scenarios: metadata · lancedb · lifecycle · policy"]
+    cloudflare --> CLOUDFLARE["integ-cloudflare<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
+    NC["Nextcloud tuning and full workflow"] --> ts & battery
     SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> shared_full --> FULL["shared-full (Shared backends full)<br/>six targets × two hosts · goldens · parity<br/>the shared shards skip these six"]
-    data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
+    battery --> J4["integ-data<br/>integ-tidb-filesystem with the event batteries"]
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]
     fuse --> J7["integ-fuse · integ-fuse-windows<br/>integ-fskit-macos"]
-    runtime --> J8["integ-runtime (8 legs) · integ-e2b<br/>integ-microsandbox · integ-kubernetes"]
+    runtime --> J8["integ-runtime (11 legs)<br/>integ-sandboxes: e2b · microsandbox · kubernetes"]
 ```
 
-The same wiring from the side of a change. Every file under `python/` sets
-`core` and `data`, every file under `typescript/` sets `ts`, `data` and
-`database`, and every file under `integ/` sets `core`, `ts` and `data`. This includes the Git `grep` and `ls_files` modules: either host
+The same wiring from the side of a change. Every library file under
+`python/` sets `battery` and `hosting`, every core, node or browser file under
+`typescript/` sets `ts`, `battery`, `hosting`, `cloudflare` and `database`, and
+every shared file under `integ/` sets `ts`, `battery`, `hosting` and
+`cloudflare`. This includes the Git `grep` and `ls_files` modules: either host
 change selects the shared Git disk/RAM corpus through these broad filters.
 The mirrored `core/msgraph/paths` and `core/dropbox/paths` spelling guards,
 disk resolvers and `session/visibility.json` case-alias regressions use these
@@ -538,7 +557,7 @@ covered by the Python backend glob and the broad TypeScript filter, so
 changes to those types also select the database job.
 
 LanceDB's shared query shapes (`core/lancedb/types.py` and `types.ts`) stay
-under the whole-host `core` and `ts` filters, whose jobs run the embedded
+under the whole-host `hosting` and `ts` filters, whose jobs run the embedded
 LanceDB corpus.
 
 S3's shared `core/s3/types` modules and the consolidated `vfs/types` find
@@ -546,7 +565,7 @@ options also select the whole-host jobs. Pyodide's `runtime/python/pyodide/confi
 stays in the broad TypeScript and runtime filters.
 
 The `cut` and `tr` Rust engines and their shared stream adapters use the
-existing whole-host `core` and `ts` filters. The paired cut corpus also pins
+whole-host `battery` and `ts` filters. The paired cut corpus also pins
 invalid-list refusal before a missing input is inspected.
 
 The shared `utils/abort` cancellation primitives remain in both whole-host
@@ -703,7 +722,7 @@ independent statement/branch floors. Its documented case exclusion omits the
 runs it. Both runners reject an unknown excluded ID. `--measure` prints current
 coverage without enforcing floors; CI always enforces them. Reports live in
 `.cache/integ-shell-coverage/` and are uploaded by `integ-shell-coverage`, which
-is required by `integ-gate` and uses the existing core/TypeScript path filters.
+is required by `integ-gate` and uses the `battery` path filter.
 
 The percentages are regression measures within each implementation, not a
 cross-language parity score. Both hosts run the same cases over the module

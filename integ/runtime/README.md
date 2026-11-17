@@ -122,9 +122,9 @@ cd integ && pnpm exec tsx runtime/run.ts open read/pread
 bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/dist/bin/mirage.js" open
 ```
 
-`INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants; CI's
-`integ-e2b`, `integ-microsandbox` and `integ-kubernetes` jobs run `sandbox`
-that way.
+`INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants (comma
+separated); CI's `integ-sandboxes` job runs `sandbox` with
+`e2b,microsandbox,kubernetes`.
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |

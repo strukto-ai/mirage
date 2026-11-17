@@ -31,8 +31,8 @@ workspace: sshfs mounts only a directory.
 | `mounts.json`     | `mount_type` serves the session's view into the box                                                                     | docker, e2b, microsandbox, kubernetes                                       |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox, apple_container and kubernetes. CI runs docker
-and ssh in `integ-runtime` against containers it starts, e2b in
-`integ-e2b` against E2B Embed, on the python host only (see the runtime
-README), microsandbox in `integ-microsandbox` on a guest it creates, and
-kubernetes in `integ-kubernetes` on a pod in a kind cluster;
+and ssh in `integ-runtime` against containers it starts, and the rest in
+`integ-sandboxes`: e2b against E2B Embed, on the python host only (see the
+runtime README), microsandbox on a guest it creates, and kubernetes on a pod
+in a kind cluster;
 smolvm and apple_container run where their host exists.

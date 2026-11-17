@@ -1,7 +1,8 @@
 {
   "_comment": [
     "Each target's subprocess wall seconds on each host, used to balance the",
-    "shared battery's three shards and four runner processes per shard.",
+    "shared battery's shards (three Python, two TypeScript) and four runner",
+    "processes per shard.",
     "Refreshed from successful shared jobs in CI runs 43874870905 (push to main)",
     "and 43874951904 (pull request, without the six Shared full targets),",
     "2026-11-16 UTC. A target seen in both runs keeps the mean of the two.",
