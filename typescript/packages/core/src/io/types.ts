@@ -19,6 +19,9 @@ import { checkMemory } from './memory.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
 export type StreamName = 'stdout' | 'stderr'
+// What a result said on stderr, newest piece first, each linked to what
+// came before it, so another piece links on without copying the rest.
+type Said = readonly [Uint8Array, Said | null]
 
 export interface OutputEvent {
   stream: StreamName
@@ -202,7 +205,8 @@ export class IOResult {
   // renders the rest. Never merged: the boundary consumes it.
   rows: Rows | null
   stdout: ByteSource | null
-  stderr: ByteSource | null
+  private _stderr: ByteSource | null = null
+  private said: Said | null = null
   // Set while a reader keeps a command's errors among its output
   // (`interleaved`): a command saying many of them as it streams adds each
   // here, in order, rather than copying a growing `stderr`.
@@ -295,37 +299,67 @@ export class IOResult {
     return new TextDecoder('utf-8', { fatal: errors === 'strict' }).decode(bytes)
   }
 
+  /** Standard error: a stream, or the bytes said so far, joined once when read after a merge or `addStderr` linked more on. */
+  get stderr(): ByteSource | null {
+    let said = this.said
+    if (said === null) return this._stderr
+    if (said[1] !== null) {
+      const pieces: Uint8Array[] = []
+      for (let link: Said | null = said; link !== null; link = link[1]) pieces.push(link[0])
+      said = this.said = [concat(pieces.reverse()), null]
+    }
+    return said[0]
+  }
+
+  set stderr(value: ByteSource | null) {
+    if (value instanceof Uint8Array) {
+      this._stderr = null
+      this.said = [value, null]
+    } else {
+      this._stderr = value
+      this.said = null
+    }
+  }
+
   /**
    * Say `piece` on stderr after what the command said so far: handed to a
    * reader keeping errors among the output (`stderrPieces`), which sends it
-   * before the next chunk, else joined onto `stderr`. A command saying many
+   * before the next chunk, else linked onto `stderr`. A command saying many
    * as it streams adds each here rather than rebuilding its whole stderr.
    * Mirrors Python's add_stderr.
    */
   addStderr(piece: Uint8Array): void {
     if (piece.byteLength === 0) return
-    if (this.stderrPieces !== null) this.stderrPieces.push(piece)
-    else this.stderr = this.stderr instanceof Uint8Array ? concat([this.stderr, piece]) : piece
+    if (this.stderrPieces !== null) {
+      this.stderrPieces.push(piece)
+      return
+    }
+    if (this.said === null) this._stderr = null
+    this.said = [piece, this.said]
   }
 
   async merge(other: IOResult): Promise<IOResult> {
-    const leftStderr = await materialize(this.stderr)
-    const rightStderr = await materialize(other.stderr)
-    let mergedStderr: Uint8Array | null = null
-    if (leftStderr.byteLength > 0 || rightStderr.byteLength > 0) {
-      mergedStderr = concat([leftStderr, rightStderr])
+    // Fully consume stderr from both sides so it's never lost; what the left
+    // side said is linked on, not copied.
+    let said = this.said
+    if (said === null && this._stderr !== null) {
+      const left = await materialize(this._stderr)
+      said = left.byteLength > 0 ? [left, null] : null
     }
+    const right = await materialize(other.stderr)
+    if (right.byteLength > 0) said = [right, said]
+    else if (said !== null && said[1] === null && said[0].byteLength === 0) said = null
     // The exit code is not copied: the merged result reads it through
     // the link, so a lazy status settling after this merge (grep's, at
     // drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
       records: other.records,
-      stderr: mergedStderr,
       producer: other.producer,
       decision: other.decision ?? this.decision,
       closedStdout: other.closedStdout,
     })
+    result.said = said
     result.output = other.output
     result.outputFinalized = other.outputFinalized
     result.streamSource = other

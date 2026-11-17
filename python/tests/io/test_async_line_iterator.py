@@ -64,6 +64,17 @@ async def test_read1_answers_one_pull_up_to_its_size_and_keeps_the_rest():
 
 
 @pytest.mark.asyncio
+async def test_read1_walks_a_buffered_chunk_in_small_reads():
+    reader = AsyncLineIterator(_chunks([b"abc\ndef\n", b"gh"]))
+    assert [await reader.read1(1) for _ in range(3)] == [b"a", b"b", b"c"]
+    assert reader.position == 3
+    assert await reader.readline() == b""
+    assert await reader.read1(8) == b"def\n"
+    assert await reader.read1(8) == b"gh"
+    assert await reader.read1(8) == b""
+
+
+@pytest.mark.asyncio
 async def test_split_across_chunks():
     source = _chunks([b"hel", b"lo\nwor", b"ld\n"])
     lines = [line async for line in AsyncLineIterator(source)]

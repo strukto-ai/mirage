@@ -130,6 +130,18 @@ describe('AsyncLineIterator', () => {
     expect(decode(await input.read1(0))).toBe('')
     expect((await input.read1(4)).byteLength).toBe(0)
   })
+
+  it('read1 walks a buffered chunk in small reads', async () => {
+    const input = new AsyncLineIterator(fromChunks([encode('abc\ndef\n'), encode('gh')]))
+    const first: string[] = []
+    for (let i = 0; i < 3; i++) first.push(decode(await input.read1(1)))
+    expect(first).toEqual(['a', 'b', 'c'])
+    expect(input.position).toBe(3)
+    expect(decode((await input.readline()) ?? new Uint8Array())).toBe('')
+    expect(decode(await input.read1(8))).toBe('def\n')
+    expect(decode(await input.read1(8))).toBe('gh')
+    expect((await input.read1(8)).byteLength).toBe(0)
+  })
 })
 
 describe('the memory budget', () => {

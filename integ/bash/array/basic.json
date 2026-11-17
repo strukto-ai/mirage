@@ -763,10 +763,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar22=(1 2); ar22+=(3); echo ${#ar22[@]}; ( unset QBW; QBW[9223372036854775807]=x; QBW+=(y z); declare -p QBW; QBW+=(w); declare -p QBW )",
+      "command": "ar22=(1 2); ar22+=(3); echo ${#ar22[@]}; ( unset QBW; QBW[9223372036854775807]=x; QBW+=(y z); declare -p QBW; QBW+=(w); declare -p QBW ); ( ql=(); for i in 1 2 3; do ql+=($i); done; i=0; while (( i < 2 )); do ql[i+10]=w$i; (( i++ )); done; until (( i == 0 )); do (( i-- )); ql+=(u$i); done; for j in a b c; do ql+=($j); [ $j = b ] && break; done; declare -p ql )",
       "expect": {
         "exit": 0,
-        "stdout": "3\ndeclare -a QBW=([-9223372036854775808]=\"y\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\ndeclare -a QBW=([-9223372036854775808]=\"w\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\n",
+        "stdout": "3\ndeclare -a QBW=([-9223372036854775808]=\"y\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\ndeclare -a QBW=([-9223372036854775808]=\"w\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\ndeclare -a ql=([0]=\"1\" [1]=\"2\" [2]=\"3\" [10]=\"w0\" [11]=\"w1\" [12]=\"u1\" [13]=\"u0\" [14]=\"a\" [15]=\"b\")\n",
         "stderr": ""
       }
     },

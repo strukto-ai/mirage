@@ -30,6 +30,9 @@ from mirage.types import PathSpec, PolicyDecision, Producer
 
 ByteSource = bytes | AsyncIterator[bytes]
 StreamName = Literal["stdout", "stderr"]
+# What a result said on stderr, newest piece first, each linked to what
+# came before it, so another piece links on without copying the rest.
+Said = tuple[bytes, "Said | None"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +318,8 @@ class IOResult:
         self.closed_stdout = closed_stdout
         self.records = records
         self.rows = rows
+        self._stderr: ByteSource | None = None
+        self._said: Said | None = None
         self.stderr = stderr
         self.stderr_pieces: list[bytes] | None = None
         self._exit_code = exit_code
@@ -355,11 +360,35 @@ class IOResult:
     async def stderr_str(self, errors: str = "replace") -> str:
         return (await self.materialize_stderr()).decode(errors=errors)
 
+    @property
+    def stderr(self) -> ByteSource | None:
+        """Standard error: a stream, or the bytes said so far, joined once
+        when read after a merge or ``add_stderr`` linked more on."""
+        said = self._said
+        if said is None:
+            return self._stderr
+        if said[1] is not None:
+            pieces: list[bytes] = []
+            link: Said | None = said
+            while link is not None:
+                pieces.append(link[0])
+                link = link[1]
+            pieces.reverse()
+            said = self._said = (b"".join(pieces), None)
+        return said[0]
+
+    @stderr.setter
+    def stderr(self, value: ByteSource | None) -> None:
+        if isinstance(value, bytes):
+            self._stderr, self._said = None, (value, None)
+        else:
+            self._stderr, self._said = value, None
+
     def add_stderr(self, piece: bytes) -> None:
         """Say ``piece`` on stderr after what the command said so far:
         handed to a reader keeping errors among the output
         (``stderr_pieces``), which sends it before the next chunk, else
-        joined onto ``stderr``. A command saying many as it streams adds
+        linked onto ``stderr``. A command saying many as it streams adds
         each here rather than rebuilding its whole stderr.
 
         Args:
@@ -369,30 +398,36 @@ class IOResult:
             return
         if self.stderr_pieces is not None:
             self.stderr_pieces.append(piece)
-        else:
-            held = self.stderr if isinstance(self.stderr, bytes) else b""
-            self.stderr = held + piece
+            return
+        if self._said is None:
+            self._stderr = None
+        self._said = (piece, self._said)
 
     async def merge(self, other: "IOResult") -> "IOResult":
-        # Fully consume stderr from both sides so it's never lost.
-        left_stderr = await materialize(self.stderr)
-        right_stderr = await materialize(other.stderr)
-        merged_stderr: bytes | None = None
-        if left_stderr or right_stderr:
-            merged_stderr = left_stderr + right_stderr
+        # Fully consume stderr from both sides so it's never lost; what
+        # the left side said is linked on, not copied.
+        said = self._said
+        if said is None and self._stderr is not None:
+            left = await materialize(self._stderr)
+            said = (left, None) if left else None
+        right = await materialize(other.stderr)
+        if right:
+            said = (right, said)
+        elif said is not None and said[1] is None and not said[0]:
+            said = None
         # The exit code is not copied: the merged result reads it
         # through the link, so a lazy status settling after this merge
         # (grep's, at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
             records=other.records,
-            stderr=merged_stderr,
             producer=other.producer,
             decision=(
                 other.decision if other.decision is not None else self.decision
             ),
             closed_stdout=other.closed_stdout,
         )
+        result._said = said
         result.output = other.output
         result.output_finalized = other.output_finalized
         result._stream_source = other

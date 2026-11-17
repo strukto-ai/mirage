@@ -374,11 +374,9 @@ export class OpenStream {
       const len = this.exports.mirage_rs_request(this.handle)
       if (len < 0) return null
       const taken = this.collect(0, [])
-      const header = JSON.parse(decoder.decode(taken.subarray(0, len))) as Record<
-        string,
-        util.JSONType
-      >
-      return [header, taken.subarray(len)]
+      const at = taken.byteLength - len
+      const header = JSON.parse(decoder.decode(taken.subarray(at))) as Record<string, util.JSONType>
+      return [header, taken.subarray(0, at)]
     })
   }
 
@@ -388,7 +386,7 @@ export class OpenStream {
     data: Uint8Array | readonly Uint8Array[],
   ): Uint8Array {
     const header = encoder.encode(JSON.stringify(reply))
-    const parts = [header, ...(data instanceof Uint8Array ? [data] : data)]
+    const parts = [...(data instanceof Uint8Array ? [data] : data), header]
     return this.guard(() => {
       this.exports.mirage_rs_reserve(
         this.handle,

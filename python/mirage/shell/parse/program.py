@@ -27,6 +27,7 @@ class ParsedProgram:
         self.references = 1
         self._released = False
         self._newlines: list[int] | None = None
+        self.read_rows: dict[int, int] = {}
         self._root: ProgramNode | None = ProgramNode(root, self)
 
     @property
@@ -86,6 +87,7 @@ class ParsedProgram:
             self.original = ""
             self.offsets = ()
             self._newlines = None
+            self.read_rows.clear()
             self._root = None
 
 

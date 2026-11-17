@@ -303,6 +303,12 @@ class AsyncLineIterator:
         """
         if size <= 0:
             return b""
+        if self._pos < len(self._buf):
+            end = min(self._pos + size, len(self._buf))
+            data = bytes(memoryview(self._buf)[self._pos : end])
+            self._pos = end
+            self._trim()
+            return data
         chunk = await self.read_chunk()
         if chunk is None:
             return b""

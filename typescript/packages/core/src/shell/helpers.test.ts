@@ -40,6 +40,7 @@ import {
   isBackgrounded,
   literalWord,
   quotedParts,
+  readRow,
   sourceParts,
   splitEnvPrefix,
 } from './helpers.ts'
@@ -691,5 +692,14 @@ describe('endsLine', () => {
       .filter(endsLine)
       .map((c) => c.text)
     expect(found).toEqual(last)
+  })
+})
+
+describe('readRow', () => {
+  it('takes a line whole and a spanning command with its end', () => {
+    const line = 'a; b\nc; { d\ne; }; f\ng'
+    expect(parse(line).namedChildren.map(readRow)).toEqual([0, 0, 1, 1, 1, 3])
+    const held = parseProgram(line).root.namedChildren
+    expect([4, 5, 0, 3, 1, 2].map((at) => readRow(held[at]))).toEqual([1, 3, 0, 1, 0, 1])
   })
 })

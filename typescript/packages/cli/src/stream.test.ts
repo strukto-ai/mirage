@@ -38,6 +38,38 @@ describe('stream response', () => {
     expect(Buffer.concat(err).toString()).toBe('oops\n')
   })
 
+  it('hands over many records from one chunk in order', async () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => `${String(i)}\n`)
+    const body = Buffer.concat([
+      ...lines.map((line) =>
+        record({ stream: 'stdout', data: Buffer.from(line).toString('base64') }),
+      ),
+      record({ status: 'done', result: { exit_code: 0 }, error: null }),
+    ])
+    const out: Uint8Array[] = []
+    async function* source() {
+      yield await Promise.resolve(body)
+    }
+    const ignore = (): Promise<void> => Promise.resolve()
+    await consumeStream(
+      source(),
+      (data) => {
+        out.push(data)
+        return Promise.resolve()
+      },
+      ignore,
+    )
+    expect(Buffer.concat(out).toString()).toBe(lines.join(''))
+  })
+
+  it('refuses a record past the cap across chunks', async () => {
+    async function* source() {
+      for (let i = 0; i < 17; i++) yield await Promise.resolve(Buffer.alloc(64 * 1024, 120))
+    }
+    const ignore = (): Promise<void> => Promise.resolve()
+    await expect(consumeStream(source(), ignore, ignore)).rejects.toThrow('too large')
+  })
+
   it.each([
     Buffer.alloc(0),
     record({ stream: 'stdout', data: 'YQ==' }),

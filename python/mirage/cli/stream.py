@@ -104,10 +104,12 @@ async def consume_stream(
     """
     pending = bytearray()
     async for chunk in source:
+        scanned = len(pending)
         pending.extend(chunk)
-        while b"\n" in pending:
-            line, _, rest = pending.partition(b"\n")
-            pending = bytearray(rest)
+        start = 0
+        while (end := pending.find(b"\n", scanned)) >= 0:
+            line = pending[start:end]
+            start = scanned = end + 1
             if len(line) > MAX_RECORD_BYTES:
                 raise ValueError("daemon stream record is too large")
             record = json.loads(line)
@@ -136,6 +138,7 @@ async def consume_stream(
                 return record
             else:
                 raise ValueError("invalid daemon stream record")
+        del pending[:start]
         if len(pending) > MAX_RECORD_BYTES:
             raise ValueError("daemon stream record is too large")
     raise ValueError("daemon stream ended without a completion record")
