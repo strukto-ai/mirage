@@ -2279,7 +2279,7 @@ describe('wordPaths', () => {
     ],
     [
       ['--file=-', '-c', 'x'],
-      [null, null, '/d/x'],
+      ['/d/-', null, '/d/x'],
     ],
   ])('resolves each word where tar reads it: %j', (argv, expected) => {
     expect(virtuals(argv, 'tar')).toEqual(expected)
@@ -2288,7 +2288,7 @@ describe('wordPaths', () => {
   it.each([
     [
       ['-f', '-', 'x'],
-      [null, null, '/d/x'],
+      [null, '/d/-', '/d/x'],
     ],
     [
       ['--file=', 'x'],
@@ -2298,7 +2298,11 @@ describe('wordPaths', () => {
       ['--file=../p', 'x'],
       ['/p', '/d/x'],
     ],
-  ])('names no file for a dash or an empty value: %j', (argv, expected) => {
+  ])('names no file for an empty value, and a file for an option dash: %j', (argv, expected) => {
     expect(virtuals(argv, 'grep')).toEqual(expected)
+  })
+
+  it('names a directory for a dash given to cp -t', () => {
+    expect(virtuals(['-t', '-', 'a'], 'cp')).toEqual([null, '/d/-', '/d/a'])
   })
 })

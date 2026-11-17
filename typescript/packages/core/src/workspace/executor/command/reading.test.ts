@@ -128,10 +128,10 @@ const LINES: [string, string[], Row[]][] = [
   ],
   [
     'zgrep -f - x',
-    ['/workspace/outbox/x'],
+    ['/workspace/outbox/-', '/workspace/outbox/x'],
     [
       ['-f', 'option', null, null],
-      ['-', 'value', '-f', null],
+      ['-', 'value', '-f', '/workspace/outbox/-'],
       ['x', 'operand', null, '/workspace/outbox/x'],
     ],
   ],
@@ -327,45 +327,45 @@ describe('readLine', () => {
   })
 })
 
-describe('what a policy sees', () => {
-  async function seenByPolicy(line: string, setup = ''): Promise<CommandContext> {
-    const seen: CommandContext[] = []
-    const ws = new Workspace(
-      { '/workspace': new RAMVFS(), '/slack': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        policies: [
-          {
-            preCommand(ctx) {
-              if (['cd', 'mkdir', 'ln', 'echo'].includes(ctx.command)) return null
-              seen.push(ctx)
-              return { kind: 'deny', reason: 'captured' }
-            },
+async function seenByPolicy(line: string, setup = ''): Promise<CommandContext> {
+  const seen: CommandContext[] = []
+  const ws = new Workspace(
+    { '/workspace': new RAMVFS(), '/slack': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preCommand(ctx) {
+            if (['cd', 'mkdir', 'ln', 'echo'].includes(ctx.command)) return null
+            seen.push(ctx)
+            return { kind: 'deny', reason: 'captured' }
           },
-        ],
-      },
-    )
-    try {
-      ws.registerCli('git', cliSpecFor('git'))
-      ws.registerCli('pdfinfo', cliSpecFor('pdfinfo'))
-      ws.registerCli('himalaya', HIMALAYA, {
-        imap_host: 'h',
-        smtp_host: 'h',
-        username: 'u',
-        password: 'p',
-      })
-      await ws.shell('mkdir -p /workspace/outbox')
-      if (setup !== '') await ws.shell(setup)
-      await ws.shell('cd /workspace/outbox')
-      await ws.shell(line)
-      const ctx = seen[seen.length - 1]
-      if (ctx === undefined) throw new Error(`no command reached the policy: ${line}`)
-      return ctx
-    } finally {
-      await ws.close()
-    }
+        },
+      ],
+    },
+  )
+  try {
+    ws.registerCli('git', cliSpecFor('git'))
+    ws.registerCli('pdfinfo', cliSpecFor('pdfinfo'))
+    ws.registerCli('himalaya', HIMALAYA, {
+      imap_host: 'h',
+      smtp_host: 'h',
+      username: 'u',
+      password: 'p',
+    })
+    await ws.shell('mkdir -p /workspace/outbox')
+    if (setup !== '') await ws.shell(setup)
+    await ws.shell('cd /workspace/outbox')
+    await ws.shell(line)
+    const ctx = seen[seen.length - 1]
+    if (ctx === undefined) throw new Error(`no command reached the policy: ${line}`)
+    return ctx
+  } finally {
+    await ws.close()
   }
+}
 
+describe('what a policy sees', () => {
   it.each([
     [
       'himalaya message reply 1 --attach ../../slack/export.csv',

@@ -2157,7 +2157,7 @@ def test_a_declared_word_is_never_a_shorter_option_with_a_value():
             ["-C", "a", "-cfrel.tar", "x"],
             [None, "/d/a", "/d/rel.tar", "/d/a/x"],
         ),
-        (["--file=-", "-c", "x"], [None, None, "/d/x"]),
+        (["--file=-", "-c", "x"], ["/d/-", None, "/d/x"]),
     ],
 )
 def test_word_paths_resolve_each_word_where_tar_reads_it(argv, expected):
@@ -2169,12 +2169,25 @@ def test_word_paths_resolve_each_word_where_tar_reads_it(argv, expected):
 @pytest.mark.parametrize(
     "argv, expected",
     [
-        (["-f", "-", "x"], [None, None, "/d/x"]),
+        (["-f", "-", "x"], [None, "/d/-", "/d/x"]),
         (["--file=", "x"], [None, "/d/x"]),
         (["--file=../p", "x"], ["/p", "/d/x"]),
     ],
 )
-def test_word_paths_name_no_file_for_a_dash_or_an_empty_value(argv, expected):
+def test_word_paths_name_no_file_for_an_empty_value_and_a_file_for_a_dash(
+    argv, expected
+):
     parsed = parse_command(SPECS["grep"], argv, "/d", "grep")
     paths = word_paths(parsed, argv, "/d", operands=True)
     assert [p.virtual if p is not None else None for p in paths] == expected
+
+
+def test_word_paths_name_a_directory_for_a_dash_given_to_cp_t():
+    argv = ["-t", "-", "a"]
+    parsed = parse_command(SPECS["cp"], argv, "/d", "cp")
+    paths = word_paths(parsed, argv, "/d", operands=True)
+    assert [p.virtual if p is not None else None for p in paths] == [
+        None,
+        "/d/-",
+        "/d/a",
+    ]

@@ -1551,8 +1551,11 @@ def word_paths(
     """The path each word of a parsed line names, aligned with argv.
 
     A PATH value or operand resolves against its word's base and an
-    attached value lands on its option word; a ``-`` (standard input or
-    output) or an empty value names no file. Built on demand, because
+    attached value lands on its option word. An empty value names no
+    file, nor does a ``-`` operand (standard input); an option's ``-``
+    resolves like any other value, since only some commands read it as
+    standard input (``cp -t -`` copies into a directory named ``-``).
+    Built on demand, because
     every line is parsed and only a reader of its words needs this, and
     operands only when asked, because a builtin's operand paths come
     from the classifier and a line can carry many thousands of them.
@@ -1578,7 +1581,8 @@ def word_paths(
         (a.slot, a.value, a.base) for a in parsed.attached if a.kind == "path"
     ]
     for slot, value, against in (*typed, *attached):
-        if value not in ("", "-"):
+        stdin = value == "-" and parsed.word_roles[slot] is WordKind.OPERAND
+        if value != "" and not stdin:
             paths[slot] = PathSpec.from_str_path(value, cwd=against)
     return paths
 

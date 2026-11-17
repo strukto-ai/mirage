@@ -74,8 +74,7 @@ def read_line(
     reads a dashed word as an option and anything else as an operand.
     A word's path is the classifier's, which carries the mount and the
     glob, else the grammar's: an option's value the classifier left as
-    text, attached (``--file=x``) or not, and a tree's operand. A ``-``
-    given to an option is standard input or output, never a file.
+    text, attached (``--file=x``) or not, and a tree's operand.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs and
@@ -148,8 +147,6 @@ def read_line(
         kind, carried, spec_path = grammar[slot]
         word = classified[slot] if slot < len(classified) else text
         path = word if isinstance(word, PathSpec) else spec_path
-        if kind is WordKind.VALUE and text == "-":
-            path = None
         owner = option if kind is WordKind.VALUE else carried
         words.append(CommandWord(text, kind, owner, path))
         if kind is WordKind.OPTION:

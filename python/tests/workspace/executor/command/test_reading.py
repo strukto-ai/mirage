@@ -139,10 +139,10 @@ LINES = [
     ),
     (
         "zgrep -f - x",
-        ["/workspace/outbox/x"],
+        ["/workspace/outbox/-", "/workspace/outbox/x"],
         (
             ("-f", "option", None, None),
-            ("-", "value", "-f", None),
+            ("-", "value", "-f", "/workspace/outbox/-"),
             ("x", "operand", None, "/workspace/outbox/x"),
         ),
     ),

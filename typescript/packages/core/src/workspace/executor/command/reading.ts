@@ -59,8 +59,7 @@ function leafGrammar(
  * no spec describes reads a dashed word as an option and anything else as an
  * operand. A word's path is the classifier's, which carries the mount and the
  * glob, else the grammar's: an option's value the classifier left as text,
- * attached (`--file=x`) or not, and a tree's operand. A `-` given to an
- * option is standard input or output, never a file. Mirrors Python's
+ * attached (`--file=x`) or not, and a tree's operand. Mirrors Python's
  * `read_line`.
  */
 export function readLine(
@@ -123,8 +122,7 @@ export function readLine(
   argv.forEach((text, slot) => {
     const [kind, carried, specPath] = grammar[slot] ?? [WordKind.OPERAND, null, null]
     const word = classified[slot] ?? text
-    let path = word instanceof PathSpec ? word : specPath
-    if (kind === WordKind.VALUE && text === '-') path = null
+    const path = word instanceof PathSpec ? word : specPath
     words.push(new CommandWord(text, kind, kind === WordKind.VALUE ? option : carried, path))
     if (kind === WordKind.OPTION) option = text
   })

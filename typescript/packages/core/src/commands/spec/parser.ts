@@ -1388,8 +1388,10 @@ export function parseCommand(
 /**
  * The path each word of a parsed line names, aligned with argv. A PATH value
  * or operand resolves against its word's base and an attached value lands on
- * its option word; a `-` (standard input or output) or an empty value names
- * no file. Built on demand, because every line is parsed and only a reader
+ * its option word. An empty value names no file, nor does a `-` operand
+ * (standard input); an option's `-` resolves like any other value, since only
+ * some commands read it as standard input (`cp -t -` copies into a directory
+ * named `-`). Built on demand, because every line is parsed and only a reader
  * of its words needs this, and operands only when `operands` asks, because a
  * builtin's operand paths come from the classifier and a line can carry many
  * thousands of them. Mirrors Python's `word_paths`.
@@ -1413,7 +1415,8 @@ export function wordPaths(
     .filter((a) => a.kind === 'path')
     .map((a): [number, string, string] => [a.slot, a.value, a.base])
   for (const [slot, value, against] of [...typed, ...attached]) {
-    if (value !== '' && value !== '-') paths[slot] = PathSpec.fromStrPath(value, undefined, against)
+    const stdin = value === '-' && parsed.wordRoles[slot] === WordKind.OPERAND
+    if (value !== '' && !stdin) paths[slot] = PathSpec.fromStrPath(value, undefined, against)
   }
   return paths
 }
