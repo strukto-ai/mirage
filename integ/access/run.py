@@ -1243,9 +1243,10 @@ async def lifecycle(
         "workspace", "shell", "-w", "i", "-c", "exit 3"
     )
     got["shell_exit_status"] = f"{tty_code} {piped_code}"
-    await cli("workspace", "use", "i")
-    _, out, _ = await cli("shell", "-c", "echo current")
-    got["workspace_use"] = out
+    _, out, _ = await cli(
+        "shell", "-c", "echo current", use={**env, "MIRAGE_WORKSPACE": "i"}
+    )
+    got["workspace_env"] = out
     token = (home / "auth_token").read_text().strip().encode()
     await cli("login", url, "--name", "spare", "--token", "-", stdin=token)
 
