@@ -348,6 +348,13 @@
           }
         },
         {
+          "command": "[[ abc == a* ]]",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:[[ abc == a* ]]\n"
+          }
+        },
+        {
           "command": "rm /ram/x",
           "expect": {
             "exit": 0,
@@ -424,6 +431,13 @@
           "expect": {
             "exit": 126,
             "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "[[ abc == a* ]]",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:[[ abc == a* ]]\n"
           }
         },
         {

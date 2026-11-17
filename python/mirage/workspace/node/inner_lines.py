@@ -71,14 +71,20 @@ def _word_globs(node: TSNodeLike) -> bool:
     return node.type == NT.EXTGLOB_PATTERN
 
 
-def read_word(node: TSNodeLike, home: str | None = None) -> Word:
+def read_word(
+    node: TSNodeLike, home: str | None = None, globs: bool = True
+) -> Word:
     """Read a word without losing which glob characters are quoted.
 
     Args:
         node (TSNodeLike): the command word's syntax node.
         home (str | None): the home directory a leading tilde names.
+        globs (bool): whether the runtime expands pathname patterns in
+            this word; inside ``[[ ]]`` it never does.
     """
-    return Word(get_text(node), literal_word(node, home), _word_globs(node))
+    return Word(
+        get_text(node), literal_word(node, home), globs and _word_globs(node)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +110,11 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
     the grammar the run evaluates it by: a test per leaf, each admitted
     as the run reaches it, since a branch never reached never expands;
     every reader of the line reads the same leaves, so a question one
-    asked is the one the gate answers. (``[`` is a command, admitted on
-    its words as any command is.)
+    asked is the one the gate answers. No word of it expands a pathname
+    pattern, so none is a glob, and a pattern side with no expansion in
+    it (an extglob or regex node) is matched as typed, so it names its
+    own text. (``[`` is a command, admitted on its words as any command
+    is.)
 
     Args:
         node (TSNodeLike): the test_command node.
@@ -115,15 +124,21 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
     out: list[TestRead] = []
     for leaf in cond_leaves(CondParser(cond_tokens(node)).parse()):
         if leaf[0] == "unary":
-            words = [Word(leaf[1], leaf[1]), read_word(leaf[2], home)]
-        elif leaf[0] == "binary":
             words = [
-                read_word(leaf[2], home),
                 Word(leaf[1], leaf[1]),
-                read_word(leaf[3], home),
+                read_word(leaf[2], home, globs=False),
+            ]
+        elif leaf[0] == "binary":
+            right = read_word(leaf[3], home, globs=False)
+            if leaf[3].type in (NT.EXTGLOB_PATTERN, NT.REGEX):
+                right = Word(right.raw, right.raw)
+            words = [
+                read_word(leaf[2], home, globs=False),
+                Word(leaf[1], leaf[1]),
+                right,
             ]
         else:
-            words = [read_word(leaf[1], home)]
+            words = [read_word(leaf[1], home, globs=False)]
         stated = leaf[0] != "binary" or leaf[1] not in PATTERN_OPS
         out.append(TestRead([opener, *words], stated))
     return out

@@ -1169,6 +1169,27 @@ async def test_a_whole_line_runs_as_typed_with_no_policy_at_pre_command():
 
 
 @pytest.mark.asyncio
+async def test_a_policy_admits_a_test_pattern_the_runtime_matches_as_typed():
+    # `[[ ]]` expands no pathname, and a pattern side with no expansion
+    # in it is matched as typed, so a policy reads it as the runtime will.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        policies=[_NoHostname()],
+        machines=[box],
+    )
+    try:
+        typed = ("[[ abc == a* ]]", "[[ abc =~ ^a.* ]]", "[[ -n a* ]]")
+        for line in typed:
+            assert (await ws.shell(line)).exit_code == 0, line
+        assert (await ws.shell("[[ abc == $p* ]]")).exit_code == 126
+        assert box.lines == list(typed)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_rule_refuses_a_command_name_the_runtime_globs():
     # The runtime turns `hostnam?` into `hostname` itself, so under a
     # rule the gate refuses a name pattern as it refuses `$X`.

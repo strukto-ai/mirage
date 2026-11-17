@@ -946,6 +946,23 @@ describe('prejudge', () => {
     expect(box.lines).toEqual([...HIDDEN_HOSTNAME])
   })
 
+  it('admits a test pattern the runtime matches as typed under a policy', async () => {
+    // `[[ ]]` expands no pathname, and a pattern side with no expansion in
+    // it is matched as typed, so a policy reads it as the runtime will.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, policies: [noHostname], machines: [box] },
+    )
+    open.push(w)
+    const typed = ['[[ abc == a* ]]', '[[ abc =~ ^a.* ]]', '[[ -n a* ]]']
+    for (const line of typed) {
+      expect([line, (await w.shell(line)).exitCode]).toEqual([line, 0])
+    }
+    expect((await w.shell('[[ abc == $p* ]]')).exitCode).toBe(126)
+    expect(box.lines).toEqual(typed)
+  })
+
   it('refuses a command name the runtime globs under a rule', async () => {
     // The runtime turns `hostnam?` into `hostname` itself, so under a rule
     // the gate refuses a name pattern as it refuses `$X`.

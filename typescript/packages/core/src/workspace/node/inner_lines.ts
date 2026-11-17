@@ -48,9 +48,13 @@ function wordGlobs(node: TSNodeLike): boolean {
   return node.type === NT.EXTGLOB_PATTERN
 }
 
-/** Read a word without losing which glob characters are quoted. */
-export function readWord(node: TSNodeLike, home: string | null = null): Word {
-  return { raw: getText(node), text: literalWord(node, home), glob: wordGlobs(node) }
+/**
+ * Read a word without losing which glob characters are quoted. `globs` says
+ * whether the runtime expands pathname patterns in this word; inside `[[ ]]`
+ * it never does.
+ */
+export function readWord(node: TSNodeLike, home: string | null = null, globs = true): Word {
+  return { raw: getText(node), text: literalWord(node, home), glob: globs && wordGlobs(node) }
 }
 
 /**
@@ -69,24 +73,28 @@ export interface TestRead {
  * grammar the run evaluates it by: a test per leaf, each admitted as the run
  * reaches it, since a branch never reached never expands; every reader of
  * the line reads the same leaves, so a question one asked is the one the
- * gate answers. (`[` is a command, admitted on its words as any command
- * is.) `home` is the home directory a leading tilde names. Mirrors Python's
- * reads_of_test.
+ * gate answers. No word of it expands a pathname pattern, so none is a glob,
+ * and a pattern side with no expansion in it (an extglob or regex node) is
+ * matched as typed, so it names its own text. (`[` is a command, admitted on
+ * its words as any command is.) `home` is the
+ * home directory a leading tilde names. Mirrors Python's reads_of_test.
  */
 export function readsOfTest(node: TSNodeLike, home: string | null = null): TestRead[] {
   const opener: Word = { raw: '[[', text: '[[' }
   return condLeaves(new CondParser(condTokens(node)).parse()).map((leaf) => {
     let words: Word[]
     if (leaf.kind === 'unary') {
-      words = [{ raw: leaf.op, text: leaf.op }, readWord(leaf.operand, home)]
+      words = [{ raw: leaf.op, text: leaf.op }, readWord(leaf.operand, home, false)]
     } else if (leaf.kind === 'binary') {
+      const right = readWord(leaf.right, home, false)
+      const typed = leaf.right.type === NT.EXTGLOB_PATTERN || leaf.right.type === NT.REGEX
       words = [
-        readWord(leaf.left, home),
+        readWord(leaf.left, home, false),
         { raw: leaf.op, text: leaf.op },
-        readWord(leaf.right, home),
+        typed ? { raw: right.raw, text: right.raw } : right,
       ]
     } else {
-      words = [readWord(leaf.operand, home)]
+      words = [readWord(leaf.operand, home, false)]
     }
     const stated = leaf.kind !== 'binary' || !PATTERN_OPS.has(leaf.op)
     return { words: [opener, ...words], stated }
