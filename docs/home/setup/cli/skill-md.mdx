@@ -1,0 +1,72 @@
+---
+title: SKILL.md
+description: The Markdown file that tells an agent which CLIs it can run and how to call them.
+icon: file-lines
+---
+
+SKILL.md lists the CLIs installed in a workspace, each with its top-level
+help; a subcommand's usage is one `--help` away. It is built from the live
+workspace and follows the session's [profile](/home/policy/overview): a CLI
+or subcommand the profile denies is never mentioned. Each CLI's reference
+shows its SKILL.md, such as [Slack](/python/cli/slack#skill-md). The mounted
+paths are in [VFS.md](/home/setup/vfs-md).
+
+## Get it
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    skill_md = await ws.skill_md()
+    agent = await ws.skill_md(session_id="agent")
+    preview = await ws.skill_md(profile="reader")
+    await ws.skill_md("/SKILL.md")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const skillMd = await ws.skillMd()
+    const agent = await ws.skillMd(undefined, { sessionId: 'agent' })
+    const preview = await ws.skillMd(undefined, { profile: 'reader' })
+    await ws.skillMd('/SKILL.md')
+    ```
+  </Tab>
+  <Tab title="HTTP" icon="globe">
+    ```bash
+    curl http://127.0.0.1:8765/v1/workspaces/demo/skill-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+
+    curl http://127.0.0.1:8765/v1/workspaces/demo/sessions/agent/skill-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+
+    curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/skill-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"path":"/SKILL.md"}'
+    ```
+  </Tab>
+  <Tab title="CLI" icon="terminal">
+    ```bash
+    mirage workspace skill-md demo
+    mirage workspace skill-md demo --session agent
+    mirage workspace skill-md demo --path /SKILL.md
+    ```
+  </Tab>
+</Tabs>
+
+- **No session or profile**: what the workspace's default profile allows.
+- **A session**: what that session's agent sees.
+- **A profile**: a preview of what a session with that profile would see.
+- **A path**: the file appears in the workspace, read-only and always
+  current, so the agent runs `cat /SKILL.md`.
+
+## What SKILL.md says about each CLI
+
+- **Usage**: the CLI's top-level `--help`: its groups, options and operands,
+  from the same spec its parser uses.
+- **Denied subcommands**: when the profile allows only part of a CLI, the
+  help pages down to what it allows, listing only the subcommands that lead
+  there.
+- **Own argument parsing**: a script CLI with no spec shows only its
+  registered description.
+
+Mount commands such as `ls` and `grep` are in VFS.md, not here.

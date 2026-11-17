@@ -1,0 +1,34 @@
+---
+title: Runtimes
+sidebarTitle: Overview
+icon: microchip
+description: The interpreters the TypeScript SDK runs inside Mirage, and how they differ from the Python SDK's.
+---
+
+A runtime is the interpreter that runs `python3` and `node` on the
+`in_process` machine, where a line runs inside the Mirage process and there is
+no installed interpreter to call. On a host, container or sandbox, the
+`python3` installed there runs instead. [Runtimes](/home/setup/runtime/overview)
+explains the split; each page here has the TypeScript install and a runnable
+example.
+
+| Runtime | Runs | |
+| --- | --- | --- |
+| <img noZoom src="/images/pydantic-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Monty](/typescript/runtime/monty) | Python | |
+| <Icon icon="python" size={14} /> [Pyodide](/typescript/runtime/pyodide) | Python, with packages, in a worker | TypeScript SDK only |
+| <Icon icon="js" size={14} /> [QuickJS](/typescript/runtime/quickjs) | JavaScript | |
+
+Runtime output uses the normal `Workspace.shell()` result: `stdout` and
+`stderr` are `Uint8Array`; `stdoutText` and `stderrText` decode them.
+
+## Differences from the Python SDK
+
+- **Monty:** each run executes in a crash-isolated worker, from one pool of
+  four that every workspace in the process shares. `os.chdir()`
+  raises `RuntimeError`; use `cd` in the shell or the run's `ctx.cwd`. `os.stat()`
+  has only the named fields (`st.st_size`).
+- **QuickJS:** a `std` and `os` shim with the calls the
+  [QuickJS](/home/setup/runtime/quickjs) table lists. A write shows to other
+  commands once the file is flushed or closed, or the run ends. A timeout stops the run, and the engine
+  caps a run at 64 MiB of memory and 1 MiB of stack.
+- **Pyodide** is in the TypeScript SDK only; WASI is in the Python SDK only.

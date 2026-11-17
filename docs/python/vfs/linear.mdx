@@ -120,7 +120,7 @@ Linear answers this command through its own API, so fewer files are read. See
   is read when the word is a key of the issue JSON (`title`, `priority`) or a
   JSON literal, has a digit or only the letters a to f, or when a search
   fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's
-  `"@all"` [command limit](/home/core/output-limits) reads every file instead.
+  `"@all"` [command limit](/home/limits#command-output) reads every file instead.
 - `grep -r` and `rg` on members, projects, cycles and documents: the listing
   keeps their whole JSON, so only the files whose text holds the pattern's
   text in any case are read, whatever `walk_limit` is. Issues are listed once

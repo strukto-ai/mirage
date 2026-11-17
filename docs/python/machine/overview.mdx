@@ -1,0 +1,68 @@
+---
+title: Machines
+sidebarTitle: Overview
+icon: server
+description: Declare machines in Python, change them on a live workspace, and start programs from code.
+---
+
+[Machines](/home/setup/machine/overview) explains routing, captures and each
+provider. This page covers what is particular to the Python SDK; each
+machine's page has its install and a runnable example.
+
+## Declare machines
+
+`Workspace(machines={...})` takes machine entries, runtime objects and
+machine handles by name. The first machine whose `captures` names a program
+runs it:
+
+```python
+from mirage import MountMode, RAMVFS, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "py": {"provider": "in_process", "runtime": "monty"},
+        "box": {"provider": "docker", "container": "my-sandbox"},
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```
+
+## Change them on a live workspace
+
+On a live workspace, `add_machine` adds a runtime's
+machine, `remove_machine` takes one out, and
+`engines()` lists them. A machine provider's machine, such as docker, is
+declared when the workspace is built:
+
+```python
+from mirage.runtime.python import WasiRuntime
+
+await ws.remove_machine("monty")
+ws.add_machine("py", WasiRuntime(config={"home": "/opt/cpython-wasi"}))
+```
+
+`python3` moves to the new machine at once. A running line finishes before
+its removed runtime closes, a removed instance cannot be added again, and
+`workspace` cannot be removed. `register_runtime(name, cls)` makes your own
+runtime class available by name in YAML.
+
+## Child processes
+
+A host application starts a program through the same admitted entry point
+as the shell.
+
+```python
+from mirage.execution.process.types import SpawnRequest
+
+child = ws.spawn(SpawnRequest(("cat",)))
+result = await child.communicate(b"hello\n")
+```
+
+## Python SDK notes
+
+- **Local:** with neither `home` nor `MIRAGE_LOCAL_HOME`, `python3` is the
+  interpreter running Mirage.
+- **Machines:** `mount_type: ssh` needs `pip install 'mirage-ai[ssh]'` on
+  the host. The `ssh` machine matches `host` against `~/.ssh/config`.

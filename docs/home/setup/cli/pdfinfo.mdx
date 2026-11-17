@@ -1,10 +1,17 @@
 ---
 title: pdfinfo
 icon: file-pdf
-description: Set up the credential-free pdfinfo CLI for PDF files with Python or TypeScript.
+description: Set up the credential-free pdfinfo CLI for PDF files.
 ---
 
 import License from '/snippets/cli/license/pdfinfo.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Mirage implements [poppler](https://poppler.freedesktop.org)'s `pdfinfo`:
 a PDF's metadata, page count, page sizes, encryption and PDF version, with
@@ -13,9 +20,15 @@ poppler's messages and exit codes.
 `pdfinfo` needs no account config and reads PDF files through existing mounts.
 Register it on `ws`.
 
-Commands: [Python](/python/cli/pdfinfo) · [TypeScript](/typescript/cli/pdfinfo).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      pdfinfo:
+        cli: pdfinfo
+        machine: in_process
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.pdf import PDFINFO
@@ -31,5 +44,16 @@ Commands: [Python](/python/cli/pdfinfo) · [TypeScript](/typescript/cli/pdfinfo)
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/pdfinfo">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/pdfinfo">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

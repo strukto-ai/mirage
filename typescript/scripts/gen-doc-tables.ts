@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { cliSpecFor, knownCliNames } from '@struktoai/mirage-core/commands/cli/specs'
 import { INTRO } from '@struktoai/mirage-core/workspace/documentation/constants'
 import { MountMode, Workspace, buildVfs, knownVfsNames } from '@struktoai/mirage-node'
 
@@ -80,6 +81,25 @@ const SAMPLES: Record<string, Record<string, string | string[]>> = {
 // GitHubVFS.create reads the repository it mounts, so a GitHub mount has
 // no document without the network.
 const ONLINE = new Set(['github'])
+// A config each account CLI installs with. Nothing is reached: installing a
+// CLI opens no connection.
+const CLI_SAMPLES: Record<string, Record<string, string>> = {
+  airtable: { token: 'token' },
+  discord: { token: 'token' },
+  gh: { token: 'token' },
+  gws: { clientId: 'id', clientSecret: 'secret', refreshToken: 'token' },
+  hf: { token: 'token' },
+  himalaya: {
+    imapHost: 'imap.example.com',
+    smtpHost: 'smtp.example.com',
+    username: 'agent@example.com',
+    password: 'password',
+  },
+  linear: { apiKey: 'key' },
+  ntn: { apiKey: 'key' },
+  slack: { token: 'token' },
+  trello: { apiKey: 'key', apiToken: 'token' },
+}
 
 // Which feature needs each optional peer. Every optional peer of core and
 // node must appear exactly once; the generator refuses a peer missing here
@@ -486,6 +506,23 @@ async function documents(): Promise<Map<string, Renderer>> {
   return out
 }
 
+// The SKILL.md a workspace with only one bundled CLI installed answers, by
+// CLI name.
+async function skills(): Promise<Map<string, Renderer>> {
+  const out = new Map<string, Renderer>()
+  for (const name of knownCliNames()) {
+    const ws = new Workspace({})
+    ws.registerCli(name, cliSpecFor(name), CLI_SAMPLES[name] ?? null)
+    try {
+      const body = tabs((await ws.skillMd()).replace(/\n+$/, ''))
+      out.set(name, (omit) => ({ body, bare: [], unknown: [...omit] }))
+    } finally {
+      await ws.close()
+    }
+  }
+  return out
+}
+
 // One VFS's document, its trailing newline dropped.
 async function vfsMd(name: string, fields: Record<string, { required: boolean }>): Promise<string> {
   const config =
@@ -699,7 +736,11 @@ async function main(): Promise<void> {
     return
   }
   const check = process.argv.includes('--check')
-  const kinds = new Map([...renderers(), ['vfs-md', await documents()]])
+  const kinds = new Map([
+    ...renderers(),
+    ['vfs-md', await documents()],
+    ['skill-md', await skills()],
+  ])
   const seen = new Set<string>()
   const errors: string[] = []
   const stale: string[] = []

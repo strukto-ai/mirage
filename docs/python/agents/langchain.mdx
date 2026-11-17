@@ -1,10 +1,10 @@
 ---
 title: LangChain (Deep Agents)
-description: Back Deep Agents with a Mirage workspace via LangchainWorkspace.
+description: Back a Deep Agents agent with a Mirage workspace through LangchainWorkspace.
 icon: /images/langchain-logo.svg
 ---
 
-[Deep Agents](https://github.com/langchain-ai/deepagents) is LangChain's framework for long-horizon coding agents. It accepts a pluggable `backend` for filesystem and shell operations, and Mirage ships one.
+[Deep Agents](https://docs.langchain.com/oss/python/deepagents/overview) is LangChain's harness for long-running agents. It takes a pluggable `backend` for its file and shell tools. Mirage ships `LangchainWorkspace`, a backend over a `Workspace`, so every file the agent touches and every command it runs stays in the workspace's mounts.
 
 ## Install
 
@@ -12,7 +12,7 @@ icon: /images/langchain-logo.svg
 uv add 'mirage-ai[deepagents]' langchain-anthropic
 ```
 
-Bring your own LangChain chat model, such as `langchain-anthropic` or `langchain-openai`.
+Add the LangChain integration package for the chat model in use, such as `langchain-anthropic` or `langchain-openai`.
 
 ## Usage
 
@@ -20,22 +20,20 @@ Bring your own LangChain chat model, such as `langchain-anthropic` or `langchain
 import asyncio
 
 from deepagents import create_deep_agent
-from langchain_anthropic import ChatAnthropic
 
-from mirage import MountMode, Workspace
+from mirage import MountMode, RAMVFS, Workspace
 from mirage.agents.langchain import (
     LangchainWorkspace,
     build_system_prompt,
     extract_text,
 )
-from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 async def main() -> None:
     agent = create_deep_agent(
-        model=ChatAnthropic(model="claude-sonnet-4-20250514"),
+        model="anthropic:claude-sonnet-5-5",
         system_prompt=await build_system_prompt(
             mount_info={"/": "In-memory filesystem (read/write)"},
         ),
@@ -46,14 +44,17 @@ async def main() -> None:
     })
     for text in extract_text(result["messages"][-1:]):
         print(text)
+    await ws.close()
 
 
 asyncio.run(main())
 ```
 
-## Multimodal files
+## Tools
 
-`read_file` can pass images, PDFs, audio, video, PPT, and PPTX files from a Mirage mount to a model as multimodal content. The selected model and provider must support the corresponding input type. Text files continue to use line-based pagination.
+The agent keeps Deep Agents' own file tools, run in Mirage: `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep`. `LangchainWorkspace` is a sandbox backend, so the agent also gets `execute`, which runs a command line in Mirage's shell. Every call acts as the session (`session_id`, default the workspace's own), so its profile and the mount modes judge it.
+
+`read_file` passes images, PDFs, audio, video and PowerPoint files to the model as multimodal content, when the model supports that input. Text files keep line-based pagination.
 
 ## Exports
 
@@ -68,7 +69,7 @@ asyncio.run(main())
 
 ## Examples
 
-- [`examples/python/agents/langchain/ram_pdf_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/ram_pdf_deepagent.py), RAM-backed PDF reading with no external storage credentials.
-- [`examples/python/agents/langchain/ram_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/ram_deepagent.py), RAM-only sandbox.
+- [`examples/python/agents/langchain/ram_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/ram_deepagent.py), a RAM-only workspace.
+- [`examples/python/agents/langchain/ram_pdf_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/ram_pdf_deepagent.py), PDF reading from a RAM workspace, with no storage credentials.
 - [`examples/python/agents/langchain/s3_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/s3_deepagent.py), read-only S3 exploration.
-- [`examples/python/agents/langchain/databricks_volume_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/databricks_volume_deepagent.py), Databricks volume exploration with an explicit workspace host and access token.
+- [`examples/python/agents/langchain/databricks_volume_deepagent.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/langchain/databricks_volume_deepagent.py), a Databricks volume, with an explicit workspace host and access token.

@@ -1,19 +1,34 @@
 ---
 title: Linear
 icon: /images/linear-logo.svg
-description: Set up the Linear CLI with Python or TypeScript.
+description: Set up the Linear CLI.
 ---
 
 import License from '/snippets/cli/license/linear.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Mirage's Linear commands draw partly on [schpet/linear-cli](https://github.com/schpet/linear-cli); the references below define the supported grammar.
 
 Create an API key in [Linear setup](/home/setup/linear), then register it on an
 existing `ws`.
 
-Commands: [Python](/python/cli/linear) · [TypeScript](/typescript/cli/linear).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      linear:
+        cli: linear
+        machine: in_process
+        config:
+          api_key: ${LINEAR_API_KEY}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.linear import LINEAR
@@ -32,5 +47,16 @@ Commands: [Python](/python/cli/linear) · [TypeScript](/typescript/cli/linear).
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/linear">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/linear">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

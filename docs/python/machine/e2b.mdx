@@ -1,0 +1,56 @@
+---
+title: E2B
+icon: /images/e2b-logo.svg
+description: Run captured programs in an E2B cloud sandbox.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [E2B](/home/setup/machine/e2b), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[e2b,ssh]'
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "box": {
+            "provider": "e2b",
+            "sandbox_id": "sandbox-id",
+            "mount_type": "ssh",
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```
+
+## Connecting the workspace
+
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
+each file call is about 150 ms for a small file from a laptop. With `fuse`,
+base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
+and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
+
+### A template for ssh
+
+Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
+
+```python
+from e2b import AsyncSandbox, Template
+
+Template.build(Template().from_base_image().apt_install("sshfs"), "mirage-sshfs")
+sandbox = await AsyncSandbox.create("mirage-sshfs", timeout=3600)
+print(sandbox.sandbox_id)
+```

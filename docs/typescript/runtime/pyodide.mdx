@@ -1,42 +1,65 @@
 ---
-title: Runtimes
-sidebarTitle: TypeScript SDK
-description: What only the TypeScript SDK has for runtimes, Pyodide details, browsers, managing runtimes in code, and child processes.
+title: Pyodide
 icon: python
+description: Run Python and packages such as numpy in the TypeScript SDK, in Node and browsers.
 ---
 
-Setup and behavior of every runtime are on the
-[Runtimes](/home/setup/runtime/overview) pages. This page covers what is
-specific to the TypeScript SDK.
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [Pyodide](/home/setup/runtime/pyodide), shared by both SDKs.
 
-## Differences from the Python SDK
+## Usage
 
-- **Monty:** each run executes in a crash-isolated worker, from one pool of
-  four that every workspace in the process shares. `os.chdir()`
-  raises `RuntimeError`; use `cd` in the shell or the run's `ctx.cwd`. `os.stat()`
-  has only the named fields (`st.st_size`).
-- **QuickJS:** a `std` and `os` shim with the calls the
-  [QuickJS](/home/setup/runtime/quickjs) table lists. A write shows to other
-  commands once the file is flushed or closed, or the run ends. A timeout stops the run, and the engine
-  caps a run at 64 MiB of memory and 1 MiB of stack.
-- **Local:** in `@struktoai/mirage-node` only. With neither `home` nor
-  `MIRAGE_LOCAL_HOME`, `python3` is the one on `PATH`.
-- **Machines:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.
-  `mountType` `ssh` and `both` need the `ssh2` package; a browser serves no
-  files into a machine. The `ssh`
-  machine authenticates through `SSH_AUTH_SOCK` when there is no
-  `identityFile`, and `username` defaults to the local user.
-- **Config objects** are camelCase in code (`sandboxId`, `mountType`); YAML
-  spells the same keys in snake_case.
-- **Pyodide** is in the TypeScript SDK only; WASI is in the Python SDK only.
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-Runtime output uses the normal `Workspace.shell()` result: `stdout` and
-`stderr` are `Uint8Array`; use `stdoutText` and `stderrText` when you want
-decoded strings.
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } },
+)
+try {
+  const inline = await ws.shell("python3 -c 'print(1 + 1)'")
+  console.log(inline.stdoutText) // 2
 
-## Pyodide
+  await ws.shell(`echo 'import sys; print(sys.argv[1:])' > /data/hello.py`)
+  const script = await ws.shell('python3 /data/hello.py alice bob')
+  console.log(script.stdoutText) // ['alice', 'bob']
 
-### Scripts and flags
+  const piped = await ws.shell("echo 'print(1 + 1)' | python3")
+  console.log(piped.stdoutText) // 2
+} finally {
+  await ws.close()
+}
+```
+
+## Packages
+
+[Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html),
+such as numpy, load when a program imports them. The first import downloads
+the package from the Pyodide CDN; Node keeps it beside the installed
+`pyodide` package for later runs.
+
+| Config key | What it does |
+| --- | --- |
+| `packages` | Load these when each interpreter starts, before the program runs. |
+| `auto_load_from_imports` | Load what a program imports. Default `true`; `false` loads only `packages`. |
+| `deny_packages` | Never download these for an import. An import still works when the package is reachable another way, such as through `sys_path`. |
+| `sys_path` | Mount paths to put first on `sys.path`: directories, globs, or pure-Python `.whl` files. |
+| `package_base_url` | Where packages download from; point it at a local copy to work offline. |
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
+
+const runtime = new PyodideRuntime({
+  config: {
+    packages: ['numpy'],
+    denyPackages: ['requests'],
+    sysPath: ['/data/vendor', '/data/wheels/*.whl'],
+  },
+})
+const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: runtime } })
+```
+
+## Scripts and flags
 
 - Each command and one-shot evaluation starts a fresh interpreter, so imports
   do not carry over; files on the mounts do. A console session keeps its own
@@ -54,7 +77,7 @@ decoded strings.
 - Standard streams support text and `.buffer` I/O, but do not expose native
   OS file descriptors.
 
-### Files
+## Files
 
 - Native packages such as PIL and NumPy reach the same mounts as `open()`.
 - A file is fetched on first access and cached for the run; edits made
@@ -71,7 +94,7 @@ decoded strings.
 - Mount files under a prefix such as `/data`: a mount at `/` cannot replace
   Pyodide's own filesystem, which holds its standard library.
 
-### Worker and browser setup
+## Worker and browser setup
 
 Pyodide runs in a worker, which Node needs no setup for. In a browser, the
 page needs one of two things:
@@ -112,7 +135,7 @@ Content-Security-Policy needs `blob:` in `worker-src`, and
 `https://cdn.jsdelivr.net` in `script-src` and `connect-src` while Pyodide
 loads from the CDN.
 
-### Concurrency and timeouts
+## Concurrency and timeouts
 
 - `max_concurrency` (default 1) bounds active top-level commands, one-shot
   evaluations and inputs to distinct consoles; extra calls wait. Calls in one
@@ -125,7 +148,7 @@ loads from the CDN.
   stopped instead, and a standalone run on the main thread blocks the event
   loop until it ends.
 
-### Sockets
+## Sockets
 
 `connect` and `sendto` raise `ENETUNREACH`, and `listen`, a UDP `bind` and
 `socket.socketpair()` raise `ENETDOWN`, so `urllib.request.urlopen` fails
@@ -133,7 +156,7 @@ fast. Compare against `errno.ENETUNREACH`, not a number: the values are
 Emscripten's. `socket.socket()`, a TCP `bind` and name lookups still answer.
 An `init_module` that calls `useNodeSockFS()` installs real sockets.
 
-### Containment
+## Containment
 
 Guest Python can run JavaScript in its worker through Pyodide. On Node with
 `module.registerHooks`, Mirage hardens the worker after interpreter setup
@@ -168,7 +191,7 @@ JavaScript safe: Pyodide exposes mutable interpreter internals, and a worker
 thread shares the host process. For hostile code, use a
 [machine](/home/setup/machine/overview) with a process and kernel boundary.
 
-### Child processes
+## Child processes
 
 `subprocess` runs Mirage commands:
 
@@ -192,7 +215,7 @@ print(result.stdout)
   `preexec_fn`, `asyncio.create_subprocess_exec` and signal handlers. An
   unsupported option fails with an error.
 
-### Configuration
+## Configuration
 
 The package keys are on the [Pyodide](/home/setup/runtime/pyodide#packages)
 page. The others:
@@ -209,54 +232,3 @@ page. The others:
 the worker. It has host privileges, so keep it in deployment config:
 `POST /v1/workspaces` rejects it, and setting it gives the runtime host
 access. Only an in-process shutdown calls its cleanup.
-
-## E2B in browsers
-
-Import the E2B machine from core (`pnpm add @struktoai/mirage-core`), which
-also registers the `e2b` provider for `machines:`, and pass `apiKey`:
-
-```ts
-import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-```
-
-Keep account keys out of shared frontend bundles; have your backend
-authenticate the app. `mountType` `ssh` and `both` need Node, so a browser
-uses `fuse` or none.
-
-## Managing runtimes in code
-
-`new Workspace(mounts, { machines: {...} })` takes machine entries, runtime
-objects and machine handles by name. On a live workspace, `addMachine` adds
-a runtime's machine, `removeMachine` takes one
-out, and `engines()` lists them. A machine provider's machine, such as
-docker, is declared when the workspace is built:
-
-```ts
-await ws.removeMachine('monty')
-ws.addMachine('py', { provider: 'in_process', runtime: 'pyodide' })
-```
-
-`python3` moves to the new machine at once. A running line finishes before
-its removed runtime closes, a removed instance cannot be added again, and
-`workspace` cannot be removed. `registerRuntime(name, cls)` makes your own
-runtime class available by name in YAML. The `@external` capture is also
-exported as `EXTERNAL_COMMANDS`.
-
-A machine subclass that overrides `loadSdk()` imports the SDK type from the
-provider's `sdk` module. The E2B one needs `pnpm add @struktoai/mirage-core`:
-
-```ts
-import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
-import type { DaytonaSdk } from '@struktoai/mirage-node/machine/daytona/sdk'
-import type { Ssh2Sdk } from '@struktoai/mirage-node/machine/ssh/sdk'
-```
-
-## Child processes
-
-A host application starts a program through the same admitted entry point
-as the shell.
-
-```ts
-const child = ws.spawn({ argv: ['cat'] })
-const result = await child.communicate(new TextEncoder().encode('hello\n'))
-```

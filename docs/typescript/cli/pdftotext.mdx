@@ -26,6 +26,84 @@ ws.registerCli('pdftotext', PDFTOTEXT)
 
 For YAML registration, see the [CLI overview](/typescript/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `pdftotext` installed.
+
+{/* generated: skill-md pdftotext start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`pdftotext`**
+
+    ```text
+    usage: pdftotext [-f int] [-l int] [-layout] [-raw] [-nodiag] [-enc string] [-eol string] [-nopgbrk] [-opw string] [-upw string] [-q] [-h] [PDF-file [text-file] ...]
+
+    Write the text of a PDF file to a text file, or to standard output when the text file is '-'. Pages end in a form feed.
+
+    positional arguments:
+      PDF-file [text-file]  The PDF file, '-' for standard input; then the text file
+
+    options:
+      -f int                 First page to read (default: 1)
+      -l int                 Last page to read (default: the last)
+      -layout                Keep each page's columns and spacing
+      -raw                   Keep text in the order the page draws it
+      -nodiag                Leave out text set at a slant
+      -enc string            Encoding of the text written; UTF-8 is the one served
+      -eol string            Line ending to write: unix, dos or mac
+      -nopgbrk               Write no form feed after each page
+      -opw string            Owner password of an encrypted file
+      -upw string            User password of an encrypted file
+      -q                     Print no messages and no errors
+      -h, -help, --help, -?  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `pdftotext`
+
+    ```text
+    usage: pdftotext [-f int] [-l int] [-layout] [-raw] [-nodiag] [-enc string] [-eol string] [-nopgbrk] [-opw string] [-upw string] [-q] [-h] [PDF-file [text-file] ...]
+
+    Write the text of a PDF file to a text file, or to standard output when the text file is '-'. Pages end in a form feed.
+
+    positional arguments:
+      PDF-file [text-file]  The PDF file, '-' for standard input; then the text file
+
+    options:
+      -f int                 First page to read (default: 1)
+      -l int                 Last page to read (default: the last)
+      -layout                Keep each page's columns and spacing
+      -raw                   Keep text in the order the page draws it
+      -nodiag                Leave out text set at a slant
+      -enc string            Encoding of the text written; UTF-8 is the one served
+      -eol string            Line ending to write: unix, dos or mac
+      -nopgbrk               Write no form feed after each page
+      -opw string            Owner password of an encrypted file
+      -upw string            User password of an encrypted file
+      -q                     Print no messages and no errors
+      -h, -help, --help, -?  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md pdftotext end */}
+
 <Reference />
 
 <License />

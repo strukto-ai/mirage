@@ -141,7 +141,7 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | Where | Reaches the workspace through | Outside the workspace |
 | --- | --- | --- |
 | Monty, WASI, QuickJS | directly | no host files or network |
-| Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
+| Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/pyodide#containment). |
 | `host` | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under a `sandbox`, only the paths you grant |
 | A provider | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `cloudflare_container`, `ssh`, `kubernetes`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
 
@@ -353,7 +353,7 @@ Swap:             0B          0B          0B                                    
 ```
 
 The workspace reports one processor, little-endian byte order and, in `free`,
-its [`max_memory`](/home/core/output-limits) with what it holds of that. It
+its [`max_memory`](/home/limits#command-output) with what it holds of that. It
 prints `-` for everything else, so nothing about the server Mirage runs on shows. `lscpu` leaves the flags and
 vulnerability rows out of its table; `lscpu --machine cloud` prints that
 machine's full output, and any other option goes to the default machine's own

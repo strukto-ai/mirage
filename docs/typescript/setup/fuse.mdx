@@ -1,222 +1,149 @@
 ---
 title: FUSE
 icon: hard-drive
-description: Set up FUSE support for MIRAGE with the TypeScript SDK.
+description: Expose a Node workspace's mounts as real folders through FUSE, FSKit or NFS.
 ---
 
-## Prerequisites
+A mount with a kernel `backend` also shows as a folder on the machine running
+Mirage, so editors, `git` and any other program read and write it like a local
+folder. The [FUSE overview](/home/setup/fuse) lists what each OS supports.
+FUSE runs on Linux and macOS from Node; a browser or a Worker cannot mount a
+folder.
 
-- Node.js 22.20+ (22.x), 24.12+ (24.x), or 25+
-- [pnpm](https://pnpm.io/) (recommended, `npm` and `yarn` also work, but the FUSE binding's install script needs extra configuration with pnpm).
+## Install
 
-## System FUSE
+<Steps>
+  <Step title="Install FUSE for the OS">
+    Follow the [Linux](/home/setup/linux) or [macOS](/home/setup/macos) guide.
+  </Step>
+  <Step title="Add the binding">
+    ```bash
+    pnpm add @struktoai/mirage-node @zkochan/fuse-native
+    ```
 
-Install the OS-level FUSE kernel support first (see the
-[support matrix](/home/setup/fuse) for the full OS overview):
+    [`@zkochan/fuse-native`](https://www.npmjs.com/package/@zkochan/fuse-native)
+    is an optional peer that compiles native code on install. Allow pnpm to
+    build it, in `pnpm-workspace.yaml`:
 
-- [macOS FUSE Setup](/home/setup/macos), macFUSE + kernel extension + Apple Silicon recovery mode steps.
-- [Linux FUSE Setup](/home/setup/linux), `fuse3` install and `/etc/fuse.conf`.
+    ```yaml pnpm-workspace.yaml
+    onlyBuiltDependencies:
+      - '@zkochan/fuse-native'
+    ```
 
-<Note>
-  **No Windows support in TypeScript.** `@zkochan/fuse-native` targets macOS
-  and Linux only; its legacy Windows path builds against the unmaintained
-  Dokany-based `fuse-shared-library-win32`, not WinFsp. Python's FUSE mounts
-  run on Windows experimentally, see [Windows FUSE Setup](/home/setup/windows).
-</Note>
-
-## Install the Node Binding
-
-The Node package (`@struktoai/mirage-node`) ships FUSE support via an **optional peer dependency** on [`@zkochan/fuse-native`](https://www.npmjs.com/package/@zkochan/fuse-native), the pnpm author's actively-maintained fork that supports both macOS and Linux (thanks to [@zkochan](https://github.com/fuse-friends/fuse-native/issues/36#issuecomment-3089754579)).
-
-```bash
-pnpm add @struktoai/mirage-node @zkochan/fuse-native
-```
-
-<Tip>
-  Non-FUSE users don't need `@zkochan/fuse-native`, the base `@struktoai/mirage-node` package works without it. Only install the binding when you want a real mountpoint.
-</Tip>
-
-### Allow pnpm to run the install script
-
-`@zkochan/fuse-native` compiles native code on install. pnpm blocks install scripts by default, allow this one explicitly in `pnpm-workspace.yaml`:
-
-```yaml
-onlyBuiltDependencies:
-  - '@zkochan/fuse-native'
-```
-
-Or, if you're not using a pnpm workspace, in `package.json`:
-
-```json
-{
-  "pnpm": {
-    "onlyBuiltDependencies": ["@zkochan/fuse-native"]
-  }
-}
-```
-
-## macFUSE 4 symlink workaround
-
-<Tabs>
-  <Tab title="macOS">
-    macFUSE 4 ships `libfuse.2.dylib` instead of the legacy `libosxfuse.2.dylib` that `@zkochan/fuse-native` links against when it builds; the built `fuse.node` then loads `/usr/local/lib/libfuse.2.dylib`. Create a one-time symlink before the build:
+    Outside a pnpm workspace, put the same list under `"pnpm"` in
+    `package.json`.
+  </Step>
+  <Step title="On macOS with macFUSE 4, link the library">
+    macFUSE 4 ships `libfuse.2.dylib`, and the binding links the older name.
+    Link it once, then rebuild:
 
     ```bash
     sudo ln -sf /usr/local/lib/libfuse.2.dylib /usr/local/lib/libosxfuse.2.dylib
     pnpm rebuild @zkochan/fuse-native
     ```
-  </Tab>
-  <Tab title="Linux">
-    No workaround needed on Linux, `@zkochan/fuse-native` links against `libfuse3` directly.
-  </Tab>
-</Tabs>
+  </Step>
+</Steps>
 
-## Verify
+## Mount a folder
 
 ```ts
+import { readdir, writeFile } from 'node:fs/promises'
 import { Mount, MountBackend, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
   '/data': new Mount(new RAMVFS(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
 })
 await ws.fuseReady()
-
-await ws.shell('echo hello | tee /data/x.txt')
-console.log('mountpoints:', ws.fuseMountpoints)
-
-// Any tool (ls, cat, external subprocess) can now see x.txt under the mountpoint.
-await ws.close() // auto-unmounts
+const folder = ws.fuseMountpoints['/data']
+await writeFile(`${folder}/hello.txt`, 'hello\n')
+console.log(await readdir(folder)) // [ 'hello.txt' ]
+await ws.close()
 ```
 
-If `ws.fuseMountpoints` prints a `mirage-fuse-XXXXXX` path under `os.tmpdir()` and no error is thrown, the binding is wired up correctly.
+- Mounting is async: `await ws.fuseReady()` resolves once every folder is
+  live, and rejects if one fails. `ws.close()` unmounts.
+- `ws.fuseMountpoints` maps each prefix to its folder, a fresh
+  `mirage-fuse-*` directory under the OS temp folder unless the mount sets
+  `mountpoint`.
+- The folder follows the mount's mode: a `read` mount cannot be written.
 
-Mounts are async, so `await ws.fuseReady()` once after constructing the workspace; it resolves when every kernel mount is live (and rejects if one fails to mount). Until then `ws.fuseMountpoints` may be empty. (In Python, where mounts are synchronous, the constructor blocks until ready instead.)
+<Warning>
+  The folder is served on the mounting process's event loop. A synchronous
+  call on it from that process, such as `readFileSync`, `statSync` or
+  `execFileSync('cat', ...)`, waits on a call only that loop can answer and
+  hangs the mount. Use the async `fs` API and async child processes, or own
+  the mount from a child process (`examples/typescript/fuse/helper.ts`).
+  Other processes are unaffected.
+</Warning>
 
-The folder is served on Node's event loop. Never block it on the folder: a synchronous `fs` call there, or a child process spawned with `cwd` inside it, waits on a call only that loop can answer. Use the async `fs` API, or pass the folder's paths as arguments to the child.
+## Backends
 
-## Per-mount backends
+Each mount picks its own `backend`:
 
-How a mount is exposed is configured **per mount**, through one `backend`
-field:
-
-| `backend` | Effect |
-| --- | --- |
-| `workspace` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
-| `fuse` | Also exposed as a real mountpoint via FUSE. |
-| `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
-| `nfs` | Also exposed as a real mountpoint through the operating system's NFS client: mirage serves NFSv3 on a local port and runs the system `mount`, so no FUSE install is needed. Linux and macOS; Linux needs root to mount. Read-only. A mount that does not set `sizesAlwaysKnown` still mounts, with a warning, but its size-unknown files read as empty; use `fuse` for it. |
-
-A kernel-backed mount shows only that mount's subtree. `mountpoint` pins
-where it lands; omit it for a fresh temp directory:
+| `backend` | The mount is | Runs on |
+| --- | --- | --- |
+| `workspace` (default) | only inside Mirage | everywhere |
+| `fuse` | also a folder, through FUSE | Linux, macOS |
+| `fskit` | also a folder, through FSKit with no kernel extension; read-mostly | macOS 15.4+ |
+| `nfs` | also a folder, read-only, through the OS's NFS client and no FUSE install | Linux (as root) and macOS |
 
 ```yaml
-mode: WRITE
 mounts:
   /data:
     vfs: ram
+    mode: write
     backend: fuse
-    mountpoint: /tmp/data-repo   # explicit path
+    mountpoint: /tmp/data   # omit for a temp directory
   /s3:
     vfs: s3
-    backend: fuse                # temp directory
+    backend: nfs
+  /logs:
+    vfs: disk               # no backend: stays inside Mirage
 ```
 
-Programmatically, set `backend` per mount: `{ '/data': new Mount(dataVfs, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Vfs, { backend: MountBackend.FUSE }) }`.
-`ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
+<Warning>
+  macOS allows one FUSE mount per process: a second one fails. Put a kernel
+  backend on one mount, or run the others in separate processes.
+</Warning>
 
-## Mounting without the kernel extension (FSKit)
+## Behavior
 
-Apple has deprecated third-party kernel extensions; FSKit (macOS 15.4+) is
-the supported userspace replacement, and macFUSE 5.x serves the same libfuse
-API through it. This works from TypeScript: `fuse.node` links
-`/usr/local/lib/libfuse.2.dylib` by absolute path, so `backend: 'fskit'`
-reaches the same macFUSE 5.x libfuse the Python package uses, keeping real
-mounts working on Macs where the kext is blocked. Only the
-kernel-to-userspace hop changes:
+- **Files of unknown size.** Slack, Linear, Trello and other API-backed
+  mounts cannot size a file without fetching it, so it stats as 0 bytes until
+  something opens it, like a `/proc` file. `cat`, `grep`, `cp` and `wc -c`
+  read it in full. `ls -l`, `du` and `find -size` show 0 until it is opened,
+  and `tar` or `rsync` copy it empty. Mirage never fetches content during
+  `stat`, which would cost one API call per file on every `ls -l`.
+- **Symlinks.** Links made with `ln -s`, in the Mirage Shell or in the
+  folder, show as real symlinks and resolve inside the folder.
+- **Permissions.** The mode bits `chmod` and `chown` set are for display.
+  Mount modes and policy decide access, never the kernel.
+- **Extended attributes.** `getfattr` and `setfattr` in the folder read and
+  write the same attributes as the Mirage Shell, on every VFS.
 
-```mermaid
-flowchart LR
-    A[cat /Volumes/.../file] --> K[kernel VFS]
-    K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
-    K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
-    L --> M[MirageFS] --> R[vfs]
-```
+## FSKit on macOS
+
+With macFUSE 5 on macOS 15.4+, `backend: 'fskit'` serves the folder through
+FSKit instead of the kernel extension, which Apple is phasing out:
 
 ```ts
 import { Mount, MountBackend, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-const dataVfs = new RAMVFS()
-const ws = new Workspace({
-  '/data': new Mount(dataVfs, { backend: MountBackend.FSKIT }),
-})
+const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { backend: MountBackend.FSKIT }) })
 await ws.fuseReady()
-ws.fuseMountpoints['/data'] // => /Volumes/mirage-<id>, tagged fskit
+console.log(ws.fuseMountpoints['/data']) // /Volumes/mirage-...
 ```
 
-The same rules as Python apply, checked at mount time: macOS-only, the
-mountpoint must be under `/Volumes` (named by mirage, created by the
-system), and every mounted VFS should report exact sizes
-(`sizesAlwaysKnown`; the `checkSizes` guard warns about anything else by
-name, and those files read as empty).
-
-**TS fskit mounts are read-mostly**, twice over. The shim's data-write
-zeroing (see
-[the Python page](/python/setup/fuse#mounting-without-the-kernel-extension-fskit))
-applies to both languages, and `checkWrites` warns at mount time on
-writable fskit mounts. On top of that, TypeScript cannot create new names:
-`create`, `mkdir` and `rename` return ENOSYS (and a failed create can
-still apply). The shim finalizes new items through macFUSE's Darwin-only
-`setattr_x`/`renamex` callbacks, which Python installs at runtime
-(`mirage/fuse/darwin.py`) but `@zkochan/fuse-native`'s compiled op table
-cannot gain from JavaScript.
+The rules match [Python's](/python/setup/fuse#fskit-on-macos): the folder is a
+volume under `/Volumes`, every VFS on it must know its files' sizes, and
+Mirage warns at mount time about either.
 
 <Warning>
-  **A wedged FSKit mount blocks more than itself.** A TS mount is served by
-  the mounting process's event loop, and in testing an FSKit mount
-  intermittently hung on a write op even when probed from child processes.
-  A dead FSKit volume blocks `mount`-table enumeration system-wide until
-  the macFUSE FSKit extension process is killed. Prefer `backend: 'fuse'`
-  for anything long-running or write-heavy; treat `fskit` from TypeScript
-  as read-mostly and experimental. `examples/typescript/fuse/fskit.ts` is
-  the live end-to-end check.
+  From TypeScript, FSKit is read-mostly and experimental. New files can be
+  written as NUL bytes, as in Python, and on top of that `create`, `mkdir`
+  and `rename` return ENOSYS, because the binding cannot install the macOS
+  callbacks FSKit needs for new names. A hung FSKit volume can block the
+  system's mount table until the macFUSE FSKit process is killed. Use
+  `fuse` for anything long-running or written to.
+  `examples/typescript/fuse/fskit.ts` runs the end-to-end check.
 </Warning>
-
-## Size semantics for API-backed files
-
-Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
-without fetching its content, so over the FUSE mount those files behave like
-Linux `/proc` files: they stat as **0 bytes until first open** and become
-fully readable the moment anything opens them. See
-[Limitations → Size-unknown API files](/typescript/limitations#3-size-unknown-api-files-stat-as-0-bytes-until-first-open)
-for the per-tool table and the mechanics (`direct_io` + `attr_timeout=0`).
-
-<Note>
-  FUSE on Node has two runtime constraints worth knowing: `patchNodeFs` can't patch ESM `node:fs` imports, and synchronous access to your own mount from the mounting process deadlocks the event loop that serves it. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
-</Note>
-
-<Warning>
-  **macOS allows only one in-process FUSE mount.** macFUSE registers a
-  process-global signal source, so a second simultaneous mount in the same
-  process fails. Multiple per-mount FUSE mounts work on Linux; on macOS, enable
-  a kernel backend on a single mount per workspace (or run extra mounts in separate
-  processes).
-</Warning>
-
-## Symlinks and Permissions
-
-Symlinks live in Mirage's namespace, not in any backend. Links created with
-`ln -s` in the Mirage Shell (or with `ln -s` inside the mountpoint) appear as
-real symlinks over FUSE: `ls -l` shows `lrwxrwxrwx`, `readlink` prints the
-target, and reads follow the link. Absolute targets are displayed relative to
-the link's directory so they always resolve inside the mountpoint.
-
-Permission bits shown over FUSE come from Mirage's metadata (`chmod`,
-`chown`, `touch` results), and they are **display only**: access control is
-enforced by Mirage mount modes, not by the kernel. For that reason, never
-mount with the `default_permissions` FUSE option. It would make the kernel
-enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
-own files.
-
-Extended attributes over FUSE are the ones the Mirage Shell's `getfattr`
-and `setfattr` read and write. Mirage stores them in its namespace beside
-the symlinks, so every backend takes them.

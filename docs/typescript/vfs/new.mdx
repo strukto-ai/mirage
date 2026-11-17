@@ -6,7 +6,7 @@ description: Virtualize a service Mirage does not ship by writing one class.
 
 A VFS is a class that extends `BaseVFS`. Override `readdir`, `read` and
 `stat`, and `ls`, `cat`, `grep`, `find`, `head`, `wc` and the other read
-commands work on the service. [Custom VFS](/home/setup/custom-vfs) lists every
+commands work on the service. [Custom VFS](/home/setup/vfs/new) lists every
 method, with examples for a writable VFS and for grep on the service's own
 search.
 
@@ -166,7 +166,7 @@ not indexed yet, so return `null` while the indexer lags.
 functions, and which built-in VFSs answer them.
 
 A service action that is not a file, such as a JQL search or adding a
-comment to an issue, belongs in a [CLI](/typescript/cli/custom), next to the mount.
+comment to an issue, belongs in a [CLI](/typescript/cli/new), next to the mount.
 
 ## Use it in YAML
 

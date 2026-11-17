@@ -25,6 +25,72 @@ ws.registerCli('pdfinfo', PDFINFO)
 
 For YAML registration, see the [CLI overview](/typescript/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `pdfinfo` installed.
+
+{/* generated: skill-md pdfinfo start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`pdfinfo`**
+
+    ```text
+    usage: pdfinfo [-f int] [-l int] [-opw string] [-upw string] [-q] [-h] [PDF-file ...]
+
+    Print a PDF file's document information: its metadata, page count, page size and PDF version.
+
+    positional arguments:
+      PDF-file  The PDF file, '-' for standard input
+
+    options:
+      -f int                 First page whose size to list
+      -l int                 Last page whose size to list
+      -opw string            Owner password of an encrypted file
+      -upw string            User password of an encrypted file
+      -q                     Print no messages and no errors
+      -h, -help, --help, -?  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `pdfinfo`
+
+    ```text
+    usage: pdfinfo [-f int] [-l int] [-opw string] [-upw string] [-q] [-h] [PDF-file ...]
+
+    Print a PDF file's document information: its metadata, page count, page size and PDF version.
+
+    positional arguments:
+      PDF-file  The PDF file, '-' for standard input
+
+    options:
+      -f int                 First page whose size to list
+      -l int                 Last page whose size to list
+      -opw string            Owner password of an encrypted file
+      -upw string            User password of an encrypted file
+      -q                     Print no messages and no errors
+      -h, -help, --help, -?  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md pdfinfo end */}
+
 <Reference />
 
 <License />

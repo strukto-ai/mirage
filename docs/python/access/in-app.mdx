@@ -6,6 +6,31 @@ icon: cube
 
 Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
 
+```text
+Workspace  mounts, profiles, policies, the store
+└── Session  one agent: its cwd, env, history and profile
+    ├── shell   run a line
+    ├── vfs     read and write files
+    └── tools   the seven agent tools
+```
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.vfs.ram import RAMVFS
+
+async def main() -> None:
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    session = await ws.session("agent")
+    await session.vfs.write("/data/notes.txt", b"one\ntwo\n")
+    result = await session.shell("wc -l < /data/notes.txt")
+    print(result.exit_code, await result.stdout_str())
+    await ws.close()
+
+asyncio.run(main())
+```
+
 ## Workspace
 
 ```python
@@ -38,7 +63,7 @@ One virtual terminal over the backends mounted at each prefix.
   [Policies](/home/policy/overview) every line passes through.
 </ResponseField>
 <ResponseField name="on_ask" type="AskHandler">
-  Resolves an approval request (ask) while the line waits. Without a handler, asks are recorded in [`ws.decisions`](#ws-decisions).
+  Resolves an approval request (ask) while the line waits. Without a handler, asks are recorded in [`ws.decisions`](#workspace-methods).
 </ResponseField>
 <ResponseField name="workspace_id" type="str">
   The workspace's id, generated when unset.
@@ -60,170 +85,182 @@ from mirage.vfs.ram import RAMVFS
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 ```
 
-Set the per-queue capacity when creating the workspace:
+<Accordion title="Queue capacity and a shared store">
+  Set the per-queue capacity when creating the workspace:
 
-```python
-from mirage import IOConfig, Workspace
-from mirage.vfs.ram import RAMVFS
+  ```python
+  from mirage import IOConfig, Workspace
+  from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
-```
+  ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
+  ```
 
-Every process that builds the workspace on one Redis store, under the same ids, shares its sessions and background jobs:
+  Every process that builds the workspace on one Redis store, under the same ids, shares its sessions and background jobs:
 
-```python
-from mirage import MountMode, Workspace
-from mirage.vfs.ram import RAMVFS
-from mirage.workspace.store.redis import RedisWorkspaceStateStore
+  ```python
+  from mirage import MountMode, Workspace
+  from mirage.vfs.ram import RAMVFS
+  from mirage.workspace.store.redis import RedisWorkspaceStateStore
 
-store = RedisWorkspaceStateStore(url="redis://localhost:6379/0")
-ws = Workspace(
-    {"/": RAMVFS()},
-    mode=MountMode.WRITE,
-    workspace_id="agent-ws",
-    session_id="s1",
-    store=store,
-)
-```
+  store = RedisWorkspaceStateStore(url="redis://localhost:6379/0")
+  ws = Workspace(
+      {"/": RAMVFS()},
+      mode=MountMode.WRITE,
+      workspace_id="agent-ws",
+      session_id="s1",
+      store=store,
+  )
+  ```
+</Accordion>
 
-### ws.session
+## Workspace methods
 
-```python
-await ws.session(
-    session_id, mounts=None, *, profile=None, permissions=None
-) -> Session
-```
+| Method | Does |
+| --- | --- |
+| `ws.session` | Create a session, or adopt one that exists. |
+| `ws.set_profile`, `ws.set_session_profile` | Change a profile's rules, or move a session to another profile. |
+| `ws.list_sessions`, `ws.close_session` | List the sessions, or close one. |
+| `ws.cancel`, `ws.kill` | Stop running lines, or background jobs and the programs they started. |
+| `ws.snapshot`, `Workspace.load` | Save the workspace to a tar, and rebuild it from one. |
+| `ws.copy` | A deep copy of the workspace, without a tar in between. |
+| `ws.decisions` | Answer the asks waiting for a host. |
+| `ws.close` | Stop the jobs and close the mounts. |
 
-The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.create_session` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
+Expand one for its signature and an example.
 
-```python
-session = await ws.session("agent")
-```
+<AccordionGroup>
+  <Accordion title="ws.session">
+    ```python
+    await ws.session(
+        session_id, mounts=None, *, profile=None, permissions=None
+    ) -> Session
+    ```
 
-### ws.set_profile, ws.set_session_profile
+    The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.create_session` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
 
-```python
-ws.set_profile(name, profile) -> None
-await ws.set_session_profile(session_id, profile) -> SessionState
-```
+    ```python
+    session = await ws.session("agent")
+    ```
+  </Accordion>
+  <Accordion title="ws.set_profile, ws.set_session_profile">
+    ```python
+    ws.set_profile(name, profile) -> None
+    await ws.set_session_profile(session_id, profile) -> SessionState
+    ```
 
-Change the rules after the workspace is built. `set_profile` defines a profile name or replaces what it means; a document no session could run under raises `PolicyError` and leaves the table as it was. A live session keeps its rules until `set_session_profile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `None` picks the workspace default, and a document passed directly runs without a name.
+    Change the rules after the workspace is built. `set_profile` defines a profile name or replaces what it means; a document no session could run under raises `PolicyError` and leaves the table as it was. A live session keeps its rules until `set_session_profile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `None` picks the workspace default, and a document passed directly runs without a name.
 
-```python
-ws.set_profile(
-    "user",
-    {"commands": {"allow": ["ls", "cat"]}, "paths": {"hide": ["/data/secret"]}},
-)
-await ws.set_session_profile("agent", "user")
-```
+    ```python
+    ws.set_profile(
+        "user",
+        {"commands": {"allow": ["ls", "cat"]}, "paths": {"hide": ["/data/secret"]}},
+    )
+    await ws.set_session_profile("agent", "user")
+    ```
+  </Accordion>
+  <Accordion title="ws.list_sessions, ws.close_session">
+    ```python
+    ws.list_sessions() -> list[SessionState]
+    await ws.close_session(session_id) -> None
+    ```
 
-### ws.list_sessions, ws.close_session
+    List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
 
-```python
-ws.list_sessions() -> list[SessionState]
-await ws.close_session(session_id) -> None
-```
+    <Expandable title="SessionState">
+      <ResponseField name="session_id" type="str" />
+      <ResponseField name="cwd" type="str">The working directory.</ResponseField>
+      <ResponseField name="env" type="Mapping[str, str]">The exported variables.</ResponseField>
+      <ResponseField name="profile" type="str | None">The profile it was created under.</ResponseField>
+      <ResponseField name="mount_modes" type="dict[str, MountMode] | None">Its mount modes, when narrower than the workspace's.</ResponseField>
+      <ResponseField name="last_exit_code" type="int">`$?`.</ResponseField>
+      <ResponseField name="created_at" type="float">Unix time.</ResponseField>
+    </Expandable>
 
-List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
+    ```python
+    print([s.session_id for s in ws.list_sessions()])
+    await ws.close_session("agent")
+    ```
+  </Accordion>
+  <Accordion title="ws.cancel, ws.kill">
+    ```python
+    await ws.cancel(session_id=None) -> int
+    await ws.kill(session_id=None) -> int
+    ```
 
-<Expandable title="SessionState">
-  <ResponseField name="session_id" type="str" />
-  <ResponseField name="cwd" type="str">The working directory.</ResponseField>
-  <ResponseField name="env" type="Mapping[str, str]">The exported variables.</ResponseField>
-  <ResponseField name="profile" type="str | None">The profile it was created under.</ResponseField>
-  <ResponseField name="mount_modes" type="dict[str, MountMode] | None">Its mount modes, when narrower than the workspace's.</ResponseField>
-  <ResponseField name="last_exit_code" type="int">`$?`.</ResponseField>
-  <ResponseField name="created_at" type="float">Unix time.</ResponseField>
-</Expandable>
+    Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and returns once they have ended; each ends with `MirageAbortError`. `kill` kills the background jobs (`cmd &`) and the programs machines started. Each answers how many it stopped.
 
-```python
-print([s.session_id for s in ws.list_sessions()])
-await ws.close_session("agent")
-```
+    ```python
+    await ws.cancel("agent")
+    await ws.kill()
+    ```
+  </Accordion>
+  <Accordion title="ws.snapshot, Workspace.load">
+    ```python
+    await ws.snapshot(target, *, compress=None, s3=None) -> int
+    await Workspace.load(source, *, s3=None, ...) -> Workspace
+    ```
 
-### ws.cancel, ws.kill
+    Save the workspace to a tar and rebuild it from one. `target` and `source` are a path, a file object, or an object key with `s3=`. `snapshot` returns the tar's size in bytes.
 
-```python
-await ws.cancel(session_id=None) -> int
-await ws.kill(session_id=None) -> int
-```
+    - While it captures, new lines and file writes wait. Running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`). Disk mount files are streamed, never held whole.
+    - The tar keeps the profiles, the command limits and each store's `capacity`. Each session loads back under the restrictions it ran with.
+    - An override brings its own `capacity`, or none.
+    - The scratch root, the RAM root added when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
 
-Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and returns once they have ended; each ends with `MirageAbortError`. `kill` kills the background jobs (`cmd &`) and the programs machines started. Each answers how many it stopped.
+    ```python
+    await ws.snapshot("run.tar")
+    restored = await Workspace.load("run.tar")
+    ```
+  </Accordion>
+  <Accordion title="ws.copy">
+    ```python
+    await ws.copy() -> Workspace
+    ```
 
-```python
-await ws.cancel("agent")
-await ws.kill()
-```
+    A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
 
-### ws.snapshot, Workspace.load
+    ```python
+    fork = await ws.copy()
+    ```
+  </Accordion>
+  <Accordion title="ws.decisions">
+    ```python
+    ws.decisions.pending(session_id="") -> tuple[Decision, ...]
+    await ws.decisions.answer(
+        decision_id, outcome, scope=Scope.ONCE, note=""
+    ) -> None
+    ```
 
-```python
-await ws.snapshot(target, *, compress=None, s3=None) -> int
-await Workspace.load(source, *, s3=None, ...) -> Workspace
-```
+    The [asks](/home/policy/policies#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending("agent")` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE` resolves the pending ask for this line, allowing its retry to run or be refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path, a file object, or an object key with `s3=`. `snapshot` returns the tar's size in bytes.
+    <Expandable title="Decision">
+      <ResponseField name="id" type="str">The id to answer it by.</ResponseField>
+      <ResponseField name="session_id" type="str">The session that ran the line.</ResponseField>
+      <ResponseField name="command" type="str">The command name.</ResponseField>
+      <ResponseField name="argv" type="tuple[str, ...]">The words after the name, expanded.</ResponseField>
+      <ResponseField name="cwd" type="str" />
+      <ResponseField name="paths" type="tuple[str, ...]">The paths the line names.</ResponseField>
+      <ResponseField name="reason" type="str">The rule's reason.</ResponseField>
+      <ResponseField name="outcome" type="Outcome | None">The answer; `None` while it waits.</ResponseField>
+      <ResponseField name="scope" type="Scope" />
+      <ResponseField name="note" type="str">What the host said when answering.</ResponseField>
+    </Expandable>
 
-- While it captures, new lines and file writes wait. Running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`). Disk mount files are streamed, never held whole.
-- The tar keeps the profiles, the command limits and each store's `capacity`. Each session loads back under the restrictions it ran with.
-- An override brings its own `capacity`, or none.
-- The scratch root, the RAM root added when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
+    ```python
+    from mirage import Outcome
 
-```python
-await ws.snapshot("run.tar")
-restored = await Workspace.load("run.tar")
-```
+    for ask in ws.decisions.pending():
+        await ws.decisions.answer(ask.id, Outcome.ALLOW)
+    ```
+  </Accordion>
+  <Accordion title="ws.close">
+    ```python
+    await ws.close() -> None
+    ```
 
-### ws.copy
-
-```python
-await ws.copy() -> Workspace
-```
-
-A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
-
-```python
-fork = await ws.copy()
-```
-
-### ws.decisions
-
-```python
-ws.decisions.pending(session_id="") -> tuple[Decision, ...]
-await ws.decisions.answer(
-    decision_id, outcome, scope=Scope.ONCE, note=""
-) -> None
-```
-
-The [asks](/home/policy/policies#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending("agent")` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE` resolves the pending ask for this line, allowing its retry to run or be refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
-
-<Expandable title="Decision">
-  <ResponseField name="id" type="str">The id to answer it by.</ResponseField>
-  <ResponseField name="session_id" type="str">The session that ran the line.</ResponseField>
-  <ResponseField name="command" type="str">The command name.</ResponseField>
-  <ResponseField name="argv" type="tuple[str, ...]">The words after the name, expanded.</ResponseField>
-  <ResponseField name="cwd" type="str" />
-  <ResponseField name="paths" type="tuple[str, ...]">The paths the line names.</ResponseField>
-  <ResponseField name="reason" type="str">The rule's reason.</ResponseField>
-  <ResponseField name="outcome" type="Outcome | None">The answer; `None` while it waits.</ResponseField>
-  <ResponseField name="scope" type="Scope" />
-  <ResponseField name="note" type="str">What the host said when answering.</ResponseField>
-</Expandable>
-
-```python
-from mirage import Outcome
-
-for ask in ws.decisions.pending():
-    await ws.decisions.answer(ask.id, Outcome.ALLOW)
-```
-
-### ws.close
-
-```python
-await ws.close() -> None
-```
-
-Stops its jobs and closes its mounts. Sessions and history stay in the workspace's store.
+    Stops its jobs and closes its mounts. Sessions and history stay in the workspace's store.
+  </Accordion>
+</AccordionGroup>
 
 ## Session
 
@@ -235,10 +272,10 @@ from mirage import Session
 class Session(workspace: Workspace, session_id: str)
 ```
 
-One session's handle, from [`ws.session`](#ws-session). Every call on it runs under the session's [profile](/home/policy/overview), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
+One session's handle, from [`ws.session`](#workspace-methods). Every call on it runs under the session's [profile](/home/policy/overview), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
 
 <ResponseField name="session_id" type="str" />
-<ResponseField name="state" type="SessionState">The session's record, as returned by [`ws.list_sessions`](#ws-list_sessions-ws-close_session).</ResponseField>
+<ResponseField name="state" type="SessionState">The session's record, as returned by [`ws.list_sessions`](#workspace-methods).</ResponseField>
 <ResponseField name="vfs" type="Files">The file API, below.</ResponseField>
 <ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
 <ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/policy/policies#asks) ledger, which records pending approval requests for this session.</ResponseField>
@@ -293,61 +330,64 @@ result = await session.shell("wc -l", stdin=b"a\nb\n")
 print(result.exit_code, await result.stdout_str())
 ```
 
-### Streaming execution
+<Accordion title="Stream the output">
+  `await session.shell(line, stream=True)` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 
-`await session.shell(line, stream=True)` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+  Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 
-Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
+  A policy with a `post_execute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
 
-A policy with a `post_execute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
+  To collect the complete result while observing output, use `await execution.collect(on_event=callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
 
-To collect the complete result while observing output, use `await execution.collect(on_event=callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
+  In this example, `send_bytes` is the application's async output sink:
 
-In this example, `send_bytes` is the application's async output sink:
+  ```python
+  execution = await session.shell("echo ready; echo warning >&2", stream=True)
+  async with execution:
+      async for event in execution.events:
+          await send_bytes(event.stream, event.data)
+      result = await execution.wait()
+  print(result.exit_code)
+  ```
 
-```python
-execution = await session.shell("echo ready; echo warning >&2", stream=True)
-async with execution:
-    async for event in execution.events:
-        await send_bytes(event.stream, event.data)
-    result = await execution.wait()
-print(result.exit_code)
-```
+  Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then raises `MirageAbortError`. Use the async context manager, or `await execution.aclose()` in `finally`, to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
+</Accordion>
 
-Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then raises `MirageAbortError`. Use the async context manager, or `await execution.aclose()` in `finally`, to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.
+### More session calls
 
-### session.glob
+<AccordionGroup>
+  <Accordion title="session.glob">
+    ```python
+    await session.glob(pattern) -> list[str]
+    ```
 
-```python
-await session.glob(pattern) -> list[str]
-```
+    The paths a pattern matches, as the session sees them.
 
-The paths a pattern matches, as the session sees them.
+    ```python
+    paths = await session.glob("/src/**/*.py")
+    ```
+  </Accordion>
+  <Accordion title="session.explain">
+    ```python
+    await session.explain.shell(line) -> ShellExplanation
+    await session.explain.vfs.<call>(...) -> VfsExplanation
+    ```
 
-```python
-paths = await session.glob("/src/**/*.py")
-```
+    What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/policy/explain).
 
-### session.explain
+    ```python
+    from mirage import CommandExplanation
 
-```python
-await session.explain.shell(line) -> ShellExplanation
-await session.explain.vfs.<call>(...) -> VfsExplanation
-```
-
-What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/policy/explain).
-
-```python
-from mirage import CommandExplanation
-
-shell_res = await session.explain.shell("rm /data/x")
-print(shell_res.exit_code, shell_res.reason)
-for node in shell_res.node.children:
-    if isinstance(node, CommandExplanation):
-        print(node.command, [a.policy for a in node.answers])
-vfs_res = await session.explain.vfs.write("/data/x", b"hi")
-print(vfs_res.error, [a.policy for a in vfs_res.answers])
-```
+    shell_res = await session.explain.shell("rm /data/x")
+    print(shell_res.exit_code, shell_res.reason)
+    for node in shell_res.node.children:
+        if isinstance(node, CommandExplanation):
+            print(node.command, [a.policy for a in node.answers])
+    vfs_res = await session.explain.vfs.write("/data/x", b"hi")
+    print(vfs_res.error, [a.policy for a in vfs_res.answers])
+    ```
+  </Accordion>
+</AccordionGroup>
 
 ### session.vfs
 

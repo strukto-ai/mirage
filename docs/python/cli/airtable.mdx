@@ -26,6 +26,68 @@ ws.register_cli("airtable", AIRTABLE, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `airtable` installed.
+
+{/* generated: skill-md airtable start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`airtable`**
+
+    ```text
+    usage: airtable [-h] {base,table,record,comment} ...
+
+    Airtable Web API client
+
+    commands:
+      base     Read bases
+      table    Read table schemas
+      record   Read and write records
+      comment  Read and add record comments
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `airtable`
+
+    ```text
+    usage: airtable [-h] {base,table,record,comment} ...
+
+    Airtable Web API client
+
+    commands:
+      base     Read bases
+      table    Read table schemas
+      record   Read and write records
+      comment  Read and add record comments
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md airtable end */}
+
 <Reference />
 
 <License />

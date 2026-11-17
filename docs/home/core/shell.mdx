@@ -1,84 +1,763 @@
 ---
 title: Mirage Shell
-description: Run Bash-style commands, pipelines, and scripts across your mounted data.
-icon: square-terminal
+sidebarTitle: Overview
+description: Run Bash commands, pipelines and scripts across every mount.
+icon: /images/mirage-icon-light.svg
 ---
 
-Mirage's shell combines commands from [Core Tools](/home/core/tools) and [Data & Network](/home/core/data-network) with variables, control flow, and persistent sessions.
+Every line runs as a non-interactive Bash runs it (`bash -c`), joined by
+pipes, redirects, variables and control flow. A session keeps its working
+directory, variables and functions between calls.
+
+<CardGroup cols={3}>
+  <Card title="Core Tools" icon="/images/mirage-icon-light.svg" href="/home/core/tools">
+    `ls`, `grep`, `sed`, `find` and the other file and text commands.
+  </Card>
+  <Card title="Data" icon="/images/mirage-icon-light.svg" href="/home/core/data">
+    `jq`, checksums, encodings and archives.
+  </Card>
+  <Card title="Network" icon="/images/mirage-icon-light.svg" href="/home/core/network">
+    `curl` and `wget`.
+  </Card>
+</CardGroup>
+
+[CLIs](/home/setup/clis) and programs on [machines](/home/setup/machine/overview)
+run in the same lines.
+
+```bash
+$ cd /s3/logs
+$ for f in *.jsonl; do echo "$f $(grep -c error "$f")"; done | sort -k2 -nr
+app.jsonl 42
+worker.jsonl 7
+```
 
 ## Syntax
 
-| Feature | Supported |
+| Feature | Example |
 | --- | --- |
-| Command lists | `;`, newlines, `&&`, `\|\|`, and `!` |
-| Pipelines | `\|` and `\|&`; `$?` and `${PIPESTATUS[@]}` report exit statuses. With job control off, `shopt -s lastpipe` runs the final foreground stage in the current shell |
-| Redirection | `>`, `>>`, `<`, `<>`, `>\|`, `2>`, `2>&1`, `&>`, `&>>`; descriptor duplication and closing |
-| Inline input | Here-documents `<<EOF`, tab-stripping `<<-EOF`, and here-strings `<<<` |
-| Quoting | Single quotes, double quotes, backslash escapes, and `$'...'` |
-| Expansion | Variables, `${name:-default}`, substring and pattern operations, `$(command)`, backticks, and `$((expression))` |
-| Paths | Tilde expansion, brace expansion, `*`, `?`, and bracket patterns. `GLOBIGNORE` excludes matching pathname spellings |
-| Extended patterns | `extglob`, `globstar`, `dotglob`, `nullglob`, and `failglob` through `shopt` |
-| Variables | Scalars, indexed arrays, associative arrays (`declare -A`), positional arguments, `$RANDOM`, `${FUNCNAME[@]}`, and the file names in `${BASH_SOURCE[@]}` |
-| Conditions | `if` / `elif` / `else`, `test`, `[ ... ]`, and `[[ ... ]]`. `shopt -s nocasematch` enables case-insensitive shell pattern and regex comparisons |
-| Loops | `for`, arithmetic `for`, `while`, `until`, and `select`; `break` and `continue` |
-| Branching and functions | `case`, `name() { ...; }`, `function`, and `return` |
-| Groups | `{ ...; }` shares the session; `( ... )` runs in an isolated session copy |
-| Process substitution | `<(command)` and `>(command)` as live `/dev/fd/N` pipes, streamed both ways. `$!` holds the last substitution's PID for `wait "$!"` |
-| Background work | `command &`, `jobs`, `wait`, `kill`, `disown`, and `ps` |
-| Timing | `time`, `time -p`, and `TIMEFORMAT`; CPU times are reported as zero |
-| Comments | `#` outside quotes |
+| Lists and pipes | `grep -c error app.log \| sort -n && echo ok` |
+| Redirects | `ls /data /missing > out 2>&1` |
+| Here-strings and documents | `wc -w <<< "one two"`, `cat <<EOF` |
+| Expansion | `echo ${name:-world} $(date) $((2 + 3))` |
+| Globs | `shopt -s globstar; ls /data/**/*.json` |
+| Arrays | `declare -A m=([k]=v); echo ${m[k]}` |
+| Conditions | `[[ $f == *.json ]] && echo json` |
+| Loops | `for f in *.txt; do wc -l < "$f"; done` |
+| Functions | `greet() { echo "hi $1"; }; greet sam` |
+| Groups | `{ echo a; echo b; } > out`, `( cd /data && ls )` |
+| Process substitution | `diff <(sort a) <(sort b)` |
+| Background jobs | `sleep 30 & wait $!` |
+| Timing | `time -p grep -r TODO /data` |
 
-## Shell commands
+<Accordion title="Every supported form">
+  | Feature | Supported |
+  | --- | --- |
+  | Command lists | `;`, newlines, `&&`, `\|\|` and `!` |
+  | Pipelines | `\|` and `\|&`; `$?` and `${PIPESTATUS[@]}`. With job control off, `shopt -s lastpipe` runs the last stage in the current shell |
+  | Redirection | `>`, `>>`, `<`, `<>`, `>\|`, `2>`, `2>&1`, `&>`, `&>>`; duplicating and closing descriptors |
+  | Inline input | `<<EOF`, `<<-EOF` and `<<<` |
+  | Quoting | `'...'`, `"..."`, backslash escapes and `$'...'` |
+  | Expansion | Variables, `${name:-default}`, substring and pattern operations, `$(command)`, backticks and `$((expression))` |
+  | Paths | `~`, braces, `*`, `?` and bracket patterns; `GLOBIGNORE` |
+  | Extended patterns | `extglob`, `globstar`, `dotglob`, `nullglob` and `failglob` through `shopt` |
+  | Variables | Scalars, indexed and associative arrays, positional arguments, `$RANDOM`, `${FUNCNAME[@]}` and `${BASH_SOURCE[@]}` |
+  | Conditions | `if` / `elif` / `else`, `test`, `[ ... ]` and `[[ ... ]]`; `shopt -s nocasematch` |
+  | Loops | `for`, arithmetic `for`, `while`, `until` and `select`; `break` and `continue` |
+  | Functions and branching | `case`, `name() { ...; }`, `function` and `return` |
+  | Groups | `{ ...; }` shares the session; `( ... )` runs in a copy of it |
+  | Process substitution | `<(command)` and `>(command)` as live `/dev/fd/N` pipes; `$!` holds the last one's PID |
+  | Background work | `command &`, `jobs`, `wait`, `kill`, `disown` and `ps`: see [Jobs](#jobs) |
+  | Timing | `time`, `time -p` and `TIMEFORMAT`; CPU times read zero |
+  | Comments | `#` outside quotes |
+</Accordion>
 
-These are common options, not an exhaustive flag reference.
+## Builtins
 
-| Commands | Purpose and common options |
-| --- | --- |
-| `cd`, `pwd` | Change or print the working directory; `-L`, `-P` |
-| `export`, `unset` | Export variables or functions (`export -f`); remove variables or functions (`unset -v`, `-f`) |
-| `declare`, `typeset`, `local`, `readonly` | Set variable scope and attributes; arrays `-a` / `-A`, integers `-i`, readonly `-r`, export `-x` |
-| `set` | Set positional arguments and options such as `-e`, `-u`, `-x`, `-f`, `-C`, and `-o pipefail` |
-| `shopt` | Set, unset, print, or query options with `-s`, `-u`, `-p`, `-q`; `-o` selects `set` options |
-| `alias`, `unalias` | Define or remove aliases; enable expansion with `shopt -s expand_aliases` |
-| `read` | Read into variables; `-r`, `-a ARRAY`, `-d CHAR`, `-n N`, `-N N`, `-u FD` |
-| `mapfile`, `readarray` | Read into an array; `-t`, `-d CHAR`, `-n N`, `-s N`, `-O INDEX`, `-u FD`, `-C CALLBACK`, `-c N` |
-| `echo`, `printf` | Print text or formatted values; `echo -n/-e/-E`, `printf -v NAME` |
-| `source`, `.`, `eval` | Run a file or command string in the current session. With `sourcepath` enabled, `source` searches `PATH` for a bare filename |
-| `bash`, `sh` | Run a script, `-c COMMAND`, or stdin with `-s` in a fresh shell environment |
-| `exec` | Replace the current shell command flow, or keep descriptor redirections; `-c` clears the command's environment |
-| `getopts`, `shift`, `let` | Parse script options, shift positional arguments, or evaluate integer expressions |
-| `trap` | Run actions on `EXIT`, `ERR`, and `RETURN` |
-| `umask` | Read or set the creation mask; `-S` prints symbolic form |
-| `command`, `type`, `which` | Run or locate a command; `command -v/-V`, `type -t/-a/-p/-P` |
-| `true`, `false`, `:` | Return success or failure; `:` is a no-op |
-| `exit` | End the current shell with an optional exit status |
-| `history` | Read or manage command history; `-c`, `-d`, `-s`, `-p`, `-a`, `-r`, `-w`, `-n` |
-| `help` | Show help for a shell builtin: `help`, `help cd` |
-| `man` | Show command help, including registered CLI subcommands: `man ls`, `man linear issue create` |
+Expand a builtin to see every flag it takes; `help NAME` prints its help.
 
-## Sessions and permissions
+{/* BEGIN GENERATED COMMANDS: Builtins */}
+<ResponseField name="cd">
+  Change the working directory.
+  <Expandable title="4 flags">
+    <ResponseField name="-L">
+      keep symbolic links in the new path (the default)
+    </ResponseField>
+    <ResponseField name="-P">
+      resolve symbolic links in the new path
+    </ResponseField>
+    <ResponseField name="-e">
+      with -P, fail when the new path cannot be resolved
+    </ResponseField>
+    <ResponseField name="-@">
+      accepted, with no effect
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="pwd">
+  <Expandable title="2 flags">
+    <ResponseField name="-P" />
+    <ResponseField name="-L" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="umask">
+  Print or set the file mode creation mask.
+  <Expandable title="2 flags">
+    <ResponseField name="-p">
+      print the mask in a reusable form
+    </ResponseField>
+    <ResponseField name="-S">
+      print the mask symbolically
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="export">
+  Put variables in the environment of the commands it runs.
+  <Expandable title="3 flags">
+    <ResponseField name="-f">
+      each NAME is a shell function
+    </ResponseField>
+    <ResponseField name="-n">
+      take the export mark off each NAME
+    </ResponseField>
+    <ResponseField name="-p">
+      print every exported variable in a reusable form
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="unset">
+  Remove variables and functions.
+  <Expandable title="3 flags">
+    <ResponseField name="-f">
+      each NAME is a function
+    </ResponseField>
+    <ResponseField name="-v">
+      each NAME is a variable
+    </ResponseField>
+    <ResponseField name="-n">
+      remove the reference NAME itself, not what it names
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="declare">
+  Set variables and their attributes.
+  <Expandable title="14 flags">
+    <ResponseField name="-a">
+      make each NAME an indexed array
+    </ResponseField>
+    <ResponseField name="-A">
+      make each NAME an associative array
+    </ResponseField>
+    <ResponseField name="-f">
+      act on functions only; with -p, print their definitions
+    </ResponseField>
+    <ResponseField name="-F">
+      print function names only
+    </ResponseField>
+    <ResponseField name="-g">
+      make NAME global even inside a function
+    </ResponseField>
+    <ResponseField name="-i">
+      make each NAME an integer, assigned arithmetically
+    </ResponseField>
+    <ResponseField name="-I">
+      inside a function, start from an outer variable's attributes
+    </ResponseField>
+    <ResponseField name="-l">
+      lowercase each value as it is assigned
+    </ResponseField>
+    <ResponseField name="-n">
+      make NAME a reference to the variable its value names
+    </ResponseField>
+    <ResponseField name="-p">
+      print each NAME with its attributes and value
+    </ResponseField>
+    <ResponseField name="-r">
+      make each NAME read-only
+    </ResponseField>
+    <ResponseField name="-t">
+      give each NAME the trace attribute
+    </ResponseField>
+    <ResponseField name="-u">
+      uppercase each value as it is assigned
+    </ResponseField>
+    <ResponseField name="-x">
+      export each NAME
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="typeset">
+  Set variables and their attributes; the same as `declare'.
+  <Expandable title="14 flags">
+    <ResponseField name="-a">
+      make each NAME an indexed array
+    </ResponseField>
+    <ResponseField name="-A">
+      make each NAME an associative array
+    </ResponseField>
+    <ResponseField name="-f">
+      act on functions only; with -p, print their definitions
+    </ResponseField>
+    <ResponseField name="-F">
+      print function names only
+    </ResponseField>
+    <ResponseField name="-g">
+      make NAME global even inside a function
+    </ResponseField>
+    <ResponseField name="-i">
+      make each NAME an integer, assigned arithmetically
+    </ResponseField>
+    <ResponseField name="-I">
+      inside a function, start from an outer variable's attributes
+    </ResponseField>
+    <ResponseField name="-l">
+      lowercase each value as it is assigned
+    </ResponseField>
+    <ResponseField name="-n">
+      make NAME a reference to the variable its value names
+    </ResponseField>
+    <ResponseField name="-p">
+      print each NAME with its attributes and value
+    </ResponseField>
+    <ResponseField name="-r">
+      make each NAME read-only
+    </ResponseField>
+    <ResponseField name="-t">
+      give each NAME the trace attribute
+    </ResponseField>
+    <ResponseField name="-u">
+      uppercase each value as it is assigned
+    </ResponseField>
+    <ResponseField name="-x">
+      export each NAME
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="local">
+  Define variables local to a function.
+</ResponseField>
+<ResponseField name="readonly">
+  Make variables read-only.
+  <Expandable title="4 flags">
+    <ResponseField name="-a">
+      each NAME is an indexed array
+    </ResponseField>
+    <ResponseField name="-A">
+      each NAME is an associative array
+    </ResponseField>
+    <ResponseField name="-f">
+      each NAME is a shell function
+    </ResponseField>
+    <ResponseField name="-p">
+      print every read-only variable in a reusable form
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="set">
+  Set shell options and positional parameters.
+  <Expandable title="20 flags">
+    <ResponseField name="-a">
+      export every variable that is assigned
+    </ResponseField>
+    <ResponseField name="-b">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-e">
+      leave the shell when a command fails
+    </ResponseField>
+    <ResponseField name="-f">
+      turn off pathname expansion
+    </ResponseField>
+    <ResponseField name="-h">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-k">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-m">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-n">
+      read commands without running them
+    </ResponseField>
+    <ResponseField name="-o <name>">
+      turn on the option called NAME
+    </ResponseField>
+    <ResponseField name="-p">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-t">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-u">
+      treat an unset variable as an error
+    </ResponseField>
+    <ResponseField name="-v">
+      print each line as it is read
+    </ResponseField>
+    <ResponseField name="-x">
+      print each command as it runs
+    </ResponseField>
+    <ResponseField name="-B">
+      turn on brace expansion
+    </ResponseField>
+    <ResponseField name="-C">
+      refuse to overwrite files with `>'
+    </ResponseField>
+    <ResponseField name="-E">
+      pass the ERR trap on to functions
+    </ResponseField>
+    <ResponseField name="-H">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-P">
+      resolve symbolic links when changing directory
+    </ResponseField>
+    <ResponseField name="-T">
+      pass the RETURN trap on to functions
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="shopt">
+  Set and unset shell options.
+  <Expandable title="5 flags">
+    <ResponseField name="-o">
+      each OPTNAME is an option of `set -o'
+    </ResponseField>
+    <ResponseField name="-p">
+      print in a reusable form
+    </ResponseField>
+    <ResponseField name="-q">
+      print nothing; the status tells
+    </ResponseField>
+    <ResponseField name="-s">
+      turn each OPTNAME on
+    </ResponseField>
+    <ResponseField name="-u">
+      turn each OPTNAME off
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="echo">
+  <Expandable title="2 flags">
+    <ResponseField name="-n" />
+    <ResponseField name="-e" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="printf">
+</ResponseField>
+<ResponseField name="read">
+  Read one line and split it into fields.
+  <Expandable title="11 flags">
+    <ResponseField name="-a <array>">
+      assign the fields to ARRAY, from index 0
+    </ResponseField>
+    <ResponseField name="-d <delim>">
+      read up to DELIM rather than a newline
+    </ResponseField>
+    <ResponseField name="-e">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-i <text>">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-n <nchars>">
+      stop after NCHARS characters or at the delimiter
+    </ResponseField>
+    <ResponseField name="-N <nchars>">
+      read exactly NCHARS characters
+    </ResponseField>
+    <ResponseField name="-p <prompt>">
+      print PROMPT on standard error first
+    </ResponseField>
+    <ResponseField name="-r">
+      take backslashes literally
+    </ResponseField>
+    <ResponseField name="-s">
+      accepted, with no effect
+    </ResponseField>
+    <ResponseField name="-t <timeout>">
+      give up after TIMEOUT seconds
+    </ResponseField>
+    <ResponseField name="-u <fd>">
+      read from file descriptor FD
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="mapfile">
+  Read lines into an indexed array.
+  <Expandable title="8 flags">
+    <ResponseField name="-d <delim>">
+      end each line at DELIM rather than at a newline
+    </ResponseField>
+    <ResponseField name="-n <count>">
+      read at most COUNT lines; 0 reads them all
+    </ResponseField>
+    <ResponseField name="-O <origin>">
+      store the first line at index ORIGIN rather than 0
+    </ResponseField>
+    <ResponseField name="-s <count>">
+      skip the first COUNT lines
+    </ResponseField>
+    <ResponseField name="-t">
+      drop the delimiter from the end of each line
+    </ResponseField>
+    <ResponseField name="-u <fd>">
+      read from file descriptor FD rather than standard input
+    </ResponseField>
+    <ResponseField name="-C <callback>">
+      run CALLBACK every QUANTUM lines
+    </ResponseField>
+    <ResponseField name="-c <quantum>">
+      how many lines go between CALLBACK runs; 5000 by default
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="readarray">
+  Read lines into an indexed array; the same as `mapfile'.
+  <Expandable title="8 flags">
+    <ResponseField name="-d <delim>">
+      end each line at DELIM rather than at a newline
+    </ResponseField>
+    <ResponseField name="-n <count>">
+      read at most COUNT lines; 0 reads them all
+    </ResponseField>
+    <ResponseField name="-O <origin>">
+      store the first line at index ORIGIN rather than 0
+    </ResponseField>
+    <ResponseField name="-s <count>">
+      skip the first COUNT lines
+    </ResponseField>
+    <ResponseField name="-t">
+      drop the delimiter from the end of each line
+    </ResponseField>
+    <ResponseField name="-u <fd>">
+      read from file descriptor FD rather than standard input
+    </ResponseField>
+    <ResponseField name="-C <callback>">
+      run CALLBACK every QUANTUM lines
+    </ResponseField>
+    <ResponseField name="-c <quantum>">
+      how many lines go between CALLBACK runs; 5000 by default
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="source, .">
+  Run the commands of a file in the current shell.
+</ResponseField>
+<ResponseField name="eval">
+  Run the arguments as a command line.
+</ResponseField>
+<ResponseField name="bash">
+  Run a program in a nested Mirage shell: the text after `-c`, a script file, or standard input. `bash` and `sh` are aliases.
+  <Expandable title="16 flags">
+    <ResponseField name="-c <text>">
+      Read commands from the next argument and execute them.
+    </ResponseField>
+    <ResponseField name="-s">
+      Read commands from stdin instead of from an argument.
+    </ResponseField>
+    <ResponseField name="-l">
+      (Ignored) Login shell. Mirage does not source profile files.
+    </ResponseField>
+    <ResponseField name="-i">
+      (Ignored) Interactive flag. Mirage shells are non-interactive.
+    </ResponseField>
+    <ResponseField name="-e">
+      Exit on first error.
+    </ResponseField>
+    <ResponseField name="-u">
+      Treat unset variables as errors.
+    </ResponseField>
+    <ResponseField name="-x">
+      Print commands as they execute.
+    </ResponseField>
+    <ResponseField name="--debug">
+      (Ignored) Debugging mode.
+    </ResponseField>
+    <ResponseField name="--init-file <text>">
+      (Ignored) Read this file instead of ~/.bashrc.
+    </ResponseField>
+    <ResponseField name="--login">
+      (Ignored) Login shell.
+    </ResponseField>
+    <ResponseField name="--noediting">
+      (Ignored) No line editing.
+    </ResponseField>
+    <ResponseField name="--noprofile">
+      (Ignored) Skip profile files.
+    </ResponseField>
+    <ResponseField name="--norc">
+      (Ignored) Skip rc files.
+    </ResponseField>
+    <ResponseField name="--posix">
+      (Ignored) POSIX-conformant mode.
+    </ResponseField>
+    <ResponseField name="--rcfile <text>">
+      (Ignored) Read this file instead of ~/.bashrc.
+    </ResponseField>
+    <ResponseField name="--verbose">
+      Print input lines as they are read.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="sh">
+  Options: The options of `bash`.
+</ResponseField>
+<ResponseField name="exec">
+  Run a command in place of the shell, or redirect the shell.
+  <Expandable title="1 flag">
+    <ResponseField name="-c">
+      run COMMAND with an empty environment
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="alias">
+  Define or print aliases.
+  <Expandable title="1 flag">
+    <ResponseField name="-p">
+      print every alias in a form the shell can read back
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="unalias">
+  Remove aliases.
+  <Expandable title="1 flag">
+    <ResponseField name="-a">
+      remove every alias
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="getopts">
+  Parse options from the arguments.
+</ResponseField>
+<ResponseField name="shift">
+  Shift the positional parameters.
+</ResponseField>
+<ResponseField name="let">
+  Evaluate arithmetic expressions.
+</ResponseField>
+<ResponseField name="trap">
+  Run commands when the shell meets signals or events.
+  <Expandable title="2 flags">
+    <ResponseField name="-l">
+      not supported
+    </ResponseField>
+    <ResponseField name="-p">
+      print the traps that are set
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="exit">
+  Leave the shell.
+</ResponseField>
+<ResponseField name="true, :">
+  Do nothing, successfully.
+</ResponseField>
+<ResponseField name="false">
+  Do nothing, unsuccessfully.
+</ResponseField>
+<ResponseField name="test">
+  Evaluate a conditional expression.
+</ResponseField>
+<ResponseField name="time">
+  Report how long a pipeline takes.
+  <Expandable title="1 flag">
+    <ResponseField name="-p">
+      print the times in the portable format
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="command">
+  Run a command, passing over shell functions, or describe it.
+  <Expandable title="3 flags">
+    <ResponseField name="-p">
+      search a default PATH that finds the standard tools
+    </ResponseField>
+    <ResponseField name="-v">
+      print the word or path the shell would run
+    </ResponseField>
+    <ResponseField name="-V">
+      describe in words what the shell would run
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="type">
+  Tell how the shell would run a name.
+  <Expandable title="5 flags">
+    <ResponseField name="-a">
+      every place NAME is found, not only the first
+    </ResponseField>
+    <ResponseField name="-f">
+      pass over shell functions
+    </ResponseField>
+    <ResponseField name="-p">
+      print the file NAME runs, if it is one
+    </ResponseField>
+    <ResponseField name="-P">
+      print the file NAME would run, searching PATH
+    </ResponseField>
+    <ResponseField name="-t">
+      print one word: alias, keyword, function, builtin or file
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="which">
+  Options: `-a`.
+</ResponseField>
+<ResponseField name="help">
+  Show how to use the shell's own commands.
+  <Expandable title="3 flags">
+    <ResponseField name="-d">
+      print each command's one-line summary
+    </ResponseField>
+    <ResponseField name="-m">
+      print each command's help as a manual page
+    </ResponseField>
+    <ResponseField name="-s">
+      print each command's synopsis only
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="man">
+  Show the manual page of a command.
+  <Expandable title="5 flags">
+    <ResponseField name="-a, --all">
+      show every page that matches PAGE
+    </ResponseField>
+    <ResponseField name="-f, --whatis">
+      print the summary line of each PAGE
+    </ResponseField>
+    <ResponseField name="-k, --apropos">
+      search the names and summaries of every page
+    </ResponseField>
+    <ResponseField name="-?, -h, --help">
+      print this list
+    </ResponseField>
+    <ResponseField name="--usage">
+      print the usage line
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="history">
+  Print or change the command history.
+  <Expandable title="8 flags">
+    <ResponseField name="-c">
+      clear the history
+    </ResponseField>
+    <ResponseField name="-d <offset>">
+      delete the entry at OFFSET; below 0, from the end
+    </ResponseField>
+    <ResponseField name="-a">
+      accepted, with no effect: the history file is the list
+    </ResponseField>
+    <ResponseField name="-n">
+      accepted, with no effect: the history file is the list
+    </ResponseField>
+    <ResponseField name="-r">
+      accepted, with no effect: the history file is the list
+    </ResponseField>
+    <ResponseField name="-w">
+      accepted, with no effect: the history file is the list
+    </ResponseField>
+    <ResponseField name="-p">
+      print each ARG, with no history expansion
+    </ResponseField>
+    <ResponseField name="-s">
+      add the ARGs to the history as one entry
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="jobs">
+  List the shell's jobs.
+  <Expandable title="5 flags">
+    <ResponseField name="-l">
+      add each job's process ID
+    </ResponseField>
+    <ResponseField name="-n">
+      only jobs whose state changed since last reported
+    </ResponseField>
+    <ResponseField name="-p">
+      print process IDs only
+    </ResponseField>
+    <ResponseField name="-r">
+      running jobs only
+    </ResponseField>
+    <ResponseField name="-s">
+      stopped jobs only
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="wait">
+  Wait for jobs and return their status.
+  <Expandable title="4 flags">
+    <ResponseField name="-f">
+      wait until each ID ends, not only until it changes state
+    </ResponseField>
+    <ResponseField name="-n">
+      wait for the next job to end and return its status
+    </ResponseField>
+    <ResponseField name="-m <machine>">
+      the machine the IDs are on
+    </ResponseField>
+    <ResponseField name="-p <var>">
+      store in VAR the ID whose status is returned
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="kill">
+  Send a signal to processes or jobs.
+  <Expandable title="4 flags">
+    <ResponseField name="-s <sig>">
+      the signal to send, by name
+    </ResponseField>
+    <ResponseField name="-n <sig>">
+      the signal to send, by number
+    </ResponseField>
+    <ResponseField name="-l">
+      list the signal names, or name the numbers given
+    </ResponseField>
+    <ResponseField name="-m <machine>">
+      the machine the IDs are on
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="disown">
+  Remove jobs from the shell's job table.
+  <Expandable title="3 flags">
+    <ResponseField name="-a">
+      remove every job
+    </ResponseField>
+    <ResponseField name="-h">
+      keep the job, but do not hang it up when the shell exits
+    </ResponseField>
+    <ResponseField name="-r">
+      remove running jobs only
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Builtins */}
 
-`ws.shell(...)` keeps the session's working directory, variables, and functions between calls. Supplying `cwd` or `env` uses an isolated copy for that call. Calls on one session run in order; use separate sessions for concurrent command streams. Python accepts a cancellation event through `cancel`; TypeScript accepts an abort `signal`.
+## Sessions
 
-### Jobs across instances
+- `ws.shell(...)` keeps the session's working directory, variables and
+  functions. Passing `cwd` or `env` runs that call on a copy.
+- Calls on one session run in order. Use separate sessions for concurrent
+  command streams.
+- Python cancels a call through `cancel`, an event; TypeScript through an
+  abort `signal`.
+- A session can narrow mount modes to `read`, `write` or `exec` (`r`, `rw`,
+  `rwx`); unlisted mounts keep their own. `python3` and `js` need `exec`; a
+  shell script runs each command with that command's permissions. A
+  [session profile](/home/configuration/session) also hides paths and
+  restricts commands.
 
-A workspace runs as several instances when more than one process builds it
-under the same `workspace_id` on one shared
-[store](/home/infrastructure/overview#workspace-state), as
-[Infrastructure](/home/infrastructure/jobs#several-instances-of-one-workspace)
-shows. One of them runs its lines at a time, the first to run one; a line on
-any other is refused with an error naming it until it closes the workspace.
-Process IDs continue from the highest the workspace has used, so an instance
-that takes over never reuses one.
+## Jobs
 
-If the running instance goes away without closing the workspace, another
-can run its lines about 30 seconds later. It reports the jobs left behind as
-ended with status 129, as Bash reports a hangup, and stops what they ran
-outside Mirage: a sandbox program through a runtime on the same machine,
-or a host program on the same machine whose PID still matches.
+`command &`, `jobs`, `wait`, `kill`, `disown` and `ps` manage Mirage jobs.
+There is no terminal job control.
 
 A program a runtime runs outside Mirage is a process of its own. `ps` shows
-its real pid and the machine it runs on, a host program's host PID or a
+its real PID and the machine it runs on: a host program's host PID or a
 [machine](/home/setup/machine/overview#processes-and-jobs)'s. Mirage's own
 commands show `mirage`:
 
@@ -89,29 +768,172 @@ commands show `mirage`:
   19443 host:my-laptop                  python3 train.py
 ```
 
-Mirage's pids start at 4194305, past any Linux pid, so `$!`, `kill`, `wait` and
-`ps -p` take either kind.
+Mirage's PIDs start at 4194305, past any Linux PID, so `$!`, `kill`, `wait`
+and `ps -p` take either kind.
 
-### Per-session mount modes
+<AccordionGroup>
+  <Accordion title="Processes and groups">
+    - Each line of a session runs as one shell process, `$$`, which leads the
+      session's process group. Its jobs, pipeline stages, subshells, command
+      substitutions and nested shells belong to it; a nested `bash -c` is a
+      process of its own, with its own `$$`.
+    - A negative operand signals a whole group: `kill -TERM -- -$$`.
+    - Unlike Bash, `kill` also stops the jobs a job started and theirs, even
+      once the job between them has ended.
+    - When time runs out, `timeout` signals its command's process group, so the
+      jobs the command started stop too. It does not with `--foreground`,
+      `-s INT` or `-s QUIT`.
+  </Accordion>
+  <Accordion title="Signals">
+    - `kill` takes every Linux signal `kill -l` lists, by name or number.
+      A signal that ends a process makes `wait` report 128 plus the signal, as
+      in Bash.
+    - `STOP` pauses a job (`ps` shows `T`) and `CONT` resumes it; a `TERM` sent
+      meanwhile waits for the `CONT`. A Mirage command pauses at its next file
+      operation, pipe write, sleep or loop turn; a Monty or Pyodide program where
+      it is; a QuickJS or WASI program at its next file operation or output. In a
+      browser, `STOP` of a Mirage command is refused.
+    - A signal whose default is to be ignored or to pause (`CHLD`, `URG`,
+      `WINCH`, `TSTP`, `TTIN`, `TTOU`) succeeds and changes nothing.
+    - A Pyodide program, and a program a runtime started on a machine or the
+      host, gets the signal as sent. One that handles it runs on, and the job
+      ends when it exits, with its status.
+    - `KILL` is sent only for `kill -9`, `timeout -k`, or when the workspace
+      shuts down.
+    - The shell ignores `QUIT`, which stops only the program it runs. A signal
+      that stops `$$` ends the line with 128 plus the signal and leaves its jobs
+      running.
+    - A background job ignores `INT` and `QUIT` when it is one program. A job
+      that runs several commands stops only its current command, subshell or
+      pipeline and goes on; a job that runs a function ends.
+  </Accordion>
+  <Accordion title="Job output">
+    - A background job writes where the shell that started it writes, as it
+      writes, so its lines and the foreground's interleave as in Bash. `wait`
+      prints none of a job's output, and `fg` prints only its command line.
+    - A `shell()` call returns what reached the session while the line ran.
+      Output a job writes after the call returned waits, and comes first in
+      the session's next call; Bash prints it at once. With `sink`, it goes to
+      the console while a line runs and waits between lines the same way.
+    - `$( )` and every pipeline stage but the last wait for the jobs they
+      start. Inside `$( )`, `jobs` lists the caller's jobs, but `wait` and
+      `kill` reach only its own; `bash -c` sees only its own.
+  </Accordion>
+  <Accordion title="Traps">
+    - `trap 'commands' EXIT` runs at `exit`, in the frame that called it, and
+      when a child shell (`bash -c`, a script, `( )`, a pipeline stage, `$( )`,
+      a job) ends, or `set -e` or a fatal expansion error ends the shell. `$?`
+      starts at the ending status and stays it unless the cleanup calls
+      `exit N`.
+    - `trap 'commands' ERR` runs where `set -e` would end the shell, and
+      `trap 'commands' RETURN` as a function or sourced file returns. A
+      function runs its caller's `ERR` and `RETURN` actions only under
+      `set -E` / `set -T`.
+    - `trap -p` lists, `trap - EXIT` removes and `trap '' EXIT` turns off a
+      registration. A subshell lists its parent's but runs only its own.
+    - A session outlives each `shell()` call, so a call that returns does not
+      fire `EXIT`; register it inside `bash -c` to run before the call
+      returns. Session stores do not keep traps.
+    - `trap` cannot catch a signal: cancellation, `kill`, timeouts and closing
+      a session end the work without cleanup. Other events (`INT`, `TERM`,
+      `DEBUG`, ...) are refused with `bash: line 1: trap: TERM: not supported`.
+  </Accordion>
+</AccordionGroup>
 
-Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use an [session profile](/home/configuration/session) to hide paths or restrict commands.
+### Jobs across instances
+
+A workspace built under one `workspace_id` by several processes on a shared
+[store](/home/infrastructure/overview#workspace-state) runs one instance's
+lines at a time, as [Infrastructure](/home/infrastructure/jobs#several-instances-of-one-workspace)
+shows. Another instance's line is refused with an error naming the running
+one until it closes the workspace. PIDs continue from the highest the
+workspace has used, so an instance that takes over never reuses one.
+
+If the running instance goes away without closing the workspace, another
+can run lines about 30 seconds later. It reports the jobs left behind as
+ended with status 129, as Bash reports a hangup, and stops what they ran
+outside Mirage: a sandbox program through a runtime on the same machine, or
+a host program on the same machine whose PID still matches.
+
+## Several machines
+
+A workspace that runs programs on a [machine](/home/setup/machine/overview)
+has processes in more than one place: Mirage's own commands, and each
+machine's programs. These commands answer for all of them, so they read
+differently from a shell on one Linux host:
+
+| Command | On one Linux host | In Mirage |
+| --- | --- | --- |
+| `ps` | The host's processes | What the session started, on every machine, with a `MACHINE` column; `--machine NAME` narrows it to one, `-o pid,machine` picks columns |
+| `jobs`, `wait`, `kill` | One process table | Each machine is asked what runs there. A PID two machines share is refused as ambiguous; name the machine with `-m` or `--machine`: `kill -m box 13` |
+| `pgrep`, `pkill`, `pidof`, `killall` | Every process on the host | Only what Mirage started, on every machine at once |
+| `nproc`, `hostname`, `lscpu`, `free` | The host | One row per machine, with the machine on the right. Inside `$( )`, the default machine's answer; `--machine NAME` picks one, `--machine mirage` the workspace |
+| `uptime`, `top` | Always there | Only while a machine or the host runs programs; `top` needs `-b` |
+| `df`, `mount` | The host's disks | The workspace's mounts |
+
+With no machine, every row is `mirage`: `ps` shows only Mirage's commands,
+from PID 4194305 up, and `nproc` or `free` answers for the workspace, one
+processor and its [`max_memory`](/home/limits#memory).
+[Processes and jobs](/home/setup/machine/overview#processes-and-jobs) shows
+a session with several machines.
+
+## Errors
+
+Errors read as a non-interactive Bash's do, `bash: line N: ...`, and a syntax
+error exits 2.
+
+<Accordion title="Error and report lines in detail">
+  - Inside a function, `environment` replaces `bash`; inside a sourced file
+    or a script, the file's path does.
+  - `$LINENO` is the running command's line and `$BASHPID` the process
+    running it.
+  - When a signal ends a command, Bash's report line follows it, such as
+    `bash: line 1:    12 Killed                  sleep 3`; for a background
+    job, after the next program, subshell or pipeline, or at `wait`. `TERM`
+    prints `Terminated` for a command and nothing for a job; `INT` and `PIPE`
+    print nothing. A command substitution reports nothing.
+  - A program a runtime runs in the foreground is not a process of its own,
+    so no report line follows when a signal ends it; its status is still 128
+    plus the signal.
+</Accordion>
+
+## Output to files
+
+Most commands write a redirect's file as they print, so
+`{ echo a; sleep 9; } > f` shows `a` in `f` at once. `tar`, `gzip` and a few
+machine programs write when they end.
+
+<Accordion title="Which commands stream, and what a reader sees">
+  - Stream as they print: a sandbox program, a `host` machine's programs
+    other than its own `python3`, Mirage's `cat`, `grep`, `awk`, `sed`, `tee`,
+    `sort` and `jq`, and the commands in a group, loop or function.
+  - Write when they end: `tar`, `gzip`, a `host` machine's `python3`, a
+    Daytona program and a microsandbox program given piped input.
+  - A command that reads or changes the file meanwhile finds what was
+    written so far. `cat` and `grep` refuse to read the file their own output
+    goes to.
+  - The output follows the file through a rename the same line makes. The
+    rest is lost once the line removes the file or renames another over it.
+    A rename from another session or through FUSE is not followed.
+  - What a stopped command wrote stays, whether `kill`, `timeout` or a
+    cancelled call stopped it.
+  - A RAM mount shows a streaming write within a tenth of a second; an object
+    store such as S3 publishes it when the write ends.
+</Accordion>
 
 ## Limits
 
-- Positive `read -t` values are accepted but do not enforce a timeout.
-- `bg`, `complete`, `compgen`, `ulimit`, `coproc`, and `exec -a/-l` are not implemented.
-- A process substitution's `/dev/fd/N` path belongs to the command that opened it. An input producer can keep running after that command finishes. The command waits for output consumers. Opening an output substitution with `exec 3> >(command)` fails with exit status `2`.
-- There is no interactive terminal or OS process job control. The supported job commands manage Mirage jobs: `cmd &`, `jobs`, `wait` and `kill`.
-- `kill` takes every Linux signal `kill -l` lists, by name or number. `STOP` pauses a job, which `ps` shows as `T`, and `CONT` lets it go on; a `TERM` sent meanwhile waits for the `CONT`. A Mirage command pauses at its next file operation, pipe write, sleep or loop turn, and in a browser `STOP` of one is refused. A Monty or Pyodide program pauses where it is, and a QuickJS or WASI program at its next file operation or output. Any other signal whose default is to be ignored or to pause a process (`CHLD`, `URG`, `WINCH`, `TSTP`, `TTIN`, `TTOU`) succeeds and changes nothing. A Pyodide program gets the signal as sent too, as does a program a runtime started on a machine or on the host: one that handles it runs on, and the job ends when the program exits, with its status. `KILL` is sent only for `kill -9`, `timeout -k`, or when the workspace shuts down. Any other process stops, and `wait` reports 128 plus the signal, as in Bash. As in Bash, a background job ignores `INT` and `QUIT`. Unlike Bash, `kill` also stops the jobs a job started and theirs, even once the job between them has ended.
-- When time runs out, `timeout` signals its command's process group, as GNU `timeout` does, so the jobs the command started stop too. It doesn't with `--foreground`, `-s INT` or `-s QUIT`.
-- A background job that gets `INT` acts as in Bash:
-  - a job that is one program ignores it;
-  - a job that runs several commands stops only its current command, subshell or pipeline, and goes on;
-  - a job that runs a function ends.
-- Every line of a session runs as one shell process, `$$`, which leads the session's process group; its jobs, pipeline stages, subshells, command substitutions and nested shells are in it. A negative operand signals a whole group (`kill -TERM -- -$$`). A signal that stops `$$` ends the line with 128 plus the signal and leaves its jobs running. As in Bash, a shell ignores `QUIT`, which stops only the program it is running. A nested `bash -c` is a process of its own, with its own `$$`.
-- The shell's own errors start as a non-interactive Bash's do, `bash: line N: `, with `environment` in place of `bash` inside a function and the file's path inside a sourced file or a script. `$LINENO` is the running command's line and `$BASHPID` the process running it. When a signal ends a command, the shell prints Bash's report line after it, such as `bash: line 1:    12 Killed                  sleep 3`; for a background job, after the next program, subshell or pipeline it runs, or at `wait`. `TERM` prints `Terminated` for a command and nothing for a job, and `INT` and `PIPE` print nothing. A program a runtime runs in the foreground is not a process of its own, so no report line follows when a signal ends it; its status is still 128 plus the signal. A command substitution reports nothing.
-- A program a sandbox runs, or one a `host` machine captures besides its own `python3`, writes its output and its stderr into a redirect's file as it prints them. So do most of Mirage's commands, such as `cat`, `grep`, `awk`, `sed`, `tee`, `sort` and `jq`, and the commands in a group, a loop or a function (`{ echo a; sleep 9; } > f`). A command that reads or changes that file meanwhile finds what was written before it, and `cat` and `grep` refuse to read the file their own output goes to, as GNU's do. The output follows the file through a rename the line makes, and the rest is lost once the line removes it or renames another file over it, as in Bash; a rename made from another session or through FUSE is not followed. What a stopped command wrote stays in the file, whether `kill`, `timeout` or a cancelled call stopped it. Others, such as `tar`, `gzip` and a `host` machine's `python3`, write theirs when they end, as do a program a Daytona sandbox runs and a microsandbox program given piped input. A file on a RAM mount shows a streaming write within a tenth of a second; an object store such as S3 publishes it when the write ends.
-- `set` and `shopt` recognize more option names than they implement; accepting or displaying an option does not mean every Bash behavior is available.
-- Enable `extglob` before the call that uses its syntax, or use `eval` after enabling it. A whole `shell()` call is parsed before it runs.
-- Command substitutions and background jobs do not inherit stdin. Writes through an already open output descriptor append rather than track a write offset.
-- Syntax errors return exit status `2`. Compatibility is a supported subset of Bash, not a full Bash installation.
+Mirage runs a supported subset of Bash, not a full Bash installation.
+
+- `bg`, `complete`, `compgen`, `ulimit`, `coproc` and `exec -a/-l` are not
+  implemented. A positive `read -t` is accepted but never times out.
+- `set` and `shopt` recognize more option names than they implement.
+- A whole `shell()` call is parsed before it runs, so enable `extglob` in an
+  earlier call, or use `eval` after enabling it.
+- Command substitutions and background jobs do not inherit stdin. A write
+  through an already open output descriptor appends rather than tracking an
+  offset.
+- A process substitution's `/dev/fd/N` belongs to the command that opened
+  it. An input producer can keep running after that command ends; the
+  command waits for output consumers. `exec 3> >(command)` fails with
+  status `2`.

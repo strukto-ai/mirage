@@ -1,0 +1,25 @@
+---
+title: microsandbox
+icon: /images/microsandbox-logo.svg
+description: Run captured programs in an existing microsandbox microVM.
+---
+
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [microsandbox](/home/setup/machine/microsandbox), shared by both SDKs.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures).
+Add `@python` to run Python programs in the guest too.
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: { box: { provider: 'microsandbox', sandbox: 'mirage-box', captures: ['@python', '@external'] } },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

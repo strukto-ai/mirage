@@ -1,68 +1,73 @@
 ---
 title: Installation
-description: Install Mirage for Python with mirage-ai from PyPI or uv, then add extras for S3, Redis, FUSE, Google Workspace, and other mounts.
+description: Install Mirage for Python from PyPI, then add the extras only for the features in use.
 keywords: ["mirage-ai", "Python virtual filesystem", "AI agents", "S3 filesystem", "FUSE", "agent tools"]
 icon: download
 ---
 
 ## Quick Install
 
-Mirage requires Python 3.12 or newer. In a uv project, install the base package with:
+Mirage needs Python 3.12 or newer. Install the base package:
 
 ```bash
 uv add mirage-ai
 ```
 
-This is enough to start with local workflows such as the RAM VFS and to understand the Mirage execution model.
+In a plain virtual environment, `uv pip install mirage-ai` or
+`python -m pip install mirage-ai` does the same.
 
-In an activated standalone virtual environment, use either installer:
+The base package ships the workspace, the RAM and Disk VFS and the shell, and
+is enough to follow the [Python Quickstart](/python/quickstart).
 
-```bash
-uv pip install mirage-ai
-# or
-python -m pip install mirage-ai
-```
+## Optional Extras
 
-## Use Mirage as a CLI
+Mirage keeps network and native dependencies in extras, so an app installs
+only what its mounts, machines and agents use. Add one with
+`uv add "mirage-ai[<extra>]"`:
 
-If you only want the `mirage` CLI (not the library), there are two convenient paths.
+{/* generated: extras optional start */}
+| Feature | Extras | Needed for |
+| --- | --- | --- |
+| Object stores | `s3`, `r2`, `gcs`, `oci` | S3 and the S3-compatible VFS, such as R2, GCS, OCI and MinIO. |
+| SSH | `ssh` | `SSHVFS` and the `ssh` machine. |
+| OpenDAL | `nextcloud`, `hf-buckets` | `NextcloudVFS` and `HfBucketsVFS`. |
+| FUSE | `fuse` | Mounting a workspace as an OS filesystem; see the [FUSE setup](/python/setup/fuse). |
+| MongoDB | `mongodb`, `gridfs` | `MongoDBVFS` and `GridFSVFS`. |
+| Postgres | `postgres` | `PostgresVFS`. |
+| Redis | `redis` | `RedisVFS`, the Redis file and index cache stores, and the Redis session store. |
+| Email | `email` | Sending mail with `himalaya` (SMTP). |
+| LanceDB | `lancedb` | `LanceDBVFS`. |
+| Qdrant | `qdrant` | `QdrantVFS`. |
+| Chroma | `chroma` | `ChromaVFS`. |
+| Mem0 | `mem0` | `Mem0VFS`. |
+| Langfuse | `langfuse` | `LangfuseVFS`. |
+| Runtimes | `monty`, `wasi`, `quickjs` | The [Monty](/python/runtime/monty), [WASI](/python/runtime/wasi) and [QuickJS](/python/runtime/quickjs) runtimes. |
+| Cloud machines | `e2b`, `daytona`, `boxd` | The `e2b`, `daytona` and `boxd` machines. |
+| AWS Secrets Manager | `aws-sm` | The `aws-sm` secret source. |
+| 1Password | `1password` | The `1password` secret source. |
+| dotenv | `dotenv` | The `dotenv` secret source. |
+| Agent SDKs | `claude-agent-sdk`, `claude-managed-agents`, `openai`, `agno`, `deepagents`, `pydantic-ai` | The adapters on the [agents pages](/python/agents/index). |
+| Bundle | `all` | Every extra above except `lancedb`, `monty`, `wasi`, `quickjs`. |
+| Bundle | `sandbox` | The extras `s3`, `r2`, `gcs`, `oci`, `ssh`, `nextcloud`, `hf-buckets`, `fuse`, `mongodb`, `gridfs`, `postgres`, `redis`, `email`, `langfuse`, `chroma`, `qdrant`. |
+{/* generated: extras optional end */}
 
-**One-shot run with `uvx`**, no install, just runs:
+A VFS that talks HTTP, such as Slack, Notion or the Hugging Face Hub, needs no
+extra.
+
+## The `mirage` CLI
+
+To use only the `mirage` CLI, run it with `uvx` or install it on `PATH`:
 
 ```bash
 uvx --from mirage-ai mirage --help
-uvx --from mirage-ai mirage workspace create workspace.yaml --id demo
-```
-
-**Persistent install with `uv tool install`**, drops `mirage` on your PATH globally:
-
-```bash
 uv tool install mirage-ai
-mirage --help
 ```
 
-To upgrade later:
-
-```bash
-uv tool install --upgrade mirage-ai
-```
-
-## VFS Extras
-
-Install extras when a VFS needs optional dependencies:
-
-```bash
-uv add "mirage-ai[s3]"
-uv add "mirage-ai[r2]"
-uv add "mirage-ai[redis]"
-uv add "mirage-ai[fuse]"
-```
-
-Use the VFS docs in the Python section when you are ready to connect real systems.
+`uv tool install --upgrade mirage-ai` upgrades it.
 
 ## Install From Source
 
-If you are contributing to Mirage or want the full local development setup:
+To contribute to Mirage or run the examples:
 
 ```bash
 git clone https://github.com/strukto-ai/mirage.git
@@ -70,8 +75,19 @@ cd mirage/python
 uv sync --all-extras
 ```
 
-## Recommended Path
+## Next steps
 
-1. Install the base package.
-2. Follow the [Python Quickstart](/python/quickstart) with the RAM VFS.
-3. Add the VFS extras and follow the [FUSE setup](/python/setup/fuse) if you need to expose mounts as a real filesystem.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/python/quickstart">
+    A workspace, a shell line and its result, in a few lines.
+  </Card>
+  <Card title="Virtualize data storage" icon="database" href="/python/vfs/index">
+    S3, Slack, Google Drive, Postgres and 60 more, as files.
+  </Card>
+  <Card title="Mount as a folder" icon="hard-drive" href="/python/setup/fuse">
+    Expose mounts to other programs through FUSE.
+  </Card>
+  <Card title="Connect an agent" icon="robot" href="/python/agents/index">
+    The Python agent SDKs, wired to one workspace.
+  </Card>
+</CardGroup>

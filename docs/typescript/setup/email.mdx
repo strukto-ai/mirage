@@ -147,7 +147,7 @@ The IMAP server answers this command, so fewer messages are read. See
   fails. A server that answers `SEARCH` from a full-text index (Dovecot with
   an FTS plugin, for one) matches words rather than substrings, so a narrowed
   scan can miss a message there; `walk_limit: -1` in the mount's `"@all"`
-  [command limit](/home/core/output-limits) reads every file instead.
+  [command limit](/home/limits#command-output) reads every file instead.
 
 ## VFS.md
 

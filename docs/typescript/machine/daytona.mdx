@@ -1,0 +1,32 @@
+---
+title: Daytona
+icon: /images/daytona-logo.svg
+description: Run captured programs in a Daytona cloud sandbox.
+---
+
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [Daytona](/home/setup/machine/daytona), shared by both SDKs.
+
+## Install
+
+```bash
+pnpm add @daytonaio/sdk
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: { box: { provider: 'daytona', sandboxId: 'sandbox-id', captures: ['@python', '@external'] } },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

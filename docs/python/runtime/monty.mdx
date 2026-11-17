@@ -1,0 +1,29 @@
+---
+title: Monty
+icon: /images/pydantic-logo.svg
+description: A Python runtime in both Mirage SDKs, supporting a subset of Python.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Monty](/home/setup/runtime/monty), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[monty]'
+```
+
+## Usage
+
+Declare an [`in_process`](/home/setup/machine/in_process) machine with
+`runtime: monty` to run `python3` on Monty:
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={"py": {"provider": "in_process", "runtime": "monty"}},
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

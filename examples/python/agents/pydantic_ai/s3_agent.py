@@ -38,7 +38,7 @@ ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
 async def main():
     agent = Agent(
-        "openai:gpt-4.1",
+        "openai:gpt-6.1-sol",
         system_prompt=await build_system_prompt(
             mount_info={"/s3/": "S3 bucket (CSV, Parquet, JSONL)"}
         ),

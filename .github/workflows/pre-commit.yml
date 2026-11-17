@@ -306,9 +306,10 @@ jobs:
       - name: Docs frontmatter
         run: ./python/.venv/bin/python scripts/check_docs_frontmatter.py
 
-      - name: Supported CLI documentation
+      - name: Supported CLI and command documentation
         run: |
           ./python/.venv/bin/python scripts/gen_cli_docs.py --check
+          ./python/.venv/bin/python scripts/gen_command_docs.py --check
           node --experimental-strip-types typescript/scripts/check-cli-docs.ts
 
       # The config option, optional peer and adapter export tables are

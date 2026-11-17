@@ -26,6 +26,78 @@ ws.register_cli("linear", LINEAR, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `linear` installed.
+
+{/* generated: skill-md linear start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`linear`**
+
+    ```text
+    usage: linear [-h] {team,issue,project,cycle,label,comment,user,document,search} ...
+
+    Linear GraphQL API client
+
+    commands:
+      team      Manage teams
+      issue     Manage issues
+      project   Manage projects
+      cycle     Manage cycles
+      label     Manage labels
+      comment   Manage comments
+      user      Manage users
+      document  Manage documents
+      search    Search issues by text
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `linear`
+
+    ```text
+    usage: linear [-h] {team,issue,project,cycle,label,comment,user,document,search} ...
+
+    Linear GraphQL API client
+
+    commands:
+      team      Manage teams
+      issue     Manage issues
+      project   Manage projects
+      cycle     Manage cycles
+      label     Manage labels
+      comment   Manage comments
+      user      Manage users
+      document  Manage documents
+      search    Search issues by text
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md linear end */}
+
 <Reference />
 
 <License />

@@ -1,10 +1,16 @@
 ---
 title: hf
 icon: /images/huggingface-logo.svg
-description: Set up the Hugging Face CLI with Python or TypeScript.
+description: Set up the Hugging Face CLI.
 ---
 
 import License from '/snippets/cli/license/hf.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Create a token in [HF Models setup](/home/setup/hf_models), then register it on
 an existing `ws`.
@@ -12,9 +18,17 @@ an existing `ws`.
 Downloading files and listing tags need a read token. Uploading, deleting,
 creating repositories and creating or deleting tags need a write token.
 
-Commands: [Python](/python/cli/hf) · [TypeScript](/typescript/cli/hf).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      hf:
+        cli: hf
+        machine: in_process
+        config:
+          token: ${HF_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.hf import HF
@@ -30,5 +44,16 @@ Commands: [Python](/python/cli/hf) · [TypeScript](/typescript/cli/hf).
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/hf">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/hf">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

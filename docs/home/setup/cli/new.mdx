@@ -1,0 +1,265 @@
+---
+title: Adding a New CLI
+icon: plus
+description: Give an agent your own command-line tools, with parsed flags, generated help and access to workspace files.
+---
+
+A custom CLI gives an agent your own command: a client for your service, a
+tool over workspace files, or a script. For a typed CLI, Mirage parses each
+line, refuses a bad one and generates `--help` and `man`, with the same parser
+its built-in commands use. A script CLI is a program that reads its own
+arguments.
+
+## Write a typed CLI
+
+A handler gets the same four arguments a shell command's handler gets: the
+install's accessor, the path operands, the text operands and a `Context`.
+Mirage builds the accessor once per install from the install's validated
+config, and closes it when the install goes. The default `NOOPAccessor` only
+holds that config, at `accessor.config`.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from typing import Literal
+
+    from pydantic import BaseModel, ConfigDict
+
+    from mirage import (Argument, CLI, CLIHandler, CommandSpec, Context,
+                        FlagView, PathSpec, Workspace)
+    from mirage.accessor import NOOPAccessor
+    from mirage.io import IOResult
+
+    class PagerConfig(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        account: Literal["engineering", "support"]
+
+    async def acknowledge(
+        accessor: NOOPAccessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> tuple[bytes, IOResult]:
+        incident_id = texts[0]
+        by = FlagView(ctx.flags, ctx.spec).as_str("by")
+        account = accessor.config.account
+        return f"[{account}] acknowledged {incident_id} by {by}\n".encode(), IOResult()
+
+    PAGER = CLI(
+        spec=CommandSpec(
+            name="pager",
+            subcommands=(CommandSpec(
+                name="ack",
+                arguments=(
+                    Argument("INCIDENT_ID"),
+                    Argument("--by", required=True),
+                ),
+            ),),
+        ),
+        handlers={"ack": CLIHandler(fn=acknowledge, write=True)},
+        config_model=PagerConfig,
+    )
+
+    ws = Workspace({})
+    ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
+    ws.register_cli("pager-support", PAGER, {"account": "support"})
+
+    for line in ["pager-eng ack INC-1 --by sam", "pager-support ack INC-2 --by kim"]:
+        r = await ws.shell(line)
+        print(await r.stdout_str(), end="")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import {
+      Argument,
+      CLI,
+      CLIHandler,
+      CommandSpec,
+      type Context,
+      FlagView,
+      IOResult,
+      type PathSpec,
+      Workspace,
+      z,
+      type CommandFnResult,
+    } from '@struktoai/mirage-node'
+    import type { NOOPAccessor } from '@struktoai/mirage-core/accessor/base'
+
+    const PagerConfigSchema = z.strictObject({ account: z.enum(['engineering', 'support']) })
+    type PagerConfig = z.infer<typeof PagerConfigSchema>
+
+    function acknowledge(
+      accessor: NOOPAccessor,
+      _paths: PathSpec[],
+      texts: string[],
+      ctx: Context,
+    ): CommandFnResult {
+      const { account } = accessor.config as PagerConfig
+      const incidentId = texts[0]
+      const by = new FlagView(ctx.flags, ctx.spec).asStr('by')
+      return [
+        new TextEncoder().encode(`[${account}] acknowledged ${incidentId} by ${by}\n`),
+        new IOResult(),
+      ]
+    }
+
+    const PAGER = new CLI({
+      spec: new CommandSpec({
+        name: 'pager',
+        subcommands: [new CommandSpec({
+          name: 'ack',
+          arguments: [
+            new Argument('INCIDENT_ID'),
+            new Argument('--by', { required: true }),
+          ],
+        })],
+      }),
+      handlers: { ack: new CLIHandler({ fn: acknowledge, write: true }) },
+      configModel: PagerConfigSchema,
+    })
+
+    const ws = new Workspace({})
+    ws.registerCli('pager-eng', PAGER, { account: 'engineering' })
+    ws.registerCli('pager-support', PAGER, { account: 'support' })
+
+    for (const line of ['pager-eng ack INC-1 --by sam', 'pager-support ack INC-2 --by kim']) {
+      const r = await ws.shell(line)
+      process.stdout.write(r.stdoutText)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+```text
+[engineering] acknowledged INC-1 by sam
+[support] acknowledged INC-2 by kim
+```
+
+One CLI, installed twice, serves two accounts. Without `--by`, Mirage refuses
+the line before `acknowledge` runs and exits 2:
+
+```text
+pager-eng ack: option '--by' is required
+Try 'pager-eng ack --help' for more information.
+```
+
+### Command shape
+
+| Node | Declares | Its handler gets |
+| --- | --- | --- |
+| Leaf | `arguments` and a `CLIHandler` | Path and text operands, and parsed flags on `ctx` |
+| Group | `subcommands`, and options its leaves inherit | No handler; Mirage runs the leaf the line names |
+
+- In `arguments`, a dashed name such as `--by` declares an option and a bare
+  name such as `INCIDENT_ID` a positional. A file operand takes
+  `type="path"`; a service ID stays a text operand.
+- `handlers` maps each leaf's path below the root to its `CLIHandler`:
+  `"ack"`, `"incident ack"`, or `""` for a program with no subcommands.
+- Read flags through `FlagView`. Reading an option the spec does not declare
+  raises an error, instead of looking like an omitted flag.
+- `config_model` (`configModel`) validates each install's config when it is
+  registered. Without one, the CLI takes no config.
+- Mark a handler that changes the service `write`. Policy reads it, so one
+  `pre_command` rule can refuse every writing subcommand, and Mirage drops
+  cached mount listings after it runs.
+- Descriptions on the spec, its options and operands become `--help` and
+  `man` at every level.
+
+## Script CLIs
+
+A script reads its own arguments and needs no Mirage imports. Name it in the
+workspace config, with a machine that runs its language:
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+machines:
+  monty:
+    provider: in_process
+    runtime: monty
+clis:
+  hello:
+    script: ./hello.py
+    machine: in_process
+    config:
+      greeting: hi
+```
+
+```python hello.py
+import json
+import os
+
+config = json.loads(os.environ["MIRAGE_CLI_CONFIG"])
+print(config["greeting"], *argv[1:])
+```
+
+`hello sam` prints `hi sam`.
+
+- Words after the command name arrive as argv, from index 1. Every option
+  reaches the script unchanged, `--help` included.
+- Piped input arrives on stdin, and the entry's `config` as JSON in
+  `MIRAGE_CLI_CONFIG`.
+- Its stdout, stderr and exit status become the command's.
+- Without a `machines` entry for its language, it exits 127.
+
+| Runs on | Arguments | Standard input |
+| --- | --- | --- |
+| Monty | `argv` global | `stdin` global |
+| WASI (Python), Pyodide (TypeScript), `host` machine | `sys.argv` | `sys.stdin` |
+| QuickJS | `scriptArgs` | `std.in` |
+
+Monty, WASI, Pyodide and QuickJS read and write workspace files but have no
+network and no extra packages. `machine: host` runs the host's own
+interpreter when the script needs more.
+
+## Install it
+
+`register_cli` (`registerCli`) installs a CLI under a name. The agent types
+that name, `pager-eng`, not the spec's name, `pager`. To install a typed CLI
+from workspace YAML, register its spec first:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import register_cli_spec
+
+    register_cli_spec(PAGER)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { registerCliSpec } from '@struktoai/mirage-node'
+
+    registerCliSpec(PAGER)
+    ```
+  </Tab>
+</Tabs>
+
+```yaml workspace.yaml
+clis:
+  pager-eng:
+    cli: pager
+    machine: in_process
+    config:
+      account: engineering
+```
+
+- Only code can install or remove a CLI. The shell has no `install` command,
+  so an agent can't remove one.
+- A registered name or a builtin wins over a file reference, and
+  registering a name a builtin already holds fails.
+- [CLI entries](/home/configuration/workspace#cli-entries) lists every
+  `clis` key.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/new">
+    Output and streams, files and the session, entry points, snapshots and the full reference.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/new">
+    Output and streams, files and the session, file references, snapshots and the full reference.
+  </Card>
+</CardGroup>

@@ -1,0 +1,123 @@
+---
+title: Network
+description: Make HTTP requests and download files with curl and wget.
+icon: /images/mirage-icon-light.svg
+---
+
+`curl` and `wget` reach the network from the shell, and write what they fetch
+into any writable mount. Expand a command to see every flag it takes.
+
+## HTTP
+
+{/* BEGIN GENERATED COMMANDS: HTTP */}
+<ResponseField name="curl">
+  Send an HTTP request.
+  <Expandable title="26 flags">
+    <ResponseField name="-H, --header <text>">
+      Add a custom header to the request.
+    </ResponseField>
+    <ResponseField name="-A, --user-agent <text>">
+      Set the User-Agent header.
+    </ResponseField>
+    <ResponseField name="-X, --request <text>">
+      Specify the HTTP request method.
+    </ResponseField>
+    <ResponseField name="-d, --data <text>">
+      Send the given data as the request body.
+    </ResponseField>
+    <ResponseField name="--data-binary <text>">
+      Send the data exactly as given, a file unchanged.
+    </ResponseField>
+    <ResponseField name="--data-raw <text>">
+      Send the data with no special meaning for @.
+    </ResponseField>
+    <ResponseField name="--data-urlencode <text>">
+      Send the data URL-encoded.
+    </ResponseField>
+    <ResponseField name="--json <text>">
+      Send the data as JSON.
+    </ResponseField>
+    <ResponseField name="-u, --user <text>">
+      Send the user and password for basic auth.
+    </ResponseField>
+    <ResponseField name="-F, --form <text>">
+      Submit a multipart/form-data field.
+    </ResponseField>
+    <ResponseField name="-b, --cookie <text>">
+      Send cookies: NAME=VALUE data as given, else a cookie file to read.
+    </ResponseField>
+    <ResponseField name="-c, --cookie-jar <path>">
+      Write every cookie to the given file after the transfer, - for stdout.
+    </ResponseField>
+    <ResponseField name="-o, --output <path>">
+      Write response body to the given file.
+    </ResponseField>
+    <ResponseField name="-D, --dump-header <path>">
+      Write the received headers to the given file, - for stdout.
+    </ResponseField>
+    <ResponseField name="-L, --location">
+      Follow HTTP redirects.
+    </ResponseField>
+    <ResponseField name="-f, --fail">
+      Fail with exit 22 on an HTTP error status.
+    </ResponseField>
+    <ResponseField name="-s, --silent">
+      Run silently with no progress or messages.
+    </ResponseField>
+    <ResponseField name="-S, --show-error">
+      Show errors even when silent.
+    </ResponseField>
+    <ResponseField name="-v, --verbose">
+      Dump the request and response headers on stderr.
+    </ResponseField>
+    <ResponseField name="-i, --include">
+      Include the response headers in the output.
+    </ResponseField>
+    <ResponseField name="-I, --head">
+      Fetch the headers only.
+    </ResponseField>
+    <ResponseField name="-4, --ipv4">
+      Accept IPv4 preference (transport selects the address family).
+    </ResponseField>
+    <ResponseField name="-6, --ipv6">
+      Accept IPv6 preference (transport selects the address family).
+    </ResponseField>
+    <ResponseField name="-w, --write-out <text>">
+      Print transfer information after completion.
+    </ResponseField>
+    <ResponseField name="-m, --max-time <text>">
+      Give up after this many seconds.
+    </ResponseField>
+    <ResponseField name="-k, --insecure">
+      Skip verification of the server certificate.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="wget">
+  Download a URL or check its response.
+  <Expandable title="4 flags">
+    <ResponseField name="-O <path>">
+      Write the downloaded content to the given file.
+    </ResponseField>
+    <ResponseField name="-q">
+      Run quietly with no output.
+    </ResponseField>
+    <ResponseField name="-T, --timeout <text>">
+      Set the network timeout in seconds (zero disables it).
+    </ResponseField>
+    <ResponseField name="--spider">
+      Check that the URL exists without downloading it.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: HTTP */}
+
+`curl` writes the body to stdout unless `-o` selects a virtual file. `wget` saves to a virtual file; use `-O -` for stdout. Both respect destination mount permissions.
+
+**Limits:** These are HTTP tools, with no full curl or Wget option set. Recursive Wget downloads (`-r`, `--mirror`) are unsupported. `curl -4/-6` are accepted, but the host transport chooses the address family. `wget -T` uses one request deadline rather than separate DNS, connect, and read timers; zero disables it.
+
+`curl -b` sends cookies from a virtual file, or `NAME=VALUE` as given; `curl -c FILE` saves them after the request, so a login carries across `curl` calls. In the browser no cookies are sent or received, but `-c` still writes its file, so it can replace a saved jar with an empty one. Public suffixes such as `co.uk` are not checked.
+
+`curl -F` sends one URL-encoded text field; repeated `-F` keeps only the last field, and `@FILE` is literal text. Multipart file uploads are unsupported.
+
+`curl -w` supports `http_code`, `response_code`, `url_effective`, `num_redirects`, `size_download`, `content_type`, `method`, `exitcode`, and `time_total`. Other variables produce a diagnostic.

@@ -26,6 +26,88 @@ ws.register_cli("slack", SLACK, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `slack` installed.
+
+{/* generated: skill-md slack start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`slack`**
+
+    ```text
+    usage: slack [-h] {send-message,edit-message,delete-message,upload-file,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...
+
+    Slack Web API client
+
+    commands:
+      send-message    Post a message to a channel or thread
+      edit-message    Replace the text of a message
+      delete-message  Delete a message
+      upload-file     Share a workspace file in a channel or thread
+      read-messages   Read the most recent messages of a channel
+      react           Add an emoji reaction to a message
+      reactions       List the reactions on a message
+      pin-message     Pin a message to its channel
+      unpin-message   Remove a pin from a message
+      list-pins       List the pinned items of a channel
+      member-info     Fetch one user's profile
+      list-members    List workspace members, optionally filtered
+      emoji-list      List the workspace's custom emoji
+      search          Search messages with Slack query operators
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `slack`
+
+    ```text
+    usage: slack [-h] {send-message,edit-message,delete-message,upload-file,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...
+
+    Slack Web API client
+
+    commands:
+      send-message    Post a message to a channel or thread
+      edit-message    Replace the text of a message
+      delete-message  Delete a message
+      upload-file     Share a workspace file in a channel or thread
+      read-messages   Read the most recent messages of a channel
+      react           Add an emoji reaction to a message
+      reactions       List the reactions on a message
+      pin-message     Pin a message to its channel
+      unpin-message   Remove a pin from a message
+      list-pins       List the pinned items of a channel
+      member-info     Fetch one user's profile
+      list-members    List workspace members, optionally filtered
+      emoji-list      List the workspace's custom emoji
+      search          Search messages with Slack query operators
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md slack end */}
+
 <Reference />
 
 <License />

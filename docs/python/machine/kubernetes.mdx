@@ -1,0 +1,24 @@
+---
+title: Kubernetes
+icon: /images/kubernetes-logo.svg
+description: Run captured programs in a Kubernetes pod, including a Nitro Sandbox on EKS.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Kubernetes](/home/setup/machine/kubernetes), shared by both SDKs.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the pod too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={"box": {"provider": "kubernetes", "pod": "mirage-box", "captures": ["@python", "@external"]}},
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

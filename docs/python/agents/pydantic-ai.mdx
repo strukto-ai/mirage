@@ -4,15 +4,15 @@ description: Give Pydantic AI runs a Mirage session as their workspace, so every
 icon: /images/pydantic-logo.svg
 ---
 
-[Pydantic AI](https://github.com/pydantic/pydantic-ai) gives every run a [workspace](https://ai.pydantic.dev/workspace/): the environment its tools reach through `ctx.workspace`. Mirage's `MirageWorkspace` capability supplies a Mirage session as that workspace, so file and shell tools, such as [`pydantic-ai-backend`](https://pypi.org/project/pydantic-ai-backend/)'s `ConsoleCapability`, read, write and run commands across every mount.
+[Pydantic AI](https://pydantic.dev/docs/ai/) gives every run a [workspace](https://pydantic.dev/docs/ai/workspace/): the environment its tools reach through `ctx.workspace`. Mirage's `MirageWorkspace` capability supplies a Mirage session as that workspace, so workspace tools read, write and run commands across every mount.
 
 ## Install
 
 ```bash
-uv add 'mirage-ai[pydantic-ai]' 'pydantic-ai-slim[openai]'
+uv add 'mirage-ai[pydantic-ai]' 'pydantic-ai-slim[anthropic]'
 ```
 
-The extra brings Pydantic AI and the console tools without a model provider; add the provider your agent uses (`openai`, `anthropic`, ...).
+The extra brings Pydantic AI and [`pydantic-ai-backend`](https://pypi.org/project/pydantic-ai-backend/)'s console tools without a model provider. Add the provider the agent uses (`anthropic`, `openai`, ...).
 
 ## Usage
 
@@ -22,16 +22,15 @@ import asyncio
 from pydantic_ai import Agent
 from pydantic_ai_backends import PERMISSIVE_RULESET, ConsoleCapability
 
-from mirage import MountMode, Workspace
+from mirage import MountMode, RAMVFS, Workspace
 from mirage.agents.pydantic_ai import MirageWorkspace, build_system_prompt
-from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 async def main() -> None:
     agent = Agent(
-        "openai:gpt-4.1",
+        "anthropic:claude-sonnet-5-5",
         system_prompt=await build_system_prompt(
             mount_info={"/": "In-memory filesystem (read/write)"},
         ),
@@ -42,12 +41,25 @@ async def main() -> None:
     )
     result = await agent.run("Create /hello.txt with 'hi' and cat it.")
     print(result.output)
+    await ws.close()
 
 
 asyncio.run(main())
 ```
 
 `ConsoleCapability`'s default ruleset asks before every write and command. Mirage already judges each call through the session's mount modes and profile, so the example allows them in the console and leaves the policy to Mirage.
+
+## Tools
+
+`MirageWorkspace` adds no tools of its own. Any tool that works in `ctx.workspace` runs in Mirage: `ConsoleCapability` gives the agent `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` and `execute`, and [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/) capabilities such as `Shell` and `FileSystem` work the same way.
+
+## Sessions
+
+`MirageWorkspace(ws, session_id="agent")` acts as a session made with [`ws.session`](/python/access/in-app#workspace-methods), so its profile judges every call. Without `session_id` it acts as the workspace's default session.
+
+Commands run in Mirage's shell, each in a clone of the session at its working directory, as a subshell does: a `cd` or an `export` in one command does not reach the next. Files go through the session's `ws.vfs`, and symlinks resolve through the namespace. The run's `WorkspaceRef` names the session; a ref in message history that names any other session is declined.
+
+The backend passes Pydantic AI's workspace conformance suite, except the rules that need POSIX processes (`mkfifo`) or mode bits: Mirage's permissions are the session profile, not `chmod`.
 
 ## Exports
 
@@ -59,10 +71,6 @@ asyncio.run(main())
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | <code style={{ whiteSpace: 'nowrap' }}>build_system_prompt</code> | Build a system prompt with optional mount info and extra instructions. |
 {/* generated: exports pydantic_ai end */}
-
-`MirageWorkspace(ws, session_id="agent")` acts as that session, so its profile judges every call. Commands run in Mirage's shell, each in a clone of the session at its working directory, as a subshell does: a `cd` or an `export` in one command does not reach the next. Files go through the session's `ws.vfs`, and symlinks resolve through the namespace. The run's `WorkspaceRef` names the session; a ref in message history that names any other session is declined.
-
-The backend passes Pydantic AI's workspace conformance suite, except the rules that need POSIX processes (`mkfifo`) or mode bits: Mirage's permissions are the session profile, not `chmod`.
 
 ## Examples
 

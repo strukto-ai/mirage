@@ -1,0 +1,38 @@
+---
+title: SSH
+icon: /images/ssh-logo.svg
+description: Run captured programs on any machine reachable over SSH.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [SSH](/home/setup/machine/ssh), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[ssh]'
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python on the machine too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "box": {
+            "provider": "ssh",
+            "host": "mybox",
+            "username": "deploy",
+            "identity_file": "~/.ssh/id_ed25519",
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```
