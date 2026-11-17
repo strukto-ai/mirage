@@ -28,7 +28,8 @@ import { isNoSuchFile, sftpCall } from './utils.ts'
 // mirage's own SFTP session out of reads; mount mode does real access
 // control), so clamped bits come back as residual. Ownership never applies
 // (chown over SFTP needs privileges the login user does not have) and is
-// always residual.
+// always residual. setattr holds no write lock, so a file another client
+// removes between these calls is ENOENT at any of them.
 export async function setAttrs(
   accessor: SSHAccessor,
   path: PathSpec,
@@ -36,33 +37,32 @@ export async function setAttrs(
 ): Promise<Record<string, number | string>> {
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', rawPathOf(path))
-  let st: Stats
+  const residual: Record<string, number | string> = {}
+  if (fields.uid !== undefined) residual.uid = fields.uid
+  if (fields.gid !== undefined) residual.gid = fields.gid
   try {
-    st = await sftpCall<Stats>((done) => {
+    const st = await sftpCall<Stats>((done) => {
       sftp.stat(remote, done)
     })
+    if (fields.mode !== undefined) {
+      const mode = fields.mode | (st.isDirectory() ? 0o700 : 0o600)
+      await sftpCall((done) => {
+        sftp.chmod(remote, mode, done)
+      })
+      if (mode !== fields.mode) residual.mode = fields.mode
+    }
+    if (fields.atime !== undefined || fields.mtime !== undefined) {
+      const newAtime =
+        fields.atime !== undefined ? Math.floor(Date.parse(fields.atime) / 1000) : st.atime
+      const newMtime =
+        fields.mtime !== undefined ? Math.floor(Date.parse(fields.mtime) / 1000) : st.mtime
+      await sftpCall((done) => {
+        sftp.utimes(remote, newAtime, newMtime, done)
+      })
+    }
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(path)
     throw err
-  }
-  const residual: Record<string, number | string> = {}
-  if (fields.mode !== undefined) {
-    const mode = fields.mode | (st.isDirectory() ? 0o700 : 0o600)
-    await sftpCall((done) => {
-      sftp.chmod(remote, mode, done)
-    })
-    if (mode !== fields.mode) residual.mode = fields.mode
-  }
-  if (fields.uid !== undefined) residual.uid = fields.uid
-  if (fields.gid !== undefined) residual.gid = fields.gid
-  if (fields.atime !== undefined || fields.mtime !== undefined) {
-    const newAtime =
-      fields.atime !== undefined ? Math.floor(Date.parse(fields.atime) / 1000) : st.atime
-    const newMtime =
-      fields.mtime !== undefined ? Math.floor(Date.parse(fields.mtime) / 1000) : st.mtime
-    await sftpCall((done) => {
-      sftp.utimes(remote, newAtime, newMtime, done)
-    })
   }
   return residual
 }

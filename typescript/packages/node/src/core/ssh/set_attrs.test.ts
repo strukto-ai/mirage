@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '@struktoai/mirage-core/types'
-import { describe, expect, it } from 'vitest'
+import { PathSpec, type SetAttrFields } from '@struktoai/mirage-core/types'
+import { describe, expect, it, vi } from 'vitest'
 import { setAttrs } from './set_attrs.ts'
 import { stat } from './stat.ts'
 import { makeFakeAccessor, type FakeSftp } from '../../../tests/core/ssh/_test_utils.ts'
@@ -83,4 +83,23 @@ describe('ssh setAttrs', () => {
     const accessor = makeFakeAccessor(state)
     await expect(setAttrs(accessor, spec('/nope.txt'), { mtime: '2020-01-01' })).rejects.toThrow()
   })
+
+  it.each<SetAttrFields>([{ mtime: '2020-01-01T00:00:00Z' }, { mode: 0o644 }])(
+    'raises enoent for a file removed after its stat: %o',
+    async (fields) => {
+      const state = makeState()
+      const accessor = makeFakeAccessor(state)
+      const sftp = await accessor.sftp()
+      const answer = sftp.stat.bind(sftp)
+      vi.spyOn(sftp, 'stat').mockImplementation((path, cb) => {
+        answer(path, (err, stats) => {
+          state.files.delete(path)
+          cb(err, stats)
+        })
+      })
+      await expect(setAttrs(accessor, spec('/a.txt'), fields)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    },
+  )
 })

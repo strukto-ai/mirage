@@ -42,6 +42,8 @@ async def set_attrs(
     reads; mount mode does real access control), so clamped bits come
     back as residual. Ownership never applies (chown over SFTP needs
     privileges the login user does not have) and is always residual.
+    setattr holds no write lock, so a file another client removes
+    between these calls is ENOENT at any of them.
 
     Args:
         accessor (SSHAccessor): backend handle.
@@ -58,31 +60,31 @@ async def set_attrs(
     """
     sftp = await accessor.sftp()
     remote = join_root(accessor.config.root, path.mount_path)
-    try:
-        attrs = await sftp.stat(remote)
-    except asyncssh.SFTPNoSuchFile:
-        raise enoent(path.raw_path)
     residual: dict[str, int | str] = {}
-    if mode is not None:
-        is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-        keep = 0o700 if is_dir else 0o600
-        await sftp.chmod(remote, mode | keep)
-        if mode | keep != mode:
-            residual["mode"] = mode
     if uid is not None:
         residual["uid"] = uid
     if gid is not None:
         residual["gid"] = gid
-    if atime is not None or mtime is not None:
-        new_atime = (
-            datetime.fromisoformat(atime).timestamp()
-            if atime is not None
-            else attrs.atime or 0.0
-        )
-        new_mtime = (
-            datetime.fromisoformat(mtime).timestamp()
-            if mtime is not None
-            else attrs.mtime or 0.0
-        )
-        await sftp.utime(remote, times=(new_atime, new_mtime))
+    try:
+        attrs = await sftp.stat(remote)
+        if mode is not None:
+            is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
+            keep = 0o700 if is_dir else 0o600
+            await sftp.chmod(remote, mode | keep)
+            if mode | keep != mode:
+                residual["mode"] = mode
+        if atime is not None or mtime is not None:
+            new_atime = (
+                datetime.fromisoformat(atime).timestamp()
+                if atime is not None
+                else attrs.atime or 0.0
+            )
+            new_mtime = (
+                datetime.fromisoformat(mtime).timestamp()
+                if mtime is not None
+                else attrs.mtime or 0.0
+            )
+            await sftp.utime(remote, times=(new_atime, new_mtime))
+    except asyncssh.SFTPNoSuchFile as exc:
+        raise enoent(path.raw_path) from exc
     return residual
