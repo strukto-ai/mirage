@@ -13,26 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
+import { enotsup } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { closeQuietly } from '../../io/stream.ts'
-import { materialize, type ByteSource } from '../../io/types.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { parent } from '../../utils/path.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { refusal } from '../posix/errors.ts'
 import { checked, remote } from './utils.ts'
-
-/**
- * A fresh name beside `target` to stage its bytes under, as short whatever
- * the target's own name, so a name near the length limit still stages.
- *
- * @param target the file's path on the machine.
- */
-export function stageName(target: string): string {
-  return `${rstripSlash(parent(target))}/.mirage-${crypto.randomUUID().replaceAll('-', '')}`
-}
 
 /**
  * The line that writes what it is fed to a file: in place, at its end, or
@@ -47,48 +35,13 @@ export function writeCommand(target: string, append: boolean, atomic: boolean): 
   const q = singleQuote(target)
   if (append) return `cat >> ${q}`
   if (!atomic) return `cat > ${q}`
-  const staged = singleQuote(stageName(target))
+  const staged = singleQuote(`${target}.mirage-${crypto.randomUUID().replaceAll('-', '')}`)
   return `cat > ${staged} && mv -f -- ${staged} ${q} || { rm -f -- ${staged}; exit 1; }`
 }
 
 /**
- * Write bytes through the machine's file API, for a machine whose exec takes
- * no input (Daytona): straight onto the file, or, with `apply`, onto a
- * sibling name one line on the machine then applies to the file and removes,
- * so an append or an offset write never rewrites the file whole and leaves
- * what a program wrote meanwhile. Mirrors Python's `staged`.
- *
- * @param accessor the mount's machines.
- * @param machine the machine's name.
- * @param path the file.
- * @param data the bytes.
- * @param apply the line that applies the staged file to the file, from both
- *   quoted paths; null writes the file itself.
- */
-export async function staged(
-  accessor: MachineAccessor,
-  machine: string,
-  path: PathSpec,
-  data: Uint8Array,
-  apply: ((stage: string, target: string) => string) | null = null,
-): Promise<void> {
-  const target = remote(accessor, path)
-  const handle = accessor.handle(machine)
-  if (apply === null) {
-    const done = await handle.putFile(target, data)
-    if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
-    return
-  }
-  const stage = stageName(target)
-  const done = await handle.putFile(stage, data)
-  if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
-  const q = singleQuote(stage)
-  const line = apply(q, singleQuote(target))
-  await checked(accessor, machine, `${line}; s=$?; rm -f -- ${q}; exit $s`, path)
-}
-
-/**
- * Write a file on a machine, the bytes streamed to its `cat`.
+ * Write a file on a machine, the bytes streamed to its `cat`. A machine
+ * whose exec takes no input (Daytona) refuses the write.
  *
  * @param accessor the mount's machines.
  * @param machine the machine's name.
@@ -105,6 +58,10 @@ export async function write(
   append = false,
   atomic = false,
 ): Promise<void> {
+  if (!accessor.handle(machine).takesInput) {
+    await closeQuietly(data)
+    throw enotsup('machine', append ? 'append' : 'write', path)
+  }
   const timer = startOp()
   let size = 0
   async function* counted(): AsyncIterable<Uint8Array> {
@@ -114,14 +71,8 @@ export async function write(
     }
   }
   try {
-    if (accessor.handle(machine).takesInput) {
-      const command = writeCommand(remote(accessor, path), append, atomic)
-      await checked(accessor, machine, command, path, counted())
-    } else {
-      const body = await materialize(data)
-      size = body.byteLength
-      await staged(accessor, machine, path, body, append ? (st, t) => `cat -- ${st} >> ${t}` : null)
-    }
+    const command = writeCommand(remote(accessor, path), append, atomic)
+    await checked(accessor, machine, command, path, counted())
   } finally {
     await closeQuietly(data)
   }

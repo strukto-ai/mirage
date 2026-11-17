@@ -1148,16 +1148,3 @@ describe('hasProgram', () => {
     expect(machine.execs.map(([line]) => line)).toEqual(['command -v grep >/dev/null 2>&1'])
   })
 })
-
-describe('putFile', () => {
-  it('feeds cat the bytes', async () => {
-    const machine = new RecordingMachine()
-    await machine.putFile('/tmp/a b', ENC.encode('data'))
-    const [line, stdin, , cwd] = machine.execs.at(-1) ?? []
-    expect([line, new TextDecoder().decode(stdin ?? undefined), cwd]).toEqual([
-      'cat > "$1"',
-      'data',
-      '/',
-    ])
-  })
-})

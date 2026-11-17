@@ -18,7 +18,7 @@ import { bound, spec } from '../../../tests/fixtures/machine_files.ts'
 import { create } from './create.ts'
 import { pwrite } from './pwrite.ts'
 import { truncate } from './truncate.ts'
-import { stageName, write, writeCommand } from './write.ts'
+import { write, writeCommand } from './write.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -29,19 +29,10 @@ describe('writeCommand', () => {
     expect(writeCommand('/tmp/x', true, false)).toBe("cat >> '/tmp/x'")
     const staged = writeCommand('/tmp/x', false, true)
     const name = staged.split(' ')[2] ?? ''
-    expect(name.startsWith("'/tmp/.mirage-")).toBe(true)
+    expect(name.startsWith("'/tmp/x.mirage-")).toBe(true)
     expect(staged).toBe(
       `cat > ${name} && mv -f -- ${name} '/tmp/x' || { rm -f -- ${name}; exit 1; }`,
     )
-  })
-})
-
-describe('stageName', () => {
-  it('stays short beside a long name', () => {
-    const name = stageName(`/tmp/${'n'.repeat(250)}`)
-    expect(name.startsWith('/tmp/.mirage-')).toBe(true)
-    expect(name.split('/').at(-1)?.length).toBe(40)
-    expect(stageName('/x').startsWith('/.mirage-')).toBe(true)
   })
 })
 
@@ -62,21 +53,16 @@ describe('write', () => {
     )
   })
 
-  it('goes through the file API on a machine without input', async () => {
+  it('is refused on a machine without input', async () => {
     const machine = new ScriptedMachine('box', () => ok(), false)
     const accessor = bound([machine])
-    await write(accessor, 'box', spec('/x'), ENC.encode('new'))
-    await write(accessor, 'box', spec('/y'), ENC.encode('+'), true)
-    await pwrite(accessor, 'box', spec('/z'), ENC.encode('AB'), 5)
-    const put = [...machine.put].map(([k, v]) => [k, DEC.decode(v)] as const)
-    const [, y = '', z = ''] = put.map(([k]) => k)
-    expect([y, z].every((k) => k.startsWith('/tmp/.mirage-'))).toBe(true)
-    expect(Object.fromEntries(put)).toEqual({ '/tmp/x': 'new', [y]: '+', [z]: 'AB' })
-    expect(machine.lines).toEqual([
-      `cat -- '${y}' >> '/tmp/y'; s=$?; rm -f -- '${y}'; exit $s`,
-      `dd if='${z}' of='/tmp/z' seek=5 oflag=seek_bytes conv=notrunc status=none; s=$?; rm -f -- '${z}'; exit $s`,
-    ])
-    expect(machine.fed.every((f) => f === null)).toBe(true)
+    await expect(write(accessor, 'box', spec('/x'), ENC.encode('new'))).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+    await expect(pwrite(accessor, 'box', spec('/z'), ENC.encode('AB'), 5)).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+    expect(machine.lines).toEqual([])
   })
 })
 

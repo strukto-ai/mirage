@@ -725,27 +725,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
-   * Replace a file's bytes on the machine: `cat` writing what it is fed, at
-   * `/` in the machine's environment. A provider whose exec takes no input
-   * (`takesInput`) writes through its own file API instead.
-   *
-   * @param path the file's path on the machine.
-   * @param data its new bytes.
-   */
-  putFile(path: string, data: Uint8Array): Promise<RunAnswer> {
-    return answerOf((output, errors) =>
-      this.execArgv(
-        ['/bin/sh', '-c', 'cat > "$1"', 'sh', path],
-        data,
-        { ...this.config.env },
-        '/',
-        output,
-        errors,
-      ),
-    )
-  }
-
-  /**
    * Unmount what the machine was served; the machine itself is the user's.
    * The next run connects again, so a workspace that takes the handle after
    * this one reaches the machine anew. On a machine that pauses, a connect

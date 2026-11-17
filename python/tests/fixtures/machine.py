@@ -56,7 +56,6 @@ class ScriptedMachine(MachineHandle):
         self.answer = answer
         self.lines: list[str] = []
         self.fed: list[bytes | None] = []
-        self.put: dict[str, bytes] = {}
 
     async def connect(self) -> None:
         return None
@@ -83,15 +82,25 @@ class ScriptedMachine(MachineHandle):
             await (output if self.joins_streams else errors)(done.stderr)
         return RunResult(done.exit_code)
 
-    async def put_file(self, path: str, data: bytes) -> RunAnswer:
-        self.put[path] = data
-        return ok()
-
 
 class InputlessMachine(ScriptedMachine):
-    """A scripted machine whose exec takes no input (Daytona)."""
+    """A scripted machine whose exec takes no input (Daytona), refusing a
+    line given any."""
 
     takes_input = False
+
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn,
+        errors: OutputFn,
+    ) -> RunResult:
+        if stdin is not None and stdin != b"":
+            return await self.input_refused(errors)
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
 
 
 class JoinedMachine(ScriptedMachine):

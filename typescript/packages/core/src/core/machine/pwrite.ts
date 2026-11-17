@@ -13,15 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
+import { enotsup } from '../../errors/fs.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { checked, remote } from './utils.ts'
-import { staged } from './write.ts'
 
 /**
  * Write bytes at an offset, as pwrite(2): the rest of the file stays, a gap
- * reads back as zeros, a missing file is made.
+ * reads back as zeros, a missing file is made. A machine whose exec takes
+ * no input (Daytona) refuses it.
  *
  * @param accessor the mount's machines.
  * @param machine the machine's name.
@@ -36,13 +37,10 @@ export async function pwrite(
   data: Uint8Array,
   offset: number,
 ): Promise<void> {
+  if (!accessor.handle(machine).takesInput) throw enotsup('machine', 'pwrite', path)
   const timer = startOp()
   const seek = `seek=${String(offset)} oflag=seek_bytes conv=notrunc status=none`
-  if (accessor.handle(machine).takesInput) {
-    const target = singleQuote(remote(accessor, path))
-    await checked(accessor, machine, `dd of=${target} ${seek}`, path, data)
-  } else {
-    await staged(accessor, machine, path, data, (st, t) => `dd if=${st} of=${t} ${seek}`)
-  }
+  const target = singleQuote(remote(accessor, path))
+  await checked(accessor, machine, `dd of=${target} ${seek}`, path, data)
   record('pwrite', path.virtual, VFSName.MACHINE, data.byteLength, timer)
 }

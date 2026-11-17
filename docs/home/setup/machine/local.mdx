@@ -154,8 +154,9 @@ runs on one of them.
   `chmod`, `chown` and `touch` apply on the machine.
 - **Tools:** the machine needs GNU `find` (for `-printf`), `cat`, `head`,
   `tail`, `dd` and the coreutils sums; a stock Debian or Ubuntu image has them.
-- **Daytona:** its exec takes no input, so writes go through Daytona's file
-  API, and a command that needs piped input stays with Mirage.
+- **Daytona:** its exec takes no input, so a write to its files is refused
+  (`Operation not supported`), and a command that needs piped input stays
+  with Mirage.
 - **Serving:** with `mount_type: ssh`, a path the machine holds itself is
   never served back to it; any other machine mount is served like any mount.
 

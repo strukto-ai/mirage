@@ -779,27 +779,6 @@ class MachineHandle:
             known = self._programs[name] = done.exit_code == 0
         return known
 
-    async def put_file(self, path: str, data: bytes) -> RunAnswer:
-        """Replace a file's bytes on the machine: ``cat`` writing what it
-        is fed, at ``/`` in the machine's environment. A provider whose
-        exec takes no input (``takes_input``) writes through its own file
-        API instead.
-
-        Args:
-            path (str): the file's path on the machine.
-            data (bytes): its new bytes.
-        """
-        return await answer_of(
-            lambda output, errors: self._exec_argv(
-                ("/bin/sh", "-c", 'cat > "$1"', "sh", path),
-                data,
-                dict(self.config.env),
-                "/",
-                output,
-                errors,
-            )
-        )
-
     def _disconnected(self) -> None:
         """Let the next run connect again, and read the machine's mounts
         again then: a connection that went may have taken them with it."""

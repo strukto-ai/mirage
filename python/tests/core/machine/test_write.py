@@ -17,7 +17,8 @@ import pytest
 from mirage.core.machine.create import create
 from mirage.core.machine.pwrite import pwrite
 from mirage.core.machine.truncate import truncate
-from mirage.core.machine.write import stage_name, write, write_command
+from mirage.core.machine.write import write, write_command
+from mirage.errors.types import OperationNotSupportedError
 from tests.fixtures.machine import (
     InputlessMachine,
     ScriptedMachine,
@@ -36,18 +37,11 @@ def test_write_command_replaces_appends_or_stages():
     )
     staged = write_command("/tmp/x", append=False, atomic=True)
     name = staged.split()[2]
-    assert name.startswith("'/tmp/.mirage-")
+    assert name.startswith("'/tmp/x.mirage-")
     assert staged == (
         f"cat > {name} && mv -f -- {name} '/tmp/x'"
         f" || {{ rm -f -- {name}; exit 1; }}"
     )
-
-
-def test_a_stage_name_stays_short_beside_a_long_name():
-    name = stage_name("/tmp/" + "n" * 250)
-    assert name.startswith("/tmp/.mirage-")
-    assert len(name.rsplit("/", 1)[1]) == 40
-    assert stage_name("/x").startswith("/.mirage-")
 
 
 @pytest.mark.asyncio
@@ -66,22 +60,15 @@ async def test_a_write_the_machine_refuses_raises_its_error():
 
 
 @pytest.mark.asyncio
-async def test_a_machine_without_input_writes_through_its_file_api():
+async def test_a_machine_without_input_refuses_a_write():
     box = InputlessMachine("box", lambda line, data: ok())
-    accessor = bound(box)
-    await write(accessor, "box", spec("/x"), b"new")
-    await write(accessor, "box", spec("/y"), b"+", append=True)
-    await pwrite(accessor, "box", spec("/z"), b"AB", 5)
-    _, y, z = box.put
-    assert [*box.put.values()] == [b"new", b"+", b"AB"]
-    assert box.put["/tmp/x"] == b"new"
-    assert y.startswith("/tmp/.mirage-") and z.startswith("/tmp/.mirage-")
-    assert box.lines == [
-        f"cat -- '{y}' >> '/tmp/y'; s=$?; rm -f -- '{y}'; exit $s",
-        f"dd if='{z}' of='/tmp/z' seek=5 oflag=seek_bytes conv=notrunc"
-        f" status=none; s=$?; rm -f -- '{z}'; exit $s",
-    ]
-    assert all(f is None for f in box.fed)
+    for op in (
+        write(bound(box), "box", spec("/x"), b"new"),
+        pwrite(bound(box), "box", spec("/z"), b"AB", 5),
+    ):
+        with pytest.raises(OperationNotSupportedError):
+            await op
+    assert box.lines == []
 
 
 @pytest.mark.asyncio

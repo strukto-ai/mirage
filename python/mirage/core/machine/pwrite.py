@@ -14,7 +14,7 @@
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.utils import checked, remote
-from mirage.core.machine.write import staged
+from mirage.errors.fs import enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
@@ -28,7 +28,8 @@ async def pwrite(
     offset: int,
 ) -> None:
     """Write bytes at an offset, as pwrite(2): the rest of the file stays,
-    a gap reads back as zeros, a missing file is made.
+    a gap reads back as zeros, a missing file is made. A machine whose
+    exec takes no input (Daytona) refuses it.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -37,17 +38,10 @@ async def pwrite(
         data (bytes): the bytes.
         offset (int): where they start.
     """
+    if not accessor.handle(machine).takes_input:
+        raise enotsup("machine", "pwrite", path)
     timer = start_op()
     seek = f"seek={offset} oflag=seek_bytes conv=notrunc status=none"
-    if accessor.handle(machine).takes_input:
-        target = single_quote(remote(accessor, path))
-        await checked(accessor, machine, f"dd of={target} {seek}", path, data)
-    else:
-        await staged(
-            accessor,
-            machine,
-            path,
-            data,
-            lambda s, t: f"dd if={s} of={t} {seek}",
-        )
+    target = single_quote(remote(accessor, path))
+    await checked(accessor, machine, f"dd of={target} {seek}", path, data)
     record("pwrite", path.virtual, "machine", len(data), timer)

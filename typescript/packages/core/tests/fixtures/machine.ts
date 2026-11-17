@@ -45,7 +45,6 @@ export class ScriptedMachine extends MachineHandle {
   static override readonly provider = 'scripted'
   readonly lines: string[] = []
   readonly fed: (Uint8Array | null)[] = []
-  readonly put = new Map<string, Uint8Array>()
 
   constructor(
     name: string,
@@ -77,11 +76,6 @@ export class ScriptedMachine extends MachineHandle {
     if (done.stdout.length > 0) await output(done.stdout)
     if (done.stderr.length > 0) await (this.joinsStreams ? output : errors)(done.stderr)
     return { exitCode: done.exitCode }
-  }
-
-  override putFile(path: string, data: Uint8Array): Promise<RunAnswer> {
-    this.put.set(path, data)
-    return Promise.resolve(ok())
   }
 }
 

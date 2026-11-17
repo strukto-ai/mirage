@@ -12,30 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.utils import checked, remote
-from mirage.core.posix.errors import refusal
+from mirage.errors.fs import enotsup
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.path import parent
 from mirage.utils.quote import single_quote
-
-
-def stage_name(target: str) -> str:
-    """A fresh name beside ``target`` to stage its bytes under, as short
-    whatever the target's own name, so a name near the length limit still
-    stages.
-
-    Args:
-        target (str): the file's path on the machine.
-    """
-    return f"{parent(target).rstrip('/')}/.mirage-{uuid4().hex}"
 
 
 def write_command(target: str, append: bool, atomic: bool) -> str:
@@ -53,50 +41,10 @@ def write_command(target: str, append: bool, atomic: bool) -> str:
         return f"cat >> {q}"
     if not atomic:
         return f"cat > {q}"
-    staged = single_quote(stage_name(target))
+    staged = single_quote(f"{target}.mirage-{uuid4().hex}")
     return (
         f"cat > {staged} && mv -f -- {staged} {q}"
         f" || {{ rm -f -- {staged}; exit 1; }}"
-    )
-
-
-async def staged(
-    accessor: MachineAccessor,
-    machine: str,
-    path: PathSpec,
-    data: bytes,
-    apply: Callable[[str, str], str] | None = None,
-) -> None:
-    """Write bytes through the machine's file API, for a machine whose exec
-    takes no input (Daytona): straight onto the file, or, with ``apply``,
-    onto a sibling name one line on the machine then applies to the file
-    and removes, so an append or an offset write never rewrites the file
-    whole and leaves what a program wrote meanwhile.
-
-    Args:
-        accessor (MachineAccessor): the mount's machines.
-        machine (str): the machine's name.
-        path (PathSpec): the file.
-        data (bytes): the bytes.
-        apply (Callable[[str, str], str] | None): the line that applies
-            the staged file to the file, from both quoted paths; None
-            writes the file itself.
-    """
-    target = remote(accessor, path)
-    handle = accessor.handle(machine)
-    if apply is None:
-        done = await handle.put_file(target, data)
-        if done.exit_code != 0:
-            raise refusal(path, done.stderr or done.stdout)
-        return
-    stage = stage_name(target)
-    done = await handle.put_file(stage, data)
-    if done.exit_code != 0:
-        raise refusal(path, done.stderr or done.stdout)
-    q = single_quote(stage)
-    line = apply(q, single_quote(target))
-    await checked(
-        accessor, machine, f"{line}; s=$?; rm -f -- {q}; exit $s", path
     )
 
 
@@ -108,7 +56,8 @@ async def write(
     append: bool = False,
     atomic: bool = False,
 ) -> None:
-    """Write a file on a machine, the bytes streamed to its ``cat``.
+    """Write a file on a machine, the bytes streamed to its ``cat``. A
+    machine whose exec takes no input (Daytona) refuses the write.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -118,6 +67,9 @@ async def write(
         append (bool): add them to the end instead.
         atomic (bool): show nothing until the stream has ended whole.
     """
+    if not accessor.handle(machine).takes_input:
+        await close_quietly(data)
+        raise enotsup("machine", "append" if append else "write", path)
     timer = start_op()
     size = 0
 
@@ -128,19 +80,8 @@ async def write(
             yield part
 
     try:
-        if accessor.handle(machine).takes_input:
-            command = write_command(remote(accessor, path), append, atomic)
-            await checked(accessor, machine, command, path, counted())
-        else:
-            body = await materialize(data)
-            size = len(body)
-            await staged(
-                accessor,
-                machine,
-                path,
-                body,
-                (lambda s, t: f"cat -- {s} >> {t}") if append else None,
-            )
+        command = write_command(remote(accessor, path), append, atomic)
+        await checked(accessor, machine, command, path, counted())
     finally:
         await close_quietly(data)
     record(
