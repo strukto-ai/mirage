@@ -135,7 +135,7 @@ PLACEHOLDER = "/<path>"
 # not one it accepts. Nothing is reached: building a VFS opens no
 # connection.
 # A machine mount needs a workspace with machines; one it never reaches.
-MACHINES: dict[str, dict[str, JsonValue]] = {
+MACHINES: dict[str, dict[str, dict[str, str]]] = {
     "machine": {"sandbox": {"provider": "docker", "container": "sandbox"}}
 }
 SAMPLES: dict[str, dict[str, JsonValue]] = {
