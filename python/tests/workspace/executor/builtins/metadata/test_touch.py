@@ -2,6 +2,7 @@ import pytest
 
 from mirage.errors.types import CommandTimeoutError
 from mirage.types import FileStat, MountMode, PathSpec
+from mirage.utils.path import norm
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -33,6 +34,27 @@ class _RejectingRAMVFS(RAMVFS):
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         raise self.error
+
+
+class _RemovedBeforeTimesRAMVFS(RAMVFS):
+    """RAM VFS where another client removes a file between touch's create
+    and the time set that follows, as an ``rm`` racing the ``touch`` that
+    made it."""
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        self._store.files.pop(norm(path.mount_path), None)
+        return await super().setattr(
+            path, mode=mode, uid=uid, gid=gid, atime=atime, mtime=mtime
+        )
 
 
 @pytest.mark.asyncio
@@ -138,3 +160,27 @@ async def test_touch_reports_a_refused_stat_and_the_line_goes_on(
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, out, err = await _run(ws, f'{line}; echo "s=$?"')
     assert (code, out, err) == (0, "s=1\n", stderr)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["touch /data/new.txt", "umask 077; touch /data/new.txt"]
+)
+async def test_touch_says_nothing_when_its_new_file_goes_before_its_times(
+    line: str,
+):
+    vfs = _RemovedBeforeTimesRAMVFS()
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    assert await _run(ws, f'{line}; echo "s=$?"') == (0, "s=0\n", "")
+
+
+@pytest.mark.asyncio
+async def test_touch_reports_a_file_it_did_not_make_going_before_its_times():
+    vfs = _RemovedBeforeTimesRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    assert await _run(ws, 'touch /data/new.txt /data/f.txt; echo "s=$?"') == (
+        0,
+        "s=1\n",
+        "touch: cannot touch '/data/f.txt': No such file or directory\n",
+    )

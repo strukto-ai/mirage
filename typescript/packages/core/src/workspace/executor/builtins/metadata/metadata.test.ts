@@ -15,7 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { SessionProfile } from '../../../../policy/profile.ts'
+import type { SetAttrFields } from '../../../../types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
+import { norm } from '../../../../utils/path.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
@@ -113,6 +115,18 @@ class RejectingRAMVFS extends OverlayRAMVFS {
   }
   override write(): Promise<void> {
     return Promise.reject(this.error)
+  }
+}
+
+// Another client removes a file between touch's create and the time set
+// that follows, as an `rm` racing the `touch` that made it.
+class RemovedBeforeTimesRAMVFS extends RAMVFS {
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    this.store.files.delete(norm(path.mountPath))
+    return super.setattr(path, fields)
   }
 }
 
@@ -290,6 +304,25 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   ])('touch reports a refused stat and the line goes on: %s', async (line, stderr) => {
     const [ws] = makeOverlayWs({}, new RejectingRAMVFS(new Error('stat refused: 503'), true))
     expect(await run(ws, `${line}; echo "s=$?"`)).toEqual([0, 's=1\n', stderr])
+    await ws.close()
+  })
+
+  it.each(['touch /data/new.txt', 'umask 077; touch /data/new.txt'])(
+    'touch says nothing when its new file goes before its times: %s',
+    async (line) => {
+      const [ws] = makeOverlayWs({}, new RemovedBeforeTimesRAMVFS())
+      expect(await run(ws, `${line}; echo "s=$?"`)).toEqual([0, 's=0\n', ''])
+      await ws.close()
+    },
+  )
+
+  it('touch reports a file it did not make going before its times', async () => {
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' }, new RemovedBeforeTimesRAMVFS())
+    expect(await run(ws, 'touch /data/new.txt /data/f.txt; echo "s=$?"')).toEqual([
+      0,
+      's=1\n',
+      "touch: cannot touch '/data/f.txt': No such file or directory\n",
+    ])
     await ws.close()
   })
 

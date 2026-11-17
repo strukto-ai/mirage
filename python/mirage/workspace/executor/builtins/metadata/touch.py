@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
@@ -46,6 +47,8 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 # GNU touch's --time words, aliases of one value together.
 TIME_GROUPS = (("atime", "access", "use"), ("mtime", "modify"))
@@ -200,6 +203,7 @@ async def handle_touch(
                 )
                 continue
         try:
+            created = False
             try:
                 await dispatch("stat", resolved)
             except NotADirectoryError as exc:
@@ -227,19 +231,32 @@ async def handle_touch(
                         f"Read-only file system\n"
                     )
                     continue
-                # A file touch creates is 0666 under the session's
-                # umask; only a mask away from bash's default is worth
-                # a mode write, since 644 is what a fresh file renders as.
-                if session.umask != DEFAULT_UMASK:
-                    await setattr_via(
-                        dispatch,
-                        resolved,
-                        mode=0o666 & ~session.umask,
-                        atime=atime,
-                        mtime=mtime,
-                    )
-                    continue
-            await setattr_via(dispatch, resolved, atime=atime, mtime=mtime)
+                created = True
+            # A file touch creates is 0666 under the session's umask; only
+            # a mask away from bash's default is worth a mode write, since
+            # 644 is what a fresh file renders as.
+            mode = (
+                0o666 & ~session.umask
+                if created and session.umask != DEFAULT_UMASK
+                else None
+            )
+            try:
+                await setattr_via(
+                    dispatch, resolved, mode=mode, atime=atime, mtime=mtime
+                )
+            except FileNotFoundError as exc:
+                # GNU sets the times through the descriptor it created the
+                # file with, so another client removing the name in between
+                # (an `rm` that saw the new file) never fails it. Here the
+                # time set goes by name, after the write, and finds nothing
+                # there.
+                if not created:
+                    raise
+                logger.debug(
+                    "touch: %s went before its times were set: %s",
+                    target.raw_path,
+                    exc,
+                )
         except PermissionError as exc:
             action = "setting times of" if no_create else "cannot touch"
             errors.append(
