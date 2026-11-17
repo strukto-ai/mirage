@@ -4,13 +4,16 @@ icon: file-pdf
 description: Set up the credential-free pdfinfo CLI for PDF files with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/pdfinfo.mdx'
+
 Mirage implements [poppler](https://poppler.freedesktop.org)'s `pdfinfo`:
 a PDF's metadata, page count, page sizes, encryption and PDF version, with
 poppler's messages and exit codes.
 
 `pdfinfo` needs no account config and reads PDF files through existing mounts.
-Register it on `ws`. Commands: [Python](/python/cli/pdfinfo) ·
-[TypeScript](/typescript/cli/pdfinfo).
+Register it on `ws`.
+
+Commands: [Python](/python/cli/pdfinfo) · [TypeScript](/typescript/cli/pdfinfo).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -28,3 +31,5 @@ Register it on `ws`. Commands: [Python](/python/cli/pdfinfo) ·
     ```
   </Tab>
 </Tabs>
+
+<License />

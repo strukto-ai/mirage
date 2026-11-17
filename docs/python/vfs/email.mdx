@@ -225,7 +225,7 @@ vfs = EmailVFS(config=config)
 
 async def main():
     ws = Workspace({"/email": vfs}, mode=MountMode.READ)
-    ws.register_cli("himalaya", HIMALAYA, config.model_dump())
+    ws.register_cli("himalaya", HIMALAYA, config)
 
     # List folders
     r = await ws.shell("ls /email/")

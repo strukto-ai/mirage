@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import argparse
+import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
@@ -23,6 +25,211 @@ from mirage.commands.spec.types import CommandSpec
 ROOT = Path(__file__).resolve().parent.parent
 START = "{/* BEGIN GENERATED CLI COMMANDS */}"
 END = "{/* END GENERATED CLI COMMANDS */}"
+LICENSE_START = "{/* BEGIN GENERATED CLI LICENSE */}"
+LICENSE_END = "{/* END GENERATED CLI LICENSE */}"
+REPO = "https://github.com/strukto-ai/mirage/blob/main"
+SECTIONS = ["Supported commands", "Usage", "Behavior"]
+
+
+@dataclass(frozen=True)
+class Project:
+    """One project a CLI follows, adapts or depends on.
+
+    Args:
+        name (str): The project, as a Markdown link.
+        role (str): What Mirage takes from it.
+        license (str): Its license, as Markdown.
+        notice (str | None): The stem of the copy under licenses/third_party/
+            when Mirage adapts its code.
+        internal (bool): Adapted for an internal detail, so the page names it
+            under the table instead of giving it a row.
+    """
+
+    name: str
+    role: str
+    license: str
+    notice: str | None = None
+    internal: bool = False
+
+
+@dataclass(frozen=True)
+class Licensing:
+    """The licensing facts of one bundled CLI.
+
+    Args:
+        upstream (str): The overview catalog's cell.
+        projects (tuple[Project, ...]): Rows above Mirage's own.
+    """
+
+    upstream: str
+    projects: tuple[Project, ...] = ()
+
+
+MIRAGE = Project(
+    "[Mirage](https://github.com/strukto-ai/mirage)",
+    "Command implementation",
+    f"[Apache-2.0]({REPO}/LICENSE)",
+)
+OPENCLAW = Project(
+    "[OpenClaw](https://github.com/openclaw/openclaw)",
+    "Action names",
+    "[MIT](https://github.com/openclaw/openclaw/blob/main/LICENSE)",
+)
+POPPLER = Project(
+    "[poppler](https://poppler.freedesktop.org)",
+    "Command-line behavior reference; Mirage copies none of its code",
+    "GPL",
+)
+PDF_OXIDE = Project(
+    "[pdf_oxide](https://github.com/yfedoseev/pdf_oxide)",
+    "PDF reader dependency",
+    "MIT or Apache-2.0",
+)
+SERVICE_API = "None; calls the service API"
+BEHAVIOR_ONLY = "GPL, behavior reference only"
+LICENSES = {
+    "airtable": Licensing(SERVICE_API),
+    "discord": Licensing("MIT (OpenClaw)", (OPENCLAW,)),
+    "gh": Licensing(
+        "MIT",
+        (
+            Project(
+                "[GitHub CLI](https://github.com/cli/cli) 2.85.0",
+                "Upstream CLI; its commands, output and API calls are adapted",
+                "MIT",
+                "gh",
+            ),
+            Project(
+                "[go-gh](https://github.com/cli/go-gh) 2.13.0",
+                "`--template` and `--jq` handling adapted",
+                "MIT",
+                "go-gh",
+                internal=True,
+            ),
+            Project(
+                "[Go](https://github.com/golang/go) 1.25.5",
+                "HTTP reason phrases and template execution adapted",
+                "BSD-3-Clause",
+                "go",
+                internal=True,
+            ),
+            Project(
+                "[gojq](https://github.com/itchyny/gojq) 0.12.17",
+                "jq builtin errors adapted",
+                "MIT",
+                "gojq",
+                internal=True,
+            ),
+            Project(
+                "[Cobra](https://github.com/spf13/cobra) 1.10.2",
+                "Unknown-command refusals adapted",
+                "Apache-2.0",
+                "cobra",
+                internal=True,
+            ),
+            Project(
+                "[pflag](https://github.com/spf13/pflag) 1.0.10",
+                "Option table and option-error wording adapted",
+                "BSD-3-Clause",
+                "pflag",
+                internal=True,
+            ),
+        ),
+    ),
+    "git": Licensing(
+        BEHAVIOR_ONLY,
+        (
+            Project(
+                "[Git](https://github.com/git/git)",
+                "Behavior reference only; Mirage does not run Git",
+                "[GPL-2.0](https://github.com/git/git/blob/master/COPYING)",
+            ),
+            Project(
+                "[Dulwich](https://github.com/jelmer/dulwich)",
+                "Python Git library, used under Apache-2.0; TypeScript ports "
+                "its rename score",
+                "Apache-2.0 or GPL-2.0-or-later",
+                "dulwich",
+            ),
+            Project(
+                "[isomorphic-git](https://github.com/isomorphic-git/isomorphic-git)",
+                "TypeScript Git library",
+                "[MIT](https://github.com/isomorphic-git/isomorphic-git/blob/main/LICENSE.md)",
+            ),
+        ),
+    ),
+    "gws": Licensing(
+        "Apache-2.0",
+        (
+            Project(
+                "[gws](https://github.com/googleworkspace/cli)",
+                "Upstream CLI",
+                "[Apache-2.0](https://github.com/googleworkspace/cli/blob/main/LICENSE)",
+            ),
+        ),
+    ),
+    "hf": Licensing(
+        "Apache-2.0",
+        (
+            Project(
+                "[huggingface_hub](https://github.com/huggingface/huggingface_hub)"
+                " 1.16.4",
+                "Upstream CLI; its repository file filters are adapted",
+                "Apache-2.0",
+                "huggingface_hub",
+            ),
+        ),
+    ),
+    "himalaya": Licensing(
+        "MIT or Apache-2.0",
+        (
+            Project(
+                "[Himalaya](https://github.com/pimalaya/himalaya)",
+                "Upstream CLI",
+                "[MIT](https://github.com/pimalaya/himalaya/blob/master/LICENSE-MIT)"
+                " or "
+                "[Apache-2.0](https://github.com/pimalaya/himalaya/blob/master/LICENSE-APACHE)",
+            ),
+        ),
+    ),
+    "linear": Licensing(
+        "ISC",
+        (
+            Project(
+                "[schpet/linear-cli](https://github.com/schpet/linear-cli) 3.1.0",
+                "Command reference; its issue relation handling is adapted",
+                "ISC",
+                "schpet-linear-cli",
+            ),
+        ),
+    ),
+    "ntn": Licensing(
+        "MIT",
+        (
+            Project(
+                "[ntn](https://www.npmjs.com/package/ntn) 0.21.9",
+                "Upstream CLI the conformance suite pins",
+                "[MIT](https://www.npmjs.com/package/ntn/v/0.21.9)",
+            ),
+        ),
+    ),
+    "office": Licensing(
+        "Apache-2.0",
+        (
+            Project(
+                "[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 1.0.161",
+                "Upstream CLI; its paths, properties, output and messages are adapted",
+                "Apache-2.0",
+                "officecli",
+            ),
+        ),
+    ),
+    "pdfinfo": Licensing(BEHAVIOR_ONLY, (POPPLER, PDF_OXIDE)),
+    "pdftotext": Licensing(BEHAVIOR_ONLY, (POPPLER, PDF_OXIDE)),
+    "search": Licensing("None; Mirage's own command"),
+    "slack": Licensing("MIT (OpenClaw)", (OPENCLAW,)),
+    "trello": Licensing(SERVICE_API),
+}
 SUMMARIES = {
     "airtable": (
         "Query bases and tables; read, create, update and delete records; "
@@ -139,6 +346,58 @@ def reference(cli: CLI) -> str:
     return "\n".join([*rows, END])
 
 
+def license_cell(project: Project) -> str:
+    """Link an adapted project's license to the copy Mirage ships.
+
+    Args:
+        project (Project): One row of a CLI's licensing.
+    """
+    if project.notice is None:
+        return project.license
+    path = ROOT / "licenses/third_party" / f"{project.notice}.txt"
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    return f"[{project.license}]({REPO}/licenses/third_party/{project.notice}.txt)"
+
+
+def license_block(name: str) -> str:
+    """Render a reference page's license table.
+
+    Args:
+        name (str): The bundled CLI.
+    """
+    rows = [
+        LICENSE_START,
+        "## License",
+        "",
+        "| Project | Role in Mirage | License |",
+        "| --- | --- | --- |",
+    ]
+    internal = []
+    for project in (*LICENSES[name].projects, MIRAGE):
+        cell = license_cell(project)
+        if project.internal:
+            internal.append(
+                re.sub(r"\[([^\]]+)\]\([^)]+\).*", r"\1", project.name)
+            )
+        else:
+            rows.append(f"| {project.name} | {project.role} | {cell} |")
+    if internal:
+        names = ", ".join(internal[:-1]) + f" and {internal[-1]}"
+        rows += [
+            "",
+            f"Adapted code from {names} keeps its license in "
+            f"[`licenses/third_party/`]({REPO.replace('/blob/', '/tree/')}"
+            "/licenses/third_party).",
+        ]
+    rows += [
+        "",
+        "See [compatibility and licenses]"
+        "(/home/setup/clis#compatibility-and-licenses).",
+    ]
+    return "\n".join([*rows, LICENSE_END])
+
+
 def catalog(language: str) -> str:
     """Render the listed CLI inventory for an overview page.
 
@@ -147,29 +406,37 @@ def catalog(language: str) -> str:
     """
     rows = [
         START,
-        "| Program | Supported operations | Commands |",
-        "| --- | --- | --- |",
+        "| Program | Supported operations | Commands | Upstream license |",
+        "| --- | --- | --- | --- |",
     ]
     for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
         spec = cli_spec_for(name)
         count = sum(1 for _ in commands(spec.spec))
+        upstream = LICENSES[name].upstream
+        if language != "home/setup":
+            upstream = f"[{upstream}](/{language}/cli/{name}#license)"
         rows.append(
-            f"| [{name}](/{language}/cli/{name}) | {SUMMARIES[name]} | {count} |"
+            f"| [{name}](/{language}/cli/{name}) | {SUMMARIES[name]} | {count} "
+            f"| {upstream} |"
         )
     return "\n".join([*rows, END])
 
 
-def replace_block(text: str, block: str) -> str:
+def replace_block(
+    text: str, block: str, start_marker: str, end_marker: str
+) -> str:
     """Replace exactly one generated block, refusing missing markers.
 
     Args:
         text (str): The existing page.
-        block (str): The newly rendered reference.
+        block (str): The newly rendered block, markers included.
+        start_marker (str): The line opening the block.
+        end_marker (str): The line closing the block.
     """
-    if text.count(START) != 1 or text.count(END) != 1:
-        raise ValueError("expected one generated CLI commands block")
-    start = text.index(START)
-    end = text.index(END, start) + len(END)
+    if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+        raise ValueError(f"expected one {start_marker} block")
+    start = text.index(start_marker)
+    end = text.index(end_marker, start) + len(end_marker)
     return text[:start] + block + text[end:]
 
 
@@ -185,7 +452,11 @@ def main() -> int:
         raise SystemExit(
             "Update CLI overview summaries for the registered programs"
         )
-    pages: dict[Path, str] = {}
+    if set(LICENSES) != set(BUILTIN_CLI_SPECS):
+        raise SystemExit("Update CLI licensing for the registered programs")
+    commands_block = (START, END)
+    license = (LICENSE_START, LICENSE_END)
+    pages: dict[Path, list[tuple[str, tuple[str, str]]]] = {}
     for language in ("python", "typescript"):
         directory = ROOT / "docs" / language / "cli"
         documented = {p.stem for p in directory.glob("*.mdx")} - {
@@ -198,18 +469,64 @@ def main() -> int:
                 f"{language} CLI pages disagree with the registry: "
                 f"{documented ^ set(BUILTIN_CLI_SPECS)}"
             )
-        pages[directory / "index.mdx"] = catalog(language)
-        for name in sorted(BUILTIN_CLI_SPECS):
-            pages[directory / f"{name}.mdx"] = reference(cli_spec_for(name))
-    pages[ROOT / "docs/home/setup/clis.mdx"] = catalog("home/setup")
+        pages[directory / "index.mdx"] = [(catalog(language), commands_block)]
+        for name in sorted(UNLISTED):
+            pages[directory / f"{name}.mdx"] = [
+                (reference(cli_spec_for(name)), commands_block),
+                (license_block(name), license),
+            ]
+    pages[ROOT / "docs/home/setup/clis.mdx"] = [
+        (catalog("home/setup"), commands_block)
+    ]
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
+        reference_page = (
+            f"import Reference from '/snippets/cli/{name}.mdx'",
+            "<Reference />",
+        )
+        license_page = (
+            f"import License from '/snippets/cli/license/{name}.mdx'",
+            "<License />",
+        )
+        expected = {
+            ROOT / "docs/python/cli" / f"{name}.mdx": (
+                reference_page,
+                license_page,
+            ),
+            ROOT / "docs/typescript/cli" / f"{name}.mdx": (
+                reference_page,
+                license_page,
+            ),
+            ROOT / "docs/home/setup/cli" / f"{name}.mdx": (license_page,),
+        }
+        for page, snippets in expected.items():
+            text = page.read_text()
+            for line in (line for snippet in snippets for line in snippet):
+                if line not in text:
+                    raise SystemExit(f"{page.relative_to(ROOT)} lacks {line}")
+        pages[ROOT / "docs/snippets/cli" / f"{name}.mdx"] = [
+            (reference(cli_spec_for(name)), commands_block)
+        ]
+        pages[ROOT / "docs/snippets/cli/license" / f"{name}.mdx"] = [
+            (license_block(name), license)
+        ]
     stale = []
-    for path, block in pages.items():
+    for path, blocks in pages.items():
         text = path.read_text()
-        updated = replace_block(text, block)
+        updated = text
+        for block, (start_marker, end_marker) in blocks:
+            updated = replace_block(updated, block, start_marker, end_marker)
         if text != updated:
             stale.append(str(path.relative_to(ROOT)))
             if not args.check:
                 path.write_text(updated)
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
+        snippet = ROOT / "docs/snippets/cli" / f"{name}.mdx"
+        found = re.findall(r"^## (.+)$", snippet.read_text(), re.M)
+        if found != SECTIONS:
+            raise SystemExit(
+                f"{snippet.relative_to(ROOT)} has sections {found}; "
+                f"a CLI reference has {SECTIONS}"
+            )
     if args.check and stale:
         raise SystemExit(
             "Stale CLI docs; run python/.venv/bin/python scripts/gen_cli_docs.py:\n"

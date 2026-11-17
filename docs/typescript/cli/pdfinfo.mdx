@@ -4,6 +4,9 @@ description: "Print a PDF file's metadata and page sizes with poppler's pdfinfo 
 icon: file-pdf
 ---
 
+import Reference from '/snippets/cli/pdfinfo.mdx'
+import License from '/snippets/cli/license/pdfinfo.mdx'
+
 Print a PDF file's document information: its metadata, page count, page
 size, encryption and PDF version. Mirage implements
 [poppler](https://poppler.freedesktop.org)'s `pdfinfo` fields, messages and
@@ -22,44 +25,6 @@ ws.registerCli('pdfinfo', PDFINFO)
 
 For YAML registration, see the [CLI overview](/typescript/cli/index#register-a-cli).
 
-{/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+<Reference />
 
-Run `pdfinfo --help` for the supported flags and operands.
-This list is generated from Mirage's registered command tree.
-
-| Command | Description |
-| --- | --- |
-| `pdfinfo` | Print a PDF file's document information: its metadata, page count, page size and PDF version |
-{/* END GENERATED CLI COMMANDS */}
-
-## Read a PDF's information
-
-```bash
-pdfinfo /data/report.pdf
-pdfinfo -f 1 -l 3 /data/report.pdf
-TZ=Asia/Shanghai pdfinfo /data/report.pdf
-```
-
-The block lists `Title`, `Subject`, `Keywords`, `Author`, `Creator`,
-`Producer`, `CreationDate` and `ModDate` where the document sets them, then
-`Custom Metadata`, `Metadata Stream`, `Tagged`, `UserProperties`, `Suspects`,
-`Form`, `JavaScript`, `Pages`, `Encrypted`, the page size and rotation,
-`File size`, `Optimized` and `PDF version`. Dates print in the session's
-`TZ`, UTC when it is unset. `-l` lists the size and rotation of pages `-f`
-to `-l` instead of the first page's; `-opw`, `-upw` and `-q` work as in
-[pdftotext](./pdftotext).
-
-## Differences from poppler
-
-- `-box`, `-meta`, `-custom`, `-js`, `-struct`, `-struct-text`, `-isodates`,
-  `-rawdates`, `-dests`, `-url`, `-enc`, `-listenc` and `-v` are not
-  supported.
-- A PDF read from standard input reports a file size of 0 bytes, as poppler
-  does.
-
-## License
-
-poppler is GPL-licensed. Mirage matches its command-line behavior and copies
-none of its code. The PDF reader is
-[pdf_oxide](https://github.com/yfedoseev/pdf_oxide) (MIT or Apache-2.0).
+<License />

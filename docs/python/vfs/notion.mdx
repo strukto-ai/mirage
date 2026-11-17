@@ -326,7 +326,7 @@ vfs = NotionVFS(config=config)
 
 async def main():
     ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
-    ws.register_cli("ntn", NTN, config.model_dump())
+    ws.register_cli("ntn", NTN, config)
 
     # List top-level pages
     r = await ws.shell("ls /notion/pages/")

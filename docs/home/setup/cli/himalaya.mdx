@@ -4,9 +4,12 @@ icon: envelope
 description: Set up the Himalaya mail CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/himalaya.mdx'
+
 Create credentials in [Email setup](/home/setup/email), then register them on
-an existing `ws`. Commands: [Python](/python/cli/himalaya) ·
-[TypeScript](/typescript/cli/himalaya).
+an existing `ws`.
+
+Commands: [Python](/python/cli/himalaya) · [TypeScript](/typescript/cli/himalaya).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -24,7 +27,7 @@ an existing `ws`. Commands: [Python](/python/cli/himalaya) ·
         username="agent@example.com",
         password="app-password",
     )
-    ws.register_cli("himalaya", HIMALAYA, config.model_dump())
+    ws.register_cli("himalaya", HIMALAYA, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -45,3 +48,5 @@ an existing `ws`. Commands: [Python](/python/cli/himalaya) ·
     ```
   </Tab>
 </Tabs>
+
+<License />

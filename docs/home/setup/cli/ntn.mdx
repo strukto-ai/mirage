@@ -4,9 +4,12 @@ icon: /images/notion-logo.svg
 description: Set up the Notion CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/ntn.mdx'
+
 Create a token in [Notion setup](/home/setup/notion), then register it on an
-existing `ws`. Commands: [Python](/python/cli/ntn) ·
-[TypeScript](/typescript/cli/ntn).
+existing `ws`.
+
+Commands: [Python](/python/cli/ntn) · [TypeScript](/typescript/cli/ntn).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -15,7 +18,7 @@ existing `ws`. Commands: [Python](/python/cli/ntn) ·
     from mirage.core.notion.config import NotionConfig
 
     config = NotionConfig(api_key="secret_...")
-    ws.register_cli("ntn", NTN, config.model_dump())
+    ws.register_cli("ntn", NTN, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -27,3 +30,5 @@ existing `ws`. Commands: [Python](/python/cli/ntn) ·
     ```
   </Tab>
 </Tabs>
+
+<License />

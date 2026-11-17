@@ -1,0 +1,37 @@
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `pdfinfo --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `pdfinfo` | Print a PDF file's document information: its metadata, page count, page size and PDF version |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+```bash
+pdfinfo /data/report.pdf
+pdfinfo -f 1 -l 3 /data/report.pdf
+TZ=Asia/Shanghai pdfinfo /data/report.pdf
+```
+
+The block lists `Title`, `Subject`, `Keywords`, `Author`, `Creator`,
+`Producer`, `CreationDate` and `ModDate` where the document sets them, then
+`Custom Metadata`, `Metadata Stream`, `Tagged`, `UserProperties`, `Suspects`,
+`Form`, `JavaScript`, `Pages`, `Encrypted`, the page size and rotation,
+`File size`, `Optimized` and `PDF version`. Dates print in the session's
+`TZ`, UTC when it is unset. `-l` lists the size and rotation of pages `-f`
+to `-l` instead of the first page's; `-opw`, `-upw` and `-q` work as in
+[pdftotext](./pdftotext).
+
+## Behavior
+
+### Differences from poppler
+
+- `-box`, `-meta`, `-custom`, `-js`, `-struct`, `-struct-text`, `-isodates`,
+  `-rawdates`, `-dests`, `-url`, `-enc`, `-listenc` and `-v` are not
+  supported.
+- A PDF read from standard input reports a file size of 0 bytes, as poppler
+  does.

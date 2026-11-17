@@ -258,6 +258,8 @@
             "group": "CLIs",
             "pages": [
               "home/setup/clis",
+              "home/setup/cli/custom",
+              "home/setup/cli/mcp",
               {
                 "group": "CLIs",
                 "icon": "wrench",

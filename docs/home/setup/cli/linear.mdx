@@ -4,11 +4,14 @@ icon: /images/linear-logo.svg
 description: Set up the Linear CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/linear.mdx'
+
 Mirage's Linear commands draw partly on [schpet/linear-cli](https://github.com/schpet/linear-cli); the references below define the supported grammar.
 
 Create an API key in [Linear setup](/home/setup/linear), then register it on an
-existing `ws`. Commands: [Python](/python/cli/linear) ·
-[TypeScript](/typescript/cli/linear).
+existing `ws`.
+
+Commands: [Python](/python/cli/linear) · [TypeScript](/typescript/cli/linear).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -17,7 +20,7 @@ existing `ws`. Commands: [Python](/python/cli/linear) ·
     from mirage.core.linear.config import LinearConfig
 
     config = LinearConfig(api_key="lin_api_...")
-    ws.register_cli("linear", LINEAR, config.model_dump())
+    ws.register_cli("linear", LINEAR, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -29,3 +32,5 @@ existing `ws`. Commands: [Python](/python/cli/linear) ·
     ```
   </Tab>
 </Tabs>
+
+<License />

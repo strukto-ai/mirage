@@ -4,11 +4,19 @@ icon: /images/google-logo.svg
 description: Set up the Google Workspace CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/gws.mdx'
+
 Mirage implements a subset of the [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli).
 
 Create OAuth credentials in [Google Workspace setup](/home/setup/google), then
-register them on an existing `ws`. Commands: [Python](/python/cli/gws) ·
-[TypeScript](/typescript/cli/gws).
+register them on an existing `ws`.
+
+Forms is CLI-only. Enable the Google Forms API and grant
+`https://www.googleapis.com/auth/forms.body` to create or edit forms. Reading
+responses needs `https://www.googleapis.com/auth/forms.responses.readonly`.
+Creating forms inside a configured folder also needs the Drive API and scope.
+
+Commands: [Python](/python/cli/gws) · [TypeScript](/typescript/cli/gws).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -19,7 +27,7 @@ register them on an existing `ws`. Commands: [Python](/python/cli/gws) ·
     config = GoogleConfig(
         client_id="...", client_secret="...", refresh_token="..."
     )
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -32,7 +40,4 @@ register them on an existing `ws`. Commands: [Python](/python/cli/gws) ·
   </Tab>
 </Tabs>
 
-Forms is CLI-only. Enable the Google Forms API and grant
-`https://www.googleapis.com/auth/forms.body` to create or edit forms. Reading
-responses needs `https://www.googleapis.com/auth/forms.responses.readonly`.
-Creating forms inside a configured folder also needs the Drive API and scope.
+<License />

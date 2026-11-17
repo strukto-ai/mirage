@@ -4,9 +4,15 @@ icon: /images/huggingface-logo.svg
 description: Set up the Hugging Face CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/hf.mdx'
+
 Create a token in [HF Models setup](/home/setup/hf_models), then register it on
-an existing `ws`. Commands: [Python](/python/cli/hf) ·
-[TypeScript](/typescript/cli/hf).
+an existing `ws`.
+
+Downloading files and listing tags need a read token. Uploading, deleting,
+creating repositories and creating or deleting tags need a write token.
+
+Commands: [Python](/python/cli/hf) · [TypeScript](/typescript/cli/hf).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -25,7 +31,4 @@ an existing `ws`. Commands: [Python](/python/cli/hf) ·
   </Tab>
 </Tabs>
 
-A Hub mount reads; `hf` also writes. Use a write token to upload, delete,
-create repositories, or create/delete tags. A read token is enough to download
-files or list tags. To edit a Hub file, download it into a local mount, edit it
-there, then upload it. A Hub write is a commit, so edits happen through the CLI.
+<License />

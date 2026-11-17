@@ -4,6 +4,9 @@ description: "Extract the text of PDF files with poppler's pdftotext command lin
 icon: file-pdf
 ---
 
+import Reference from '/snippets/cli/pdftotext.mdx'
+import License from '/snippets/cli/license/pdftotext.mdx'
+
 Write the text of a PDF file on any mount to standard output or to a text
 file. Mirage implements [poppler](https://poppler.freedesktop.org)'s
 `pdftotext` command line, layout, messages and exit codes with its own PDF
@@ -25,66 +28,6 @@ ws.register_cli("pdftotext", PDFTOTEXT)
 
 For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 
-{/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+<Reference />
 
-Run `pdftotext --help` for the supported flags and operands.
-This list is generated from Mirage's registered command tree.
-
-| Command | Description |
-| --- | --- |
-| `pdftotext` | Write the text of a PDF file to a text file, or to standard output when the text file is '-'. Pages end in a form feed |
-{/* END GENERATED CLI COMMANDS */}
-
-## Read a PDF
-
-```bash
-pdftotext /data/report.pdf -
-pdftotext -f 2 -l 4 /data/report.pdf - | grep -i revenue
-pdftotext -layout /data/table.pdf -
-pdftotext /data/report.pdf
-cat /data/report.txt
-```
-
-`-` as the text file writes to standard output; with no text file, the text
-goes beside the PDF with `.pdf` replaced by `.txt`. A PDF file of `-` is read
-from standard input and then needs a text file. Each page ends in a form feed
-unless `-nopgbrk` is given. By default text comes in reading order, one blank
-line after each block; `-layout` keeps each page's rows and columns and `-raw`
-keeps the order the page draws its text.
-
-| Option | Effect |
-| --- | --- |
-| `-f N`, `-l N` | First and last page; out-of-range values are clamped as poppler clamps them |
-| `-layout` | Keep columns and spacing |
-| `-raw` | Keep drawing order |
-| `-nopgbrk` | No form feed after each page |
-| `-nodiag` | Leave out text set at a slant |
-| `-eol unix\|dos\|mac` | Line endings |
-| `-enc UTF-8` | Output encoding; UTF-8 is the one served |
-| `-opw`, `-upw` | Owner or user password of an encrypted file |
-| `-q` | No messages or errors; the exit code still reports them |
-
-Encrypted files are read as poppler reads them; one that needs a password
-opens with `-upw` or `-opw`. Pages without a text layer, such as scans, give empty text: there is no
-OCR.
-
-## Differences from poppler
-
-- Text comes from Mirage's PDF reader, not poppler's. Where poppler prints raw
-  glyph codes for a font with no usable encoding, the text may come out
-  readable here.
-- `-layout` keeps poppler's rows, but column widths can differ.
-- Reading order can differ for cells set side by side in rows.
-- `-r`, `-x`, `-y`, `-W`, `-H`, `-fixed`, `-htmlmeta`, `-tsv`, `-bbox`,
-  `-bbox-layout`, `-cropbox`, `-colspacing`, `-listenc` and `-v` are not
-  supported, and `-enc` takes only UTF-8. An option Mirage does not know is
-  refused rather than read as a file name.
-- Help is Mirage's own, and poppler's `Syntax Warning` lines about damaged
-  content it reads anyway are not printed.
-
-## License
-
-poppler is GPL-licensed. Mirage matches its command-line behavior and copies
-none of its code. The PDF reader is
-[pdf_oxide](https://github.com/yfedoseev/pdf_oxide) (MIT or Apache-2.0).
+<License />

@@ -19,6 +19,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
+SNIPPETS = DOCS / "snippets"
 FENCE = "---"
 
 
@@ -65,7 +66,9 @@ def check(path: Path) -> str | None:
 
 
 def main() -> int:
-    pages = sorted(DOCS.rglob("*.mdx"))
+    pages = sorted(
+        p for p in DOCS.rglob("*.mdx") if not p.is_relative_to(SNIPPETS)
+    )
     if not pages:
         print(f"docs frontmatter check FAILED\n\nno .mdx pages under {DOCS}")
         return 1

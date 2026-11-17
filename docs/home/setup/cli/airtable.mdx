@@ -4,11 +4,14 @@ icon: /images/airtable-logo.svg
 description: Set up the Airtable CLI with Python or TypeScript.
 ---
 
+import License from '/snippets/cli/license/airtable.mdx'
+
 Mirage defines this command tree over the [Airtable Web API](https://airtable.com/developers/web/api/introduction).
 
 Create a token in [Airtable setup](/home/setup/airtable), with the write scopes
-the CLI needs, then register it on an existing `ws`. Commands:
-[Python](/python/cli/airtable) · [TypeScript](/typescript/cli/airtable).
+the CLI needs, then register it on an existing `ws`.
+
+Commands: [Python](/python/cli/airtable) · [TypeScript](/typescript/cli/airtable).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -17,7 +20,7 @@ the CLI needs, then register it on an existing `ws`. Commands:
     from mirage.vfs.airtable import AirtableConfig
 
     config = AirtableConfig(token="pat...")
-    ws.register_cli("airtable", AIRTABLE, config.model_dump())
+    ws.register_cli("airtable", AIRTABLE, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -29,3 +32,5 @@ the CLI needs, then register it on an existing `ws`. Commands:
     ```
   </Tab>
 </Tabs>
+
+<License />

@@ -1,26 +1,25 @@
 ---
 title: Customize CLI
-description: "Define a typed or script CLI with shared parsing, account config and VFS access."
+description: "Give an agent your own command-line tools, with parsed flags, generated help and access to workspace files."
 icon: code
 ---
 
-Define a custom CLI when an agent needs service operations with a stable
-command grammar. Use a typed `CLI` for parsed commands and generated help,
-or a script CLI when the program should parse its own arguments.
+A custom CLI gives an agent your own command, with fixed subcommands and
+flags: a client for your service, a tool over workspace files, or a script.
+For a typed `CLI`, Mirage parses each line, refuses a bad one and generates
+`--help` and `man`. A script CLI is a program that reads its own arguments.
 
-Shell builtins and CLIs keep separate catalogs and dispatch. Both use
-`CommandSpec` for argument parsing.
+A typed CLI declares its grammar with `CommandSpec`, the same parser Mirage's
+built-in commands use, so its `--help`, error messages and exit codes work
+the same way as theirs.
 
-## Define a typed command
+## Write a typed CLI
 
-Each handler receives `(accessor, paths, texts, ctx)`, the shape a shell
-command takes: the installation's accessor, the operands, and the same
-`Context`. The install builds the accessor once from its validated config
-(`CLI.accessor`, default `NOOPAccessor`, which only holds the config at
-`accessor.config`) and the workspace closes it when the install goes. The
-example below shows the
-registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/python/cli/pager.py)
-adds a mutable incident service and shared cross-language coverage.
+A handler gets the same four arguments a shell command's handler gets: the
+install's accessor, the path operands, the text operands and a `Context`.
+Mirage builds the accessor once per install from the install's validated
+config, and closes it when the install goes. The default `NOOPAccessor` only
+holds that config, at `accessor.config`.
 
 ```python
 from typing import Literal
@@ -65,155 +64,108 @@ PAGER = CLI(
 ws = Workspace({})
 ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
 ws.register_cli("pager-support", PAGER, {"account": "support"})
+
+for line in ["pager-eng ack INC-1 --by sam", "pager-support ack INC-2 --by kim"]:
+    r = await ws.shell(line)
+    print(await r.stdout_str(), end="")
 ```
 
+```text
+[engineering] acknowledged INC-1 by sam
+[support] acknowledged INC-2 by kim
+```
 
-The same CLI can be installed for multiple accounts. Service IDs use textual
-operands; file operands use `type="path"`. Read flags through `FlagView(ctx.flags, ctx.spec)`
-so a read of an undeclared option fails rather than looking like an omitted flag.
+One CLI, installed twice, serves two accounts. Without `--by`, Mirage refuses
+the line before `acknowledge` runs and exits 2:
 
-## Choose the command shape
+```text
+pager-eng ack: option '--by' is required
+Try 'pager-eng ack --help' for more information.
+```
 
-| Node | Declares | Handler input |
+The runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/python/cli/pager.py)
+adds an incident service the handlers change.
+
+### Command shape
+
+| Node | Declares | Its handler gets |
 | --- | --- | --- |
-| Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Paths and text as arguments, parsed flags on `ctx` |
-| Group | `subcommands`, optional inherited options | Dispatches to a leaf |
-| Script CLI | `CLI.script`, a machine and optional runtime | Raw argv, stdin and environment |
+| Leaf | `arguments` and a `CLIHandler` | Path and text operands, and parsed flags on `ctx` |
+| Group | `subcommands`, and options its leaves inherit | No handler; Mirage runs the leaf the line names |
 
-A typed node is a leaf or a group. Names and aliases are single words;
-child names and aliases share one namespace. Options cannot collide across
-ancestors and descendants. Construction validates the tree and compiles the
-grammar; do not repeat parser validation in every handler.
+- In `arguments`, a dashed name such as `--by` declares an option and a bare
+  name such as `INCIDENT_ID` declares a positional. Declare a file operand
+  with `type="path"`; a service ID stays a text operand.
+- `CLI.handlers` maps each leaf's path below the root to its `CLIHandler`:
+  `"ack"`, `"incident ack"`, or `""` for a program with no subcommands.
+- Names and aliases are single words, and a group's children share one set
+  of names. An option can't repeat in a parent and its child.
+- `CLI(...)` refuses a bad tree when you build it, and Mirage refuses a bad
+  line before the handler runs, so a handler never re-checks its flags.
+- Read flags through `FlagView(ctx.flags, ctx.spec)`. Reading an option the
+  spec doesn't declare raises an error, instead of looking like an omitted
+  flag.
+- `config_model` validates each install's config when you register it.
+  Without one, the CLI takes no config and `accessor.config` is `None`.
+- Mark a handler that changes the service `write=True`. Policy reads it as
+  `CommandContext.write`, so one `pre_command` method can refuse every
+  writing subcommand, and Mirage drops cached mount listings after it runs.
+  It grants no permission.
+- Descriptions on the spec, its options and operands become `--help` and
+  `man` at every level.
 
-`CommandSpec.arguments` holds options and positional arguments: a dashed name
-such as `--by` declares an option; a bare name declares a positional.
-`CLI.handlers` maps canonical paths below the root to `CLIHandler` bindings,
-such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
+### Output and status
 
-Declare `config_model` on the account `CLI`. Registration validates
-each installation, and the default `NOOPAccessor` holds that account's settings
-at `accessor.config`. Without a config model, a typed CLI accepts no config and
-`accessor.config` is `None`.
-
-Mark mutating `CLIHandler` bindings `write=True`. This classifies the command for policy and
-cache invalidation; it does not grant permission or perform the mutation.
-Policy reads it as `CommandContext.write`, so one `pre_command` method can
-refuse every writing verb.
-Descriptions, options and operands supply `--help` and `man` at every level.
-
-## Register the program
-
-Installing a CLI directly is the shortest path:
-
-```python
-ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
-```
-
-The installed name is the dispatch key and does not have to equal the spec's
-root name. This is what makes one tree usable for several accounts.
-
-To resolve a bare name from workspace YAML, register the CLI before loading
-the workspace:
+A handler returns `(stdout, IOResult)`. `stdout` is `bytes`, an async iterator
+of `bytes` for output that arrives in pieces, or `None`. The `IOResult` carries
+the exit status and stderr. Piped input arrives on `ctx.stdin` as bytes, an
+async byte source, or `None` when nothing is piped; `materialize` reads all of
+it.
 
 ```python
-from mirage import register_cli_spec
+from collections.abc import AsyncIterator
 
-register_cli_spec(PAGER)
+from mirage import Context, PathSpec, UsageError
+from mirage.accessor import NOOPAccessor
+from mirage.io.types import IOResult, materialize
+
+async def count(accessor: NOOPAccessor, paths: list[PathSpec],
+                texts: list[str], ctx: Context) -> tuple[bytes, IOResult]:
+    if ctx.stdin is None:
+        raise UsageError("pipe incident IDs on stdin")
+    lines = (await materialize(ctx.stdin)).splitlines()
+    return f"{len(lines)}\n".encode(), IOResult()
+
+async def watch(accessor: NOOPAccessor, paths: list[PathSpec],
+                texts: list[str], ctx: Context) -> tuple[AsyncIterator[bytes], IOResult]:
+    async def events() -> AsyncIterator[bytes]:
+        for incident_id in texts:
+            yield f"{incident_id} open\n".encode()
+    return events(), IOResult()
+
+async def close(accessor: NOOPAccessor, paths: list[PathSpec],
+                texts: list[str], ctx: Context) -> tuple[None, IOResult]:
+    message = f"{texts[0]} is already closed\n"
+    return None, IOResult(exit_code=1, stderr=message.encode())
 ```
 
-```yaml
-clis:
-  pager-eng:
-    cli: pager
-    machine: in_process
-    config:
-      account: engineering
-```
+Bound as `pager count`, `pager watch INCIDENT_ID...` and
+`pager close INCIDENT_ID`:
 
-`cli:` may instead point directly at `module:ATTR` or `./file.py:ATTR`. Relative
-files resolve next to the YAML file. A packaged Python CLI can publish the same
-CLI without import side effects:
+| Line | Prints | Exit |
+| --- | --- | --- |
+| `printf 'INC-1\nINC-2\n' \| pager-eng count` | `2` | 0 |
+| `pager-eng count` | `pipe incident IDs on stdin` on stderr | 2 |
+| `pager-eng watch INC-1 INC-2` | `INC-1 open` and `INC-2 open` | 0 |
+| `pager-eng close INC-9` | `INC-9 is already closed` on stderr | 1 |
 
-```toml
-[project.entry-points."mirage.clis"]
-pager = "my_package.cli:PAGER"
-```
+`UsageError(message, exit_code=2)` prints its message to stderr and sets the
+exit status, and the rest of the line keeps running.
 
-Registered names and builtins win over direct references and entry points.
-Registering a name already held by another explicit registration or builtin
-fails; an explicit registration may intentionally shadow an entry point.
-
-Registration and installation are host-side lifecycle operations. There is no
-shell `install` or `uninstall` command, so an agent can use a CLI it was given
-but cannot remove it. A deployment that must pin the head word should enforce
-that with policy; shell functions can otherwise shadow it like they do in bash.
-
-## Serve a CLI on a mount
-
-Registered on a mount, a typed CLI serves its verbs there as a command
-tree. Its leaves get the mount's accessor, so the tree declares no
-`config_model`, `accessor` or `script`:
-
-```python
-from mirage import MountMode, RAMVFS
-from mirage.accessor.ram import RAMAccessor
-
-async def tag(accessor: RAMAccessor, paths: list[PathSpec],
-              texts: list[str], ctx: Context) -> tuple[None, IOResult]:
-    accessor.store.files["/" + paths[0].vfs_path] = " ".join(texts).encode()
-    return None, IOResult()
-
-NOTES = CLI(
-    spec=CommandSpec(name="notes", subcommands=(CommandSpec(
-        name="tag",
-        arguments=(Argument("note", type="path"), Argument("tags", nargs="+")),
-    ),)),
-    handlers={"tag": CLIHandler(fn=tag, write=True)},
-)
-
-ws = Workspace({"/notes/": RAMVFS()}, mode=MountMode.WRITE)
-ws.mount("/notes/").register_commands([NOTES])
-```
-
-`notes tag /notes/a.md draft` walks, helps and refuses like an installed
-CLI's line, and runs on the working directory's mount when it serves
-`notes`. Otherwise a writing leaf selects the only writable matching mount;
-several writable matches produce an ambiguity error. Use `cd` to select
-the target. Read-only leaves keep the first matching mount, with a debug
-log when several match. Help remains available without selecting a write
-destination. A VFS hands the same tree to every mount of it
-with `commands=[NOTES]`. Its leaves reach the backend past the dispatcher.
-Mutating leaves must declare `write=True`, run only when the mount is
-writable, and clear cached mount listings on return.
-
-## Use workspace files
-
-Build the service client in the CLI's accessor (`CLI.accessor`), from the
-install's config, so one install keeps one client for every call; the
-workspace closes it when the install goes. A CLI should not find a matching
-VFS to obtain credentials or a backend accessor. Reuse core service functions
-and accessor classes between CLI and VFS implementations where their behavior
-is the same.
-
-For file arguments such as uploads or attachments, use `ctx`:
-
-| Field | Purpose |
-| --- | --- |
-| `vfs` | The session's files, the same API as `session.vfs`: `read`, `write`, `stat`, `readdir`, `symlink`, `readlink` and the rest, with workspace policy and mount modes applied |
-| `session` | Live, gated session reads and writes; `ctx.env` is the frozen invocation snapshot |
-
-`vfs.stat(path, nofollow=True)` reports a link itself. `vfs.mount_of(path)`
-names the mount serving a path, `vfs.is_mount(path)` says whether a path is a
-mount root, and `vfs.submounts(path)` lists the mounts below a folder. A mount
-the session hides is listed as the nearest folder above it that the session
-sees, so a CLI that removes a folder can refuse without learning the hidden
-name.
-
-A CLI that prints paths from its own data, as git prints its index, hands its
-output over as rows instead of bytes: each row names the path it shows, and
-the command prints none of it itself. The workspace drops the rows the session
-hides, then calls the renderer with the rest, so no line, count, total or
-column width stands for a hidden path:
+A CLI that prints paths from its own data, as `git` prints its index, returns
+rows instead of bytes. Each row names the path it shows. Mirage drops the rows
+the session can't see, then calls your renderer with the rest, so no line,
+count or column width gives a hidden path away:
 
 ```python
 from dataclasses import dataclass
@@ -246,43 +198,118 @@ async def tracked(
     return None, IOResult(rows=Rows(entries, render))
 ```
 
-The renderer runs inside the command's timeout. A handler hands over rows or
-stdout, never both.
+The renderer runs inside the command's timeout. A handler returns rows or
+stdout, not both.
 
-Declare file options and operands with `type="path"`; preserve the resulting
-`PathSpec` values when calling `ctx.vfs`. Use `PathSpec.from_str_path(value, cwd=ctx.cwd)` for a path string from
-config, and derive paths with `join` and `parent`. Do not convert them to plain
-strings before filesystem access. Direct handler callers may leave
-`ctx.vfs` unset; a handler requiring files must refuse when it is absent.
+### Files and the session
 
-Account CLI writes, including failed writes that may have reached the service,
-expire mounted caches. Config-free filesystem CLIs rely on the dispatcher's
-per-path invalidation. A script marked as a write also expires caches because
-its config and service access are opaque. An install's accessor decides which
-mounts that is: override `Accessor.reaches(peer)` to answer False for a mount's
-accessor its writes cannot change. The default reaches every mount.
+Build the service client in `CLI.accessor`, from the install's config, so
+every call on one install shares one client. Don't look for a matching VFS to
+borrow its credentials or accessor; share core service functions and accessor
+classes between a CLI and a VFS instead.
 
-## Snapshots and credentials
+`ctx.vfs` is the session's files, with workspace policy and mount modes
+applied: `read`, `write`, `stat`, `readdir`, `symlink`, `readlink` and the
+rest, the same API as `session.vfs`.
 
-A named typed CLI is saved by spec name. Fields declared as Pydantic secrets in
-`config_model` are redacted. Loading that snapshot must provide fresh install
-config through `clis=`; Mirage refuses to restore redacted credentials as if
-they were usable values. The loading process must also make the spec name
-resolvable, or pass `(cli, config)` as that install's `clis=` override. A tree
-installed directly in live code survives `Workspace.copy`, which carries the
-live CLI and revealed config together.
+- Keep the `PathSpec` a `type="path"` operand gives you, and derive paths
+  with `join` and `parent`. For a path string from config, use
+  `PathSpec.from_str_path(value, cwd=ctx.cwd)`.
+- `ctx.vfs.stat(path, nofollow=True)` reports a link itself.
+- `ctx.vfs.mount_of(path)` names the mount serving a path,
+  `ctx.vfs.is_mount(path)` says whether a path is a mount root, and
+  `ctx.vfs.submounts(path)` lists the mounts below a folder. A mount the
+  session hides shows as the nearest folder above it that the session sees,
+  so a CLI that removes a folder can refuse without learning the hidden name.
+- `ctx.vfs` is `None` when your code calls a handler directly; a handler
+  that needs files raises `UsageError` then.
 
-A script CLI is different: the script source is embedded in the snapshot and
-its opaque config is serialized verbatim because there is no config model to
-identify secrets. Keep credentials in the environment, or provide fresh script
-config through `clis=` when loading.
+After an install's write, Mirage drops the caches of every mount its accessor
+may reach, even when the write failed, since it may still have reached the
+service. Override `Accessor.reaches(peer)` to return `False` for a mount's
+accessor your writes can't change; by default an accessor reaches every
+mount. A script CLI marked as a write drops them too, since Mirage can't see
+what it touched. A CLI with no config that works on files, such as `git`,
+needs none of this: Mirage drops the cache of each path it writes.
+
+`ctx.env` is a copy of the environment taken when the command starts.
+`ctx.session` reads and writes the live session under the shell's rules, so
+writing a readonly or hidden variable fails. Reads are plain calls. Writes are
+coroutines: await them, or they never happen.
+
+| Call | Does |
+| --- | --- |
+| `get(name)` | Returns the variable's value, or `None` |
+| `snapshot()` | Returns every variable the session can see, as a `dict` |
+| `await set(name, value)` | Sets the variable, as `NAME=value` does |
+| `await unset(name)` | Removes the variable |
+| `is_readonly(name)` | Whether `readonly` has marked the variable |
+| `cwd()` | Returns the session's working directory |
+| `session_id` | The session's ID |
+
+```python
+async def login(accessor: NOOPAccessor, paths: list[PathSpec],
+                texts: list[str], ctx: Context) -> tuple[None, IOResult]:
+    if ctx.session is None:
+        raise UsageError("needs a workspace session")
+    await ctx.session.set("PAGER_ACCOUNT", accessor.config.account)
+    return None, IOResult()
+```
+
+After `pager-eng login`, `echo $PAGER_ACCOUNT` prints `engineering`. If
+`PAGER_ACCOUNT` is readonly, the command exits 1 with
+`pager-eng login: PAGER_ACCOUNT: readonly variable`. To run another command
+from a handler, use `await ctx.shell(line)`; see [`Context`](#context).
+
+### On a mount
+
+A typed CLI registered on a mount runs its subcommands there, with the
+mount's accessor, so it declares no `config_model`, `accessor` or `script`:
+
+```python
+from mirage import MountMode, RAMVFS
+from mirage.accessor.ram import RAMAccessor
+
+async def tag(accessor: RAMAccessor, paths: list[PathSpec],
+              texts: list[str], ctx: Context) -> tuple[None, IOResult]:
+    accessor.store.files["/" + paths[0].vfs_path] = " ".join(texts).encode()
+    return None, IOResult()
+
+NOTES = CLI(
+    spec=CommandSpec(name="notes", subcommands=(CommandSpec(
+        name="tag",
+        arguments=(Argument("note", type="path"), Argument("tags", nargs="+")),
+    ),)),
+    handlers={"tag": CLIHandler(fn=tag, write=True)},
+)
+
+ws = Workspace({"/notes/": RAMVFS()}, mode=MountMode.WRITE)
+ws.mount("/notes/").register_commands([NOTES])
+```
+
+`notes tag /notes/a.md draft` parses, shows help and refuses bad flags the
+same way an installed CLI does.
+
+- It runs on the working directory's mount when that mount has `notes`.
+- Otherwise a writing subcommand runs on the only writable mount that has
+  it. With two, Mirage refuses the line and names both; `cd` into one.
+- A read-only subcommand runs on the first mount that has it.
+- `--help` works from anywhere.
+- A VFS gives the same tree to every mount of it with `commands=[NOTES]`.
+- Its handlers reach the backend directly, without Mirage's file layer. A
+  writing one must declare `write=True`; it runs only on a writable mount,
+  and Mirage drops cached listings after it.
 
 ## Script CLIs
 
-Use `script:` when the program should own its grammar or should have no Mirage
-imports:
+A script CLI is a program file that reads its own arguments and needs no
+Mirage imports:
 
 ```yaml
+machines:
+  monty:
+    provider: in_process
+    runtime: monty
 clis:
   pager:
     script: ./cli/pager.py
@@ -291,105 +318,157 @@ clis:
       width: 80
 ```
 
-Every `clis` entry names its `machine`. A script runs on `in_process` or
-`host`; the workspace needs a `machines` entry of that type that runs the
-script's language, and the first one serves. `runtime` picks a runtime on
-`in_process` instead, such as `quickjs`; a `host` takes none.
+It runs on the [machine](/home/setup/machine/overview) its entry names, as
+[Script CLIs](/home/setup/runtime/overview#script-clis) describes; without a
+`machines` entry for its language it exits 127. Mirage embeds the file when
+the workspace loads.
 
-The file is embedded at load. Words after the head arrive as argv, piped input
-arrives on stdin, and config arrives as JSON in `MIRAGE_CLI_CONFIG`. The
-program's stdout, stderr, and exit status become the shell result. A script CLI
-cannot declare `config_model`, subcommands, or function handlers; it parses and
-documents its own options, including `--help`.
+- Words after the command name arrive as argv, and `argv[0]` is the
+  installed name, so two installs can tell themselves apart. A script
+  declares no Mirage grammar, so every option reaches it unchanged,
+  `--help` included. A script CLI built in code can add a `CommandSpec` to
+  get Mirage's parsing and help.
+- Piped input arrives on stdin.
+- Config arrives as JSON in `MIRAGE_CLI_CONFIG`, alongside the session's
+  environment. Changes the program makes to its environment stay with it.
+- Its stdout, stderr and exit status become the command's.
+- A script CLI takes no `config_model`, subcommands or handlers.
 
-Slot 0 is the installed name on every runtime, so two installs can identify
-themselves and user-facing errors can name the invoked program. Arguments begin
-at index 1. A YAML script declares no Mirage grammar, so every option reaches the
-program unchanged. A script CLI constructed in code may supply a `CommandSpec`
-to opt into Mirage parsing and generated help.
-
-Runtime argument spellings differ:
-
-| Runtime | Arguments | Standard input |
+| Runs on | Arguments | Standard input |
 | --- | --- | --- |
-| monty | `argv` global | `stdin` global |
-| wasi, local | `sys.argv` | `sys.stdin` |
-| quickjs | `scriptArgs` | `std.in` |
+| Monty | `argv` global | `stdin` global |
+| WASI, `host` machine | `sys.argv` | `sys.stdin` |
+| QuickJS | `scriptArgs` | `std.in` |
 
-The sandboxed runtimes provide files plus compute, not arbitrary networking or
-third-party packages. `machine: host` selects the host interpreter when that
-broader authority is intentional.
+Monty, WASI and QuickJS read and write workspace files but have no network
+and no extra packages. Use `machine: host` to run the host's own interpreter
+when the script needs more.
 
-## Authoring reference
+## Install it
 
-The public constructors document exact types and defaults:
+`ws.register_cli(name, cli, config)` installs a typed or script CLI under
+`name`. The agent types that name, `pager-eng`, not the spec's name, `pager`.
+
+To install a typed CLI from workspace YAML, register its spec first, then
+load the workspace:
+
+```python
+from mirage import register_cli_spec
+
+register_cli_spec(PAGER)
+```
+
+```yaml
+clis:
+  pager-eng:
+    cli: pager
+    machine: in_process
+    config:
+      account: engineering
+```
+
+A script CLI needs no registration: its entry names the file with `script:`,
+as in [Script CLIs](#script-clis).
+
+`cli:` can also point at `module:ATTR` or `./file.py:ATTR`; a relative file
+resolves next to the YAML file. A Python package can publish a CLI without
+import side effects through an entry point:
+
+```toml
+[project.entry-points."mirage.clis"]
+pager = "my_package.cli:PAGER"
+```
+
+- A registered name or a builtin wins over a `module:ATTR` reference or an
+  entry point.
+- Registering a name another registration or a builtin already holds fails.
+  A registration may shadow an entry point.
+- Only your code can install or remove a CLI. The shell has no `install`
+  command, so an agent can't remove one. A shell function can still shadow
+  a CLI, as in bash; refuse that with a `pre_command` policy.
+
+See [CLI entries](/home/configuration/workspace#cli-entries) for every
+`clis` key.
+
+## Snapshots and credentials
+
+A snapshot saves a typed CLI install by its spec name, and redacts the
+config fields `config_model` declares as Pydantic secrets.
+
+- Loading the snapshot needs fresh config for that install through `clis=`;
+  Mirage refuses to restore a redacted credential as if it were real.
+- The loading process must also resolve the spec name, or pass
+  `(cli, config)` as that install's `clis=` entry.
+- `Workspace.copy` carries a CLI installed in code, with its real config.
+
+A script CLI's snapshot embeds the script, and saves its config as it is,
+since there is no config model to mark secrets. Keep credentials in the
+environment, or pass fresh config through `clis=` when loading.
+
+## Reference
+
+The constructors document exact types and defaults:
 [`CLI` and `CLIHandler`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/cli/types.py),
 and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/spec/types.py).
 
 ### `CLI` and `CLIHandler`
 
-| Field | Authoring meaning |
+| Field | Meaning |
 | --- | --- |
-| `CLI.spec` | Root `CommandSpec` describing the program's grammar. |
-| `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
-| `CLI.config_model` | Pydantic model for per-install account validation. |
-| `CLI.accessor` | Builds the install's accessor from its validated config, once per install; closed when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.machine`, `CLI.runtime` | Embedded script, the machine type that runs it (`in_process`, the default in code, or `host`) and the runtime there, if named; used instead of typed handlers. A CLI without a script runs on `in_process` only. |
-| `CLIHandler.fn` | Leaf handler, called as `fn(accessor, paths, texts, ctx)`. |
-| `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
+| `CLI.spec` | The root `CommandSpec`. |
+| `CLI.handlers` | Each leaf's path mapped to its `CLIHandler`. |
+| `CLI.config_model` | The Pydantic model each install's config must match. |
+| `CLI.accessor` | Builds the install's accessor from its config, once per install; Mirage closes it when the install goes. Default `NOOPAccessor`. |
+| `CLI.script`, `CLI.machine`, `CLI.runtime` | The embedded script, the machine type that runs it (`in_process`, the default in code, or `host`) and the runtime there, if named. A CLI without a script runs on `in_process` only. |
+| `CLIHandler.fn` | The handler, called as `fn(accessor, paths, texts, ctx)`. |
+| `CLIHandler.write`, `CLIHandler.limit` | Whether the handler changes the service, and its execution limit. |
+| `CLIHandler.write_when` | Options that make an otherwise read-only leaf a write on the line that passes them, as `himalaya message read --seen` marks mail read. |
 
 ### `CommandSpec`
 
-| Field | Authoring meaning |
+| Field | Meaning |
 | --- | --- |
-| `name`, `aliases` | Command word and alternate subcommand words. |
-| `subcommands` | Child nodes for a group. |
-| `arguments` | Options and positional arguments; group options are inherited by leaves. |
-| `description`, `epilog` | Help text and trailing help text. |
-| `usage_style` | Root help and refusal dialect: argparse, Git, clap, Cobra or poppler. Cobra keeps standard help and option errors; handlers own missing positional refusals. poppler keeps standard help and answers an option error with the help page and exit 99. |
-| `allow_abbrev` | Whether unique long-option prefixes are accepted. |
+| `name`, `aliases` | The command word, and other words for a subcommand. |
+| `subcommands` | A group's children. |
+| `arguments` | Options and positionals; a group's options pass to its leaves. |
+| `description`, `epilog` | Help text, and text after it. |
+| `usage_style` | How help and refusals read: argparse, Git, clap, Cobra or poppler. Cobra leaves a missing positional to the handler. poppler answers an option error with the help page and exit 99. |
+| `allow_abbrev` | Whether a unique prefix of a long option counts as the option. |
 
 ### `Argument`
 
-| Field | Authoring meaning |
+| Field | Meaning |
 | --- | --- |
 | Names | One positional name, or one or more dashed option spellings. |
-| `type` | `str` (default), `int`, `float`, or virtual `path`. |
+| `type` | `str` (default), `int`, `float`, or `path` for a workspace path. |
 | `action` | `store` (default), `store_true`, `count`, `append`, or `extend`. |
-| `nargs` | One value by default; `?` for optional or an integer for fixed arity. Positionals also accept `*`, `+`, or `REMAINDER`. |
-| `choices` | Allowed values, validated by the parser. |
-| `required` | Require an option; positional arity comes from `nargs`. |
-| `default`, `env` | Option fallbacks; an environment value counts as supplied. |
-| `help`, `metavar` | Help description and displayed value name. |
+| `nargs` | One value by default; `?` for optional or an integer for a fixed count. Positionals also take `*`, `+` or `REMAINDER`; only one positional may take a variable count, and it must come last. |
+| `choices` | The allowed values. |
+| `required` | Whether an option must be given; a positional's count comes from `nargs`. |
+| `default`, `env` | An option's fallbacks; a value from the environment counts as given. |
+| `help`, `metavar` | Help text, and the value's name in help. |
 
-This follows argparse's naming conventions and supports a subset of its
-features. Positional defaults and variadic options are unsupported; `append`
-collects single option values, while `extend` flattens fixed groups.
+The names follow argparse, which Mirage supports in part. Positionals take no
+`default`, and options take no variable count. `append` collects one value per
+use; `extend` flattens fixed groups. The other fields of `CommandSpec` and
+`Argument` describe shell builtins' grammars, such as `tar`'s old-style
+options; a CLI doesn't need them.
 
-### Handler arguments and `Context`
+### `Context`
 
-| Argument or field | Handler view |
+| Argument or field | Holds |
 | --- | --- |
 | `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`None` without a config model). |
-| `paths` | Cwd-resolved path operands. |
-| `texts` | Textual and numeric operands in declaration order. |
-| `ctx.argv` | Verbatim words after the installed head word, including subcommands. |
-| `ctx.flags` | Group and leaf flags keyed by normalized kwarg name. |
-| `ctx.spec` | The resolved leaf grammar. |
-| `ctx.stdin` | Piped bytes or an async byte source, or `None`. |
+| `paths` | The path operands, resolved against the working directory. |
+| `texts` | The text and number operands, in declaration order. |
+| `ctx.argv` | The words after the command name as typed, subcommands included. |
+| `ctx.flags` | Group and leaf flags keyed by option name, `--dry-run` as `dry_run`. |
+| `ctx.spec` | The leaf's `CommandSpec`. |
+| `ctx.stdin` | Piped bytes, an async byte source, or `None`. |
 | `ctx.cwd` | The session's working directory. |
-| `ctx.env` | Frozen environment snapshot for this invocation. |
-| `ctx.vfs`, `ctx.session` | The session's files and live session, for verbs that need them; `None` outside a workspace. |
-
-
-## Verify a custom CLI
-
-Check help, successful execution, a refusal and isolation between two account
-installations. Exercise VFS access with path and mount policy, and verify
-snapshot restoration with credentials supplied again. Keep service request
-construction and internal edge cases in unit tests; put observable shell
-results in shared integration cases when both hosts implement the program.
-
-The shared grammar also serves shell commands. Prefer its existing argparse
-and POSIX concepts; keep a program-specific rule in its handler, or use a
-script when the whole program needs to own parsing.
+| `ctx.env` | A copy of the environment taken when the command starts. |
+| `ctx.vfs`, `ctx.session` | The session's files and live session; `None` outside a workspace. |
+| `ctx.shell` | `await ctx.shell(line)` runs another line in the calling session and returns its `IOResult`. Calling it after the command returns raises an error. |
+| `ctx.processes` | The session's processes, as `ps` and `jobs` see them. |
+| `ctx.ids` | The workspace's source of generated names and random values, so a seeded workspace replays them. |
+| `ctx.runtime`, `ctx.diff`, `ctx.find` | Not set for a CLI; they serve interpreter commands, `diff` and `find`. Run code through `ctx.shell` instead. |
