@@ -15,7 +15,7 @@ existing `ws`. Commands: [Python](/python/cli/slack) ·
     from mirage.core.slack.config import SlackConfig
 
     config = SlackConfig(token="xoxb-...", search_token="xoxp-...")
-    ws.register_cli("slack", SLACK, config.model_dump())
+    ws.register_cli("slack", SLACK, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">

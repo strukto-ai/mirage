@@ -17,7 +17,7 @@ register them on an existing `ws`. Commands:
     from mirage.core.trello.config import TrelloConfig
 
     config = TrelloConfig(api_key="...", api_token="...")
-    ws.register_cli("trello", TRELLO, config.model_dump())
+    ws.register_cli("trello", TRELLO, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">

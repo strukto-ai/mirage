@@ -15,7 +15,7 @@ existing `ws`. Commands: [Python](/python/cli/ntn) ·
     from mirage.core.notion.config import NotionConfig
 
     config = NotionConfig(api_key="secret_...")
-    ws.register_cli("ntn", NTN, config.model_dump())
+    ws.register_cli("ntn", NTN, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">

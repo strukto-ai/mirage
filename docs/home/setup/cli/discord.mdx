@@ -15,7 +15,7 @@ an existing `ws`. Commands: [Python](/python/cli/discord) ·
     from mirage.core.discord.config import DiscordConfig
 
     config = DiscordConfig(token="bot-token")
-    ws.register_cli("discord", DISCORD, config.model_dump())
+    ws.register_cli("discord", DISCORD, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">

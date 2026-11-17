@@ -19,7 +19,7 @@ register them on an existing `ws`. Commands: [Python](/python/cli/gws) ·
     config = GoogleConfig(
         client_id="...", client_secret="...", refresh_token="..."
     )
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">

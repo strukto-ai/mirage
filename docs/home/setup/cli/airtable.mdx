@@ -17,7 +17,7 @@ the CLI needs, then register it on an existing `ws`. Commands:
     from mirage.vfs.airtable import AirtableConfig
 
     config = AirtableConfig(token="pat...")
-    ws.register_cli("airtable", AIRTABLE, config.model_dump())
+    ws.register_cli("airtable", AIRTABLE, config)
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
