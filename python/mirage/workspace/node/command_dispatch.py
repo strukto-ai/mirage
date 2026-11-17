@@ -1529,7 +1529,13 @@ async def _route_argv(
 
     if runs_wrapper(name, argv.args, session, registry, context.frame.routing):
         return handle_wrapper(
-            execute_fn, name, argv.args, session, registry, stdin
+            execute_fn,
+            name,
+            argv.args,
+            session,
+            registry,
+            stdin,
+            context.frame.routing,
         )
 
     consumer, routing = routed_consumer(

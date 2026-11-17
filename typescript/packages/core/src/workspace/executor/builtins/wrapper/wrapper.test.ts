@@ -77,3 +77,17 @@ it.each([
     await ws.close()
   }
 })
+
+it("leaves the job alone where a shell's inner wrapper runs", async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+  try {
+    const io = await ws.shell(
+      "nice -n 0 sh -c 'nohup sleep 0; echo ready; sleep 3' & p=$!; " +
+        'sleep 0.3; kill -HUP $p; sleep 0.2; ' +
+        'kill -0 $p 2>/dev/null && echo alive; wait $p; echo rc=$?',
+    )
+    expect(DEC.decode(io.stdout)).toBe('ready\nrc=129\n')
+  } finally {
+    await ws.close()
+  }
+})

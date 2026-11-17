@@ -1372,7 +1372,15 @@ async function routeArgv(
   }
 
   if (runsWrapper(name, argv.args, session, registry, context.frame.routing)) {
-    return handleWrapper(executeFn, name, argv.args, session, registry, stdin)
+    return handleWrapper(
+      executeFn,
+      name,
+      argv.args,
+      session,
+      registry,
+      stdin,
+      context.frame.routing,
+    )
   }
 
   const [consumer, routing] = routedConsumer(

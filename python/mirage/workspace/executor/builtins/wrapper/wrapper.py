@@ -30,7 +30,12 @@ from mirage.execution.process.types import ProcessTraits
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.types import (
+    OutputFn,
+    RouteDecision,
+    RunResult,
+    RuntimeIdentity,
+)
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import SIGHUP
@@ -43,8 +48,13 @@ from mirage.workspace.lookup.constants import (
     nice_adjustment,
     read_wrapper,
 )
-from mirage.workspace.lookup.lookup import execs
-from mirage.workspace.lookup.types import WrapperAnswer
+from mirage.workspace.lookup.lookup import (
+    execs,
+    lookup,
+    path_program,
+    runs_wrapper,
+)
+from mirage.workspace.lookup.types import Consumer, WrapperAnswer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -128,6 +138,7 @@ def handle_wrapper(
     session: SessionState,
     registry: MountRegistry,
     stdin: ByteSource | None,
+    routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """A wrapper Mirage runs (``nice``, ``nohup``, ``setsid``,
     ``stdbuf``, ``ionice``): it answers for itself (``nice`` alone, a bad
@@ -144,6 +155,7 @@ def handle_wrapper(
         session (SessionState): the session it runs in.
         registry (MountRegistry): mount registry (command registration).
         stdin (ByteSource | None): its input.
+        routing (RouteDecision | None): the line's placement.
     """
     caller = current_caller()
     answer = wrapper_answer(
@@ -162,9 +174,36 @@ def handle_wrapper(
         name, args, answer.runs_from, caller.traits
     )
     line = shell_join(args[answer.runs_from :])
-    if caller.process is not None and caller.process.wrap(traits, line):
+    if caller.process is not None and caller.process.wrap(
+        traits,
+        line,
+        _execs(args[answer.runs_from :], session, registry, routing),
+    ):
         traits = dataclasses.replace(traits, leads=False)
     return _run_program(execute_fn, name, line, session, stdin, traits, warned)
+
+
+def _execs(
+    words: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> bool:
+    """Whether a wrapper's program runs on in the wrapper's place: another
+    wrapper Mirage runs, or a program a machine takes, which may take the
+    runner as its own. A command Mirage runs itself (a shell, ``grep``)
+    runs its own commands, which do not.
+
+    Args:
+        words (Sequence[str]): the program and its words.
+        session (SessionState): shell session (cwd, function table).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        routing (RouteDecision | None): the line's placement.
+    """
+    head = path_program(words[0], session, registry) or words[0]
+    if runs_wrapper(head, words[1:], session, registry, routing):
+        return True
+    return lookup(head, session, registry, routing) is Consumer.EXTERNAL
 
 
 def wrapper_traits(

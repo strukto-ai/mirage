@@ -203,15 +203,19 @@ export class ProcessHandle {
    * runs in its place (`nohup sleep 3 &`), as a wrapper execs its program:
    * its record names the program, with what the wrapper changed (its
    * niceness, a group and session of its own), and it ignores what the
-   * wrapper made it ignore. The program may still take it (`take`). False for
-   * a runner started for more than one command, or a shell. Mirrors Python's
-   * `wrap`.
+   * wrapper made it ignore. It stays one command only while the program runs
+   * on in its place (`execs`: another wrapper, or a program a machine takes),
+   * so a shell the wrapper runs (`nice sh -c 'nohup a; b'`) keeps what its own
+   * commands' wrappers change to them. False for a runner started for more
+   * than one command, or a shell. Mirrors Python's `wrap`.
    *
    * @param traits what the wrappers around the program changed.
    * @param command the program's words.
+   * @param execs whether the program runs on in its place.
    */
-  wrap(traits: ProcessTraits, command: string): boolean {
+  wrap(traits: ProcessTraits, command: string, execs: boolean): boolean {
     if (!this.oneCommand || this.current.parent === null) return false
+    this.oneCommand = execs
     this.ignores = new Set([...this.ignores, ...traits.ignores])
     this.programIgnores = new Set([...this.programIgnores, ...traits.ignores])
     const pid = this.current.id.pid

@@ -26,7 +26,8 @@ import {
 import type { ProcessTraits } from '../../../../execution/process/types.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { ensureStream } from '../../../../io/stream.ts'
-import type { OutputFn, RunResult } from '../../../../runtime/types.ts'
+import type { Runtime } from '../../../../runtime/base.ts'
+import type { OutputFn, RouteDecision, RunResult } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, JobConsole } from '../../../../shell/console/index.ts'
 import { SIGHUP } from '../../../../shell/constants.ts'
@@ -39,8 +40,8 @@ import {
   niceAdjustment,
   readWrapper,
 } from '../../../lookup/constants.ts'
-import { execs } from '../../../lookup/lookup.ts'
-import { WrapperAnswer } from '../../../lookup/types.ts'
+import { execs as found, lookup, pathProgram, runsWrapper } from '../../../lookup/lookup.ts'
+import { Consumer, WrapperAnswer } from '../../../lookup/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -126,6 +127,7 @@ export function handleWrapper(
   session: SessionState,
   registry: MountRegistry,
   stdin: ByteSource | null,
+  routing: RouteDecision<Runtime> | undefined,
 ): RedirectResult {
   const caller = currentCaller()
   const answer = wrapperAnswer(name, args, session, registry, caller.traits.niceness)
@@ -142,8 +144,28 @@ export function handleWrapper(
   }
   const [traits, warned] = wrapperTraits(name, args, answer.runsFrom, caller.traits)
   const line = shellJoin(args.slice(answer.runsFrom))
-  const worn = caller.process?.wrap(traits, line) === true ? { ...traits, leads: false } : traits
+  const program = args.slice(answer.runsFrom)
+  const wrapped = caller.process?.wrap(traits, line, execs(program, session, registry, routing))
+  const worn = wrapped === true ? { ...traits, leads: false } : traits
   return runProgram(executeFn, name, line, session, stdin, worn, warned)
+}
+
+/**
+ * Whether a wrapper's program runs on in the wrapper's place: another wrapper
+ * Mirage runs, or a program a machine takes, which may take the runner as its
+ * own. A command Mirage runs itself (a shell, `grep`) runs its own commands,
+ * which do not. Mirrors Python's `_execs`.
+ */
+function execs(
+  words: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  const word = words[0] ?? ''
+  const head = pathProgram(word, session, registry) ?? word
+  if (runsWrapper(head, words.slice(1), session, registry, routing)) return true
+  return lookup(head, session, registry, routing) === Consumer.EXTERNAL
 }
 
 /**
@@ -188,7 +210,7 @@ export function wrapperRefusal(
   if (error !== null) return [grammar.status, error]
   if (at === null) return null
   const inner = args[at] ?? ''
-  if (!PROGRAM_WRAPPERS.has(inner) && !execs(inner, session, registry)) {
+  if (!PROGRAM_WRAPPERS.has(inner) && !found(inner, session, registry)) {
     return [127, grammar.missing.replace('{}', inner)]
   }
   return null

@@ -111,3 +111,17 @@ async def test_nice_prints_the_niceness_its_wrappers_gave_it(line, out):
         assert await (await ws.shell(line)).stdout_str() == out
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_shell_s_inner_wrapper_leaves_the_job_alone():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(
+            "nice -n 0 sh -c 'nohup sleep 0; echo ready; sleep 3' & p=$!; "
+            "sleep 0.3; kill -HUP $p; sleep 0.2; "
+            "kill -0 $p 2>/dev/null && echo alive; wait $p; echo rc=$?"
+        )
+        assert await io.stdout_str() == "ready\nrc=129\n"
+    finally:
+        await ws.close()

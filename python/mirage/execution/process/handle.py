@@ -233,18 +233,22 @@ class ProcessHandle:
             self._tell()
             return True
 
-    def wrap(self, traits: ProcessTraits, command: str) -> bool:
+    def wrap(self, traits: ProcessTraits, command: str, execs: bool) -> bool:
         """Run on as the program a wrapper that is a stage's or a job's
         one command runs in its place (``nohup sleep 3 &``), as a wrapper
         execs its program: its record names the program, with what the
         wrapper changed (its niceness, a group and session of its own),
-        and it ignores what the wrapper made it ignore. The program may
-        still take it (``take``).
+        and it ignores what the wrapper made it ignore. It stays one
+        command only while the program runs on in its place (``execs``:
+        another wrapper, or a program a machine takes), so a shell the
+        wrapper runs (``nice sh -c 'nohup a; b'``) keeps what its own
+        commands' wrappers change to them.
 
         Args:
             traits (ProcessTraits): what the wrappers around the program
                 changed.
             command (str): the program's words.
+            execs (bool): whether the program runs on in its place.
 
         Returns:
             bool: whether it was the wrapper's to change; False for a
@@ -253,6 +257,7 @@ class ProcessHandle:
         with self._lock:
             if not self.one_command or self._record.parent is None:
                 return False
+            self.one_command = execs
             self.ignores = self.ignores | traits.ignores
             self.program_ignores = self.program_ignores | traits.ignores
             pid = self._record.pid
