@@ -494,12 +494,12 @@ output bytes.
 and math precision cases. The following paths select
 additional jobs:
 
-Shared TypeScript fixtures under `packages/*/tests/` and the
-`packages/openai-agents/` adapter remain covered by the whole-host
-TypeScript filters. Integration runners import some of those fixtures.
+Shared TypeScript fixtures under `packages/*/tests/` remain covered by the
+whole-host TypeScript filters, since integration runners import some of them.
+The agent adapter packages, `openai-agents` among them, select no job.
 Rust filename sanitization (`rust/mirage-rs/src/sanitize.rs`), its mirrored
 `utils/sanitize` adapters, `core/generic/types`, and the condition `errors`
-modules stay under the same whole-host core and TypeScript filters.
+modules stay under the same whole-host Python and TypeScript filters.
 The shared Rust document validator (`rust/mirage-rs/src/document.rs`),
 mirrored `rs/document` and `utils/records` adapters, and Jaeger config in
 TypeScript core use the same filters. `integ/policy/documents.json` and
@@ -508,26 +508,29 @@ record normalization on both hosts.
 Formatting and stream unit tests consolidated under `commands/builtin/utils/`
 remain covered by the same whole-host filters on both hosts.
 
-| Changed                                                                                                                                      | Also sets                         |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| python or typescript source, except the runtime drop list below                                                                              | runtime                           |
-| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                                                           | runtime                           |
-| `integ/package.json`                                                                                                                         | runtime, fuse                     |
-| the python mongodb, postgres, chroma and qdrant layers and the `search` CLI; their `integ/vfs/` cases                                        | database                          |
-| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds                                 | observability                     |
-| `integ/runners/`, `integ/targets.json`                                                                                                       | database, observability           |
-| the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py`                         | fuse                              |
-| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language                                       | fuse                              |
-| `vfs/capacity`, the `core/ram` writers (`dest`, `write`, `pwrite`, `truncate`, `copy`) and `vfs/ram/ram`, `vfs/ram/store` in either language | fuse                              |
-| Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                                          | fuse                              |
-| `rust/`, the shared command streams including colrm and envsubst, date formatter, JSON validation, Lance SQL and jq both hosts run           | core, ts, data, database, runtime |
-| `test_integ.yml`                                                                                                                             | every filter                      |
+| Changed                                                                                                                                                                     | Also sets                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| python or typescript source, except the runtime drop list below                                                                                                             | runtime                                             |
+| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                                                                                          | runtime                                             |
+| `integ/package.json`                                                                                                                                                        | runtime, fuse                                       |
+| the python mongodb, postgres, chroma and qdrant layers and the `search` CLI; their `integ/vfs/` cases                                                                       | database                                            |
+| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds                                                                | observability                                       |
+| `integ/runners/`, `integ/targets.json`                                                                                                                                      | database, observability                             |
+| the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py`                                                        | fuse                                                |
+| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language                                                                      | fuse                                                |
+| `vfs/capacity`, the `core/ram` writers (`dest`, `write`, `pwrite`, `truncate`, `copy`) and `vfs/ram/ram`, `vfs/ram/store` in either language                                | fuse                                                |
+| Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                                                                         | fuse                                                |
+| `rust/`, the shared command streams including colrm and envsubst, date formatter, JSON validation, Lance SQL and jq both hosts run (`rust/python/` skips ts and cloudflare) | ts, battery, hosting, cloudflare, database, runtime |
+| `test_integ.yml`                                                                                                                                                            | every filter                                        |
 
-Besides the README and `typescript/scripts/` exclusions above, the runtime
-drop list is the only subtraction in any filter, and it holds only what nothing integ-runtime
-loads can import, directly or not: unit tests, markdown, the python agent
-adapters, the browser, dsh and opencode packages, and the python layers of
-the backends and account CLIs no runtime case mounts or runs (the python
+Besides the README and `typescript/scripts/` exclusions above, the filters
+subtract only what the map above names (unit tests, the agent adapter
+packages, the server and CLI where a job loads neither, Rust's other host,
+and the `integ/` directories one job owns) and the runtime drop list. That
+list holds only what nothing integ-runtime loads can import, directly or
+not: unit tests, markdown, the python agent adapters, the browser and
+cloudflare packages and the agent adapter packages, and the python layers
+of the backends and account CLIs no runtime case mounts or runs (the python
 VFS registry imports a backend only when one is mounted). A typescript
 backend stays in, since the core barrel imports every VFS, and so do FUSE
 and every command, which the workspace and the command tables import.

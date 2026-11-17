@@ -2782,8 +2782,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Its own entry: W&B's conformance run installs both SDKs from their
+      # requirements files, which the lock does not hold, so the shared
+      # entry would lack them. This entry holds the full set and both.
       - name: Install uv
         uses: ./.github/actions/setup-uv
+        with:
+          cache-suffix: facets
+          cache-dependency-glob: |
+            python/uv.lock
+            integ/wandb/requirements-*.txt
 
       - name: Install Python dependencies
         working-directory: python
