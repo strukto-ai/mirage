@@ -125,18 +125,24 @@ export function stdinStat(
 
 /**
  * A file's bytes from `offset` to `end`, read a window of at most 1 MiB at a
- * time: a range-capable backend may answer a window whole. Mirrors Python's
- * ranged_stream.
+ * time: a range-capable backend may answer a window whole. With no `end` the
+ * windows go on until one comes back short, which is where the file ends now.
+ * Mirrors Python's ranged_stream.
  */
 export async function* rangedStream(
   read: ReadStreamFn<[PathSpec, number, number | null]>,
   path: PathSpec,
   offset: number,
-  end: number,
+  end: number | null,
 ): AsyncGenerator<Uint8Array> {
-  while (offset < end) {
-    const size = Math.min(1 << 20, end - offset)
-    yield* chunks(read(path, offset, size))
+  while (end === null || offset < end) {
+    const size = end === null ? 1 << 20 : Math.min(1 << 20, end - offset)
+    let got = 0
+    for await (const part of chunks(read(path, offset, size))) {
+      got += part.byteLength
+      yield part
+    }
+    if (end === null && got < size) return
     offset += size
   }
 }

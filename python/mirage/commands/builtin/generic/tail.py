@@ -642,10 +642,10 @@ async def _gained(
     read_range: ReadStreamFn, io: IOResult, p: PathSpec, box: list[int]
 ) -> AsyncGenerator[bytes, None]:
     """What a size-unknown file gained past the position ``box`` holds,
-    read from there as it comes, leaving there where the next poll
-    starts. A read that finds nothing at a position the file no longer
-    reaches, its byte before the position gone too, means it was
-    truncated, which is noted and read from the start.
+    read from there a window at a time (``ranged_stream``), leaving there
+    where the next poll starts. A read that finds nothing at a position
+    the file no longer reaches, its byte before the position gone too,
+    means it was truncated, which is noted and read from the start.
 
     Args:
         read_range (ReadStreamFn): the backend's byte window.
@@ -655,7 +655,7 @@ async def _gained(
     """
     pos = box[0]
     async with aclosing(
-        _advancing(read_range(p, offset=pos, size=None), box)
+        _advancing(ranged_stream(read_range, p, pos, None), box)
     ) as gained:
         async for part in gained:
             yield part
@@ -668,7 +668,7 @@ async def _gained(
     _note(io, f"tail: {p.raw_path}: file truncated\n")
     box[0] = 0
     async with aclosing(
-        _advancing(read_range(p, offset=0, size=None), box)
+        _advancing(ranged_stream(read_range, p, 0, None), box)
     ) as whole:
         async for part in whole:
             yield part
@@ -688,9 +688,10 @@ async def _catch_up(
     position (``_gained``) and a sized one in the window it grew by;
     elsewhere the file is read whole as a stream, the bytes already
     shown skipped (``_past``), and a size-unknown file is measured by
-    that same read. Either way a poll holds a chunk, never what the file
-    gained. A file shorter than the position was truncated, which is
-    noted and read from the start.
+    that same read. Either way a poll holds a chunk, or a window where
+    the backend answers one whole, never what the file gained. A file
+    shorter than the position was truncated, which is noted and read
+    from the start.
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
@@ -725,7 +726,7 @@ async def _catch_up(
     if size <= pos:
         return
     window = (
-        read_range(p, offset=pos, size=size - pos)
+        ranged_stream(read_range, p, pos, size)
         if read_range is not None
         else _past(read, p, pos, size - pos, [0])
     )

@@ -154,10 +154,10 @@ async function* advancing(source: ByteSource, box: { end: number }): AsyncGenera
 
 /**
  * What a size-unknown file gained past the position `box` holds, read from
- * there as it comes, leaving there where the next poll starts. A read that
- * finds nothing at a position the file no longer reaches, its byte before
- * the position gone too, means it was truncated, which is noted and read
- * from the start. Mirrors Python's `_gained`.
+ * there a window at a time (`rangedStream`), leaving there where the next
+ * poll starts. A read that finds nothing at a position the file no longer
+ * reaches, its byte before the position gone too, means it was truncated,
+ * which is noted and read from the start. Mirrors Python's `_gained`.
  */
 async function* gained(
   readRange: ReadStreamFn<[PathSpec, number, number | null]>,
@@ -166,7 +166,7 @@ async function* gained(
   box: { end: number },
 ): AsyncGenerator<Uint8Array> {
   const start = box.end
-  yield* advancing(readRange(p, start, null), box)
+  yield* advancing(rangedStream(readRange, p, start, null), box)
   if (
     box.end > start ||
     start === 0 ||
@@ -175,7 +175,7 @@ async function* gained(
     return
   note(io, `tail: ${p.rawPath}: file truncated\n`)
   box.end = 0
-  yield* advancing(readRange(p, 0, null), box)
+  yield* advancing(rangedStream(readRange, p, 0, null), box)
 }
 
 /**
@@ -184,9 +184,10 @@ async function* gained(
  * a size-unknown file is read from that position (`gained`) and a sized one
  * in the window it grew by; elsewhere the file is read whole as a stream, the
  * bytes already shown skipped (`past`), and a size-unknown file is measured
- * by that same read. Either way a poll holds a chunk, never what the file
- * gained. A file shorter than the position was truncated, which is noted and
- * read from the start. Mirrors Python's `_catch_up`.
+ * by that same read. Either way a poll holds a chunk, or a window where the
+ * backend answers one whole, never what the file gained. A file shorter than
+ * the position was truncated, which is noted and read from the start.
+ * Mirrors Python's `_catch_up`.
  */
 async function* catchUp(
   stream: ReadStreamFn,
@@ -215,7 +216,7 @@ async function* catchUp(
   if (length <= start) return
   yield* advancing(
     readRange !== null
-      ? readRange(p, start, length - start)
+      ? rangedStream(readRange, p, start, length)
       : past(stream, p, start, length - start, { end: 0 }),
     box,
   )

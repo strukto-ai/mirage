@@ -379,6 +379,7 @@ class _Growing:
         self.sized = sized
         self.whole_reads = 0
         self.ranged = 0
+        self.asked: list[int | None] = []
 
     async def stat(self, p: PathSpec) -> FileStat:
         if p.virtual not in self.data:
@@ -401,6 +402,7 @@ class _Growing:
     async def read_range(
         self, p: PathSpec, offset: int, size: int | None
     ) -> AsyncIterator[bytes]:
+        self.asked.append(size)
         end = None if size is None else offset + size
         window = self.data[p.virtual][offset:end]
         self.ranged += len(window)
@@ -607,6 +609,33 @@ async def test_follow_streams_a_ranged_poll_a_chunk_at_a_time(sized):
     assert b"".join(chunks) == b"a\n" + big + b"z\n"
     assert io.stderr == b"tail: /d/log: file truncated\n"
     assert max(len(chunk) for chunk in chunks) <= CHUNK_SIZE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sized", [True, False], ids=["sized", "unsized"])
+async def test_follow_reads_a_large_gain_a_window_at_a_time(sized):
+    # A poll asks a ranged backend for a window at a time, so a burst the
+    # file gained is never one read of all of it.
+    fs = _Growing({"/d/log": b"a\n"}, sized=sized)
+    stream, _ = await _tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+    )
+    big = b"x" * (5 << 19) + b"\n"
+
+    async def grow() -> None:
+        await asyncio.sleep(0.06)
+        fs.data["/d/log"] += big
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.3)
+    await grower
+    assert b"".join(chunks) == b"a\n" + big
+    assert all(size is not None and size <= 1 << 20 for size in fs.asked)
 
 
 @pytest.mark.asyncio

@@ -81,6 +81,7 @@ class Growing {
   ) {}
   wholeReads = 0
   ranged = 0
+  asked: (number | null)[] = []
   stat = (p: PathSpec): Promise<FileStat> => {
     const data = this.data.get(p.virtual)
     if (data === undefined) {
@@ -113,6 +114,7 @@ class Growing {
     size: number | null,
   ): AsyncIterable<Uint8Array> {
     await Promise.resolve()
+    this.asked.push(size)
     const window = bytesOf(this.data.get(p.virtual)).slice(
       offset,
       size === null ? undefined : offset + size,
@@ -389,6 +391,31 @@ describe('tail -f', () => {
     expect(text).toBe('a\n' + big + 'z\n')
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
     expect(Math.max(...pieces)).toBeLessThanOrEqual(CHUNK_SIZE)
+  })
+
+  it.each([true, false])('reads a large gain a window at a time (sized %s)', async (sized) => {
+    // A poll asks a ranged backend for a window at a time, so a burst the
+    // file gained is never one read of all of it.
+    const fs = new Growing(new Map(), sized)
+    fs.set('/d/log', 'a\n')
+    const abort = new AbortController()
+    const [stream] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const big = 'x'.repeat(5 << 19) + '\n'
+    const grower = (async () => {
+      await sleep(60)
+      fs.append('/d/log', big)
+    })()
+    const text = await drainFor(stream, 300, abort)
+    await grower
+    expect(text).toBe('a\n' + big)
+    expect(fs.asked.every((size) => size !== null && size <= 1 << 20)).toBe(true)
   })
 
   it('reads only the end of a file for its first print', async () => {

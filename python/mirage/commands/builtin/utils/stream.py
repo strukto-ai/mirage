@@ -172,24 +172,30 @@ def stdin_stat(
 
 
 async def ranged_stream(
-    read: ReadStreamFn, path: PathSpec, offset: int, end: int
+    read: ReadStreamFn, path: PathSpec, offset: int, end: int | None
 ) -> AsyncGenerator[bytes, None]:
     """A file's bytes from ``offset`` to ``end``, read a window of at most
     1 MiB at a time: a range-capable backend may answer a window whole.
+    With no ``end`` the windows go on until one comes back short, which
+    is where the file ends now.
 
     Args:
         read (ReadStreamFn): ``read(path, offset=, size=)``.
         path (PathSpec): the file.
         offset (int): the first byte.
-        end (int): the byte past the last.
+        end (int | None): the byte past the last; None reads to the end.
     """
-    while offset < end:
-        size = min(1 << 20, end - offset)
+    while end is None or offset < end:
+        size = 1 << 20 if end is None else min(1 << 20, end - offset)
+        got = 0
         async with aclosing(
             chunks(read(path, offset=offset, size=size))
         ) as source:
             async for part in source:
+                got += len(part)
                 yield part
+        if end is None and got < size:
+            return
         offset += size
 
 
