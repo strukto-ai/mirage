@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 5 & p=$!; ps -C sleep -o comm=; ps -C nosuch -o comm=; echo none=$?; ps -C \"\" -o comm= 2>&1 | head -1; ps -C sleep,,x -o comm= 2>&1 | head -1; kill \"$p\"; wait \"$p\" 2>/dev/null || :)",
+      "command": "(\"sleep\" 5 & p=$!; ps -C sleep -o comm=; ps -C nosuch -o comm=; echo none=$?; ps -C \"\" -o comm= 2>&1 | head -1; ps -C sleep,,x -o comm= 2>&1 | head -1; kill \"$p\"; wait \"$p\" 2>/dev/null || :)",
       "expect": {
         "exit": 0,
         "stdout": "sleep\nnone=1\nerror: list of command names must follow -C\nerror: improper list\n",

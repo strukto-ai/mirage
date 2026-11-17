@@ -100,6 +100,62 @@ async def test_ps_compares_the_name_procps_keeps(name, found):
     await table.kill(job.id)
 
 
+# The kernel keeps 15 bytes of a program's name; procps shows a character
+# the cut splits as one ? per byte, and a -C name whose own cut splits one
+# selects nothing (procps-ng 4.0.4, LANG=C.UTF-8).
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,name,shown",
+    [
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm??", "abcdefghijklm??"),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600A", None),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600B", None),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600", None),
+        ("abc\U0001f600 30", "abc\U0001f600", "abc\U0001f600"),
+        ("abcdefghijklmn\U0001f600 30", "abcdefghijklmn", None),
+        (
+            "abcdefghij\U0001f600XYZ 30",
+            "abcdefghij\U0001f600XYZ",
+            "abcdefghij\U0001f600X",
+        ),
+        (
+            "abcdefghij\U0001f600XYZ 30",
+            "abcdefghij\U0001f600XY",
+            "abcdefghij\U0001f600X",
+        ),
+    ],
+)
+async def test_ps_cuts_a_name_at_15_bytes(command, name, shown):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm="])
+    assert (out.decode(), io.exit_code) == (
+        (f"{shown}\n", 0) if shown is not None else ("", 1)
+    )
+    await table.kill(job.id)
+
+
+# A program's name is its first word with the quotes removed, as the
+# shell ran it.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"sleep" 30',
+        "'sleep' 30",
+        's"le"ep 30',
+        '/bin/"sleep" 30',
+        "\\sleep 30",
+    ],
+)
+async def test_ps_names_a_program_by_its_unquoted_word(command):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    out, io, _ = await handle_ps(table, ["ps", "-C", "sleep", "-o", "comm="])
+    assert (out.decode(), io.exit_code) == ("sleep\n", 0)
+    await table.kill(job.id)
+
+
 @pytest.mark.asyncio
 async def test_ps_adds_a_name_selection_to_a_pid_selection():
     table = JobTable()

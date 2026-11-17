@@ -119,8 +119,8 @@ export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean,
   machine: ['MACHINE', 31, false, 'machine'],
 }
 
-// How much of a command's name procps keeps, which `comm` prints and `-C`
-// compares.
+// How many bytes of a program's name the kernel keeps, which `comm` prints
+// and `-C` compares.
 export const COMM_WIDTH = 15
 
 // What ps prints without -o: each process's pid, the machine it runs on

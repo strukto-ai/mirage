@@ -28,6 +28,7 @@ import { endsLine } from '../../../../shell/helpers.ts'
 import { ProcessId } from '../../../../execution/types.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { systemNow } from '../../../../utils/clock.ts'
+import { shlexSplit } from '../../../../utils/shlex.ts'
 import { zoneFromEnv } from '../../../../utils/timezone.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -37,6 +38,10 @@ import { MAX_PID_OPERAND } from '../constants.ts'
 import { grantsOf, jobResult, onMachine, sessionOf } from '../jobspec.ts'
 import * as constants from './constants.ts'
 import type { PsContext, PsOptions } from './types.ts'
+
+// Opt in by assigning a debug sink, as Python's module logger is off until
+// configured.
+export const logger: { debug?: (message: string) => void } = {}
 
 /** One `-p` list, refused in procps's words. */
 function psPids(value: string, option: string): number[] {
@@ -61,10 +66,59 @@ function psNames(value: string, option: string): string[] {
   return names
 }
 
-/** A command line's name as procps keeps it: the program's base name, cut to 15 characters. */
+/** How many bytes one character takes in UTF-8. */
+function utf8Size(char: string): number {
+  const point = char.codePointAt(0) ?? 0
+  if (point < 0x80) return 1
+  if (point < 0x800) return 2
+  return point < 0x10000 ? 3 : 4
+}
+
+/**
+ * A program's name as the kernel keeps it, its first 15 bytes of UTF-8,
+ * shown as procps shows it: a character the cut splits prints one `?` per
+ * byte kept. Returns the name as shown, and whether the cut split a
+ * character.
+ */
+function commCut(name: string): [string, boolean] {
+  let used = 0
+  let shown = ''
+  for (const char of name) {
+    const size = utf8Size(char)
+    if (used + size > constants.COMM_WIDTH) {
+      const left = constants.COMM_WIDTH - used
+      return [shown + '?'.repeat(left), left > 0]
+    }
+    used += size
+    shown += char
+  }
+  return [shown, false]
+}
+
+/**
+ * A command line's name as procps keeps it: the base name of its program,
+ * the first word with its quotes removed, cut as the kernel cuts it.
+ */
 function comm(command: string): string {
-  const head = command.split(/\s+/).find((word) => word !== '') ?? ''
-  return (head.split('/').pop() ?? '').slice(0, constants.COMM_WIDTH)
+  let words: string[]
+  try {
+    words = shlexSplit(command)
+  } catch (err) {
+    logger.debug?.(`ps: ${JSON.stringify(command)} read word by word: ${String(err)}`)
+    words = command.split(/\s+/).filter((word) => word !== '')
+  }
+  const head = words[0] ?? ''
+  return commCut(head.split('/').pop() ?? '')[0]
+}
+
+/**
+ * What a `-C` name compares equal to: the name cut as the kernel cuts one,
+ * or, where that cut splits a character, the name whole, longer than any
+ * name the kernel keeps, so it selects nothing, as in procps.
+ */
+function selectedName(name: string): string {
+  const [cut, split] = commCut(name)
+  return split ? name : cut
 }
 
 /** One `-o` list: `key` or `key=header`, refused in procps's words. */
@@ -138,8 +192,7 @@ function parsePs(words: string[]): PsOptions {
       const value = letters !== '' ? letters : (words[at++] ?? '')
       letters = ''
       if (flag === 'p') select(psPids(value, '-p'))
-      else if (flag === 'C')
-        for (const name of psNames(value, '-C')) names.add(name.slice(0, constants.COMM_WIDTH))
+      else if (flag === 'C') for (const name of psNames(value, '-C')) names.add(selectedName(name))
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
@@ -351,9 +404,9 @@ function forest(rows: readonly Process[]): [Process, string][] {
  * process can answer (`constants.COLUMNS`), `machine` among them;
  * a header row prints unless every header is empty. BSD `f` and `--forest`
  * draw each command under its parent's. A `-p` number is a pid as `ps` shows
- * it; a `-C` name selects the processes whose command name, cut to 15
- * characters as procps keeps it, is the name cut the same way. `-p` and `-C`
- * add up. Selecting nothing (`-p` of an absent PID) exits 1, as
+ * it; a `-C` name selects the processes whose command name, its first 15
+ * bytes as the kernel keeps it, is the name cut the same way; a cut that
+ * splits a character selects nothing. `-p` and `-C` add up. Selecting nothing (`-p` of an absent PID) exits 1, as
  * procps does, and an option error is procps's message and usage. A process
  * has no CPU, RSS or TTY accounting, and ps never broadens the profile's
  * view.

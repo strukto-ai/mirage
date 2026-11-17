@@ -123,8 +123,8 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
 }
 
 
-# How much of a command's name procps keeps, which ``comm`` prints and
-# ``-C`` compares.
+# How many bytes of a program's name the kernel keeps, which ``comm``
+# prints and ``-C`` compares.
 COMM_WIDTH = 15
 
 

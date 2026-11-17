@@ -109,6 +109,41 @@ describe('handlePs', () => {
     expect([decode(out as Uint8Array).split('\n'), io.exitCode]).toEqual([rows, found ? 0 : 1])
   })
 
+  // The kernel keeps 15 bytes of a program's name; procps shows a character
+  // the cut splits as one ? per byte, and a -C name whose own cut splits one
+  // selects nothing (procps-ng 4.0.4, LANG=C.UTF-8).
+  it.each([
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm??', 'abcdefghijklm??'],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}A', null],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}B', null],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}', null],
+    ['abc\u{1F600} 30', 'abc\u{1F600}', 'abc\u{1F600}'],
+    ['abcdefghijklmn\u{1F600} 30', 'abcdefghijklmn', null],
+    ['abcdefghij\u{1F600}XYZ 30', 'abcdefghij\u{1F600}XYZ', 'abcdefghij\u{1F600}X'],
+    ['abcdefghij\u{1F600}XYZ 30', 'abcdefghij\u{1F600}XY', 'abcdefghij\u{1F600}X'],
+  ] as const)('cuts a name at 15 bytes: %s -C %s', async (command, name, shown) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm='])
+    expect([decode((out ?? new Uint8Array()) as Uint8Array), io.exitCode]).toEqual(
+      shown === null ? ['', 1] : [`${shown}\n`, 0],
+    )
+  })
+
+  // A program's name is its first word with the quotes removed, as the
+  // shell ran it.
+  it.each(['"sleep" 30', "'sleep' 30", 's"le"ep 30', '/bin/"sleep" 30', '\\sleep 30'])(
+    'names a program by its unquoted word: %s',
+    async (command) => {
+      const jt = new JobTable()
+      const abort = new AbortController()
+      await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+      const [out, io] = await handlePs(jt, ['ps', '-C', 'sleep', '-o', 'comm='])
+      expect([decode(out as Uint8Array), io.exitCode]).toEqual(['sleep\n', 0])
+    },
+  )
+
   it('prints its header alone when no job is running', async () => {
     const jt = new JobTable()
     const [out, io] = await handlePs(jt, ['ps'])

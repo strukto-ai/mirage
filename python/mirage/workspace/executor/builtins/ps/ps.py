@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+import shlex
 from dataclasses import replace
 from datetime import datetime
 
@@ -44,6 +46,8 @@ from mirage.workspace.executor.builtins.ps.types import PsContext, PsOptions
 from mirage.workspace.lookup.constants import LOWEST_PRIORITY
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 def _ps_pids(value: str, option: str) -> set[int]:
@@ -85,16 +89,70 @@ def _ps_names(value: str, option: str) -> set[str]:
     return names
 
 
+def _utf8_size(char: str) -> int:
+    """How many bytes one character takes in UTF-8.
+
+    Args:
+        char (str): the character.
+    """
+    point = ord(char)
+    if point < 0x80:
+        return 1
+    if point < 0x800:
+        return 2
+    return 3 if point < 0x10000 else 4
+
+
+def _comm_cut(name: str) -> tuple[str, bool]:
+    """A program's name as the kernel keeps it, its first 15 bytes of
+    UTF-8, shown as procps shows it: a character the cut splits prints
+    one ``?`` per byte kept.
+
+    Args:
+        name (str): the program's base name.
+
+    Returns:
+        tuple[str, bool]: the name as shown, and whether the cut split
+        a character.
+    """
+    used = 0
+    for at, char in enumerate(name):
+        size = _utf8_size(char)
+        if used + size > constants.COMM_WIDTH:
+            left = constants.COMM_WIDTH - used
+            return name[:at] + "?" * left, left > 0
+        used += size
+    return name, False
+
+
 def _comm(command: str) -> str:
-    """A command line's name as procps keeps it: the program's base name,
-    cut to 15 characters.
+    """A command line's name as procps keeps it: the base name of its
+    program, the first word with its quotes removed, cut as the kernel
+    cuts it.
 
     Args:
         command (str): the command line.
     """
-    words = command.split()
+    try:
+        words = shlex.split(command)
+    except ValueError as exc:
+        logger.debug("ps: %r read word by word: %s", command, exc)
+        words = command.split()
     head = words[0] if words else ""
-    return head.rsplit("/", 1)[-1][: constants.COMM_WIDTH]
+    return _comm_cut(head.rsplit("/", 1)[-1])[0]
+
+
+def _selected_name(name: str) -> str:
+    """What a ``-C`` name compares equal to: the name cut as the kernel
+    cuts one, or, where that cut splits a character, the name whole,
+    longer than any name the kernel keeps, so it selects nothing, as in
+    procps.
+
+    Args:
+        name (str): the name as given.
+    """
+    cut, split = _comm_cut(name)
+    return name if split else cut
 
 
 def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
@@ -193,7 +251,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
         tuple(columns),
         forest,
         machine,
-        frozenset(name[: constants.COMM_WIDTH] for name in names),
+        frozenset(_selected_name(name) for name in names),
     )
 
 
@@ -476,8 +534,9 @@ async def handle_ps(
     header row prints unless every header is empty. BSD ``f`` and
     ``--forest`` draw each command under its parent's. A ``-p`` number
     is a pid as ``ps`` shows it; a ``-C`` name selects the processes
-    whose command name, cut to 15 characters as procps keeps it, is
-    the name cut the same way. ``-p`` and ``-C`` add up. Selecting nothing (``-p`` of
+    whose command name, its first 15 bytes as the kernel keeps it, is
+    the name cut the same way; a cut that splits a character selects
+    nothing. ``-p`` and ``-C`` add up. Selecting nothing (``-p`` of
     an absent PID) exits 1, as procps does, and an option error is
     procps's message and usage. A program's CPU and memory columns are
     what the scan read of it (``USAGE_FACTS``); Mirage's own processes
