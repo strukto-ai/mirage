@@ -731,22 +731,20 @@ def typescript_cycles(
     )
 
 
+def _first_party(node: ast.AST) -> bool:
+    if isinstance(node, ast.ImportFrom):
+        return node.level > 0 or (node.module or "").split(".")[0] == "mirage"
+    return isinstance(node, ast.Import) and any(
+        alias.name.split(".")[0] == "mirage" for alias in node.names
+    )
+
+
 def python_type_checking(sources: dict[Path, str]) -> set[str]:
     """Modules other than a package barrel that import a Mirage module
-    under ``TYPE_CHECKING``: a first-party type only the checker may see
-    stands in for an import the module should make or a design to fix. A
-    third-party one (an optional extra, ``_typeshed``) is left alone; it
-    cannot close a cycle here."""
-
-    def first_party(node: ast.stmt) -> bool:
-        if isinstance(node, ast.ImportFrom):
-            return (
-                node.level > 0 or (node.module or "").split(".")[0] == "mirage"
-            )
-        return isinstance(node, ast.Import) and any(
-            alias.name.split(".")[0] == "mirage" for alias in node.names
-        )
-
+    under ``TYPE_CHECKING``, at any depth below the guard: a first-party
+    type only the checker may see stands in for an import the module
+    should make or a design to fix. A third-party one (an optional extra,
+    ``_typeshed``) is left alone; it cannot close a cycle here."""
     return {
         path.relative_to(ROOT).as_posix()
         for path, text in sources.items()
@@ -754,7 +752,11 @@ def python_type_checking(sources: dict[Path, str]) -> set[str]:
         and any(
             isinstance(node, ast.If)
             and _type_checking(node.test)
-            and any(first_party(child) for child in node.body)
+            and any(
+                _first_party(child)
+                for statement in node.body
+                for child in ast.walk(statement)
+            )
             for node in ast.walk(ast.parse(text))
         )
     }
@@ -966,27 +968,38 @@ def rust_cycles(sources: dict[Path, str] | None = None) -> set[str]:
                         name = alias[1]
                     exports[here][name] = full
 
-        def target(
+        def resolve(
             full: list[str],
             seen: frozenset[tuple[tuple[str, ...], str]],
-            value: bool = False,
-        ) -> tuple[str, ...]:
+            value: bool,
+        ) -> tuple[tuple[str, ...], bool]:
             module: tuple[str, ...] = ()
             rest = full[1:]
             while rest[value:] and (*module, rest[0]) in modules:
                 module = (*module, rest[0])
                 rest = rest[1:]
-            if rest and (module, rest[0]) not in seen:
-                seen = seen | {(module, rest[0])}
-                alias = exports[module].get(rest[0])
-                if alias is not None:
-                    return target(alias + rest[1:], seen, value)
-                if rest[0] not in items.get(module, ()):
-                    for source in globs[module]:
-                        found = target(source + rest, seen, value)
-                        if found != module:
-                            return found
-            return module
+            if not rest:
+                return module, True
+            if (module, rest[0]) in seen:
+                return module, False
+            seen = seen | {(module, rest[0])}
+            alias = exports[module].get(rest[0])
+            if alias is not None:
+                return resolve(alias + rest[1:], seen, value)
+            if rest[0] in items.get(module, ()):
+                return module, True
+            for source in globs[module]:
+                found, defined = resolve(source + rest, seen, value)
+                if defined:
+                    return found, True
+            return module, False
+
+        def target(
+            full: list[str],
+            seen: frozenset[tuple[tuple[str, ...], str]],
+            value: bool = False,
+        ) -> tuple[str, ...]:
+            return resolve(full, seen, value)[0]
 
         values = {
             here: {a or b for a, b in RS_VALUE.findall(text)}
@@ -1256,14 +1269,18 @@ def _selftest_cycles() -> int:
         if got != want:
             print(f"  selftest: package init {init!r}: {got}, want {want}")
             failed += 1
+    nested = PY_ROOT / "planted/nested.py"
     guarded = python_type_checking(
         {
             a: "if TYPE_CHECKING:\n    from .b import B",
             b: "if TYPE_CHECKING:\n    from qdrant_client import models",
             barrel: "if TYPE_CHECKING:\n    from .a import A",
+            nested: "if TYPE_CHECKING:\n    try:\n        from mirage.x import X\n"
+            "    except ImportError:\n        pass",
+            leaf: "if TYPE_CHECKING:\n    pass\nelse:\n    from mirage.x import X",
         }
     )
-    if guarded != {a.relative_to(ROOT).as_posix()}:
+    if guarded != {p.relative_to(ROOT).as_posix() for p in (a, nested)}:
         print(f"  selftest: TYPE_CHECKING outside a barrel read as {guarded}")
         failed += 1
     crate = ROOT / "rust/planted/src"
@@ -1327,6 +1344,19 @@ def _selftest_cycles() -> int:
         print(
             f"  selftest: a name a glob re-export brings read as the root: {cyclic}"
         )
+        failed += 1
+    rc = crate / "c.rs"
+    cyclic = rust_cycles(
+        {
+            lib: "mod a;\nmod b;\nmod c;\npub use a::*;\npub use c::*;",
+            ra: "pub struct A;",
+            rb: "use crate::C;\npub struct B;",
+            rc: "use crate::b::B;\npub struct C;",
+        }
+    )
+    expected = {p.relative_to(ROOT).as_posix() for p in (rb, rc)}
+    if cyclic != expected:
+        print(f"  selftest: a name the second glob re-export brings: {cyclic}")
         failed += 1
     for use, expected in (("b()", set()), ("b::g()", rust_pair)):
         cyclic = rust_cycles(
