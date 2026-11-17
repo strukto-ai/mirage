@@ -50,13 +50,7 @@ import {
   type Login,
 } from './credentials.ts'
 import { emit, fail, formatTable } from './output.ts'
-import {
-  defaultLocalUrl,
-  header,
-  isLocalUrl,
-  loadDaemonSettings,
-  localUrl,
-} from './settings.ts'
+import { defaultLocalUrl, header, isLocalUrl, loadDaemonSettings, localUrl } from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -357,9 +351,7 @@ export function registerLoginCommands(program: Command): void {
     })
   program
     .command('whoami')
-    .description(
-      'Print the current context: its server, team and user, and when to log in again.',
-    )
+    .description('Print the current context: its server, team and user, and when to log in again.')
     .action(() => {
       const url = rstripSlash(loadDaemonSettings().url)
       const name = currentName()
