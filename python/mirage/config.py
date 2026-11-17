@@ -659,6 +659,40 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
     return resolved if ":" in block.cli else block.cli
 
 
+def check_mount_machines(
+    mounts: Mapping[str, "MountBlock"],
+    machines: Mapping[str, dict[str, Any]] | None,
+) -> None:
+    """A machine mount names machines the document defines, wherever in
+    it they sit; one without a ``machines:`` block gets its machines from
+    the caller, which checks them when it binds.
+
+    Args:
+        mounts (Mapping[str, MountBlock]): the document's mounts, each
+            ``"@<machine>"`` already a machine block.
+        machines (Mapping[str, dict[str, Any]] | None): its machines.
+
+    Raises:
+        ValueError: a machine mount names a machine the document lacks.
+    """
+    if machines is None:
+        return
+    known = ", ".join(repr(m) for m in machines) or "none"
+    for prefix, block in mounts.items():
+        if block.vfs != VFSName.MACHINE.value:
+            continue
+        chosen = block.config.get("default_machine")
+        for name in [
+            *(block.config.get("machines") or ()),
+            *([chosen] if chosen is not None else []),
+        ]:
+            if name not in machines:
+                raise ValueError(
+                    f"mount {prefix!r}: no machine {name!r} "
+                    f"(machines: {known})"
+                )
+
+
 class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -819,25 +853,7 @@ class WorkspaceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _v_mount_machines(self) -> "WorkspaceConfig":
-        # A machine mount names machines the document defines, wherever
-        # in it they sit; one without a `machines:` block gets its
-        # machines from the caller, which checks them when it binds.
-        if self.machines is None:
-            return self
-        known = ", ".join(repr(m) for m in self.machines) or "none"
-        for prefix, block in self.mounts.items():
-            if block.vfs != VFSName.MACHINE.value:
-                continue
-            chosen = block.config.get("default_machine")
-            for name in [
-                *(block.config.get("machines") or ()),
-                *([chosen] if chosen is not None else []),
-            ]:
-                if name not in self.machines:
-                    raise ValueError(
-                        f"mount {prefix!r}: no machine {name!r} "
-                        f"(machines: {known})"
-                    )
+        check_mount_machines(self.mounts, self.machines)
         return self
 
     def to_workspace_kwargs(
