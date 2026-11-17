@@ -14,6 +14,9 @@
 
 import type { Context } from '../commands/config.ts'
 import type { ProcessTable } from '../execution/process/table.ts'
+import { appendThroughSpool } from '../core/generic/rewrite.ts'
+import { isMissingOp } from '../errors/fs.ts'
+import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
@@ -281,7 +284,26 @@ export function workspaceBridge(
       case 'append': {
         if (bytes === undefined) throw new Error('append op requires bytes')
         const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-        await dispatch('append', path, [buf])
+        try {
+          await dispatch('append', path, [buf])
+        } catch (error) {
+          if (!isMissingOp(error, 'append')) throw error
+          // A mount with no append takes the whole file written back, read
+          // fresh as a stream into a spool here, where the guest's own
+          // bridge (a worker's crosses postMessage) carries no stream.
+          await appendThroughSpool(
+            async () =>
+              (await dispatch('read', path, [], {
+                filetype: null,
+                direct: true,
+                stream: true,
+              })) as ByteSource,
+            async (body) => {
+              await dispatch('write', path, [body])
+            },
+            buf,
+          )
+        }
         return undefined
       }
       case 'pwrite': {

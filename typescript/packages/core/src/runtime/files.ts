@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { ebadf, einval, eloop, exdev, isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { ebadf, einval, eloop, exdev, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -228,7 +228,6 @@ export class Descriptor {
 export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
-  private readonly noAppend = new Set<string>()
 
   /**
    * @param bridge the bridge every op rides, over the run's files; it also
@@ -798,57 +797,22 @@ export class RuntimeFiles {
   }
 
   /**
-   * Extend `path` by `tail`, falling back to a whole-file write.
-   *
-   * `append` is optional per backend (S3 registers `write` and
-   * `rename` without it), so a mount that declines is remembered: the
-   * fallback then costs one failed dispatch per mount rather than one
-   * per call.
-   *
-   * The fallback reads the base fresh every time, never a copy from an
-   * earlier append: an append lands after whatever the file holds now,
-   * so a write another action made between two appends is kept, as
-   * O_APPEND keeps it. It reads the stored bytes, not a rendering, since
-   * it writes them back. Only a confirmed absence starts from an empty
-   * base, since an append may create the file; every other read failure
-   * propagates, because writing the tail alone over a file that exists
-   * but is momentarily unreadable would replace content this run never
-   * saw.
-   *
-   * Divergence: Python's twin streams the base through a spool into a
-   * streamed write (`append_through_spool`). Here the base and the write
-   * ride the guest bridge, whose read answers and whose write takes one
-   * `Uint8Array` (a Pyodide worker's bridge crosses `postMessage`, where no
-   * stream goes), so the rewrite holds the file whole.
+   * Extend `path` by `tail`. A mount with no append takes the whole file
+   * written back, which the bridge's host side does (`workspaceBridge`):
+   * the base read fresh as a stream into a spool and written back as a
+   * stream with `tail` after it (`appendThroughSpool`), so the rewrite holds
+   * a chunk rather than the file, a Pyodide worker's included, whose bridge
+   * crosses `postMessage`, where no stream goes. Fresh every time, never a
+   * copy from an earlier append: an append lands after whatever the file
+   * holds now, as O_APPEND keeps it. Mirrors Python's `append`, which calls
+   * the dispatcher itself.
    *
    * Args:
    *   path: guest-absolute virtual path.
    *   tail: only the newly appended bytes.
    */
   async append(path: string, tail: Uint8Array): Promise<void> {
-    if (await this.appendDelta(path, tail)) {
-      this.core?.restat(path)
-      return
-    }
-    let base: Uint8Array = new Uint8Array()
-    try {
-      base = await this.read(path, { raw: true, direct: true })
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-    }
-    await this.write(path, concat([base, tail]))
-  }
-
-  private async appendDelta(path: string, tail: Uint8Array): Promise<boolean> {
-    const mount = this.mountOf(path) ?? path
-    if (this.noAppend.has(mount)) return false
-    try {
-      await this.dispatch('append', path, tail)
-    } catch (err) {
-      if (!isMissingOp(err, 'append')) throw err
-      this.noAppend.add(mount)
-      return false
-    }
-    return true
+    await this.dispatch('append', path, tail)
+    this.core?.restat(path)
   }
 }

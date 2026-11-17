@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { enotsup } from '../errors/fs.ts'
 import { MEMORY_LIMIT } from '../io/spool.ts'
 import { MountCore } from '../mount/core.ts'
 import {
@@ -500,85 +499,6 @@ describe('RuntimeFiles append', () => {
       enc.encode('tail'),
     )
     expect(dispatch.mock.calls.map((c) => c[0])).toEqual(['append'])
-  })
-
-  it('reads the base fresh when the mount has no append', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      if (op === 'read') return Promise.resolve(enc.encode('head'))
-      return Promise.resolve(undefined)
-    })
-    await new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).append(
-      '/a/x',
-      enc.encode('tail'),
-    )
-    const write = dispatch.mock.calls.find((c) => c[0] === 'write')
-    if (write?.[2] === undefined) throw new Error('unreachable')
-    expect(new TextDecoder().decode(write[2])).toBe('headtail')
-    const read = dispatch.mock.calls.find((c) => c[0] === 'read')
-    expect(read?.[4]).toEqual({ raw: true, direct: true })
-  })
-
-  // The fallback reads the base fresh each time: an append lands after
-  // whatever the file holds now, as O_APPEND does, so a copy kept from
-  // the last append would overwrite another action's write.
-  it('keeps a write made since the last append', async () => {
-    let stored: Uint8Array = enc.encode('head')
-    const dispatch = vi.fn<BridgeDispatchFn>((op, _path, bytes) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      if (op === 'read') return Promise.resolve(stored)
-      if (op === 'write' && bytes !== undefined) stored = bytes
-      return Promise.resolve(undefined)
-    })
-    const files = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a']))
-    await files.append('/a/x', enc.encode('-1'))
-    stored = enc.encode('other')
-    await files.append('/a/x', enc.encode('-2'))
-    const writes = dispatch.mock.calls.filter((c) => c[0] === 'write')
-    expect(writes.map((c) => new TextDecoder().decode(c[2]))).toEqual(['head-1', 'other-2'])
-  })
-
-  it('starts from an empty base when the file is simply absent', async () => {
-    const missing = Object.assign(new Error('nope'), { code: 'ENOENT' })
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      if (op === 'read') return Promise.reject(missing)
-      return Promise.resolve(undefined)
-    })
-    await new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).append(
-      '/a/x',
-      enc.encode('tail'),
-    )
-    const write = dispatch.mock.calls.find((c) => c[0] === 'write')
-    if (write?.[2] === undefined) throw new Error('unreachable')
-    expect(new TextDecoder().decode(write[2])).toBe('tail')
-  })
-
-  it('propagates a read failure that is not an absence', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      if (op === 'read') return Promise.reject(new Error('transport down'))
-      return Promise.resolve(undefined)
-    })
-    await expect(
-      new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).append(
-        '/a/x',
-        enc.encode('tail'),
-      ),
-    ).rejects.toThrow(/transport down/)
-    expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
-  })
-
-  it('remembers a mount that declined, so it costs one failed dispatch', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      if (op === 'read') return Promise.resolve(new Uint8Array())
-      return Promise.resolve(undefined)
-    })
-    const vfs = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a']))
-    await vfs.append('/a/x', enc.encode('1'))
-    await vfs.append('/a/y', enc.encode('2'))
-    expect(dispatch.mock.calls.filter((c) => c[0] === 'append')).toHaveLength(1)
   })
 
   it('lets a real append failure propagate instead of writing whole', async () => {

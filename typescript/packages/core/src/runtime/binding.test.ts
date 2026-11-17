@@ -14,7 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
-import { answerOf, refusedRun, type WorkspaceBinding, type RuntimeContext } from './binding.ts'
+import {
+  answerOf,
+  refusedRun,
+  workspaceBridge,
+  type WorkspaceBinding,
+  type RuntimeContext,
+} from './binding.ts'
 import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
@@ -27,7 +33,8 @@ import {
   runWithCaller,
   runWithSession,
 } from '../context/session_context.ts'
-import { materialize } from '../io/types.ts'
+import { materialize, type ByteSource } from '../io/types.ts'
+import { enotsup } from '../errors/fs.ts'
 import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
@@ -427,4 +434,68 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+describe('workspaceBridge append on a mount with no append', () => {
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+
+  /** A bridge over a mount that declines `append`, its file held here. */
+  function noAppend(stored: { body: Uint8Array | null; read?: Error }) {
+    const asked: Record<string, unknown>[] = []
+    const written: ByteSource[] = []
+    const bridge = workspaceBridge(async (name, _path, args, kwargs) => {
+      if (name === 'append') throw enotsup('s3', 'append', '/a/x')
+      if (name === 'read') {
+        asked.push({ ...kwargs })
+        if (stored.read !== undefined) throw stored.read
+        if (stored.body === null) throw Object.assign(new Error('nope'), { code: 'ENOENT' })
+        const body = stored.body
+        return (async function* () {
+          yield body
+        })()
+      }
+      if (name === 'write') {
+        const body = (args ?? [])[0] as ByteSource
+        written.push(body)
+        stored.body = await materialize(body)
+      }
+      return undefined
+    })
+    return { bridge, asked, written }
+  }
+
+  it('writes the base, read fresh as a stream, back as a stream with the tail', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null }
+    const { bridge, asked, written } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('tail'))
+    expect(dec.decode(stored.body ?? undefined)).toBe('headtail')
+    expect(asked).toEqual([{ filetype: null, direct: true, stream: true }])
+    expect(written[0]).not.toBeInstanceOf(Uint8Array)
+  })
+
+  // An append lands after whatever the file holds now, as O_APPEND does,
+  // so a copy kept from the last append would overwrite another write.
+  it('keeps a write made since the last append', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null }
+    const { bridge } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('-1'))
+    stored.body = enc.encode('other')
+    await bridge('append', '/a/x', enc.encode('-2'))
+    expect(dec.decode(stored.body)).toBe('other-2')
+  })
+
+  it('starts from an empty base when the file is simply absent', async () => {
+    const stored: { body: Uint8Array | null } = { body: null }
+    const { bridge } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('tail'))
+    expect(dec.decode(stored.body ?? undefined)).toBe('tail')
+  })
+
+  it('propagates a read failure that is not an absence', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null, read: new Error('down') }
+    const { bridge, written } = noAppend(stored)
+    await expect(bridge('append', '/a/x', enc.encode('tail'))).rejects.toThrow(/down/)
+    expect(written).toHaveLength(0)
+  })
 })
