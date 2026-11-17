@@ -29,6 +29,7 @@ it('drops the final tree and maps while stale nodes remain reachable', () => {
   const root = program.root
   const child = root.namedChildren[0]
   assert(child)
+  expect(child.children[0]?.parent).toBe(child)
   const borrowed = root.borrowed
   assert(borrowed instanceof ShellTreeNode)
   const tree = borrowed.tree

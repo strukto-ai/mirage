@@ -926,17 +926,20 @@ async def _run_argv(
         # command a registered one runs keeps none of that one's.
         outer = current_caller()
         token = bind_caller(
-            dataclasses.replace(
-                outer,
-                gate=admitted if admitted is not None else outer.gate,
-                command=argv.name,
-                invocation=admitted.ctx if admitted is not None else None,
-                declared=None,
-                output_file=(
-                    output_target(diverted_file(context.session, output))
-                    if isinstance(output, Recorder)
-                    else None
-                ),
+            outer.changed(
+                {
+                    "gate": admitted if admitted is not None else outer.gate,
+                    "command": argv.name,
+                    "invocation": (
+                        admitted.ctx if admitted is not None else None
+                    ),
+                    "declared": None,
+                    "output_file": (
+                        output_target(diverted_file(context.session, output))
+                        if isinstance(output, Recorder)
+                        else None
+                    ),
+                }
             )
         )
         # A pre_command route places this command, and what it runs, over

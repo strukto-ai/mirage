@@ -841,8 +841,11 @@ export class MountRegistry {
     return effectivePathMode(virtual, m.prefix, m.mode, access) === MountMode.EXEC
   }
 
-  private fallbackCandidates(cmdName: string, access?: SessionAccess): MountEntry[] {
-    const visible = this.visibleMounts(access?.sessionId)
+  private fallbackCandidates(
+    cmdName: string,
+    access?: SessionAccess,
+    visible: MountEntry[] = this.visibleMounts(access?.sessionId),
+  ): MountEntry[] {
     const ordered =
       this.rootRef === null
         ? visible
@@ -907,7 +910,7 @@ export class MountRegistry {
       return [mount]
     }
     if (mount !== undefined && first !== undefined) return []
-    return this.fallbackCandidates(cmdName, access)
+    return this.fallbackCandidates(cmdName, access, visible)
   }
 
   /** The first discovery candidate; selecting execution may refuse ambiguity. */

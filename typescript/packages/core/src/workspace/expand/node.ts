@@ -16,6 +16,7 @@ import type { IOResult } from '../../io/types.ts'
 import { ShellVars } from '../../rs/session.ts'
 import type { Item, Shell, ShellTask, ShellTreeNode } from '../../rs/shell.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { PLAIN_WORD, PLAIN_WORD_TYPES } from '../../shell/constants.ts'
 import { parse } from '../../shell/parse/parse.ts'
 import { ProgramNode, type ParsedProgram, shellNode } from '../../shell/parse/program.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -84,7 +85,7 @@ export class ExpandHost implements TaskHost {
   }
 
   private node(node: ShellTreeNode): TSNodeLike {
-    return this.program === null ? node : new ProgramNode(node, this.program)
+    return this.program === null ? node : this.program.wrap(node)
   }
 
   async substitute(
@@ -175,6 +176,10 @@ export async function expand(
     const text = literal(word)
     if (mode === 'fields') return [markGlobs(text)]
     return mode === 'pattern' ? [[text, true]] : text
+  }
+  if (mode === 'fields' && PLAIN_WORD_TYPES.has(word.type)) {
+    const text = word.text
+    if (PLAIN_WORD.test(text)) return [text]
   }
   const session = context.session
   frame(session, callStack)

@@ -125,9 +125,21 @@ def line_row(node: TSNodeLike) -> int:
     where that element ends when it is an assignment, which bash takes
     without reading on; any other node's is the row it starts on.
 
+    A program's node is numbered once, and the parse keeps its row.
+
     Args:
         node (TSNodeLike): a node of a parsed program.
     """
+    if not isinstance(node, ProgramNode):
+        return _numbered_row(node)
+    rows = node.program.line_rows
+    row = rows.get(node.id)
+    if row is None:
+        row = rows[node.id] = _numbered_row(node)
+    return row
+
+
+def _numbered_row(node: TSNodeLike) -> int:
     parent = node.parent
     if node.type == NT.VARIABLE_ASSIGNMENT:
         if parent is None or parent.type != NT.VARIABLE_ASSIGNMENTS:

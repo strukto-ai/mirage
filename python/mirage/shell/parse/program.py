@@ -1,7 +1,6 @@
 from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from typing import Any
-from weakref import WeakSet
 
 from mirage._rs import ShellNode
 from mirage.shell.bytes import encode_text
@@ -12,8 +11,9 @@ class ParsedProgram:
     """One parse of a line: its tree, where each of its bytes sits in the
     line as typed, and the references that keep it.
 
-    The final explicit release clears the tree and maps, even if stale
-    node wrappers remain reachable.
+    Each node read has one wrapper, kept until the final explicit
+    release, which clears the tree and maps even if stale wrappers
+    remain reachable.
 
     Args:
         original (str): the line as typed.
@@ -23,13 +23,14 @@ class ParsedProgram:
     def __init__(self, original: str, root: ShellNode) -> None:
         self.original = original
         self.offsets: Sequence[int] = root.offsets
-        self._nodes: WeakSet[ProgramNode] = WeakSet()
+        self._nodes: dict[int, ProgramNode] = {}
         self.references = 1
         self._released = False
         self._newlines: list[int] | None = None
         self._text: bytes | None = None
         self.read_rows: dict[int, int] = {}
-        self._root: ProgramNode | None = ProgramNode(root, self)
+        self.line_rows: dict[int, int] = {}
+        self._root: ProgramNode | None = self.wrap(root)
 
     @property
     def root(self) -> "ProgramNode":
@@ -46,6 +47,19 @@ class ParsedProgram:
             assert self._root is not None
             self._text = self._root.text or b""
         return self._text
+
+    def wrap(self, node: TSNodeLike) -> "ProgramNode":
+        """The one wrapper of a node of this program, built on its first
+        read.
+
+        Args:
+            node (TSNodeLike): the parser's node.
+        """
+        self.check()
+        wrapped = self._nodes.get(node.id)
+        if wrapped is None:
+            wrapped = self._nodes[node.id] = ProgramNode(node, self)
+        return wrapped
 
     def row(self, offset: int) -> int:
         """The row a byte of the line as typed is on: the newlines before
@@ -90,8 +104,9 @@ class ParsedProgram:
     def _drop(self) -> None:
         self.references -= 1
         if self.references == 0:
-            for node in self._nodes:
+            for node in self._nodes.values():
                 node._borrowed = None
+                node._parent = None
                 node._children = None
                 node._named = None
             self._nodes.clear()
@@ -100,27 +115,37 @@ class ParsedProgram:
             self._newlines = None
             self._text = None
             self.read_rows.clear()
+            self.line_rows.clear()
             self._root = None
 
 
 class ProgramNode:
     """A node of a parsed program; every read checks the program is held.
 
-    The wrappers of a node's children are built once and kept, so a walk
-    pays for each wrapper one time, and the attributes walks read most go
-    straight to the node.
+    Its program builds it once (``ParsedProgram.wrap``), and the wrappers
+    of its parent and children, and its type, are read once and kept, so
+    a walk that comes back to a node pays for none of them again.
 
     Args:
         node (TSNodeLike): the node it reads.
         program (ParsedProgram): the program the node belongs to.
     """
 
-    __slots__ = ("_borrowed", "program", "_children", "_named", "__weakref__")
+    __slots__ = (
+        "_borrowed",
+        "program",
+        "_type",
+        "_parent",
+        "_children",
+        "_named",
+        "__weakref__",
+    )
 
     def __init__(self, node: TSNodeLike, program: ParsedProgram) -> None:
         self._borrowed: TSNodeLike | None = node
-        program._nodes.add(self)
         self.program = program
+        self._type: str | None = None
+        self._parent: tuple[ProgramNode | None] | None = None
         self._children: list[ProgramNode] | None = None
         self._named: list[ProgramNode] | None = None
 
@@ -131,11 +156,10 @@ class ProgramNode:
         return self._borrowed
 
     def __getattr__(self, name: str) -> Any:
-        self.program.check()
         return getattr(self._node, name)
 
     def _wrap(self, node: TSNodeLike | None) -> "ProgramNode | None":
-        return None if node is None else ProgramNode(node, self.program)
+        return None if node is None else self.program.wrap(node)
 
     @property
     def offsets(self) -> Sequence[int]:
@@ -144,61 +168,54 @@ class ProgramNode:
 
     @property
     def type(self) -> str:
-        self.program.check()
-        return self._node.type
+        node = self._node
+        if self._type is None:
+            self._type = node.type
+        return self._type
 
     @property
     def text(self) -> bytes | None:
-        self.program.check()
         return self._node.text
 
     @property
     def start_byte(self) -> int:
-        self.program.check()
         return self._node.start_byte
 
     @property
     def end_byte(self) -> int:
-        self.program.check()
         return self._node.end_byte
 
     @property
     def is_named(self) -> bool:
-        self.program.check()
         return self._node.is_named
 
     @property
     def children(self) -> list["ProgramNode"]:
-        self.program.check()
+        node = self._node
         if self._children is None:
-            self._children = [
-                ProgramNode(node, self.program) for node in self._node.children
-            ]
+            self._children = [self.program.wrap(n) for n in node.children]
         return list(self._children)
 
     @property
     def named_children(self) -> list["ProgramNode"]:
-        self.program.check()
+        node = self._node
         if self._named is None:
-            self._named = [
-                ProgramNode(node, self.program)
-                for node in self._node.named_children
-            ]
+            self._named = [self.program.wrap(n) for n in node.named_children]
         return list(self._named)
 
     @property
     def parent(self) -> "ProgramNode | None":
-        self.program.check()
-        return self._wrap(self._node.parent)
+        node = self._node
+        if self._parent is None:
+            self._parent = (self._wrap(node.parent),)
+        return self._parent[0]
 
     @property
     def next_sibling(self) -> "ProgramNode | None":
-        self.program.check()
         return self._wrap(self._node.next_sibling)
 
     @property
     def prev_sibling(self) -> "ProgramNode | None":
-        self.program.check()
         return self._wrap(self._node.prev_sibling)
 
     def child(self, index: int) -> "ProgramNode | None":
@@ -206,7 +223,6 @@ class ProgramNode:
         return children[index] if 0 <= index < len(children) else None
 
     def child_by_field_name(self, name: str) -> "ProgramNode | None":
-        self.program.check()
         return self._wrap(self._node.child_by_field_name(name))
 
 

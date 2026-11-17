@@ -309,7 +309,11 @@ async def fill_tree_env(
     Returns:
         Whether a value was fetched, which changes how the words read.
     """
-    if registry.fill_env is None or registry.clis.get(name) is not None:
+    if (
+        registry.fill_env is None
+        or registry.clis.get(name) is not None
+        or lookup(name, session, registry) is not Consumer.MOUNT
+    ):
         return False
     candidates = registry.invocation_candidates(
         name, [], session.cwd, args, session_access(session)
@@ -319,8 +323,6 @@ async def fill_tree_env(
     mount = candidates[0]
     tree = mount.cli_for(name)
     if not isinstance(tree, CLI):
-        return False
-    if lookup(name, session, registry) is not Consumer.MOUNT:
         return False
     verbs = frozenset(w for w in args if not w.startswith("-"))
     names = (

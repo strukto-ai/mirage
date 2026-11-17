@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Mapping
 
 from mirage.shell.types import (
@@ -19,6 +20,14 @@ from mirage.shell.types import (
     BuiltinTier,
     NodeType,
     ShellBuiltin,
+)
+
+# A word that reads as itself in an argument list: no quoting, expansion,
+# glob, brace or tilde character, ASCII only. Its fields are its text, so
+# no shell is framed or asked to expand it.
+PLAIN_WORD = re.compile(rb"[A-Za-z0-9_./:%+,=@-]+")
+PLAIN_WORD_TYPES = frozenset(
+    {NodeType.WORD, NodeType.COMMAND_NAME, NodeType.NUMBER}
 )
 
 # How deep the shell may re-enter itself: function calls, sourced files, `eval`
