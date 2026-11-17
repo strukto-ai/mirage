@@ -129,11 +129,16 @@ export class PidLineFilter {
  * has exited (`runExitMark`) taken out, and the status the line gives
  * handed to `ended`. Only an ending that can still become the line is held;
  * everything else passes as it arrives, what the program left running
- * included. Mirrors Python's `ExitLineFilter`.
+ * included. The status is told once the bytes written with the line have
+ * been passed on, so a reader slow to take the program's last output (a
+ * transport that answers whole, the line inside it) never has the run let
+ * go while that output is still on its way. Mirrors Python's
+ * `ExitLineFilter`.
  */
 export class ExitLineFilter {
   private held = new Uint8Array()
   private passing = false
+  private status: number | null = null
 
   /**
    * @param sink receives the stream without the line.
@@ -154,7 +159,13 @@ export class ExitLineFilter {
       this.held = new Uint8Array()
       out = this.take(held)
     }
-    if (out.byteLength > 0) await this.sink(out)
+    try {
+      if (out.byteLength > 0) await this.sink(out)
+    } finally {
+      const status = this.status
+      this.status = null
+      if (status !== null) this.ended(status)
+    }
   }
 
   /** Pass on what is still held once the stream has ended. */
@@ -178,7 +189,7 @@ export class ExitLineFilter {
       const digits = end < 0 ? tail.byteLength : end
       if (digits > 0 && digits <= EXIT_DIGITS && tail[digits] === 0x0a) {
         this.passing = true
-        this.ended(Number(new TextDecoder().decode(tail.subarray(0, digits))))
+        this.status = Number(new TextDecoder().decode(tail.subarray(0, digits)))
         return concat([...out, rest.subarray(0, at), tail.subarray(digits + 1)])
       }
       if (digits === tail.byteLength && digits <= EXIT_DIGITS) {

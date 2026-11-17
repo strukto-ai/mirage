@@ -145,6 +145,10 @@ class ExitLineFilter:
 
     Only an ending that can still become the line is held; everything
     else passes as it arrives, what the program left running included.
+    The status is told once the bytes written with the line have been
+    passed on, so a reader slow to take the program's last output (a
+    transport that answers whole, the line inside it) never has the run
+    let go while that output is still on its way.
 
     Args:
         sink (OutputFn): receives the stream without the line.
@@ -160,6 +164,7 @@ class ExitLineFilter:
         self._mark = mark
         self._held = b""
         self._passing = False
+        self._status: int | None = None
 
     async def write(self, data: bytes) -> None:
         """Pass on what can no longer be, or hold, the exit line.
@@ -170,8 +175,13 @@ class ExitLineFilter:
         if not self._passing:
             held, self._held = self._held + data, b""
             data = self._take(held)
-        if data:
-            await self._sink(data)
+        try:
+            if data:
+                await self._sink(data)
+        finally:
+            if self._status is not None:
+                status, self._status = self._status, None
+                self._ended(status)
 
     async def finish(self) -> None:
         """Pass on what is still held once the stream has ended."""
@@ -196,7 +206,7 @@ class ExitLineFilter:
                 and rest[digits : digits + 1] == b"\n"
             ):
                 self._passing = True
-                self._ended(int(rest[:digits]))
+                self._status = int(rest[:digits])
                 return bytes(out + held[:at] + rest[digits + 1 :])
             if digits == len(rest) and digits <= EXIT_DIGITS:
                 self._held = held[at:]

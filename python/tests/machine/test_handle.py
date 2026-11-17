@@ -830,6 +830,25 @@ async def test_an_exit_line_without_the_runs_own_word_is_the_programs():
     assert await _exited([forged]) == (forged, [])
 
 
+# The status is told once the output written with the line has been
+# taken, so a slow reader never has the run let go mid-write.
+@pytest.mark.asyncio
+async def test_the_status_waits_for_the_output_written_with_it():
+    taken = asyncio.Event()
+    codes: list[int] = []
+
+    async def slow(chunk: bytes) -> None:
+        await taken.wait()
+
+    line = ExitLineFilter(slow, codes.append, MARK)
+    writing = asyncio.create_task(line.write(b"out\n" + MARK + b"0\n"))
+    await asyncio.sleep(0)
+    assert codes == []
+    taken.set()
+    await writing
+    assert codes == [0]
+
+
 class LeftOpenBox(RecordingMachine):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"3\n")

@@ -875,6 +875,29 @@ describe('ExitLineFilter', () => {
     expect(await exited(chunks)).toEqual(['err\nlater\n', [42]])
   })
 
+  // The status is told once the output written with the line has been taken,
+  // so a slow reader never has the run let go mid-write.
+  it('tells the status once the output written with it is taken', async () => {
+    let release = (): void => undefined
+    const taken = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const codes: number[] = []
+    const line = new ExitLineFilter(
+      () => taken,
+      (code) => codes.push(code),
+      MARK,
+    )
+    const writing = line.write(
+      new Uint8Array([...ENC.encode('out\n'), ...MARK, ...ENC.encode('0\n')]),
+    )
+    await Promise.resolve()
+    expect(codes).toEqual([])
+    release()
+    await writing
+    expect(codes).toEqual([0])
+  })
+
   // A mark with no status line after it is the program's own, and so is a
   // piece of one the stream ends on.
   it("leaves a mark without a status line as the program's own", async () => {
