@@ -433,6 +433,18 @@ fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
         (b".a1.tar.gz".to_vec(), b"a1.tar.gz".to_vec()),
         (b"01".to_vec(), b"1.a".to_vec()),
         (b"a1..a~.gz".to_vec(), b"a1..b.tar".to_vec()),
+        (b"abZ~1".to_vec(), b"abzA1".to_vec()),
+        (b"ab!1".to_vec(), b"abA1".to_vec()),
+        (long.clone(), long.clone()),
+        (
+            [b"9".repeat(800), b"1".to_vec()].concat(),
+            [b"9".repeat(800), b"2".to_vec()].concat(),
+        ),
+        ([b"0".repeat(800), b"12".to_vec()].concat(), b"12".to_vec()),
+        (
+            [long.as_slice(), b"~1"].concat(),
+            [long.as_slice(), b"A1"].concat(),
+        ),
         (
             [long.as_slice(), b"00012.tar.gz"].concat(),
             [long.as_slice(), b"12.tar.xz"].concat(),
@@ -452,6 +464,10 @@ fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
     ];
     for mods in [
         Mods::default(),
+        Mods {
+            fold: true,
+            ..Mods::default()
+        },
         Mods {
             fold: true,
             dictionary: true,
@@ -478,18 +494,21 @@ fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
                     .collect::<Vec<_>>()
             };
             let expected = version_cmp(&transform(a), &transform(b));
-            let mut scan = VersionScan::default();
-            let mut calls = 0;
-            let actual = loop {
-                calls += 1;
-                assert!(calls < 20000, "version comparison failed to advance");
-                if let Some(order) = scan.step(a, b, &mods, &mut 1) {
-                    break order;
+            for budget in [1, 7, 4096] {
+                let mut scan = VersionScan::default();
+                let mut calls = 0;
+                let actual = loop {
+                    calls += 1;
+                    assert!(calls < 20000, "version comparison failed to advance");
+                    let mut remaining = budget;
+                    if let Some(order) = scan.step(a, b, &mods, &mut remaining) {
+                        break order;
+                    }
+                };
+                assert_eq!(actual, expected);
+                if budget == 1 && a.len() + b.len() > 256 {
+                    assert!(calls > 256, "source scanning must consume the allowance");
                 }
-            };
-            assert_eq!(actual, expected);
-            if a.len() + b.len() > 256 {
-                assert!(calls > 256, "source scanning must consume the allowance");
             }
         }
     }
