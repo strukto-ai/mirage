@@ -23,6 +23,7 @@ const DOCS = new URL('../../docs/typescript/cli/', import.meta.url)
 const SNIPPETS = new URL('../../docs/snippets/cli/', import.meta.url)
 const START = '{/* BEGIN GENERATED CLI COMMANDS */}'
 const END = '{/* END GENERATED CLI COMMANDS */}'
+const UNLISTED = new Set(['search'])
 
 function commands(node: Node.CommandSpec, parents: readonly string[] = []): string[] {
   const path = [...parents, node.name]
@@ -32,7 +33,9 @@ function commands(node: Node.CommandSpec, parents: readonly string[] = []): stri
   ]
 }
 
-const specs = Object.values(Node).filter((value) => value instanceof Node.CLI)
+const specs = Object.values(Node).filter(
+  (value): value is Node.CLI => value instanceof Node.CLI && !UNLISTED.has(value.spec.name),
+)
 assert.ok(specs.length > 0, 'No bundled CLI specs were loaded')
 const pages = readdirSync(DOCS)
   .filter((name) => name.endsWith('.mdx') && !['index.mdx', 'new.mdx', 'mcp.mdx'].includes(name))
