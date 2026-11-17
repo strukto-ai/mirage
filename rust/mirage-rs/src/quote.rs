@@ -19,6 +19,8 @@ enum Style {
     C,
     CMaybe,
     Locale,
+    /// A word in a diagnostic as `quote()` writes it (`quote_arg`).
+    Arg,
 }
 
 #[derive(Deserialize)]
@@ -28,13 +30,17 @@ struct Config {
     /// `-q`: a control prints as `?` under the styles that print it raw.
     #[serde(default)]
     hide: bool,
+    /// `arg` under a UTF-8 locale.
+    #[serde(default)]
+    utf8: bool,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let Config { style, hide } = parse_config(config)?;
+    let Config { style, hide, utf8 } = parse_config(config)?;
     Ok(Box::new(Quote {
         style,
         hide,
+        utf8,
         text: Vec::new(),
         finished: false,
     }))
@@ -43,6 +49,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 struct Quote {
     style: Style,
     hide: bool,
+    utf8: bool,
     text: Vec<u8>,
     finished: bool,
 }
@@ -76,6 +83,7 @@ impl Stream for Quote {
                     out.extend_from_slice(&text);
                 }
             }
+            Style::Arg => out.extend(quote_arg(&text, self.utf8)),
             Style::Locale => c_style(
                 &text,
                 "\u{2018}".as_bytes(),
@@ -157,6 +165,25 @@ pub(crate) fn quoted(text: &[u8]) -> String {
             _ => out.push_str(&format!("\\{byte:03o}")),
         }
     }
+    out
+}
+
+/// A word as gnulib's `quote()` writes it, quotes included: under a UTF-8
+/// locale between `‘` and `’`, a valid character as itself but a control,
+/// a backslash and a byte that is no UTF-8 escaped; in the C locale between
+/// `'` and `'` with `quoted`'s escapes.
+pub(crate) fn quote_arg(text: &[u8], utf8: bool) -> Vec<u8> {
+    if !utf8 {
+        return [b"'", quoted(text).as_bytes(), b"'"].concat();
+    }
+    let mut out = Vec::new();
+    c_style(
+        text,
+        "\u{2018}".as_bytes(),
+        "\u{2019}".as_bytes(),
+        false,
+        &mut out,
+    );
     out
 }
 
@@ -296,7 +323,26 @@ fn shell(text: &[u8], always: bool, diagnostic: bool) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_quoted;
+    use super::{quote_arg, shell_quoted};
+
+    #[test]
+    fn arg_quotes_as_find_names_a_file_in_each_locale() {
+        for (text, c, utf8) in [
+            (&b"nosuch"[..], "'nosuch'", "\u{2018}nosuch\u{2019}"),
+            (b"it's", "'it\\'s'", "\u{2018}it's\u{2019}"),
+            (b"a\tb", "'a\\tb'", "\u{2018}a\\tb\u{2019}"),
+            (b"a\\b", "'a\\\\b'", "\u{2018}a\\\\b\u{2019}"),
+            (
+                "\u{e9}".as_bytes(),
+                "'\\303\\251'",
+                "\u{2018}\u{e9}\u{2019}",
+            ),
+            (b"x\xffy", "'x\\377y'", "\u{2018}x\\377y\u{2019}"),
+        ] {
+            assert_eq!(quote_arg(text, false), c.as_bytes());
+            assert_eq!(quote_arg(text, true), utf8.as_bytes());
+        }
+    }
     use crate::open;
 
     #[test]

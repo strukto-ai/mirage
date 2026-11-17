@@ -141,11 +141,16 @@ async def test_several_machines_keep_each_figure_where_it_was():
 
 
 @pytest.mark.asyncio
+async def test_one_machine_answers_alone_as_its_own_free_does():
+    out, _, code = await free_of(table=table_of(resources()))
+    assert (out, code) == (f"{HEADER}\n{MEM}\n{SWAP}\n", 0)
+
+
+@pytest.mark.asyncio
 async def test_the_workspace_row_is_its_max_memory():
     budget = MemoryBudget(32 << 20, lambda: 2 << 20)
-    out, _, _ = await run_with_memory(
-        budget, free_of("-m", table=table_of(resources()))
-    )
+    table = table_of(resources("docker:a"), resources("e2b:b"))
+    out, _, _ = await run_with_memory(budget, free_of("-m", table=table))
     rows = out.splitlines()
     assert rows[1].split() == [
         "Mem:",
@@ -162,7 +167,8 @@ async def test_the_workspace_row_is_its_max_memory():
 
 @pytest.mark.asyncio
 async def test_no_max_memory_leaves_the_workspace_row_blank():
-    out, _, _ = await free_of("-m", table=table_of(resources()))
+    table = table_of(resources("docker:a"), resources("e2b:b"))
+    out, _, _ = await free_of("-m", table=table)
     rows = out.splitlines()
     assert rows[1].split() == ["Mem:", *"------", "mirage"]
     assert rows[2].split() == ["Swap:", *"---", "mirage"]

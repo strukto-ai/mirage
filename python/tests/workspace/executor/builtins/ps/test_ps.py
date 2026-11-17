@@ -51,6 +51,146 @@ async def test_ps_lists_only_the_running_jobs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-C", "sleep"],
+        ["-Csleep"],
+        ["-C", "nosuch,sleep"],
+        ["-C", "nosuch sleep"],
+        ["-C", "nosuch", "-C", "sleep"],
+    ],
+)
+async def test_ps_selects_by_command_name(args):
+    table = JobTable()
+    job = await submit_pending(table)
+    other = await submit_pending(table, command="foo 1")
+    out, io, _ = await handle_ps(table, ["ps", *args])
+    assert (out.decode(), io.exit_code) == (
+        f"{HEADER}\n{_row(job.pid, 'sleep')}\n",
+        0,
+    )
+    await table.kill(job.id)
+    await table.kill(other.id)
+
+
+# procps keeps 15 characters of a command's name and compares a -C name
+# cut the same way; a path or another case is no match.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,found",
+    [
+        ("abcdefghijklmnopqrst", True),
+        ("abcdefghijklmno", True),
+        ("abcdefghijklmnop", True),
+        ("/bin/abcdefghijklmnopqrst", False),
+        ("ABCDEFGHIJKLMNO", False),
+        ("abcdefghijklmn", False),
+    ],
+)
+async def test_ps_compares_the_name_procps_keeps(name, found):
+    table = JobTable()
+    job = await submit_pending(table, command="/bin/abcdefghijklmnopqrst 30")
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm"])
+    rows = ["COMMAND", "abcdefghijklmno"] if found else ["COMMAND"]
+    assert (out.decode().splitlines(), io.exit_code) == (
+        rows,
+        0 if found else 1,
+    )
+    await table.kill(job.id)
+
+
+# The kernel keeps 15 bytes of a program's name; procps shows a character
+# the cut splits as one ? per byte, and a -C name whose own cut splits one
+# selects nothing (procps-ng 4.0.4, LANG=C.UTF-8).
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,name,shown",
+    [
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm??", "abcdefghijklm??"),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600A", None),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600B", None),
+        ("abcdefghijklm\U0001f600A 30", "abcdefghijklm\U0001f600", None),
+        ("abc\U0001f600 30", "abc\U0001f600", "abc\U0001f600"),
+        ("abcdefghijklmn\U0001f600 30", "abcdefghijklmn", None),
+        (
+            "abcdefghij\U0001f600XYZ 30",
+            "abcdefghij\U0001f600XYZ",
+            "abcdefghij\U0001f600X",
+        ),
+        (
+            "abcdefghij\U0001f600XYZ 30",
+            "abcdefghij\U0001f600XY",
+            "abcdefghij\U0001f600X",
+        ),
+    ],
+)
+async def test_ps_cuts_a_name_at_15_bytes(command, name, shown):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm="])
+    assert (out.decode(), io.exit_code) == (
+        (f"{shown}\n", 0) if shown is not None else ("", 1)
+    )
+    await table.kill(job.id)
+
+
+# A program's name is its first word with the quotes removed, as the
+# shell ran it.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"sleep" 30',
+        "'sleep' 30",
+        's"le"ep 30',
+        '/bin/"sleep" 30',
+        "\\sleep 30",
+    ],
+)
+async def test_ps_names_a_program_by_its_unquoted_word(command):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    out, io, _ = await handle_ps(table, ["ps", "-C", "sleep", "-o", "comm="])
+    assert (out.decode(), io.exit_code) == ("sleep\n", 0)
+    await table.kill(job.id)
+
+
+# A process a scan found carries the machine's arguments as read, so its
+# first word is the program's name as it stands, quotes and backslashes
+# and all.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,name",
+    [("foo\\bar 1", "foo\\bar"), ("it's 1", "it's"), ('/opt/"q" 1', '"q"')],
+)
+async def test_ps_names_a_found_process_by_its_word_as_read(command, name):
+    table = JobTable()
+    job = await submit_pending(table, command=command)
+    assert job.process is not None
+    job.process.set_machine_pid(MachinePid(4242, 1.0))
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm="])
+    assert (out.decode(), io.exit_code) == (f"{name}\n", 0)
+    await table.kill(job.id)
+
+
+@pytest.mark.asyncio
+async def test_ps_adds_a_name_selection_to_a_pid_selection():
+    table = JobTable()
+    job = await submit_pending(table)
+    other = await submit_pending(table, command="foo 1")
+    out, _, _ = await handle_ps(
+        table, ["ps", "-C", "foo", "-p", str(job.pid), "-o", "pid,comm"]
+    )
+    assert out.decode().splitlines()[1:] == [
+        f"{job.pid:>7} sleep",
+        f"{other.pid:>7} foo",
+    ]
+    await table.kill(job.id)
+    await table.kill(other.id)
+
+
+@pytest.mark.asyncio
 async def test_ps_prints_its_header_alone_when_no_job_is_running():
     out, io, _ = await handle_ps(JobTable(), ["ps"])
     assert (out, io.exit_code) == (f"{HEADER}\n".encode(), 1)
@@ -232,6 +372,12 @@ _PS_USAGE = (
         (["-o", "pid,,cmd"], b"improper format list"),
         (["-o", "foo"], b'unknown user-defined format specifier "foo"'),
         (["-o", "="], b'unknown user-defined format specifier ""'),
+        (["-C"], b"list of command names must follow -C"),
+        (["-C", ""], b"list of command names must follow -C"),
+        (["-C", "sleep,,foo"], b"improper list"),
+        (["-C", ","], b"improper list"),
+        (["-C", " "], b"improper list"),
+        (["--command", "sleep"], b"unknown gnu long option"),
         (["-K"], b"unsupported SysV option"),
         (["--bogus"], b"unknown gnu long option"),
         (["bogus"], b"unsupported option (BSD syntax)"),

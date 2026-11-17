@@ -113,9 +113,18 @@ describe('free', () => {
     expect(rows[5]).toBe(`${MEM}  e2b:b`)
   })
 
+  it('answers for one machine alone, as its own free does', async () => {
+    expect(await freeOf([], tableOf([resources()]))).toEqual([
+      `${HEADER}\n${MEM}\n${SWAP}\n`,
+      '',
+      0,
+    ])
+  })
+
   it('shows the max_memory in the workspace row', async () => {
     const budget = new MemoryBudget(32 << 20, () => 2 << 20)
-    const [out] = await runWithMemory(budget, () => freeOf(['-m'], tableOf([resources()])))
+    const table = tableOf([resources('docker:a'), resources('e2b:b')])
+    const [out] = await runWithMemory(budget, () => freeOf(['-m'], table))
     const rows = out.split('\n')
     expect(rows[1]?.trim().split(/\s+/)).toEqual([
       'Mem:',
@@ -131,7 +140,8 @@ describe('free', () => {
   })
 
   it('leaves the workspace row blank with no max_memory', async () => {
-    const rows = (await freeOf(['-m'], tableOf([resources()])))[0].split('\n')
+    const table = tableOf([resources('docker:a'), resources('e2b:b')])
+    const rows = (await freeOf(['-m'], table))[0].split('\n')
     expect(rows[1]?.trim().split(/\s+/)).toEqual(['Mem:', '-', '-', '-', '-', '-', '-', 'mirage'])
     expect(rows[2]?.trim().split(/\s+/)).toEqual(['Swap:', '-', '-', '-', 'mirage'])
   })

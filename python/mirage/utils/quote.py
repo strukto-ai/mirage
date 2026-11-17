@@ -140,6 +140,22 @@ def quote_name(name: str, style: str, hide: bool = False) -> str:
     return decode_text(stream.finish())
 
 
+def quote_arg(text: str, utf8: bool = False) -> str:
+    """A word as gnulib's ``quote()`` writes it into a diagnostic, quotes
+    included: between ``‘`` and ``’`` under a UTF-8 locale, a valid
+    character as itself and a control, a backslash or a byte that is no
+    UTF-8 escaped; in the C locale between ``'`` and ``'``, an apostrophe,
+    a backslash and every byte outside printable ASCII escaped.
+
+    Args:
+        text (str): the word.
+        utf8 (bool): the line runs under a UTF-8 locale.
+    """
+    stream = open_stream("quote", {"style": "arg", "utf8": utf8})
+    stream.feed(encode_text(text))
+    return decode_text(stream.finish())
+
+
 def shell_quote_always(name: str) -> str:
     """Wrap a name so a shell would read it back as itself.
 

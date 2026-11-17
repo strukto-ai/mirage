@@ -20,9 +20,12 @@ import type { JsonValue } from '../types.ts'
 import { systemNow } from '../utils/clock.ts'
 import { parseDateExpr } from '../utils/dates.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../utils/timezone.ts'
+import { quoteArg } from '../utils/quote.ts'
 import { scanned } from './scan.ts'
 
 export const OPERAND = ''
+// The option that says the line runs under a UTF-8 locale.
+export const UTF8_OPTION = 'utf8'
 export const DAY = 86400
 export const MINUTE = 60
 
@@ -50,7 +53,9 @@ type Obj = Readonly<Record<string, JsonValue>>
  * `-fprint0` and `-fprintf` write, each once, in the order first named;
  * `predicates` is every predicate word typed, in order; `warnings` the
  * lines the reference prints while it parses; `start` where the expression begins
- * among the words typed. Mirrors Python's `FindExpr`.
+ * among the words typed; `utf8` whether the line runs under a UTF-8 locale,
+ * where a name a diagnostic quotes goes between curly quotes. Mirrors Python's
+ * `FindExpr`.
  */
 export interface FindExpr {
   tree: PredNode
@@ -72,6 +77,7 @@ export interface FindExpr {
   predicates: string[]
   warnings: string[]
   start: number
+  utf8?: boolean
 }
 
 /** Where find's expression begins among the words typed, and which words an `-exec` owns. */
@@ -175,12 +181,15 @@ export function strictlyAfter(timestamp: number): number {
   return view.getFloat64(0)
 }
 
-/** One `-newermt` argument as a GNU date expression; naive times are UTC. */
-export function parseNewermt(value: string): number {
+/**
+ * One `-newermt` argument as a GNU date expression; naive times are UTC.
+ * `utf8` says the line runs under a UTF-8 locale.
+ */
+export function parseNewermt(value: string, utf8 = false): number {
   const ts = parseDateExpr(value, UTC_ZONE)
   if (ts === null || !Number.isFinite(ts.getTime()) || value.trim() === '@') {
     throw new UsageError(
-      `find: I cannot figure out how to interpret '${value}' as a date or time`,
+      `find: I cannot figure out how to interpret ${quoteArg(value, utf8)} as a date or time`,
       1,
     )
   }
@@ -429,7 +438,7 @@ function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNod
     const origin = flag(raw.daystart) ? nextMidnight(binding.now, binding.zone) : binding.now
     bounds = ageBounds(str(raw.cmp), float(raw.amount), flag(raw.minutes), origin)
   } else if (op === 'newermt') {
-    bounds = [strictlyAfter(parseNewermt(textView(str(raw.date)))), null]
+    bounds = [strictlyAfter(parseNewermt(textView(str(raw.date)), binding.utf8)), null]
   } else {
     if (op === 'anewer') field = 'a'
     else if (op === 'cnewer') field = 'c'
@@ -445,14 +454,16 @@ function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNod
 }
 
 /**
- * What mirage-rs read of a find line, before any time test is resolved.
- * Mirrors Python's `FindParse`.
+ * What mirage-rs read of a find line, before any time test is resolved, and
+ * whether the line runs under a UTF-8 locale. Mirrors Python's `FindParse`.
  */
 export class FindParse {
   readonly values: Obj
+  readonly utf8: boolean
 
-  constructor(values: Obj) {
+  constructor(values: Obj, utf8 = false) {
     this.values = values
+    this.utf8 = utf8
   }
 
   /** Where the expression begins among the words typed. */
@@ -476,7 +487,7 @@ export class FindParse {
     for (const entry of array(this.values.dates)) {
       const [date, before] = array(entry)
       try {
-        parseNewermt(textView(str(date)))
+        parseNewermt(textView(str(date)), this.utf8)
       } catch (err) {
         if (err instanceof UsageError) return [int(before), err]
         throw err
@@ -506,7 +517,7 @@ export class FindParse {
       refs: newerTimes,
       now,
       zone: zoneFromEnv(env),
-      utf8: utf8Locale(env ?? undefined),
+      utf8: this.utf8 || utf8Locale(env ?? undefined),
       profile,
       window: null,
       fsType,
@@ -537,6 +548,7 @@ export class FindParse {
       predicates: array(this.values.predicates).map((w) => textView(str(w))),
       warnings: array(this.values.warnings).map((w) => textView(str(w))),
       start: this.start,
+      utf8: binding.utf8,
     }
   }
 }
@@ -545,10 +557,12 @@ export class FindParse {
  * find's words read once by mirage-rs: the start points end where the
  * expression begins, and the expression becomes a tree. Throws UsageError
  * for the first word the grammar refuses, in GNU's words and with its exit
- * status. Mirrors Python's `parse_find`.
+ * status; `utf8` says the line runs under a UTF-8 locale, which the refusals
+ * quote words for. Mirrors Python's `parse_find`.
  */
-export function parseFind(argv: readonly string[]): FindParse {
-  return new FindParse(scanned('find', words(argv)))
+export function parseFind(argv: readonly string[], utf8 = false): FindParse {
+  const options = [...words(argv), ...(utf8 ? [[UTF8_OPTION, ''] as const] : [])]
+  return new FindParse(scanned('find', options), utf8)
 }
 
 /** `parseFind` and `bind` with no reference resolved, for a caller holding only the words. */

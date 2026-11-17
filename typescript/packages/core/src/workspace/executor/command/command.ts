@@ -48,7 +48,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { framed, mountVoice } from './handler.ts'
 import type { EntryGate, HandOff } from '../../../policy/types.ts'
 import { parseFind, type FindExpr } from '../../../rs/find.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
@@ -327,7 +327,8 @@ async function boundFind(
   const session = context.session
   let findExpr: FindExpr
   try {
-    const parsedFind = parseFind(spelledWords(parts.slice(1)))
+    const utf8 = utf8Locale(envSnapshot(session))
+    const parsedFind = parseFind(spelledWords(parts.slice(1)), utf8)
     // Every -newer reference is statted through the dispatcher here,
     // once, before the expression is bound; a date GNU refuses stops the
     // stats at the references typed before it.
@@ -343,6 +344,7 @@ async function boundFind(
         (path) => pathStat(dispatch, path),
         namespace ?? null,
         lineFacts('find', parts, session.cwd).follows !== Follow.NONE,
+        utf8,
       )
       if (refErr !== null) {
         return failed(cmdStr, 1, refErr)

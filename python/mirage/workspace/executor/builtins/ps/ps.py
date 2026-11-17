@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+import shlex
 from dataclasses import replace
 from datetime import datetime
 
@@ -45,6 +47,8 @@ from mirage.workspace.lookup.constants import LOWEST_PRIORITY
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
+logger = logging.getLogger(__name__)
+
 
 def _ps_pids(value: str, option: str) -> set[int]:
     """One ``-p`` list, refused in procps's words.
@@ -66,6 +70,93 @@ def _ps_pids(value: str, option: str) -> set[int]:
             raise ValueError("process ID out of range")
         pids.add(number)
     return pids
+
+
+def _ps_names(value: str, option: str) -> set[str]:
+    """One ``-C`` list of command names, refused in procps's words.
+
+    Args:
+        value (str): the list, comma or blank separated.
+        option (str): the option as typed, for the missing-list error.
+    """
+    if not value:
+        raise ValueError(f"list of command names must follow {option}")
+    names: set[str] = set()
+    for item in value.split(","):
+        if not item.strip():
+            raise ValueError("improper list")
+        names.update(item.split())
+    return names
+
+
+def _utf8_size(char: str) -> int:
+    """How many bytes one character takes in UTF-8.
+
+    Args:
+        char (str): the character.
+    """
+    point = ord(char)
+    if point < 0x80:
+        return 1
+    if point < 0x800:
+        return 2
+    return 3 if point < 0x10000 else 4
+
+
+def _comm_cut(name: str) -> tuple[str, bool]:
+    """A program's name as the kernel keeps it, its first 15 bytes of
+    UTF-8, shown as procps shows it: a character the cut splits prints
+    one ``?`` per byte kept.
+
+    Args:
+        name (str): the program's base name.
+
+    Returns:
+        tuple[str, bool]: the name as shown, and whether the cut split
+        a character.
+    """
+    used = 0
+    for at, char in enumerate(name):
+        size = _utf8_size(char)
+        if used + size > constants.COMM_WIDTH:
+            left = constants.COMM_WIDTH - used
+            return name[:at] + "?" * left, left > 0
+        used += size
+    return name, False
+
+
+def _comm(info: Process) -> str:
+    """A process's name as procps keeps it: the base name of its program,
+    cut as the kernel cuts it. A command Mirage spells (a line as typed,
+    a program's words joined) names the program in its first word, its
+    quotes removed; a process a scan found carries the machine's
+    arguments as read, spaces between, so its first word is the
+    program's as it stands.
+
+    Args:
+        info (Process): the process.
+    """
+    words = info.command.split()
+    if info.program or info.machine_pid is None:
+        try:
+            words = shlex.split(info.command)
+        except ValueError as exc:
+            logger.debug("ps: %r read word by word: %s", info.command, exc)
+    head = words[0] if words else ""
+    return _comm_cut(head.rsplit("/", 1)[-1])[0]
+
+
+def _selected_name(name: str) -> str:
+    """What a ``-C`` name compares equal to: the name cut as the kernel
+    cuts one, or, where that cut splits a character, the name whole,
+    longer than any name the kernel keeps, so it selects nothing, as in
+    procps.
+
+    Args:
+        name (str): the name as given.
+    """
+    cut, split = _comm_cut(name)
+    return name if split else cut
 
 
 def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
@@ -97,8 +188,8 @@ def _parse_ps(words: list[str]) -> PsOptions:
     """Parse the procps selection and output options a runner answers.
 
     SysV letters after one dash, BSD letters with none, and the
-    ``--pid``/``--format``/``--forest``/``--machine`` long forms; ``-p`` and ``-o``
-    repeat and accumulate. BSD ``f`` and ``--forest`` draw the forest;
+    ``--pid``/``--format``/``--forest``/``--machine`` long forms; ``-p``,
+    ``-C`` and ``-o`` repeat and accumulate. BSD ``f`` and ``--forest`` draw the forest;
     ``-f`` and BSD ``u``/``w`` pick a layout the processes do not have,
     so they leave the plain one.
 
@@ -106,6 +197,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
         words (list[str]): arguments after ps.
     """
     pids: set[int] = set()
+    names: set[str] = set()
     columns: list[tuple[str, str]] = []
     select_all = False
     forest = False
@@ -145,7 +237,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
                 continue
             if flag == "f":
                 continue
-            if flag not in "po":
+            if flag not in "pCo":
                 raise ValueError("unsupported SysV option")
             value, letters = letters, ""
             if not value:
@@ -153,10 +245,17 @@ def _parse_ps(words: list[str]) -> PsOptions:
                 at += 1
             if flag == "p":
                 pids |= _ps_pids(value, "-p")
+            elif flag == "C":
+                names |= _ps_names(value, "-C")
             else:
                 columns += _ps_columns(value, "-o")
     return PsOptions(
-        frozenset(pids), select_all, tuple(columns), forest, machine
+        frozenset(pids),
+        select_all,
+        tuple(columns),
+        forest,
+        machine,
+        frozenset(_selected_name(name) for name in names),
     )
 
 
@@ -281,8 +380,7 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
         )
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
-        head = info.command.split()[0] if info.command.split() else ""
-        return branch + head.rsplit("/", 1)[-1][:15]
+        return branch + _comm(info)
     if fact in ("user", "group"):
         own = info.session_id == ctx.session_id
         return (ctx.group if own else None) or UNKNOWN_NAME
@@ -439,7 +537,10 @@ async def handle_ps(
     (``constants.COLUMNS``), ``machine`` among them; a
     header row prints unless every header is empty. BSD ``f`` and
     ``--forest`` draw each command under its parent's. A ``-p`` number
-    is a pid as ``ps`` shows it. Selecting nothing (``-p`` of
+    is a pid as ``ps`` shows it; a ``-C`` name selects the processes
+    whose command name, its first 15 bytes as the kernel keeps it, is
+    the name cut the same way; a cut that splits a character selects
+    nothing. ``-p`` and ``-C`` add up. Selecting nothing (``-p`` of
     an absent PID) exits 1, as procps does, and an option error is
     procps's message and usage. A program's CPU and memory columns are
     what the scan read of it (``USAGE_FACTS``); Mirage's own processes
@@ -462,7 +563,7 @@ async def handle_ps(
         return job_result(cmd_str, f"error: {exc}\n{constants.USAGE}", 1)
     sid = session_of(session)
     await job_table.processes.scan()
-    every = options.all or not options.pids
+    every = options.all or not (options.pids or options.names)
     caller = current_caller()
     runner = caller.process
     node = session._line_node if session is not None else None
@@ -477,7 +578,11 @@ async def handle_ps(
     rows = [
         info
         for info in listed
-        if (every or info.shown_pid in options.pids)
+        if (
+            every
+            or info.shown_pid in options.pids
+            or _comm(info) in options.names
+        )
         and on_machine(info, options.machine)
     ]
     columns = options.columns or constants.PLAIN

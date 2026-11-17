@@ -1322,6 +1322,152 @@
         "stderr": "find: invalid argument `9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' to `-mtime'\n"
       },
       "flags": []
+    },
+    {
+      "id": "find_quotes_a_name_curly_under_a_utf8_locale",
+      "seq": 19996010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export LANG=C.UTF-8; find /data/nosuch \"/data/it's\"; find /data -maxdepth abc; find /data -perm zz; LANG=C find /data/nosuch",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: ‘/data/nosuch’: No such file or directory\nfind: ‘/data/it's’: No such file or directory\nfind: Expected a positive decimal integer argument to -maxdepth, but got ‘abc’\nfind: invalid mode ‘zz’\nfind: '/data/nosuch': No such file or directory\n"
+      },
+      "flags": [],
+      "note": "findutils quotes a name through gnulib's quote(): between curly quotes under a UTF-8 locale, with an apostrophe left as itself; straight quotes with the apostrophe escaped in the C locale."
+    },
+    {
+      "id": "find_quotes_a_newer_reference_curly_under_a_utf8_locale",
+      "seq": 19996011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "LANG=C.UTF-8 find /data -newer /data/nosuch",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: ‘/data/nosuch’: No such file or directory\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "find_quotes_an_exec_program_curly_under_a_utf8_locale",
+      "seq": 19996012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "LANG=C.UTF-8 find /data -maxdepth 0 -exec nosuchcmd \\;",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "find: ‘nosuchcmd’: No such file or directory\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "find_keeps_its_own_quotes_under_a_utf8_locale",
+      "seq": 19996013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "LANG=C.UTF-8 find /data -regextype bogus; LANG=C.UTF-8 find /data -name",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Unknown regular expression type ‘bogus’; valid types are ‘findutils-default’, ‘ed’, ‘emacs’, ‘gnu-awk’, ‘grep’, ‘posix-awk’, ‘awk’, ‘posix-basic’, ‘posix-egrep’, ‘egrep’, ‘posix-extended’, ‘posix-minimal-basic’, ‘sed’.\nfind: missing argument to `-name'\n"
+      },
+      "flags": [],
+      "note": "A word quote() names turns curly; a quote the message spells itself (`-name') stays ASCII."
     }
   ]
 }

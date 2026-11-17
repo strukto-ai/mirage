@@ -36,6 +36,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs.find import FindExpr, parse_find_expression
+from mirage.shell.bytes import utf8_locale
 from mirage.types import (
     FileStat,
     FileType,
@@ -44,6 +45,7 @@ from mirage.types import (
     PathSpec,
 )
 from mirage.utils.path import respell_one, respell_raw
+from mirage.utils.quote import quote_arg
 
 
 def parse_find_args(
@@ -305,13 +307,15 @@ async def find_generic(
     records: list[PathRecord] = []
     io = IOResult(records=records)
 
+    utf8 = utf8_locale(ctx.env)
+
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
         stopped: list[str] = []
         for run, search in enumerate(searches):
             if stopped:
                 break
-            label = f"find: '{search.raw_path}': "
+            label = f"find: {quote_arg(search.raw_path, utf8)}: "
             if search.walk_error is not None:
                 # The walk refused the start point before find ran (the
                 # empty name, a link loop), and every probe below goes by
@@ -441,20 +445,23 @@ async def find_generic(
             # order, lists the directory itself, and exits 1 like a
             # start point it could not read.
             missing.extend(
-                f"find: '{shown}': Permission denied"
+                f"find: {quote_arg(shown, utf8)}: Permission denied"
                 for shown in respell_raw(
                     unreadable, search.virtual, search.raw_path
                 )
             )
             for path, exc in unstatted.items():
                 shown = respell_one(path, search.virtual, search.raw_path)
-                missing.append(f"find: '{shown}': {strerror_of(exc)}")
+                missing.append(
+                    f"find: {quote_arg(shown, utf8)}: {strerror_of(exc)}"
+                )
             for path, above in loops:
+                inner = respell_one(path, search.virtual, search.raw_path)
+                outer = respell_one(above, search.virtual, search.raw_path)
                 missing.append(
                     "find: File system loop detected; "
-                    f"'{respell_one(path, search.virtual, search.raw_path)}'"
-                    " is part of the same file system loop as "
-                    f"'{respell_one(above, search.virtual, search.raw_path)}'."
+                    f"{quote_arg(inner, utf8)} is part of the same file "
+                    f"system loop as {quote_arg(outer, utf8)}."
                 )
             missing.extend(f"find: {line}" for line in budget.stopped)
         if missing:

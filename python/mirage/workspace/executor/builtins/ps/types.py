@@ -29,6 +29,8 @@ class PsOptions:
             command under its parent's.
         machine (str | None): ``--machine``, which keeps that machine's
             processes; None keeps every one.
+        names (frozenset[str]): ``-C`` selection, each name cut to the
+            15 characters procps keeps of a command name; empty for none.
     """
 
     pids: frozenset[int]
@@ -36,6 +38,7 @@ class PsOptions:
     columns: tuple[tuple[str, str], ...]
     forest: bool = False
     machine: str | None = None
+    names: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

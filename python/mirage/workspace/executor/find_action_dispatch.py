@@ -66,7 +66,7 @@ from mirage.shell.console.types import Channel
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
-from mirage.utils.quote import shell_quote_always
+from mirage.utils.quote import quote_arg, shell_quote_always
 from mirage.view.types import StatPath
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
@@ -185,6 +185,7 @@ async def _run_exec(
     paths: list[str],
     stdin: SharedStdin | None,
     where: str | None = None,
+    utf8: bool = False,
 ) -> IOResult:
     """Start one ``-exec`` invocation, its output passed on as the child
     writes it (``line_output``).
@@ -211,6 +212,7 @@ async def _run_exec(
             by every child; None keeps the ambient stdin.
         where (str | None): ``-execdir``'s directory as printed, which the
             run enters first; None runs where find does.
+        utf8 (bool): the line runs under a UTF-8 locale.
     """
     # GNU substitutes the matches into the words and only then hands
     # them to execvp, so the head looked up is the substituted one:
@@ -224,7 +226,9 @@ async def _run_exec(
     if missing:
         return IOResult(
             exit_code=1,
-            stderr=encode_text(f"find: '{head}': No such file or directory\n"),
+            stderr=encode_text(
+                f"find: {quote_arg(head, utf8)}: No such file or directory\n"
+            ),
         )
     # A function or alias of the head's name is invisible to execvp, so
     # the line runs the program past it, as `command` does. The run is
@@ -307,6 +311,7 @@ async def _row_stat(
     vfs: Files | None,
     stat_path: StatPath | None,
     errors: list[bytes],
+    utf8: bool = False,
 ) -> FileStat | None:
     """The facts ``find -ls`` renders one accepted row from.
 
@@ -326,11 +331,14 @@ async def _row_stat(
         stat_path (StatPath | None): dispatcher stat; None outside a
             workspace, where no row can be rendered.
         errors (list[bytes]): where a failure's line is appended.
+        utf8 (bool): the line runs under a UTF-8 locale.
     """
     links = link_view(vfs)
-    path = ps.raw_path or ps.virtual
+    shown = ps.raw_path or ps.virtual
     if stat_path is None:
-        errors.append(encode_text(f"find: '{path}': no stat function\n"))
+        errors.append(
+            encode_text(f"find: {quote_arg(shown, utf8)}: no stat function\n")
+        )
         return None
     link = links.stat_at(ps.virtual) if links is not None else None
     try:
@@ -343,13 +351,12 @@ async def _row_stat(
         why = (
             exc.strerror if isinstance(exc, OSError) else None
         ) or strerror_of(exc)
-        errors.append(encode_text(f"find: '{path}': {why}\n"))
+        errors.append(encode_text(f"find: {quote_arg(shown, utf8)}: {why}\n"))
         return None
     if st is None:
+        missing = posix_phrase(FsCondition.ENOENT)
         errors.append(
-            encode_text(
-                f"find: '{path}': {posix_phrase(FsCondition.ENOENT)}\n"
-            )
+            encode_text(f"find: {quote_arg(shown, utf8)}: {missing}\n")
         )
         return None
     return st
@@ -508,7 +515,9 @@ async def open_find_files(
         try:
             await dispatch("write", _file_spec(file, cwd), data=b"")
         except (OSError, ValueError) as exc:
-            return encode_text(f"find: '{file}': {strerror_of(exc)}\n")
+            return encode_text(
+                f"find: {quote_arg(file, expr.utf8)}: {strerror_of(exc)}\n"
+            )
     return None
 
 
@@ -552,7 +561,7 @@ async def run_listed_find(
         return IOResult(
             exit_code=1,
             stderr=encode_text(
-                f"find: extra operand {shell_quote_always(typed[0])}\n"
+                f"find: extra operand {quote_arg(typed[0], expr.utf8)}\n"
                 "find: file operands cannot be combined with -files0-from\n"
             ),
         )
@@ -577,7 +586,7 @@ async def run_listed_find(
         return IOResult(
             exit_code=1,
             stderr=encode_text(
-                f"find: cannot open {shell_quote_always(source)} for "
+                f"find: cannot open {quote_arg(source, expr.utf8)} for "
                 f"reading: {strerror_of(exc)}\n"
             ),
         )
@@ -644,6 +653,7 @@ async def _write_files(
     cwd: str,
     dispatch: DispatchFn | None,
     moved: bool,
+    utf8: bool = False,
 ) -> bytes:
     """Write what ``-fprint``, ``-fprint0``, ``-fprintf`` and ``-fls``
     collected, each file once.
@@ -654,6 +664,7 @@ async def _write_files(
         dispatch (DispatchFn | None): the workspace dispatcher.
         moved (bool): an ``-exec`` child ran, which may have moved or
             removed a file.
+        utf8 (bool): the line runs under a UTF-8 locale.
 
     Returns:
         find's line for each file it could not write, empty when every
@@ -676,7 +687,11 @@ async def _write_files(
         try:
             await dispatch("write", spec, data=b"".join(rows))
         except (OSError, ValueError) as exc:
-            failed.append(encode_text(f"find: '{file}': {strerror_of(exc)}\n"))
+            failed.append(
+                encode_text(
+                    f"find: {quote_arg(file, utf8)}: {strerror_of(exc)}\n"
+                )
+            )
     return b"".join(failed)
 
 
@@ -922,7 +937,7 @@ async def _apply_find_actions(
             # it never statted is looked up by the first action that reads
             # it, and held from there, as GNU stats a row once.
             known = (
-                await _row_stat(match, vfs, stat_path, [])
+                await _row_stat(match, vfs, stat_path, [], expr.utf8)
                 if stats and (statted or match.virtual in start_virtuals)
                 else None
             )
@@ -953,6 +968,7 @@ async def _apply_find_actions(
                         [arg],
                         once,
                         where,
+                        expr.utf8,
                     )
                     async with aclosing(ran(run)) as output:
                         async for chunk in output:
@@ -961,7 +977,9 @@ async def _apply_find_actions(
                         break
                 elif _reads_stat(action):
                     if known is None:
-                        known = await _row_stat(match, vfs, stat_path, errors)
+                        known = await _row_stat(
+                            match, vfs, stat_path, errors, expr.utf8
+                        )
                         heard()
                     if known is None:
                         # A row -ls or -printf cannot stat is false, so the
@@ -1027,6 +1045,7 @@ async def _apply_find_actions(
                     paths,
                     once,
                     where,
+                    expr.utf8,
                 )
                 try:
                     async with aclosing(ran(run)) as output:
@@ -1047,7 +1066,7 @@ async def _apply_find_actions(
                 await close_stream(engine)
             if walked:
                 unwritten = await _write_files(
-                    sinks, cwd, dispatch, bool(expr.execs)
+                    sinks, cwd, dispatch, bool(expr.execs), expr.utf8
                 )
                 put(Channel.STDERR, unwritten)
                 failed = failed or bool(unwritten)

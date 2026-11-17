@@ -123,6 +123,11 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
 }
 
 
+# How many bytes of a program's name the kernel keeps, which ``comm``
+# prints and ``-C`` compares.
+COMM_WIDTH = 15
+
+
 # What ps prints without -o: each process's pid, the machine it runs on
 # (``mirage`` for Mirage's own) and its command.
 PLAIN = (

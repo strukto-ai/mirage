@@ -48,6 +48,119 @@ describe('handlePs', () => {
     expect(decode(out as Uint8Array)).toBe(`${HEADER}\n${row(job.pid, 'sleep')}\n`)
   })
 
+  it.each([
+    [['-C', 'sleep']],
+    [['-Csleep']],
+    [['-C', 'nosuch,sleep']],
+    [['-C', 'nosuch sleep']],
+    [['-C', 'nosuch', '-C', 'sleep']],
+  ])('selects by command name: %j', async (args) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command: 'sleep', run: pendingRun(abort), abort, cwd: '/' })
+    const other = new AbortController()
+    await jt.submit({ command: 'foo 1', run: pendingRun(other), abort: other, cwd: '/' })
+    const [out, io] = await handlePs(jt, ['ps', ...args])
+    expect([decode(out as Uint8Array), io.exitCode]).toEqual([
+      `${HEADER}\n${row(job.pid, 'sleep')}\n`,
+      0,
+    ])
+  })
+
+  it('adds a name selection to a pid selection', async () => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command: 'sleep', run: pendingRun(abort), abort, cwd: '/' })
+    const other = new AbortController()
+    const foo = await jt.submit({
+      command: 'foo 1',
+      run: pendingRun(other),
+      abort: other,
+      cwd: '/',
+    })
+    const [out] = await handlePs(jt, ['ps', '-C', 'foo', '-p', String(job.pid), '-o', 'pid,comm'])
+    expect(
+      decode(out as Uint8Array)
+        .split('\n')
+        .slice(1, 3),
+    ).toEqual([`${String(job.pid).padStart(7)} sleep`, `${String(foo.pid).padStart(7)} foo`])
+  })
+
+  // procps keeps 15 characters of a command's name and compares a -C name cut
+  // the same way; a path or another case is no match.
+  it.each([
+    ['abcdefghijklmnopqrst', true],
+    ['abcdefghijklmno', true],
+    ['abcdefghijklmnop', true],
+    ['/bin/abcdefghijklmnopqrst', false],
+    ['ABCDEFGHIJKLMNO', false],
+    ['abcdefghijklmn', false],
+  ] as const)('compares the name procps keeps: %s', async (name, found) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    await jt.submit({
+      command: '/bin/abcdefghijklmnopqrst 30',
+      run: pendingRun(abort),
+      abort,
+      cwd: '/',
+    })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm'])
+    const rows = found ? ['COMMAND', 'abcdefghijklmno', ''] : ['COMMAND', '']
+    expect([decode(out as Uint8Array).split('\n'), io.exitCode]).toEqual([rows, found ? 0 : 1])
+  })
+
+  // The kernel keeps 15 bytes of a program's name; procps shows a character
+  // the cut splits as one ? per byte, and a -C name whose own cut splits one
+  // selects nothing (procps-ng 4.0.4, LANG=C.UTF-8).
+  it.each([
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm??', 'abcdefghijklm??'],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}A', null],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}B', null],
+    ['abcdefghijklm\u{1F600}A 30', 'abcdefghijklm\u{1F600}', null],
+    ['abc\u{1F600} 30', 'abc\u{1F600}', 'abc\u{1F600}'],
+    ['abcdefghijklmn\u{1F600} 30', 'abcdefghijklmn', null],
+    ['abcdefghij\u{1F600}XYZ 30', 'abcdefghij\u{1F600}XYZ', 'abcdefghij\u{1F600}X'],
+    ['abcdefghij\u{1F600}XYZ 30', 'abcdefghij\u{1F600}XY', 'abcdefghij\u{1F600}X'],
+  ] as const)('cuts a name at 15 bytes: %s -C %s', async (command, name, shown) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm='])
+    expect([decode((out ?? new Uint8Array()) as Uint8Array), io.exitCode]).toEqual(
+      shown === null ? ['', 1] : [`${shown}\n`, 0],
+    )
+  })
+
+  // A program's name is its first word with the quotes removed, as the
+  // shell ran it.
+  it.each(['"sleep" 30', "'sleep' 30", 's"le"ep 30', '/bin/"sleep" 30', '\\sleep 30'])(
+    'names a program by its unquoted word: %s',
+    async (command) => {
+      const jt = new JobTable()
+      const abort = new AbortController()
+      await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+      const [out, io] = await handlePs(jt, ['ps', '-C', 'sleep', '-o', 'comm='])
+      expect([decode(out as Uint8Array), io.exitCode]).toEqual(['sleep\n', 0])
+    },
+  )
+
+  // A process a scan found carries the machine's arguments as read, so its
+  // first word is the program's name as it stands, quotes and backslashes
+  // and all.
+  it.each([
+    ['foo\\bar 1', 'foo\\bar'],
+    ["it's 1", "it's"],
+    ['/opt/"q" 1', '"q"'],
+  ] as const)('names a found process by its word as read: %s', async (command, name) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command, run: pendingRun(abort), abort, cwd: '/' })
+    if (job.process == null) throw new Error('the job has no process')
+    job.process.setMachinePid({ pid: 4242, started: 1 })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm='])
+    expect([decode(out as Uint8Array), io.exitCode]).toEqual([`${name}\n`, 0])
+  })
+
   it('prints its header alone when no job is running', async () => {
     const jt = new JobTable()
     const [out, io] = await handlePs(jt, ['ps'])
@@ -226,6 +339,12 @@ it.each([
   [['-o', 'pid,,cmd'], 'improper format list'],
   [['-o', 'foo'], 'unknown user-defined format specifier "foo"'],
   [['-o', '='], 'unknown user-defined format specifier ""'],
+  [['-C'], 'list of command names must follow -C'],
+  [['-C', ''], 'list of command names must follow -C'],
+  [['-C', 'sleep,,foo'], 'improper list'],
+  [['-C', ','], 'improper list'],
+  [['-C', ' '], 'improper list'],
+  [['--command', 'sleep'], 'unknown gnu long option'],
   [['-K'], 'unsupported SysV option'],
   [['--bogus'], 'unknown gnu long option'],
   [['bogus'], 'unsupported option (BSD syntax)'],

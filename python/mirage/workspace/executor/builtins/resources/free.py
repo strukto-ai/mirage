@@ -280,6 +280,20 @@ def _workspace_row(
     )
 
 
+def _answering(scope: MachineScope) -> MachineScope:
+    """The machines ``free`` answers for: one machine alone, as the real
+    ``free`` on it prints, where the line names none; the workspace and
+    an engine run in Mirage, so they join only an answer that already
+    holds several machines, or a workspace that has none.
+
+    Args:
+        scope (MachineScope): the machines ``machine_scope`` picked.
+    """
+    if scope.picked or len(scope.ids) != 1:
+        return scope
+    return MachineScope(scope.ids)
+
+
 def _shown(row: MachineResources, options: FreeOptions) -> FreeOptions:
     """How one machine's figures print: the workspace's as ``-`` when it
     has no ``max_memory``.
@@ -451,9 +465,11 @@ async def handle_free(
     """Print the memory of the machines a line can use, in procps's
     columns, ``machine_scope`` choosing which; several print a row each
     with a ``MACHINE`` column on the right, so columns a reader counts
-    stay where they are, and are never added up. Figures a machine has
-    no such thing for print ``-``. The workspace answers too, in any
-    workspace, with its ``max_memory``.
+    stay where they are, and are never added up. One machine answers
+    alone, as the real ``free`` there does (``_answering``). Figures a
+    machine has no such thing for print ``-``. The workspace answers
+    with its ``max_memory`` where it has no machine, beside several, or
+    as ``--machine mirage``.
 
     Args:
         job_table (JobTable): the workspace's jobs.
@@ -499,9 +515,10 @@ async def handle_free(
     name = parse.flags.get("machine")
     named = name if isinstance(name, str) else None
     processes = job_table.processes
-    scope = machine_scope(processes, named, workspace=True)
-    if scope is None:
+    found = machine_scope(processes, named, workspace=True)
+    if found is None:
         return job_result(cmd_str, f"free: {named}: no such machine\n", 1)
+    scope = _answering(found)
     options = _free_options(units, parse.flags)
     memory = memory_budget()
     rows, errors = await _read(processes, scope, memory)

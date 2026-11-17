@@ -119,6 +119,10 @@ export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean,
   machine: ['MACHINE', 31, false, 'machine'],
 }
 
+// How many bytes of a program's name the kernel keeps, which `comm` prints
+// and `-C` compares.
+export const COMM_WIDTH = 15
+
 // What ps prints without -o: each process's pid, the machine it runs on
 // (`mirage` for Mirage's own) and its command. Mirrors Python's `PLAIN`.
 export const PLAIN: readonly (readonly [string, string])[] = [

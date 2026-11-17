@@ -61,9 +61,12 @@ from mirage.shell.bytes import text_view, utf8_locale
 from mirage.types import JsonValue
 from mirage.utils.clock import system_now
 from mirage.utils.dates import parse_date_expr
+from mirage.utils.quote import quote_arg
 from mirage.utils.timezone import zone_from_env
 
 OPERAND = ""
+# The option that says the line runs under a UTF-8 locale.
+UTF8_OPTION = "utf8"
 DAY = 86400
 MINUTE = 60
 
@@ -107,6 +110,8 @@ class FindExpr:
         warnings (list[str]): the warning lines GNU prints while it
             parses, in order.
         start (int): where the expression begins among the words typed.
+        utf8 (bool): the line runs under a UTF-8 locale, where a name a
+            diagnostic quotes goes between curly quotes.
     """
 
     tree: PredNode = field(default_factory=TrueNode)
@@ -127,6 +132,7 @@ class FindExpr:
     predicates: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     start: int = 0
+    utf8: bool = False
 
     @property
     def execs(self) -> list[ExecAction]:
@@ -254,11 +260,12 @@ def _before(timestamp: float) -> float:
     return math.nextafter(timestamp, -math.inf)
 
 
-def parse_newermt(value: str) -> float:
+def parse_newermt(value: str, utf8: bool = False) -> float:
     """One ``-newermt`` argument as the reference epoch time.
 
     Args:
         value (str): a GNU date expression, with naive times read as UTC.
+        utf8 (bool): the line runs under a UTF-8 locale.
 
     Raises:
         UsageError: GNU's refusal when the text is no date.
@@ -270,7 +277,7 @@ def parse_newermt(value: str) -> float:
     if ts is None:
         raise UsageError(
             "find: I cannot figure out how to interpret "
-            f"'{value}' as a date or time",
+            f"{quote_arg(value, utf8)} as a date or time",
             1,
         )
     return ts.timestamp()
@@ -568,7 +575,9 @@ def _time_node(
         )
     elif op == "newermt":
         bounds = (
-            strictly_after(parse_newermt(text_view(_str(raw["date"])))),
+            strictly_after(
+                parse_newermt(text_view(_str(raw["date"])), binding.utf8)
+            ),
             None,
         )
     else:
@@ -591,9 +600,11 @@ class FindParse:
 
     Args:
         values (dict[str, JsonValue]): the grammar's answer.
+        utf8 (bool): the line runs under a UTF-8 locale.
     """
 
     values: dict[str, JsonValue]
+    utf8: bool = False
 
     @property
     def start(self) -> int:
@@ -619,7 +630,7 @@ class FindParse:
         for entry in _array(self.values["dates"]):
             date, before = _array(entry)
             try:
-                parse_newermt(text_view(_str(date)))
+                parse_newermt(text_view(_str(date)), self.utf8)
             except UsageError as exc:
                 return _int(before), exc
         return None
@@ -656,7 +667,7 @@ class FindParse:
             newer_times,
             system_now() if now is None else now,
             zone=zone_from_env(env),
-            utf8=utf8_locale(env),
+            utf8=self.utf8 or utf8_locale(env),
             profile=profile,
             fs_type=fs_type,
         )
@@ -687,21 +698,25 @@ class FindParse:
                 text_view(_str(w)) for w in _array(self.values["warnings"])
             ],
             start=self.start,
+            utf8=binding.utf8,
         )
 
 
-def parse_find(argv: Sequence[str]) -> FindParse:
+def parse_find(argv: Sequence[str], utf8: bool = False) -> FindParse:
     """find's words read once by mirage-rs: the start points end where the
     expression begins, and the expression becomes a tree.
 
     Args:
         argv (Sequence[str]): the command's words, without the name.
+        utf8 (bool): the line runs under a UTF-8 locale, which the
+            refusals quote words for.
 
     Raises:
         UsageError: the first word the grammar refuses, in GNU's words
             and with its exit status.
     """
-    return FindParse(scanned("find", _words(argv)))
+    options = [*_words(argv), *([(UTF8_OPTION, "")] if utf8 else [])]
+    return FindParse(scanned("find", options), utf8)
 
 
 def parse_find_expression(argv: Sequence[str]) -> FindExpr:

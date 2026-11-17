@@ -966,3 +966,131 @@ async def test_find_host_flags(line, stdout):
     io = await ws.shell(line)
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == ""
+
+
+_REGEX_TYPES = (
+    "findutils-default",
+    "ed",
+    "emacs",
+    "gnu-awk",
+    "grep",
+    "posix-awk",
+    "awk",
+    "posix-basic",
+    "posix-egrep",
+    "egrep",
+    "posix-extended",
+    "posix-minimal-basic",
+    "sed",
+)
+
+
+def _types(open_: str, close: str) -> str:
+    return ", ".join(f"{open_}{name}{close}" for name in _REGEX_TYPES)
+
+
+# Pinned on debian:stable-slim findutils under LANG=C and LANG=C.UTF-8: a
+# word gnulib's quote() names goes between curly quotes under UTF-8, while
+# a quote the message itself spells (`-name', '-not') stays ASCII.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,c,utf8",
+    [
+        ("find nosuch", "'nosuch'", "‘nosuch’"),
+        ('find "it\'s"', "'it\\'s'", "‘it's’"),
+        ("find 'a\\b'", "'a\\\\b'", "‘a\\\\b’"),
+        ("find é", "'\\303\\251'", "‘é’"),
+    ],
+)
+async def test_a_missing_start_point_is_quoted_for_the_locale(line, c, utf8):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    for locale, quoted in (("C", c), ("C.UTF-8", utf8)):
+        r = await ws.shell(f"export LANG={locale}; {line}")
+        assert (await r.stderr_str(), r.exit_code) == (
+            f"find: {quoted}: No such file or directory\n",
+            1,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,c,utf8",
+    [
+        (
+            "find . -maxdepth x",
+            "find: Expected a positive decimal integer argument to "
+            "-maxdepth, but got 'x'",
+            "find: Expected a positive decimal integer argument to "
+            "-maxdepth, but got ‘x’",
+        ),
+        (
+            "find . -perm zz",
+            "find: invalid mode 'zz'",
+            "find: invalid mode ‘zz’",
+        ),
+        (
+            "find . -links x",
+            "find: non-numeric argument to -links: 'x'",
+            "find: non-numeric argument to -links: ‘x’",
+        ),
+        (
+            "find . -regextype bogus",
+            "find: Unknown regular expression type 'bogus'; valid types "
+            f"are {_types(chr(39), chr(39))}.",
+            "find: Unknown regular expression type ‘bogus’; valid types "
+            f"are {_types('‘', '’')}.",
+        ),
+        (
+            "find . -newer nosuch",
+            "find: 'nosuch': No such file or directory",
+            "find: ‘nosuch’: No such file or directory",
+        ),
+        (
+            "find . -newermt bogusdate",
+            "find: I cannot figure out how to interpret 'bogusdate' as a "
+            "date or time",
+            "find: I cannot figure out how to interpret ‘bogusdate’ as a "
+            "date or time",
+        ),
+        (
+            "find . -maxdepth 0 -exec nosuchcmd \\;",
+            "find: 'nosuchcmd': No such file or directory",
+            "find: ‘nosuchcmd’: No such file or directory",
+        ),
+        (
+            "find -files0-from nosuch",
+            "find: cannot open 'nosuch' for reading: No such file or "
+            "directory",
+            "find: cannot open ‘nosuch’ for reading: No such file or "
+            "directory",
+        ),
+        (
+            "find . -fprint /nonexist/x",
+            "find: '/nonexist/x': No such file or directory",
+            "find: ‘/nonexist/x’: No such file or directory",
+        ),
+        (
+            "find . -name",
+            "find: missing argument to `-name'",
+            "find: missing argument to `-name'",
+        ),
+        (
+            "find -not",
+            "find: expected an expression after '-not'",
+            "find: expected an expression after '-not'",
+        ),
+    ],
+)
+async def test_find_quotes_a_word_as_the_locale_does(line, c, utf8):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    for prefix, said in (
+        ("", c),
+        ("export LANG=C.UTF-8; ", utf8),
+        ("LANG=C.UTF-8 ", utf8),
+        ("export LANG=C.UTF-8; LC_ALL=C ", c),
+    ):
+        r = await ws.shell(prefix + line)
+        code = 0 if "-exec" in line else 1
+        assert (await r.stderr_str(), r.exit_code) == (f"{said}\n", code), (
+            prefix
+        )
