@@ -39,7 +39,8 @@ export interface MontyConfig {
  * Python's `remote_url`.
  */
 export function remoteUrl(config: MontyConfig): string | null {
-  if (config.url !== undefined) return config.url
-  const region = config.apiKey === undefined ? undefined : LOGFIRE_KEY.exec(config.apiKey)?.[1]
+  if (typeof config.url === 'string') return config.url
+  const region =
+    typeof config.apiKey === 'string' ? LOGFIRE_KEY.exec(config.apiKey)?.[1] : undefined
   return (region === undefined ? undefined : LOGFIRE_REGIONS[region]) ?? null
 }

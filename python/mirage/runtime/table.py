@@ -35,6 +35,7 @@ from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
+from mirage.runtime.python.monty.config import remote_url
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.sandlock import SandlockRuntime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
@@ -177,11 +178,6 @@ def build_entry(
         cls = _runtime_for(
             name, provider, fields.pop("runtime", None), sandbox
         )
-        if provider == REMOTE and fields.keys().isdisjoint({"url", "api_key"}):
-            raise ValueError(
-                f"machine {name!r}: a {REMOTE} machine names its url, or a"
-                " Logfire api_key that names its region"
-            )
         if (
             provider != REMOTE
             and issubclass(cls, MontyRuntime)
@@ -193,6 +189,11 @@ def build_entry(
             )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
+        if provider == REMOTE and remote_url(runtime.config) is None:
+            raise ValueError(
+                f"machine {name!r}: a {REMOTE} machine names its url, or a"
+                " Logfire api_key that names its region"
+            )
         if isinstance(runtime, WorkspaceRuntime):
             raise ValueError(
                 f"machine {name!r}: the workspace's runtime is not a machine"

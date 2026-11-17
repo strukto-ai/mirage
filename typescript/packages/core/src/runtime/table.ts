@@ -33,6 +33,7 @@ import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { LanguageRuntime } from './language.ts'
 import { isLineExecutor, isProcessExecutor, type LineExecutorMixin } from './mixin.ts'
 import { RemoteRuntime } from './machine/runtime.ts'
+import { remoteUrl, type MontyConfig } from './python/monty/config.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { WorkspaceRuntime } from './workspace.ts'
@@ -196,10 +197,6 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       named as string | RuntimeClass | undefined,
       sandbox,
     )
-    if (provider === REMOTE && !('url' in fields) && !('apiKey' in fields))
-      throw new Error(
-        `machine '${name}': a ${REMOTE} machine names its url, or a Logfire api_key that names its region`,
-      )
     if (
       provider !== REMOTE &&
       (cls === MontyRuntime || cls.prototype instanceof MontyRuntime) &&
@@ -213,6 +210,10 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       ...(captures === undefined ? {} : { captures: captures as string[] }),
       ...(Object.keys(config).length > 0 ? { config: config as never } : {}),
     })
+    if (provider === REMOTE && remoteUrl(runtime.config as MontyConfig) === null)
+      throw new Error(
+        `machine '${name}': a ${REMOTE} machine names its url, or a Logfire api_key that names its region`,
+      )
     if (runtime instanceof WorkspaceRuntime)
       throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
     BUILT_FROM.set(runtime, { ...spec })

@@ -335,6 +335,7 @@ describe('buildEntry', () => {
     ['py', { provider: 'remote', url: 'https://m' }, /names its runtime/],
     ['py', { provider: 'remote', runtime: 'quickjs', url: 'https://m' }, /runs monty/],
     ['py', { provider: 'remote', runtime: 'monty' }, /names its url/],
+    ['py', { provider: 'remote', runtime: 'monty', url: null }, /names its url/],
     ['py', { provider: 'remote', runtime: 'monty', apiKey: 'k' }, /needs a url/],
     ['py', { provider: 'in_process', runtime: 'monty', url: 'https://m' }, /provider remote/],
     ['py', { provider: 'in_process', runtime: 'monty', apiKey: 'k' }, /provider remote/],

@@ -304,6 +304,11 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
         ("py", {"provider": "remote", "runtime": "monty"}, "names its url"),
         (
             "py",
+            {"provider": "remote", "runtime": "monty", "url": None},
+            "names its url",
+        ),
+        (
+            "py",
             {"provider": "remote", "runtime": "monty", "api_key": "k"},
             "needs a url",
         ),
