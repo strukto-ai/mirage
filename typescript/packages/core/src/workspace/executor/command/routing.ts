@@ -165,7 +165,7 @@ export function treePathScopes(
   const seen = new Set(found.map((p) => p.virtual))
   for (const path of result.valuePaths.values()) if (!seen.has(path.virtual)) found.push(path)
   const leaf = parseCommand(result.leaf, [...result.argv], cwd, name, env, true)
-  for (const path of wordPaths(leaf, result.argv, cwd)) if (path !== null) found.push(path)
+  for (const path of wordPaths(leaf, result.argv, cwd, true)) if (path !== null) found.push(path)
   for (const value of leaf.suppliedPathValues) {
     found.push(new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }))
   }
@@ -356,7 +356,9 @@ export function programTokens(
  * value or an operand) and the path it names there. A command no spec
  * describes reads a dashed word as an option and anything else as an
  * operand, and names no path. `cli` says the spec is an installed CLI's
- * node, whose undeclared dashed words are the program's own operands.
+ * node, whose undeclared dashed words are the program's own operands and
+ * whose path operands name their paths; a builtin's operand paths are the
+ * classifier's.
  * Mirrors Python's `_parsed_words`.
  */
 function parsedWords(
@@ -374,7 +376,7 @@ function parsedWords(
     ])
   }
   const parsed = parseCommand(spec, [...argv], cwd, cmdName, env, cli)
-  const paths = wordPaths(parsed, argv, cwd)
+  const paths = wordPaths(parsed, argv, cwd, cli)
   return parsed.wordRoles.map((role, slot) => [role ?? WordKind.OPERAND, paths[slot] ?? null])
 }
 
@@ -444,10 +446,7 @@ export function commandWords(
       ...parsedWords(result.leaf, argv.slice(lead), cwd, name, env, true),
     ]
   } else {
-    read = parsedWords(SPECS[name], argv, cwd, name).map(([kind, path]) => [
-      kind,
-      kind === WordKind.OPERAND ? null : path,
-    ])
+    read = parsedWords(SPECS[name], argv, cwd, name)
   }
   const words = [new CommandWord(name, WordKind.NAME)]
   let option: string | null = null

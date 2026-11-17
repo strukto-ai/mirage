@@ -1381,16 +1381,22 @@ export function parseCommand(
  * or operand resolves against its word's base and an attached value lands on
  * its option word; a `-` (standard input or output) or an empty value names
  * no file. Built on demand, because every line is parsed and only a reader
- * of its words needs this. Mirrors Python's `word_paths`.
+ * of its words needs this, and operands only when `operands` asks, because a
+ * builtin's operand paths come from the classifier and a line can carry many
+ * thousands of them. Mirrors Python's `word_paths`.
  */
 export function wordPaths(
   parsed: ParsedArgs,
   argv: readonly string[],
   cwd: string,
+  operands: boolean,
 ): (PathSpec | null)[] {
+  const skip = new Set<WordKind | null>(
+    operands ? [WordKind.OPTION] : [WordKind.OPTION, WordKind.OPERAND],
+  )
   const typed: [number, string, string][] = []
   argv.forEach((word, slot) => {
-    if (parsed.wordKinds[slot] === 'path' && parsed.wordRoles[slot] !== WordKind.OPTION)
+    if (parsed.wordKinds[slot] === 'path' && !skip.has(parsed.wordRoles[slot] ?? null))
       typed.push([slot, word, parsed.wordBases[slot] ?? cwd])
   })
   const paths: (PathSpec | null)[] = new Array<PathSpec | null>(argv.length).fill(null)

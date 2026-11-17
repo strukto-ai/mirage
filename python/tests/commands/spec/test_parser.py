@@ -2162,7 +2162,7 @@ def test_a_declared_word_is_never_a_shorter_option_with_a_value():
 )
 def test_word_paths_resolve_each_word_where_tar_reads_it(argv, expected):
     parsed = parse_command(SPECS["tar"], argv, "/d", "tar")
-    paths = word_paths(parsed, argv, "/d")
+    paths = word_paths(parsed, argv, "/d", operands=True)
     assert [p.virtual if p is not None else None for p in paths] == expected
 
 
@@ -2176,5 +2176,5 @@ def test_word_paths_resolve_each_word_where_tar_reads_it(argv, expected):
 )
 def test_word_paths_name_no_file_for_a_dash_or_an_empty_value(argv, expected):
     parsed = parse_command(SPECS["grep"], argv, "/d", "grep")
-    paths = word_paths(parsed, argv, "/d")
+    paths = word_paths(parsed, argv, "/d", operands=True)
     assert [p.virtual if p is not None else None for p in paths] == expected
