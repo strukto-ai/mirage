@@ -113,6 +113,8 @@ export class FakeFiles {
     if (w.slice(0, 4).join(' ') === 'env LC_ALL=C find -L') {
       const path = w[4] ?? ''
       const depth = w[5] === '-maxdepth' ? Number(w[6]) : null
+      if ([...this.files.keys()].some((f) => path.startsWith(`${f}/`)))
+        return failed(`find: '${path}': Not a directory\n`)
       if (!this.dirs.has(path) && !this.files.has(path)) return this.missing('find', path)
       let out = this.row(path, '')
       const under = `${path.replace(/\/+$/, '')}/`
@@ -158,6 +160,14 @@ export class FakeFiles {
       }
       if (!this.files.has(path)) return this.missing('rm', path)
       this.files.delete(path)
+      return ok()
+    }
+    if (head === 'rmdir') {
+      const path = w.at(-1) ?? ''
+      if (!this.dirs.has(path)) return this.missing('rmdir', path)
+      if ([...this.files.keys(), ...this.dirs].some((n) => n.startsWith(`${path}/`)))
+        return failed(`rmdir: failed to remove '${path}': Directory not empty\n`)
+      this.dirs.delete(path)
       return ok()
     }
     if (head === 'mv' || head === 'cp') {

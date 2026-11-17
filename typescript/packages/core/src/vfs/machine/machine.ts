@@ -36,7 +36,7 @@ import { stat as machineStat, tree as machineTree } from '../../core/machine/sta
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import { eisdir, enoent, enotdir, exdev } from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty, exdev } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
@@ -218,11 +218,15 @@ export class MachineVFS extends BaseVFS {
         const there = await machineStat(this.accessor, other, dst)
         if ((there.type === FileType.DIRECTORY) !== folder)
           throw folder ? enotdir(dst) : eisdir(dst)
-        if (folder) await machineRmdir(this.accessor, other, dst)
+        if (folder && (await machineReaddir(this.accessor, [other], dst)).length > 0)
+          throw enotempty(dst)
       }
     }
     await machineRename(this.accessor, machine, src, dst, several)
-    if (!folder) for (const other of others) await machineUnlink(this.accessor, other, dst)
+    for (const other of others) {
+      if (folder) await machineRmdir(this.accessor, other, dst)
+      else await machineUnlink(this.accessor, other, dst)
+    }
   }
 
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {

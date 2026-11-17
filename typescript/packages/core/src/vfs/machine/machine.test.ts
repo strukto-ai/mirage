@@ -91,6 +91,22 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it("keeps another machine's folder when a mv fails", async () => {
+    const a = new FakeFiles({ '/tmp/src/f': 'x' })
+    const b = new FakeFiles()
+    b.dirs.add('/tmp/dst')
+    const ws = two(a, b)
+    expect((await run(ws, 'mv -T /tmp/src /tmp/dst'))[0]).toBe(1)
+    expect(b.dirs.has('/tmp/dst')).toBe(true)
+    await ws.close()
+  })
+
+  it("lists a folder under another machine's file", async () => {
+    const ws = two(new FakeFiles({ '/tmp/d/sub/g': 'y' }), new FakeFiles({ '/tmp/d': 'f' }))
+    expect(await run(ws, 'ls /tmp/d/sub')).toEqual([0, 'g\n', ''])
+    await ws.close()
+  })
+
   it("lands a program's output on the machine running it", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })

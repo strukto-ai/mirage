@@ -233,3 +233,24 @@ async def test_an_option_naming_another_mount_s_file_stays_with_mirage():
     assert await out(ws, "grep --file=/data/p /tmp/a.py") == "x\n"
     assert files.ran == []
     await ws.close()
+
+
+class NoCat(Policy):
+    async def pre_command(self, ctx):
+        return Deny(reason="no cat") if ctx.command == "cat" else None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_command_never_reaches_a_machine():
+    a = ScriptedMachine(
+        "a", FakeFiles({"/tmp/x": b"x"}, programs=TOOLS).answer
+    )
+    b = ScriptedMachine("b", FakeFiles(programs=TOOLS).answer)
+    ws = Workspace(
+        {}, mode=MountMode.WRITE, machines={"a": a, "b": b}, policies=[NoCat()]
+    )
+    before = (len(a.lines), len(b.lines))
+    done = await ws.shell("cat /tmp/x > /dev/null")
+    assert done.exit_code == 126
+    assert (len(a.lines), len(b.lines)) == before
+    await ws.close()

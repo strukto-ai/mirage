@@ -102,6 +102,8 @@ class FakeFiles:
         if words[:4] == ["env", "LC_ALL=C", "find", "-L"]:
             path = words[4]
             depth = int(words[6]) if words[5] == "-maxdepth" else None
+            if any(path.startswith(f + "/") for f in self.files):
+                return failed(f"find: '{path}': Not a directory\n".encode())
             if path not in self.dirs and path not in self.files:
                 return self._missing("find", path)
             out = self._row(path, "")
@@ -142,6 +144,18 @@ class FakeFiles:
             if path not in self.files:
                 return self._missing("rm", path)
             del self.files[path]
+            return ok()
+        if words[0] == "rmdir":
+            path = words[-1]
+            if path not in self.dirs:
+                return self._missing("rmdir", path)
+            if any(
+                n.startswith(path + "/") for n in [*self.files, *self.dirs]
+            ):
+                return failed(
+                    f"rmdir: failed to remove '{path}': Directory not empty\n".encode()
+                )
+            self.dirs.discard(path)
             return ok()
         if words[0] in ("mv", "cp"):
             src, dst = words[-2], words[-1]

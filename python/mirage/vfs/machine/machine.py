@@ -38,7 +38,7 @@ from mirage.core.machine.stat import tree as _tree
 from mirage.core.machine.truncate import truncate as _truncate
 from mirage.core.machine.unlink import unlink as _unlink
 from mirage.core.machine.write import write as _write
-from mirage.errors.fs import eisdir, enoent, enotdir, exdev
+from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, exdev
 from mirage.execution.machine.table import MachineTable
 from mirage.io.types import ByteSource
 from mirage.types import (
@@ -213,11 +213,14 @@ class MachineVFS(BaseVFS):
                 there = await _stat(self.accessor, other, dst)
                 if (there.type is FileType.DIRECTORY) is not folder:
                     raise eisdir(dst) if not folder else enotdir(dst)
-                if folder:
-                    await _rmdir(self.accessor, other, dst)
+                if folder and await _readdir(self.accessor, [other], dst):
+                    raise enotempty(dst)
         await _rename(self.accessor, machine, src, dst, make_parent=several)
-        for other in [] if folder else others:
-            await _unlink(self.accessor, other, dst)
+        for other in others:
+            if folder:
+                await _rmdir(self.accessor, other, dst)
+            else:
+                await _unlink(self.accessor, other, dst)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         machine = await self._same_machine(src, dst)

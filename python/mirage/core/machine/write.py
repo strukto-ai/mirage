@@ -23,7 +23,19 @@ from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.path import parent
 from mirage.utils.quote import single_quote
+
+
+def stage_name(target: str) -> str:
+    """A fresh name beside ``target`` to stage its bytes under, as short
+    whatever the target's own name, so a name near the length limit still
+    stages.
+
+    Args:
+        target (str): the file's path on the machine.
+    """
+    return f"{parent(target).rstrip('/')}/.mirage-{uuid4().hex}"
 
 
 def write_command(target: str, append: bool, atomic: bool) -> str:
@@ -41,7 +53,7 @@ def write_command(target: str, append: bool, atomic: bool) -> str:
         return f"cat >> {q}"
     if not atomic:
         return f"cat > {q}"
-    staged = single_quote(f"{target}.mirage-{uuid4().hex}")
+    staged = single_quote(stage_name(target))
     return (
         f"cat > {staged} && mv -f -- {staged} {q}"
         f" || {{ rm -f -- {staged}; exit 1; }}"
@@ -77,7 +89,7 @@ async def staged(
         if done.exit_code != 0:
             raise refusal(path, done.stderr or done.stdout)
         return
-    stage = f"{target}.mirage-{uuid4().hex}"
+    stage = stage_name(target)
     done = await handle.put_file(stage, data)
     if done.exit_code != 0:
         raise refusal(path, done.stderr or done.stdout)

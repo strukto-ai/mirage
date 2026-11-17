@@ -1171,9 +1171,12 @@ async function runArgv(
   // runs on (`python gen.py > /tmp/out`), or the machine a command runs on
   // whole because its files are that machine's (`/tmp/tool > /tmp/out`),
   // which matters only over several machines, so only then is it asked
-  // before the redirects open.
+  // before the redirects open, once the command is admitted: a refused one
+  // never reaches a machine.
   let machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
   if ((runner !== null || redirects.length > 0) && severalMachines(registry)) {
+    const denied = await guard([], stdin)
+    if (denied !== null) return denied
     const [held] = await heldMachine(
       name,
       argv,

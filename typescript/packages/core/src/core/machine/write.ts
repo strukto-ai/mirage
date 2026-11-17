@@ -18,9 +18,21 @@ import { closeQuietly } from '../../io/stream.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
+import { parent } from '../../utils/path.ts'
 import { singleQuote } from '../../utils/quote.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { refusal } from '../posix/errors.ts'
 import { checked, remote } from './utils.ts'
+
+/**
+ * A fresh name beside `target` to stage its bytes under, as short whatever
+ * the target's own name, so a name near the length limit still stages.
+ *
+ * @param target the file's path on the machine.
+ */
+export function stageName(target: string): string {
+  return `${rstripSlash(parent(target))}/.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+}
 
 /**
  * The line that writes what it is fed to a file: in place, at its end, or
@@ -35,7 +47,7 @@ export function writeCommand(target: string, append: boolean, atomic: boolean): 
   const q = singleQuote(target)
   if (append) return `cat >> ${q}`
   if (!atomic) return `cat > ${q}`
-  const staged = singleQuote(`${target}.mirage-${crypto.randomUUID().replaceAll('-', '')}`)
+  const staged = singleQuote(stageName(target))
   return `cat > ${staged} && mv -f -- ${staged} ${q} || { rm -f -- ${staged}; exit 1; }`
 }
 
@@ -67,7 +79,7 @@ export async function staged(
     if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
     return
   }
-  const stage = `${target}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+  const stage = stageName(target)
   const done = await handle.putFile(stage, data)
   if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
   const q = singleQuote(stage)

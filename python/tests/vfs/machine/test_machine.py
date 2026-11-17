@@ -98,6 +98,24 @@ async def test_mv_onto_another_machine_s_name_replaces_it():
 
 
 @pytest.mark.asyncio
+async def test_a_failed_mv_keeps_another_machine_s_folder():
+    a, b = FakeFiles({"/tmp/src/f": b"x"}), FakeFiles()
+    b.dirs.add("/tmp/dst")
+    ws = two(a, b)
+    assert (await run(ws, "mv -T /tmp/src /tmp/dst"))[0] == 1
+    assert "/tmp/dst" in b.dirs
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_lists_a_folder_under_another_machine_s_file():
+    a, b = FakeFiles({"/tmp/d/sub/g": b"y"}), FakeFiles({"/tmp/d": b"f"})
+    ws = two(a, b)
+    assert await run(ws, "ls /tmp/d/sub") == (0, "g\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_program_s_output_lands_on_the_machine_running_it():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles } from '../../../tests/fixtures/machine_files.ts'
-import type { Action, VfsContext } from '../../policy/types.ts'
+import type { Action, CommandContext, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { MountSpec, WorkspaceOptions } from '../workspace/types.ts'
@@ -195,6 +195,22 @@ describe('operand routing', () => {
     await ws.shell('echo y > /data/y && ln -s /data/y /tmp/l')
     expect(await out(ws, 'cat /tmp/*')).toBe('xy\n')
     expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it('never reaches a machine for a refused command', async () => {
+    const a = new ScriptedMachine('a', new FakeFiles({ '/tmp/x': 'x' }, TOOLS).answer)
+    const b = new ScriptedMachine('b', new FakeFiles({}, TOOLS).answer)
+    const ws = new Workspace({}, { mode: MountMode.WRITE, machines: { a, b } })
+    ws.policies.add({
+      preCommand(ctx: CommandContext): Action | null {
+        return ctx.command === 'cat' ? { kind: 'deny', reason: 'no cat' } : null
+      },
+    })
+    const before = [a.lines.length, b.lines.length]
+    const done = await ws.shell('cat /tmp/x > /dev/null')
+    expect(done.exitCode).toBe(126)
+    expect([a.lines.length, b.lines.length]).toEqual(before)
     await ws.close()
   })
 

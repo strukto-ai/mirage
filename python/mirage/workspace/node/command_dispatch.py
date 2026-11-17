@@ -1129,11 +1129,15 @@ async def _run_argv(
     # program runs on (``python gen.py > /tmp/out``), or the machine a
     # command runs on whole because its files are that machine's
     # (``/tmp/tool > /tmp/out``), which matters only over several
-    # machines, so only then is it asked before the redirects open.
+    # machines, so only then is it asked before the redirects open, once
+    # the command is admitted: a refused one never reaches a machine.
     machine = _stage_machine(
         name, argv.args, session, registry, context.frame.routing
     )
     if (runner is not None or redirects) and several_machines(registry):
+        denied = await guard((), stdin)
+        if denied is not None:
+            return denied
         held, _ = await _held_machine(
             name,
             argv,

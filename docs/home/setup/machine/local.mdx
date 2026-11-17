@@ -99,26 +99,24 @@ no `/tmp` mount of its own.
 
 ## Where a command runs
 
+A workspace with `/testbed` and `/tmp` on one machine and `/data` in RAM:
+
 ```mermaid
-flowchart TD
-    C["grep -rn TODO /testbed"] --> Q{"every path on one machine?"}
-    Q -- yes --> K{"input piped in?"}
-    K -- no --> R["runs on the machine, one exec"]
-    K -- yes --> M["Mirage runs it"]
-    Q -- "no: another mount, several machines" --> M
-    M --> F["each file read or written on its machine"]
+flowchart LR
+    G["grep -rn TODO /testbed"] -- "every path on the machine" --> R
+    X["find . | xargs grep -l x"] -- "xargs feeds no input" --> R
+    V["/tmp/venv/bin/python -V"] -- "a program the machine holds" --> R
+    L["ln -s a.py /tmp/link"] -- "a link in the machine's folder" --> R
+    C["cat /tmp/a.py /data/b"] -- "/data is not the machine's" --> M
+    P["ls | while read f; do grep x $f; done"] -- "input piped in" --> M
+    D["cat /tmp/l, l linked to /data/b"] -- "a link Mirage made" --> M
+    R["runs on the machine: one exec, its own output"]
+    M["Mirage runs it: each file read or written on its machine"]
 ```
 
-- **On the machine:** `grep -rn`, `find`, `sed -i`, `ls -la`, `du`, a program
-  at a path there (`/tmp/venv/bin/python`), `ln` and `readlink` in the
-  folder. Output is the machine's own.
-- **`xargs` and `< /dev/null`** count as no input: `find . | xargs grep x`
-  still runs there.
-- **Stays in Mirage:** piped input (`... | while read f; do grep x "$f"; done`),
-  a link Mirage made, a restricted or read-only mount, a program the machine
-  lacks.
-- **`/dev`** is Mirage's (`/dev/null`, `/dev/stdin`); only `/dev/shm` is the
-  machine's.
+A restricted or read-only mount, a coded file policy and a program the
+machine lacks keep a command in Mirage too. `/dev` is Mirage's (`/dev/null`,
+`/dev/stdin`); only `/dev/shm` is the machine's.
 
 ## Several machines
 

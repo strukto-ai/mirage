@@ -17,7 +17,7 @@ import pytest
 from mirage.core.machine.create import create
 from mirage.core.machine.pwrite import pwrite
 from mirage.core.machine.truncate import truncate
-from mirage.core.machine.write import write, write_command
+from mirage.core.machine.write import stage_name, write, write_command
 from tests.fixtures.machine import (
     InputlessMachine,
     ScriptedMachine,
@@ -36,11 +36,18 @@ def test_write_command_replaces_appends_or_stages():
     )
     staged = write_command("/tmp/x", append=False, atomic=True)
     name = staged.split()[2]
-    assert name.startswith("'/tmp/x.mirage-")
+    assert name.startswith("'/tmp/.mirage-")
     assert staged == (
         f"cat > {name} && mv -f -- {name} '/tmp/x'"
         f" || {{ rm -f -- {name}; exit 1; }}"
     )
+
+
+def test_a_stage_name_stays_short_beside_a_long_name():
+    name = stage_name("/tmp/" + "n" * 250)
+    assert name.startswith("/tmp/.mirage-")
+    assert len(name.rsplit("/", 1)[1]) == 40
+    assert stage_name("/x").startswith("/.mirage-")
 
 
 @pytest.mark.asyncio
@@ -65,10 +72,10 @@ async def test_a_machine_without_input_writes_through_its_file_api():
     await write(accessor, "box", spec("/x"), b"new")
     await write(accessor, "box", spec("/y"), b"+", append=True)
     await pwrite(accessor, "box", spec("/z"), b"AB", 5)
-    stages = {k.rsplit(".mirage-", 1)[0]: (k, v) for k, v in box.put.items()}
+    _, y, z = box.put
+    assert [*box.put.values()] == [b"new", b"+", b"AB"]
     assert box.put["/tmp/x"] == b"new"
-    y, z = stages["/tmp/y"][0], stages["/tmp/z"][0]
-    assert (stages["/tmp/y"][1], stages["/tmp/z"][1]) == (b"+", b"AB")
+    assert y.startswith("/tmp/.mirage-") and z.startswith("/tmp/.mirage-")
     assert box.lines == [
         f"cat -- '{y}' >> '/tmp/y'; s=$?; rm -f -- '{y}'; exit $s",
         f"dd if='{z}' of='/tmp/z' seek=5 oflag=seek_bytes conv=notrunc"
