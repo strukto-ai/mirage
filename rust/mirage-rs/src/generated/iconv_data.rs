@@ -3,7 +3,7 @@
 // differs from the WHATWG decoder encoding_rs seeds it with. Do not edit
 // by hand; rerun the script.
 
-use crate::iconv::table::Corrections;
+use crate::iconv::corrections::Corrections;
 
 pub(crate) const GBK: Corrections = Corrections {
     remapped: &[],

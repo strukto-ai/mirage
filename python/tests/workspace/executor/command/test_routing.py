@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import DeviceInput
@@ -23,11 +22,9 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command import routing
 from mirage.workspace.executor.command.routing import (
-    command_words,
     default_cwd_operand,
     merge_scopes,
     path_flag_scopes,
-    program_tokens,
     routable_scopes,
 )
 
@@ -166,46 +163,6 @@ def test_path_flag_scopes_leaves_dispatch_files_out(cmd: str, argv: list[str]):
     # The handler reaches them through the dispatcher, so they name no
     # mount the line has to run on (DISPATCH_FLAG_KEYS).
     assert path_flag_scopes(cmd, argv, "/") == []
-
-
-def test_program_tokens_walks_a_cli_verb_path_and_keeps_the_rest_raw():
-    ws = Workspace(mounts={"/ram": (RAMVFS(), MountMode.WRITE)})
-    try:
-        ws.register_cli("git", cli_spec_for("git"))
-        reg = ws._registry
-        # Options before the verb are not the verb; an alias reads as
-        # its canonical name; the leaf's own words follow untouched.
-        assert program_tokens(
-            reg, "git", ["-C", "/r", "reset", "--hard", "HEAD"], "/"
-        ) == (("git", "reset", "--hard", "HEAD"), ("git", "reset"))
-        assert program_tokens(reg, "git", ["log", "-1"], "/") == (
-            ("git", "log", "-1"),
-            ("git", "log"),
-        )
-        # A walk the tree refuses (unknown verb, bare head) reads raw.
-        assert program_tokens(reg, "git", ["frobnicate", "x"], "/") == (
-            ("git", "frobnicate", "x"),
-            ("git",),
-        )
-        assert program_tokens(reg, "git", [], "/") == (("git",), ("git",))
-        # Anything else is the name and the raw argv.
-        assert program_tokens(reg, "rm", ["-rf", "/x"], "/") == (
-            ("rm", "-rf", "/x"),
-            ("rm",),
-        )
-        # A group option's value is never read as a verb, even one
-        # that spells one (`-C status`, a directory named status).
-        words = command_words(reg, "git", ["-C", "status", "log"], [], [], "/")
-        assert [(w.text, w.kind.value, w.option) for w in words] == [
-            ("git", "name", None),
-            ("-C", "option", None),
-            ("status", "value", "-C"),
-            ("log", "subcommand", None),
-        ]
-    finally:
-        import asyncio
-
-        asyncio.run(ws.close())
 
 
 @pytest.mark.asyncio

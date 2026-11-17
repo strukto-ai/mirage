@@ -27,6 +27,8 @@ class ParsedProgram:
         self.references = 1
         self._released = False
         self._newlines: list[int] | None = None
+        self._text: bytes | None = None
+        self.read_rows: dict[int, int] = {}
         self._root: ProgramNode | None = ProgramNode(root, self)
 
     @property
@@ -34,6 +36,16 @@ class ParsedProgram:
         self.check()
         assert self._root is not None
         return self._root
+
+    @property
+    def text(self) -> bytes:
+        """The parsed source, read from the tree once: a node's ``text``
+        is copied out on every read."""
+        self.check()
+        if self._text is None:
+            assert self._root is not None
+            self._text = self._root.text or b""
+        return self._text
 
     def row(self, offset: int) -> int:
         """The row a byte of the line as typed is on: the newlines before
@@ -86,6 +98,8 @@ class ParsedProgram:
             self.original = ""
             self.offsets = ()
             self._newlines = None
+            self._text = None
+            self.read_rows.clear()
             self._root = None
 
 

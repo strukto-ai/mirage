@@ -4,59 +4,33 @@ description: Answer md5sum and sha256sum from a stored hash.
 icon: fingerprint
 ---
 
-`md5sum`, `sha256sum` and the other hash commands can ask your VFS for a hash
-it already stores, instead of reading and hashing the file. Return `None`
-(TypeScript: `null`) and Mirage hashes the file.
+Checksums lets a VFS answer hash commands from a hash its service already
+stores, without reading the file. Override `checksum` to make `md5sum`,
+`sha256sum` and the other hash commands cheaper.
 
-For example, [Google Drive](/python/vfs/gdrive) answers `md5sum`, `sha1sum`
-and `sha256sum` from the hashes Drive stores.
+## Supported commands
 
-## `checksum`
+These commands ask the VFS for a stored hash. When the VFS has none for that
+hash, the command reads and hashes the file as usual.
 
-The hash of one file.
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    async def checksum(self, path: PathSpec, algorithm: str) -> str | None: ...
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    checksum(path: PathSpec, algorithm: string): Promise<string | null>
-    ```
-  </Tab>
-</Tabs>
-
-| Argument | Meaning |
+| Command | What happens |
 | --- | --- |
-| `path` | The file. |
-| `algorithm` | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `blake2b`, or `blake2b-N` for BLAKE2b at N bits. |
+| `md5sum`, `md5` | Asks for the `md5` hash. |
+| `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum` | Asks for the `sha1`, `sha224`, `sha256`, `sha384` or `sha512` hash. |
+| `b2sum` | Asks for the `blake2b` hash. |
+| `b2sum -l N` | Asks for the `blake2b-N` hash, BLAKE2b at N bits. |
+| Any of these with `-c`, which checks the hashes listed in a file | Reads the files. |
 
-| Return | Mirage then |
-| --- | --- |
-| The lowercase hex hash of exactly the bytes a read returns | Prints it. The file is not read. |
-| `None` | Reads the file and hashes it. |
+## For VFS authors
 
-These commands call `checksum`, with this `algorithm`:
+A custom VFS overrides `checksum` when its service stores hashes.
 
-- `md5sum`, `md5`: `md5`
-- `sha1sum`: `sha1`
-- `sha224sum`: `sha224`
-- `sha256sum`: `sha256`
-- `sha384sum`: `sha384`
-- `sha512sum`: `sha512`
-- `b2sum`: `blake2b`, or `blake2b-N` with `-l N`
+### `checksum`
 
-This reads the file instead:
-
-- `-c`: check hashes listed in a file
-
-## Example
-
-This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example-a-read-only-vfs).
-A real service returns the hash it stores; this one computes MD5 and leaves the
-others to Mirage:
+The hash of one file. A real service returns the hash it stores. This example
+extends `NotesVFS` from
+[Adding a New VFS](/home/setup/vfs/new#write-one), computes
+MD5 and leaves the others to Mirage.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -91,4 +65,11 @@ others to Mirage:
   </Tab>
 </Tabs>
 
-`md5sum /notes/hello.txt` then reads nothing. `sha256sum` still reads the page.
+`path` is the file. `algorithm` is the hash name from
+[Supported commands](#supported-commands): `md5`, `sha1` to `sha512`,
+`blake2b` or `blake2b-N`.
+
+Return the lowercase hex hash of exactly the bytes a read returns. Mirage
+prints it and reads nothing. Return `None` (TypeScript: `null`) and Mirage
+reads and hashes the file. With this example, `md5sum /notes/hello.txt` reads
+nothing, and `sha256sum` still reads the page.

@@ -1,29 +1,23 @@
 ---
-title: VFS.md and SKILL.md
-description: Two Markdown files that tell an agent what is mounted and which commands it can run.
+title: VFS.md
+description: The Markdown file that tells an agent what is mounted and which commands work on each path.
 icon: file-lines
 ---
 
-A workspace describes itself to an agent in two Markdown files, in the
-[VFS.md](https://agentvfs.org/vfs) format:
+VFS.md lists every mounted path, its layout and which Unix commands work
+there, in the [VFS.md](https://agentvfs.org/vfs) format. It is built from the
+live workspace and follows the session's [profile](/home/policy/overview): a
+command the profile denies, or a path it hides, is never mentioned. Each VFS
+page shows its VFS.md, such as [Gmail](/python/vfs/gmail). The CLIs are in
+[SKILL.md](/home/setup/cli/skill-md).
 
-- **VFS.md**: every mounted path, its layout and which Unix commands work
-  there.
-- **SKILL.md**: the registered CLIs, with each one's top-level help. A
-  subcommand's usage is one `--help` away.
-
-Both are built from the live workspace and follow the session's
-[profile](/home/policy/overview): a command the profile denies, or a path it
-hides, is never mentioned. Each VFS page shows its VFS.md, such as
-[Gmail](/python/vfs/gmail).
-
-## Get them
+## Get it
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     vfs_md = await ws.vfs_md()
-    skill_md = await ws.skill_md(session_id="agent")
+    agent = await ws.vfs_md(session_id="agent")
     preview = await ws.vfs_md(profile="reader")
     await ws.vfs_md("/VFS.md")
     ```
@@ -31,7 +25,7 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     const vfsMd = await ws.vfsMd()
-    const skillMd = await ws.skillMd(undefined, { sessionId: 'agent' })
+    const agent = await ws.vfsMd(undefined, { sessionId: 'agent' })
     const preview = await ws.vfsMd(undefined, { profile: 'reader' })
     await ws.vfsMd('/VFS.md')
     ```
@@ -39,9 +33,6 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
   <Tab title="HTTP" icon="globe">
     ```bash
     curl http://127.0.0.1:8765/v1/workspaces/demo/vfs-md \
-      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
-
-    curl http://127.0.0.1:8765/v1/workspaces/demo/sessions/agent/skill-md \
       -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
 
     curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/vfs-md \
@@ -53,7 +44,6 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
   <Tab title="CLI" icon="terminal">
     ```bash
     mirage workspace vfs-md demo
-    mirage workspace skill-md demo --session agent
     mirage workspace vfs-md demo --path /VFS.md
     ```
   </Tab>
@@ -74,7 +64,7 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
 - **Mode**: `read`, `write` or `exec`. A path whose VFS cannot change files
   shows `read`, whatever mode it is mounted with.
 - **Layout**: how its files are organized and what they hold, for a VFS that
-  has one. A VFS sets it with [`vfs_md`](/home/setup/custom-vfs#attributes).
+  has one. A VFS sets it with [`vfs_md`](/home/setup/vfs/new#write-one).
 - **Supported commands**: the Unix commands that work there, and which of them
   ask the service which files may match. CLIs such as
   [`gh`](/home/setup/cli/gh) are in SKILL.md, not here.
@@ -83,4 +73,4 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
   large folders.
 
 Which commands can change files depends on the methods the VFS implements;
-[Custom VFS](/home/setup/custom-vfs) lists them.
+[Adding a New VFS](/home/setup/vfs/new) lists them.

@@ -7,10 +7,11 @@
 use super::super::node::{Node, Value};
 use super::super::tree::{E, R, W, is_on, on_off};
 use super::super::units::{f2, half_points, hex_color, round_trip};
+use super::doc::Word;
 use super::paragraph::{border_spec, latin_pair};
 use super::{
-    FIELD_KEEP, TYPOGRAPHY_ONLY, Word, color_with_theme_tail, complex_script, fill_unknown, is_int,
-    jsn, run_text, shading_canonical, t_text, w_child, w_val,
+    FIELD_KEEP, TYPOGRAPHY_ONLY, color_with_theme_tail, complex_script, fill_unknown, is_int, jsn,
+    run_text, shading_canonical, t_text, w_child, w_val,
 };
 
 impl<'p> Word<'p> {

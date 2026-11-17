@@ -5,7 +5,7 @@ use std::iter::once;
 use std::sync::OnceLock;
 
 use super::class::{self, Set};
-use super::parse::{Node, seq};
+use super::node::{Node, seq};
 use crate::generated::unicode_case_fold::FOLDS;
 
 /// Each folding and the codes that fold to it (Oniguruma's unfold

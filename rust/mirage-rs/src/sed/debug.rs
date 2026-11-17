@@ -3,15 +3,7 @@
 
 use crate::regex::posix::Spans;
 
-use super::script::{Address, Command, Part, Program, Translit};
-
-/// An expression as --debug lists it: the text regcomp gets, and its
-/// flags.
-pub(super) struct Source {
-    pub(super) text: Vec<u8>,
-    pub(super) icase: bool,
-    pub(super) multiline: bool,
-}
+use super::program::{Address, Command, Part, Program, Source, Translit};
 
 /// Bytes as the trace shows them: printable ASCII as itself, the C
 /// controls and the backslash as their escapes, `/` escaped in an

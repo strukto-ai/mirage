@@ -14,15 +14,11 @@
 
 from collections.abc import AsyncGenerator, AsyncIterator
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from python_multipart.exceptions import MultipartParseError
 from python_multipart.multipart import MultipartParser, parse_options_header
 
 from mirage.server.errors import ErrorCode, HttpError
-
-if TYPE_CHECKING:
-    from python_multipart.multipart import MultipartCallbacks
 
 MAX_REQUEST_PART = 1024 * 1024
 MAX_SNAPSHOT_PART = 1024 * 1024 * 1024
@@ -50,17 +46,27 @@ class Parts:
         self._value = b""
         self.finished = False
 
-    def callbacks(self) -> "MultipartCallbacks":
-        return {
-            "on_part_begin": self._begin,
-            "on_header_field": self._header_field,
-            "on_header_value": self._header_value,
-            "on_header_end": self._header_end,
-            "on_headers_finished": self._headers_finished,
-            "on_part_data": self._data,
-            "on_part_end": self._end,
-            "on_end": self._finish,
-        }
+    def parser(self, boundary: bytes) -> MultipartParser:
+        """A parser that calls back into these parts.
+
+        Args:
+            boundary (bytes): the body's multipart boundary.
+        """
+        return MultipartParser(
+            boundary,
+            {
+                "on_part_begin": self._begin,
+                "on_header_field": self._header_field,
+                "on_header_value": self._header_value,
+                "on_header_end": self._header_end,
+                "on_headers_finished": self._headers_finished,
+                "on_part_data": self._data,
+                "on_part_end": self._end,
+                "on_end": self._finish,
+            },
+            max_header_count=MAX_HEADER_COUNT,
+            max_header_size=MAX_HEADER_SIZE,
+        )
 
     def take(self) -> list[tuple[PartEvent, bytes]]:
         events, self._events = self._events, []
@@ -124,12 +130,7 @@ async def part_events(
             ErrorCode.INVALID_REQUEST, "multipart body without a boundary"
         )
     parts = Parts()
-    parser = MultipartParser(
-        boundary,
-        parts.callbacks(),
-        max_header_count=MAX_HEADER_COUNT,
-        max_header_size=MAX_HEADER_SIZE,
-    )
+    parser = parts.parser(boundary)
     async for chunk in chunks:
         try:
             parser.write(chunk)

@@ -17,7 +17,7 @@ pnpm add -D tsx typescript
 `npm install @struktoai/mirage-node` and `yarn add @struktoai/mirage-node` work too.
 
 The packages require ECMAScript modules (ESM). In the same directory,
-set `"type": "module"` in your `package.json`:
+set `"type": "module"` in `package.json`:
 
 ```bash
 npm pkg set type=module
@@ -25,7 +25,7 @@ npm pkg set type=module
 
 ## Create a Workspace
 
-Start with the RAM VFS so you can try Mirage without credentials.
+Start with the RAM VFS, which needs no credentials.
 
 ```ts quickstart.ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -59,10 +59,27 @@ pnpm tsx quickstart.ts
 Shell failures are returned in the result; check `exitCode` and `stderrText`
 when needed. See the [in-app API reference](/typescript/access/in-app#session-shell).
 
-## Next Steps
+## Next steps
 
-- See [TypeScript Installation](/typescript/install) for optional native peers (FUSE, Redis, Postgres, MongoDB, SSH, Email).
-- Building for the browser? Start with the [Browser Quickstart](/typescript/browser-quickstart).
-- Configure [command output limits](/home/core/output-limits) for large files and long-running commands.
-- Browse [TypeScript Agents](/typescript/agents/index) to wire Mirage into OpenAI Agents SDK, Vercel AI SDK, LangChain, Mastra, and more.
-- Pick a real backend from the VFS section, such as [S3](/typescript/setup/s3), [Slack](/typescript/setup/slack), or [Discord](/typescript/setup/discord).
+For a browser app, start from the [Browser Quickstart](/typescript/browser-quickstart).
+
+<CardGroup cols={2}>
+  <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
+    S3, Slack, Google Drive, Postgres and 60 more, as files.
+  </Card>
+  <Card title="Install CLIs" icon="wrench" href="/typescript/cli/index">
+    `gh`, `git`, Linear, Office and PDF tools in the same shell.
+  </Card>
+  <Card title="Run programs on a machine" icon="server" href="/typescript/machine/overview">
+    `python3` and `node` in Mirage, on the host or in a sandbox.
+  </Card>
+  <Card title="Connect an agent" icon="robot" href="/typescript/agents/index">
+    The TypeScript agent SDKs, wired to one workspace.
+  </Card>
+  <Card title="Set what an agent may do" icon="shield-halved" href="/home/policy/overview">
+    Profiles, allow lists, asks and hidden paths.
+  </Card>
+  <Card title="In-App API" icon="cube" href="/typescript/access/in-app">
+    Every workspace and session call, with an example.
+  </Card>
+</CardGroup>

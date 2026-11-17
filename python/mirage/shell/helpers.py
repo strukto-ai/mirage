@@ -83,8 +83,10 @@ def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
         before (TSNodeLike): the earlier node.
         after (TSNodeLike): the later one.
     """
-    text = root.text or b""
-    base = root.start_byte
+    if isinstance(root, ProgramNode):
+        text, base = root.program.text, root.program.root.start_byte
+    else:
+        text, base = root.text or b"", root.start_byte
     return b"\n" not in text[before.end_byte - base : after.start_byte - base]
 
 
@@ -156,7 +158,9 @@ def read_row(node: TSNodeLike) -> int:
     bash reads a whole line before running any of it, and a complete
     command spanning lines whole, with the rest of the line it ends on:
     a command after a `;`, or inside a group that spans rows, was read
-    with the ones before it.
+    with the ones before it. A statement read with the one before it
+    shares its row, which the parse keeps, so each statement of a long
+    line looks back once.
 
     Args:
         node (TSNodeLike): a node of a parsed program.
@@ -165,10 +169,24 @@ def read_row(node: TSNodeLike) -> int:
     while top.parent is not None and top.parent.parent is not None:
         top = top.parent
     root = top.parent if top.parent is not None else top
+    rows = top.program.read_rows if isinstance(top, ProgramNode) else None
+    walked = [top]
+    row: int | None = None
     before = top.prev_sibling
-    while before is not None and same_line(root, before, top):
-        top, before = before, before.prev_sibling
-    return top.start_point[0]
+    while before is not None and same_line(root, before, walked[-1]):
+        if (
+            rows is not None
+            and (row := rows.get(before.start_byte)) is not None
+        ):
+            break
+        walked.append(before)
+        before = before.prev_sibling
+    if row is None:
+        row = walked[-1].start_point[0]
+    if rows is not None:
+        for each in walked:
+            rows[each.start_byte] = row
+    return row
 
 
 def source_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:

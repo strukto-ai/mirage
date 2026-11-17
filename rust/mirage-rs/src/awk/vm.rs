@@ -9,6 +9,7 @@ use super::compile::{
 use super::format::{Formatter, NumberText, Output, Print};
 use super::io::{Io, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES};
 use super::parser::{Cmp, GetlineKind, RedirKind};
+use super::text::no_memory;
 use super::text::{
     IndexSearch, Regexes, SplitScan, StringWork, Substitution, View, split_assignment, substr,
 };
@@ -24,10 +25,6 @@ const MAX_CALL_DEPTH: usize = 100;
 /// The most fields a record may be given; mawk 1.3.4 crashes well past
 /// this rather than refusing.
 const MAX_FIELDS: usize = 1 << 22;
-
-pub(super) fn no_memory() -> Vec<u8> {
-    b"awk: out of memory".to_vec()
-}
 
 #[derive(Default)]
 struct Slot {

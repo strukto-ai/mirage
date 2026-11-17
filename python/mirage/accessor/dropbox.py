@@ -12,13 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING
-
 from mirage.accessor.base import TokenAccessor
-
-if TYPE_CHECKING:
-    from mirage.core.dropbox.client import DropboxTokenManager
-    from mirage.vfs.dropbox.config import DropboxConfig
+from mirage.core.dropbox.client import DropboxTokenManager
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def normalize_dropbox_root_path(value: str | None) -> str:
@@ -37,10 +33,10 @@ def normalize_dropbox_root_path(value: str | None) -> str:
 
 
 class DropboxAccessor(TokenAccessor):
-    token_manager: "DropboxTokenManager"
+    token_manager: DropboxTokenManager
 
     def __init__(
-        self, config: "DropboxConfig", token_manager: "DropboxTokenManager"
+        self, config: DropboxConfig, token_manager: DropboxTokenManager
     ) -> None:
         self.config = config
         self.token_manager = token_manager

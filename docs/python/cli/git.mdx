@@ -34,6 +34,166 @@ await ws.shell("git -C /repo init -b main")
 
 For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `git` installed.
+
+{/* generated: skill-md git start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`git`**
+
+    ```text
+    git: Content tracker
+
+    Usage: git [flags] <command> [<args>]
+
+    Commands:
+      add                      Stage working tree content
+      branch                   List, create or delete branches
+      cat-file                 Provide contents or details of repository objects
+      check-ignore             Show which paths the ignore rules cover
+      check-ref-format         Check that a ref name is well formed
+      checkout                 Switch branches
+      clone                    Clone a repository into a new directory
+      commit                   Record the index as a new commit
+      config                   Read repository configuration
+      describe                 Name a commit after the nearest tag
+      diff                     Show changes between commits
+      diff-files               Compare the index with the working tree
+      diff-index               Compare a tree with the working tree or index
+      diff-tree                Compare a commit with its parent, or two trees
+      fetch                    Download objects and refs from another repository
+      for-each-ref             List references with a format
+      fsck                     Verify object hashes and connectivity
+      grep                     Search tracked files in the working tree, index or named trees
+      hash-object              Compute object ID and optionally create an object from a file
+      help                     Show command help
+      init                     Create an empty Git repository or reinitialize an existing one
+      log                      Show commit logs
+      ls-files                 Show files in the index
+      ls-remote                List the refs another repository publishes
+      ls-tree                  List the contents of a tree object
+      merge-base               Find best common ancestors of commits
+      mv                       Move or rename a file, a directory, or a symlink
+      reflog                   Show reference history
+      remote                   List remotes and inspect their URLs
+      reset                    Unstage, putting the index back to HEAD
+      restore                  Restore working tree files
+      rev-list                 List reachable commits
+      rev-parse                Resolve revisions
+      rm                       Remove files from the working tree and the index
+      shortlog                 Summarize commit history
+      show                     Show a commit and its diff
+      show-ref                 List references
+      stash                    Inspect saved working trees
+      status                   Show the working tree status
+      switch                   Switch branches
+      symbolic-ref             Read, change or delete a symbolic ref
+      tag                      Create, list or delete a tag
+      version (--version, -v)  Show the Mirage Git implementation version
+
+    Flags:
+      -C <path>                      Run as if git was started in <path>
+      --config-env, -c <name=value>  Set a config variable for this one command
+      -p, --paginate                 Accepted; there is no pager to run
+      -P, --no-pager                 Accepted; there is no pager to run
+      --no-optional-locks            Accepted; only the locks a write needs are taken
+      --no-replace-objects           Accepted; replace refs are not followed
+      --no-lazy-fetch                Accepted; objects are never fetched lazily
+      --no-advice                    Accepted; hints stay as they are
+      --git-dir <path>               Use the repository at <path>
+      --work-tree <path>             Use <path> as the working tree
+      --help                         Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `git`
+
+    ```text
+    git: Content tracker
+
+    Usage: git [flags] <command> [<args>]
+
+    Commands:
+      add                      Stage working tree content
+      branch                   List, create or delete branches
+      cat-file                 Provide contents or details of repository objects
+      check-ignore             Show which paths the ignore rules cover
+      check-ref-format         Check that a ref name is well formed
+      checkout                 Switch branches
+      clone                    Clone a repository into a new directory
+      commit                   Record the index as a new commit
+      config                   Read repository configuration
+      describe                 Name a commit after the nearest tag
+      diff                     Show changes between commits
+      diff-files               Compare the index with the working tree
+      diff-index               Compare a tree with the working tree or index
+      diff-tree                Compare a commit with its parent, or two trees
+      fetch                    Download objects and refs from another repository
+      for-each-ref             List references with a format
+      fsck                     Verify object hashes and connectivity
+      grep                     Search tracked files in the working tree, index or named trees
+      hash-object              Compute object ID and optionally create an object from a file
+      help                     Show command help
+      init                     Create an empty Git repository or reinitialize an existing one
+      log                      Show commit logs
+      ls-files                 Show files in the index
+      ls-remote                List the refs another repository publishes
+      ls-tree                  List the contents of a tree object
+      merge-base               Find best common ancestors of commits
+      mv                       Move or rename a file, a directory, or a symlink
+      reflog                   Show reference history
+      remote                   List remotes and inspect their URLs
+      reset                    Unstage, putting the index back to HEAD
+      restore                  Restore working tree files
+      rev-list                 List reachable commits
+      rev-parse                Resolve revisions
+      rm                       Remove files from the working tree and the index
+      shortlog                 Summarize commit history
+      show                     Show a commit and its diff
+      show-ref                 List references
+      stash                    Inspect saved working trees
+      status                   Show the working tree status
+      switch                   Switch branches
+      symbolic-ref             Read, change or delete a symbolic ref
+      tag                      Create, list or delete a tag
+      version (--version, -v)  Show the Mirage Git implementation version
+
+    Flags:
+      -C <path>                      Run as if git was started in <path>
+      --config-env, -c <name=value>  Set a config variable for this one command
+      -p, --paginate                 Accepted; there is no pager to run
+      -P, --no-pager                 Accepted; there is no pager to run
+      --no-optional-locks            Accepted; only the locks a write needs are taken
+      --no-replace-objects           Accepted; replace refs are not followed
+      --no-lazy-fetch                Accepted; objects are never fetched lazily
+      --no-advice                    Accepted; hints stay as they are
+      --git-dir <path>               Use the repository at <path>
+      --work-tree <path>             Use <path> as the working tree
+      --help                         Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md git end */}
+
 <Reference />
 
 <License />

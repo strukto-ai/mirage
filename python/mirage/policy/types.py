@@ -758,9 +758,12 @@ class CommandContext:
             agent typed, or for a command a line runs in turn (``eval``,
             ``$( )``, a function body) that line's text.
         command (str): the command name.
-        paths (tuple[PathSpec, ...]): every path the line names, the
-            positional operands first and then the values of any
-            path-valued flags. What a path-pattern guard matches on.
+        paths (tuple[PathSpec, ...]): every path the line reaches: its
+            words' paths in the order they stand, then values typed
+            onto their option and values a default supplied, the link
+            targets the command reaches, a bare command's working
+            directory and the redirect targets. What a path-pattern
+            guard matches on.
         words (tuple[CommandWord, ...]): the command line word by word,
             the name first and redirect targets last, each with its
             kind. A rule that reads a slot (mv's source, ln's target,

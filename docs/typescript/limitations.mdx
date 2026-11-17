@@ -1,307 +1,95 @@
 ---
 title: Limitations
 icon: triangle-exclamation
-description: Runtime-specific constraints in the TypeScript SDK (Node and Browser) and how to work around them.
+description: Where the TypeScript SDK differs on Node and in a browser, and how to work around it.
 ---
 
-Most of Mirage's behavior is identical across Python and TypeScript. The two TS runtimes (Node and Browser) each impose a handful of constraints, most of which don't exist in Python (the one shared design property, size-unknown stat, is included because it is the most common surprise). All are documented here so you can plan around them before they surprise you in production.
-
-<Note>
-  `python3` has its own set of WASM-runtime-level divergences. See the
-  [TypeScript runtime reference](/typescript/runtime/python#pyodide) for the
-  worker, filesystem, socket, and containment details.
-</Note>
-
-## Node versions
-
-The Node SDK and packages that use it require Node `^22.20 || ^24.12 || >=25`,
-matching the [XZ streaming codec](https://www.npmjs.com/package/@napi-rs/lzma)
-shipped with the SDK. Node 20, 23, and early Node 22/24 releases are outside
-that range. The runtime-agnostic core and browser packages do not acquire this
-Node requirement.
-
-## Shell traps (Python, Node and Browser)
-
-`trap 'commands' EXIT` (or `0`) registers cleanup for the shell that ends. It runs at `exit`, in the frame that called it, so a function's locals and `$1` are still in scope. It also runs when a child shell ends (`bash -c`, a script, `( ... )`, a pipeline stage, `$( )`, a background job) or when `set -e` or a fatal expansion error ends the shell. `$?` starts at the ending status. The status stays that unless the cleanup calls `exit N` or fails under `set -e`.
-
-`trap -p` lists the registration, `trap - EXIT` removes it and `trap '' EXIT` turns cleanup off. A subshell lists its parent's registration but runs only one it registers itself. `bash` and `sh` start with none.
-
-`trap 'commands' ERR` runs after a command fails where `set -e` would end the shell: not in an `if`/`while`/`until` test, on the left of `&&`/`||` or after `!`, and not again for the group, loop or `case` whose command already ran it. `$?` is the failed status while it runs and after it. `trap 'commands' RETURN` runs as a function or a sourced file returns. A function neither runs nor lists its caller's `ERR` and `RETURN` actions unless `set -E` / `set -T`, and gives them back when it returns unless it set its own; a child shell keeps listing them but runs neither. `exec CMD` replaces the shell, so its actions go with it.
-
-A workspace session persists across `shell()` calls, so a call that returns does not fire `EXIT`. Register the cleanup inside `bash -c` when it has to finish before the call returns. Registrations are live shell state: session stores do not keep them.
-
-`trap` cannot catch a signal. Cancellation, `kill`, timeouts, and stopping or closing a workspace or a session end the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) as `bash: line 1: trap: TERM: not supported`, and `trap -l` the same way.
-
-## Background job output (Python, Node and Browser)
-
-A background job writes where the shell that started it writes, as it writes, so its lines and the foreground's come out in the order they were written, as in bash. `wait` prints none of a job's output, and `fg` prints only the job's command line.
-
-A `shell()` call returns whatever reached the session's virtual terminal while the line ran. A job that writes after the call has returned has no line to show it, so that output waits and comes first in the next call on the session; bash prints it right away. With `sink`, the output goes to the console while a line runs, and between lines it waits the same way.
-
-`$( )` and every pipeline stage but the last wait for the jobs they start, as bash reads a pipe until every writer has closed it. Inside `$( )`, `jobs` still lists the caller's jobs, but `wait` and `kill` reach only its own. `bash -c` sees only its own jobs.
+Mirage behaves the same in Python and TypeScript. This page lists where a
+TypeScript host differs: Node's `fs` patching and FUSE, the browser's sandbox,
+and how a call is cancelled. Cloudflare Workers have their own
+[limits](/typescript/cloudflare-quickstart#limits), and limits every host
+shares are on [Limits](/home/limits) and the [shell page](/home/core/shell#limits).
 
 ## Node
 
-### 1. `patchNodeFs` only patches CJS `require('fs')`, not ESM named imports
+### Node versions
 
-**The problem.** `patchNodeFs()` routes `fs` calls on mounted paths through the workspace so that third-party libraries "just work" against them. It swaps the functions on the CommonJS `fs` object and on `fs.promises`. ESM is different:
+`@struktoai/mirage-node` needs Node `^22.20 || ^24.12 || >=25`. The core and
+browser packages, run under Node, need 20.18.1 or later.
 
-- `import { readFile } from 'node:fs/promises'` binds the function when the module links.
-- There is no public hook to replace that binding after the fact.
-- Loader hooks (`--loader=…`) could intercept the resolution, but they're a build-time decision, not a runtime monkey-patch.
+### `patchNodeFs` misses ESM imports
 
-**What this means in practice.**
+`patchNodeFs(ws)` routes `fs` calls on mounted paths into the workspace by
+swapping the functions on CommonJS `fs` and `fs.promises`. An ESM named
+import, `import { readFile } from 'node:fs/promises'`, is bound when the
+module loads, so it bypasses the patch and reaches the real filesystem.
+Synchronous calls (`readFileSync`) refuse a mounted path either way, since
+the workspace answers asynchronously. Python has no such split:
+`with Workspace() as ws:` patches `open` and `os` for every caller.
 
-```ts
-// ✅ Works, this is CJS and goes through require('fs')
-const fs = require('fs')
-patchNodeFs(ws)
-await fs.promises.readFile('/data/x.txt')  // routes through the RAM VFS
+Instead:
 
-// ❌ Does not work, an ESM named import bypasses the patch
-import { readFile } from 'node:fs/promises'
-patchNodeFs(ws)
-await readFile('/data/x.txt')  // hits the real filesystem, throws ENOENT
-```
+- Call `ws.shell(...)` or `ws.vfs` directly, from ESM or CommonJS.
+- Mount the workspace as a [FUSE folder](/typescript/setup/fuse), so every
+  `fs` call goes through the kernel.
+- Keep the code that reads the files in CommonJS, `require('fs')`.
 
-A sync form (`fs.readFileSync`, `fs.statSync`) refuses a mounted path, since the workspace answers asynchronously. Paths outside every mount keep Node's own behavior in every form.
+### A FUSE folder is served on the process's event loop
 
-**Why Python doesn't hit this.** Python has no equivalent concept of "ESM vs CJS". `with Workspace() as ws:` swaps `builtins.open`, the `os` module's functions and `shutil.rmtree` in place: one set of mutable globals, one patch point, works for every caller.
-
-**Workarounds.**
-
-<Tabs>
-  <Tab title="Use FUSE instead">
-    If you want ESM-imported `node:fs` to see your mounted data, expose the workspace as a real filesystem. Mount FUSE, then every `fs` call, ESM or CJS, goes through the kernel.
-
-    ```ts
-    import { readFile } from 'node:fs/promises'
-    const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
-    await ws.fuseReady()
-    // The `/data` subtree is exposed at the mountpoint root, so paths are relative to it.
-    const bytes = await readFile(`${ws.fuseMountpoint}/x.txt`)
-    ```
-  </Tab>
-  <Tab title="Use Mirage's VFS API directly">
-    The most reliable approach: call `ws.shell()` or the VFS methods. No magic, no monkey-patching, works from ESM or CJS.
-
-    ```ts
-    const res = await ws.shell('cat /data/x.txt')
-    const bytes = res.stdout
-    ```
-  </Tab>
-  <Tab title="Restrict your code to CJS">
-    If you really need `fs` patching to work, keep the consuming code in CJS. Note that most modern Node projects default to ESM, so this is a narrow escape hatch.
-
-    ```js
-    // package.json: no "type": "module"
-    const { readFileSync } = require('fs')
-    ```
-  </Tab>
-</Tabs>
-
-**Possible future fix.** A published Node loader hook that resolves `node:fs` through the workspace would remove the ESM limitation, at the cost of forcing consumers to opt into the loader (`node --loader @struktoai/mirage-node/loader main.mjs`). Not planned currently.
-
----
-
-### 2. The FUSE mount is served by your process's event loop
-
-**The problem.** `@zkochan/fuse-native` dispatches every FUSE request (`getattr`, `read`, …) as a callback on the mounting process's Node event loop. Any *synchronous* access to your own mountpoint from that same process (`readFileSync`, `statSync`, `execFileSync('cat', …)`) blocks the loop that must answer the request: the call deadlocks, the kernel eventually times the filesystem out, and later operations fail with `Device not configured` / `ENOTCONN`.
-
-```ts
-const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
-await ws.fuseReady()
-const mp = ws.fuseMountpoint
-
-// ✅ async APIs interleave with the FUSE callbacks
-await readFile(`${mp}/x.txt`)
-await promisify(execFile)('cat', [`${mp}/x.txt`])
-
-// ❌ sync APIs deadlock the mount this process is serving
-readFileSync(`${mp}/x.txt`)
-execFileSync('cat', [`${mp}/x.txt`])
-```
-
-**Why Python doesn't hit this.** Python's FUSE loop runs on a dedicated thread, so the main thread can block on the mount freely.
-
-**Workarounds.** Use async `fs` APIs and async subprocess spawns from the mounting process, or dedicate a child process to owning the mount (see `examples/typescript/fuse/helper.ts` for the pattern). External processes (a program on a machine, another terminal, your shell) are unaffected — the constraint only binds the process that created the mount.
-
----
-
-### 3. Size-unknown API files stat as 0 bytes until first open
-
-**The behavior.** API-backed mounts (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` because the byte size isn't known until the API has been called. Over the FUSE mount these files behave like Linux `/proc` files: they stat as **0 bytes until first open**, and become fully readable the moment anything opens them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of the reported size; `@zkochan/fuse-native` doesn't expose the option, so Mirage appends it to the mount option string itself) and `attr_timeout=0` (post-open `fstat` returns the real size of the now-fetched content, kept warm in a 30-second cache).
-
-What that means per tool:
-
-| Tools | Behavior |
-| --- | --- |
-| `cat`, `grep`, `head`, `cp`, `md5sum`, `sed`, `sort` | correct content, always |
-| `wc -c`, `tail -c` | correct (they fstat after open, which serves the real size) |
-| `ls -l`, `du`, `find -size`, `test -s` | report 0 until the file has been opened recently |
-| `tar`, `rsync`, `scp` | see 0 at stat time and copy empty content, exactly like `tar` over `/proc`; read the file first or use `cat`/`cp` based flows |
-
-Mirage never reports a fake size and never fetches content during `stat`: returning real sizes eagerly would fire one API call per file on every `ls -l`. Earlier TS versions instead reported a fake 100 MiB size with zero-padded reads (`JSON.parse` of a FUSE-read file failed on the padding); that sentinel is gone and reads are byte-exact.
-
-**Why Python behaves the same.** Unlike the other entries on this page, this one is not TS-specific: it is a design property of API-backed mounts, and Python's FUSE layer has identical semantics (see [Python FUSE setup](/python/setup/fuse#size-semantics-for-api-backed-files)). It is listed here because the stat-time zeros are the most common FUSE surprise in practice.
-
----
+A synchronous call on the folder from the process that mounted it, such as
+`readFileSync` or `execFileSync('cat', ...)`, blocks the loop that must
+answer it, and the mount hangs. Use async `fs` calls and async child
+processes, or own the mount from a child process. Python serves its folder on
+a thread of its own. See [FUSE](/typescript/setup/fuse#mount-a-folder).
 
 ## Browser
 
-The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`. That removes the Node sections above (neither FUSE nor `patchNodeFs` apply) but introduces its own constraints.
+A browser workspace runs inside the page, with no kernel, no subprocesses and
+no Node `fs`. Every command runs in-process, and `python3` runs on
+[Pyodide](/typescript/runtime/pyodide).
 
-### 1. No FUSE
+- **No FUSE.** A page cannot mount a folder: the browser `Workspace` takes
+  plain mounts. Use `ws.shell(...)` and `ws.vfs`.
+- **OPFS quota and eviction.** [`OPFSVFS`](/typescript/setup/opfs) stores
+  files under the browser's per-origin quota. Set its `capacity` so a write
+  fails with `Disk quota exceeded` before the browser's own quota does;
+  `navigator.storage.estimate()` shows the room left. The browser may clear
+  an origin under storage pressure unless the page calls
+  `navigator.storage.persist()`.
+- **CORS.** A VFS that calls a third-party API from the page fails unless
+  that API allows the page's origin. Slack and Discord take a `proxyUrl` to
+  a backend that adds the token; S3, R2 and GCS take presigned URLs; Notion,
+  Box, Dropbox and Google sign in from the page with OAuth.
+- **Pyodide caches files for a run.** A file Pyodide read stays cached for
+  that run, so an outside edit shows on the next run. Without a worker and
+  either `SharedArrayBuffer` or Mirage's service worker, `python3` exits 127;
+  see [worker and browser setup](/typescript/runtime/pyodide#worker-and-browser-setup).
+- **VFS a page does not build.** SSH, Disk, SQL, GridFS, Nextcloud,
+  Hugging Face Buckets, LanceDB and Email need Node APIs or raw TCP. Jaeger,
+  Databricks Volumes, TiDB Cloud Filesystem and the Hugging Face Hub mounts
+  take their service token in the config, which a page would have to hold,
+  so only Node and Cloudflare build them; the browser's Slack, Discord, S3
+  and the like leave the token to a proxy or a presigned URL instead. A
+  config that names one fails with an error. Postgres runs over HTTP with
+  `NeonPgDriver`, and MongoDB with `HttpMongoDriver` through an HTTP proxy;
+  both need an endpoint that allows the page's origin.
 
-Browsers can't mount filesystems. The browser `Workspace` takes plain mounts: there is no `Mount` backend option and no `addFuseMount`. Use `ws.shell(...)` (virtual executor) and `ws.vfs.read`/`write` instead. Every builtin (`cat`, `grep`, `jq`, `awk`, etc.) is reimplemented in-process, so most agent code paths work unchanged from Node; `python3` runs on Pyodide (see below).
+## Cancellation
 
-### 2. OPFS quotas and persistence
+`ws.shell(command, { signal })` cancels a call, as `cancel` does in Python.
+The two differ because a JavaScript promise cannot be cancelled:
 
-`OPFSVFS` writes through the [Origin Private File System](https://web.dev/articles/origin-private-file-system). Two things to know:
-
-- **Storage quota.** The browser sets per-origin quotas (typically a fraction of free disk, single-digit GB on most setups). Hitting it raises `QuotaExceededError`. Call `navigator.storage.estimate()` to inspect.
-- **Eviction.** Origins that aren't [persisted](https://web.dev/articles/persistent-storage) can be cleared by the browser under storage pressure. For long-lived workspaces, request `navigator.storage.persist()` early.
-
-### 3. CORS for HTTP-backed VFS
-
-Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls from the page. Anything not configured to allow your origin via CORS will fail with the usual browser error. Workarounds:
-
-- **Browser-native auth flows.** mounts like Box, Dropbox, GDrive, GDocs ship PKCE OAuth examples that work entirely in-browser.
-- **Pre-signed URLs.** For S3/R2/GCS, generate pre-signed URLs server-side and pass them in. The Mirage browser examples include a Vite dev-server `presigner` plugin as reference.
-- **Same-origin proxy.** Stand up a tiny proxy on your own domain that forwards to the upstream API with the right auth headers.
-
-### 4. Pyodide caches accessed files for each run
-
-Pyodide's worker fetches workspace files on access and caches them for that
-execution. An external edit to a cached file is not visible until the next
-run. Without workers, or with neither `SharedArrayBuffer` nor Mirage's
-service worker, `python3` in a workspace exits 127 rather than copy every
-mount in before each run.
-
-See [worker and browser setup](/typescript/runtime/python#worker-and-browser-setup)
-for browser requirements and [file access](/typescript/runtime/python#files)
-for its limitations.
-
-### 5. Some VFS drivers remain Node-only
-
-SSH, LanceDB, Email, Disk, GridFS, Nextcloud, and the Hugging Face mounts are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Databricks Volumes and Jaeger use HTTP but are not exported by `@struktoai/mirage-browser` yet. Importing any of them from `@struktoai/mirage-browser` is a build error.
-
-Postgres and MongoDB do have browser implementations:
-
-- Postgres uses `NeonPgDriver` over HTTP.
-- MongoDB uses `HttpMongoDriver` and an HTTP proxy such as the bundled mongo-proxy example.
-
-Those HTTP drivers still need a browser-reachable endpoint with the correct CORS policy. They are not drop-in replacements for raw Postgres or MongoDB socket connections.
-
----
-
-## Quick reference
-
-| Scenario | Runtime | Status |
-|---|---|---|
-| `patchNodeFs()` with `require('fs')` (CJS) | Node | ✅ works |
-| `patchNodeFs()` with `import from 'node:fs'` (ESM) | Node | ❌ silently bypassed; use FUSE or the VFS API |
-| FUSE `cat`/`readFile` of API-backed size-unknown files | Node | ✅ works (stats 0 until opened, like `/proc`) |
-| `tar`/`rsync` of an unopened size-unknown file | Node | ❌ copies 0 bytes (stat-only tools; same in Python) — read the file first or use `cp` |
-| Synchronous access to your own mount from the mounting process | Node | ❌ deadlocks; use async APIs or a child process |
-| `ws.shell(...)` virtual builtins | Browser | ✅ works |
-| `Workspace` with a fuse `Mount` | Browser | ❌ not supported; the browser `Workspace` takes plain mounts |
-| OPFS reads/writes within quota | Browser | ✅ works |
-| OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
-| HTTP-backed mounts without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
-| Python `open()` writes back through mount | Browser | ✅ with workers and `SharedArrayBuffer` or the service worker |
-| Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
-| MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
-| Node-only VFS types (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, Nextcloud, FUSE) | Browser | ❌ Node APIs or raw TCP required |
-| Databricks Volumes, Jaeger | Browser | ❌ not exported by the browser package yet |
-
-The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
-
-## CPU-bound builtin processing
-
-Line readers, cache drains, and `wc` processing periodically yield to the event loop. Large RAM files and warm cache reads therefore allow host timers and I/O callbacks to run. `Workspace.shell(command, { signal })` forwards caller cancellation to builtin input processing; Python provides the corresponding `cancel=asyncio.Event()` path and task cancellation.
-
-File-cache fingerprints use incremental MD5: the Node package installs native hashing with 64 KiB updates, while browser/core uses JavaScript block batches. Both yield on a time budget; Python uses incremental `hashlib` updates.
-
-These checkpoints are cooperative, not a hard execution-time bound. A synchronous regex call, native sort, whole-buffer allocation, or individual hash chunk can still occupy the thread until that operation returns. Custom handlers must observe cancellation themselves. Embeddings requiring isolation from arbitrary CPU work should run the workspace in a separate worker or process.
-
-Queued calls have not started execution: cancelling one removes its waiter immediately, even while the preceding call is still blocked. Once a call starts, cancellation is cooperative and usually leaves backend writes in place; [conditional S3 file moves](/typescript/setup/s3) may attempt rollback.
-
-Cancellation itself has one seam. Python runs the whole line as one task, cancels it and joins it, so every await in the line unwinds before `execute` raises; the line's own flush and history record get the same 250 ms grace after the cancel and are cancelled too if a store holds them past it. A JavaScript promise cannot be cancelled, so TypeScript fires the signal, joins the tree for a short grace (250 ms) while responsive leaves close their producers and settle, then releases the caller. `execute` always rejects with an `AbortError` whose `cause` is the signal's reason. A leaf that does not observe the signal within the grace (a custom handler, a backend call with no signal parameter) keeps running in the background until it settles on its own; its output is dropped and it cannot change `$?` (the status entry point refuses a statement that settles after the release), but any write it completes still lands on the backend. A handler that loops over operands reaches its backend through slots (a generic-bound command such as `rm`, `cp` or `mkdir`) or through the dispatcher (a namespace-routed one such as `chmod`, `touch` or `rm` of a link), and both refuse to start once the signal has fired, so a released line begins no further read or write between operands; only a custom handler that reaches its backend directly can. Python's cancelled task never reaches the next operand, and a Python handler or store must let `CancelledError` propagate: one that swallows both deliveries holds `execute` until it returns, as it would hold `asyncio.wait_for`, and a warning is logged while it does. A caller cancelled from outside (`asyncio.wait_for` around `execute`) gets the same grace as the event. Loading workspace state, parsing, routing, the fetch of a managed variable's secret, the history record and the session flush are raced against the signal as well, so a stalled state store or secret source cannot hold the caller either. A line is recorded in history once it has been parsed; an abort that lands while workspace state is still loading records nothing, in both languages. A command timeout is the line's own answer (exit 124), never an abort of the invocation: neither language writes the caller's signal or event. A background job, and every line it evaluates, runs without the caller's signal or event; only `kill` reaches it.
-
-The cancellation boundary is caller completion, not proof that every custom handler has stopped. TypeScript retains the evaluation and its owned parser programs until the command tree settles, even after the grace releases the caller. An uncooperative mount handler can keep running after that tree settles. An embedding that needs a hard stop for arbitrary handlers must provide process or worker isolation.
-
-## Streaming resource bounds
-
-Named gzip/gunzip/zgrep, `iconv -o`, archive commands, deferred redirects and
-script output, external sort, split/csplit and record reordering use incremental
-I/O or replayable scratch storage. Known-size tar members can emit immediately;
-unknown-size members must be spooled before writing their headers. ZIP updates
-copy unchanged compressed members, but archive indexing and updates still read
-the existing archive in full. They do not yet use remote range reads to fetch
-only the central directory or selected members.
-
-Streaming bounds payload memory in supported host packages; it does not make
-every algorithm constant-memory. A single large record, archive metadata,
-AWK arrays, regex `tac`, `diff`/`patch` and `jq --slurp` retain their algorithmic
-working data. Whole-byte results still collect output.
-
-The standard `rg` engine on Python, Node and Browser limits requested scratch
-storage for each search to 64 MiB. This covers both state tables, their capture rows,
-start and candidate capture slots, and the closure stack. Compiled expressions,
-input, emitted matches and captures, printer output, and allocator overhead are
-outside that limit. Ordinary search retains only whole-match captures.
-Replacement templates containing `$` conservatively retain all capture groups
-when the selected output uses replacement. A pattern whose scratch storage
-would exceed the limit is refused before searching. `--regex-size-limit`
-controls compilation separately and does not raise the search scratch limit.
-
-Native write paths cover disk, SSH, OPFS, GridFS and the upload-session APIs for
-Drive, Dropbox, OneDrive, SharePoint and Box. Uploads that require a length or
-replay stage their input first. Provider sessions are cleaned up where the API
-supports it; this is not a durable upload-resume service across process restarts.
-S3 uses 8 MiB multipart parts, with a 10,000-part limit (about 78.1 GiB with this
-fixed part size). Presigned uploads and conditional writes to custom S3 endpoints
-retain a single PUT, backed by scratch storage and limited to 5 GiB. Store-native
-append is unavailable on S3: it still downloads and uploads the object again.
-
-Async I/O lets another request run while an operation waits. Compression and
-comparison still consume CPU; spooling adds local I/O. Reductions in peak memory
-or time to first output do not imply an equal increase in server throughput or
-lower cloud network bills.
-
-
-### Measured command-level costs
-
-The mirrored Python implementations were measured with Python 3.12.11 on macOS,
-using three isolated runs over a 128 MiB deterministic binary input. Each probe
-consumes output without collecting it. These are median tracked Python
-allocations (`tracemalloc`), not process RSS or TypeScript measurements; the
-baseline measured implementations match main at `866615ceb7`.
-
-| Operation | Peak allocations before → after | First 64 KiB before → after | Total before → after |
-| --- | --- | --- | --- |
-| Named gzip | 512.13 → 0.54 MiB | 2,016 → 1.36 ms | 2,064 → 2,225 ms |
-| Tar, known member size | 263.74 → 0.28 MiB | 160.68 → 0.31 ms | 209 → 173 ms |
-| Tar, unknown size | 263.74 → 1.21 MiB | 160.68 → 217.73 ms | 209 → 489 ms |
-| Default streamed cache fill | 256.24 → 8.13 MiB | 0.09 → 0.07 ms | 137 → 103 ms |
-
-Output SHA-256 values matched before and after. Named gzip's maximum event-loop
-lag fell from 1,877 ms to 4.88 ms in the same probe. Its total compression time
-did not improve. Unknown-size tar incurs scratch I/O and remains slower than
-collecting the input; a known size avoids that staging. The cache result also
-changes admission: the 128 MiB file is no longer cached with the default fill
-budget, so repeated reads can cost more backend I/O.
-
-Run from the repository root:
-
-```bash
-PYTHONPATH=python python/.venv/bin/python scripts/benchmark_streaming.py gzip_file
-```
-
-Other modes are `gzip_stdin`,
-`tar_current` (with `--known-size` to skip staging), `cache_default`, `cache_8mib`
-and `cache_0`. `--mib` changes the input size. For the previous reader contract,
-run the same script with the previous source tree on `PYTHONPATH` and
-`--whole-read` for named gzip and tar. Whole-result workspace APIs collect their
-output, so their final result memory is outside this streaming probe.
+- Python cancels the line's task and waits for it to unwind. TypeScript fires
+  the signal, gives the line 250 ms to settle, then rejects with an
+  `AbortError` whose `cause` is the signal's reason.
+- A step that ignores the signal, such as a custom handler or a backend call
+  with no signal, can run on after that. Its output is dropped and it cannot
+  change `$?`, but a write it completes still lands. Built-in commands check
+  the signal between operands, so they start no new read or write.
+- Long commands yield to the event loop as they go, so timers and I/O keep
+  running, but a single synchronous step, such as a large regex match, holds
+  the thread until it returns. To stop arbitrary code hard, run the workspace
+  in a worker or a separate process.
+- A command's `timeout` is the line's own result, exit 124, not a
+  cancellation, and a background job runs without the caller's signal: only
+  `kill` reaches it.

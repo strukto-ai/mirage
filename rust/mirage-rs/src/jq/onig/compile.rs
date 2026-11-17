@@ -4,7 +4,8 @@ use std::ops::Range;
 
 use super::callout::Callout;
 use super::class::Set;
-use super::parse::{Anchor, Node, Parsed, Saved, Update};
+use super::node::{Anchor, Node, Saved, Update};
+use super::parse::Parsed;
 
 const INVALID_LOOK_BEHIND: &str = "invalid pattern in look-behind";
 const NEVER_ENDING_RECURSION: &str = "never ending recursion";

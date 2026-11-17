@@ -389,3 +389,52 @@ xdr_struct!(diropargs3, dir, name);
 pub fn get_root_mount_handle() -> Vec<u8> {
     vec![0]
 }
+
+impl XDR for nfsstring {
+    fn serialize<R: Write>(&self, dest: &mut R) -> std::io::Result<()> {
+        self.0.serialize(dest)
+    }
+    fn deserialize<R: Read>(&mut self, src: &mut R) -> std::io::Result<()> {
+        self.0.deserialize(src)
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct DirEntrySimple {
+    pub fileid: fileid3,
+    pub name: filename3,
+}
+#[derive(Default, Debug)]
+pub struct ReadDirSimpleResult {
+    pub entries: Vec<DirEntrySimple>,
+    pub end: bool,
+}
+
+#[derive(Default, Debug)]
+pub struct DirEntry {
+    pub fileid: fileid3,
+    pub name: filename3,
+    pub attr: fattr3,
+}
+#[derive(Default, Debug)]
+pub struct ReadDirResult {
+    pub entries: Vec<DirEntry>,
+    pub end: bool,
+}
+
+impl ReadDirSimpleResult {
+    pub(super) fn from_readdir_result(result: &ReadDirResult) -> ReadDirSimpleResult {
+        let entries: Vec<DirEntrySimple> = result
+            .entries
+            .iter()
+            .map(|e| DirEntrySimple {
+                fileid: e.fileid,
+                name: e.name.clone(),
+            })
+            .collect();
+        ReadDirSimpleResult {
+            entries,
+            end: result.end,
+        }
+    }
+}

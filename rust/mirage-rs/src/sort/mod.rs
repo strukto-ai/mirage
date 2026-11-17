@@ -1,3 +1,4 @@
+mod cost;
 mod key;
 mod modifiers;
 pub(crate) mod number;
@@ -13,6 +14,7 @@ use crate::{
     constants::{MAX_HELD, OUTPUT},
     parse_config,
 };
+use cost::{COST_BYTES, weight};
 use key::{Compare, Comparison};
 
 #[derive(Deserialize)]
@@ -142,19 +144,6 @@ fn write_record(
 /// Work charged per call. Exact numeric and whole-record lexical
 /// comparisons resume after this byte allowance.
 const STEP: usize = 4 * 1024;
-
-/// A record's bytes that count as one more comparison's work, about what a
-/// keyed comparison of two short records costs.
-const COST_BYTES: usize = 256;
-
-fn weight(record: &[u8]) -> usize {
-    1 + record.len() / COST_BYTES
-}
-
-/// What comparing two records may cost: each can be read to its end.
-fn cost(a: &[u8], b: &[u8]) -> usize {
-    weight(a) + weight(b) - 1
-}
 
 /// The most records one block sort orders, and the most weight: a block
 /// of long records ends sooner.

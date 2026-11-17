@@ -7,12 +7,14 @@ use std::sync::Arc;
 
 use memchr::memmem::Finder;
 
+use super::fault::{Answer, Fault, array_limit, array_too_long, fail, type_error};
+use super::meter::Limits;
 use super::meter::{self, Charge};
 use super::parse::parse_value;
+use super::value::StringBuffer;
 use super::value::{
     Comparing, Key, List, MAX_DEPTH, Number, Object, Text, TooDeep, Value, try_compare,
 };
-use super::vm::Limits;
 
 const PATH_DEPTH: usize = 10000;
 const INDEX_MAX: f64 = (i32::MAX >> 2) as f64;
@@ -281,14 +283,6 @@ pub(crate) const BUILTINS: &[(&str, usize, Kind)] = &[
     ("IN", 2, Kind::Jq),
     ("builtins", 0, Kind::Native),
 ];
-
-/// Why a native builtin produced no value.
-pub(crate) enum Fault {
-    Error(Value),
-    Halt(Option<Value>, Option<f64>),
-}
-
-type Answer = Result<Value, Fault>;
 
 fn deep_compare(_: TooDeep) -> Fault {
     fail("Comparison too deep")
@@ -608,14 +602,6 @@ impl Sorting {
     }
 }
 
-pub(super) fn fail(message: impl Into<String>) -> Fault {
-    Fault::Error(StringBuffer::from(message.into()).into_value())
-}
-
-pub(super) fn type_error(bad: &Value, message: &str) -> Fault {
-    fail(format!("{} ({}) {message}", bad.kind(), bad.dump_trunc()))
-}
-
 fn type_error2(a: &Value, b: &Value, message: &str) -> Fault {
     fail(format!(
         "{} ({}) and {} ({}) {message}",
@@ -826,19 +812,6 @@ pub(super) fn string_too_long(limits: Limits) -> Fault {
 
 pub(super) fn string_limit(text: String, limits: Limits) -> Answer {
     StringBuffer::from(text).finish(limits)
-}
-
-fn array_too_long(items: usize) -> Fault {
-    fail(format!("jq array limit of {items} elements exceeded"))
-}
-
-pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
-    let mut charge = Charge::open(items.capacity() * std::mem::size_of::<Value>());
-    if items.len() > limits.items {
-        return Err(array_too_long(limits.items));
-    }
-    charge.set(0);
-    Ok(Value::array(items))
 }
 
 /// The builtin `f` over `args`, the input first. As jq's `f_plus` frees
@@ -2068,58 +2041,6 @@ impl Deref for FormatInput<'_> {
     }
 }
 
-struct StringBuffer {
-    text: String,
-    charge: Charge,
-}
-
-impl From<String> for StringBuffer {
-    fn from(text: String) -> Self {
-        let charge = Charge::open(text.capacity());
-        Self { text, charge }
-    }
-}
-
-impl StringBuffer {
-    fn with_capacity(capacity: usize) -> Self {
-        String::with_capacity(capacity).into()
-    }
-
-    fn push(&mut self, ch: char) {
-        let capacity = self.text.capacity();
-        self.text.push(ch);
-        if self.text.capacity() != capacity {
-            self.charge.set(self.text.capacity());
-        }
-    }
-
-    fn push_str(&mut self, text: &str) {
-        let capacity = self.text.capacity();
-        self.text.push_str(text);
-        if self.text.capacity() != capacity {
-            self.charge.set(self.text.capacity());
-        }
-    }
-
-    fn into_value(mut self) -> Value {
-        self.charge.set(0);
-        Value::string(self.text)
-    }
-
-    /// Refuses a string grown past the limit, before it grows further.
-    fn check(&self, limits: Limits) -> Result<(), Fault> {
-        if self.text.len() > limits.bytes {
-            return Err(string_too_long(limits));
-        }
-        Ok(())
-    }
-
-    fn finish(self, limits: Limits) -> Answer {
-        self.check(limits)?;
-        Ok(self.into_value())
-    }
-}
-
 fn escape(
     text: &str,
     table: &[(char, &str)],
@@ -2818,6 +2739,21 @@ fn component(paths: &[Value], i: usize, at: usize) -> &Value {
 
 fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
     Deleting::begin(object, paths)?.finish(limits)
+}
+
+impl StringBuffer {
+    /// Refuses a string grown past the limit, before it grows further.
+    pub(super) fn check(&self, limits: Limits) -> Result<(), Fault> {
+        if self.text.len() > limits.bytes {
+            return Err(string_too_long(limits));
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish(self, limits: Limits) -> Answer {
+        self.check(limits)?;
+        Ok(self.into_value())
+    }
 }
 
 #[cfg(test)]

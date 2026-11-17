@@ -12,20 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 # Follows gh 2.85.0's root usage function and error printing (MIT; see
 # licenses/third_party/gh.txt), Cobra 1.10.2's unknown-command suggestions
 # (Apache-2.0; licenses/third_party/cobra.txt) and pflag 1.0.10's option table
 # and refusals (BSD-3-Clause; licenses/third_party/pflag.txt).
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
+from mirage.commands.spec.parser import ParsedArgs
 from mirage.commands.spec.types import Argument, CommandSpec
-
-if TYPE_CHECKING:
-    from mirage.commands.spec.parser import ParsedArgs
-    from mirage.workspace.executor.command.types import ParsedCommand
+from mirage.workspace.executor.command.types import ParsedCommand
 
 COBRA_EXIT = 1
 SUGGESTION_DISTANCE = 2
@@ -325,7 +321,7 @@ def _invalid_value(
 
 
 def leaf_message(
-    parsed: "ParsedCommand | ParsedArgs",
+    parsed: ParsedCommand | ParsedArgs,
     node: CommandSpec,
     argv: Sequence[str],
     path: str,
@@ -344,7 +340,7 @@ def leaf_message(
 
 
 def _option_message(
-    parsed: "ParsedCommand | ParsedArgs",
+    parsed: ParsedCommand | ParsedArgs,
     node: CommandSpec,
     argv: Sequence[str],
 ) -> str | None:

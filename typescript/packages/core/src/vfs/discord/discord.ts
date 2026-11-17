@@ -39,21 +39,15 @@ export const VFS_MD = `\`\`\`text
       <username>__<user-id>.json    # member profile
 \`\`\`
 
-- A guild, channel, member or attachment name is \`<display-name>__<id>\`.
-  The display name keeps Discord's spelling (spaces, apostrophes, emoji);
-  only \`/\` becomes \`∕\` (U+2215). \`ls\` the parent first to find exact
-  names, and quote a name that has spaces.
-- Messages are JSONL; use \`jq\` for fields such as \`.content\`,
-  \`.author.username\` and \`.attachments\`. A day's \`files/\` may be empty.
-- Without \`start_time\`/\`end_time\`, a channel lists the latest 30 days up
-  to its newest message; a date glob finds earlier days.
-- With \`start_time\`/\`end_time\`, listings cover that scope; messages and
-  attachments outside it are absent, direct paths included. Users and
-  channel metadata stay available as context.
-- \`grep\` and \`rg\` read the files they reach, so \`grep\` needs \`-r\` for a
-  directory. Under a channel that reads every listed day, attachments
-  included: they download from the CDN, and binary ones such as JPG or
-  PDF produce noise.`
+- A guild, channel, member or attachment name is \`<display-name>__<id>\`;
+  only \`/\` becomes \`∕\` (U+2215). \`ls\` the parent for exact names and
+  quote names with spaces.
+- \`chat.jsonl\` holds one message per line (\`.content\`,
+  \`.author.username\`, \`.attachments\`).
+- Without \`start_time\`/\`end_time\`, a channel lists the 30 days up to its
+  newest message; a date glob finds earlier days.
+- \`grep -r\` on a channel reads every listed day, attachments included;
+  they download from the CDN and binary ones produce noise.`
 
 /**
  * Discord's functions over its accessor, which the node and browser

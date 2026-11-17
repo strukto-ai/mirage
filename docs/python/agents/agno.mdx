@@ -1,10 +1,10 @@
 ---
 title: Agno
-description: Give Agno agents shell-based filesystem access to any Mirage workspace using MirageToolkit.
+description: Give Agno agents Mirage's tools over a workspace with MirageToolkit.
 icon: /images/agno-logo.svg
 ---
 
-[Agno](https://github.com/agno-agi/agno) is an agent framework that groups related tools into `Toolkit` classes. Mirage ships `MirageToolkit`, a toolkit that runs Mirage's seven tools in a workspace instead of on the host.
+[Agno](https://docs.agno.com) groups an agent's tools into `Toolkit` classes. Mirage ships `MirageToolkit`, a toolkit over a `Workspace`, so the agent's shell and file tools run in the workspace's mounts instead of on the host.
 
 ## Install
 
@@ -18,7 +18,7 @@ uv add 'mirage-ai[agno]'
 import asyncio
 
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from agno.models.openai import OpenAIResponses
 
 from mirage import MountMode, RAMVFS, Workspace
 from mirage.agents.agno import MirageToolkit
@@ -26,10 +26,9 @@ from mirage.agents.agno import MirageToolkit
 ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = Agent(
-    model=OpenAIChat(id="gpt-5.4-mini"),
+    model=OpenAIResponses(id="gpt-6.1-sol"),
     tools=[MirageToolkit(ws)],
-    instructions=("You have access to a virtual filesystem via shell "
-                  "tools. Use them to explore and read files."),
+    instructions="Use the shell tools to explore and read files.",
     markdown=True,
 )
 
@@ -38,6 +37,7 @@ async def main() -> None:
     await ws.shell('echo "hello from mirage" | tee /data/hello.txt')
     await agent.aprint_response(
         "List all files under /data and show the contents of each one.")
+    await ws.close()
 
 
 asyncio.run(main())
@@ -45,7 +45,9 @@ asyncio.run(main())
 
 ## Tools
 
-The toolkit serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools), as far as the session's profile leaves them (`session.tools.names()`), each as a sync and async pair under one name: Agno calls the async one in `arun` and `aprint_response`, and the sync one otherwise.
+The toolkit serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, filtered by the session's profile. Each tool is a sync and async pair under one name. Agno calls the async one in `arun` and `aprint_response`, and the sync one otherwise.
+
+`MirageToolkit(ws, session_id="agent")` acts as a session made with [`ws.session`](/python/access/in-app#workspace-methods), so its profile judges every call. `stale_write_protection=False` lets the agent overwrite a file that changed since it read it.
 
 ## Exports
 
@@ -59,4 +61,4 @@ The toolkit serves the session's seven tools, [`session.tools`](/python/access/i
 
 ## Examples
 
-- [`examples/python/agents/agno/agno_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/agno/agno_example.py), `Agent` with `MirageToolkit` over a RAM workspace, sync and async.
+- [`examples/python/agents/agno/agno_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/agno/agno_example.py), an `Agent` with `MirageToolkit` over a RAM workspace.

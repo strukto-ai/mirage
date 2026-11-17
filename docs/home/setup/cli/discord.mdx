@@ -1,10 +1,17 @@
 ---
 title: Discord
 icon: /images/discord-logo.svg
-description: Set up the Discord CLI with Python or TypeScript.
+description: Set up the Discord CLI.
 ---
 
 import License from '/snippets/cli/license/discord.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Create a bot token in [Discord setup](/home/setup/discord), then register it on
 an existing `ws`.
@@ -13,9 +20,17 @@ Grant Send Messages for `send`/`edit`/`poll` and Send Polls for `poll`.
 Add Reactions is needed for `react`, Create Public Threads for `thread-create`,
 and Manage Messages when deleting others' messages.
 
-Commands: [Python](/python/cli/discord) · [TypeScript](/typescript/cli/discord).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      discord:
+        cli: discord
+        machine: in_process
+        config:
+          token: ${DISCORD_BOT_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.discord import DISCORD
@@ -34,5 +49,16 @@ Commands: [Python](/python/cli/discord) · [TypeScript](/typescript/cli/discord)
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/discord">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/discord">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

@@ -6,8 +6,10 @@ use std::task::{Context, Poll};
 
 use serde::{Deserialize, Serialize};
 
-use super::nfs::{fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, specdata3};
-use super::vfs::{DirEntry, ReadDirResult};
+use super::nfs::{
+    DirEntry, ReadDirResult, fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3,
+    specdata3,
+};
 use crate::StreamError;
 
 pub const ROOT_ID: fileid3 = 1;

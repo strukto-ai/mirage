@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
 use crate::number;
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 const BACKWARDS: &str = "xxd: Sorry, cannot seek backwards.";

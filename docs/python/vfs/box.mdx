@@ -1,42 +1,20 @@
 ---
 title: Box
-description: Mount a Box account (or a single folder of it) as a read/write Mirage filesystem with async access and shell commands.
+description: Virtualize a Box account or folder from Python.
 icon: /images/box-logo.svg
 ---
 
-The Box VFS mounts a Box account at some prefix such as `/box/`. All
-operations involve network I/O to the
-[Box v2 HTTP API](https://developer.box.com/reference/):
-`/2.0/folders/{id}/items` for directories, `/2.0/files/{id}/content` for
-content, and multipart upload / `/2.0/folders` / `delete` / `PUT` (rename or
-move) / `copy` for writes. Files are served as raw bytes. Both `READ` and
-`WRITE` modes are supported.
+`BoxVFS` mounts a Box account, or one folder of it: every item keeps its real
+name and raw bytes, and folders stay folders. Tokens and apps are set up on
+the [Box page](/home/setup/box).
 
-Box addresses everything by numeric **item id**, not by path (the account
-root is folder id `0`). Mirage resolves each path to its id by listing folders
-level by level and caches the path → id mapping, so nested directories cost
-one API call per level on first access.
+## Install
 
-Every Box item is served as its raw bytes, keeping its real name. Box's native
-`.boxnote` / `.boxcanvas` come back as their stored ProseMirror-style JSON
-(text, so `cat foo.boxnote | jq .` works), and Box's Google-Workspace files
-(`.gdoc` / `.gsheet` / `.gslides`) come back as the Office Open XML zips
-(`docx` / `xlsx` / `pptx`) Box stores them as, opaque binary like any other
-Office document.
+```bash
+pip install mirage-ai
+```
 
-<Note>
-Box exposes no API to edit these formats from a structured payload, so Mirage
-does not decode them, it hands back exactly what Box stores. For a rich,
-editable view of Google-format documents, mount them through
-[Google Drive](/python/vfs/gdrive) with Google credentials instead; the
-`gws` commands operate on Google file ids and do not apply to Box.
-</Note>
-
-For credential setup, see the [Box Setup](/home/setup/box) guide. The
-TypeScript packages ship the same backend for Node and the browser, see
-[Box (TypeScript)](/typescript/setup/box).
-
-## Config
+## Configure
 
 ```python
 import os
@@ -45,68 +23,145 @@ from mirage import MountMode, Workspace
 from mirage.vfs.box import BoxConfig, BoxVFS
 
 config = BoxConfig(
-    # A Box developer token from the app console (~60-minute lifetime):
-    access_token=os.environ["BOX_DEVELOPER_TOKEN"],
-    # Optional:
-    # root_folder_id="123456789",  # mount a sub-folder as the root
+    client_id=os.environ["BOX_CLIENT_ID"],
+    client_secret=os.environ["BOX_CLIENT_SECRET"],
+    refresh_token=os.environ["BOX_REFRESH_TOKEN"],
 )
+ws = Workspace({"/box": BoxVFS(config)}, mode=MountMode.WRITE)
 
-vfs = BoxVFS(config)
-ws = Workspace({"/box": vfs}, mode=MountMode.WRITE)
+result = await ws.shell("ls /box && grep -rlw report /box/Contracts")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-Box supports three authentication modes:
+`root_folder_id` mounts one folder instead of the whole account. To try the
+mount quickly, pass only `access_token` with a developer token.
 
-- **Developer token** (`access_token`): quickest to try; expires after ~60
-  minutes and cannot be refreshed programmatically.
-- **OAuth2 refresh** (`client_id` + `refresh_token`, optional
-  `client_secret`): Box rotates the refresh token on each refresh; supply
-  `on_refresh_token_rotated` to persist the new one across restarts.
-- **Client credentials** (`client_id` + `client_secret` + `enterprise_id`):
-  the app authenticates as its own service account; expired tokens are simply
-  re-fetched.
-
-The access token is cached in memory and refreshed ~5 minutes before expiry
-(refresh and client-credentials modes).
-
-### Config Reference
+### Fields
 
 {/* generated: config-table box start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Box app client ID. Required with `refresh_token` (OAuth) or with `client_secret` and `enterprise_id` (client credentials). |
-| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. |
-| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | OAuth refresh token; needs `client_id`. Box rotates it on every refresh, so persist the new one with `on_refresh_token_rotated`. |
-| <code style={{ whiteSpace: 'nowrap' }}>enterprise_id</code> | Box enterprise ID for the client-credentials grant. With `client_id` and `client_secret`, tokens are minted for the app's service account and no refresh token is involved. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. |
-| <code style={{ whiteSpace: 'nowrap' }}>root_folder_id</code> | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. Unset mounts the account root, folder `0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>refresh_fn</code><br />secret | Async callable that takes the current refresh token and returns `(access_token, refresh_token, expires_in)`, called instead of Box's token endpoint. Needs `client_id` and `refresh_token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>on_refresh_token_rotated</code><br />secret | Async callable given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="endpoint" type={"str"}>
+  Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts.
+</ResponseField>
+<ResponseField name="client_id" type={"str"}>
+  Box app client ID. Required with `refresh_token` (OAuth) or with `client_secret` and `enterprise_id` (client credentials).
+</ResponseField>
+<ResponseField name="client_secret" type={"str"} post={["secret"]}>
+  Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it.
+</ResponseField>
+<ResponseField name="refresh_token" type={"str"} post={["secret"]}>
+  OAuth refresh token; needs `client_id`. Box rotates it on every refresh, so persist the new one with `on_refresh_token_rotated`.
+</ResponseField>
+<ResponseField name="enterprise_id" type={"str"}>
+  Box enterprise ID for the client-credentials grant. With `client_id` and `client_secret`, tokens are minted for the app's service account and no refresh token is involved.
+</ResponseField>
+<ResponseField name="access_token" type={"str"} post={["secret"]}>
+  Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential.
+</ResponseField>
+<ResponseField name="root_folder_id" type={"str"}>
+  Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. Unset mounts the account root, folder `0`.
+</ResponseField>
+<ResponseField name="refresh_fn" type={"callable"} post={["secret"]}>
+  Async callable that takes the current refresh token and returns `(access_token, refresh_token, expires_in)`, called instead of Box's token endpoint. Needs `client_id` and `refresh_token`.
+</ResponseField>
+<ResponseField name="on_refresh_token_rotated" type={"callable"} post={["secret"]}>
+  Async callable given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table box end */}
 
-\* Provide one of: `access_token`; `client_id` + `refresh_token`; or
-`client_id` + `client_secret` + `enterprise_id`.
+## Authentication
+
+Set one of these credential sets:
+
+1. `access_token`: a developer token, used as is. It lasts 60 minutes, cannot
+   be renewed by code, and wins over every other credential.
+2. `client_id` and `refresh_token`, with `client_secret` unless the app is a
+   PKCE client: OAuth for a user. Box rotates the refresh token on every
+   refresh and the old one stops working after its first use, so pass
+   `on_refresh_token_rotated`, an async callable given each new token, to
+   persist it across restarts.
+3. `client_id`, `client_secret` and `enterprise_id`: client credentials for
+   the app's service account, fetched again on expiry with no refresh token.
+
+Access tokens are renewed 5 minutes before they expire. A service account
+starts with an empty root: share folders with its email address to see them.
+
+The app needs the **Read all files and folders stored in Box** scope, and
+**Write all files and folders stored in Box** for a `write` mount. In an
+enterprise, a Box admin may have to enable the app first; until then Box
+answers `403 access_denied`.
+
+## Layout
+
+```text
+/box/
+  Contracts/
+    2026_MSA.pdf
+  Roadmap.gdoc
+  Team Notes.boxnote
+  data.csv
+```
+
+Box addresses items by numeric ID, and the account root is folder `0`. The
+mount resolves each path one folder level at a time, so the first access to a
+nested folder costs one request per level, and keeps the result.
+
+## Behavior
+
+- **Folder root:** `root_folder_id` mounts one folder, its ID taken from the
+  web URL (`app.box.com/folder/<id>`). Unlike a path, it survives renames and
+  moves. Paths outside it are unreachable.
+- **Box files:** `.boxnote` and `.boxcanvas` come back as the JSON Box
+  stores, so `cat notes.boxnote | jq .` works. `.gdoc`, `.gsheet` and
+  `.gslides` come back as the Office zips Box stores (`docx`, `xlsx`,
+  `pptx`). Mirage does not convert them; for an editable view of Google
+  files, mount [Google Drive](/python/vfs/gdrive) instead.
+- **`read: fresh`:** a cached file is checked against the SHA-1 Box keeps,
+  with one request. A file Box reports without a SHA-1 cannot be checked, so
+  each fresh read downloads it again. Listings are fetched again once per
+  command, since a folder's version does not change with its children.
+
+## Integration
+
+Box answers these commands through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Box search names the files to read, for whole
+  words. Every file is read when the search fails, reaches its 10,000-match
+  limit or finds nothing, or when the searched path is not a folder.
+  [Search](/home/integration/search) lists how each option uses it. Box
+  searches the text it extracted, not the bytes, and indexes a write some
+  time after it lands, so it can miss Office files, PDFs, archives, the end
+  of a large file, a word Box splits differently (`foo.bar`) and recent
+  writes. `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/limits#command-output) reads every file instead.
+- `grep -r` and `rg` without `-w`: every file is read.
+- `sha1sum`: the SHA-1 Box keeps, asked live.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md box start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `box`, write |
+    | `/<path>` | `box`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -119,13 +174,11 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
         <file>             # PDFs, images and the rest: raw bytes
     ```
 
-    - Every item is served as its raw bytes; pipe the JSON ones to `jq`.
-    - This is a remote mount: prefer targeted reads over full scans.
-    - Box names folders by numeric id (the root is `0`). The path-to-id
-      mapping is cached, so a nested directory costs one API call per level
-      on first access. `ls` the parent before constructing a path.
+    - Pipe `.boxnote` and `.boxcanvas` files to `jq`.
+    - Each path level resolves to a Box id with one API call on first
+      access; `ls` the parent before building a path.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -133,7 +186,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `box` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -154,7 +207,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `box`, write |
+    | `/<path>` | `box`, `<mode>` |
 
     ## VFS Layout
 
@@ -171,11 +224,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
         <file>             # PDFs, images and the rest: raw bytes
     ```
 
-    - Every item is served as its raw bytes; pipe the JSON ones to `jq`.
-    - This is a remote mount: prefer targeted reads over full scans.
-    - Box names folders by numeric id (the root is `0`). The path-to-id
-      mapping is cached, so a nested directory costs one API call per level
-      on first access. `ls` the parent before constructing a path.
+    - Pipe `.boxnote` and `.boxcanvas` files to `jq`.
+    - Each path level resolves to a Box id with one API call on first
+      access; `ls` the parent before building a path.
 
     ## Supported Unix Commands for VFS
 
@@ -197,145 +248,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md box end */}
-
-## Mount a subfolder
-
-Pass `root_folder_id` to expose a single Box folder as the mount root instead
-of the whole account. Every command and FUSE/VFS op is scoped to that folder;
-paths outside it are unreachable. Folder ids are stable across renames and
-moves, and are visible in the Box web URL (`app.box.com/folder/<id>`), so an
-id-based mount survives reorganization that a path prefix would not.
-
-```python
-config = BoxConfig(
-    access_token=os.environ["BOX_DEVELOPER_TOKEN"],
-    root_folder_id="123456789",
-)
-```
-
-## Cache
-
-The Box VFS caches directory listings via `IndexCacheStore` to hold the
-path → id mapping and reduce repeated API calls during traversal;
-with no `index:` configured, listings live
-for the mount's `ttl` (600 s by default), at most 24 hours; a configured
-`index:` uses its own `ttl`, still capped by the mount's `ttl:`. File reads go through the standard read cache
-(`caches_reads = True`). Writes invalidate the affected listings so subsequent
-reads see the new state.
-
-## Writes
-
-A write records the `sha1` its upload reply names, so a `fresh` read
-right after a `tee` or `sed -i` downloads nothing.
-
-## Conditional writes
-
-A rewrite that observes a missing file requires atomic create-only support,
-which this backend does not currently enable. Appending to a missing file
-therefore returns an unsupported-operation error under either write policy.
-An intentional write with `>` can create the file, and subsequent appends to
-that existing file retain the selected policy.
-
-A Box mount accepts `write: conditional`. A
-write or a file delete compares the `sha1` mirage holds with the one the
-folder listing it walks anyway shows, and refuses a file changed since it
-was read before sending anything; the request then carries the file's
-`etag` as `If-Match`, so Box refuses (412) a change that lands in between.
-A conditional write costs no request more than a plain one. `rm -r` walks
-the folder file by file, and a `mv` within the mount is Box's own move,
-which is not refused when its source changed (a `mv` to another mount is a
-copy and a conditioned delete, so there a changed source stays and `mv`
-reports the failed removal).
-
-## Reads under `fresh`
-
-A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
-folder listing and `GET /files/{id}` both carry; a download names no version,
-so a whole read stamps the listed `sha1` only when the downloaded bytes hash
-to it, and a ranged read stamps nothing. On a
-`write: conditional` mount a whole read stamps
-the `sha1` of the bytes it downloaded, so a listing another client has since
-outdated cannot leave the next write without the version the agent read. `modified_at` is never the token:
-two same-size edits in one second share it.
-
-Checking a cached file costs one request, `GET /files/{id}` by the id the
-mount last listed, while the mount still holds that file's listing row. The
-answer is trusted only when Box places the same active file at the same path
-from the mount root; a file that was moved, renamed, trashed or recreated
-falls back to listing each folder from the mount root, one listing per level
-(up to two per level when the file is gone). When that fallback confirms
-byte-identical content, the built-in RAM and Redis indexes retain the newly
-resolved file row if the original hint is still current. A later check then
-uses the recovered id without refreshing the parent listing. Custom indexes
-must implement `replace_if_unchanged` to retain this row; otherwise later checks
-repeat the fallback walk. A persistent 403
-still requires the failed point request and a listing walk on each check.
-Any stale, unknown or gone verdict on the mount
-drops its cached listings, so the checks after one walk until a cold read or
-an `ls` lists the folders again. A file Box reports without a `sha1` cannot
-be verified: each fresh read of it downloads it again and drops the mount's
-cached listings.
-
-A folder's `etag` does not move when its children change, so under `fresh`
-listings are re-fetched once per command. Repeated uses within that command
-share the result; outside commands, the existing one-second listing trust
-window applies. Before fetching a nested listing, mirage resolves its folder through current
-parent listings up to the configured mount root. A folder moved away and
-replaced under the same name is therefore resolved to the replacement on
-the next fresh command. This costs one listing per ancestor level; a warm
-file check still uses one metadata request.
-
-## Integration
-
-What Box answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Box |
-| --- | --- |
-| `grep -r`, `rg` | Box search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Box splits differently (`foo.bar`) and recent writes. |
-| `sha1sum` | The SHA-1 Box keeps, asked live |
-
-`grep -rw` and
-`rg -w` read only the files Box search names. Every file is read when the
-search fails, reaches its 10,000-match limit or finds nothing, or when the
-searched path is not a folder. [Search](/home/integration/search) lists how
-each option uses the search.
-
-`walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Box searches the text it extracted, not the bytes
-`grep` reads, and indexes a write some time after it lands. A file that holds
-the word can be left out: an office file, PDF or archive, the end of a large
-file, a word Box splits differently (`foo.bar`), or a recent write.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from mirage import MountMode, Workspace
-from mirage.vfs.box import BoxConfig, BoxVFS
-
-config = BoxConfig(access_token=os.environ["BOX_DEVELOPER_TOKEN"])
-
-vfs = BoxVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/box": vfs}, mode=MountMode.WRITE)
-
-    r = await ws.shell("ls /box/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("grep -rl report /box/docs/")
-    print(await r.stdout_str())
-
-    # Plain text from a Box Note:
-    # A Box Note comes back as raw ProseMirror JSON:
-    r = await ws.shell("cat /box/notes/standup.boxnote | jq .")
-    print(await r.stdout_str())
-
-    await ws.close()
-
-
-asyncio.run(main())
-```

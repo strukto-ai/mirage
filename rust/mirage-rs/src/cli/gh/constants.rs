@@ -419,3 +419,5 @@ pub(crate) const REPO_EDIT_FIELDS: [(&str, &str, EditKind); 19] = [
         EditKind::Toggle,
     ),
 ];
+
+pub(crate) const COPILOT_LOGIN: &str = "copilot-swe-agent";

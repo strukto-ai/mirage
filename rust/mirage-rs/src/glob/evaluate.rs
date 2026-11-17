@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
+use super::compile::Span;
 use super::compile::{Program, has, is};
-use super::{Key, Positions, Span};
+
+type Positions = Arc<Vec<Span>>;
+type Key = (usize, usize, usize);
 
 fn append_span(spans: &mut Vec<Span>, (lo, hi): Span) {
     if lo >= hi {

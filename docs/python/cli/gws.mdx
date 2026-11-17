@@ -26,6 +26,74 @@ ws.register_cli("gws", GWS, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `gws` installed.
+
+{/* generated: skill-md gws start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`gws`**
+
+    ```text
+    usage: gws [-h] {drive,sheets,docs,slides,calendar,forms,gmail} ...
+
+    Google Workspace API commands
+
+    commands:
+      drive     Google drive API commands
+      sheets    Google sheets API commands
+      docs      Google docs API commands
+      slides    Google slides API commands
+      calendar  Google calendar API commands
+      forms     Google forms API commands
+      gmail     Google gmail API commands
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `gws`
+
+    ```text
+    usage: gws [-h] {drive,sheets,docs,slides,calendar,forms,gmail} ...
+
+    Google Workspace API commands
+
+    commands:
+      drive     Google drive API commands
+      sheets    Google sheets API commands
+      docs      Google docs API commands
+      slides    Google slides API commands
+      calendar  Google calendar API commands
+      forms     Google forms API commands
+      gmail     Google gmail API commands
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md gws end */}
+
 <Reference />
 
 <License />

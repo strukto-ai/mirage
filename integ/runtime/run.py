@@ -1510,7 +1510,8 @@ def _machines(runtime: str, case: dict[str, Any]) -> dict[str, Any]:
     ``RUNTIME_ENTRY``, the case's ``entry`` captures and config laid
     over it. A machine provider's variant adds the case's
     ``also_machines``, each capturing what an ``also_entries`` entry
-    names for it and nothing else.
+    names for it and nothing else, that entry's ``config`` laid over its
+    own, such as another container.
 
     Args:
         runtime (str): one name from the case's ``runtimes``.
@@ -1534,7 +1535,9 @@ def _machines(runtime: str, case: dict[str, Any]) -> dict[str, Any]:
     for name in case.get("also_machines", []):
         machines[name] = {"provider": runtime, **config, "captures": []}
     for entry in case.get("also_entries", []):
-        machines[entry["machine"]]["captures"] = entry["captures"]
+        also = machines[entry["machine"]]
+        also.update(entry.get("config", {}))
+        also["captures"] = entry["captures"]
     return machines
 
 

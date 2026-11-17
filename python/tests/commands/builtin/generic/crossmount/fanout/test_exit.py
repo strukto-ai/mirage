@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.crossmount.fanout.exit import (
 )
 
 
-def testcombined_exit_grep_match_wins_over_no_match():
+def test_combined_exit_grep_match_wins_over_no_match():
     assert combined_exit("grep", [0, 1]) == 0
     assert combined_exit("grep", [1, 1]) == 1
     assert combined_exit("grep", [2, 0]) == 2
@@ -25,12 +25,12 @@ def testcombined_exit_grep_match_wins_over_no_match():
     assert combined_exit("md5", [0, 0]) == 0
 
 
-def testcombined_exit_grep_failed_operand_forces_1():
+def test_combined_exit_grep_failed_operand_forces_1():
     assert combined_exit("grep", [0, 1], [False, True]) == 1
     assert combined_exit("rg", [0, 1], [False, True]) == 1
     assert combined_exit("grep", [0, 1], [False, False]) == 0
 
 
-def testcombined_exit_grep_quiet_match_wins_over_error():
+def test_combined_exit_grep_quiet_match_wins_over_error():
     assert combined_exit("grep", [0, 1], [False, True], quiet=True) == 0
     assert combined_exit("grep", [1, 1], [False, True], quiet=True) == 1

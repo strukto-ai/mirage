@@ -10,9 +10,10 @@ use super::super::tree::{A, E, M, R, W, W14, WP, is_on, on_off, outer_xml};
 use super::super::units::{
     f2, fixed, fmt, half_points, hex_color, word_line_spacing, word_spacing,
 };
+use super::doc::Word;
 use super::{
-    WPG, Word, clip, color_with_theme_tail, fill_unknown, is_int, jsn, num_text, num_value,
-    para_segment, read_border, sdt_segment, t_text, w_child, w_val,
+    WPG, clip, color_with_theme_tail, fill_unknown, is_int, jsn, num_text, num_value, para_segment,
+    read_border, sdt_segment, t_text, w_child, w_val,
 };
 
 /// The attribute order the Open XML SDK keeps for a typed `w:style`.

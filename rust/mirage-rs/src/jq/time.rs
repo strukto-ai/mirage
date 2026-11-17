@@ -2,7 +2,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use super::builtin::{Cfunc, Fault};
+use super::builtin::Cfunc;
+use super::fault::Fault;
 use super::meter::Charge;
 use super::value::{Text, Value};
 use crate::calendar::{MONTHS, WEEKDAYS};

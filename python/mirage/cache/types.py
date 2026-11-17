@@ -15,13 +15,11 @@
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias
+from typing import Literal, Protocol, TypeAlias
 
 from mirage.io.types import ByteSource
+from mirage.observe.record import OpRecord
 from mirage.types import FileStat, PathSpec
-
-if TYPE_CHECKING:
-    from mirage.observe.record import OpRecord
 
 WriteKind = Literal["put", "copy", "delete"]
 
@@ -124,7 +122,7 @@ class WriteContext:
     ]
     drop: Callable[[PathSpec], Awaitable[None]]
     keep: Callable[[PathSpec, "Measured"], Awaitable[None]]
-    observe: Callable[["OpRecord"], None] | None = None
+    observe: Callable[[OpRecord], None] | None = None
     lose: Callable[[PathSpec, str | None], None] | None = None
     creates: frozenset[WriteKind] = frozenset()
 

@@ -1,48 +1,65 @@
 ---
 title: Browser Quickstart
 icon: browser
-description: Run a Mirage RAM workspace in a browser with Vite and @struktoai/mirage-browser.
+description: Run a Mirage workspace in a browser page with Vite and @struktoai/mirage-browser.
 keywords: ["Mirage browser quickstart", "@struktoai/mirage-browser", "virtual filesystem", "Vite"]
 ---
 
-This runs Mirage in the browser with an in-memory filesystem and no credentials.
+`@struktoai/mirage-browser` runs a workspace inside the page: the shell, the
+commands and an in-memory filesystem, with no server and no credentials.
 
 ## Create the app
 
-This Vite starter needs Node 20.19+ on Node 20, or Node 22.12+:
+<Steps>
+  <Step title="Start a Vite app">
+    Vite needs Node 20.19+ or 22.12+:
 
-```bash
-npm create vite@7 mirage-browser -- --template vanilla-ts
-cd mirage-browser
-npm install @struktoai/mirage-browser
-```
+    ```bash
+    npm create vite@7 mirage-browser -- --template vanilla-ts
+    cd mirage-browser
+    npm install @struktoai/mirage-browser
+    ```
 
-With pnpm, also add `@struktoai/mirage-core`: Vite's dev server finds Mirage's WebAssembly
-files through it.
+    With pnpm, also add `@struktoai/mirage-core`: Vite's dev server finds
+    Mirage's WebAssembly files through it.
+  </Step>
+  <Step title="Replace src/main.ts">
+    ```ts src/main.ts
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 
-Replace `src/main.ts` with:
+    async function main(): Promise<void> {
+      const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+      await ws.shell('echo "hello mirage" > /data/hello.txt')
+      const result = await ws.shell('cat /data/hello.txt')
+      document.querySelector<HTMLDivElement>('#app')!.textContent = result.stdoutText
+      await ws.close()
+    }
 
-```ts src/main.ts
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
+    void main()
+    ```
+  </Step>
+  <Step title="Run it">
+    ```bash
+    npm run dev
+    ```
 
-async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-  await ws.shell('echo "hello mirage" > /data/hello.txt')
-  const result = await ws.shell('cat /data/hello.txt')
-  document.querySelector<HTMLDivElement>('#app')!.textContent = result.stdoutText
-  await ws.close()
-}
+    Open the URL Vite prints. The page shows `hello mirage`.
+  </Step>
+</Steps>
 
-void main()
-```
+## Next steps
 
-Start the development server:
-
-```bash
-npm run dev
-```
-
-Open the URL Vite prints. The page displays `hello mirage`.
-
-Before choosing a production mount, review the [browser limitations](/typescript/limitations#browser)
-and browser support in the [VFS table](/home/setup/vfs).
+<CardGroup cols={2}>
+  <Card title="Keep files in the browser" icon="hard-drive" href="/typescript/setup/opfs">
+    OPFS keeps a workspace's files across page loads.
+  </Card>
+  <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
+    The VFS table marks which mounts run in a browser.
+  </Card>
+  <Card title="Run python3 in the page" icon="python" href="/typescript/runtime/pyodide">
+    Pyodide in a worker, with workspace files.
+  </Card>
+  <Card title="Browser limitations" icon="triangle-exclamation" href="/typescript/limitations#browser">
+    CORS, storage quotas and Node-only mounts.
+  </Card>
+</CardGroup>

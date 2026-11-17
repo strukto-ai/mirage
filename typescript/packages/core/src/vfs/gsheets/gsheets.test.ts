@@ -20,8 +20,7 @@ describe('VFS_MD', () => {
     const rendered = VFS_MD.replace(/\{prefix\}/g, '/gsheets')
     expect(rendered).toContain('owned/')
     expect(rendered).toContain('shared/')
-    expect(rendered).toContain('shared with you by others')
-    expect(rendered).toContain('still in `owned/`')
+    expect(rendered).toContain('stay\n  in `owned/`')
     expect(rendered).toContain('`spreadsheets.get`')
     expect(rendered).toContain('.sheets[].properties.title')
   })
@@ -29,9 +28,7 @@ describe('VFS_MD', () => {
 
 describe('VFS_MD file commands', () => {
   it('documents rm and mv for a write path', () => {
-    expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gsheet.json')
-    expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gsheet.json')
-    expect(VFS_MD).toContain('Delete, on a `write` path:')
-    expect(VFS_MD).toContain('Rename to a new title, on a `write` path:')
+    expect(VFS_MD).toContain('On a `write` path, `rm` a file to delete it from Drive')
+    expect(VFS_MD).toContain('`mv` it to a\n  new `<title>`')
   })
 })

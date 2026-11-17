@@ -1,10 +1,17 @@
 ---
 title: pdftotext
 icon: file-pdf
-description: Set up the credential-free pdftotext CLI for PDF files with Python or TypeScript.
+description: Set up the credential-free pdftotext CLI for PDF files.
 ---
 
 import License from '/snippets/cli/license/pdftotext.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Mirage implements [poppler](https://poppler.freedesktop.org)'s `pdftotext`:
 the text of a PDF in reading order, with `-layout`, `-raw`, page ranges and
@@ -14,9 +21,15 @@ empty text.
 `pdftotext` needs no account config and reads PDF files through existing mounts.
 Register it on `ws`.
 
-Commands: [Python](/python/cli/pdftotext) · [TypeScript](/typescript/cli/pdftotext).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      pdftotext:
+        cli: pdftotext
+        machine: in_process
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.pdf import PDFTOTEXT
@@ -32,5 +45,16 @@ Commands: [Python](/python/cli/pdftotext) · [TypeScript](/typescript/cli/pdftot
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/pdftotext">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/pdftotext">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

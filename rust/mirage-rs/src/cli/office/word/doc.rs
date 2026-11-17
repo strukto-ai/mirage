@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use super::super::Fail;
+use super::super::errors::Fail;
 use super::super::node::{Node, Value};
 use super::super::package::Pkg;
 use super::super::tree::{E, Tree, W, on_off};

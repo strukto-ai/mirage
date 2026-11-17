@@ -46,10 +46,9 @@ export const VFS_MD = `\`\`\`text
                   comments.jsonl
 \`\`\`
 
-- \`ls\` directories first to discover exact names.
-- To act on boards and cards (list boards, members, lists, labels, cards
-  and comments; create, update, move, assign, label and comment on
-  cards), use the \`trello\` CLI if installed (\`trello --help\`).`
+- A named segment is \`<name>__<id>\`; \`ls\` the parent for exact names.
+- To create, update, move, assign, label or comment on cards, use the
+  \`trello\` CLI if installed (\`trello --help\`).`
 
 export class TrelloVFS extends BaseVFS {
   override readonly handed = {

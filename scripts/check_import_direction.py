@@ -410,6 +410,9 @@ def python_cycles(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
 
     A from-import follows the selected lazy export to its defining module;
     importing a sibling submodule does not import every name in its barrel.
+    Importing ``p.q.r`` runs the ``__init__`` of each package on the way
+    that is not the importer's own, so an eager barrel there is a
+    dependency too.
     """
     modules = {
         ".".join(
@@ -417,6 +420,7 @@ def python_cycles(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
         ).removesuffix(".__init__"): path
         for path in sources
     }
+    names_of = {path: module for module, path in modules.items()}
     trees = {path: ast.parse(text) for path, text in sources.items()}
     exports = {
         module: _python_exports(path, trees[path])
@@ -425,7 +429,10 @@ def python_cycles(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
     values: dict[Path, set[Path]] = defaultdict(set)
     every: dict[Path, set[Path]] = defaultdict(set)
     for path, tree in trees.items():
+        barrel = path.name == "__init__.py" and bool(exports[names_of[path]])
         for module, names, eager in _python_dependencies(path, tree):
+            if barrel and not eager:
+                continue
             targets = {module} if not names else set()
             for name in names:
                 seen: set[tuple[str, str]] = set()
@@ -441,6 +448,12 @@ def python_cycles(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
                     if exported is None:
                         break
                     target, name = exported
+            own = names_of[path].split(".")
+            for target in list(targets):
+                parts = target.split(".")
+                for depth in range(1, len(parts)):
+                    if parts[:depth] != own[:depth]:
+                        targets.add(".".join(parts[:depth]))
             for target in targets:
                 dependency = modules.get(target)
                 if dependency is not None and dependency != path:
@@ -718,6 +731,321 @@ def typescript_cycles(
     )
 
 
+def _first_party(node: ast.AST) -> bool:
+    if isinstance(node, ast.ImportFrom):
+        return node.level > 0 or (node.module or "").split(".")[0] == "mirage"
+    return isinstance(node, ast.Import) and any(
+        alias.name.split(".")[0] == "mirage" for alias in node.names
+    )
+
+
+def python_type_checking(sources: dict[Path, str]) -> set[str]:
+    """Modules other than a package barrel that import a Mirage module
+    under ``TYPE_CHECKING``, at any depth below the guard: a first-party
+    type only the checker may see stands in for an import the module
+    should make or a design to fix. A third-party one (an optional extra,
+    ``_typeshed``) is left alone; it cannot close a cycle here."""
+    return {
+        path.relative_to(ROOT).as_posix()
+        for path, text in sources.items()
+        if path.name != "__init__.py"
+        and any(
+            isinstance(node, ast.If)
+            and _type_checking(node.test)
+            and any(
+                _first_party(child)
+                for statement in node.body
+                for child in ast.walk(statement)
+            )
+            for node in ast.walk(ast.parse(text))
+        )
+    }
+
+
+RS_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+# Comments, string literals and char literals, which may spell a path
+# that is not one; a lifetime ('a) has no closing quote and is kept.
+RS_NOISE = re.compile(
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r'|(?<![\w])b?r(?P<hashes>#*)".*?"(?P=hashes)'
+    r'|(?<![\w])b?"(?:\\.|[^"\\])*"'
+    r"|(?<![\w])b?'(?:\\.[^'\n]*|[^\\'\n])'",
+    re.S,
+)
+RS_VISIBILITY = re.compile(r"\bpub\s*\(\s*in\s+[^)]*\)")
+RS_USE = re.compile(r"\buse\s+([^;]+);")
+RS_INLINE_MOD = re.compile(rf"\bmod\s+({RS_IDENT})\s*\{{")
+RS_VALUE = re.compile(
+    rf"^(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*fn\s+({RS_IDENT})"
+    rf"|^(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+({RS_IDENT})",
+    re.M,
+)
+RS_ITEM = re.compile(
+    rf"^(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*"
+    rf"(?:fn|struct|enum|trait|type|const|static|union|mod)\s+({RS_IDENT})",
+    re.M,
+)
+RS_CFG_TEST = re.compile(r"#\[cfg\(test\)\](?:\s*#\[[^\]]*\])*")
+RS_PATH = re.compile(
+    rf"(?<![\w:$])((?:crate|super|self|{RS_IDENT})(?:\s*::\s*{RS_IDENT})+)"
+)
+
+
+def _rs_trees(tree: str) -> list[list[str]]:
+    """The paths one ``use`` tree names, braces and ``self`` expanded and
+    ``as`` renames dropped, each as its segments."""
+    tree = re.sub(r"\s+", "", re.sub(r"\s+as\s+", "@", tree))
+    brace = tree.find("{")
+    if brace < 0:
+        return [[s for s in tree.split("@")[0].split("::") if s]]
+    head = [s for s in tree[:brace].split("::") if s]
+    body = tree[brace + 1 : tree.rfind("}")]
+    items, depth, item = [], 0, ""
+    for ch in body:
+        if ch == "," and depth == 0:
+            items.append(item)
+            item = ""
+            continue
+        depth += (ch == "{") - (ch == "}")
+        item += ch
+    items.append(item)
+    paths: list[list[str]] = []
+    for part in filter(None, items):
+        for sub in _rs_trees(part):
+            paths.append(head if sub == ["self"] else head + sub)
+    return paths
+
+
+def _rs_modules(
+    src: Path, paths: Iterable[Path]
+) -> dict[tuple[str, ...], Path]:
+    """Each module file of one crate by its path below the crate root;
+    a binary root (``main.rs``, ``bin/``) is its own crate and left out."""
+    modules: dict[tuple[str, ...], Path] = {}
+    for path in paths:
+        parts = path.relative_to(src).with_suffix("").parts
+        if parts in (("main",),) or parts[0] == "bin":
+            continue
+        if parts == ("lib",):
+            parts = ()
+        elif parts[-1] == "mod":
+            parts = parts[:-1]
+        modules[parts] = path
+    return modules
+
+
+def _rs_closing(text: str) -> dict[int, int]:
+    """Each ``{`` offset to its matching ``}`` offset."""
+    closing: dict[int, int] = {}
+    stack: list[int] = []
+    for index, ch in enumerate(text):
+        if ch == "{":
+            stack.append(index)
+        elif ch == "}" and stack:
+            closing[stack.pop()] = index
+    return closing
+
+
+def _rs_inline(text: str) -> list[tuple[int, int, str]]:
+    """Each inline ``mod name { ... }`` of a file as its span and name."""
+    closing = _rs_closing(text)
+    spans = []
+    for match in RS_INLINE_MOD.finditer(text):
+        start = match.end() - 1
+        spans.append((start, closing.get(start, len(text)), match[1]))
+    return spans
+
+
+def _rs_without_tests(text: str) -> tuple[str, set[str]]:
+    """``text`` with each ``#[cfg(test)]`` item blanked, as the other
+    hosts leave their tests out, and the file modules it declares so."""
+    closing = _rs_closing(text)
+    spans: list[tuple[int, int]] = []
+    test_modules: set[str] = set()
+    for match in RS_CFG_TEST.finditer(text):
+        item = match.end()
+        semicolon = text.find(";", item)
+        brace = text.find("{", item)
+        if semicolon >= 0 and (brace < 0 or semicolon < brace):
+            end = semicolon
+            declared = re.match(
+                rf"\s*(?:pub\S*\s+)?mod\s+({RS_IDENT})\s*;", text[item:]
+            )
+            if declared:
+                test_modules.add(declared[1])
+        else:
+            end = closing.get(brace, len(text) - 1)
+        spans.append((match.start(), end + 1))
+    chars = list(text)
+    for start, end in spans:
+        for index in range(start, end):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars), test_modules
+
+
+def rust_cycles(sources: dict[Path, str] | None = None) -> set[str]:
+    """Files on a module cycle in any crate of the Rust workspace.
+
+    Cargo refuses a cycle between crates but not between the modules of
+    one, so this reads each crate's ``use`` trees and the ``crate::``,
+    ``super::``, ``self::`` and child-module paths its code spells, and
+    resolves each to the module that defines the name. A module-level
+    ``use``, private ones included (the crate sees a root's private
+    names), is followed to its source, so a name a crate root re-exports
+    is no dependency on the root.
+    """
+    if sources is None:
+        sources = {
+            path: path.read_text()
+            for manifest in sorted((ROOT / "rust").glob("*/Cargo.toml"))
+            if (manifest.parent / "src").is_dir()
+            for path in sorted((manifest.parent / "src").rglob("*.rs"))
+        }
+    crates: dict[Path, list[Path]] = defaultdict(list)
+    for path in sources:
+        parts = path.parts
+        crates[Path(*parts[: len(parts) - parts[::-1].index("src")])].append(
+            path
+        )
+    graph: dict[Path, set[Path]] = defaultdict(set)
+    for src, paths in crates.items():
+        modules = _rs_modules(src, paths)
+        texts: dict[tuple[str, ...], str] = {}
+        tests: set[tuple[str, ...]] = set()
+        for here, path in modules.items():
+            text, declared = _rs_without_tests(
+                RS_NOISE.sub(
+                    lambda m: "\n" * m.group().count("\n"), sources[path]
+                )
+            )
+            texts[here] = RS_VISIBILITY.sub("pub", text)
+            tests |= {(*here, name) for name in declared}
+        for here in list(modules):
+            if any(here[: len(test)] == test for test in tests):
+                del modules[here], texts[here]
+
+        def absolute(
+            segments: list[str], here: tuple[str, ...]
+        ) -> list[str] | None:
+            head = segments[0] if segments else ""
+            if head == "crate":
+                return segments
+            if head in ("super", "self"):
+                base = list(here)
+                rest = segments
+                while rest and rest[0] in ("super", "self"):
+                    if rest[0] == "super":
+                        base = base[:-1]
+                    rest = rest[1:]
+                return ["crate", *base, *rest]
+            if (*here, head) in modules:
+                return ["crate", *here, *segments]
+            return None
+
+        exports: dict[tuple[str, ...], dict[str, list[str]]] = defaultdict(
+            dict
+        )
+        globs: dict[tuple[str, ...], list[list[str]]] = defaultdict(list)
+        items = {
+            here: set(RS_ITEM.findall(text)) for here, text in texts.items()
+        }
+        for here, text in texts.items():
+            for match in RS_USE.finditer(text):
+                before = text[: match.start()]
+                if before.count("{") != before.count("}"):
+                    continue
+                for segments in _rs_trees(match[1]):
+                    full = absolute(segments, here)
+                    alias = re.search(rf"\bas\s+({RS_IDENT})\b", match[1])
+                    if full is not None and segments[-1] == "*":
+                        globs[here].append(full[:-1])
+                    if full is None or segments[-1] == "*":
+                        continue
+                    name = segments[-1]
+                    if alias and "{" not in match[1]:
+                        name = alias[1]
+                    exports[here][name] = full
+
+        def resolve(
+            full: list[str],
+            seen: frozenset[tuple[tuple[str, ...], str]],
+            value: bool,
+        ) -> tuple[tuple[str, ...], bool]:
+            module: tuple[str, ...] = ()
+            rest = full[1:]
+            while rest[value:] and (*module, rest[0]) in modules:
+                module = (*module, rest[0])
+                rest = rest[1:]
+            if not rest:
+                return module, True
+            if (module, rest[0]) in seen:
+                return module, False
+            seen = seen | {(module, rest[0])}
+            alias = exports[module].get(rest[0])
+            if alias is not None:
+                return resolve(alias + rest[1:], seen, value)
+            if rest[0] in items.get(module, ()):
+                return module, True
+            for source in globs[module]:
+                found, defined = resolve(source + rest, seen, value)
+                if defined:
+                    return found, True
+            return module, False
+
+        def target(
+            full: list[str],
+            seen: frozenset[tuple[tuple[str, ...], str]],
+            value: bool = False,
+        ) -> tuple[str, ...]:
+            return resolve(full, seen, value)[0]
+
+        values = {
+            here: {a or b for a, b in RS_VALUE.findall(text)}
+            for here, text in texts.items()
+        }
+
+        for here, text in texts.items():
+            inline = _rs_inline(text)
+            path = modules[here]
+            children = {
+                name[-1] for name in modules if name and name[:-1] == here
+            }
+            found: list[tuple[int, list[str], bool]] = [
+                (match.start(), segments, False)
+                for match in RS_USE.finditer(text)
+                for segments in _rs_trees(match[1])
+            ]
+            code = RS_USE.sub(lambda m: " " * len(m.group()), text)
+            for match in RS_PATH.finditer(code):
+                segments = re.sub(r"\s+", "", match[1]).split("::")
+                if segments[0] in ("crate", "super", "self") or (
+                    segments[0] in children
+                ):
+                    called = code[match.end() :].lstrip().startswith("(")
+                    found.append((match.start(), segments, called))
+            for offset, segments, called in found:
+                scope = here + tuple(
+                    name
+                    for start, end, name in sorted(inline)
+                    if start < offset < end
+                )
+                full = absolute(segments, scope)
+                if full is None:
+                    continue
+                if not called and len(full) > 1:
+                    name = full[-1]
+                    owner = target(full[:-1], frozenset())
+                    called = name in values.get(owner, ()) and not re.search(
+                        rf"(?<![\w:]){re.escape(name)}\s*::", code
+                    )
+                dependency = modules.get(target(full, frozenset(), called))
+                if dependency is not None and dependency != path:
+                    graph[path].add(dependency)
+    return {p.relative_to(ROOT).as_posix() for p in _cycle_files(graph)}
+
+
 SELFTEST_TS = [
     ("import { a } from './a.ts'", [("./a.ts", False, ("a",))]),
     ("import type { A } from './a.ts'", [("./a.ts", True, ("A",))]),
@@ -920,6 +1248,145 @@ def _selftest_cycles() -> int:
     if python_cycles(sources) != (set(), set()):
         print("  selftest: a sibling submodule was mistaken for its barrel")
         failed += 1
+    leaf = PY_ROOT / "planted/leaf.py"
+    other = PY_ROOT / "other.py"
+    knot = {p.relative_to(ROOT).as_posix() for p in (barrel, a, other)}
+    for init, want in (
+        ("from .a import A", (set(), knot)),
+        (
+            "if TYPE_CHECKING:\n    from .a import A\n"
+            "_EXPORTS = {'mirage.planted.a': ('A',)}",
+            (set(), set()),
+        ),
+    ):
+        sources = {
+            barrel: init,
+            a: "if TYPE_CHECKING:\n    from mirage.other import O",
+            leaf: "",
+            other: "from mirage.planted.leaf import L",
+        }
+        got = python_cycles(sources)
+        if got != want:
+            print(f"  selftest: package init {init!r}: {got}, want {want}")
+            failed += 1
+    nested = PY_ROOT / "planted/nested.py"
+    guarded = python_type_checking(
+        {
+            a: "if TYPE_CHECKING:\n    from .b import B",
+            b: "if TYPE_CHECKING:\n    from qdrant_client import models",
+            barrel: "if TYPE_CHECKING:\n    from .a import A",
+            nested: "if TYPE_CHECKING:\n    try:\n        from mirage.x import X\n"
+            "    except ImportError:\n        pass",
+            leaf: "if TYPE_CHECKING:\n    pass\nelse:\n    from mirage.x import X",
+        }
+    )
+    if guarded != {p.relative_to(ROOT).as_posix() for p in (a, nested)}:
+        print(f"  selftest: TYPE_CHECKING outside a barrel read as {guarded}")
+        failed += 1
+    crate = ROOT / "rust/planted/src"
+    lib, ra, rb = crate / "lib.rs", crate / "a.rs", crate / "b.rs"
+    rust_pair = {p.relative_to(ROOT).as_posix() for p in (ra, rb)}
+    for a_text, b_text, expected in (
+        ("use crate::b::B;", "use crate::a::A;", rust_pair),
+        (
+            "use crate::{\n    b::{self, B},\n};",
+            "pub fn f() { super::a::g() }",
+            rust_pair,
+        ),
+        ("fn f() { crate::b::g() }", "use super::a::A as Renamed;", rust_pair),
+        ("use crate::B;", "use crate::a::A;", rust_pair),
+        (
+            "mod inner {\n    use super::super::b::B;\n}",
+            "use crate::a::A;",
+            rust_pair,
+        ),
+        (
+            '// use crate::b::B;\nconst S: &str = "crate::b::B";',
+            "use crate::a::A;",
+            set(),
+        ),
+        (
+            "macro_rules! m { () => { $crate::b::g() } }",
+            "use crate::a::A;",
+            set(),
+        ),
+        (
+            "#[cfg(test)]\nmod tests {\n    use crate::b::B;\n}",
+            "use crate::a::A;",
+            set(),
+        ),
+        ("pub(in crate::b) struct A;", "use crate::a::A;", set()),
+    ):
+        cyclic = rust_cycles(
+            {lib: "pub use b::B;\nmod a;\nmod b;", ra: a_text, rb: b_text}
+        )
+        if cyclic != expected:
+            print(f"  selftest: Rust cycle {a_text!r} / {b_text!r}: {cyclic}")
+            failed += 1
+    cyclic = rust_cycles(
+        {
+            lib: "pub fn b() {}\nmod a;\nmod b;",
+            ra: "fn f() {\n    crate::b();\n}",
+            rb: "use crate::a::A;",
+        }
+    )
+    if cyclic:
+        print(f"  selftest: a call of a root fn read as its module: {cyclic}")
+        failed += 1
+    cyclic = rust_cycles(
+        {
+            lib: "mod a;\nmod t;\npub use a::A;\npub use t::*;",
+            ra: "use crate::T;\npub struct A;",
+            crate / "t.rs": "pub struct T;",
+        }
+    )
+    if cyclic:
+        print(
+            f"  selftest: a name a glob re-export brings read as the root: {cyclic}"
+        )
+        failed += 1
+    rc = crate / "c.rs"
+    cyclic = rust_cycles(
+        {
+            lib: "mod a;\nmod b;\nmod c;\npub use a::*;\npub use c::*;",
+            ra: "pub struct A;",
+            rb: "use crate::C;\npub struct B;",
+            rc: "use crate::b::B;\npub struct C;",
+        }
+    )
+    expected = {p.relative_to(ROOT).as_posix() for p in (rb, rc)}
+    if cyclic != expected:
+        print(f"  selftest: a name the second glob re-export brings: {cyclic}")
+        failed += 1
+    for use, expected in (("b()", set()), ("b::g()", rust_pair)):
+        cyclic = rust_cycles(
+            {
+                lib: "pub fn b() {}\nmod a;\nmod b;",
+                ra: f"use crate::b;\nfn f() {{\n    {use};\n}}",
+                rb: "use crate::a::A;",
+            }
+        )
+        if cyclic != expected:
+            print(
+                f"  selftest: an import of fn and module b used as {use}: {cyclic}"
+            )
+            failed += 1
+    for root in ("use b::B;", "fn f() {\n    use b::B;\n}\npub struct B;"):
+        cyclic = rust_cycles(
+            {
+                lib: f"{root}\nmod a;\nmod b;",
+                ra: "use crate::B;",
+                rb: "use crate::a::A;",
+            }
+        )
+        expected = (
+            rust_pair
+            if root.startswith("use")
+            else rust_pair | {lib.relative_to(ROOT).as_posix()}
+        )
+        if cyclic != expected:
+            print(f"  selftest: Rust root re-export {root!r}: {cyclic}")
+            failed += 1
     ts_a = TS_ROOT / "core/src/index.ts"
     ts_b = TS_ROOT / "server/src/index.ts"
     ts_pair = {p.relative_to(ROOT).as_posix() for p in (ts_a, ts_b)}
@@ -1001,13 +1468,15 @@ def main() -> int:
     unexcused = sorted(set(edges) - set(excused))
     stale = sorted(set(excused) - set(edges))
     unmapped, unused = cli_drift(cli_trees())
-    py_runtime, py_every = python_cycles(
-        {path: path.read_text() for path in PY_ROOT.rglob("*.py")}
-    )
+    py_sources = {path: path.read_text() for path in PY_ROOT.rglob("*.py")}
+    py_runtime, py_every = python_cycles(py_sources)
+    guarded = python_type_checking(py_sources)
     ts_runtime, ts_every = typescript_cycles()
+    rs_every = rust_cycles()
     runtime = py_runtime | ts_runtime
     every = py_every | ts_every
     baseline = exceptions["cycle_files"]
+    rs_baseline = exceptions["rust_cycle_files"]
     for edge in unexcused:
         print(f"  {edges[edge]}: {edge}")
     for edge in stale:
@@ -1020,6 +1489,11 @@ def main() -> int:
         print(f"  on a runtime import cycle: {path}")
     for path in sorted(every - runtime):
         print(f"  on a type-only or deferred import cycle: {path}")
+    for path in sorted(guarded):
+        print(f"  imports a Mirage module under TYPE_CHECKING: {path}")
+    if len(rs_every) != rs_baseline:
+        for path in sorted(rs_every):
+            print(f"  on a Rust module cycle: {path}")
     keys = {rule.title: rule.key for rule in RULES}
     held = Counter(keys[edges[edge]] for edge in edges if edge in excused)
     print()
@@ -1030,13 +1504,22 @@ def main() -> int:
     print(f"Python files on any import cycles: {len(py_every)}")
     print(f"TypeScript files on any import cycles: {len(ts_every)}")
     print(f"files on any import cycles: {len(every)} (baseline {baseline})")
+    print(
+        "Python modules importing Mirage under TYPE_CHECKING: "
+        f"{len(guarded)} (baseline 0)"
+    )
+    print(
+        f"Rust files on module cycles: {len(rs_every)} (baseline {rs_baseline})"
+    )
     failed = bool(
         unexcused
         or stale
         or unmapped
         or unused
         or runtime
+        or guarded
         or len(every) != baseline
+        or len(rs_every) != rs_baseline
     )
     return 1 if args.strict and failed else 0
 

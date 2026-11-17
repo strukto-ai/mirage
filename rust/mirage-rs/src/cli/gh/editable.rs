@@ -1,12 +1,12 @@
-// Follows gh 2.85.0's pkg/cmd/pr/shared/editable.go and editable_http.go
-// (MIT; see licenses/third_party/gh.txt).
+// Follows gh 2.85.0's pkg/cmd/pr/shared/editable.go and editable_http.go,
+// and pkg/cmd/issue's assignee handles (MIT; see licenses/third_party/gh.txt).
 
 use super::accessor::{Flags, body_value, csv_values};
-use super::issue::with_special_names;
-use crate::core::github::client::{Account, Result, usage};
+use super::constants::COPILOT_LOGIN;
+use crate::core::github::client::{Account, Failure, Result, usage};
 use crate::core::github::json::{Json, Obj};
 use crate::core::github::metadata::{Metadata, Wanted};
-use crate::core::github::repo::mutate;
+use crate::core::github::repo::{current_login, mutate};
 
 /// What `issue edit` and `pr edit` were asked to change.
 pub(crate) struct Editable {
@@ -236,4 +236,50 @@ async fn label_change(
     };
     mutate(account, operation, input_type, call, "__typename", input).await?;
     Ok(())
+}
+
+/// The login `@me` stands for, a failure in MeReplacer's words.
+pub(crate) async fn me_login(account: &Account) -> Result<String> {
+    current_login(account).await.map_err(|failure| {
+        Failure::Value(format!(
+            "failed resolving `@me` to your user handle: {}",
+            failure.text()
+        ))
+    })
+}
+
+/// A list of handles with `@me` read as the account's login.
+pub(crate) async fn with_me(account: &Account, handles: Vec<String>) -> Result<Vec<String>> {
+    if !handles.iter().any(|handle| handle == "@me") {
+        return Ok(handles);
+    }
+    let login = me_login(account).await?;
+    Ok(handles
+        .into_iter()
+        .map(|handle| {
+            if handle == "@me" {
+                login.clone()
+            } else {
+                handle
+            }
+        })
+        .collect())
+}
+
+/// Assignee handles with `@me` and `@copilot` read as logins.
+pub(crate) async fn with_special_names(
+    account: &Account,
+    handles: Vec<String>,
+) -> Result<Vec<String>> {
+    Ok(with_me(account, handles)
+        .await?
+        .into_iter()
+        .map(|handle| {
+            if handle.eq_ignore_ascii_case("@copilot") {
+                COPILOT_LOGIN.to_owned()
+            } else {
+                handle
+            }
+        })
+        .collect())
 }

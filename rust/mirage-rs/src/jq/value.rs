@@ -1,4 +1,4 @@
-// Adapted from jq 1.8.2 (MIT), src/jv.c, src/jv_aux.c and src/jv_print.c. See licenses/third_party/jq.txt.
+// Adapted from jq 1.8.2 (MIT), src/builtin.c, src/jv.c, src/jv_aux.c and src/jv_print.c. See licenses/third_party/jq.txt.
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -2378,6 +2378,45 @@ fn hex4(bytes: &[u8], at: usize) -> Result<u32, String> {
     let digits = bytes.get(at..at + 4).ok_or("Invalid \\uXXXX escape")?;
     let text = std::str::from_utf8(digits).map_err(|_| "Invalid \\uXXXX escape")?;
     u32::from_str_radix(text, 16).map_err(|_| "Invalid \\uXXXX escape".into())
+}
+
+pub(super) struct StringBuffer {
+    pub(super) text: String,
+    pub(super) charge: Charge,
+}
+
+impl From<String> for StringBuffer {
+    fn from(text: String) -> Self {
+        let charge = Charge::open(text.capacity());
+        Self { text, charge }
+    }
+}
+
+impl StringBuffer {
+    pub(super) fn with_capacity(capacity: usize) -> Self {
+        String::with_capacity(capacity).into()
+    }
+
+    pub(super) fn push(&mut self, ch: char) {
+        let capacity = self.text.capacity();
+        self.text.push(ch);
+        if self.text.capacity() != capacity {
+            self.charge.set(self.text.capacity());
+        }
+    }
+
+    pub(super) fn push_str(&mut self, text: &str) {
+        let capacity = self.text.capacity();
+        self.text.push_str(text);
+        if self.text.capacity() != capacity {
+            self.charge.set(self.text.capacity());
+        }
+    }
+
+    pub(super) fn into_value(mut self) -> Value {
+        self.charge.set(0);
+        Value::string(self.text)
+    }
 }
 
 #[cfg(test)]

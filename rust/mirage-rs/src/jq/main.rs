@@ -10,11 +10,15 @@ use crate::{Stream, StreamError, constants::WORK};
 use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, Position, STDERR};
 use super::format;
 use super::link::{Linked, Links, resolve};
+use super::meter::EXHAUSTED;
 use super::meter::{self, Meter};
-use super::options::ERROR_SYSTEM;
 use super::parse::{Scanned, Scanner};
 use super::unicode::{Bytes, DecodeCursor};
 use super::value::{List, Value};
+
+/// jq's exit status for an option it refuses and a binding it cannot
+/// read.
+pub(super) const ERROR_SYSTEM: i32 = 2;
 
 /// The most bytes one read of jq's input reader takes (util.c): fgets
 /// into a 4096-byte buffer, less the four bytes it keeps for UTF-8 and
@@ -37,10 +41,6 @@ const OK: f64 = 0.0;
 const OK_NULL_KIND: f64 = -1.0;
 const OK_NO_OUTPUT: f64 = -4.0;
 const ERROR_UNKNOWN: f64 = 5.0;
-
-/// What the stream fails with once what jq holds outgrows the memory it
-/// was given, which the host reports as the workspace's own refusal.
-pub(crate) const EXHAUSTED: &str = "memory exhausted";
 
 /// One invocation as the hosts and the option loop (options.rs) give it.
 #[derive(Deserialize, Serialize)]
@@ -858,7 +858,7 @@ impl Main {
         match message {
             Message::Text(text) => self.stderr.append(text),
             Message::Debug(formatting) => {
-                let mut budget = eval::STEPS;
+                let mut budget = meter::STEPS;
                 let printed = formatting.run(&mut budget);
                 formatting.take(&mut self.stderr);
                 match printed {

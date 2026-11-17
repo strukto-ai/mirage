@@ -151,23 +151,18 @@
             "group": "VFS",
             "pages": [
               "home/setup/vfs",
-              "home/setup/custom-vfs",
-              "home/setup/vfs-md",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
                   "home/setup/ram",
                   "home/setup/disk",
-                  "home/setup/opfs",
-                  "home/setup/redis",
-                  "home/setup/sql",
-                  "home/setup/ssh"
+                  "home/setup/opfs"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "home/setup/s3",
                   "home/setup/r2",
@@ -188,43 +183,36 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
                   "home/setup/google",
-                  "home/setup/gcal",
                   "home/setup/onedrive",
                   "home/setup/sharepoint",
                   "home/setup/dropbox",
                   "home/setup/box",
                   "home/setup/nextcloud",
                   "home/setup/databricks",
-                  "home/setup/tidb"
+                  "home/setup/tidb",
+                  "home/setup/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "home/setup/github",
-                  "home/setup/hf_spaces",
-                  "home/setup/linear",
-                  "home/setup/wandb",
-                  "home/setup/langfuse",
-                  "home/setup/jaeger",
-                  "home/setup/slack",
-                  "home/setup/discord",
-                  "home/setup/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "home/setup/postgres",
                   "home/setup/mongodb",
                   "home/setup/gridfs",
-                  "home/setup/postgres",
-                  "home/setup/airtable",
+                  "home/setup/redis",
+                  "home/setup/sql",
+                  "home/setup/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "home/setup/chroma",
                   "home/setup/lancedb",
                   "home/setup/qdrant",
@@ -235,60 +223,95 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "home/setup/github",
+                  "home/setup/hf_spaces",
+                  "home/setup/linear",
+                  "home/setup/wandb",
+                  "home/setup/langfuse",
+                  "home/setup/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "home/setup/slack",
+                  "home/setup/discord",
+                  "home/setup/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "home/setup/gcal",
                   "home/setup/notion",
                   "home/setup/trello"
                 ]
-              }
-            ]
-          },
-          {
-            "group": "Integration",
-            "pages": [
-              "home/integration/overview",
-              "home/integration/search",
-              "home/integration/lines",
-              "home/integration/checksums",
-              "home/integration/walks"
+              },
+              {
+                "group": "VFS Integration",
+                "icon": "plug",
+                "pages": [
+                  "home/integration/overview",
+                  "home/integration/search",
+                  "home/integration/lines",
+                  "home/integration/checksums",
+                  "home/integration/walks"
+                ]
+              },
+              "home/setup/vfs/new",
+              "home/setup/vfs-md"
             ]
           },
           {
             "group": "CLIs",
             "pages": [
               "home/setup/clis",
-              "home/setup/cli/custom",
-              "home/setup/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "home/setup/cli/himalaya",
-                  "home/setup/cli/gws",
-                  "home/setup/cli/slack",
-                  "home/setup/cli/discord",
-                  "home/setup/cli/ntn",
-                  "home/setup/cli/linear",
-                  "home/setup/cli/trello",
-                  "home/setup/cli/airtable",
-                  "home/setup/cli/gh",
-                  "home/setup/cli/hf",
-                  "home/setup/cli/git",
                   "home/setup/cli/office",
                   "home/setup/cli/pdftotext",
                   "home/setup/cli/pdfinfo"
                 ]
-              }
-            ]
-          },
-          {
-            "group": "Mirage Shell",
-            "pages": [
-              "home/core/shell",
-              "home/core/output-limits",
-              "home/core/tools",
-              "home/core/data-network"
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "home/setup/cli/gh",
+                  "home/setup/cli/git",
+                  "home/setup/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "home/setup/cli/slack",
+                  "home/setup/cli/discord",
+                  "home/setup/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "home/setup/cli/gws",
+                  "home/setup/cli/ntn",
+                  "home/setup/cli/linear",
+                  "home/setup/cli/trello",
+                  "home/setup/cli/airtable"
+                ]
+              },
+              "home/setup/cli/new",
+              "home/setup/cli/mcp",
+              "home/setup/cli/skill-md"
             ]
           },
           {
@@ -335,21 +358,47 @@
                     "pages": [
                       "home/setup/runtime/quickjs"
                     ]
-                  },
-                  "home/setup/runtime/custom"
+                  }
                 ]
               },
               "home/setup/machine/host",
-              "home/setup/machine/docker",
-              "home/setup/machine/kubernetes",
-              "home/setup/machine/apple_container",
-              "home/setup/machine/smolvm",
-              "home/setup/machine/microsandbox",
-              "home/setup/machine/daytona",
-              "home/setup/machine/e2b",
-              "home/setup/machine/cloudflare_container",
-              "home/setup/machine/boxd",
-              "home/setup/machine/ssh"
+              "home/setup/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "home/setup/machine/docker",
+                  "home/setup/machine/kubernetes",
+                  "home/setup/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "home/setup/machine/microsandbox",
+                  "home/setup/machine/smolvm",
+                  "home/setup/machine/e2b",
+                  "home/setup/machine/daytona",
+                  "home/setup/machine/boxd",
+                  "home/setup/machine/cloudflare_container"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Mirage Shell",
+            "pages": [
+              "home/core/shell",
+              {
+                "group": "Commands",
+                "icon": "/images/mirage-icon-light.svg",
+                "pages": [
+                  "home/core/tools",
+                  "home/core/data",
+                  "home/core/network"
+                ]
+              }
             ]
           },
           {
@@ -428,27 +477,23 @@
             "group": "VFS",
             "pages": [
               "python/vfs/index",
-              "python/vfs/new",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
-                  "python/vfs/disk",
                   "python/vfs/ram",
-                  "python/vfs/redis",
-                  "python/vfs/sql",
-                  "python/vfs/ssh"
+                  "python/vfs/disk"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "python/vfs/s3",
                   "python/vfs/r2",
                   "python/vfs/gcs",
-                  "python/vfs/supabase",
                   "python/vfs/oci",
+                  "python/vfs/supabase",
                   "python/vfs/minio",
                   "python/vfs/ceph",
                   "python/vfs/seaweedfs",
@@ -463,47 +508,39 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
-                  "python/vfs/gmail",
                   "python/vfs/gdrive",
                   "python/vfs/gdocs",
                   "python/vfs/gsheets",
                   "python/vfs/gslides",
-                  "python/vfs/gcal",
                   "python/vfs/onedrive",
                   "python/vfs/sharepoint",
-                  "python/vfs/box",
                   "python/vfs/dropbox",
+                  "python/vfs/box",
                   "python/vfs/nextcloud",
                   "python/vfs/databricks_volume",
-                  "python/vfs/tidb_filesystem"
+                  "python/vfs/tidb_filesystem",
+                  "python/vfs/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "python/vfs/github",
-                  "python/vfs/hf_spaces",
-                  "python/vfs/linear",
-                  "python/vfs/wandb",
-                  "python/vfs/langfuse",
-                  "python/vfs/jaeger",
-                  "python/vfs/slack",
-                  "python/vfs/discord",
-                  "python/vfs/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "python/vfs/postgres",
                   "python/vfs/mongodb",
                   "python/vfs/gridfs",
-                  "python/vfs/postgres",
-                  "python/vfs/airtable",
+                  "python/vfs/redis",
+                  "python/vfs/sql",
+                  "python/vfs/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "python/vfs/chroma",
                   "python/vfs/lancedb",
                   "python/vfs/qdrant",
@@ -514,47 +551,134 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "python/vfs/github",
+                  "python/vfs/hf_spaces",
+                  "python/vfs/linear",
+                  "python/vfs/wandb",
+                  "python/vfs/langfuse",
+                  "python/vfs/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "python/vfs/slack",
+                  "python/vfs/discord",
+                  "python/vfs/gmail",
+                  "python/vfs/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "python/vfs/gcal",
                   "python/vfs/notion",
                   "python/vfs/trello"
                 ]
-              }
+              },
+              "python/vfs/new"
             ]
           },
           {
             "group": "CLIs",
             "pages": [
               "python/cli/index",
-              "python/cli/custom",
-              "python/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "python/cli/himalaya",
-                  "python/cli/gws",
-                  "python/cli/slack",
-                  "python/cli/discord",
-                  "python/cli/ntn",
-                  "python/cli/linear",
-                  "python/cli/trello",
-                  "python/cli/airtable",
-                  "python/cli/gh",
-                  "python/cli/hf",
-                  "python/cli/git",
                   "python/cli/office",
                   "python/cli/pdftotext",
                   "python/cli/pdfinfo"
                 ]
-              }
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "python/cli/gh",
+                  "python/cli/git",
+                  "python/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "python/cli/slack",
+                  "python/cli/discord",
+                  "python/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "python/cli/gws",
+                  "python/cli/ntn",
+                  "python/cli/linear",
+                  "python/cli/trello",
+                  "python/cli/airtable"
+                ]
+              },
+              "python/cli/new",
+              "python/cli/mcp"
             ]
           },
           {
-            "group": "Runtimes",
+            "group": "Machines",
             "pages": [
-              "python/runtime/python"
+              "python/machine/overview",
+              {
+                "group": "Runtimes",
+                "icon": "microchip",
+                "pages": [
+                  "python/runtime/overview",
+                  {
+                    "group": "Python",
+                    "icon": "python",
+                    "pages": [
+                      "python/runtime/monty",
+                      "python/runtime/wasi"
+                    ]
+                  },
+                  {
+                    "group": "JavaScript",
+                    "icon": "js",
+                    "pages": [
+                      "python/runtime/quickjs"
+                    ]
+                  }
+                ]
+              },
+              "python/machine/host",
+              "python/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "python/machine/docker",
+                  "python/machine/kubernetes",
+                  "python/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "python/machine/microsandbox",
+                  "python/machine/smolvm",
+                  "python/machine/e2b",
+                  "python/machine/daytona",
+                  "python/machine/boxd",
+                  "python/machine/cloudflare_container"
+                ]
+              }
             ]
           }
         ]
@@ -620,23 +744,18 @@
             "group": "VFS",
             "pages": [
               "typescript/setup/vfs",
-              "typescript/vfs/new",
               {
-                "group": "Local & Infrastructure",
-                "icon": "server",
+                "group": "Local",
+                "icon": "hard-drive",
                 "pages": [
-                  "typescript/setup/disk",
                   "typescript/setup/ram",
-                  "typescript/setup/opfs",
-                  "typescript/setup/redis",
-                  "typescript/setup/sql",
-                  "typescript/setup/upstash",
-                  "typescript/setup/ssh"
+                  "typescript/setup/disk",
+                  "typescript/setup/opfs"
                 ]
               },
               {
-                "group": "Object Storage",
-                "icon": "cloud",
+                "group": "Buckets",
+                "icon": "bucket",
                 "pages": [
                   "typescript/setup/s3",
                   "typescript/setup/r2",
@@ -657,47 +776,40 @@
                 ]
               },
               {
-                "group": "Cloud & Productivity",
+                "group": "Files",
                 "icon": "folder-open",
                 "pages": [
-                  "typescript/setup/gmail",
                   "typescript/setup/gdrive",
                   "typescript/setup/gdocs",
                   "typescript/setup/gsheets",
                   "typescript/setup/gslides",
-                  "typescript/setup/gcal",
                   "typescript/setup/onedrive",
                   "typescript/setup/sharepoint",
                   "typescript/setup/dropbox",
                   "typescript/setup/box",
                   "typescript/setup/nextcloud",
                   "typescript/setup/databricks_volume",
-                  "typescript/setup/tidb_filesystem"
+                  "typescript/setup/tidb_filesystem",
+                  "typescript/setup/ssh"
                 ]
               },
               {
-                "group": "Developer & Messaging",
-                "icon": "code",
-                "pages": [
-                  "typescript/setup/github",
-                  "typescript/setup/hf_spaces",
-                  "typescript/setup/linear",
-                  "typescript/setup/wandb",
-                  "typescript/setup/langfuse",
-                  "typescript/setup/jaeger",
-                  "typescript/setup/slack",
-                  "typescript/setup/discord",
-                  "typescript/setup/email"
-                ]
-              },
-              {
-                "group": "Data & AI",
+                "group": "Databases",
                 "icon": "database",
                 "pages": [
+                  "typescript/setup/postgres",
                   "typescript/setup/mongodb",
                   "typescript/setup/gridfs",
-                  "typescript/setup/postgres",
-                  "typescript/setup/airtable",
+                  "typescript/setup/redis",
+                  "typescript/setup/upstash",
+                  "typescript/setup/sql",
+                  "typescript/setup/airtable"
+                ]
+              },
+              {
+                "group": "AI",
+                "icon": "sparkles",
+                "pages": [
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",
                   "typescript/setup/qdrant",
@@ -708,47 +820,134 @@
                 ]
               },
               {
-                "group": "Notes & Tasks",
-                "icon": "book",
+                "group": "Developer",
+                "icon": "code",
                 "pages": [
+                  "typescript/setup/github",
+                  "typescript/setup/hf_spaces",
+                  "typescript/setup/linear",
+                  "typescript/setup/wandb",
+                  "typescript/setup/langfuse",
+                  "typescript/setup/jaeger"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "typescript/setup/slack",
+                  "typescript/setup/discord",
+                  "typescript/setup/gmail",
+                  "typescript/setup/email"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "typescript/setup/gcal",
                   "typescript/setup/notion",
                   "typescript/setup/trello"
                 ]
-              }
+              },
+              "typescript/vfs/new"
             ]
           },
           {
             "group": "CLIs",
             "pages": [
               "typescript/cli/index",
-              "typescript/cli/custom",
-              "typescript/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "typescript/cli/himalaya",
-                  "typescript/cli/gws",
-                  "typescript/cli/slack",
-                  "typescript/cli/discord",
-                  "typescript/cli/ntn",
-                  "typescript/cli/linear",
-                  "typescript/cli/trello",
-                  "typescript/cli/airtable",
-                  "typescript/cli/gh",
-                  "typescript/cli/hf",
-                  "typescript/cli/git",
                   "typescript/cli/office",
                   "typescript/cli/pdftotext",
                   "typescript/cli/pdfinfo"
                 ]
-              }
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "typescript/cli/gh",
+                  "typescript/cli/git",
+                  "typescript/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "typescript/cli/slack",
+                  "typescript/cli/discord",
+                  "typescript/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "typescript/cli/gws",
+                  "typescript/cli/ntn",
+                  "typescript/cli/linear",
+                  "typescript/cli/trello",
+                  "typescript/cli/airtable"
+                ]
+              },
+              "typescript/cli/new",
+              "typescript/cli/mcp"
             ]
           },
           {
-            "group": "Runtimes",
+            "group": "Machines",
             "pages": [
-              "typescript/runtime/python"
+              "typescript/machine/overview",
+              {
+                "group": "Runtimes",
+                "icon": "microchip",
+                "pages": [
+                  "typescript/runtime/overview",
+                  {
+                    "group": "Python",
+                    "icon": "python",
+                    "pages": [
+                      "typescript/runtime/monty",
+                      "typescript/runtime/pyodide"
+                    ]
+                  },
+                  {
+                    "group": "JavaScript",
+                    "icon": "js",
+                    "pages": [
+                      "typescript/runtime/quickjs"
+                    ]
+                  }
+                ]
+              },
+              "typescript/machine/host",
+              "typescript/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "typescript/machine/docker",
+                  "typescript/machine/kubernetes",
+                  "typescript/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "typescript/machine/microsandbox",
+                  "typescript/machine/smolvm",
+                  "typescript/machine/e2b",
+                  "typescript/machine/daytona",
+                  "typescript/machine/boxd",
+                  "typescript/machine/cloudflare_container"
+                ]
+              }
             ]
           }
         ]
@@ -970,6 +1169,50 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/home/setup/cli/custom",
+      "destination": "/home/setup/cli/new"
+    },
+    {
+      "source": "/python/cli/custom",
+      "destination": "/python/cli/new"
+    },
+    {
+      "source": "/typescript/cli/custom",
+      "destination": "/typescript/cli/new"
+    },
+    {
+      "source": "/home/setup/custom-vfs",
+      "destination": "/home/setup/vfs/new"
+    },
+    {
+      "source": "/python/runtime/custom",
+      "destination": "/python/machine/overview"
+    },
+    {
+      "source": "/typescript/runtime/custom",
+      "destination": "/typescript/machine/overview"
+    },
+    {
+      "source": "/home/setup/runtime/custom",
+      "destination": "/home/setup/machine/overview"
+    },
+    {
+      "source": "/python/runtime/python",
+      "destination": "/python/runtime/overview"
+    },
+    {
+      "source": "/typescript/runtime/python",
+      "destination": "/typescript/runtime/overview"
+    },
+    {
+      "source": "/home/core/data-network",
+      "destination": "/home/core/data"
+    },
+    {
+      "source": "/home/core/output-limits",
+      "destination": "/home/limits"
+    },
     {
       "source": "/home/examples/lightweight-terminal",
       "destination": "/home/examples/in-process-terminal"

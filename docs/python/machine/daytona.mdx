@@ -1,0 +1,30 @@
+---
+title: Daytona
+icon: /images/daytona-logo.svg
+description: Run captured programs in a Daytona cloud sandbox.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Daytona](/home/setup/machine/daytona), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[daytona]'
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={"box": {"provider": "daytona", "sandbox_id": "sandbox-id", "captures": ["@python", "@external"]}},
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

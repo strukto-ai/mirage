@@ -1,9 +1,11 @@
 // Adapted from jq 1.8.2 (MIT), src/builtin.c, src/main.c and src/util.c. See licenses/third_party/jq.txt.
 
-use super::builtin::{self, Cfunc, Fault};
+use super::builtin::Cfunc;
+use super::fault::Fault;
+use super::fault::fail;
+use super::meter::Limits;
 use super::meter::{self, Charge};
 use super::value::{Dumping, Object, Value};
-use super::vm::Limits;
 
 /// What the host answered the `input` builtin with: the next document,
 /// the end of the stream, or the reader's parse error.
@@ -127,7 +129,7 @@ impl Messaging {
             self.text = Some(text);
         }
         if meter::exceeded() {
-            return Some(Err(builtin::fail(format!(
+            return Some(Err(fail(format!(
                 "jq memory limit of {} bytes exceeded",
                 limits.memory
             ))));

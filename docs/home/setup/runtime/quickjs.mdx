@@ -29,7 +29,7 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     No package to add: each run executes in a worker. In a browser, `home`
     is the URL of the folder holding `qjs-wasi.wasm`, and the page needs the
-    same [worker setup](/typescript/runtime/python#worker-and-browser-setup)
+    same [worker setup](/typescript/runtime/pyodide#worker-and-browser-setup)
     as Pyodide.
 
     QuickJS does not run on Cloudflare Workers: with no worker to stop it,
@@ -89,7 +89,7 @@ Declare an `in_process` machine that runs QuickJS to run `node` on it once its e
 ## Memory
 
 A run holds no more than its workspace's
-[`max_memory`](/home/core/output-limits#limit-a-workspaces-memory) has left,
+[`max_memory`](/home/limits#memory) has left,
 96 MB by default. A program that needs more gets `InternalError: out of
 memory`.
 

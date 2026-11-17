@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::number::{self, EOVERFLOW, ERANGE, is_space};
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 use crate::width::TAB_WIDTH;
 use crate::{Stream, StreamError, parse_config, quoted};
 
@@ -616,7 +616,8 @@ impl Layout {
         self.word.extend_from_slice(chars);
         self.col += chars.len() as i64;
         let mut para = self.para.take().expect("a paragraph");
-        while para.size + self.word.len() > PIECE_BYTES {
+        let mut printed = 0;
+        while para.size + self.word.len() - printed > PIECE_BYTES {
             if !para.terms.is_empty() {
                 self.flush(&mut para, self.start, out);
                 continue;
@@ -625,9 +626,11 @@ impl Layout {
             // a piece holds, with no indent and no newline, and goes on with
             // the rest of it as a word of its own, in the column the word
             // started in.
-            out.extend(self.word.drain(..PIECE_BYTES));
+            out.extend_from_slice(&self.word[printed..printed + PIECE_BYTES]);
+            printed += PIECE_BYTES;
             self.col -= PIECE_BYTES as i64;
         }
+        self.word.drain(..printed);
         self.para = Some(para);
     }
 

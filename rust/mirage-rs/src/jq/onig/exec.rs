@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use super::callout::{Outcome, State};
 use super::compile::{Inst, Program, Unit};
-use super::parse::{Anchor, Saved, Update};
+use super::node::{Anchor, Saved, Update};
 use super::{class, fold};
 use crate::regex::Step;
 use crate::rg_grapheme::Grapheme;

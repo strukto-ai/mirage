@@ -40,52 +40,26 @@ export const VFS_MD = `\`\`\`text
       ...
 \`\`\`
 
-Reading the tree:
-
-- \`ls {prefix}/\` lists the calendars. The primary one is always spelled
-  \`primary\`; every other directory ends in \`__<calendarId>\`.
-- \`ls {prefix}/primary/\` lists buckets with events from all available
-  history through today +90 days unless \`end_time\` is configured.
-  \`start_time\`/\`end_time\` restrict this mount, including direct paths,
-  date globs and event reads. A date glob such as
-  \`ls {prefix}/primary/2027-03-*\` selects its own listing range within
-  that scope, beyond the default future horizon.
+- Calendars are \`primary\` and \`<Name>__<calendarId>\`; \`calendar.json\`
+  holds the calendar's \`accessRole\` and \`bucketTimeZone\`, the zone every
+  bucket is cut in.
 {layout}
-- \`cat\` an event for the unmodified Calendar API payload, including
-  attendees, description, location and the original start and end with
-  offsets.
-- \`calendar.json\` carries the calendar's \`accessRole\` and, in
-  \`bucketTimeZone\`, the zone the buckets are cut in. That zone is
-  mount-wide, so every calendar's \`{bucket}/\` covers the same hours.
-- On a calendar shared as free/busy only, Google returns no titles at
-  all, so events render as \`busy\`.
+- \`cat\` an event for the raw Calendar API JSON (attendees, description,
+  location, start and end with offsets).
+- A listing runs through today +90 days unless \`end_time\` is set; a date
+  glob such as \`2027-03-*\` reaches past that.
+- On a \`write\` path, \`rm\` an event file deletes it for every attendee.
+  Other changes go through the \`gws calendar\` CLI, with explicit offsets
+  or a \`timeZone\`.`
 
-Acting on it:
+export const DAY_VFS_MD = `- A bucket is one local day. A file is
+  \`<eventId>__<HHMM-HHMM>_<Title>.gcal.json\`, times clamped to the day; a
+  multi-day event appears under each day.`
 
-- On a \`write\` path, \`rm\` an event file to delete that event for every
-  attendee.
-- Everything else goes through the \`gws calendar\` CLI, which takes the
-  ids the tree renders.
-- A written event must carry an explicit UTC offset or \`timeZone\`; an
-  ambiguous local time is not interpreted for you.`
-
-export const DAY_VFS_MD = `- A bucket is one local day, named by its date. A well-formed date
-  inside the configured scope is a directory even when it holds no
-  events. Dates outside the scope are absent.
-- A file name is \`<eventId>__<HHMM-HHMM>_<Title>.gcal.json\`. The times
-  are clamped to that day, so an event running through it reads
-  \`0000-2400\`. A multi-day event appears under every day it covers.`
-
-export const BUCKET_VFS_MD = `- A bucket is {days} local days, named by its first and last day on a
-  fixed grid where 7-day buckets run Monday to Sunday. A bucket on the
-  grid inside the configured scope is a directory even when it holds no
-  events; a bare date, a span off the grid and a bucket outside the
-  scope are absent. A glob matches the name, so \`2027-03-*\` finds the
-  buckets that open in March.
-- A file name is \`<eventId>__<YYYY-MM-DD>_<HHMM-HHMM>_<Title>.gcal.json\`,
-  dated with its day. The times are clamped to that day, so an event
-  running through it reads \`0000-2400\`. A multi-day event appears once
-  for each day of the bucket it covers.`
+export const BUCKET_VFS_MD = `- A bucket is {days} local days on a fixed grid (7-day buckets run Monday
+  to Sunday). A file is
+  \`<eventId>__<YYYY-MM-DD>_<HHMM-HHMM>_<Title>.gcal.json\`, one per day the
+  event covers, times clamped to that day.`
 
 const EXAMPLE_DAY = '2026-08-11'
 

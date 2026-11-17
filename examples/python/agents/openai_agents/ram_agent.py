@@ -46,7 +46,7 @@ async def main():
 
     agent = Agent(
         name="Mirage RAM Agent",
-        model="gpt-5.5-mini",
+        model="gpt-6.1-sol",
         instructions=system_prompt,
         tools=[
             ShellTool(executor=MirageShellExecutor(ws)),

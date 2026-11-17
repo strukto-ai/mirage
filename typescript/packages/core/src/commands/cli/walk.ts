@@ -21,11 +21,11 @@ import {
   renderHelp,
   usageLine,
 } from '../spec/help.ts'
-import { CommandSpec, type CommandSpecInit, UsageStyle, Argument } from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, UsageStyle, Argument, WordKind } from '../spec/types.ts'
 import { PathSpec } from '../../types.ts'
 
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
-import { WalkResult, type CLI, type WalkFlagBag } from './types.ts'
+import { WalkResult, WalkWord, type CLI, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, POPPLER_EXIT, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
@@ -421,12 +421,30 @@ function recordBool(flags: WalkFlagBag, cs: CompiledSpec, spelling: string): voi
 }
 
 /**
+ * A group option's value as the walk took it: its dest, the value as typed
+ * and the argv position it stands in, the option word's own for an attached
+ * value. Mirrors Python's `_Taken`.
+ */
+interface Taken {
+  readonly dest: string
+  readonly value: string
+  readonly slot: number
+}
+
+/**
  * Record a value occurrence. Directory changes are resolved in occurrence
  * order by resolveGroupPaths after the node has been scanned.
  */
-function recordValue(flags: WalkFlagBag, cs: CompiledSpec, spelling: string, value: string): void {
+function recordValue(
+  flags: WalkFlagBag,
+  cs: CompiledSpec,
+  spelling: string,
+  value: string,
+  taken: Taken[],
+  slot: number,
+): void {
   const dest = cs.destOf(spelling)
-  flagOccurrences(flags).push([dest, value])
+  taken.push({ dest, value, slot })
   if (cs.multipleDests.has(dest)) {
     const prev = flags[dest]
     if (Array.isArray(prev)) {
@@ -444,9 +462,11 @@ function recordValues(
   cs: CompiledSpec,
   spelling: string,
   values: readonly string[],
+  taken: Taken[],
+  at: readonly number[],
 ): void {
   const dest = cs.destOf(spelling)
-  for (const value of values) flagOccurrences(flags).push([dest, value])
+  values.forEach((value, index) => taken.push({ dest, value, slot: at[index] ?? -1 }))
   const previous = flags[dest]
   flags[dest] =
     cs.multipleDests.has(dest) && Array.isArray(previous) ? [...previous, ...values] : [...values]
@@ -469,11 +489,13 @@ function matchShort(
   token: string,
   following: readonly string[],
   style: UsageStyle,
+  taken: Taken[],
+  at: number,
 ): [number, WalkResult | null] | null {
   const nextToken = following[0]
   for (const vf of cs.attachSpellings) {
     if (token.startsWith(vf) && token.length > vf.length) {
-      recordValue(flags, cs, vf, token.slice(vf.length))
+      recordValue(flags, cs, vf, token.slice(vf.length), taken, at)
       return [1, null]
     }
   }
@@ -485,12 +507,16 @@ function matchShort(
     if (following.length < remaining)
       return [0, usageError(name, node, `error: option '${vf}' requires a value`, style)]
     const values = [...(attached === '' ? [] : [attached]), ...following.slice(0, remaining)]
-    if (arity !== undefined) recordValues(flags, cs, vf, values)
-    else recordValue(flags, cs, vf, values[0] ?? '')
+    const where = [
+      ...(attached === '' ? [] : [at]),
+      ...Array.from({ length: remaining }, (_, k) => at + 1 + k),
+    ]
+    if (arity !== undefined) recordValues(flags, cs, vf, values, taken, where)
+    else recordValue(flags, cs, vf, values[0] ?? '', taken, where[0] ?? at)
     return [remaining + 1, null]
   }
   if (cs.detachedOptionalSpellings.has(token) && optionalValue(nextToken)) {
-    recordValue(flags, cs, token, nextToken)
+    recordValue(flags, cs, token, nextToken, taken, at + 1)
     return [2, null]
   }
   if (cs.boolSpellings.has(token)) {
@@ -506,6 +532,37 @@ function matchShort(
  * node does not declare its own, because it is a registered option
  * everywhere else (argparse and getopt_long both expand `--hel` to it).
  */
+/**
+ * What each word a walk consumed before its leaf is: a verb is a SUBCOMMAND,
+ * a value standing as its own word a VALUE (`-x` in `-C -x`), and any other
+ * word an option, which names itself as typed when it carries its value
+ * (`-Cb`, `--file=x`). Mirrors Python's `_lead_words`.
+ */
+function leadWords(
+  lead: readonly string[],
+  verbs: readonly number[],
+  taken: readonly Taken[],
+  paths: ReadonlyMap<number, PathSpec>,
+): WalkWord[] {
+  const words = lead.map(() => new WalkWord(WordKind.OPTION))
+  for (const at of verbs) words[at] = new WalkWord(WordKind.SUBCOMMAND)
+  for (const t of taken) {
+    const word = lead[t.slot] ?? ''
+    if (word === t.value) {
+      words[t.slot] = new WalkWord(WordKind.VALUE, null, paths.get(t.slot) ?? null)
+      continue
+    }
+    const option =
+      t.value !== '' && word.endsWith(t.value) ? word.slice(0, word.length - t.value.length) : word
+    words[t.slot] = new WalkWord(
+      WordKind.OPTION,
+      option.endsWith('=') ? option.slice(0, -1) : option,
+      paths.get(t.slot) ?? null,
+    )
+  }
+  return words
+}
+
 function expandGroupLong(node: CommandSpec, cs: CompiledSpec, spelling: string): readonly string[] {
   const candidates = expandLong(cs, spelling)
   if (
@@ -532,29 +589,42 @@ function expandGroupLong(node: CommandSpec, cs: CompiledSpec, spelling: string):
  *
  * Keep the typed spelling and its walk verdict, just as leaf PATH values do.
  * The operand base resolves first; other path options are relative to it.
+ * Each typed value's path is also kept by the argv position it stands in.
  */
 function resolveGroupPaths(
   cs: CompiledSpec,
   flags: WalkFlagBag,
   cwd: string,
   bases: PathSpec[],
+  taken: readonly Taken[],
+  paths: Map<number, PathSpec>,
 ): void {
   let base: string | PathSpec = cwd
+  const typed: [string, string, number][] = taken.map((t) => [t.dest, t.value, t.slot])
   if (cs.baseDest !== null) {
     const value = flags[cs.baseDest]
     if (typeof value === 'string') {
-      const values = flagOccurrences(flags)
+      const values: [string, number | null][] = typed
         .filter(([name]) => name === cs.baseDest)
-        .map(([, value]) => value)
-        .filter((value): value is string => typeof value === 'string')
+        .map(([, word, slot]) => [word, slot])
       let scope = PathSpec.fromStrPath('.', undefined, cwd)
-      for (const word of values.length > 0 ? values : [value]) {
+      for (const [word, slot] of values.length > 0 ? values : [[value, null] as const]) {
         scope = PathSpec.fromStrPath(word || '.', undefined, scope)
-        bases.push(scope)
+        if (slot === null || !paths.has(slot)) bases.push(scope)
+        if (slot !== null) paths.set(slot, scope)
       }
       flags[cs.baseDest] = scope
       base = scope
     }
+  }
+  const seen = new Map<string, number>()
+  for (const [name, word, slot] of typed) {
+    if (name === cs.baseDest || cs.kindByDest.get(name) !== 'path') continue
+    const index = seen.get(name) ?? 0
+    seen.set(name, index + 1)
+    const kinds = cs.valueTypesByDest.get(name) ?? ['path']
+    if (!paths.has(slot) && kinds[index % kinds.length] === 'path')
+      paths.set(slot, PathSpec.fromStrPath(word, undefined, base))
   }
   for (const [dest, kind] of cs.kindByDest) {
     if (kind !== 'path' || !(dest in flags) || dest === cs.baseDest) continue
@@ -585,6 +655,8 @@ function finishNode(
   cwd: string,
   style: UsageStyle,
   bases: PathSpec[],
+  taken: readonly Taken[],
+  paths: Map<number, PathSpec>,
   env: Readonly<Record<string, string>> | null,
   deferEnv: boolean,
 ): WalkResult | null {
@@ -599,7 +671,7 @@ function finishNode(
       flags[dest] = cs.multipleDests.has(dest) ? [value] : value
     }
   }
-  resolveGroupPaths(cs, flags, cwd, bases)
+  resolveGroupPaths(cs, flags, cwd, bases, taken, paths)
   // Numeric-typed values before choices, argparse's order; wording is
   // git's parse-options refusal (`--depth` on a non-integer), one phrase
   // for int and float alike.
@@ -674,16 +746,21 @@ export function walk(
   let positions: number[] = []
   const flags: WalkFlagBag = {}
   const bases: PathSpec[] = []
+  const taken: Taken[] = []
+  const paths = new Map<number, PathSpec>()
   let i = 0
   for (;;) {
     // A script node terminates the walk exactly like an fn leaf: its
     // remaining argv rides the ordinary spec machinery for validation,
     // then passes to the program verbatim.
     if (node.subcommands.length === 0) {
+      const tape = flagOccurrences(flags)
+      tape.length = 0
+      for (const t of taken) tape.push([t.dest, t.value])
       return new WalkResult({
         leaf: node,
         path,
-        verbPositions: positions,
+        words: leadWords(argv.slice(0, i), positions, taken, paths),
         groupFlags: flags,
         operandBases: bases,
         argv: argv.slice(i),
@@ -701,7 +778,19 @@ export function walk(
           ? findChild(node, token)
           : null
       if (alias?.aliases.includes(token)) {
-        const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
+        const refused = finishNode(
+          name,
+          node,
+          cs,
+          flags,
+          cwd,
+          style,
+          bases,
+          taken,
+          paths,
+          env,
+          deferEnv,
+        )
         if (refused !== null) return refused
         node = alias
         path = [...path, alias.name]
@@ -761,9 +850,9 @@ export function walk(
         // --color=auto would be refused as taking no value.
         if (cs.longOptionalSpellings.has(spelling)) {
           if (attached !== null) {
-            recordValue(flags, cs, spelling, attached)
+            recordValue(flags, cs, spelling, attached, taken, i)
           } else if (cs.detachedOptionalSpellings.has(spelling) && optionalValue(argv[i + 1])) {
-            recordValue(flags, cs, spelling, argv[i + 1] ?? '')
+            recordValue(flags, cs, spelling, argv[i + 1] ?? '', taken, i + 1)
             i += 1
           } else {
             recordBool(flags, cs, spelling)
@@ -777,19 +866,26 @@ export function walk(
           const next = argv[i + 1]
           const width = cs.nargsByDest.get(cs.destOf(spelling))
           if (width === 1 && attached !== null) {
-            recordValues(flags, cs, spelling, [attached])
+            recordValues(flags, cs, spelling, [attached], taken, [i])
           } else if (width !== undefined) {
             if (attached !== null)
               return usageError(name, node, `unknown option: ${token}`, style, token)
             if (argv.length - i - 1 < width)
               return usageError(name, node, `error: option '${spelling}' requires a value`, style)
-            recordValues(flags, cs, spelling, argv.slice(i + 1, i + 1 + width))
+            recordValues(
+              flags,
+              cs,
+              spelling,
+              argv.slice(i + 1, i + 1 + width),
+              taken,
+              Array.from({ length: width }, (_, k) => i + 1 + k),
+            )
             i += width
           } else if (attached !== null) {
-            recordValue(flags, cs, spelling, attached)
+            recordValue(flags, cs, spelling, attached, taken, i)
           } else if (next !== undefined) {
             i += 1
-            recordValue(flags, cs, spelling, next)
+            recordValue(flags, cs, spelling, next, taken, i)
           } else {
             return usageError(name, node, `error: option '${spelling}' requires a value`, style)
           }
@@ -816,7 +912,7 @@ export function walk(
         // Declared multi-char shorts (find-style -name) match the whole
         // token before any cluster splitting, longest first, the same
         // precedence the flat parser uses.
-        const whole = matchShort(name, node, cs, flags, token, argv.slice(i + 1), style)
+        const whole = matchShort(name, node, cs, flags, token, argv.slice(i + 1), style, taken, i)
         if (whole !== null) {
           const [consumed, refused] = whole
           if (refused !== null) return refused
@@ -841,6 +937,8 @@ export function walk(
               `-${token.slice(j)}`,
               argv.slice(i + 1),
               style,
+              taken,
+              i,
             )
             if (matched !== null) {
               const [consumed, refused] = matched
@@ -866,7 +964,19 @@ export function walk(
         i += 1
         continue
       }
-      const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
+      const refused = finishNode(
+        name,
+        node,
+        cs,
+        flags,
+        cwd,
+        style,
+        bases,
+        taken,
+        paths,
+        env,
+        deferEnv,
+      )
       if (refused !== null) return refused
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
@@ -890,7 +1000,19 @@ export function walk(
       break
     }
     if (descended) continue
-    const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
+    const refused = finishNode(
+      name,
+      node,
+      cs,
+      flags,
+      cwd,
+      style,
+      bases,
+      taken,
+      paths,
+      env,
+      deferEnv,
+    )
     if (refused !== null) return refused
     const clapGroup = style === UsageStyle.CLAP && path.length > 0
     return new WalkResult({

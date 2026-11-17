@@ -25,11 +25,8 @@ import type { ConfigState, Handed } from '../types.ts'
 import { REDACTED_SECRET, type RedactedSchema } from '../secrets.ts'
 import { resolveDifyConfig, type DifyConfig } from './config.ts'
 
-export const VFS_MD = `- A Dify knowledge base, mounted read only.
-- Every file is plain text assembled from the document's Dify segments,
-  whatever its original extension.
-- \`cat\`, \`head\`, \`tail\`, \`grep\`, \`find\`, \`ls\` and \`wc\` work on these
-  files.`
+export const VFS_MD = `- Every file is plain text assembled from the document's Dify segments,
+  whatever its original extension.`
 
 export interface DifyVFSOptions {
   config: DifyConfig

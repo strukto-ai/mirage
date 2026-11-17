@@ -4,6 +4,7 @@
 //! `//TRANSLIT` and `//IGNORE` suffixes are refused, as glibc's
 //! transliteration follows its own locale tables.
 
+pub(crate) mod corrections;
 pub(crate) mod table;
 #[cfg(test)]
 mod tests;

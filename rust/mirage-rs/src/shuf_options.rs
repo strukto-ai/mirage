@@ -9,7 +9,7 @@
 use serde_json::{Value as Json, json};
 
 use crate::number::{EOVERFLOW, unsigned_decimal};
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::{StreamError, quoted};
 
 const ECHO_WITH_RANGE: &str =

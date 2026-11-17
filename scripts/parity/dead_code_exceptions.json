@@ -1,0 +1,221 @@
+{
+  "python/mirage/agents/langchain/backend.py": {
+    "reason": "deepagents' SandboxBackendProtocol, which the agent calls by method name.",
+    "names": [
+      "download_files"
+    ]
+  },
+  "python/mirage/agents/openai_agents/sandbox.py": {
+    "reason": "Hooks and class flags of the OpenAI Agents SDK's BaseSandboxSession and BaseSandboxClient, which the SDK calls and reads.",
+    "names": [
+      "_ensure_backend_started",
+      "_exec_internal",
+      "_prepare_backend_workspace",
+      "_prepare_exec_command",
+      "backend_id",
+      "deserialize_session_state",
+      "supports_default_options",
+      "supports_pty"
+    ]
+  },
+  "python/mirage/cli/login.py": {
+    "reason": "http.server's BaseHTTPRequestHandler hooks: the server calls do_GET and log_message.",
+    "names": [
+      "do_GET",
+      "log_message"
+    ]
+  },
+  "python/mirage/cli/vfs.py": {
+    "reason": "typer reads a built verb's annotations to parse its options.",
+    "names": [
+      "__annotations__"
+    ]
+  },
+  "python/mirage/commands/cli/builtin/git/objects.py": {
+    "reason": "dulwich reads object_format off the object store it is handed.",
+    "names": [
+      "object_format"
+    ]
+  },
+  "python/mirage/commands/cli/builtin/git/tag.py": {
+    "reason": "A dulwich Tag field, written into the tag object it serializes.",
+    "names": [
+      "tag_timezone"
+    ]
+  },
+  "python/mirage/fuse/fs.py": {
+    "reason": "fusepy reads use_ns off its Operations to pass times in nanoseconds.",
+    "names": [
+      "use_ns"
+    ]
+  },
+  "python/mirage/mount/sftp.py": {
+    "reason": "asyncssh's SFTPServer hooks, which the SFTP session calls per request.",
+    "names": [
+      "fsetstat",
+      "fstatvfs",
+      "lsetstat",
+      "map_path",
+      "open56",
+      "reverse_map_path"
+    ]
+  },
+  "python/mirage/runtime/python/host/file.py": {
+    "reason": "io.RawIOBase's protocol: the buffered layers above call readinto and readall.",
+    "names": [
+      "readall",
+      "readinto"
+    ]
+  },
+  "python/mirage/runtime/python/host/fs.py": {
+    "reason": "The os module surface a guest program calls by name.",
+    "names": [
+      "fdatasync",
+      "preadv",
+      "pwritev",
+      "readv",
+      "writev"
+    ]
+  },
+  "python/mirage/runtime/python/host/list.py": {
+    "reason": "os.DirEntry's surface, which a guest's scandir loop calls.",
+    "names": [
+      "is_junction"
+    ]
+  },
+  "python/mirage/runtime/python/monty/execution.py": {
+    "reason": "A strong reference that keeps the opening task alive: the event loop holds only weak ones.",
+    "names": [
+      "_opener"
+    ]
+  },
+  "python/mirage/runtime/python/monty/fs.py": {
+    "reason": "pydantic_monty's AbstractOS callbacks and settings, which the Monty interpreter calls and reads.",
+    "names": [
+      "date_today",
+      "get_environ",
+      "max_urandom_bytes",
+      "path_append_text",
+      "path_is_dir",
+      "path_is_file",
+      "path_iterdir",
+      "path_mkdir",
+      "path_read_text",
+      "path_rename",
+      "path_resolve",
+      "path_rmdir",
+      "path_scan",
+      "path_unlink",
+      "path_write_text"
+    ]
+  },
+  "python/mirage/runtime/wasm/execution.py": {
+    "reason": "wasmtime Config settings, read when the engine is built.",
+    "names": [
+      "epoch_interruption",
+      "macos_use_mach_ports"
+    ]
+  },
+  "python/mirage/runtime/wasm/fs.py": {
+    "reason": "WASI preview1 host functions, which the linker binds by name from the WASI table, and the linker setting that lets them replace the defaults.",
+    "names": [
+      "allow_shadowing",
+      "clock_res_get",
+      "clock_time_get",
+      "fd_advise",
+      "fd_datasync",
+      "fd_fdstat_get",
+      "fd_fdstat_set_flags",
+      "fd_filestat_get",
+      "fd_filestat_set_size",
+      "fd_pread",
+      "fd_prestat_dir_name",
+      "fd_prestat_get",
+      "fd_pwrite",
+      "fd_readdir",
+      "fd_renumber",
+      "fd_seek",
+      "fd_tell",
+      "fd_write",
+      "path_create_directory",
+      "path_filestat_get",
+      "path_filestat_set_times",
+      "path_link",
+      "path_readlink",
+      "path_remove_directory",
+      "path_rename",
+      "path_symlink",
+      "path_unlink_file",
+      "proc_exit"
+    ]
+  },
+  "python/mirage/server/mcp/relay.py": {
+    "reason": "httpx.Auth's hook, which the client calls per request.",
+    "names": [
+      "async_auth_flow"
+    ]
+  },
+  "python/mirage/server/rpc/relay.py": {
+    "reason": "httpx.Auth's hook, which the client calls per request.",
+    "names": [
+      "async_auth_flow"
+    ]
+  },
+  "python/mirage/server/ssh/server.py": {
+    "reason": "asyncssh's SSHServer hooks, which the connection calls.",
+    "names": [
+      "begin_auth",
+      "connection_made"
+    ]
+  },
+  "python/mirage/server/ssh/session.py": {
+    "reason": "asyncssh's SSHServer hooks, which the connection calls.",
+    "names": [
+      "begin_auth"
+    ]
+  },
+  "python/mirage/server/workers/worker.py": {
+    "reason": "uvicorn Server flags its serve loop polls to stop.",
+    "names": [
+      "force_exit",
+      "should_exit"
+    ]
+  },
+  "python/mirage/shell/descriptors.py": {
+    "reason": "The yield after the raise makes the function an async generator, so its first read fails, not its call.",
+    "names": [
+      "raise"
+    ]
+  },
+  "python/mirage/utils/timezone.py": {
+    "reason": "tzinfo's protocol: datetime calls fromutc for astimezone.",
+    "names": [
+      "fromutc"
+    ]
+  },
+  "python/mirage/vfs/gsheets/gsheets.py": {
+    "reason": "Named by string in the filetype table, which calls it for a .gsheet.json file.",
+    "names": [
+      "read_sheet"
+    ]
+  },
+  "python/mirage/vfs/gslides/gslides.py": {
+    "reason": "Named by string in the filetype table, which calls it for a .gslide.json file.",
+    "names": [
+      "read_deck"
+    ]
+  },
+  "python/mirage/vfs/sql/driver.py": {
+    "reason": "sqlite3 reads row_factory off the connection for every row.",
+    "names": [
+      "row_factory"
+    ]
+  },
+  "python/mirage/workspace/mount/mount.py": {
+    "reason": "Reached by name: the rewrite fallback looks up _{op}_by_rewrite for the op it emulates.",
+    "names": [
+      "_pwrite_by_rewrite",
+      "_truncate_by_rewrite"
+    ]
+  }
+}

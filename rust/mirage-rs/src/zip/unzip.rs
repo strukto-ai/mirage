@@ -6,8 +6,10 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
+use super::format::{
+    ARCHIVE, Decoded, Decoder, Directory, Entry, Fault, Spool, WINDOW, padded, say, wildcard,
+};
 use super::listing::{self, Letters, Rows};
-use super::{Decoded, Decoder, Directory, Entry, Fault, Spool, WINDOW, padded, say, wildcard};
 use crate::request::{Opening, Reply, Request, bytes, failed, failure_text};
 use crate::task::{File, Host};
 
@@ -500,7 +502,7 @@ async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8
             Opening::AsOperand
         };
         let open = (name.clone(), opening);
-        let spool = super::ARCHIVE;
+        let spool = ARCHIVE;
         let (reply, _) = host.ask(Request::Fill { spool, open }).await;
         if !failed(&reply) {
             return Ok((name, reply.size));
@@ -546,7 +548,7 @@ pub(super) async fn run(host: Host, mut config: Config) -> i32 {
             return NO_ARCHIVE_EXIT;
         }
     };
-    let mut spool = Spool::new(&host, super::ARCHIVE, size);
+    let mut spool = Spool::new(&host, ARCHIVE, size);
     let directory = match spool.directory(false).await {
         Ok(directory) => directory,
         Err(Fault::Read(text)) => {

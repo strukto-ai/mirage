@@ -22,7 +22,7 @@ import type { CommandFnResult, Context } from '../config.ts'
 import { argumentDest, compileSpec } from '../spec/compile.ts'
 import type { MCPSource } from './mcp/types.ts'
 import type { Argument } from '../spec/types.ts'
-import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue, type WordKind } from '../spec/types.ts'
 
 /** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
 export type CLIVerbFn<A extends Accessor = Accessor> = (
@@ -219,6 +219,22 @@ function validateTree(
 export type WalkFlagBag = Record<string, FlagValue>
 
 /**
+ * One word a walk consumed before its leaf: a verb, a group option or a
+ * group option's value. `option` is the option as typed on a word carrying
+ * its value attached (`-Cb`, `--file=x`); `path` is the PATH value the word
+ * carries, resolved as the run resolves it. Mirrors Python's `WalkWord`.
+ */
+export class WalkWord {
+  constructor(
+    readonly kind: WordKind,
+    readonly option: string | null = null,
+    readonly path: PathSpec | null = null,
+  ) {
+    Object.freeze(this)
+  }
+}
+
+/**
  * Outcome of walking a CLI tree with one command line. Exactly one of two
  * shapes: `leaf` set (dispatch: the resolved verb, the group flags
  * collected on the way down keyed by canonical dashed spelling, and the
@@ -229,8 +245,8 @@ export type WalkFlagBag = Record<string, FlagValue>
 export class WalkResult {
   readonly leaf: CommandSpec | null
   readonly path: readonly string[]
-  /** Where each of `path` stands in the walked argv. */
-  readonly verbPositions: readonly number[]
+  /** What each word the walk consumed before the leaf's is, in argv order. */
+  readonly words: readonly WalkWord[]
   readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag
   readonly argv: readonly string[]
@@ -244,7 +260,7 @@ export class WalkResult {
         WalkResult,
         | 'leaf'
         | 'path'
-        | 'verbPositions'
+        | 'words'
         | 'operandBases'
         | 'groupFlags'
         | 'argv'
@@ -256,7 +272,7 @@ export class WalkResult {
   ) {
     this.leaf = init.leaf ?? null
     this.path = Object.freeze([...(init.path ?? [])])
-    this.verbPositions = Object.freeze([...(init.verbPositions ?? [])])
+    this.words = Object.freeze([...(init.words ?? [])])
     this.groupFlags = init.groupFlags ?? {}
     this.operandBases = init.operandBases ?? []
     this.argv = Object.freeze([...(init.argv ?? [])])

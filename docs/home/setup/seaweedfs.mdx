@@ -1,37 +1,173 @@
 ---
 title: SeaweedFS
 icon: /images/seaweedfs-logo.svg
-description: Set up SeaweedFS credentials for the SeaweedFS VFS.
+description: Virtualize a SeaweedFS bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-SeaweedFS serves an S3-compatible gateway (the `weed s3` command, default port
-`8333`). Access keys are defined in the gateway's S3 config (`-s3.config`), or
-the gateway can run without authentication for local development.
+A bucket on the SeaweedFS S3 gateway becomes a folder tree, with one file
+per object.
 
-### 1. Get an access key
 
-1. Start the S3 gateway, e.g. `weed server -s3` or `weed s3 -filer=localhost:8888`
-1. If you configured `-s3.config`, copy an identity's **accessKey** and **secretKey**
-1. Note your gateway **endpoint** (e.g. `http://localhost:8333`) and **bucket** name
 
-SeaweedFS uses path-style addressing, so the `endpoint_url` is required.
+## Setup
 
-### 2. Set environment variables
+The SeaweedFS S3 gateway (`weed s3`, port `8333` by default) takes access keys
+from an S3 config file. With no identities defined, it accepts any key pair,
+which suits local development.
+
+<AccordionGroup>
+  <Accordion title="Define an access key">
+    Write the identities to `s3.json`:
+
+    ```json s3.json
+    {
+      "identities": [
+        {
+          "name": "mirage",
+          "credentials": [{ "accessKey": "mirage-key", "secretKey": "mirage-secret" }],
+          "actions": ["Read:my-bucket", "Write:my-bucket", "List:my-bucket"]
+        }
+      ]
+    }
+    ```
+
+    Start the gateway with it, `weed s3 -filer=localhost:8888 -config=s3.json`
+    or `weed server -s3 -s3.config=s3.json`. Drop `Write:my-bucket` for a
+    read-only key. Once any identity exists, the gateway requires
+    authentication even after the identities are removed.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-SEAWEEDFS_BUCKET=my-bucket
-SEAWEEDFS_ENDPOINT=http://localhost:8333
-SEAWEEDFS_ACCESS_KEY=...
-SEAWEEDFS_SECRET_KEY=...
+export SEAWEEDFS_BUCKET=my-bucket
+export SEAWEEDFS_ENDPOINT=http://localhost:8333
+export SEAWEEDFS_ACCESS_KEY=mirage-key
+export SEAWEEDFS_SECRET_KEY=mirage-secret
 ```
 
-<Tip>
-Blaxel Agent Drive is backed by SeaweedFS. Use the drive's `s3Url` as the
-endpoint and a drive access token's credentials to mount it as a SeaweedFS
-VFS.
-</Tip>
+- The gateway is self-hosted, so the endpoint is required and requests are
+  path-style.
+- Blaxel Agent Drive is backed by SeaweedFS: use the drive's `s3Url` as the
+  endpoint and a drive access token's credentials as the key pair.
 
-For SDK guides, see [SeaweedFS (Python)](/python/vfs/seaweedfs) and [SeaweedFS (TypeScript)](/typescript/setup/seaweedfs).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /seaweedfs:
+        vfs: seaweedfs
+        mode: read
+        config:
+          bucket: ${SEAWEEDFS_BUCKET}
+          endpoint_url: ${SEAWEEDFS_ENDPOINT}
+          access_key_id: ${SEAWEEDFS_ACCESS_KEY}
+          secret_access_key: ${SEAWEEDFS_SECRET_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id weed
+    mirage shell -w weed -c 'ls /seaweedfs'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.seaweedfs import SeaweedFSConfig, SeaweedFSVFS
+
+    config = SeaweedFSConfig(
+        bucket=os.environ["SEAWEEDFS_BUCKET"],
+        endpoint_url=os.environ["SEAWEEDFS_ENDPOINT"],
+        access_key_id=os.environ["SEAWEEDFS_ACCESS_KEY"],
+        secret_access_key=os.environ["SEAWEEDFS_SECRET_KEY"],
+    )
+    ws = Workspace({"/seaweedfs": SeaweedFSVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /seaweedfs")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SeaweedFSVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/seaweedfs': new SeaweedFSVFS({
+          bucket: process.env.SEAWEEDFS_BUCKET!,
+          endpoint: process.env.SEAWEEDFS_ENDPOINT!,
+          accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY!,
+          secretAccessKey: process.env.SEAWEEDFS_SECRET_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /seaweedfs')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/seaweedfs/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /seaweedfs -type f
+/seaweedfs/data/events.jsonl
+/seaweedfs/data/users.parquet
+/seaweedfs/reports/2026-11/metrics.csv
+/seaweedfs/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /seaweedfs/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /seaweedfs/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/seaweedfs">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/seaweedfs">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

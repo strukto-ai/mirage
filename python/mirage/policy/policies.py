@@ -18,7 +18,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import fields, replace
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import Any, TypeVar, overload
 
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
@@ -77,9 +77,7 @@ from mirage.types import FileType, Limit, MountMode, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
-
-if TYPE_CHECKING:
-    from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -829,7 +827,7 @@ class Policies:
         self.decisions = Decisions()
         self.views: (
             Callable[
-                [str, "SessionState | None"],
+                [str, SessionState | None],
                 tuple[SessionView, FileView, PolicyCaller] | None,
             ]
             | None

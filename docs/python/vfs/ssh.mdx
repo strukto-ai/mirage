@@ -1,68 +1,150 @@
 ---
 title: SSH
 icon: /images/ssh-logo.svg
-description: Mount a remote filesystem over SSH/SFTP.
+description: Virtualize a remote server's filesystem over SSH from Python.
 ---
-The SSH VFS mounts a remote server's filesystem over SFTP.
-It supports full read and write operations.
 
-Install the extra:
+`SSHVFS` mounts a directory of a remote server over SFTP: its folders and
+files appear as they are on the server. The key and server are set up on the
+[SSH page](/home/setup/ssh).
+
+## Install
 
 ```bash
 pip install "mirage-ai[ssh]"
 ```
 
-## Config
+## Configure
 
 ```python
 from mirage import MountMode, Workspace
 from mirage.vfs.ssh import SSHConfig, SSHVFS
 
 config = SSHConfig(
-    host="myserver",
+    host="server.example.com",
     username="deploy",
     identity_file="~/.ssh/id_ed25519",
-    root="/var/data",
+    root="/srv/data",
 )
-vfs = SSHVFS(config=config)
-ws = Workspace({"/remote": vfs}, mode=MountMode.WRITE)
+ws = Workspace({"/remote": SSHVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /remote && tail -n 20 /remote/logs/app.log")
+print(await result.stdout_str())
+await ws.close()
 ```
 
+`host` also matches a `~/.ssh/config` alias, and that entry's settings apply.
+`known_hosts` turns on host-key checking. Use `MountMode.EXEC` when `python3`
+or `js` should run scripts from the mount.
+
+### Fields
+
 {/* generated: config-table ssh start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Host name, IP address or `~/.ssh/config` alias of the remote. |
-| <code style={{ whiteSpace: 'nowrap' }}>hostname</code> | Address to connect to instead of `host`. |
-| <code style={{ whiteSpace: 'nowrap' }}>port</code> | SSH port; unset uses the client's default, `22` unless `~/.ssh/config` sets one for the host. |
-| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name unless `~/.ssh/config` sets one for the host. |
-| <code style={{ whiteSpace: 'nowrap' }}>identity_file</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh`. |
-| <code style={{ whiteSpace: 'nowrap' }}>private_key</code><br />secret | A private key's own text, such as one a credential pointer reads from a secret store; offered after `identity_file`'s. |
-| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identity_file`. |
-| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted `identity_file` or `private_key`; ignored when both are unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the TCP connection, and again for authentication. |
-| <code style={{ whiteSpace: 'nowrap' }}>known_hosts</code> | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |
+<ResponseField name="host" type={"str"} required>
+  Host name, IP address or `~/.ssh/config` alias of the remote.
+</ResponseField>
+<ResponseField name="hostname" type={"str"}>
+  Address to connect to instead of `host`.
+</ResponseField>
+<ResponseField name="port" type={"int"}>
+  SSH port; unset uses the client's default, `22` unless `~/.ssh/config` sets one for the host.
+</ResponseField>
+<ResponseField name="username" type={"str"}>
+  Login user; unset uses the local user name unless `~/.ssh/config` sets one for the host.
+</ResponseField>
+<ResponseField name="identity_file" type={"str"}>
+  Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh`.
+</ResponseField>
+<ResponseField name="private_key" type={"str"} post={["secret"]}>
+  A private key's own text, such as one a credential pointer reads from a secret store; offered after `identity_file`'s.
+</ResponseField>
+<ResponseField name="password" type={"str"} post={["secret"]}>
+  Password for password authentication; prefer `identity_file`.
+</ResponseField>
+<ResponseField name="passphrase" type={"str"} post={["secret"]}>
+  Passphrase of an encrypted `identity_file` or `private_key`; ignored when both are unset.
+</ResponseField>
+<ResponseField name="root" type={"str"} default={"'/'"}>
+  Path on the remote that becomes the mount root.
+</ResponseField>
+<ResponseField name="timeout" type={"int"} default={"30"}>
+  Seconds to wait for the TCP connection, and again for authentication.
+</ResponseField>
+<ResponseField name="known_hosts" type={"str"}>
+  Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ssh end */}
 
-The `host` field matches entries in `~/.ssh/config`, so existing SSH
-configurations are automatically picked up.
+## Authentication
+
+The mount offers, in order, the key at `identity_file`, then the key text in
+`private_key`, which a [credential pointer](/home/service-credentials#pointer-fields)
+can read from a secret store. Without either, it tries the SSH agent and the
+default keys in `~/.ssh`. `passphrase` unlocks an encrypted key. `password`
+works too, but a key is preferred.
+
+The server needs SFTP turned on. Reads and writes go as far as the SSH
+account's own file permissions allow.
+
+## Layout
+
+```text
+/remote/
+  logs/
+    app.log
+  reports/
+    2026-11.csv
+```
+
+The tree mirrors the server from `root`: `/remote/logs/app.log` is
+`/srv/data/logs/app.log` on the server.
+
+## Behavior
+
+- **Host keys:** checked only when `known_hosts` names a file; unset, any
+  host key is accepted.
+- **Caching:** listings are cached for 60 seconds by default. File bytes are
+  served from cache without a check until the mount's `ttl:`; an SSH mount
+  does not accept `read: fresh`.
+- **Running programs:** this mount reads and writes files. To run programs on
+  the server, use the [SSH machine](/home/setup/machine/ssh).
+
+## Integration
+
+SSH answers these commands on the server, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: `grep` on the server finds which files hold the text,
+  then only those are read, so nothing is missed. Every file is read when the
+  server runs no commands (an SFTP-only account), its `grep` refuses an
+  option (busybox), or it cannot read a file.
+- `wc -l`: `wc -l` on the server.
+- `tail -f`: `tail -f` on the server.
+- `md5sum`, `sha256sum` and the other hash commands: the matching sum tool on
+  the server.
+- `find`: one `find` on the server.
+- `du`: one `find` on the server.
+- `ls -R` and `tree`: one `find` on the server.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with SSH mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md ssh start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `ssh`, write |
+    | `/<path>` | `ssh`, `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -70,7 +152,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SSH mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` ask `ssh` which files may match. `wc -l` asks `ssh` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -91,7 +173,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SSH mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `ssh`, write |
+    | `/<path>` | `ssh`, `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -113,114 +195,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SSH mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md ssh end */}
-
-```text
-/remote/
-  <remote-directory-tree>
-```
-
-The mounted tree mirrors the remote filesystem starting at `root`.
-
-Example with `root="/var/data"`:
-
-```text
-/remote/
-  logs/
-    app.log
-    nginx/
-      access.log
-      error.log
-  config/
-    app.yaml
-  uploads/
-    image.png
-```
-
-## Cache
-
-Directory listings are cached for 60 seconds by default (a configured
-`index:` uses its own `ttl`, and the mount's `ttl:` caps it). File bytes are cached and served
-without a check until the mount's `ttl:`; SSH does not accept `read: fresh`.
-
-## Example
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.ssh import SSHConfig, SSHVFS
-
-config = SSHConfig(
-    host="myserver",
-    username="deploy",
-    identity_file="~/.ssh/id_ed25519",
-    root="/var/log",
-)
-vfs = SSHVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/logs": vfs}, mode=MountMode.READ)
-
-    # List remote directory
-    r = await ws.shell("ls /logs/")
-    print(await r.stdout_str())
-
-    # Read last 20 lines of a log
-    r = await ws.shell("tail -n 20 /logs/nginx/access.log")
-    print(await r.stdout_str())
-
-    # Search across log files
-    r = await ws.shell('grep "ERROR" /logs/app.log')
-    print(await r.stdout_str())
-
-    # Find large files
-    r = await ws.shell("find /logs/ -name '*.log'")
-    print(await r.stdout_str())
-
-    # File metadata
-    r = await ws.shell("stat /logs/app.log")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Integration
-
-What SSH answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On SSH |
-| --- | --- |
-| `grep -r`, `rg` | `grep` on the server, for any text. It misses nothing. |
-| `wc -l` | `wc -l` on the server |
-| `tail -f` | `tail -f` on the server |
-| `md5sum`, `sha256sum` and the other hash commands | The matching sum tool on the server |
-| `find`, `du`, `ls -R`, `tree` | One `find` on the server |
-
-`grep -r` and `rg` run `grep` on the server to find which files hold the text,
-then read only those. The answer is exact. Every file is read when the server
-runs no commands (an SFTP-only account), its `grep` refuses an option
-(busybox), or it cannot read a file.
-
-## Shell Commands
-
-| Command                | Notes                                      |
-| ---------------------- | ------------------------------------------ |
-| `ls`                   | List remote files and directories          |
-| `cat`                  | Read remote file content                   |
-| `head` / `tail`        | First/last N lines                         |
-| `grep` / `rg`          | Pattern search; `-r` asks the server's grep which files to read |
-| `wc`                   | Line/word/byte counts                      |
-| `stat`                 | File metadata (size, mtime)                |
-| `find`                 | Recursive search with `-name`, `-maxdepth` |
-| `tree`                 | Directory tree view                        |
-| `mkdir`                | Create remote directories                  |
-| `touch`                | Create empty remote files                  |
-| `cp` / `mv` / `rm`    | Copy, move, delete on remote               |
-| `tee`                  | Write stdin to remote file                 |
-| `diff` / `cmp`         | Compare remote files                       |
-| `sort` / `cut` / `tr`  | Text processing                            |
-| `tar` / `zip` / `gzip` | Compression                                |

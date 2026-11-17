@@ -298,7 +298,7 @@ describe('vfsMd', () => {
     const ws = new Workspace({ '/a\n```': [gdocs(), MountMode.READ] })
     const markdown = await ws.vfsMd()
     expect(markdown).toContain('````text\n```text\n/a\n```\n  owned/')
-    expect(markdown).toContain('any other name is refused.\n````')
+    expect(markdown).toContain('date and id to rename it.\n````')
   })
 
   it('keeps a layout text under a backtick prefix', async () => {

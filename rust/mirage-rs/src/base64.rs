@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::number;
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::{Stream, StreamError, parse_config, quoted};
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

@@ -6,9 +6,10 @@
 //! parts only it used, as OfficeCLI's Excel handler does.
 
 use super::book::{Book, relationships, rels_of, resolve};
+use super::errors::Fail;
 use super::read::{Doc, Entry};
+use super::xml::{HEAD, MAIN, REL, before_end, strip};
 use super::xml::{Kind, element_end, escape, retag, tags, unescape};
-use super::{Fail, HEAD, MAIN, REL, before_end, strip};
 
 const WORKSHEET_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";

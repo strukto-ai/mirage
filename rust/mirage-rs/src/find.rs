@@ -19,7 +19,7 @@
 use serde_json::{Value as Json, json};
 
 use crate::regex::parse::{Dialect, parse as compile_regex};
-use crate::scan::{OPERAND, Typed, Values, unknown};
+use crate::scan_grammar::{OPERAND, Typed, Values, unknown};
 use crate::sort::number::strtod_prefix;
 use crate::{StreamError, byte_text};
 
@@ -1810,7 +1810,7 @@ mod tests {
     fn tape(tokens: &[&str]) -> Vec<(&'static str, Vec<u8>)> {
         tokens
             .iter()
-            .map(|token| (crate::scan::OPERAND, token.as_bytes().to_vec()))
+            .map(|token| (crate::scan_grammar::OPERAND, token.as_bytes().to_vec()))
             .collect()
     }
 

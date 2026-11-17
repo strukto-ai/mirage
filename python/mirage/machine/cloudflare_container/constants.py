@@ -43,9 +43,6 @@ RELAY_START = "start"
 RELAY_EXEC = "exec"
 RELAY_MONITOR = "monitor"
 
-# The secret a relay checks every call's token against.
-RELAY_TOKEN = "MIRAGE_RELAY_TOKEN"
-
 # The byte before each chunk of output on an exec's socket: its stream.
 STDOUT_CHANNEL = 1
 STDERR_CHANNEL = 2
@@ -54,7 +51,3 @@ STDERR_CHANNEL = 2
 # before the sender waits: output the client has not read, input the
 # program has not taken.
 RELAY_WINDOW_BYTES = 1 << 20
-
-# How often a relay speaks on a quiet socket, so nothing between drops it
-# as idle.
-RELAY_HEARTBEAT_SECONDS = 30

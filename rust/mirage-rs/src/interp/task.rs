@@ -106,10 +106,16 @@ impl Line {
     }
 }
 
+/// What an operation holds while its shell is lent to the host, which
+/// hands that shell back with its answer: a shell sharing no records, so
+/// a write the host lands on the lent one copies none of them.
+fn stand_in() -> Shell {
+    Shell::new(Store::new(Arc::new(|| 0)))
+}
+
 impl Host for Line {
     async fn subscript(&mut self, shell: &mut Shell, text: &[u8]) -> Result<Vec<u8>, Fault> {
-        let stand_in = Shell::new(shell.vars.fork());
-        let lent = std::mem::replace(shell, stand_in);
+        let lent = std::mem::replace(shell, stand_in());
         let ask = Ask::Subscript {
             shell: lent,
             text: text.to_vec(),
@@ -191,8 +197,7 @@ impl Host for Line {
 
 impl Runs for Line {
     async fn run(&mut self, shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
-        let stand_in = Shell::new(shell.vars.fork());
-        let lent = std::mem::replace(shell, stand_in);
+        let lent = std::mem::replace(shell, stand_in());
         match self.ask(Ask::Run { shell: lent, run }).await {
             Answer::Ran { shell: back, ran } => {
                 *shell = *back;
@@ -588,7 +593,7 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vars::Store;
+    use crate::vars::{Indexed, Slot, Store, Var};
 
     fn shell() -> Shell {
         let mut shell = Shell::new(Store::new(Arc::new(|| 1)));
@@ -621,6 +626,32 @@ mod tests {
         let texts: Vec<Vec<u8>> = fields.iter().map(Field::text).collect();
         assert_eq!(texts, vec![b"outa".to_vec(), b"b".to_vec()]);
         assert_eq!(ended.shell.status, 4);
+    }
+
+    #[test]
+    fn a_list_run_lends_records_no_one_else_holds() {
+        let mut shell = shell();
+        shell
+            .vars
+            .seed("a", Value::Indexed(Indexed::dense([b"x".to_vec()])));
+        let held: *const Var = shell.vars.record("a").unwrap();
+        let construct = Construct::While {
+            test: 0,
+            body: 1,
+            until: false,
+        };
+        let tree = Arc::new(crate::shell::parse(b""));
+        let mut task = control(shell, tree, construct, Vec::new());
+        let Some(Ask::Run { mut shell, .. }) = task.step() else {
+            panic!("expected a run");
+        };
+        assert!(
+            shell
+                .vars
+                .put_element("a", &Slot::Index(1), Some(b"y".to_vec()), false)
+        );
+        let written: *const Var = shell.vars.record("a").unwrap();
+        assert_eq!(held, written);
     }
 
     #[test]

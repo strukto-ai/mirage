@@ -11,7 +11,7 @@ TypeScript SDK only.
 
 Pyodide does not provide isolation for hostile code. Host and network access
 depend on the environment and configuration; see
-[containment](/typescript/runtime/python#containment) before choosing it for
+[containment](/typescript/runtime/pyodide#containment) before choosing it for
 untrusted programs.
 
 ## Installation
@@ -23,7 +23,7 @@ pnpm add @struktoai/mirage-node @struktoai/mirage-core pyodide
 In a browser, install `@struktoai/mirage-browser` and `@struktoai/mirage-core`
 instead: Pyodide loads from its CDN or `home`, not the `pyodide` package. The
 page must be cross-origin isolated or registered with Mirage's service worker; see
-[worker and browser setup](/typescript/runtime/python#worker-and-browser-setup).
+[worker and browser setup](/typescript/runtime/pyodide#worker-and-browser-setup).
 
 ## Usage
 
@@ -133,7 +133,7 @@ A run starts at about 50M. One that passes the cap fails with
 passes the cap; browsers check the cap when the run ends.
 
 Without its own `max_memory`, a run may grow by what its workspace's
-[`max_memory`](/home/core/output-limits#limit-a-workspaces-memory) has left,
+[`max_memory`](/home/limits#memory) has left,
 96 MB by default, past what the interpreter and its packages take to start.
 
 ## Python compatibility

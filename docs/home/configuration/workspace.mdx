@@ -34,7 +34,7 @@ Keys are `snake_case`; TypeScript constructor options use camelCase, such as
 | `route_policy` | Which [machine](/home/policy/route-machine) a line runs on. |
 | `profiles`, `profile` | [Session profiles](/home/configuration/session) and the default one. |
 | `processes` | Whose processes a session lists and stops, and how many it runs: `128` by default. |
-| `command_limits` | [Output and execution limits](/home/core/output-limits). |
+| `command_limits` | [Output and execution limits](/home/limits#command-output). |
 | `max_memory` | Memory cap, as a [size](#sizes): `96MB` by default, `null` for none. |
 | `max_env` | Cap on each session's variables, functions and aliases: `2MB` by default. |
 | `max_body_bytes` | Largest API reply read whole: `64MB` by default. |
@@ -138,7 +138,7 @@ machines:
 | Key | Sets |
 | --- | --- |
 | `cli` | A registered [CLI](/home/setup/clis). |
-| `script` | A `.py`, `.js` or `.mjs` program, as a custom CLI in [Python](/python/cli/custom) or [TypeScript](/typescript/cli/custom). |
+| `script` | A `.py`, `.js` or `.mjs` program, as a custom CLI in [Python](/python/cli/new) or [TypeScript](/typescript/cli/new). |
 | `machine` | Required. `in_process`, or `host` for a script. A script needs a `machines` entry that runs its language. |
 | `runtime` | The runtime for a script on `in_process`, such as `monty`. |
 | `config` | The CLI's fields. A script's `config` takes no credential pointer. |

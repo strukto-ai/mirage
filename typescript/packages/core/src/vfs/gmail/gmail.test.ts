@@ -20,10 +20,10 @@ describe('VFS_MD', () => {
     const rendered = VFS_MD.replace(/\{prefix\}/g, '/gmail')
     expect(rendered).toContain('<label>')
     expect(rendered).toContain('INBOX')
-    expect(rendered).toContain('`after:`/`before:`')
+    expect(rendered).toContain('listing one queries\n  only that day')
     expect(rendered).toContain('processed by Mirage')
     expect(rendered).toContain('.body_text')
-    expect(rendered).toContain('gws gmail --help')
+    expect(rendered).toContain('`gws gmail` CLI')
   })
 
   it('documents file-per-message layout with sibling attachments dir', () => {

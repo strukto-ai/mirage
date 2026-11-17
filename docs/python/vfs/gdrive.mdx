@@ -1,14 +1,21 @@
 ---
 title: Google Drive
-description: Mount Google Drive folders and files, including Docs, Sheets, and Slides, as a Mirage virtual filesystem.
+description: Virtualize Google Drive folders and files from Python.
 icon: /images/gdrive-logo.svg
 ---
-The Google Drive VFS exposes a Google Drive account as a virtual
-filesystem mounted at some prefix such as `/gdrive/`.
 
-For Google OAuth setup, see [Google Workspace Setup](/home/setup/google).
+`GoogleDriveVFS` mounts a Google Drive account: every folder becomes a
+directory, every file a file, and Docs, Sheets and Slides read as JSON. My
+Drive and every Shared Drive the account can see are included. Credentials are
+set up on the [Google Workspace page](/home/setup/google).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -21,55 +28,139 @@ config = GoogleDriveConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-vfs = GoogleDriveVFS(config=config)
-ws = Workspace({"/gdrive": vfs}, mode=MountMode.WRITE)
+ws = Workspace({"/gdrive": GoogleDriveVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /gdrive && find /gdrive -maxdepth 2 -name '*.gsheet.json'")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-To mount a subfolder instead of the whole Drive, set `folder_id`.
-The mount root becomes that folder. The folder may live in My Drive,
-be shared with you, sit inside a Shared Drive, or be a Shared Drive
-id itself; the drive scope is resolved automatically. Scoped mounts
-do not surface other shared drives:
+`folder_id` mounts one folder instead of the whole Drive. A mount takes
+`MountMode.READ`, `WRITE` or `EXEC`; `EXEC` lets `python3` and `js` run
+scripts from the mount.
 
-```python
-config = GoogleDriveConfig(
-    client_id=os.environ["GOOGLE_CLIENT_ID"],
-    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-    folder_id="1AbCdEfFolderId",
-)
-```
+### Fields
 
 {/* generated: config-table gdrive start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
-| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
-| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>folder_id</code> | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="access_token" type={"str | callable"} post={["secret"]}>
+  OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`.
+</ResponseField>
+<ResponseField name="client_id" type={"str"}>
+  Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself.
+</ResponseField>
+<ResponseField name="client_secret" type={"str"} post={["secret"]}>
+  Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client.
+</ResponseField>
+<ResponseField name="refresh_token" type={"str"} post={["secret"]}>
+  User's OAuth refresh token. Required with `client_id` when `access_token` is unset.
+</ResponseField>
+<ResponseField name="api_base" type={"str"}>
+  One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts.
+</ResponseField>
+<ResponseField name="folder_id" type={"str"}>
+  Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gdrive end */}
 
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_token`, a token or a callable that returns one.
+2. `client_id` and `refresh_token`, with `client_secret` unless the client
+   uses PKCE. Mirage trades the refresh token for access tokens on its own.
+
+The mount needs the Drive API and the `https://www.googleapis.com/auth/drive`
+scope, or `drive.readonly` for a read-only mount. Drive grants access per
+item, so a write mount can still hold files the account may not change. A
+change Drive refuses fails with `Permission denied` on that operand, and the
+rest of the mount keeps working.
+
+## Layout
+
+```text
+/gdrive/
+  Projects/
+    roadmap.gsheet.json
+    spec.pdf
+  Notes/
+    meeting.gdoc.json
+  Engineering/
+    ...
+```
+
+- The root holds My Drive's folders and files plus one folder per Shared
+  Drive. A Shared Drive whose name clashes gets a `[Shared Drive]` suffix and,
+  if needed, a number.
+- Regular files (PDFs, images, CSVs) keep their names and read as their
+  bytes.
+- Docs, Sheets and Slides cannot be downloaded as bytes, so they read as the
+  JSON of their own API: `.gdoc.json`, `.gsheet.json` and `.gslide.json`.
+
+## Behavior
+
+- **Folder scope:** `folder_id="1AbCdEf..."` makes that folder the mount
+  root. It may sit in My Drive, be shared with the account, sit in a Shared
+  Drive, or be a Shared Drive's id. A scoped mount shows no other Shared
+  Drive.
+- **Writes:** on a `write` mount, `tee`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`,
+  `touch`, `truncate` and `sed -i` work on regular files and folders.
+  `mkdir` over an existing name fails with `File exists`, `mv` onto a
+  non-empty directory with `Directory not empty`, and `cp -r` merges. `rm`
+  deletes for good, not to the trash.
+- **Docs, Sheets and Slides:** read only as bytes; a write to one fails with
+  `Permission denied`. Change them with the [`gws`](/python/cli/gws) CLI,
+  which also acts on any Drive item by id.
+- **Shared Drives:** writable on the same terms as My Drive. The account's
+  role on that drive decides what it may change, and some organizations
+  restrict deleting or moving content out of a drive. `MountMode.READ` makes
+  a mount that cannot write at all.
+- **Snapshots:** a snapshot records each file's Drive revision and replays
+  that exact content. A file the agent wrote, and a Docs, Sheets or Slides
+  file, is checked against the live file instead.
+
+## Integration
+
+Drive answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -r` and `rg` with `-w` or `-x`: Drive full-text search names the
+  files to read. Every file is read when the search fails or finds nothing.
+  Drive searches the text it extracted, not the bytes `grep` reads, and
+  indexes a write some time after it lands, so it can leave out a file that
+  holds the word: a Docs, Sheets or Slides file (its JSON keys and ids), an
+  office file, PDF or archive, the end of a large file, or a word Drive
+  splits differently (`foo.bar`). `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/limits#command-output) turns the search off and reads
+  every file.
+- `md5sum`, `sha1sum` and `sha256sum`: the digest Drive keeps. A Docs, Sheets
+  or Slides file is read.
+- `find`, `du`, `ls -R` and `tree`: one recursive listing.
+
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at
+`/<path>`. `<mode>` is the mount's mode: `read`, `write` or `exec`. The
+commands shown are those of a `write` mount.
 
 {/* generated: vfs-md gdrive start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gdrive`, write |
+    | `/<path>` | `gdrive`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -81,15 +172,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
       <shared-drive>/        # each shared drive you can see
     ```
 
-    - There is no `owned/` and `shared/` split: this is your full Drive
-      view, including files shared with you that were added to My Drive.
-    - This is a remote mount: prefer targeted reads over full scans. A
-      date-prefixed glob (`2026-05-*`) becomes a Drive `modifiedTime` range
-      query.
-    - To act on Drive items by id (create, update, export, permissions), use
-      the `gws` CLI if installed (`gws drive --help`).
+    - The full Drive view, folders mirrored, with files shared into My Drive;
+      there is no `owned/` and `shared/` split.
+    - Changes by id (create, export, permissions) go through the `gws drive`
+      CLI.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -97,7 +185,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `gdrive` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -118,7 +206,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `gdrive`, write |
+    | `/<path>` | `gdrive`, `<mode>` |
 
     ## VFS Layout
 
@@ -134,13 +222,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
       <shared-drive>/        # each shared drive you can see
     ```
 
-    - There is no `owned/` and `shared/` split: this is your full Drive
-      view, including files shared with you that were added to My Drive.
-    - This is a remote mount: prefer targeted reads over full scans. A
-      date-prefixed glob (`2026-05-*`) becomes a Drive `modifiedTime` range
-      query.
-    - To act on Drive items by id (create, update, export, permissions), use
-      the `gws` CLI if installed (`gws drive --help`).
+    - The full Drive view, folders mirrored, with files shared into My Drive;
+      there is no `owned/` and `shared/` split.
+    - Changes by id (create, export, permissions) go through the `gws drive`
+      CLI.
 
     ## Supported Unix Commands for VFS
 
@@ -162,238 +247,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gdrive end */}
-
-The mount mirrors the actual Google Drive folder hierarchy. The root
-contains the Drive API `root` folder plus each Shared Drive visible to
-the user. Shared Drives appear as top-level directories. Duplicate names
-receive a `[Shared Drive]` suffix and, when needed, a numeric suffix.
-Subfolders appear as directories, and regular files keep their original names.
-
-### Synthetic Extensions
-
-Google Workspace files cannot be downloaded as raw bytes, so they
-are exposed with synthetic extensions and read via their respective
-APIs:
-
-| Extension      | Type          | Read via   |
-| -------------- | ------------- | ---------- |
-| `.gdoc.json`   | Google Docs   | Docs API   |
-| `.gsheet.json` | Google Sheets | Sheets API |
-| `.gslide.json` | Google Slides | Slides API |
-
-Regular files (PDFs, images, CSVs, etc.) are downloaded directly
-from Drive. Large regular files use streaming.
-
-## Write Support
-
-Under `MountMode.WRITE` the standard write commands work on regular
-files and folders: `tee`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`,
-`touch`, `truncate`, and in-place editors such as `sed -i`. Semantics
-follow the other object-store mounts (GNU check-then-act: `EEXIST`
-on mkdir over an existing name, `mv` onto a non-empty directory
-fails with `ENOTEMPTY`, `cp -r` merges).
-
-Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`)
-are read-only as bytes; writing to them fails with `EACCES`. Mutate
-them through the `gws` commands below instead.
-
-Drive access is per-item (shared-drive roles, folder-level grants), so
-a write mount can still hold items you may not edit. A mutation the
-API denies fails with `EACCES` (Permission denied) on that operand,
-like a real filesystem; the rest of the mount keeps working.
-
-A write records the `md5Checksum` (else the `headRevisionId`) its upload
-reply names, so a `fresh` read right after a `tee` or `sed -i` downloads
-nothing.
-
-Use `MountMode.EXEC` if `python3` or `js` should run scripts from the
-mount.
-
-### Writing inside a Shared Drive
-
-A Shared Drive is not a read-only corner of the mount. Every Drive call
-mirage makes carries `supportsAllDrives`, so create, write, rename, copy
-and delete work the same inside a Shared Drive as in My Drive, and the
-commands above behave identically there.
-
-What you may actually do is decided by Drive, not by mirage: a Shared
-Drive has its own role model (`viewer`, `commenter`, `contributor`,
-`content manager`, `manager`), and some organizations restrict deletion
-or moving content out of the drive. mirage does not attempt to predict
-those rules. It issues the operation and reports the answer, so a role
-that forbids the change fails with `EACCES` on that operand, exactly like
-an unwritable item in My Drive.
-
-The practical consequence is that a write mount spanning Shared Drives is
-partly writable, and the boundary follows your roles rather than the
-mount. If you want a mount that cannot write at all, use
-`MountMode.READ`; if you want to scope one to a single drive, set
-`folder_id` to the Shared Drive id.
-
-## Snapshots
-
-The VFS supports workspace snapshots. Recorded reads capture the
-file's Drive revision (`headRevisionId`), and a loaded snapshot pins
-reads to that revision via the Drive Revisions API, so replay serves
-the exact bytes the agent saw. A path the agent wrote carries its write's
-token and no revision: loading checks the live file against that token,
-and replay reads the live file rather than a pinned revision. Google Docs,
-Sheets and Slides files carry no revision: loading checks them against the
-live file instead.
-
-## Cache
-
-The Google Drive VFS uses `IndexCacheStore` (same as Slack,
-Gmail, and other mounts). Index entries store folder IDs, file
-IDs, and file metadata. File bytes go through the workspace
-file cache.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.gws import GWS
-from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
-
-load_dotenv(".env.development")
-
-config = GoogleDriveConfig(
-    client_id=os.environ["GOOGLE_CLIENT_ID"],
-    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-)
-vfs = GoogleDriveVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/gdrive": vfs}, mode=MountMode.WRITE)
-    ws.register_cli("gws", GWS, config)
-
-    # List root
-    r = await ws.shell("ls /gdrive/ | head -n 10")
-    print(await r.stdout_str())
-
-    # Browse a subfolder
-    r = await ws.shell("ls /gdrive/Projects/")
-    print(await r.stdout_str())
-
-    # Read a regular file
-    r = await ws.shell("cat /gdrive/Projects/spec.pdf | head -c 200")
-    print(await r.stdout_str())
-
-    # Read a Google Doc title
-    r = await ws.shell('jq ".title" /gdrive/Notes/meeting.gdoc.json')
-    print(await r.stdout_str())
-
-    # Read a Google Sheet title
-    r = await ws.shell(
-        'jq ".properties.title" /gdrive/Projects/roadmap.gsheet.json')
-    print(await r.stdout_str())
-
-    # Read a Google Slides deck length
-    r = await ws.shell(
-        'jq ".slides | length"'
-        " /gdrive/Presentations/quarterly_review.gslide.json")
-    print(await r.stdout_str())
-
-    # Search across all files
-    r = await ws.shell('rg "quarterly" /gdrive/Projects/')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 2 /gdrive/")
-    print(await r.stdout_str())
-
-    # Create a new Google Doc
-    r = await ws.shell(
-        "gws docs documents create"
-        ' --json \'{"title": "New Doc from MIRAGE"}\'')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-See [`examples/python/vfs/gdrive/gdrive.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/gdrive/gdrive.py) for the full working example.
-
-## Shell Commands
-
-Standard commands available on the mounted Google Drive tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List folders and files                     |
-| `cat`           | Read file content (regular or Workspace)   |
-| `head` / `tail` | First/last N lines or bytes                |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields on Workspace files       |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type)           |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `basename`      | Extract filename from path                 |
-| `dirname`       | Extract directory from path                |
-| `realpath`      | Resolve path to absolute form              |
-| `nl`            | Number lines of output                     |
-| `sort`          | Sort lines                                 |
-| `uniq`          | Deduplicate adjacent lines                 |
-| `cut`           | Extract fields/columns                     |
-| `awk`           | Pattern-directed scanning                  |
-| `sed`           | Stream editor                              |
-| `tr`            | Translate/delete characters                |
-| `diff`          | Compare two files                          |
-| `rev`           | Reverse lines                              |
-| `tac`           | Reverse file line order                    |
-| `paste`         | Merge lines of files                       |
-| `join`          | Join lines on a common field               |
-| `column`        | Columnate output                           |
-| `comm`          | Compare sorted files line by line          |
-| `fold`          | Wrap lines to a given width                |
-| `fmt`           | Reformat paragraph text                    |
-| `expand`        | Convert tabs to spaces                     |
-| `unexpand`      | Convert spaces to tabs                     |
-| `du`            | Estimate file space usage                  |
-| `shuf`          | Randomly permute lines                     |
-| `look`          | Display lines beginning with a prefix      |
-| `strings`       | Extract printable strings from binary      |
-| `base64`        | Base64 encode/decode                       |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-| `xxd`           | Hex dump                                   |
-| `zcat`          | Read compressed files                      |
-| `zgrep`         | Search compressed files                    |
-| `readlink`      | Print resolved symbolic links              |
-| `cmp`           | Compare two files byte by byte             |
-| `tsort`         | Topological sort                           |
-| `file`          | Detect file type                           |
-
-## Integration
-
-What Google Drive answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Google Drive |
-| --- | --- |
-| `grep -r`, `rg` | Drive full-text search, for whole words (`-w`, `-x`). It can miss Docs, Sheets and Slides JSON, office files, PDFs, archives, the end of large files, words Drive splits differently (`foo.bar`) and recent writes. |
-| `md5sum`, `sha1sum`, `sha256sum` | The digest Drive keeps; a Docs, Sheets or Slides file is read |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-`grep -rw` and
-`rg -w` read only the files Drive full-text search names; every file is read
-when the search fails or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Drive searches
-the text it extracted, not the bytes `grep` reads, and indexes a write some
-time after it lands, so a file that holds the word can be left out: a Docs,
-Sheets or Slides file (its JSON keys and ids), an office file, PDF or archive,
-the end of a large file, or a word Drive splits differently (`foo.bar`).
-
-## Acting on Drive
-
-Acting on Drive files by id (create, update, copy, delete, share,
-export, plus the Docs/Sheets/Slides helpers) goes through the
-[gws CLI](/python/cli/gws) when installed.

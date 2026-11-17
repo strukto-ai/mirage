@@ -122,9 +122,9 @@ cd integ && pnpm exec tsx runtime/run.ts open read/pread
 bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/dist/bin/mirage.js" open
 ```
 
-`INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants; CI's
-`integ-e2b`, `integ-microsandbox` and `integ-kubernetes` jobs run `sandbox`
-that way.
+`INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants (comma
+separated); CI's `integ-sandboxes` job runs `sandbox` with
+`e2b,microsandbox,kubernetes`.
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |
@@ -134,6 +134,7 @@ that way.
 | `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
 | `MONGODB_URI`                                | `backend/mongodb.json`                              |
 | `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
+| `MIRAGE_INTEG_DOCKER_SECOND_CONTAINER`       | `sandbox/captures.json`: a pid two machines share   |
 | `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
 | `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
 | `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |

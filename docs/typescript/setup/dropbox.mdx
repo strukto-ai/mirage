@@ -1,27 +1,20 @@
 ---
 title: Dropbox
+description: Virtualize a Dropbox account or folder from Node or the browser.
 icon: /images/dropbox-logo.svg
-description: Mount Dropbox as a read/write MIRAGE VFS from Node or the browser via OAuth2.
 ---
 
-Mirage ships `DropboxVFS` in **two runtimes**:
+`DropboxVFS` mounts a Dropbox account, or one folder of it: files keep their
+names and bytes, and folders stay folders. The app key, app secret and refresh
+token are set up on the [Dropbox page](/home/setup/dropbox).
 
-- `@struktoai/mirage-node`, uses `client_id` + `client_secret` + long-lived refresh token to fetch
-  short-lived access tokens server-side.
-- `@struktoai/mirage-browser`, supports the same refresh token via PKCE (no client secret in the bundle).
-
-Both runtimes hit the same [Dropbox v2 HTTP API](https://www.dropbox.com/developers/documentation/http/documentation):
-`/2/files/list_folder` for directories, `/2/files/download` for content, and
-`/2/files/upload` / `create_folder_v2` / `delete_v2` / `move_v2` / `copy_v2` for writes.
-Credentials are obtained the same way in both runtimes, see
-[Dropbox Credentials](/home/setup/dropbox). The Python package ships the same
-backend, see [Dropbox (Python)](/python/vfs/dropbox).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -31,67 +24,162 @@ const dropbox = new DropboxVFS({
   clientSecret: process.env.DROPBOX_APP_SECRET!,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
 })
+const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-const res = await ws.shell('ls /dropbox/')
-console.log(res.stdoutText)
+const result = await ws.shell('ls /dropbox && grep -rl report /dropbox/Projects')
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-The `DropboxTokenManager` caches the access token in memory and refreshes it ~5 minutes before
-expiry, so cold-start API calls don't pay the refresh round-trip.
+`rootPath`, such as `/Team/data`, mounts one folder instead of the whole
+account.
 
-### Config
+### Fields
 
 {/* generated: config-table dropbox start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>clientId</code><br />required | Dropbox app key. |
-| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />required, secret | Dropbox app secret. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
-| <code style={{ whiteSpace: 'nowrap' }}>rootPath</code> | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="clientId" type={"string"} required>
+  Dropbox app key.
+</ResponseField>
+<ResponseField name="clientSecret" type={"string"} required post={["secret"]}>
+  Dropbox app secret.
+</ResponseField>
+<ResponseField name="refreshToken" type={"string"} required post={["secret"]}>
+  Long-lived OAuth refresh token; mirage mints short-lived access tokens from it.
+</ResponseField>
+<ResponseField name="rootPath" type={"string"}>
+  Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts.
+</ResponseField>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
+  Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table dropbox end */}
 
-## Mount a subfolder
+## Authentication
 
-Pass `rootPath` to expose a single Dropbox folder as the mount root instead of the whole
-account. Every command and FUSE/VFS op is scoped to that folder; paths outside it are
-unreachable.
+Mirage mints short-lived access tokens from the long-lived `refreshToken` and
+renews each one 5 minutes before it expires. The refresh token lasts until the
+user disconnects the app or the app is deleted.
 
-```ts
-const dropbox = new DropboxVFS({
-  clientId: process.env.DROPBOX_APP_KEY!,
-  clientSecret: process.env.DROPBOX_APP_SECRET!,
-  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
-  rootPath: '/Team/data',
-})
+The app needs these scopes, checked on its **Permissions** tab:
 
-const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-await ws.shell('ls /dropbox/') // lists the contents of /Team/data
+- `files.metadata.read` to list folders and read metadata.
+- `files.content.read` to download files.
+- `files.content.write` for writes on a `write` mount.
+- `account_info.read` for `df` (optional).
+
+Dropbox leaves unchecked scopes out of tokens, and a call that needs one fails
+with `missing_scope`.
+
+## Layout
+
+```text
+/dropbox/
+  Photos/
+  Projects/
+    data.csv
+    report.pdf
+  notes.txt
 ```
 
-`rootPath` accepts `Team/data`, `/Team/data`, or `/Team/data/` (all normalized the same way);
-`..` segments are rejected. Config dictionaries (e.g. via the VFS registry) may spell it
-`root_path`. Omitting it (or passing `/`) mounts the account root as before.
+`/dropbox/Projects/data.csv` is the Dropbox path `/Projects/data.csv`, or
+`<rootPath>/Projects/data.csv` with `rootPath` set. An App folder app sees
+only its own folder.
+
+## Behavior
+
+- **Folder root:** `rootPath` accepts `Team/data`, `/Team/data` or
+  `/Team/data/`, all the same; `..` segments are rejected. Paths outside it
+  are unreachable.
+- **Folders:** `rmdir` fails with `ENOTEMPTY` on a non-empty folder; `rm -r`
+  removes it.
+- **Files from other clients:** a name missing from a cached listing is looked
+  up on Dropbox before the mount answers that it does not exist, so a file
+  another client created is found, and `>>`, `touch` and `sed -i` act on it
+  instead of replacing it. A listing the running command fetched itself is
+  trusted for the whole command, so one long-running command, such as a
+  program a runtime runs, does not see a file created after it listed the
+  folder.
+- **Space:** `df` reports the account's space usage, with the
+  `account_info.read` scope.
+
+## Browser
+
+`@struktoai/mirage-browser` exports the same `DropboxVFS`. It signs in with
+PKCE, so the page holds the app key and a refresh token but no app secret.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const dropbox = new DropboxVFS({
+  clientId: import.meta.env.VITE_DROPBOX_APP_KEY,
+  refreshToken: refreshTokenFromLocalStorage,
+})
+const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
+```
+
+- Add the page's URL to the app's **Redirect URIs** on its **Settings** tab,
+  such as `http://localhost:5173/vfs/dropbox/dropbox_pkce.html`. It must match
+  exactly.
+- [`examples/browser/vfs/dropbox/dropbox_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/dropbox/dropbox_pkce.ts)
+  runs the whole PKCE sign-in and keeps the refresh token in `localStorage`.
+- To keep a secret on a backend instead, pass `refreshFn`: it takes the
+  refresh token and returns `{ accessToken, expiresIn }`.
+
+## Integration
+
+Dropbox answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: [Dropbox search](https://www.dropbox.com/developers/documentation/http/documentation#files-search)
+  names the files to read, for whole words. Every file is read when the
+  search fails, reaches its 10,000-match limit or finds nothing.
+  [Search](/home/integration/search) lists how each option uses it. Dropbox
+  can leave out a file that holds the word:
+  - Full-text search needs a Professional, Essentials or Business plan; on
+    other plans Dropbox matches file names only.
+  - Dropbox searches the text it extracted, not the bytes, and indexes a
+    write some time after it lands, so it can miss Office files, PDFs,
+    archives, the end of a large file, a word Dropbox splits differently
+    (`foo.bar`) and recent writes.
+
+  `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/limits#command-output) reads every file instead.
+- `grep -a` (`--binary-files=text`): files with a binary extension, such as
+  `.pdf` or `.zip`, are read and searched as text even when the search did
+  not name them. `grep -I` skips binary files.
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Dropbox mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md dropbox start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `dropbox`, write |
+    | `/<path>` | `dropbox`, `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -99,7 +187,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dropbox mounted at `/<path>
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `dropbox` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -120,7 +208,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dropbox mounted at `/<path>
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `dropbox`, write |
+    | `/<path>` | `dropbox`, `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -142,172 +230,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dropbox mounted at `/<path>
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md dropbox end */}
-
-## Integration
-
-What Dropbox answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Dropbox |
-| --- | --- |
-| `grep -r`, `rg` | Dropbox search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Dropbox splits differently (`foo.bar`) and recent writes; file contents on plans below Professional. |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-The [Python Dropbox docs](/python/vfs/dropbox#integration) list when each search answers and what it can miss.
-
-## Names missing from a listing
-
-A name missing from a cached listing that the running command did not
-fetch is looked up on Dropbox by path before mirage answers that it does
-not exist: one `get_metadata` for a `stat`, or the download itself for a
-read. A file another client created after the listing is therefore found,
-and `>>`, `touch` and `sed -i` act on it instead of replacing it.
-
-A listing the running command fetched itself is trusted as is, for the
-whole command. Each command of a script is its own command, but one
-long-running command, such as a program a runtime runs, does not see a
-file another client creates after it listed the folder.
-
-Some lookups run outside any shell command: FUSE, programmatic calls,
-`[ ]` and `[[ ]]` tests, and a redirect on anything but a simple command
-(a brace group, subshell, loop, `if` or `case`). No listing is the
-caller's own there, so each lookup of a name missing from a cached
-listing costs one request.
-
-## Reads under `fresh`
-
-Under `read: fresh`, a cached file is checked against its `content_hash`
-before it is served: one `get_metadata` per warm read, never a folder
-listing. A download names the hash in its `Dropbox-API-Result` header, full
-or ranged, so a read stamps it with no extra request. `server_modified` is
-not used: Dropbox repeats it across same-size rewrites.
-
-## Writes
-
-A write records the `content_hash` its upload reply names, so a `fresh` read
-right after a `tee` or `sed -i` downloads nothing.
-
-## Conditional writes
-
-A rewrite that observes a missing file requires atomic create-only support,
-which this backend does not currently enable. Appending to a missing file
-therefore returns an unsupported-operation error under either write policy.
-An intentional write with `>` can create the file, and subsequent appends to
-that existing file retain the selected policy.
-
-A Dropbox mount accepts `write: conditional`.
-A write that holds a version looks the file up once (`get_metadata`),
-refuses a file whose `content_hash` changed since it was read, and uploads
-in `update` mode with the file's `rev`, so Dropbox refuses (409
-`path/conflict`) a change that lands in between; a delete sends the `rev` as
-`parent_rev`. `rm -r` walks the folder file by file, and a `mv` within the
-mount is Dropbox's own move, which is not refused when its source changed
-(a `mv` to another mount is a copy and a conditioned delete, so there a
-changed source stays and `mv` reports the failed removal).
-
-## Browser (PKCE, no client secret)
-
-```bash
-pnpm add @struktoai/mirage-browser
-```
-
-```ts
-import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
-
-// Refresh token obtained via the PKCE flow, see examples/browser/vfs/dropbox/dropbox_pkce.ts.
-const dropbox = new DropboxVFS({
-  clientId: import.meta.env.VITE_DROPBOX_APP_KEY,
-  refreshToken: refreshTokenFromLocalStorage,
-})
-
-const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-await ws.shell('ls /dropbox/')
-```
-
-Set the redirect URI on your Dropbox app's **Settings** tab to your dev/prod origin
-(e.g. `http://localhost:5173/vfs/dropbox/dropbox_pkce.html`). The bundled
-[`examples/browser/vfs/dropbox/dropbox_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/dropbox/dropbox_pkce.ts)
-runs the full PKCE dance end-to-end and persists the refresh token to `localStorage`.
-
-## VFS mode (`patchNodeFs`)
-
-Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs` calls under a mount
-through the workspace, so any library that uses Node's `fs` API can read directly from Dropbox
-without code changes.
-
-```ts
-import { createRequire } from 'node:module'
-import { DropboxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
-
-const require = createRequire(import.meta.url)
-const fs = require('fs') as typeof import('fs')
-
-const dropbox = new DropboxVFS({
-  clientId: process.env.DROPBOX_APP_KEY!,
-  clientSecret: process.env.DROPBOX_APP_SECRET!,
-  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
-})
-
-const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-const restore = patchNodeFs(ws)
-
-const entries = await fs.promises.readdir('/dropbox/')
-const stat = await fs.promises.stat('/dropbox/data')
-const bytes = await fs.promises.readFile('/dropbox/data/example.parquet')
-
-restore()
-```
-
-The async forms (`fs.promises.*` and the callbacks) are routed. Sync forms like `fs.statSync` and
-`fs.readFileSync` refuse a mounted path because remote reads can't block the event loop.
-
-## FUSE mode
-
-For tools that need a real filesystem path (CLI tools, editors, system utilities), mount the
-workspace under FUSE:
-
-```ts
-import { DropboxVFS, Mount, MountBackend, MountMode, Workspace } from '@struktoai/mirage-node'
-
-const dropbox = new DropboxVFS({
-  clientId: process.env.DROPBOX_APP_KEY!,
-  clientSecret: process.env.DROPBOX_APP_SECRET!,
-  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
-})
-
-const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
-await ws.fuseReady()
-const mp = ws.fuseMountpoint
-
-// The dropbox subtree is exposed at the mountpoint root, so `${mp}/` is a real path:
-//   ls ${mp}/
-//   find ${mp} -name '*.parquet'
-//   cat ${mp}/data/example.json | jq .
-
-await ws.close()
-```
-
-Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
-[FUSE setup](/home/setup/macos).
-
-## Available commands
-
-`DropboxVFS` ships the same shell command set as the GDrive VFS:
-
-- **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
-  `realpath`, `basename`, `dirname`
-- **Write** (on a `WRITE` mount): `tee`, `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cp`, `truncate`,
-  shell redirection (`>` / `>>`)
-- **Search/text**: `grep`, `rg`, `awk`, `sed`, `sort`, `uniq`, `cut`, `diff`, `cmp`, `jq`
-- **Encoding**: `base64`
-
-## Examples
-
-End-to-end runnable scripts are in
-[`examples/typescript/vfs/dropbox/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/dropbox):
-
-- [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
-- [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
-- [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal
-
-`grep` classifies the bytes it reads, including downloaded attachments. Use `-I` to skip binary inputs or `-a` (`--binary-files=text`) to search them as text. Text mode bypasses the content-search index and scans files directly.

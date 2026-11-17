@@ -1,3 +1,6 @@
+// The run limits and `memory exhausted` adapted from jq 1.8.2 (MIT), src/execute.c,
+// src/exec_stack.h and src/main.c. See licenses/third_party/jq.txt.
+
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -187,3 +190,26 @@ mod tests {
         assert!(!meter.exceeded());
     }
 }
+
+/// Limits one run is held to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    /// Stack blocks (values, frames, fork points) alive at once.
+    pub(crate) blocks: usize,
+    /// Elements one array may hold.
+    pub(crate) items: usize,
+    /// Bytes one string may hold.
+    pub(crate) bytes: usize,
+    /// Bytes of values the run may hold alive at once.
+    pub(crate) memory: usize,
+}
+
+pub(super) const STEPS: u64 = 1 << 16;
+pub(super) const BLOCKS: usize = 1 << 20;
+pub(super) const ITEMS: usize = 1 << 24;
+pub(super) const BYTES: usize = 1 << 28;
+pub(super) const MEMORY: usize = 1 << 30;
+
+/// What the stream fails with once what jq holds outgrows the memory it
+/// was given, which the host reports as the workspace's own refusal.
+pub(crate) const EXHAUSTED: &str = "memory exhausted";

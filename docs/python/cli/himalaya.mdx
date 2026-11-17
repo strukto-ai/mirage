@@ -31,6 +31,72 @@ ws.register_cli("himalaya", HIMALAYA, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `himalaya` installed.
+
+{/* generated: skill-md himalaya start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`himalaya`**
+
+    ```text
+    CLI to manage emails
+
+    Usage: himalaya [OPTIONS] <COMMAND>
+
+    Commands:
+      mailbox        Manage mailboxes
+      flag           Manage message flags
+      attachment     Manage message attachments
+      envelope       Manage envelopes
+      message (msg)  Manage messages
+
+    Options:
+      --json  Enable JSON output
+      --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `himalaya`
+
+    ```text
+    CLI to manage emails
+
+    Usage: himalaya [OPTIONS] <COMMAND>
+
+    Commands:
+      mailbox        Manage mailboxes
+      flag           Manage message flags
+      attachment     Manage message attachments
+      envelope       Manage envelopes
+      message (msg)  Manage messages
+
+    Options:
+      --json  Enable JSON output
+      --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md himalaya end */}
+
 <Reference />
 
 <License />

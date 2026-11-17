@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::number::{self, ERANGE};
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::utf8::{Char, char_at};
 use crate::width::{TAB_WIDTH, char_width, is_space};
 use crate::{Stream, StreamError, parse_config, quoted};
@@ -55,6 +55,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         spaces: config.spaces,
         count: config.count,
         line: Vec::new(),
+        blank: None,
         started: false,
         column: 0,
         last: 0,
@@ -78,6 +79,8 @@ struct Fold {
     count: Count,
     /// The current line, kept only with `spaces`.
     line: Vec<u8>,
+    /// One past the line's last blank, kept as the line grows.
+    blank: Option<usize>,
     started: bool,
     column: u64,
     /// The columns the last printing character took, which a backspace
@@ -117,6 +120,7 @@ impl Fold {
             out.extend_from_slice(&self.line);
             out.push(b'\n');
             self.line.clear();
+            self.blank = None;
             crate::release_capacity(&mut self.line);
             self.started = false;
             self.column = 0;
@@ -127,6 +131,9 @@ impl Fold {
             if next <= self.width || !self.started {
                 if self.spaces {
                     self.line.extend_from_slice(unit);
+                    if cp.is_some_and(is_blank) {
+                        self.blank = Some(self.line.len());
+                    }
                 } else {
                     out.extend_from_slice(unit);
                 }
@@ -135,7 +142,7 @@ impl Fold {
                 return;
             }
             if self.spaces {
-                if let Some(blank) = self.last_blank() {
+                if let Some(blank) = self.blank.take() {
                     out.extend_from_slice(&self.line[..blank]);
                     out.push(b'\n');
                     self.line.drain(..blank);
@@ -146,22 +153,12 @@ impl Fold {
                 }
                 out.append(&mut self.line);
                 crate::release_capacity(&mut self.line);
+                self.blank = None;
             }
             out.push(b'\n');
             self.started = false;
             self.column = 0;
         }
-    }
-
-    /// One past the line's last blank.
-    fn last_blank(&self) -> Option<usize> {
-        let mut found = None;
-        self.units(&self.line, |at, unit, cp| {
-            if cp.is_some_and(is_blank) {
-                found = Some(at + unit.len());
-            }
-        });
-        found
     }
 
     fn recount(&self) -> (u64, u64) {
@@ -260,6 +257,7 @@ impl Stream for Fold {
         let held = std::mem::take(&mut self.held);
         self.consume(&held, true, out);
         out.append(&mut self.line);
+        self.blank = None;
         Ok(())
     }
 }

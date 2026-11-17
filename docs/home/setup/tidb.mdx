@@ -1,23 +1,35 @@
 ---
 title: TiDB Cloud Filesystem
 icon: /images/tidb-logo.svg
-description: Set up a TiDB Cloud Filesystem token for the tidb_filesystem VFS.
+description: Virtualize a TiDB Cloud Filesystem, or a self-hosted drive9 server, as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The VFS reaches a file system through its REST API with a file system token.
-No extra package is needed in Python or TypeScript.
+A TiDB Cloud file system appears under the mount as its own tree of
+directories and files, reached through its REST API with no FUSE mount.
+
+## Setup
 
 1. Create a file system in the [TiDB Cloud console](https://tidbcloud.com/) or
    with `ti fs`, and note its region.
-2. Take its owner token, shown once when the file system is created, or create
-   a scoped token under **File Systems**, your file system, **Access Tokens**,
-   **Create Token**. See [Manage File System Tokens](https://docs.pingcap.com/tidbcloud-filesystem/manage-filesystem-tokens/).
-3. Set `host` to the endpoint of the file system's region. A token works only
-   against its own region.
+2. Copy its owner token, shown once in the **Your File System is Ready!**
+   dialog, or create a scoped token: **File Systems**, the file system,
+   **Access Tokens**, **Create Token**. See
+   [Manage File System Tokens](https://docs.pingcap.com/tidbcloud-filesystem/manage-filesystem-tokens/).
+3. Set the host to the endpoint of the file system's region. A token works
+   only against its own region.
 
-| Region | `host` |
+```bash
+export TIDB_FILESYSTEM_HOST=https://aws-us-east-1.drive9.ai
+export TIDB_FILESYSTEM_TOKEN=...
+```
+
+| Region | Host |
 | --- | --- |
 | `aws-us-east-1` | `https://aws-us-east-1.drive9.ai` |
 | `aws-us-west-2` | `https://aws-us-west-2.drive9.ai` |
@@ -26,26 +38,112 @@ No extra package is needed in Python or TypeScript.
 | `azure-centralus` | `https://azure-centralus.drive9.ai` |
 | `alicloud-ap-southeast-1` | `https://alicloud-ap-southeast-1.drive9.ai` |
 
-Your application passes both to the VFS, for example from its environment:
-
-```bash
-TIDB_FILESYSTEM_HOST=https://aws-us-east-1.drive9.ai
-TIDB_FILESYSTEM_TOKEN=...
-```
-
-### Scoped tokens
-
 A scoped token reaches only the path it was created for, and only with the
-operations it allows (read, list, search, write, delete). Mount it with
-`root_path` set to that path, since it cannot list the file system's root.
-
-## Self-hosted drive9
+operations it allows (`read`, `list`, `search`, `write`, `delete`). Mount it
+with `root_path` set to that path, since it cannot list the file system's
+root.
 
 TiDB Cloud Filesystem runs on the open-source
 [drive9](https://github.com/mem9-ai/drive9) server, and the same VFS mounts a
-drive9 server you run yourself: set `host` to its origin and `token` to an API
-key it issued.
+self-hosted drive9 server: set `host` to its origin and `token` to an API key
+it issued.
 
-See the [Python TiDB Cloud Filesystem VFS](/python/vfs/tidb_filesystem) or
-[TypeScript TiDB Cloud Filesystem VFS](/typescript/setup/tidb_filesystem) page
-for configuration and examples.
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /fs:
+        vfs: tidb_filesystem
+        mode: write
+        config:
+          host: ${TIDB_FILESYSTEM_HOST}
+          token: ${TIDB_FILESYSTEM_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id fs
+    mirage shell -w fs -c 'ls /fs'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.tidb_filesystem import TiDBFilesystemConfig, TiDBFilesystemVFS
+
+    config = TiDBFilesystemConfig(
+        host=os.environ["TIDB_FILESYSTEM_HOST"],
+        token=os.environ["TIDB_FILESYSTEM_TOKEN"],
+    )
+    ws = Workspace({"/fs": TiDBFilesystemVFS(config)}, mode=MountMode.WRITE)
+    result = await ws.shell("ls /fs")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const fs = await buildVfs('tidb_filesystem', {
+      host: process.env.TIDB_FILESYSTEM_HOST!,
+      token: process.env.TIDB_FILESYSTEM_TOKEN!,
+    })
+    const ws = new Workspace({ '/fs': fs }, { mode: MountMode.WRITE })
+    const result = await ws.shell('ls /fs')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/fs/
+  notes/
+    a.txt
+  workspace/
+    data.json
+```
+
+- Files keep their own names and bytes; nothing is converted.
+- `root_path: /workspace` mounts only that directory; `..` is refused.
+- A file in the extent layout, which only the file system's FUSE client
+  reads, answers `Operation not supported`.
+
+## Sample runs
+
+```bash
+$ ls /fs
+notes
+workspace
+```
+
+```bash
+$ ls /fs/notes
+a.txt
+```
+
+```bash
+$ cat /fs/notes/a.txt
+hello
+```
+
+`echo hello > /fs/notes/a.txt` writes a file; `mv` is one server-side rename
+and `rm -r` one recursive delete. A file of 50,000 bytes or more uploads in
+parts, and `>>` onto it sends only the new bytes.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/tidb_filesystem">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/tidb_filesystem">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

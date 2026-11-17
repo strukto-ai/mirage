@@ -20,7 +20,7 @@ use serde_json::{Value as Json, json};
 
 use crate::number;
 use crate::quote::escaped;
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::width::{TAB_WIDTH, char_width};
 use crate::word::{self, Choice};
 use crate::{Stream, StreamError, byte_text, parse_config, quoted};

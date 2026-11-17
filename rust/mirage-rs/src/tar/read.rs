@@ -13,8 +13,8 @@ use super::header::{self, BLOCK, Block, Kind, Member, Pax, Rows, padding};
 use super::options::Overwrites;
 use super::transform::Scope;
 use super::{
-    Codec, Config, Exclusion, FAILED, FATAL, Mode, TRAILER, WINDOW, escaped, lines, open_failure,
-    read,
+    Codec, Config, Exclusion, FAILED, FATAL, FEED, Mode, TRAILER, WINDOW, escaped, lines,
+    open_failure, read, trimmed,
 };
 use crate::Stream;
 use crate::glob::CompiledGlob;
@@ -23,8 +23,6 @@ use crate::task::{File, Host};
 
 /// The archive's input.
 const ARCHIVE: u32 = 1;
-/// The most a codec stream takes a feed.
-pub(super) const FEED: usize = 16 * 1024;
 const NOT_TAR: &str = "tar: This does not look like a tar archive";
 const SKIPPING: &str = "tar: Skipping to next header";
 const UNEXPECTED_EOF: &str = "tar: Unexpected EOF in archive";
@@ -486,11 +484,6 @@ impl Sink<'_> {
             }
         }
     }
-}
-
-/// `name` without its trailing slashes.
-pub(super) fn trimmed(name: &[u8]) -> &[u8] {
-    &name[..name.len() - name.iter().rev().take_while(|&&b| b == b'/').count()]
 }
 
 /// What GNU removes from a member's name before it uses it: everything

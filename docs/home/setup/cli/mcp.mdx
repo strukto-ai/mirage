@@ -1,12 +1,11 @@
 ---
 title: From MCP
-icon: plug
+icon: /images/mcp-icon.svg
 description: Install an MCP server's tools as one CLI, with Python or TypeScript.
 ---
 
 An MCP server's tools become one CLI: each tool is a subcommand that takes the
-tool's arguments as one JSON object. Full guide:
-[Python](/python/cli/mcp) · [TypeScript](/typescript/cli/mcp).
+tool's arguments as one JSON object.
 
 ```yaml workspace.yaml
 mounts:
@@ -62,3 +61,14 @@ issues --help
 issues search-issues --help
 issues search-issues '{"query": "login bug"}'
 ```
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/mcp">
+    Server options and how tools become commands.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/mcp">
+    Server options and how tools become commands.
+  </Card>
+</CardGroup>

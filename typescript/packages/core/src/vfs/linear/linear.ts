@@ -44,126 +44,15 @@ export const VFS_MD = `\`\`\`text
         <title>__<document-id>.json
 \`\`\`
 
-- \`ls\` directories first to discover exact names.
-- Every entity-named segment is \`<sanitized-human-readable>__<id>\`. The
-  human-readable part is sanitized, so don't construct it; \`ls\` the
-  parent directory instead.
-- The id is the last \`__\`-separated segment:
-
-\`\`\`text
-{prefix}/teams/STR__Strukto-ai__<team-id>/         -> <team-id>
-{prefix}/teams/.../issues/STR-42__<issue-id>/      -> <issue-id>
-{prefix}/teams/.../members/Alice__<user-id>.json   -> <user-id>
-\`\`\`
-
-All \`cat\` output is normalized by Mirage (snake_case keys), not the raw
-Linear GraphQL response. The shapes:
-
-\`team.json\`:
-
-\`\`\`jsonc
-{
-  "team_id": "...", "team_key": "STR", "team_name": "Strukto",
-  "name": "...", "description": "...", "timezone": "...",
-  "updated_at": "...",
-  "states": [
-    { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
-    ...                              // one element per workflow state
-  ]
-}
-\`\`\`
-
-\`issue.json\`:
-
-\`\`\`jsonc
-{
-  "issue_id": "...", "issue_key": "STR-42",
-  "title": "...", "description": "...",
-  "team_id": "...", "team_key": "...", "team_name": "...",
-  "project_id": "...",   "project_name": "...",
-  "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
-  "state_id": "...",     "state_name": "In Progress",
-  "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
-  "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
-  "priority": 2,         // 0=none 1=urgent 2=high 3=medium 4=low
-  "label_ids":   ["..."],
-  "label_names": ["bug", "frontend"],
-  "created_at": "...", "updated_at": "...", "url": "..."
-}
-\`\`\`
-
-\`comments.jsonl\`, one normalized comment per line:
-
-\`\`\`jsonc
-{ "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
-  "user_id": "...", "user_email": "...", "user_name": "...",
-  "body": "...", "created_at": "...", "updated_at": "...",
-  "url": "..." }
-\`\`\`
-
-A project (\`projects/<name>__<project-id>.json\`):
-
-\`\`\`jsonc
-{
-  "project_id": "...", "team_id": "...",
-  "name": "...", "description": "...", "state": "started",
-  "lead_id": "...", "updated_at": "...", "url": "...",
-  "issue_count": 12,
-  "issues": [
-    { "issue_id": "...", "issue_key": "STR-42", "title": "...",
-      "state_id": "...", "state_name": "In Progress", "url": "..." }
-  ]
-}
-\`\`\`
-
-A cycle (\`cycles/<name>__<cycle-id>.json\`):
-
-\`\`\`jsonc
-{
-  "cycle_id": "...", "team_id": "...",
-  "name": "...", "number": 7,
-  "starts_at": "...", "ends_at": "...",
-  "updated_at": "...", "url": "..."
-}
-\`\`\`
-
-A member (\`members/<display-name>__<user-id>.json\`):
-
-\`\`\`jsonc
-{
-  "user_id": "...", "name": "...", "display_name": "...",
-  "email": "...", "is_active": true, "is_admin": false,
-  "updated_at": "...", "url": "..."
-}
-\`\`\`
-
-A document (\`documents/<title>__<document-id>.json\`):
-
-\`\`\`jsonc
-{
-  "document_id": "...", "title": "...", "content": "...",
-  "project_id": "...", "project_name": "...",
-  "creator_id": "...", "creator_name": "...", "creator_email": "...",
-  "created_at": "...", "updated_at": "...", "url": "..."
-}
-\`\`\`
-
-Useful \`jq\` paths:
-
-\`\`\`jq
-.issue_key                                          # issue.json
-.state_name                                         # issue.json
-.assignee_email                                     # issue.json
-.label_names[]                                      # issue.json
-.issues[] | select(.state_name == "In Progress")    # a project
-.states[].state_name                                # team.json
-[inputs] | length                                   # comments.jsonl: count
-[inputs | select(.user_email == "x")] | length      # comments.jsonl
-\`\`\`
-
-To act on issues (list, get, create, update, assign, transition,
-comments, projects, cycles, labels, users, documents, search), use the
-\`linear\` CLI if installed (\`linear --help\`).`
+- A named segment is \`<sanitized-name>__<id>\`; the id after the last \`__\`
+  is exact. \`ls\` the parent for exact names rather than building them.
+- Files are JSON normalized by Mirage with snake_case keys (\`issue_key\`,
+  \`state_name\`, \`assignee_email\`, \`label_names\`), not Linear's GraphQL
+  shape. \`comments.jsonl\` holds one comment per line.
+- \`team.json\` lists the team's workflow states; a project file lists its
+  issues with their state.
+- To create, update, assign, transition or comment on issues, use the
+  \`linear\` CLI if installed (\`linear --help\`).`
 
 export class LinearVFS extends BaseVFS {
   override readonly handed = {

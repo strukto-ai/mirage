@@ -97,7 +97,7 @@ struct Cond<'p, 'a> {
     depth: usize,
     /// The heredocs the substitutions in the words read so far left
     /// pending: the next newline reads their bodies.
-    heredocs: Vec<super::heredoc::Pending>,
+    heredocs: Vec<super::heredoc_body::Pending>,
 }
 
 impl Cond<'_, '_> {
@@ -297,7 +297,7 @@ impl Cond<'_, '_> {
         }
         if tok.kind == Kind::Newline && tok.end > tok.start && !self.heredocs.is_empty() {
             let s = self.parser.s;
-            self.pos = super::heredoc::bodies_end(s, tok.end, &mut self.heredocs);
+            self.pos = super::heredoc_body::bodies_end(s, tok.end, &mut self.heredocs);
             self.heredocs.clear();
         }
     }

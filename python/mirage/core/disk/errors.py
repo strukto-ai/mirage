@@ -56,7 +56,7 @@ class disk_errors(AbstractContextManager[None]):
         self,
         typ: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,
+        _tb: TracebackType | None,
     ) -> None:
         if isinstance(exc, OSError):
             raise disk_error(exc, self.virtual) from exc

@@ -15,11 +15,15 @@
 import argparse
 import ast
 import asyncio
+import collections.abc
 import difflib
 import inspect
+import json
 import re
 import sys
 import textwrap
+import tomllib
+import types
 import typing
 from collections.abc import Callable
 from enum import Enum
@@ -31,6 +35,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from typing_extensions import TypeForm
 
+from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.types import JsonValue, MountMode
 from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
 from mirage.vfs.secrets import secret_field_names
@@ -42,6 +47,66 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs" / "python"
 AGENTS = ROOT / "python" / "mirage" / "agents"
 SECRET_NOTE = "Fields marked secret are redacted in snapshots."
+PYPROJECT = ROOT / "python" / "pyproject.toml"
+EXTRA_FEATURES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    (
+        "Object stores",
+        ("s3", "r2", "gcs", "oci"),
+        "S3 and the S3-compatible VFS, such as R2, GCS, OCI and MinIO.",
+    ),
+    ("SSH", ("ssh",), "`SSHVFS` and the `ssh` machine."),
+    (
+        "OpenDAL",
+        ("nextcloud", "hf-buckets"),
+        "`NextcloudVFS` and `HfBucketsVFS`.",
+    ),
+    (
+        "FUSE",
+        ("fuse",),
+        "Mounting a workspace as an OS filesystem; see the "
+        "[FUSE setup](/python/setup/fuse).",
+    ),
+    ("MongoDB", ("mongodb", "gridfs"), "`MongoDBVFS` and `GridFSVFS`."),
+    ("Postgres", ("postgres",), "`PostgresVFS`."),
+    (
+        "Redis",
+        ("redis",),
+        "`RedisVFS`, the Redis file and index cache stores, and the Redis "
+        "session store.",
+    ),
+    ("Email", ("email",), "Sending mail with `himalaya` (SMTP)."),
+    ("LanceDB", ("lancedb",), "`LanceDBVFS`."),
+    ("Qdrant", ("qdrant",), "`QdrantVFS`."),
+    ("Chroma", ("chroma",), "`ChromaVFS`."),
+    ("Mem0", ("mem0",), "`Mem0VFS`."),
+    ("Langfuse", ("langfuse",), "`LangfuseVFS`."),
+    (
+        "Runtimes",
+        ("monty", "wasi", "quickjs"),
+        "The [Monty](/python/runtime/monty), [WASI](/python/runtime/wasi) and "
+        "[QuickJS](/python/runtime/quickjs) runtimes.",
+    ),
+    (
+        "Cloud machines",
+        ("e2b", "daytona", "boxd"),
+        "The `e2b`, `daytona` and `boxd` machines.",
+    ),
+    ("AWS Secrets Manager", ("aws-sm",), "The `aws-sm` secret source."),
+    ("1Password", ("1password",), "The `1password` secret source."),
+    ("dotenv", ("dotenv",), "The `dotenv` secret source."),
+    (
+        "Agent SDKs",
+        (
+            "claude-agent-sdk",
+            "claude-managed-agents",
+            "openai",
+            "agno",
+            "deepagents",
+            "pydantic-ai",
+        ),
+        "The adapters on the [agents pages](/python/agents/index).",
+    ),
+)
 MIB = 1024 * 1024
 MARKER = re.compile(
     r"^\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+)"
@@ -57,6 +122,11 @@ TOKEN = re.compile(
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 FRONTMATTER = re.compile(r"\A---\n.*?\n---\n+", re.S)
 FENCE = re.compile(r"^`{3,}")
+BOX = (
+    '<div className="rounded-xl border border-gray-200 dark:border-gray-800 '
+    'px-5 my-4">'
+)
+MODE_CELL = re.compile(r"^(\| `/<path>` \| (?:[^|]*, )?)write \|", re.M)
 # The path a docs page mounts its VFS at: a mount goes wherever its
 # workspace puts it.
 PLACEHOLDER = "/<path>"
@@ -132,6 +202,15 @@ def cell(text: str) -> str:
         last = match.end()
     out.append(_escape_prose(flat[last:]))
     return "".join(out)
+
+
+def prose(text: str) -> str:
+    """Escape prose for MDX outside a table, as ``cell`` does inside one.
+
+    Args:
+        text (str): A description, joined onto one line.
+    """
+    return cell(text).replace("\\|", "|")
 
 
 def _escape_prose(text: str) -> str:
@@ -224,25 +303,66 @@ def description(model: type[BaseModel], name: str) -> str:
 
 def _default_text(field: FieldInfo) -> str:
     if field.is_required():
-        return "required"
+        return ""
     value = field.get_default(call_default_factory=True)
     if value is None:
         return ""
     if isinstance(value, Enum):
         value = value.value
-    text = f"default `{value!r}`".replace("|", "\\|")
+    text = repr(value)
     if type(value) is int and value >= MIB and value % MIB == 0:
         text += f" ({value // MIB} MiB)"
     return text
 
 
+def type_text(annotation: TypeForm[typing.Any] | None) -> str:
+    """A field's type as a reader writes it: no ``None``, a secret as
+    ``str`` and a literal as its values.
+
+    Args:
+        annotation (TypeForm[typing.Any] | None): The field's annotation.
+    """
+    if annotation is None or annotation is type(None):
+        return ""
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin is typing.Annotated:
+        return type_text(args[0])
+    if origin in (typing.Union, types.UnionType):
+        parts = [type_text(a) for a in args if a is not type(None)]
+        return " | ".join(dict.fromkeys(p for p in parts if p))
+    if origin is typing.Literal:
+        return " | ".join(repr(a) for a in args)
+    if origin in (list, tuple, set, frozenset, collections.abc.Sequence):
+        inner = type_text(args[0]) if args else ""
+        return f"list[{inner}]" if inner else "list"
+    if origin in (dict, collections.abc.Mapping):
+        return "dict"
+    if (
+        origin is collections.abc.Callable
+        or annotation is collections.abc.Callable
+    ):
+        return "callable"
+    if isinstance(annotation, type):
+        if issubclass(annotation, Enum):
+            return " | ".join(repr(m.value) for m in annotation)
+        if issubclass(annotation, BaseModel):
+            return "object"
+        if annotation.__name__ in ("SecretStr", "SecretBytes"):
+            return "str"
+        return annotation.__name__
+    return getattr(annotation, "__name__", "") or str(annotation)
+
+
+def _attr(text: str) -> str:
+    return "{" + json.dumps(text) + "}"
+
+
 def config_table(
     model: type[BaseModel], omit: frozenset[str] = frozenset()
 ) -> Rendered:
-    """Render a config model as a two-column Markdown table.
-
-    The name cell carries whether the field is required, its default and
-    whether it is secret, so the description gets the width.
+    """Render a config model as one ``ResponseField`` per field: its name,
+    type, whether it is required, its default and whether it is secret.
 
     Args:
         model (type[BaseModel]): The VFS config model.
@@ -250,7 +370,7 @@ def config_table(
             the mount it documents ignores them.
     """
     secrets = set(secret_field_names(model))
-    rows = ["| Field | Description |", "| --- | --- |"]
+    blocks: list[str] = []
     bare: list[str] = []
     wires: set[str] = set()
     shows_secret = False
@@ -262,17 +382,23 @@ def config_table(
         text = description(model, name)
         if not text:
             bare.append(wire)
-        tags = [t for t in (_default_text(field),) if t]
+        attrs = [f'name="{wire}"']
+        kind = type_text(field.annotation)
+        if kind:
+            attrs.append(f"type={_attr(kind)}")
+        if field.is_required():
+            attrs.append("required")
+        default = _default_text(field)
+        if default:
+            attrs.append(f"default={_attr(default)}")
         if name in secrets:
-            tags.append("secret")
+            attrs.append('post={["secret"]}')
             shows_secret = True
-        rows.append(
-            f"| {name_cell(wire)}<br />{', '.join(tags)} | {cell(text)} |"
-            if tags
-            else f"| {name_cell(wire)} | {cell(text)} |"
+        blocks.append(
+            f"<ResponseField {' '.join(attrs)}>\n  {prose(text)}\n</ResponseField>"
         )
     note = f"\n\n{SECRET_NOTE}" if shows_secret else ""
-    return Rendered("\n".join(rows) + note, bare, sorted(omit - wires))
+    return Rendered("\n".join(blocks) + note, bare, sorted(omit - wires))
 
 
 def _module_file(module: str) -> Path:
@@ -476,14 +602,15 @@ async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
     ws.mount("/").visible = hidden
     ws.mount("/dev").visible = hidden
     try:
-        return (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
+        markdown = (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
     finally:
         await ws.close()
+    return MODE_CELL.sub(r"\1`<mode>` |", markdown, count=1)
 
 
 def rendered(markdown: str) -> str:
     """``markdown`` as a docs page shows it: no frontmatter, and every
-    heading two levels down, below the page's own.
+    heading a bold line, so none joins the page's own outline.
 
     Args:
         markdown (str): A VFS.md.
@@ -498,13 +625,14 @@ def rendered(markdown: str) -> str:
         elif fence and set(bare) == {"`"} and len(bare) >= fence:
             fence = 0
         elif not fence and line.startswith("#"):
-            line = f"##{line}"
+            line = f"**{line.lstrip('#').strip()}**"
         lines.append(line)
     return "\n".join(lines)
 
 
 def tabs(markdown: str) -> str:
-    """``markdown`` rendered in one tab and as its source in another.
+    """``markdown`` rendered in one tab and as its source in another,
+    boxed apart from the page around it.
 
     Args:
         markdown (str): A VFS.md.
@@ -512,10 +640,11 @@ def tabs(markdown: str) -> str:
     shown = textwrap.indent(rendered(markdown), "    ")
     raw = textwrap.indent(fenced(markdown, "markdown"), "    ")
     return (
+        f"{BOX}\n"
         '<Tabs>\n  <Tab title="Rendered">\n'
         f"{shown}\n  </Tab>\n"
         '  <Tab title="Raw">\n'
-        f"{raw}\n  </Tab>\n</Tabs>"
+        f"{raw}\n  </Tab>\n</Tabs>\n</div>"
     )
 
 
@@ -536,6 +665,98 @@ def vfs_md(
     return Rendered(tabs(markdown.rstrip("\n")), [], sorted(omit))
 
 
+# A config each account CLI installs with. Nothing is reached: installing
+# a CLI opens no connection.
+CLI_SAMPLES: dict[str, dict[str, JsonValue]] = {
+    "airtable": {"token": "token"},
+    "discord": {"token": "token"},
+    "gh": {"token": "token"},
+    "gws": {
+        "client_id": "id",
+        "client_secret": "secret",
+        "refresh_token": "token",
+    },
+    "hf": {"token": "token"},
+    "himalaya": {
+        "imap_host": "imap.example.com",
+        "smtp_host": "smtp.example.com",
+        "username": "agent@example.com",
+        "password": "password",
+    },
+    "linear": {"api_key": "key"},
+    "ntn": {"api_key": "key"},
+    "slack": {"token": "token"},
+    "trello": {"api_key": "key", "api_token": "token"},
+}
+
+
+async def _skill_md(name: str) -> str:
+    ws = Workspace({})
+    ws.register_cli(name, cli_spec_for(name), CLI_SAMPLES.get(name))
+    try:
+        return await ws.skill_md()
+    finally:
+        await ws.close()
+
+
+def skill_md(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
+    """Render the SKILL.md a workspace with only ``name`` installed
+    answers, rendered and raw, one tab each.
+
+    Args:
+        name (str): The bundled CLI.
+        omit (frozenset[str]): Nothing can be left out of a document.
+    """
+    markdown = asyncio.run(_skill_md(name))
+    return Rendered(tabs(markdown.rstrip("\n")), [], sorted(omit))
+
+
+def extras_table(omit: frozenset[str] = frozenset()) -> Rendered:
+    """Render the ``mirage-ai`` extras by feature, from pyproject.toml.
+
+    Every extra is either mapped in ``EXTRA_FEATURES`` or a meta extra
+    made only of other extras, so a new one fails the check until it is
+    described here.
+
+    Args:
+        omit (frozenset[str]): Nothing can be left out of this table.
+    """
+    extras = tomllib.loads(PYPROJECT.read_text())["project"][
+        "optional-dependencies"
+    ]
+    meta = {
+        name: [dep[len("mirage-ai[") : -1] for dep in deps]
+        for name, deps in extras.items()
+        if deps and all(dep.startswith("mirage-ai[") for dep in deps)
+    }
+    mapped = [name for _, names, _ in EXTRA_FEATURES for name in names]
+    unmapped = sorted(set(extras) - set(mapped) - set(meta))
+    unknown = sorted(set(mapped) - set(extras))
+    if unmapped or unknown or len(mapped) != len(set(mapped)):
+        raise ValueError(
+            f"EXTRA_FEATURES disagrees with pyproject.toml: unmapped "
+            f"{unmapped or '-'}; not an extra {unknown or '-'}"
+        )
+    rows = ["| Feature | Extras | Needed for |", "| --- | --- | --- |"]
+    for feature, names, needs in EXTRA_FEATURES:
+        cell = ", ".join(f"`{name}`" for name in names)
+        rows.append(f"| {feature} | {cell} | {needs} |")
+    for name, members in sorted(meta.items()):
+        left = [extra for extra in mapped if extra not in members]
+        if len(left) < len(members):
+            needs = "Every extra above" + (
+                " except " + ", ".join(f"`{extra}`" for extra in left)
+                if left
+                else ""
+            )
+        else:
+            needs = "The extras " + ", ".join(
+                f"`{extra}`" for extra in members
+            )
+        rows.append(f"| Bundle | `{name}` | {needs}. |")
+    return Rendered("\n".join(rows), [], sorted(omit))
+
+
 def renderers() -> dict[str, dict[str, Renderer]]:
     """Each marker kind's keys, mapped to the function rendering one."""
     models = config_models()
@@ -545,9 +766,13 @@ def renderers() -> dict[str, dict[str, Renderer]]:
             for name, model in models.items()
         },
         "exports": {name: partial(exports_table, name) for name in adapters()},
+        "extras": {"optional": extras_table},
         "vfs-md": {
             name: partial(vfs_md, name, models.get(name))
             for name in sorted(REGISTRY)
+        },
+        "skill-md": {
+            name: partial(skill_md, name) for name in sorted(BUILTIN_CLI_SPECS)
         },
     }
 
@@ -598,8 +823,15 @@ def selftest() -> None:
     ):
         assert not markers_paired(broken), broken
     document = "---\nname: x\n---\n\n# T\n\n```text\n# kept\n```\n\n## S"
-    assert rendered(document) == "### T\n\n```text\n# kept\n```\n\n#### S"
+    assert rendered(document) == "**T**\n\n```text\n# kept\n```\n\n**S**"
     assert tabs(document).count("    # kept") == 2
+    table = "| `/<path>` | `gcal`, write |\n| `/<path>` | write |"
+    assert MODE_CELL.sub(r"\1`<mode>` |", table, count=1) == (
+        "| `/<path>` | `gcal`, `<mode>` |\n| `/<path>` | write |"
+    )
+    assert type_text(int | None) == "int"
+    assert type_text(typing.Literal["a", "b"]) == "'a' | 'b'"
+    assert type_text(list[str] | None) == "list[str]"
     print("gen_doc_tables selftest: ok")
 
 

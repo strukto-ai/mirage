@@ -43,6 +43,7 @@ from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.oldstyle import expand_old_style
 from mirage.commands.spec.types import (
     Argument,
+    Attached,
     CommandSpec,
     ParsedFlagValue,
     ValueType,
@@ -54,7 +55,7 @@ from mirage.commands.spec.word_choice import (
     match_word,
     value_classes,
 )
-from mirage.types import LineFacts
+from mirage.types import LineFacts, PathSpec
 from mirage.utils.path import resolve_path
 
 
@@ -127,6 +128,12 @@ class ParsedArgs:
     # scan read as an option, VALUE for an option's detached value,
     # OPERAND for an argument, None for a word the scan never reads.
     word_roles: list[WordKind | None] = field(default_factory=list)
+    # Each value typed onto its option word (`--file=x`, `-fx`), in scan
+    # order. ``word_paths`` reads the PATH ones.
+    attached: list[Attached] = field(default_factory=list)
+    # PATH values no word typed, which a default or the environment
+    # supplied, resolved.
+    supplied_path_values: list[str] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
     # abbreviated longs matching several options (typed prefix, matched
@@ -656,6 +663,7 @@ def parse_command(
     base = cwd
     word_bases: list[str | None] = [None] * len(argv)
     raw_bases: list[str] = []
+    typed_onto: list[Attached] = []
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
@@ -777,7 +785,37 @@ def parse_command(
             word_kinds[scan_origins[i + offset + 1]] = kinds[
                 offset + (attached is not None)
             ]
+        if attached is not None:
+            record_attached(spelling, attached, kinds[0])
         return detached + 1
+
+    def record_attached(
+        spelling: str, value: str, kind: ValueType | None = None
+    ) -> None:
+        """Keep a value typed onto its option word, with the option as
+        typed and the directory a PATH value resolves against: the
+        operand base for the base option itself (``-C a -Cb`` is
+        ``a/b``), else the cwd, as a detached value of the same option
+        resolves."""
+        slot = scan_origins[i]
+        word = argv[slot]
+        option = (
+            word[: len(word) - len(value)].removesuffix("=")
+            if value and word.endswith(value)
+            else word.removesuffix("=")
+        )
+        moves = (
+            cs.base_dest is not None and cs.dest_of(spelling) == cs.base_dest
+        )
+        typed_onto.append(
+            Attached(
+                slot,
+                option,
+                value,
+                base if moves else cwd,
+                kind or cs.kind_of[spelling],
+            )
+        )
 
     i = 0
     end_of_flags = False
@@ -933,6 +971,7 @@ def parse_command(
                         spelling,
                         tok[eq + 1 :],
                     )
+                    record_attached(spelling, tok[eq + 1 :])
                     base = _rebase(flags, cs, spelling, tok[eq + 1 :], base)
                 elif etok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
@@ -997,6 +1036,7 @@ def parse_command(
                         vf,
                         tok[len(vf) :],
                     )
+                    record_attached(vf, tok[len(vf) :])
                     base = _rebase(flags, cs, vf, tok[len(vf) :], base)
                     i += 1
                     matched_optional = True
@@ -1047,6 +1087,7 @@ def parse_command(
                         vf,
                         attached_value,
                     )
+                    record_attached(vf, attached_value)
                     base = _rebase(flags, cs, vf, attached_value, base)
                     i += 1
                     matched_value = True
@@ -1152,6 +1193,7 @@ def parse_command(
                     _set_value_flag(
                         flags, refusals, cs, word_choice_dests, vflag, attached
                     )
+                    record_attached(vflag, attached)
                     base = _rebase(flags, cs, vflag, attached, base)
                     i += 1
                     continue
@@ -1455,6 +1497,20 @@ def parse_command(
         else None
         for slot in range(len(argv))
     ]
+    supplied_path_values: list[str] = []
+    for name, kind in cs.kind_by_dest.items():
+        if kind != "path" or name not in flags or name in typed_dests:
+            continue
+        value = flags[name]
+        parts = value if isinstance(value, list) else [value]
+        types = cs.value_types_by_dest.get(name, ("path",))
+        supplied_path_values += [
+            part
+            for index, part in enumerate(parts)
+            if isinstance(part, str)
+            and part != "-"
+            and types[index % len(types)] == "path"
+        ]
     parsed = ParsedArgs(
         flags=flags,
         args=classified,
@@ -1466,6 +1522,8 @@ def parse_command(
         word_kinds=word_kinds,
         word_bases=word_bases,
         word_roles=word_roles,
+        attached=typed_onto,
+        supplied_path_values=supplied_path_values,
         invalid_options=invalid_options,
         ambiguous_options=ambiguous_options,
         option_error_kinds=option_error_kinds,
@@ -1485,6 +1543,48 @@ def parse_command(
             parses.clear()
         parses[key] = parsed
     return parsed
+
+
+def word_paths(
+    parsed: ParsedArgs, argv: Sequence[str], cwd: str, *, operands: bool
+) -> list[PathSpec | None]:
+    """The path each word of a parsed line names, aligned with argv.
+
+    A PATH value or operand resolves against its word's base and an
+    attached value lands on its option word. An empty value names no
+    file, nor does a ``-`` operand (standard input); an option's ``-``
+    resolves like any other value, since only some commands read it as
+    standard input (``cp -t -`` copies into a directory named ``-``).
+    Built on demand, because
+    every line is parsed and only a reader of its words needs this, and
+    operands only when asked, because a builtin's operand paths come
+    from the classifier and a line can carry many thousands of them.
+
+    Args:
+        parsed (ParsedArgs): the parse of ``argv``.
+        argv (Sequence[str]): the words the parse read.
+        cwd (str): the working directory they were read under.
+        operands (bool): whether a path operand gets its path too, or
+            only the options' values.
+    """
+    skip = (
+        {WordKind.OPTION} if operands else {WordKind.OPTION, WordKind.OPERAND}
+    )
+    typed = [
+        (slot, word, parsed.word_bases[slot] or cwd)
+        for slot, word in enumerate(argv)
+        if parsed.word_kinds[slot] == "path"
+        and parsed.word_roles[slot] not in skip
+    ]
+    paths: list[PathSpec | None] = [None] * len(argv)
+    attached = [
+        (a.slot, a.value, a.base) for a in parsed.attached if a.kind == "path"
+    ]
+    for slot, value, against in (*typed, *attached):
+        stdin = value == "-" and parsed.word_roles[slot] is WordKind.OPERAND
+        if value != "" and not stdin:
+            paths[slot] = PathSpec.from_str_path(value, cwd=against)
+    return paths
 
 
 def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, ParsedFlagValue]:

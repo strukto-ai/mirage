@@ -12,33 +12,66 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.lookup.constants import (
-    JOB_BUILTINS,
-    NAMESPACE_COMMANDS,
-    SHELL_NAMES,
-    SLASH_KEEPS_LAST,
-    UNSUPPORTED_BUILTINS,
-    end_options_after_program,
-    facts_of,
-    line_facts,
-)
-from mirage.workspace.lookup.lookup import (
-    execs,
-    is_tool,
-    lookup,
-    lookup_all,
-    program,
-    program_note,
-    programs,
-    runs_as,
-    runtime_refused,
-)
-from mirage.workspace.lookup.types import (
-    SHELL_CONSUMERS,
-    Consumer,
-    WordPolicy,
-    word_policy,
-)
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.workspace.lookup.constants import (
+        JOB_BUILTINS,
+        NAMESPACE_COMMANDS,
+        SHELL_NAMES,
+        SLASH_KEEPS_LAST,
+        UNSUPPORTED_BUILTINS,
+        end_options_after_program,
+        facts_of,
+        line_facts,
+    )
+    from mirage.workspace.lookup.lookup import (
+        execs,
+        is_tool,
+        lookup_all,
+        program,
+        program_note,
+        programs,
+        runs_as,
+        runtime_refused,
+    )
+    from mirage.workspace.lookup.types import (
+        SHELL_CONSUMERS,
+        Consumer,
+        WordPolicy,
+        word_policy,
+    )
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.lookup.constants": (
+        "JOB_BUILTINS",
+        "NAMESPACE_COMMANDS",
+        "SHELL_NAMES",
+        "SLASH_KEEPS_LAST",
+        "UNSUPPORTED_BUILTINS",
+        "end_options_after_program",
+        "facts_of",
+        "line_facts",
+    ),
+    "mirage.workspace.lookup.lookup": (
+        "execs",
+        "is_tool",
+        "lookup_all",
+        "program",
+        "program_note",
+        "programs",
+        "runs_as",
+        "runtime_refused",
+    ),
+    "mirage.workspace.lookup.types": (
+        "SHELL_CONSUMERS",
+        "Consumer",
+        "WordPolicy",
+        "word_policy",
+    ),
+}
 
 __all__ = [
     "end_options_after_program",
@@ -51,7 +84,6 @@ __all__ = [
     "SHELL_CONSUMERS",
     "UNSUPPORTED_BUILTINS",
     "WordPolicy",
-    "lookup",
     "execs",
     "SHELL_NAMES",
     "is_tool",
@@ -63,3 +95,5 @@ __all__ = [
     "runtime_refused",
     "word_policy",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

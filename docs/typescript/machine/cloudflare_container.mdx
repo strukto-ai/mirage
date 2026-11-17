@@ -1,0 +1,40 @@
+---
+title: Cloudflare Container
+icon: /images/cloudflare-logo.svg
+description: Run captured programs in a Cloudflare Container, from its Durable Object or from anywhere through a relay.
+---
+
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [Cloudflare Container](/home/setup/machine/cloudflare_container), shared by both SDKs.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-cloudflare @struktoai/mirage-core
+```
+
+## Usage through a relay
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: {
+      box: {
+        provider: 'cloudflare_container',
+        url: 'https://mirage-relay.example.workers.dev/box',
+        token: 'relay-token',
+        mountType: 'ssh',
+        captures: ['@python', '@external'],
+      },
+    },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```
+
+In a browser, import `@struktoai/mirage-core/machine/cloudflare_container/handle`
+once to register the provider, and use `mountType: 'fuse'` or leave it
+unset.

@@ -21,17 +21,12 @@ import { BaseVFS } from '../base.ts'
 import type { ConfigState } from '../types.ts'
 import { redactQdrantConfig, resolveQdrantConfig, type QdrantConfig } from './config.ts'
 
-export const VFS_MD = `- A Qdrant vector database, exposed as a filesystem.
-- At the root each directory is a collection, unless config pins a
-  single collection.
-- Inside a collection, directories are the configured group-by payload
-  fields; descending one narrows a filter.
-- Each matching point appears as files named by its Qdrant point id:
-  \`<id>.json\` (the full payload), \`<id>.txt\` (the embedded source text)
-  when a text field is configured, and \`<id>.<ext>\` (raw blob bytes)
-  when a blob field is configured. The embedding vector is never shown.
-- \`ls\`, \`cd\`, \`cat\`, \`tree\`, \`find\`, \`wc\`, \`grep\` and \`rg\` work as
-  usual.`
+export const VFS_MD = `- At the root each directory is a collection, unless config pins one.
+- Inside a collection, directories are the group-by payload fields;
+  descending one narrows a filter.
+- Each point is \`<id>.json\` (its payload), plus \`<id>.txt\` (source text)
+  and \`<id>.<ext>\` (blob bytes) when those fields are configured. The
+  vector is never shown.`
 
 export interface QdrantVFSOptions {
   config: QdrantConfig

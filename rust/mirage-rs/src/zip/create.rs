@@ -8,10 +8,11 @@ use std::collections::{BTreeMap, HashMap};
 use flate2::{Compress, Compression, Crc, FlushCompress, Status};
 use serde::Deserialize;
 
-use super::{
-    ARCHIVE, CENTRAL, END, END64, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central, end_record, say,
-    u16_at, u32_at, unzip, wildcard,
+use super::format::{
+    ARCHIVE, CENTRAL, END, END_SEARCH, END64, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
+    end_record, say, u16_at, u32_at, wildcard,
 };
+use super::unzip;
 use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
 use crate::task::Host;
 
@@ -257,7 +258,7 @@ fn plain_extra(extra: &[u8]) -> bool {
 /// An archive as Zip 3.0 reads one it updates: refused when split, ZIP64,
 /// or any record disagrees with itself.
 async fn original(spool: &mut Spool<'_>) -> Option<Original> {
-    let base = spool.size.saturating_sub(super::END_SEARCH);
+    let base = spool.size.saturating_sub(END_SEARCH);
     let tail = spool.read(base, spool.size - base).await.ok()?;
     let mut end = end_record(&tail, base, true)?;
     let at = (end.at - base) as usize;

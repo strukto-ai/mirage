@@ -25,6 +25,7 @@ export class ParsedProgram {
     { all?: ProgramNode[]; named?: ProgramNode[] }
   >()
   references = 1
+  readonly readRows = new Map<number, number>()
   private released = false
 
   private sourceOffsets: Uint32Array | undefined
@@ -95,6 +96,7 @@ export class ParsedProgram {
       this.sourceOffsets = undefined
       this.originalText = ''
       this.newlines = null
+      this.readRows.clear()
     }
   }
 

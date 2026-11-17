@@ -1,71 +1,126 @@
 ---
 title: Nextcloud
-description: "Mount Nextcloud over WebDAV as a filesystem and read or write your files with shell commands."
+description: Virtualize Nextcloud or any WebDAV server from Node.
 icon: /images/nextcloud-logo.svg
 ---
 
-The Nextcloud VFS mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
-server (Nextcloud, ownCloud, Hetzner Storage Share, or any generic WebDAV
-endpoint) at a prefix such as `/nc/`. Reads are streaming, with HTTP `Range`
-requests for partial reads.
-
-For credential and server setup, see [Nextcloud Setup](/home/setup/nextcloud).
-For Python, see the [Nextcloud (Python)](/python/vfs/nextcloud) reference.
+`NextcloudVFS` mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
+server: Nextcloud, ownCloud, Hetzner Storage Share or any other WebDAV
+endpoint. Its folders and files appear as they are, with their own names and
+bytes. The URL and app password are set up on the
+[Nextcloud page](/home/setup/nextcloud).
 
 ## Install
 
-Nextcloud requires the optional `opendal` peer dependency:
-
 ```bash
-pnpm add opendal
+npm install @struktoai/mirage-node opendal
 ```
 
-## Config
+`opendal` is an optional peer package that only this mount needs.
 
-```typescript
-import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
+## Configure
 
-const vfs = await buildVfs('nextcloud', {
+```ts
+import { MountMode, NextcloudVFS, Workspace } from '@struktoai/mirage-node'
+
+const nc = new NextcloudVFS({
   url: process.env.NEXTCLOUD_URL!,
-  username: process.env.NEXTCLOUD_USERNAME,
-  password: process.env.NEXTCLOUD_PASSWORD,
-  // Optional:
-  // timeout: 30,
+  username: process.env.NEXTCLOUD_USERNAME!,
+  password: process.env.NEXTCLOUD_PASSWORD!,
 })
-const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/nc': nc }, { mode: MountMode.WRITE })
+
+const result = await ws.shell("ls /nc && find /nc -name '*.md'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-`NextcloudVFS` accepts a configuration object with the WebDAV URL and optional
-Basic Auth credentials. Both `READ` and `WRITE` mount modes are supported.
-Use an **app password** (Settings → Security in Nextcloud) rather than your
-account password.
+`url` is the WebDAV URL of the user's files, such as
+`https://cloud.example.com/remote.php/dav/files/alice/`. `verifySsl` is
+accepted but not applied: every request verifies the server's certificate.
+
+### Fields
 
 {/* generated: config-table nextcloud start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>url</code><br />required | WebDAV URL of the user's files, such as `https://cloud.example.com/remote.php/dav/files/alice/`. |
-| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Basic Auth user name; unset sends requests without credentials. |
-| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Basic Auth password; use an app password (Settings → Security) rather than the account password. |
-| <code style={{ whiteSpace: 'nowrap' }}>verifySsl</code> | Accepted but not applied: every request verifies the server's TLS certificate. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search, the chunks of a large write) may take; reads, other writes and listings go through OpenDAL and its own timeouts. |
+<ResponseField name="url" type={"string"} required>
+  WebDAV URL of the user's files, such as `https://cloud.example.com/remote.php/dav/files/alice/`.
+</ResponseField>
+<ResponseField name="username" type={"string"}>
+  Basic Auth user name; unset sends requests without credentials.
+</ResponseField>
+<ResponseField name="password" type={"string"} post={["secret"]}>
+  Basic Auth password; use an app password (Settings → Security) rather than the account password.
+</ResponseField>
+<ResponseField name="verifySsl" type={"boolean"}>
+  Accepted but not applied: every request verifies the server's TLS certificate.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"30"}>
+  Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search, the chunks of a large write) may take; reads, other writes and listings go through OpenDAL and its own timeouts.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table nextcloud end */}
 
+## Authentication
+
+The mount sends `username` and `password` as Basic Auth; without them it sends
+no credentials. Use an app password (Settings, Security in Nextcloud) rather
+than the account password: it can be revoked on its own. A request the server
+refuses answers `Permission denied`.
+
+## Layout
+
+```text
+/nc/
+  Documents/
+    notes.md
+    contract.pdf
+  Photos/
+    2024/
+      cat.jpg
+```
+
+`/nc/Documents/notes.md` is `<NEXTCLOUD_URL>/Documents/notes.md` on the
+server.
+
+## Behavior
+
+- **Partial reads:** reads stream in chunks, and partial reads such as
+  `head -c` send HTTP `Range` requests.
+- **Writes:** a write buffers the whole file before it uploads. `cp`, `mv`,
+  `rm` and `mkdir` run as WebDAV `COPY`, `MOVE`, `DELETE` and `MKCOL`.
+- **Snapshots:** a snapshot keeps the mount's settings but not the password,
+  so hand the password back when loading it. Files are not checked for
+  changes on replay.
+
+## Integration
+
+Nextcloud answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `md5sum`, `sha256sum` and the other hash commands: the digest Nextcloud
+  keeps (`oc:checksums`), when the uploading client set one.
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
+
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Nextcloud mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md nextcloud start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -73,7 +128,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Nextcloud mounted at `/<pat
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -94,7 +149,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Nextcloud mounted at `/<pat
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -116,40 +171,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Nextcloud mounted at `/<pat
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md nextcloud end */}
-
-WebDAV resources map directly to virtual paths under the mount prefix.
-For example, virtual `/nc/Documents/notes.md` issues HTTP WebDAV requests
-against `<NEXTCLOUD_URL>/Documents/notes.md`.
-
-## Cache
-
-The Nextcloud VFS caches directory listings in Mirage's index cache. A listing
-usually needs one `PROPFIND Depth: 1`; each file missing a size needs an extra
-`stat` request. Cached child entries include sizes, types, and modification
-times, but not ETags. Subsequent `stat` operations can reuse those entries.
-
-## Example
-
-```typescript
-import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
-
-const vfs = await buildVfs('nextcloud', {
-  url: process.env.NEXTCLOUD_URL!,
-  username: process.env.NEXTCLOUD_USERNAME,
-  password: process.env.NEXTCLOUD_PASSWORD,
-})
-const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
-
-// List files
-const ls = await ws.shell('ls -la /nc/')
-console.log(await ls.stdoutStr())
-
-// Read a remote document
-const doc = await ws.shell('cat /nc/Documents/notes.md')
-console.log(await doc.stdoutStr())
-
-// Search document contents
-const search = await ws.shell('grep -i "meeting" /nc/Documents/*.md')
-console.log(await search.stdoutStr())
-```

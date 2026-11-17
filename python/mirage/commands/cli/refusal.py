@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
@@ -38,14 +37,12 @@ from mirage.commands.spec.help import (
     option_metavar,
     usage_line,
 )
+from mirage.commands.spec.parser import ParsedArgs
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.shell.bytes import encode_text
-
-if TYPE_CHECKING:
-    from mirage.commands.spec.parser import ParsedArgs
-    from mirage.workspace.executor.command.types import ParsedCommand
+from mirage.workspace.executor.command.types import ParsedCommand
 
 ARGPARSE_EXIT = 2
 LONG_PREFIX = "--"
@@ -288,7 +285,7 @@ def clap_stray_operand(
 
 
 def clap_leaf_refusal(
-    prog: str, spec: CommandSpec, parsed: "ParsedCommand | ParsedArgs"
+    prog: str, spec: CommandSpec, parsed: ParsedCommand | ParsedArgs
 ) -> bytes | None:
     """clap's refusal for a leaf's option error, None when not one of them.
 
@@ -373,7 +370,7 @@ def clap_leaf_refusal(
 def leaf_refusal(
     style: UsageStyle,
     argparse_message: bytes,
-    parsed: "ParsedCommand | ParsedArgs",
+    parsed: ParsedCommand | ParsedArgs,
     path: str,
     spec: CommandSpec,
     prog: str = "",

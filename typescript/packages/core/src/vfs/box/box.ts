@@ -52,11 +52,9 @@ export const VFS_MD = `\`\`\`text
     <file>             # PDFs, images and the rest: raw bytes
 \`\`\`
 
-- Every item is served as its raw bytes; pipe the JSON ones to \`jq\`.
-- This is a remote mount: prefer targeted reads over full scans.
-- Box names folders by numeric id (the root is \`0\`). The path-to-id
-  mapping is cached, so a nested directory costs one API call per level
-  on first access. \`ls\` the parent before constructing a path.`
+- Pipe \`.boxnote\` and \`.boxcanvas\` files to \`jq\`.
+- Each path level resolves to a Box id with one API call on first
+  access; \`ls\` the parent before building a path.`
 
 export class BoxVFS extends BaseVFS {
   override get conditionSupport(): ConditionSupport {

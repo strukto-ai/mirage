@@ -4,26 +4,72 @@ icon: hard-drive
 description: Keep workspace files in browser storage across page reloads.
 ---
 
-OPFS uses the browser's Origin Private File System. Files stay scoped to the
-current website's origin and persist across page reloads. Browser only; for
-Python or Node, use [Disk](/home/setup/disk).
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+</div>
 
-## Configuration
+OPFS mounts a folder of the browser's Origin Private File System. Its files
+stay scoped to the page's origin and survive page reloads.
 
-```typescript
-import { MountMode, OPFSVFS, Workspace } from '@struktoai/mirage-browser'
+## Connect
 
-const ws = new Workspace(
-  { '/data': new OPFSVFS({ root: 'mirage' }) },
-  { mode: MountMode.WRITE },
-)
-await ws.shell('echo "hello" > /data/note.txt')
-await ws.close()
+<Tabs>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, OPFSVFS, Workspace } from '@struktoai/mirage-browser'
+
+    const ws = new Workspace(
+      { '/data': new OPFSVFS({ root: 'mirage' }) },
+      { mode: MountMode.WRITE },
+    )
+    const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/data/
+  note.txt
+  drafts/
+    plan.md
 ```
 
-Pass `capacity: '100MB'` to cap the bytes the directory holds; see
-[mount capacity](/home/setup/vfs#mount-capacity).
+- `root` is a folder under the origin's OPFS root, so several workspaces can
+  keep apart. It defaults to the OPFS root itself.
+- Browser only. In Python or Node, use [Disk](/home/setup/disk).
+- `capacity: '100MB'` caps the bytes the folder holds; see
+  [capacity](/home/setup/vfs#mount-capacity).
 
-The browser controls storage quotas and may remove data under storage
-pressure. See the [OPFS guide](/typescript/setup/opfs#storage-and-quotas) for
-checking usage and requesting persistent storage.
+## Sample runs
+
+```bash
+$ tree /data
+/data
+|-- drafts
+|   `-- plan.md
+`-- note.txt
+
+2 directories, 2 files
+```
+
+```bash
+$ cat /data/note.txt
+hello
+```
+
+Every command that writes works on a `write` mount. The browser sets the
+origin's quota and may evict the data under storage pressure; the
+[OPFS guide](/typescript/setup/opfs#storage-and-quotas) shows how to check
+usage and ask for persistent storage.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/opfs">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -46,6 +46,7 @@ import type { MountEntry } from '../../mount/mount.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
+import type { LeafParse } from './types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForScript } from '../../../runtime/routing/decide.ts'
 import { execNode } from './run.ts'
@@ -68,6 +69,10 @@ import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 // which is why basename has one and still refuses an option it does not know.
 const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
 
+// Each leaf's parse grammar, kept so every parse of the leaf reuses one
+// spec object and hits the parse cache, as compileSpec keeps its tables.
+const GRAMMARS = new WeakMap<CommandSpec, Map<string, [CommandSpec, boolean]>>()
+
 /**
  * The spec a leaf's argv parses against, and who answers `--help`.
  *
@@ -80,24 +85,58 @@ const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
  * the tier unusable, since a YAML `clis:` entry cannot declare options at
  * all. Returns the spec to parse with and whether the injected `--help`
  * is mirage's to answer. CLI init accepts instance fields, so each
- * spread is a plain init bag (the withHelpSupport pattern).
+ * spread is a plain init bag (the withHelpSupport pattern). The grammar is
+ * kept per leaf, so each parse of the leaf reuses one spec object.
  */
 function parseSpecFor(
   leaf: CommandSpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
   passthrough = false,
 ): [CommandSpec, boolean] {
+  let kept = GRAMMARS.get(leaf)
+  if (kept === undefined) {
+    kept = new Map()
+    GRAMMARS.set(leaf, kept)
+  }
+  const key = `${style}:${String(passthrough)}`
+  const cached = kept.get(key)
+  if (cached !== undefined) return cached
+  let found: [CommandSpec, boolean]
   if (passthrough) {
     const spec: CommandSpecInit = leaf
-    return [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+    found = [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
+  } else {
+    const grammar =
+      style === UsageStyle.COBRA
+        ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
+        : leaf
+    found =
+      !grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help'))
+        ? [grammar, false]
+        : [listedNode(grammar, style), true]
   }
-  const grammar =
-    style === UsageStyle.COBRA
-      ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
-      : leaf
-  if (!grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help')))
-    return [grammar, false]
-  return [listedNode(grammar, style), true]
+  kept.set(key, found)
+  return found
+}
+
+/**
+ * How the run parses a CLI leaf's words, which a policy's reading of the
+ * line parses with too, so both see the same options.
+ *
+ * The dialect is the root's: under cobra an undeclared dashed word is an
+ * error and no long option abbreviates. git resolves an abbreviated long
+ * option against the verb's own full table (parse-options), and its
+ * revision walkers take whole words only.
+ */
+export function leafParse(cli: CLI, leaf: CommandSpec, path: readonly string[]): LeafParse {
+  const [spec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
+  return {
+    spec,
+    mirageHelp,
+    unknownIsOperand: cli.spec.usageStyle !== UsageStyle.COBRA,
+    abbreviations:
+      cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(path.join(' ')) ?? []) : undefined,
+  }
 }
 
 /**
@@ -370,26 +409,22 @@ export async function walkLeaf(
   if (handler === undefined) throw new Error(`cli '${prog}': missing handler`)
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const [parseSpec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
-
+  const grammar = leafParse(cli, leaf, result.path)
+  const { spec: parseSpec, mirageHelp } = grammar
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
   const style = cli.spec.usageStyle
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
-  // git resolves an abbreviated long option against the verb's own full table
-  // (parse-options), and its revision walkers take whole words only.
-  const abbreviations =
-    cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? []) : undefined
   const parsed = parseFlags(
     [...result.argv],
     parseSpec,
     prog,
     session.cwd,
     envSnapshot(session),
-    style !== UsageStyle.COBRA,
-    abbreviations,
+    grammar.unknownIsOperand,
+    grammar.abbreviations,
   )
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {

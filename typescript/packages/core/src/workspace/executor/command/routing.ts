@@ -16,7 +16,6 @@ import { findLayout } from '../../../rs/find.ts'
 import { recurses } from '../../../commands/builtin/generic/grep.ts'
 import { FILE_KEYS } from '../../../commands/builtin/generic/program.ts'
 import type { CLI } from '../../../commands/cli/types.ts'
-import { walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { isBuiltinGrammar } from '../../../commands/spec/builtins.ts'
 import {
@@ -26,7 +25,6 @@ import {
   STDIN_DASH_LEADING,
 } from '../../../commands/spec/constants.ts'
 import { type CommandSpec, WordKind } from '../../../commands/spec/types.ts'
-import { CommandWord } from '../../../policy/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import { DeviceInput, type ByteSource } from '../../../io/types.ts'
@@ -130,39 +128,6 @@ export function defaultCwdOperand(
     resolved: operand.resolved,
     rawPath: CWD_DEFAULT_RAW[cmdName] ?? '',
   })
-}
-
-/**
- * The path-valued options a command tree's walk resolves. `pathFlagScopes`
- * reads the built-in specs, which hold no tree, and a tree's words are
- * classified as its walk reads them, its group options as text. So a tree's
- * group options and its leaf's are read here, walked as the run walks them:
- * `notes --file /data/secret show` hands the leaf `/data/secret`, and a rule
- * protecting it has to see it. Mirrors Python's `tree_path_scopes`.
- */
-export function treePathScopes(
-  registry: MountRegistry,
-  name: string,
-  argv: readonly string[],
-  cwd: string,
-  env?: Record<string, string>,
-  access?: SessionAccess,
-): PathSpec[] {
-  const tree = commandTree(registry, name, cwd, argv, access)
-  if (tree === null) return []
-  const result = walk(name, tree.spec, argv, cwd, env ?? null)
-  if (result.leaf === null) return []
-  const found: PathSpec[] = []
-  for (const value of Object.values(result.groupFlags)) {
-    for (const item of Array.isArray(value) ? value : [value]) {
-      if (item instanceof PathSpec) found.push(item)
-    }
-  }
-  const leaf = parseCommand(result.leaf, [...result.argv], cwd, name, env, true)
-  for (const value of leaf.pathFlagValues) {
-    found.push(new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }))
-  }
-  return found
 }
 
 export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[] {
@@ -313,59 +278,6 @@ export function commandTree(
 }
 
 /**
- * The line as an admission pattern reads it, and the program it runs.
- *
- * For a command tree's head (an installed CLI, or a tree a mount serves)
- * the spec walk names the verb path (global options before the verb
- * dropped, an alias canonicalized) and hands back the leaf's own words, so
- * `git -C /r push origin` reads as `git push origin` and a rule on
- * `git push` catches it; a walk the tree refuses (unknown verb, bare group,
- * usage error) reads the raw words, since the line fails on its own.
- * Anything else is the name and the raw argv, and the program is the bare
- * name. `env` is the session environment, which fills a group option
- * declaring `Argument.env` as the run's walk does.
- */
-export function programTokens(
-  registry: MountRegistry,
-  name: string,
-  argv: readonly string[],
-  cwd: string,
-  env?: Record<string, string>,
-  access?: SessionAccess,
-): [readonly string[], readonly string[]] {
-  const tree = commandTree(registry, name, cwd, argv, access)
-  if (tree !== null) {
-    const result = walk(name, tree.spec, argv, cwd, env)
-    if (result.leaf !== null) {
-      const program = [name, ...result.path]
-      return [[...program, ...result.argv], program]
-    }
-  }
-  return [[name, ...argv], [name]]
-}
-
-/**
- * Each word's kind as a command's grammar reads it: an option, an option's
- * value or an operand. A command no spec describes reads a dashed word as an
- * option and anything else as an operand. `cli` says the spec is an
- * installed CLI's node, whose undeclared dashed words are the program's own
- * operands. Mirrors Python's `_parsed_kinds`.
- */
-function parsedKinds(
-  spec: CommandSpec | undefined,
-  argv: readonly string[],
-  cwd: string,
-  cmdName: string,
-  cli = false,
-): WordKind[] {
-  if (spec === undefined) {
-    return argv.map((w) => (w.startsWith('-') && w !== '-' ? WordKind.OPTION : WordKind.OPERAND))
-  }
-  const parsed = parseCommand(spec, [...argv], cwd, cmdName, undefined, cli)
-  return parsed.wordRoles.map((role) => role ?? WordKind.OPERAND)
-}
-
-/**
  * The classified path words a builtin's grammar reads as path operands. Read
  * by position, so neither an option's value nor a text operand (grep's
  * pattern) counts even where its spelling repeats a path operand's, and a
@@ -386,59 +298,4 @@ export function operandPaths(
       parsed.wordRoles[i] === WordKind.OPERAND &&
       parsed.wordKinds[i] === 'path',
   )
-}
-
-/**
- * The command line word by word, each with its kind and the path it names.
- * The name comes first and the redirect targets last. A command tree's verbs
- * (an installed CLI's, or a mount's) are read off the tree and its leaf's
- * words off the leaf's grammar; any other command's words off its own spec.
- * `env` is the session environment, which fills a group option declaring
- * `Argument.env` as the run's walk does. Mirrors Python's `command_words`.
- */
-export function commandWords(
-  registry: MountRegistry,
-  name: string,
-  argv: readonly string[],
-  classified: readonly (string | PathSpec)[],
-  redirects: readonly PathSpec[],
-  cwd: string,
-  env?: Record<string, string>,
-  access?: SessionAccess,
-): CommandWord[] {
-  const tree = commandTree(registry, name, cwd, argv, access)
-  const result = tree !== null ? walk(name, tree.spec, argv, cwd, env) : null
-  let kinds: WordKind[]
-  if (result !== null && result.leaf !== null) {
-    const lead = argv.length - result.argv.length
-    kinds = [
-      ...argv
-        .slice(0, lead)
-        .map((word, i) =>
-          result.verbPositions.includes(i)
-            ? WordKind.SUBCOMMAND
-            : word.startsWith('-')
-              ? WordKind.OPTION
-              : WordKind.VALUE,
-        ),
-      ...parsedKinds(result.leaf, argv.slice(lead), cwd, name, true),
-    ]
-  } else {
-    kinds = parsedKinds(SPECS[name], argv, cwd, name)
-  }
-  const words = [new CommandWord(name, WordKind.NAME)]
-  let option: string | null = null
-  argv.forEach((text, index) => {
-    const kind = kinds[index] ?? WordKind.OPERAND
-    const word = classified[index]
-    const path = word instanceof PathSpec ? word : null
-    words.push(new CommandWord(text, kind, kind === WordKind.VALUE ? option : null, path))
-    if (kind === WordKind.OPTION) option = text
-  })
-  for (const p of redirects) {
-    words.push(
-      new CommandWord(p.rawPath !== '' ? p.rawPath : p.virtual, WordKind.REDIRECT, null, p),
-    )
-  }
-  return words
 }

@@ -109,16 +109,31 @@ export function lineRow(node: TSNodeLike): number {
  * The row the shell began reading `node`'s command on. bash reads a whole
  * line before running any of it, and a complete command spanning lines
  * whole, with the rest of the line it ends on: a command after a `;`, or
- * inside a group that spans rows, was read with the ones before it. Mirrors
- * Python's read_row.
+ * inside a group that spans rows, was read with the ones before it. A
+ * statement read with the one before it shares its row, which the parse
+ * keeps, so each statement of a long line looks back once. Mirrors Python's
+ * read_row.
  */
 export function readRow(node: TSNodeLike): number {
   let top = node
   while (top.parent?.parent != null) top = top.parent
   const root = top.parent ?? top
-  for (let before = top.previousSibling; before != null && sameLine(root, before, top);)
-    [top, before] = [before, before.previousSibling]
-  return top.startPosition?.row ?? 0
+  const rows = top instanceof ProgramNode ? top.program.readRows : null
+  const walked = [top]
+  let row: number | undefined
+  for (
+    let before = top.previousSibling;
+    before != null && sameLine(root, before, top);
+    before = before.previousSibling
+  ) {
+    row = rows?.get(before.startIndex ?? -1)
+    if (row !== undefined) break
+    top = before
+    walked.push(top)
+  }
+  row ??= top.startPosition?.row ?? 0
+  if (rows !== null) for (const each of walked) rows.set(each.startIndex ?? -1, row)
+  return row
 }
 
 /**

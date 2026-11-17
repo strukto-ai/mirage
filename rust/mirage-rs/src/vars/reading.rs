@@ -159,3 +159,40 @@ impl Vars for Reading<'_> {
         Ok(())
     }
 }
+
+impl Store {
+    /// Evaluate `text` as arithmetic against the session, as every
+    /// arithmetic context does: drawing through `draws`, stopping at a
+    /// write to a readonly name, its subscripts expanding first when
+    /// `expand` (a `let` operand, an `-i` value). The writes come back for
+    /// the caller to land.
+    pub fn arith(
+        &mut self,
+        draws: &mut Draws,
+        text: &[u8],
+        added: Option<&[u8]>,
+        nounset: bool,
+        expand: bool,
+    ) -> Outcome {
+        let mut reading = Reading {
+            store: self,
+            draws: Some(draws),
+            kept: None,
+        };
+        let store = &reading.store;
+        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID]
+            .into_iter()
+            .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
+            .map(str::to_owned)
+            .collect();
+        reading.evaluate(text, added, nounset, &dynamic, expand)
+    }
+
+    /// A seed word as the generator's state: evaluated as arithmetic,
+    /// without the generator on offer, modulo 2^32.
+    pub(super) fn seed_from(&mut self, word: &[u8]) -> Result<u32, arith::Error> {
+        let mut reading = Reading::plain(self);
+        let outcome = reading.evaluate(word, None, false, &[], false);
+        outcome.value.map(|value| value as u32)
+    }
+}

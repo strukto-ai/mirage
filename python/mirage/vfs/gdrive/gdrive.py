@@ -59,13 +59,10 @@ VFS_MD = """\
   <shared-drive>/        # each shared drive you can see
 ```
 
-- There is no `owned/` and `shared/` split: this is your full Drive
-  view, including files shared with you that were added to My Drive.
-- This is a remote mount: prefer targeted reads over full scans. A
-  date-prefixed glob (`2026-05-*`) becomes a Drive `modifiedTime` range
-  query.
-- To act on Drive items by id (create, update, export, permissions), use
-  the `gws` CLI if installed (`gws drive --help`)."""
+- The full Drive view, folders mirrored, with files shared into My Drive;
+  there is no `owned/` and `shared/` split.
+- Changes by id (create, export, permissions) go through the `gws drive`
+  CLI."""
 
 
 class GoogleDriveVFS(BaseVFS):

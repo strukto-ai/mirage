@@ -48,24 +48,19 @@ import { Follow, PathSpec, type LineFacts, type PolicyDecision } from '../../typ
 import { makeAbortError } from '../../utils/abort.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import { resolvePath } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import type { NamespaceLinks } from '../../view/types.ts'
 import { CondRefused } from '../executor/builtins/condition/errors.ts'
 import { fileOperands, TEST_NAMES } from '../executor/builtins/condition/operands.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
-import { toScope } from '../executor/builtins/scope.ts'
+import { contextWords, linePaths, readLine } from '../executor/command/reading.ts'
 import { reachesService } from '../executor/command/cli.ts'
 import {
-  commandWords,
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
   mergeScopes,
   pathFlagScopes,
-  programTokens,
   routableScopes,
   routedOperands,
-  treePathScopes,
 } from '../executor/command/routing.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
@@ -176,88 +171,6 @@ export class Admitted implements EntryGate {
     if (this.judged.has(norm(virtual))) return null
     return ioRefusal(this.rules, this.ctx.tokens ?? [], virtual, this.granted)
   }
-}
-
-/**
- * The paths a path-pattern guard reads for a line: the operands as
- * typed and the values of path-valued flags, a command tree's group and
- * leaf options among them (`treeFlags`, from `treePathScopes`), then, for
- * a command that
- * follows links, the targets they resolve to. `cat /data/link` reads
- * `/data/secret`, so a rule protecting the target has to see it, and a
- * command-scoped rule never runs at the dispatcher where the resolved path
- * would otherwise be checked. The links are followed as the command's own
- * session sees them (`links`, `Namespace.sessionLinks`), as the router
- * follows them: on the browser fallback the ambient view folds every live
- * session's hides, and a peer hiding the link must not keep its target from
- * the rule; null where no link stands. The follow policy is the command's own
- * (`follows`, whether `LineFacts.follows` is not NONE: rm, mv, ln, stat,
- * tar ... act on the link itself, `-L` turns following back on), the same
- * one the router applies to the operands before the handler runs, so a rule
- * sees exactly the path the command will touch. A loop is left to that later
- * step to report; here the typed paths stand. Then the operand a bare
- * `ls`/`find`/`du`/`tree`/`grep -r` implies, the working directory,
- * which the executor injects after the gate and which a rule on that
- * directory has to see. Last come the statement's redirect targets:
- * `cat < /data/secret` reads the file and `echo x > /data/secret`
- * truncates it, on the shell's own fds outside the admitted command's
- * gate window, so the admission is the one place a rule can see them. A
- * redirect always dereferences (the shell opens the target), so its
- * link targets ride along whatever the command's own follow policy
- * says.
- */
-export function policyScopes(
-  name: string,
-  args: readonly string[],
-  operands: readonly (string | PathSpec)[],
-  follows: boolean,
-  links: NamespaceLinks | null,
-  cwd: string,
-  implied: PathSpec | null = null,
-  redirects: readonly PathSpec[] = [],
-  treeFlags: readonly PathSpec[] = [],
-): PathSpec[] {
-  const scopes: PathSpec[] = []
-  for (const p of operands) {
-    if (p instanceof PathSpec) scopes.push(p)
-  }
-  for (const item of pathFlagScopes(name, [...args], cwd)) scopes.push(item)
-  const typed = new Set(scopes.map((p) => p.virtual))
-  for (const item of treeFlags.filter((p) => !typed.has(p.virtual))) scopes.push(item)
-  if (name.includes('/')) {
-    // A slash-carrying head word is a file the line executes, and it
-    // lives in argv[0], not the operands, so a path-pattern guard would
-    // never see it without this row.
-    scopes.unshift(toScope(resolvePath(name, cwd)))
-  }
-  if (links !== null && operands.length > 0) {
-    const followed = followPaths(links, [...operands], follows, !SLASH_KEEPS_LAST.has(name))
-    const seen = new Set(scopes.map((p) => p.virtual))
-    for (const item of followed) {
-      if (item instanceof PathSpec && !seen.has(item.virtual)) {
-        seen.add(item.virtual)
-        scopes.push(item)
-      }
-    }
-  }
-  if (implied !== null && !scopes.some((p) => p.virtual === implied.virtual)) {
-    scopes.push(implied)
-  }
-  if (redirects.length > 0) {
-    const targets: (string | PathSpec)[] = [...redirects]
-    if (links !== null) {
-      const followed = followPaths(links, [...redirects], true, true)
-      for (const item of followed.filter((p) => p instanceof PathSpec)) targets.push(item)
-    }
-    const seen = new Set(scopes.map((p) => p.virtual))
-    for (const item of targets) {
-      if (item instanceof PathSpec && !seen.has(item.virtual)) {
-        seen.add(item.virtual)
-        scopes.push(item)
-      }
-    }
-  }
-  return scopes
 }
 
 /**
@@ -523,14 +436,7 @@ export async function gate(
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask | Route)[]]> {
   const tool = intrinsic || isTool(name, session, registry)
   const env = envSnapshot(session)
-  const [tokens, program] = programTokens(
-    registry,
-    name,
-    [...args],
-    session.cwd,
-    env,
-    sessionAccess(session),
-  )
+  const reading = readLine(registry, name, args, operands, session.cwd, env, sessionAccess(session))
   const implied =
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
@@ -544,34 +450,18 @@ export async function gate(
   const follows = facts.follows !== Follow.NONE
   const paths = seen(
     session,
-    policyScopes(
+    linePaths(
       name,
-      args,
-      operands,
+      reading,
       follows,
       namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
       session.cwd,
       implied,
       redirects,
-      treePathScopes(registry, name, args, session.cwd, env, sessionAccess(session)),
     ),
     unread,
   )
-  await budget.run()
-  const words = seenWords(
-    session,
-    commandWords(
-      registry,
-      name,
-      args,
-      operands,
-      redirects,
-      session.cwd,
-      env,
-      sessionAccess(session),
-    ),
-    unread,
-  )
+  const words = seenWords(session, contextWords(name, reading, redirects), unread)
   await budget.run()
   const write = writes(name, args, operands, facts, session, registry, namespace, implied)
   await budget.run()
@@ -583,8 +473,8 @@ export async function gate(
     argv: [...args],
     cwd: session.cwd,
     sessionId: session.sessionId,
-    tokens,
-    program,
+    tokens: [...reading.tokens],
+    program: [...reading.program],
     tool,
     walks: facts.walks,
     write,
@@ -598,7 +488,7 @@ export async function gate(
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
-      reason: `${program.join(' ')} is not allowed`,
+      reason: `${reading.program.join(' ')} is not allowed`,
       policy: PermissionsPolicy.name,
     })
   }

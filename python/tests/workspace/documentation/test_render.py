@@ -222,7 +222,7 @@ async def test_vfs_md_keeps_a_layout_text_under_a_fence_forming_prefix():
     ws = Workspace({"/a\n```": (slack, MountMode.READ)})
     markdown = await ws.vfs_md()
     assert "````text\n```text\n/a\n```\n  channels/" in markdown
-    assert "cannot escape this scope.\n````" in markdown
+    assert "globs cannot escape it.\n````" in markdown
 
 
 @pytest.mark.asyncio
@@ -243,7 +243,7 @@ async def test_vfs_md_substitutes_prefix():
         mode=MountMode.WRITE,
     )
     prompt = await ws.vfs_md()
-    assert "/home/zecheng/gdocs/owned/<file>.gdoc.json" in prompt
+    assert "```text\n/home/zecheng/gdocs\n  owned/" in prompt
     assert "{prefix}" not in prompt
 
 

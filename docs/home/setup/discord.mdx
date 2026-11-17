@@ -1,38 +1,144 @@
 ---
 title: Discord
 icon: /images/discord-logo.svg
-description: Set up a Discord Bot Token for the Discord VFS.
+description: Virtualize Discord servers, channels and members as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create a Discord Application
+Every server the bot is in becomes a folder of channels, each a folder of days
+with a `chat.jsonl` of that day's messages and the files shared in it. Members
+become one JSON profile each.
 
-1. Go to https://discord.com/developers/applications
-1. **New Application** -> name it (e.g., "Mirage")
+## Setup
 
-### 2. Create a Bot
+Create a Discord application with a bot, turn on its intents and add it to
+the server.
 
-1. **Bot** in the left sidebar
-1. **Reset Token** -> copy the **Bot Token**
-1. Under **Privileged Gateway Intents**, enable:
-   - **Message Content Intent** (required to read message content)
-   - **Server Members Intent** for the VFS `members/` directory or the CLI
-     `discord members` command without `--query`
-
-### 3. Invite the Bot to Your Server
-
-1. **OAuth2** -> **URL Generator** in the left sidebar
-1. Select scopes: `bot`
-1. Select bot permissions: `Read Messages/View Channels`, `Read Message History`;
-   add `Send Messages` for the CLI's writes and `Attach Files` for `send --file`
-1. Copy the generated URL and open it in a browser to invite
-
-### 4. Set Environment Variables
+<AccordionGroup>
+  <Accordion title="Create the bot and invite it">
+    1. Open the [Discord Developer Portal](https://discord.com/developers/applications),
+       click **New Application** and name it (for example `Mirage`).
+    2. Under **Bot**, click **Reset Token** and copy the bot token.
+    3. On the same page, under **Privileged Gateway Intents**, turn on
+       **Message Content Intent**; without it, message text and attachments
+       come back empty. Turn on **Server Members Intent** for the `members/`
+       folder and for `discord members` without `--query`.
+    4. Under **OAuth2**, **URL Generator**, select the `bot` scope and the
+       **View Channels** and **Read Message History** permissions. Add
+       **Send Messages** for the CLI's writes and **Attach Files** for
+       `send --file`.
+    5. Open the generated URL in a browser and add the bot to the server.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-DISCORD_BOT_TOKEN=MTIx...
+export DISCORD_BOT_TOKEN=MTIx...
 ```
 
-For SDK guides, see [Discord (Python)](/python/vfs/discord) and [Discord (TypeScript)](/typescript/setup/discord).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /discord:
+        vfs: discord
+        mode: read
+        config:
+          token: ${DISCORD_BOT_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id discord
+    mirage shell -w discord -c 'ls /discord'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.discord import DiscordConfig, DiscordVFS
+
+    config = DiscordConfig(token=os.environ["DISCORD_BOT_TOKEN"])
+    ws = Workspace({"/discord": DiscordVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /discord")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/discord': new DiscordVFS({ token: process.env.DISCORD_BOT_TOKEN! }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /discord')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/discord/
+  Acme Labs__1098765432101234567/
+    channels/
+      general__1098765432101234570/
+        2026-11-16/
+          chat.jsonl
+          files/
+            diagram__1174567890123456789.png
+    members/
+      alice__1012345678901234567.json
+```
+
+- A name is `<display-name>__<id>`, spaces and emoji kept; quote it in the
+  shell.
+- Each channel lists one folder per day for the 30 days up to its newest
+  message; `start_time` and `end_time` set another range.
+- A `chat.jsonl` line is one message as Discord's API returns it, with
+  `.content`, `.author.username` and `.attachments`.
+
+## Sample runs
+
+```bash
+$ ls /discord
+Acme Labs__1098765432101234567
+```
+
+```bash
+$ ls "/discord/Acme Labs__1098765432101234567/channels"
+announcements__1098765432101234571
+general__1098765432101234570
+```
+
+```bash
+$ jq -r '.author.username + ": " + .content' "/discord/Acme Labs__1098765432101234567/channels/general__1098765432101234570/2026-11-16/chat.jsonl"
+alice: Build 412 is green
+bob: Deploying after lunch
+```
+
+The mount is read-only. Send messages with the
+[`discord`](/home/setup/cli/discord) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/discord">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/discord">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

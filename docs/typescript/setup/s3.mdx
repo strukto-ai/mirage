@@ -1,111 +1,159 @@
 ---
 title: S3
 icon: /images/s3-logo.svg
-description: Set up AWS S3 as a MIRAGE VFS from Node or the browser.
+description: Virtualize an Amazon S3 or S3-compatible bucket from Node or the browser.
 ---
 
-MIRAGE ships `S3VFS` in **two runtimes**:
+`S3VFS` mounts one bucket: every object becomes a file and every `/` in a key a
+folder. It works with Amazon S3 and any S3-compatible server, such as MinIO,
+Ceph or SeaweedFS. Credentials are set up on the [S3 page](/home/setup/s3).
 
-- `@struktoai/mirage-node`, signs requests server-side using [@aws-sdk/client-s3](https://www.npmjs.com/package/@aws-sdk/client-s3).
-- `@struktoai/mirage-browser`, stays secret-free: your backend hands out **presigned URLs** and the browser fetches them with `fetch()`.
-
-Credentials (IAM user, access keys) are created the same way in both runtimes, see [AWS S3 Credentials](/home/setup/s3).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
 
+## Configure
+
 ```ts
-import { MountMode, Workspace } from '@struktoai/mirage-node'
-import { S3VFS } from '@struktoai/mirage-node'
+import { MountMode, S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const s3 = new S3VFS({
   bucket: process.env.AWS_S3_BUCKET!,
-  region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  // Optional:
-  // endpoint: 'http://localhost:9000',  // MinIO
-  // forcePathStyle: true,               // For MinIO/R2
-  // timeout: 30,
-  // proxy: 'http://proxy:8080',
+  region: process.env.AWS_DEFAULT_REGION!,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
 })
+const ws = new Workspace({ '/s3': s3 }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': s3 }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /s3 && find /s3 -name '*.csv'")
+console.log(result.stdoutText)
+await ws.close()
 ```
 
-If `~/.aws/credentials` is configured, you can omit `accessKeyId`/`secretAccessKey` and the AWS SDK picks up the default profile.
+For MinIO or another S3-compatible server, add `endpoint` and, if the server
+needs it, `forcePathStyle: true`. A mount takes `MountMode.READ`, `WRITE` or
+`EXEC`.
 
-Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint`. A browser mount signed by presigned URLs cannot carry a condition, so it cannot declare `write: conditional`. If the session last saw no file at the path, the write sends `If-None-Match: *` and fails if someone created the file in the meantime.
-
-A conditional single-file move attempts rollback when source deletion is refused. The move still fails and warns if the destination may remain. Cleanup uses the copy's S3 version or, for a new destination, its ETag. Unversioned overwrites, same-ETag replacements, retried versioned copies, and uncertain delete outcomes limit recovery; inspect both paths after a failure.
-
-An absent destination must remain absent until copying. This guard may add one metadata request; cleanup adds one delete and may require `s3:DeleteObjectVersion`. Directory and cross-mount moves do not use rollback.
-
-A directory `mv`, `rm -r` or `rmdir` looks at the directory again when it is done: a file written into it that the command never listed stays, and the command fails with `Directory not empty`. Under `write: conditional`, a directory `mv` that finds a file changed before it could copy it removes nothing from the source; the copies it made stay at the destination.
-
-An append or another rewrite that observes a missing file uses create-only
-commit under either write policy. S3 checks `If-None-Match: *` at PUT or final
-multipart completion, so a delayed creation cannot replace a competing
-writer's bytes. A lost condition returns an error without automatic retry.
-Existing-file appends under `unconditional` retain last-write-wins behavior.
-
-### Config
+### Fields
 
 {/* generated: config-table s3 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
-| <code style={{ whiteSpace: 'nowrap' }}>httpAgentProvider</code><br />secret | Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"function"} post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.
+</ResponseField>
+<ResponseField name="httpAgentProvider" type={"function"} post={["secret"]}>
+  Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"}>
+  `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table s3 end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from `accessKeyId` and `secretAccessKey`, with `sessionToken`
+for temporary credentials. Without them, the AWS SDK reads its own chain:
+environment variables, `~/.aws/credentials`, then the instance or container
+role.
+
+The mount needs `s3:ListBucket` on the bucket, `s3:GetObject` to read, and
+`s3:PutObject` and `s3:DeleteObject` to write. An object the credentials cannot
+read answers `Permission denied`. Without `s3:ListBucket`, a missing file
+answers `Permission denied` too, since S3 then hides which keys exist.
+
+## Layout
+
+```text
+/s3/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-The browser `S3VFS` never sees AWS credentials. You implement one function, `presignedUrlProvider`, that your frontend calls to get a signed URL for each S3 operation. The actual signing happens on **your server**, using any S3-signing SDK you prefer.
+`/s3/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; S3 stores no folder objects.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/s3 omit=accessKeyId,secretAccessKey,sessionToken,forcePathStyle,httpAgentProvider start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/s3/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+- **Content type:** written objects carry `defaultContentType` when it is set;
+  otherwise the server picks its default.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/s3 end */}
+## Browser
 
-The browser `S3VFS` can also sign requests itself, without `presignedUrlProvider`: it then takes the credential fields of the [Node config](#config), which puts the keys in the browser.
+The browser `S3VFS` from `@struktoai/mirage-browser` keeps credentials off the
+page: a server signs a URL for each S3 call, and the browser fetches it.
 
-### 1. Server: sign URLs on demand
+```bash
+npm install @struktoai/mirage-browser
+```
 
-Using [@aws-sdk/s3-request-presigner](https://www.npmjs.com/package/@aws-sdk/s3-request-presigner):
+```ts
+import { MountMode, S3VFS, Workspace } from '@struktoai/mirage-browser'
+
+const s3 = new S3VFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/s3': s3 }, { mode: MountMode.READ })
+```
+
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server and its IAM policy.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -153,61 +201,10 @@ app.post('/presign', async (req, res) => {
 })
 ```
 
-<Tip>
-Scope the presigner to the **minimal operations your app needs**. Read-only viewers only need `GET`/`HEAD`/`LIST`; a file manager needs the full set.
-</Tip>
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-### 2. Browser: wire it up
-
-```ts
-import { MountMode, S3VFS, Workspace } from '@struktoai/mirage-browser'
-
-const s3 = new S3VFS({
-  bucket: 'my-bucket',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = (await r.json()) as { url: string }
-    return url
-  },
-})
-
-const ws = new Workspace({ '/bucket/': s3 }, { mode: MountMode.READ })
-const res = await ws.shell('cat /bucket/hello.txt')
-console.log(res.stdoutText)
-```
-
-### Customize a builtin command
-
-The generic command definitions are available before a workspace is created.
-Copy the definition with the behavior you want to change, then register that
-copy on one mount:
-
-```ts
-import { generic } from '@struktoai/mirage-browser'
-
-const cat = generic('cat')
-
-ws.mount('/bucket/')?.register({
-  ...cat,
-  fn: async (accessor, paths, texts, opts) => {
-    console.log('reading', paths.map((path) => path.virtual))
-    return cat.fn(accessor, paths, texts, opts)
-  },
-})
-```
-
-Use the same `generic` export from `@struktoai/mirage-node` for a Node
-workspace. The builtin definition and other mounts stay unchanged.
-Registration is a host application action; an agent can discover and run the
-resulting `cat` command, but cannot alter the command table.
-
-### 3. Configure CORS on the bucket
-
-Presigned URLs reach the S3 host directly from the browser. Your bucket must allow cross-origin requests from your app's origin, otherwise every `fetch()` fails with `TypeError: Failed to fetch` (the browser drops the response at the CORS preflight).
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
 
 ```json
 [
@@ -225,74 +222,73 @@ Presigned URLs reach the S3 host directly from the browser. Your bucket must all
 aws s3api put-bucket-cors --bucket $AWS_S3_BUCKET --cors-configuration file://cors.json
 ```
 
-**Or** use the helper in the browser example, it signs the `PutBucketCors` call with your existing env credentials and applies the same policy to all configured buckets in one shot:
-
 ```bash
-cd examples/browser
-npx tsx scripts/configure-cors.ts http://localhost:5173 https://app.example.com
+aws s3api put-bucket-cors --bucket $AWS_S3_BUCKET --cors-configuration file://cors.json
 ```
 
-<Warning>
-CORS is origin-exact. `http://localhost:5173` ≠ `http://localhost:5174` ≠ `https://app.example.com`. Include every origin you'll serve the page from.
-</Warning>
+  </Accordion>
+  <Accordion title="Browser fields">
 
-See [S3 Setup](/home/setup/s3) for credential setup.
+{/* generated: config-table browser/s3 omit=accessKeyId,secretAccessKey,sessionToken,forcePathStyle,httpAgentProvider start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"function"} post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"}>
+  `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
 
-## Refused keys
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/s3 end */}
 
-When credentials cannot read an S3 object (S3 returns `AccessDenied`, or a bodiless HTTP 403 response on a `HEAD` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
+Without `presignedUrlProvider`, the browser `S3VFS` signs requests itself with
+the Node fields' credentials, which puts the keys in the page.
 
-Shell commands follow standard POSIX conventions:
-- `cat a b c` prints the contents of `a` and `c`, writes a permission error for `b` to `stderr`, and exits with a non-zero status.
-- `grep -r` logs an error on inaccessible files and exits with status `2`.
-- `cp b x || fallback` triggers the fallback branch.
-- `test -e b` evaluates to false.
+  </Accordion>
+</AccordionGroup>
 
-### IAM permissions and existence checks
+## Integration
 
-- **Scoped grants:** When access is granted below a specific prefix (for example, `s3:GetObject` on `bucket/dir/*` alongside `s3:ListBucket` on the bucket), Mirage treats `dir` as a directory during `stat`.
-- **Missing `ListBucket`:** Without `s3:ListBucket` permission, S3 returns HTTP 403 even for non-existent keys to avoid leaking existence. As a result, non-existent files report `Permission denied` (`EACCES`) instead of `No such file or directory` (`ENOENT`).
-- **Listed but unreadable keys:** If `ListObjectsV2` includes an object that your credentials cannot read, `stat` and `test -e` report that the file exists, while read attempts (`cat`) fail with `Permission denied`.
-- **Browser presigned URLs:** Mirage does not parse the HTTP error body when reading through presigned URLs in the browser. Any HTTP 403 status (including expired or misconfigured URLs) is handled as a permission refusal.
+S3 answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
 
-## Scoping a VFS to a key prefix
-
-Pass `keyPrefix` to scope every operation to a subpath of the bucket:
-
-```ts
-const s3 = new S3VFS({
-  bucket: 'app-data',
-  region: 'eu-west-1',
-  keyPrefix: `users/${userId}/`,
-})
-```
-
-When set, every read/write/list/stat/copy/rename/delete operation is transparently scoped to that bucket subpath. Agents see clean paths like `/data/notes.md`; the underlying bucket key is `users/${userId}/data/notes.md`. Useful for multi-tenant systems. Pairs naturally with STS AssumeRole session policies for AWS-side enforcement. Unset behavior is unchanged.
-
-**Normalization:** leading slashes are stripped and a trailing slash is added automatically. Both `undefined` and an empty string are treated as "no prefix."
-
-In YAML-based configs the snake-case spelling `key_prefix` is also accepted and is automatically mapped to `keyPrefix` at construction.
-
-<Warning>
-**Browser variant — security note**
-
-For `mirage-browser`'s `S3VFS` (which uses `presignedUrlProvider`), `keyPrefix` flows through the same core code path, but a client-controlled prefix is not a security boundary — a malicious client can ignore or alter it before signing. For real isolation, enforce the prefix inside your server-side `presignedUrlProvider` implementation (and in the IAM/STS session policy backing those credentials). Treat the client-side `keyPrefix` as ergonomics only.
-</Warning>
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with S3 mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md s3 start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -300,7 +296,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with S3 mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -321,7 +317,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with S3 mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -343,13 +339,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with S3 mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md s3 end */}
-
-## Integration
-
-What S3 answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On S3 |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

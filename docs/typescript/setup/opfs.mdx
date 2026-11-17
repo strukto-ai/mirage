@@ -1,53 +1,82 @@
 ---
 title: OPFS
 icon: hard-drive
-description: Persistent in-browser filesystem backed by the Origin Private File System.
+description: Virtualize the browser's Origin Private File System from the browser.
 ---
 
-`OPFSVFS` mounts the [Origin Private File System](https://web.dev/articles/origin-private-file-system) as a Mirage VFS. Files persist across page reloads but stay scoped to the current origin.
+`OPFSVFS` mounts the
+[Origin Private File System](https://web.dev/articles/origin-private-file-system):
+files persist across page reloads and stay scoped to the page's origin. It
+needs no service and no credentials; see the [OPFS page](/home/setup/opfs).
 
 <Note>
-  Browser only. There is no OPFS in Node; for local persistence in Node, use [Disk](/typescript/setup/disk).
+  Browser only. Node has no OPFS; for local files in Node, use
+  [Disk](/typescript/setup/disk).
 </Note>
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-browser
+npm install @struktoai/mirage-browser
 ```
 
-## Config
+## Configure
 
 ```ts
 import { MountMode, OPFSVFS, Workspace } from '@struktoai/mirage-browser'
 
 const opfs = new OPFSVFS({ root: 'mirage' })
-
 const ws = new Workspace({ '/data': opfs }, { mode: MountMode.WRITE })
-await ws.shell('echo persistent | tee /data/note.txt')
+
+const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
+console.log(result.stdoutText)
+await ws.close()
 ```
+
+`capacity: '100MB'` caps the bytes the folder holds; a write past it fails with
+"Disk quota exceeded". See [capacity](/home/setup/vfs#mount-capacity). A mount
+takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `root` | `''` | Subdirectory under the OPFS root. Useful to namespace multiple workspaces. |
+| `root` | `''` | Folder under the origin's OPFS root, so several workspaces can keep apart. Empty mounts the OPFS root itself. |
+| `capacity` | none | The most bytes the folder may hold, a size like `100MB` or a count of bytes. |
 
-## Mount mode
+## Layout
 
-`read`, `write`, `exec`.
+```text
+/data/
+  note.txt
+  drafts/
+    plan.md
+```
 
-## Storage and quotas
+With `root: 'mirage'`, `/data/drafts/plan.md` is `mirage/drafts/plan.md` in
+the origin's OPFS.
 
-The browser sets per-origin quotas (typically a fraction of free disk, single-digit GB on most setups). Hitting it raises `QuotaExceededError`.
+## Behavior
+
+- **Origin scope:** another origin, or another browser profile, sees none of
+  the files.
+
+### Storage and quotas
+
+The browser sets a quota per origin, typically a fraction of free disk. A
+write past it fails with `QuotaExceededError`.
 
 ```ts
 const { quota, usage } = await navigator.storage.estimate()
 console.log(`${usage} / ${quota} bytes`)
 ```
 
-For long-lived workspaces, request persistent storage early so the browser doesn't evict your data under storage pressure:
+Under storage pressure the browser may evict the data. For a long-lived
+workspace, ask for persistent storage early:
 
 ```ts
 await navigator.storage.persist()
 ```
 
-See [TypeScript Limitations: Browser](/typescript/limitations#browser) for the full set of browser constraints.
+See [TypeScript Limitations: Browser](/typescript/limitations#browser) for
+every browser constraint.

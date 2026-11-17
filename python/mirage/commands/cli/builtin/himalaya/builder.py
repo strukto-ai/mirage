@@ -400,14 +400,15 @@ def _quoted_printable(data: bytes, is_body: bool) -> bytes:
 
     def plain(chunk: bytes) -> None:
         nonlocal column
-        while column + len(chunk) > MAX_CONTENT_LEN:
+        at = 0
+        while column + len(chunk) - at > MAX_CONTENT_LEN:
             room = max(MAX_CONTENT_LEN - column, 0)
-            out.extend(chunk[:room])
+            out.extend(chunk[at : at + room])
             out.extend(b"=\r\n")
             column = 0
-            chunk = chunk[room:]
-        out.extend(chunk)
-        column += len(chunk)
+            at += room
+        out.extend(chunk[at:])
+        column += len(chunk) - at
 
     def escape(byte: int) -> None:
         nonlocal column

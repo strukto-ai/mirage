@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use super::buffer::Buffer;
+use super::text::no_memory;
 use super::text::{RecordSearch, Regexes, take_record};
 use super::value::Text;
-use super::vm::no_memory;
 use crate::constants::{FLUSH, KEPT, MAX_HELD};
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 

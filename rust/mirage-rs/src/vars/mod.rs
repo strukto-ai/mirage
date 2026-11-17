@@ -29,38 +29,12 @@ use crate::arith::{self, Halt, Outcome, Vars};
 use crate::policy::{VarScope, Visibility, VisibilityMatcher};
 
 pub use random::Draws;
-use reading::Reading;
-use scope::Frame;
+use random::draw;
 use value::saves_alike;
-pub use value::{Assoc, Indexed, Kind, Managed, Slot, Value, Var, entry_bytes};
-
-/// `declare -i`: a value assigned is evaluated as arithmetic.
-pub const INTEGER: u8 = 1;
-/// `declare -n`: the name stands for the variable its value names.
-pub const NAMEREF: u8 = 1 << 1;
-pub const READONLY: u8 = 1 << 2;
-pub const TRACE: u8 = 1 << 3;
-pub const EXPORT: u8 = 1 << 4;
-/// `declare -l`: a value assigned is lowercased.
-pub const LOWER: u8 = 1 << 5;
-/// `declare -u`: a value assigned is uppercased.
-pub const UPPER: u8 = 1 << 6;
-/// An array `declare -a` / `-A` made and nothing assigned yet: it lists
-/// with no value and no letter, and the first write clears it.
-pub const UNASSIGNED: u8 = 1 << 7;
-
-/// The stored attributes as `declare -p` prints them, in bash's own order,
-/// pinned over every ordered pair of `a A i l n r t u x`: `i n r t x`, then
-/// `l`/`u`. `-a` and `-A` are the value's kind, never stored.
-const LETTERS: [(u8, char); 7] = [
-    (INTEGER, 'i'),
-    (NAMEREF, 'n'),
-    (READONLY, 'r'),
-    (TRACE, 't'),
-    (EXPORT, 'x'),
-    (LOWER, 'l'),
-    (UPPER, 'u'),
-];
+pub use value::{
+    Assoc, EXPORT, INTEGER, Indexed, Kind, LOWER, Managed, NAMEREF, READONLY, Slot, TRACE,
+    UNASSIGNED, UPPER, Value, Var, attrs_of, entry_bytes, letters,
+};
 
 pub const RANDOM: &str = "RANDOM";
 /// The running command's line and the process running it, which the
@@ -70,24 +44,6 @@ pub const BASHPID: &str = "BASHPID";
 pub const BASH_LINENO: &str = "BASH_LINENO";
 pub const BASH_SOURCE: &str = "BASH_SOURCE";
 pub const PIPESTATUS: &str = "PIPESTATUS";
-/// The stored attribute letters, in print order.
-pub fn letters(attrs: u8) -> String {
-    LETTERS
-        .iter()
-        .filter(|(attr, _)| attrs & attr != 0)
-        .map(|(_, letter)| *letter)
-        .collect()
-}
-
-/// The attributes a stored letter cluster spells. A letter naming none is
-/// skipped: the cluster is shared with the other host and later versions,
-/// and refusing a session over one letter loses more than the letter.
-pub fn attrs_of(cluster: &str) -> u8 {
-    cluster
-        .chars()
-        .filter_map(|c| LETTERS.iter().find(|(_, letter)| *letter == c))
-        .fold(0, |attrs, (attr, _)| attrs | attr)
-}
 
 /// The seed word `$RANDOM`'s generator last consumed. `Fresh` has none and
 /// draws its first seed from the host; `Off` is after `unset RANDOM`, or
@@ -117,6 +73,15 @@ fn fresh_stamp() -> u64 {
 
 /// Where a host draws a generator's first seed: the workspace's id source.
 pub type Ids = Arc<dyn Fn() -> u32 + Send + Sync>;
+
+/// The scope a function call or a prefix assignment opens: the records it
+/// shadowed, None for a name that had none. `temp` marks a prefix
+/// assignment's scope, bash's temporary environment of `x=1 f`.
+#[derive(Clone, Debug, Default)]
+struct Frame {
+    pub(super) saved: HashMap<String, Option<Arc<Var>>>,
+    pub(super) temp: bool,
+}
 
 /// A session's variables.
 #[derive(Clone)]
@@ -725,6 +690,37 @@ impl Store {
         true
     }
 
+    /// Append `text` to the scalar `name` holds in place, as `land` stores
+    /// the joined value: the record assigned, a managed pointer dropped,
+    /// exported under `set -a`. The table and the record are copied first
+    /// only while a fork or a saved scope shares them. False when the
+    /// record holds no scalar, or is `GLOBIGNORE`, which `place` watches.
+    pub fn append_text(&mut self, name: &str, text: &[u8], allexport: bool) -> bool {
+        if name == "GLOBIGNORE"
+            || !self
+                .record(name)
+                .is_some_and(|var| matches!(var.value, Some(Value::Scalar(_))))
+        {
+            return false;
+        }
+        let Some(var) = Arc::make_mut(&mut self.vars).get_mut(name) else {
+            return false;
+        };
+        let var = Arc::make_mut(var);
+        let Some(Value::Scalar(held)) = var.value.as_mut() else {
+            return false;
+        };
+        held.extend_from_slice(text);
+        var.attrs &= !UNASSIGNED;
+        var.managed = None;
+        if allexport {
+            var.attrs |= EXPORT;
+        }
+        self.held += text.len();
+        self.stamp = fresh_stamp();
+        true
+    }
+
     /// A copy for a fork of the session: the same records, a generator that
     /// starts afresh unless `unset RANDOM` ended it, and `LINENO` and
     /// `BASHPID` as special as they were.
@@ -769,33 +765,6 @@ impl Store {
             };
         }
         child
-    }
-
-    /// Evaluate `text` as arithmetic against the session, as every
-    /// arithmetic context does: drawing through `draws`, stopping at a
-    /// write to a readonly name, its subscripts expanding first when
-    /// `expand` (a `let` operand, an `-i` value). The writes come back for
-    /// the caller to land.
-    pub fn arith(
-        &mut self,
-        draws: &mut Draws,
-        text: &[u8],
-        added: Option<&[u8]>,
-        nounset: bool,
-        expand: bool,
-    ) -> Outcome {
-        let mut reading = Reading {
-            store: self,
-            draws: Some(draws),
-            kept: None,
-        };
-        let store = &reading.store;
-        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID]
-            .into_iter()
-            .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
-            .map(str::to_owned)
-            .collect();
-        reading.evaluate(text, added, nounset, &dynamic, expand)
     }
 
     /// The `-i` coercion of one value, as one evaluation: against the
@@ -928,6 +897,73 @@ pub fn strip_key_quotes(text: &[u8]) -> &[u8] {
     match text {
         [open, inner @ .., close] if open == close && matches!(open, b'"' | b'\'') => inner,
         _ => text,
+    }
+}
+
+impl Store {
+    /// Whether `RANDOM` is special here: not hidden, not ended.
+    pub(super) fn random_special(&self, name: &str) -> bool {
+        name == RANDOM && !self.hidden(name) && self.random_seed != Seed::Off
+    }
+
+    /// One `$RANDOM` read: a draw from the generator, or None once it is
+    /// no longer special, or hidden. A value the host seeded is consumed on
+    /// its first read; a seed that does not evaluate is an arithmetic error.
+    pub fn next_random(&mut self) -> Result<Option<u32>, arith::Error> {
+        let stored = self.scalar(RANDOM).map(<[u8]>::to_vec);
+        if !self.random_special(RANDOM) || (stored.is_none() && self.random_seed != Seed::Fresh) {
+            return Ok(None);
+        }
+        let reseed = match (&stored, &self.random_seed) {
+            (Some(word), Seed::Word(seed)) if word == seed => None,
+            (Some(word), _) => Some(self.seed_from(word)?),
+            (None, _) => None,
+        };
+        let (state, last) = match (reseed, self.random_state) {
+            (Some(seed), _) => (seed, 0),
+            (None, None) => ((self.ids)(), 0),
+            (None, Some(state)) => (state, self.random_last),
+        };
+        let (state, value) = draw(state, last);
+        self.random_state = Some(state);
+        self.random_last = value;
+        let word = value.to_string().into_bytes();
+        let var = match self.vars.get(RANDOM) {
+            Some(existing) => existing.holding(Some(Value::Scalar(word.clone()))),
+            None => Var::scalar(word.clone()),
+        };
+        self.place(RANDOM, Some(Arc::new(var)));
+        self.random_seed = Seed::Word(word);
+        Ok(Some(value))
+    }
+
+    /// Seed the generator at a `RANDOM=` write: the word's value
+    /// modulo 2^32, the sequence restarting.
+    pub fn seed_random(&mut self, word: Vec<u8>, state: u32) {
+        self.random_state = Some(state);
+        self.random_seed = Seed::Word(word);
+        self.random_last = 0;
+    }
+
+    /// Whether a write to RANDOM seeds it now.
+    pub fn seeds_random(&self, name: &str) -> bool {
+        name == RANDOM && self.random_seed != Seed::Off
+    }
+
+    /// Replay an evaluation's scratch draws on the generator, once the
+    /// writer landed the seed it assigned: the session ends seeded and advanced by
+    /// every read since, as bash's does.
+    pub fn settle(&mut self, draws: &mut Draws) -> Result<(), arith::Error> {
+        let Some(seeded) = draws.seeded.take() else {
+            return Ok(());
+        };
+        if self.random_seed != Seed::Word(seeded.into_bytes()) {
+            return Ok(());
+        }
+        for _ in 0..std::mem::take(&mut draws.count) {
+            self.next_random()?;
+        }
+        Ok(())
     }
 }
 

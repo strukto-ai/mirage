@@ -1,37 +1,157 @@
 ---
 title: Notion
 icon: /images/notion-logo.svg
-description: Set up a Notion internal integration for the Notion VFS.
+description: Virtualize Notion pages and databases as read-only JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an Internal Integration
+Every page shared with the integration becomes a folder with a `page.json`
+(metadata, the body as Markdown, and raw blocks) and a folder per child page.
+Databases become their data sources, each with its schema and rows.
 
-1. Go to [My Integrations](https://www.notion.com/my-integrations)
-1. Click **+ New integration**
-1. Name it (e.g. "mirage"), select your workspace
-1. Under **Content Capabilities**, enable:
-   - **Read content** (required)
-   - **Update content** (for write commands)
-   - **Insert content** (for creating pages and comments)
-1. Click **Save changes**
-1. Copy the **Internal Integration Secret** (starts with `ntn_`)
+## Setup
 
-### 2. Share Pages with the Integration
+Create an internal connection, give it **Read content**, share the pages to
+mount with it, and export its API token:
 
-The integration has no access by default. You must share each page:
+<AccordionGroup>
+  <Accordion title="Create the connection and share pages">
+    1. As a workspace owner, open the
+       [Developer portal](https://app.notion.com/developers/connections),
+       select **Internal connections** under **Build**, and click
+       **Create a new connection**. Name it (for example `mirage`) and pick the
+       workspace.
+    2. On the **Configuration** tab, turn on the read content capability. The
+       update and insert content capabilities are only for writes through the
+       [`ntn`](/home/setup/cli/ntn) CLI.
+    3. Copy the API token from the same tab (it starts with `ntn_`).
+    4. The connection reaches no page until one is shared with it. Either open
+       the **Content access** tab, click **Edit access** and pick pages and
+       databases, or open a page in Notion, click **•••**, **Connections**,
+       **Add connection**, and pick the connection.
+    5. Child pages inherit access, so sharing a top-level page exposes its
+       whole subtree.
 
-1. Open a Notion page you want to mount
-1. Click `...` (top-right) -> **+ Add connections**
-1. Search for your integration name and select it
-1. Child pages inherit the connection - share a top-level page to expose its entire subtree
-
-### 3. Set Environment Variables
+    A personal access token from
+    [notion.so/developers/tokens](https://www.notion.so/developers/tokens) with
+    the **Notion API** capability also works. It acts with its creator's
+    permissions and needs no sharing step.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-NOTION_API_KEY=ntn_xxxx...
+export NOTION_API_KEY=ntn_...
 ```
 
-For SDK guides, see [Notion (Python)](/python/vfs/notion) and [Notion (TypeScript)](/typescript/setup/notion).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /notion:
+        vfs: notion
+        mode: read
+        config:
+          api_key: ${NOTION_API_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id notion
+    mirage shell -w notion -c 'ls /notion/pages'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.notion import NotionConfig, NotionVFS
+
+    config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
+    ws = Workspace({"/notion": NotionVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /notion/pages")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, NotionVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/notion': new NotionVFS({ apiKey: process.env.NOTION_API_KEY! }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /notion/pages')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/notion/
+  pages/
+    Engineering_Wiki__<page-id>/
+      page.json
+      Onboarding__<child-id>/
+        page.json
+  databases/
+    Roadmap__<database-id>/
+      database.json
+      Roadmap__<data-source-id>/
+        data_source.json
+        rows.jsonl
+```
+
+- Titles are sanitized and end in `__<id>`; `ls` the parent instead of
+  building a path.
+- `rows.jsonl` holds one row per line, each with `path` to its `page.json`.
+  Row folders are not listed; open one by that path.
+- `database.json` lists the database's data sources; `data_source.json`
+  holds the property schema.
+
+## Sample runs
+
+```bash
+$ ls /notion/pages
+Engineering_Wiki__1f3c8a2e-5b7d-4e91-a0c6-3d2b8f4e7a15
+Meeting_Notes__2a9d4b1f-7c3e-4f82-b5d0-6e1a9c8f2b47
+```
+
+```bash
+$ jq -r '.title, .markdown' /notion/pages/Engineering_Wiki__1f3c8a2e-5b7d-4e91-a0c6-3d2b8f4e7a15/page.json
+Engineering Wiki
+# Engineering Wiki
+
+Start with the onboarding page.
+```
+
+```bash
+$ jq -r '.title + "  " + .path' /notion/databases/Roadmap__6c2e9f1a-4b8d-4a73-9e05-1d7b3c6a8f20/Roadmap__8e4a1c7b-2d9f-4b36-a1e8-5f0c3d9b7a62/rows.jsonl
+Search v2  Search_v2__0b7e3a9c-6d1f-4c58-8a24-9f3e1b6d2c70/page.json
+Dark mode  Dark_mode__4d8f2b6e-1a3c-4e97-b0d5-7c2a9e4f1b83/page.json
+```
+
+The mount is read-only. Create and edit pages with the
+[`ntn`](/home/setup/cli/ntn) CLI, which takes the same token.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/notion">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/notion">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

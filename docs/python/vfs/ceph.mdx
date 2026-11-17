@@ -1,23 +1,20 @@
 ---
 title: Ceph (Rados Gateway)
+description: Virtualize a Ceph Rados Gateway bucket from Python.
 icon: /images/ceph-logo.svg
-description: Mount a self-hosted Ceph Rados Gateway bucket as a virtual filesystem.
 ---
-The Ceph VFS is a thin wrapper over the [S3 VFS](/python/vfs/s3).
-It maps a `CephConfig` to an `S3Config` and reuses the exact same backend,
-commands, and behavior as S3, it just points at your Ceph Rados Gateway
-`endpoint_url` and uses path-style addressing by default.
 
-Ceph RGW is self-hosted, so `endpoint_url` is **required** (there is no
-region-derived host). Uses aioboto3 against the gateway's S3-compatible API.
+`CephVFS` mounts one bucket on a Ceph Rados Gateway (RGW): every object becomes
+a file and every `/` in a key a folder. It reaches the gateway through its S3
+API. Credentials are set up on the [Ceph page](/home/setup/ceph).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[s3]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -30,52 +27,120 @@ config = CephConfig(
     endpoint_url=os.environ["CEPH_ENDPOINT_URL"],
     access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
     secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
-    # Optional:
-    # region="us-east-1",   # default
-    # path_style=True,      # default
-    # timeout=30,
-    # proxy="http://proxy:8080",
 )
-vfs = CephVFS(config)
-ws = Workspace({"/ceph": vfs}, mode=MountMode.READ)
+ws = Workspace({"/ceph": CephVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /ceph && find /ceph -name '*.csv'")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-Both `READ` and `WRITE` modes are supported.
+`endpoint_url` is required, since the server is self-hosted. `region` defaults
+to `us-east-1`. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table ceph start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | Region requests are signed for; the gateway's endpoint does not depend on it. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code><br />required | URL of the self-hosted S3 gateway, such as `http://localhost:9000`. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `True` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="bucket" type={"str"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"str"} default={"'us-east-1'"}>
+  Region requests are signed for; the gateway's endpoint does not depend on it.
+</ResponseField>
+<ResponseField name="endpoint_url" type={"str"} required>
+  URL of the self-hosted S3 gateway, such as `http://localhost:9000`.
+</ResponseField>
+<ResponseField name="access_key_id" type={"str"} post={["secret"]}>
+  Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain.
+</ResponseField>
+<ResponseField name="secret_access_key" type={"str"} post={["secret"]}>
+  Secret access key paired with `access_key_id`.
+</ResponseField>
+<ResponseField name="session_token" type={"str"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="aws_profile" type={"str"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="path_style" type={"bool"} default={"True"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="proxy" type={"str"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ceph end */}
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_key_id` and `secret_access_key`, an RGW user's key pair, with
+   `session_token` for temporary credentials.
+2. `aws_profile`, a profile in `~/.aws/credentials`.
+3. The AWS credential chain: environment variables, then the instance or
+   container role.
+
+The key pair belongs to an RGW user, created with `radosgw-admin user create`. A
+request the credentials may not make answers `Permission denied`.
+
+## Layout
+
+```text
+/ceph/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
+```
+
+`/ceph/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; Ceph stores no folder objects.
+
+## Behavior
+
+- **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
+  so `/ceph/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+- **Path style:** requests are path-style; `path_style` defaults to `True`.
+
+## Integration
+
+Ceph answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph (Rados Gateway) mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md ceph start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -83,7 +148,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph (Rados Gateway) mounte
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -104,7 +169,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph (Rados Gateway) mounte
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -126,48 +191,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph (Rados Gateway) mounte
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md ceph end */}
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.ceph import CephConfig, CephVFS
-
-load_dotenv(".env.development")
-
-config = CephConfig(
-    bucket=os.environ["CEPH_BUCKET"],
-    endpoint_url=os.environ["CEPH_ENDPOINT_URL"],
-    access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
-    secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
-)
-vfs = CephVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/ceph/": vfs}, mode=MountMode.READ)
-
-    r = await ws.shell("ls /ceph/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /ceph/ -name '*.json'")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Notes
-
-- Ceph registers under its own `VFSName` and routes through the same `core/s3`
-  implementation, so the full S3 shell-command set applies. See the
-  [S3 VFS](/python/vfs/s3) for the complete command reference,
-  range reads, streaming, and the index cache fast path.
-- For credential setup, see [Ceph Setup](/home/setup/ceph).

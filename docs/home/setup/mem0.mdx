@@ -1,54 +1,136 @@
 ---
 title: Mem0
 icon: /images/mem0.svg
-description: Set up a Mem0 API key and memory scope for the Mem0 VFS.
+description: Virtualize one Mem0 memory scope as read-only JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-Mirage uses the [Mem0 Platform](https://docs.mem0.ai) managed API. You need a
-Mem0 API key and one memory scope — a `user_id`, `agent_id`, or `run_id` — to
-mount.
+The memories of one [Mem0 Platform](https://docs.mem0.ai) scope become a flat
+folder with one JSON file per memory.
 
-### 1. Get a Mem0 API Key
+## Setup
 
-1. Sign in to the [Mem0 dashboard](https://app.mem0.ai).
-1. Open **API Keys**.
-1. Create or copy a key (it starts with `m0-...`).
-
-The key is sent as a `Token` authorization header to the Mem0 API. Your
-organization and project are resolved from the key.
-
-### 2. Choose a Scope
-
-Mem0 stores each memory under a single entity. A Mirage mount is scoped to
-exactly one of:
-
-| Scope | Mem0 filter |
-| ----- | ----------- |
-| User | `user_id` |
-| Agent | `agent_id` |
-| Run / session | `run_id` |
-
-Set exactly one. Combining two (for example `user_id` **and** `agent_id`) is
-rejected, because a memory added with both is split into separate user-scoped
-and agent-scoped memories — a combined filter matches nothing.
-
-### 3. Set Environment Variables
+1. Sign in to the [Mem0 dashboard](https://app.mem0.ai) and open the **API
+   Keys** page under **Settings**.
+1. Create a key and copy it. The organization and project come from the key.
+1. Pick the scope to mount: one `user_id`, `agent_id` or `run_id`.
 
 ```bash
-# .env.development
-MEM0_API_KEY=m0-...
-MEM0_USER_ID=alex
+export MEM0_API_KEY=m0-...
+export MEM0_USER_ID=alex
 ```
 
-For an agent or run scope, set `MEM0_AGENT_ID` or `MEM0_RUN_ID` instead of
-`MEM0_USER_ID`.
+- Set exactly one scope. A pair such as `user_id` and `agent_id` is refused:
+  Mem0 splits a memory added with both into separate memories, so a combined
+  filter matches nothing.
+- An agent or run scope sets `agent_id` or `run_id` instead of `user_id`.
+- `host` (default `https://api.mem0.ai`) points at another Mem0 API host.
+- Keep the key out of public browser bundles; call Mem0 from a server instead.
 
-For self-hosted or a custom host, set `MEM0_HOST`:
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /memory:
+        vfs: mem0
+        mode: read
+        config:
+          api_key: ${MEM0_API_KEY}
+          user_id: ${MEM0_USER_ID}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id mem
+    mirage shell -w mem -c 'ls /memory'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.mem0 import Mem0Config, Mem0VFS
+
+    config = Mem0Config(
+        api_key=os.environ["MEM0_API_KEY"],
+        user_id=os.environ["MEM0_USER_ID"],
+    )
+    ws = Workspace({"/memory": Mem0VFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /memory")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Mem0VFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/memory': new Mem0VFS({
+          apiKey: process.env.MEM0_API_KEY!,
+          userId: process.env.MEM0_USER_ID!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /memory')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/memory/
+  6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+  b52e7a19-0c4d-4a8e-9f3b-2d6c1e8a7f40.json
+```
+
+- A file holds the memory's full record: `memory`, `categories`, `metadata`,
+  `created_at`, `updated_at` and the rest.
+- `stat` reports `updated_at`, or `created_at` when unset, as the modified time.
+- The [`search` CLI](/python/cli/search) runs Mem0's semantic search in the same
+  scope.
+
+## Sample runs
 
 ```bash
-MEM0_HOST=https://api.mem0.ai
+$ ls /memory
+6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+b52e7a19-0c4d-4a8e-9f3b-2d6c1e8a7f40.json
 ```
 
-For SDK guides, see [Mem0 (Python)](/python/vfs/mem0) and [Mem0 (TypeScript)](/typescript/setup/mem0).
+```bash
+$ jq -r '.memory, .categories[0]' /memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+User's name is Alex, follows a vegetarian diet, allergic to nuts
+personal_details
+```
+
+```bash
+$ grep -rl allergic /memory
+/memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+```
+
+The mount is read-only.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/mem0">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/mem0">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

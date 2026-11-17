@@ -5,9 +5,9 @@ description: Run Mirage workspaces and the Mirage server API on Cloudflare Worke
 keywords: ["Mirage Cloudflare", "@struktoai/mirage-cloudflare", "Cloudflare Workers", "Durable Objects", "serverless terminal"]
 ---
 
-`@struktoai/mirage-cloudflare` runs Mirage on Cloudflare Workers. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust and, when a workspace names it, `python3` on [Monty](/typescript/runtime/python), all in one thread.
-
-The Worker needs `nodejs_compat` for Node's `buffer`, `crypto`, `path`, `process` and `util` modules. Wrangler loads Mirage's Rust module and Monty as compiled `WebAssembly.Module` imports.
+`@struktoai/mirage-cloudflare` runs a workspace inside a Worker's isolate: the
+shell, the commands and, when a workspace names it, `python3` on
+[Monty](/typescript/runtime/monty), with no machine to start.
 
 ## Install
 
@@ -26,7 +26,12 @@ compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolut
 "cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
 ```
 
-The package serves a workspace's files into a [machine](/home/setup/machine/e2b) with `ssh2`, which tries the native `cpu-features` addon inside a `try`. A Worker cannot load a native addon, so the alias hands it the package's stub, which throws in its place.
+- `nodejs_compat` gives Mirage Node's `buffer`, `crypto`, `path`, `process`
+  and `util`.
+- `no_handle_cross_request_promise_resolution` lets a later request finish
+  work an earlier one started, which the server API needs.
+- The alias hands `ssh2` a stub for the native `cpu-features` addon, which a
+  Worker cannot load.
 
 ## Run a workspace
 
@@ -59,43 +64,25 @@ npx wrangler dev
 curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 ```
 
-`python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
-
-`node` and `js` do not run on Cloudflare Workers. [QuickJS](/home/setup/runtime/quickjs) would run on the isolate's one thread, where a script that never calls the host, such as `for (;;) {}`, runs until Cloudflare's CPU limit ends the request while every workspace in the isolate waits, a Durable Object sharing it included. A config whose `machines` run `quickjs` is refused.
-
-For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that a Worker bundle cannot resolve.
-
-## Read secrets from AWS and 1Password
-
-A [pointer](/home/service-credentials) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
-
-`aws-sm` is registered when the package loads. The Worker signs each `GetSecretValue` itself, and has no AWS credentials file or default chain to fall back on, so the source's config gives `region`, `aws_access_key_id` and `aws_secret_access_key`, with `aws_session_token` for temporary keys. `aws_profile` is refused.
-
-There is no `env` source in a Worker: the Worker's environment holds its own secrets, which any workspace config naming `env` could read. Give a source's keys from your Worker's code, which reads them from its bindings.
-
-`1password` runs 1Password's SDK, whose core is about 13 MiB of WebAssembly, so it is its own import. Install the SDK version the package is built against, and alias its core to the package's build of it, which loads the WebAssembly as a module. With the core, the Worker is past Cloudflare's 64 MiB limit unless it is minified:
-
-```bash
-npm install @1password/sdk@0.5.0
+```json
+{"exit":0,"stdout":"100\n99\n98\n"}
 ```
 
-```toml wrangler.toml
-minify = true
-
-[alias]
-"cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
-"@1password/sdk-core" = "@struktoai/mirage-cloudflare/onepassword_core"
-```
-
-```ts src/worker.ts
-import '@struktoai/mirage-cloudflare/onepassword'
-```
-
-The token is the source config's `token`, or `OP_SERVICE_ACCOUNT_TOKEN` among the Worker's secrets, which `nodejs_compat` puts on `process.env`.
+- `python3` runs on Monty in the isolate's one thread. Monty's own clock
+  stops a run at the line's time limit (exit 124) or after 30 seconds, so a
+  loop that never ends leaves the isolate free for the next line.
+- `node` does not run on Workers: QuickJS would hold the isolate's one thread
+  until Cloudflare's CPU limit, so a config whose machines run `quickjs` is
+  refused.
+- Import anything else from core by subpath
+  (`@struktoai/mirage-core/vfs/registry`): the package root pulls in optional
+  packages, such as Pyodide, that a Worker bundle cannot resolve.
 
 ## Serve the server API
 
-`createApp` answers the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc) as the [server](/typescript/access/server) does, over the workspaces the isolate holds:
+`createApp` answers the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp)
+and [RPC](/home/access/rpc) as the [server](/typescript/access/server) does,
+over the workspaces the isolate holds:
 
 ```ts src/worker.ts
 import { createApp } from '@struktoai/mirage-cloudflare'
@@ -103,9 +90,9 @@ import { createApp } from '@struktoai/mirage-cloudflare'
 export default createApp({ maxWorkspaces: 8 })
 ```
 
-A workspace outlives the request that created it, so a later request finishes work an earlier one started; `no_handle_cross_request_promise_resolution` above lets it.
-
-It checks each request the way the server does, from the same `MIRAGE_AUTH_MODE`, `MIRAGE_AUTH_TOKEN` and `MIRAGE_JWT_*` [variables](/home/access/http#configure-authentication). Without a token or a JWT issuer it serves nothing, since a Worker's URL is public.
+A Worker's URL is public, so it serves nothing without a token or a JWT
+issuer, set through the server's `MIRAGE_AUTH_*` and `MIRAGE_JWT_*`
+[variables](/home/access/http#configure-authentication):
 
 ```toml wrangler.toml
 [vars]
@@ -121,23 +108,29 @@ curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAG
   -H 'content-type: application/json' -d '{"command": "python3 -c \"print(6 * 7)\""}'
 ```
 
-| Option | Meaning |
-| --- | --- |
-| `auth` | An `AuthConfig` in place of the env variables: `{ mode: 'token', bearerToken }`, or `{ mode: 'jwt', jwt }`. |
-| `maxWorkspaces` | The most workspaces the isolate holds at once. A create past it answers 503. |
-| `maxSessions` | The most sessions each workspace holds, `4` unless set, since every workspace shares the isolate's memory. A new session past it answers 429. |
-| `maxMemory` | The most any workspace's `max_memory` reaches, as a [size](/home/configuration/workspace#sizes). |
-| `maxProcesses` | The most any session's `processes.max` reaches. |
-| `maxLineSeconds` | The most seconds any line runs, whatever `@line` a config or profile sets. |
-| `maxEnv` | The most any workspace's `max_env` reaches, as a [size](/home/configuration/workspace#sizes). |
-| `policies` | The server's own [policies](/home/access/http#server-policies). |
-| `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
+`/v1/workspaces/:id/codex-exec` serves Codex's exec-server over a WebSocket,
+so `codex exec-server forward` runs its tools in a workspace on the Worker.
 
-`/v1/workspaces/:id/codex-exec` serves Codex's exec-server over a WebSocket, as the server does, so `codex exec-server forward` runs its tools in a workspace on the Worker.
+<Accordion title="createApp options">
+  | Option | Meaning |
+  | --- | --- |
+  | `auth` | An `AuthConfig` in place of the variables: `{ mode: 'token', bearerToken }` or `{ mode: 'jwt', jwt }`. |
+  | `maxWorkspaces` | The most workspaces the isolate holds at once. A create past it answers 503. |
+  | `maxSessions` | The most sessions each workspace holds, `4` unless set. A new session past it answers 429. |
+  | `maxMemory` | The most any workspace's `max_memory` reaches, as a [size](/home/configuration/workspace#sizes). |
+  | `maxProcesses` | The most any session's `processes.max` reaches. |
+  | `maxLineSeconds` | The most seconds any line runs, whatever a config or profile sets. |
+  | `maxEnv` | The most any workspace's `max_env` reaches, as a [size](/home/configuration/workspace#sizes). |
+  | `policies` | The server's own [policies](/home/access/http#server-policies). |
+  | `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
+</Accordion>
 
 ## Keep a workspace's files
 
-A Worker's memory goes with its isolate. To keep a workspace's files and sessions, put them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's own storage or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each session's working directory, variables and functions, its jobs, and the lines and processes it ran. Pass the Durable Object's own id as `daemonId`, so a Durable Object woken again takes its workspace back at once. A Durable Object per workspace gives each workspace a database of its own, and its mounts can each serve a folder of it with `root`. It does not give each its own memory: Cloudflare may run several Durable Objects of one class in one isolate, where they share its 128 MB and run one at a time.
+A Worker's memory goes with its isolate. To keep files and sessions, store
+them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's storage
+or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each
+session's directory, variables, functions, jobs and history:
 
 ```ts
 import { DurableObjectSqlDriver, SqlVFS, SqlWorkspaceStateStore, Workspace } from '@struktoai/mirage-cloudflare'
@@ -154,24 +147,78 @@ const ws = new Workspace(
 )
 ```
 
-## Mounts and CLIs
+`daemonId` set to the Durable Object's id lets a woken Durable Object take its
+workspace back at once. A Durable Object per workspace gives each workspace
+its own database, but not its own memory: Cloudflare may run several of one
+class in one isolate, sharing its 128 MB.
 
-Mounts:
+## Secrets
 
-- `ram`, `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `dify`, `slack`, `discord`, `notion`, `dropbox`, `jaeger`, `databricks_volume`, `tidb_filesystem`, `hf_models`, `hf_datasets`, `hf_spaces`
-- `s3`, `r2`, `gcs`, `minio`, `ceph`, `seaweedfs`, `wasabi`, `backblaze`, `digitalocean`, `tencent`, `aliyun`, `scaleway`, `qingstor`, `oci`, `supabase`, without `proxy`
-- `qdrant`: install `@qdrant/js-client-rest`
-- `postgres`: install `pg`
-- `redis`: any Redis over TCP, Upstash included, at a `redis://` or `rediss://` url, through Cloudflare's `connect()`
-- `email`: install `imapflow`, `mailparser` and `nodemailer`
+A [pointer](/home/service-credentials) reads `aws-sm` and `1password` in a
+Worker as on the server. There is no `env` source: the Worker's environment
+holds its own secrets, so the Worker's code passes a source its keys from its
+bindings.
 
-`chroma` does not run on Cloudflare.
+<AccordionGroup>
+  <Accordion title="AWS Secrets Manager">
+    `aws-sm` is registered when the package loads. The Worker signs each
+    request itself and has no credentials file or default chain, so the
+    source's config gives `region`, `aws_access_key_id` and
+    `aws_secret_access_key`, with `aws_session_token` for temporary keys.
+    `aws_profile` is refused.
+  </Accordion>
+  <Accordion title="1Password">
+    1Password's SDK core is about 13 MiB of WebAssembly, so it is its own
+    import. Install the SDK version the package is built against, alias its
+    core to the package's build, and minify to stay under Cloudflare's 64 MiB
+    limit:
 
-CLIs: `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mcp`, `ntn`, `search`, `slack`, `trello`.
+    ```bash
+    npm install @1password/sdk@0.5.0
+    ```
+
+    ```toml wrangler.toml
+    minify = true
+
+    [alias]
+    "cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
+    "@1password/sdk-core" = "@struktoai/mirage-cloudflare/onepassword_core"
+    ```
+
+    ```ts src/worker.ts
+    import '@struktoai/mirage-cloudflare/onepassword'
+    ```
+
+    The token is the source config's `token`, or `OP_SERVICE_ACCOUNT_TOKEN`
+    among the Worker's secrets.
+  </Accordion>
+</AccordionGroup>
+
+## VFS and CLIs
+
+| Runs on Workers | Names |
+| --- | --- |
+| VFS in memory | `ram` |
+| VFS over HTTP | `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `dify`, `slack`, `discord`, `notion`, `dropbox`, `jaeger`, `databricks_volume`, `tidb_filesystem`, `hf_models`, `hf_datasets`, `hf_spaces` |
+| Object store VFS, without `proxy` | `s3`, `r2`, `gcs`, `minio`, `ceph`, `seaweedfs`, `wasabi`, `backblaze`, `digitalocean`, `tencent`, `aliyun`, `scaleway`, `qingstor`, `oci`, `supabase` |
+| VFS with a peer installed | `qdrant` (`@qdrant/js-client-rest`), `postgres` (`pg`), `email` (`imapflow`, `mailparser`, `nodemailer`) |
+| VFS over TCP | `redis`, any Redis at a `redis://` or `rediss://` URL, Upstash included, through Cloudflare's `connect()` |
+| CLIs | `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mcp`, `ntn`, `search`, `slack`, `trello` |
+
+The `chroma` VFS does not run on Workers.
 
 ## Limits
 
-- A Worker's isolate has 128 MB of memory and no disk, shared by every workspace it runs, whether the server API holds them or each has its own Durable Object. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded`, and a command's output held for its redirect with `line: memory exhausted`, before the isolate runs out.
-- The server API's workspaces live in the isolate's memory. A request routed to another isolate does not see them, a write to a running line's stdin included, and they are gone when the isolate is evicted. `store.type` must be `ram`. A workspace built in code keeps its files and sessions in SQL, as [above](#keep-a-workspaces-files).
-- Network rules judge each request by host name: the isolate never sees the address a name reaches, so a `denied_domains` entry naming an address or a range is refused, and jwt mode's block on cloud metadata addresses covers only a request made to the address itself.
-- SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded by a `source:Class` reference are the Node server's alone. Codex's exec-server runs here over its WebSocket.
+- An isolate has 128 MB and no disk, shared by every workspace in it. Set
+  `max_memory` on each workspace, so a large write fails with
+  `Disk quota exceeded` before the isolate runs out.
+- The server API's workspaces live in one isolate's memory: a request routed
+  to another isolate does not see them, and eviction drops them. `store.type`
+  must be `ram`; a workspace built in code keeps its state in SQL, as
+  [above](#keep-a-workspaces-files).
+- Network rules judge a request by host name, since the isolate never sees
+  the address a name reaches, so a `denied_domains` entry naming an address or
+  a range is refused, and jwt mode's block on cloud metadata addresses
+  covers only a request made to the address itself.
+- SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded
+  by a `source:Class` reference run only on the Node server.

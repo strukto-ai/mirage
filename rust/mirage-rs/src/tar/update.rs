@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use super::create::{self, Output};
 use super::header::{self, Block, Pax};
-use super::read::{Input, MAX_META, Raw, Selection, trimmed};
-use super::{Codec, Config, FAILED, FATAL, Mode, TRAILER, lines, open_failure};
+use super::read::{Input, MAX_META, Raw, Selection};
+use super::{Codec, Config, FAILED, FATAL, Mode, TRAILER, lines, open_failure, trimmed};
 use crate::request::{Request, WriteMode, failed};
 use crate::task::Host;
 

@@ -7,6 +7,8 @@ use serde::Deserialize;
 
 use crate::constants::{MAX_HELD, WORK};
 use crate::{Stream, StreamError, parse_config, quoted};
+pub(crate) use options::Mode;
+use options::Whitespace;
 
 /// The block a long hold sets aside at a time.
 #[cfg(not(test))]
@@ -18,19 +20,6 @@ const PARK: usize = 4096;
 const RETIRE: usize = 64;
 #[cfg(test)]
 const RETIRE: usize = 2;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Mode {
-    Bytes,
-    Characters,
-    Fields,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Whitespace {
-    Default,
-    Trimmed,
-}
 
 /// cut's options as typed, `[name, text]` in typed order (`options::Typed`).
 #[derive(Deserialize)]

@@ -18,8 +18,9 @@ import json
 import threading
 from collections.abc import Iterable, Mapping
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, TypeAlias, assert_never
+from typing import Any, TypeAlias, assert_never
 
+from mirage.policy.types import AdmissionRules, CommandRule
 from mirage.rs.document import from_units, units
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import (
@@ -38,9 +39,6 @@ from mirage.utils.path import (
     LinkLanding,
     LinkStep,
 )
-
-if TYPE_CHECKING:
-    from mirage.policy.types import AdmissionRules, CommandRule
 
 Wire: TypeAlias = dict[str, Any]
 

@@ -3,8 +3,20 @@
 
 use serde::Deserialize;
 
-use super::{Mode, Whitespace};
 use crate::{StreamError, quoted};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Bytes,
+    Characters,
+    Fields,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Whitespace {
+    Default,
+    Trimmed,
+}
 
 /// The options cut reads, by the name each host's spec gives it.
 const NAMES: [&str; 13] = [
@@ -79,7 +91,7 @@ pub(super) fn read(options: &[Typed]) -> Result<Selection, StreamError> {
     if let Some(Typed(name, _)) = options.iter().find(|Typed(name, text)| {
         !NAMES.contains(&name.as_str()) || (text.is_none() && name != "whitespace_delimited")
     }) {
-        return Err(crate::scan::unknown("cut", name));
+        return Err(crate::scan_grammar::unknown("cut", name));
     }
     let typed = |name: &str| options.iter().any(|Typed(typed, _)| typed == name);
     let last = |name: &str| {

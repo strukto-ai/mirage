@@ -1,0 +1,33 @@
+---
+title: QuickJS
+icon: js
+description: Run JavaScript scripts and pipe transforms in both Mirage SDKs.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [QuickJS](/home/setup/runtime/quickjs), shared by both SDKs.
+
+## Install
+
+Download `qjs-wasi.wasm` from a
+[quickjs-ng release](https://github.com/quickjs-ng/quickjs/releases) and
+point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
+
+```bash
+pip install 'mirage-ai[quickjs]'
+```
+
+## Usage
+
+Declare an `in_process` machine that runs QuickJS to run `node` on it once its engine is found:
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+from mirage.runtime.js import QuickJsRuntime
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={"js": QuickJsRuntime(config={"home": "/path/to/quickjs"})},
+)
+await ws.shell("node -e 'console.log(1 + 1)'")
+```

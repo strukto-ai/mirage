@@ -814,3 +814,11 @@ impl Program {
         scratch.seen_from = at;
     }
 }
+
+/// Whether `pos` falls inside a UTF-8 character of `hay`.
+pub(crate) fn splits_char(hay: &[u8], pos: usize) -> bool {
+    (pos.saturating_sub(3)..pos).any(|start| {
+        unit_at(hay, start, hay.len(), true)
+            .is_some_and(|(unit, len)| matches!(unit, Unit::Char(_)) && start + len > pos)
+    })
+}

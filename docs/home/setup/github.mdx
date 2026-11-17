@@ -1,28 +1,171 @@
 ---
 title: GitHub
 icon: github
-description: Set up a GitHub Personal Access Token for the GitHub VFS.
+description: Virtualize a GitHub repository at a branch, tag or commit as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create a Personal Access Token
+A repository becomes its file tree at one ref, read through GitHub's REST API.
+Owner, repo and ref are set at mount time, so paths start at the repository
+root.
 
-1. Go to https://github.com/settings/tokens
-1. **Generate new token (classic)** or **Fine-grained token**
-1. For classic tokens, select scopes:
-   - `repo` for private repositories. This broad scope includes write access;
-     prefer a fine-grained token when you need tighter permissions.
-1. For fine-grained tokens:
-   - **Repository access**: select the repos you need
-   - **Permissions**: Contents -> Read-only
-1. Copy the token
+## Setup
 
-### 2. Set Environment Variables
+Create a fine-grained personal access token with read-only **Contents** on
+the repository, then export it:
+
+<AccordionGroup>
+  <Accordion title="Create the token">
+    1. Open [Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
+       (Settings, Developer settings, Personal access tokens, Fine-grained
+       tokens) and click **Generate new token**.
+    2. Pick the resource owner that holds the repository, then under
+       **Repository access** choose **Only select repositories** and pick it.
+    3. Under **Permissions**, set **Contents** to **Read-only**.
+    4. Click **Generate token** and copy it. An organization that requires
+       approval keeps the token pending until an admin approves it.
+
+    A classic token (Tokens (classic)) also works: select the `repo` scope for
+    private repositories. That broad scope includes write access, so prefer a
+    fine-grained token for tighter permissions. A public repository still
+    needs a token; one with no scopes reads it.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-GITHUB_TOKEN=ghp_xxxx...
+export GITHUB_TOKEN=github_pat_...
 ```
 
-For SDK guides, see [GitHub (Python)](/python/vfs/github) and [GitHub (TypeScript)](/typescript/setup/github).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /github:
+        vfs: github
+        mode: read
+        config:
+          token: ${GITHUB_TOKEN}
+          owner: strukto-ai
+          repo: mirage
+          ref: main
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id gh
+    mirage shell -w gh -c 'ls /github'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.github import GitHubConfig, GitHubVFS
+
+    config = GitHubConfig(
+        token=os.environ["GITHUB_TOKEN"],
+        owner="strukto-ai",
+        repo="mirage",
+        ref="main",
+    )
+    ws = Workspace({"/github": GitHubVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /github")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const github = await GitHubVFS.create({
+      token: process.env.GITHUB_TOKEN!,
+      owner: 'strukto-ai',
+      repo: 'mirage',
+      ref: 'main',
+    })
+    const ws = new Workspace({ '/github': github }, { mode: MountMode.READ })
+    const result = await ws.shell('ls /github')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/github/
+  README.md
+  python/
+    pyproject.toml
+    mirage/
+      ...
+  typescript/
+    ...
+```
+
+- The tree mirrors the repository at `ref`; unset `ref` follows the default
+  branch.
+- `stat` shows each file's git blob SHA.
+- A GitHub App installation can replace the token; the SDK guides show the
+  `app` block.
+
+## Sample runs
+
+```bash
+$ ls /github
+AGENTS.md
+CITATION.cff
+CLAUDE.md
+CONTRIBUTING.md
+LICENSE
+README.md
+SECURITY.md
+assets
+docker
+docs
+examples
+integ
+licenses
+plugins
+python
+readme
+ruff.toml
+rust
+scripts
+typescript
+```
+
+```bash
+$ head -n 2 /github/python/pyproject.toml
+[project]
+name = "mirage-ai"
+```
+
+```bash
+$ rg -w "def build_vfs" /github/python
+/github/python/mirage/vfs/registry.py:def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
+```
+
+The mount is read-only. Act on the repository with the
+[`gh`](/home/setup/cli/gh) CLI, which takes the same token.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/github">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/github">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

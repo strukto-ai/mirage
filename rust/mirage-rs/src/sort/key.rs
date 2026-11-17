@@ -5,6 +5,7 @@ use blake2::digest::Digest;
 use blake2::digest::consts::U16;
 use serde::{Deserialize, Serialize};
 
+use super::cost::{COST_BYTES, cost};
 use super::modifiers::{Mods, kept};
 use super::number::{NumberScan, general_order, human_order, leading_number};
 use super::version::{VersionScan, version_cmp};
@@ -450,13 +451,13 @@ impl Comparison {
         if matches!(self.phase, ComparisonPhase::Key)
             && self.key == 0
             && self.offset == 0
-            && a.len() <= super::COST_BYTES
-            && b.len() <= super::COST_BYTES
+            && a.len() <= COST_BYTES
+            && b.len() <= COST_BYTES
         {
-            *work += super::cost(a, b);
+            *work += cost(a, b);
             return Some(compare.records(a, b));
         }
-        let available = (budget - *work) * super::COST_BYTES;
+        let available = (budget - *work) * COST_BYTES;
         let mut bytes = available;
         let whole = match compare.keys.as_slice() {
             [] if !compare.stable && !compare.unique => Some(compare.reverse),
@@ -480,7 +481,7 @@ impl Comparison {
         } else {
             self.resume(compare, a, b, &mut bytes)
         };
-        *work += 1 + (available - bytes) / super::COST_BYTES;
+        *work += 1 + (available - bytes) / COST_BYTES;
         if result.is_some() {
             *self = Self::default();
         }
@@ -522,7 +523,7 @@ impl Comparison {
                     if *bytes == 0 {
                         return None;
                     }
-                    *bytes = bytes.saturating_sub(super::cost(a, b) * super::COST_BYTES);
+                    *bytes = bytes.saturating_sub(cost(a, b) * COST_BYTES);
                     let ka = compare.extract(a, key);
                     let kb = compare.extract(b, key);
                     let order = if key.mods.random {

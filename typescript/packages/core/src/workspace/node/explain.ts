@@ -48,7 +48,6 @@ import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { commandWords } from '../executor/command/routing.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { lineFacts } from '../lookup/index.ts'
@@ -56,8 +55,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { tildeHome } from '../session/shell_dirs.ts'
-import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
-import { sessionAccess } from '../../context/session_context.ts'
+import { envIsReadonly, seedVar, setAttr } from '../session/state.ts'
 import {
   classifiedWords,
   gate,
@@ -497,16 +495,6 @@ async function* judgeWords(
   ]
   const unread = unreadPaths(readWords, kinds, session.cwd, lost && !wholeLine)
   const redirects = redirectPaths(redirectWords, registry, session.cwd)
-  const wordsRead = commandWords(
-    registry,
-    name,
-    args,
-    classified.slice(1),
-    redirects,
-    session.cwd,
-    envSnapshot(session),
-    sessionAccess(session),
-  )
   const [ctx, asked, answers] = await gate(
     name,
     args,
@@ -554,7 +542,7 @@ async function* judgeWords(
       : null
   if (refused !== null) {
     yield {
-      judgment: { ...denied(name, refused), words: wordsRead },
+      judgment: { ...denied(name, refused), words: ctx.words ?? [] },
       occurrence,
       stated: literal,
       intrinsic,
@@ -563,7 +551,7 @@ async function* judgeWords(
     return
   }
   yield {
-    judgment: { ...(await explained(ctx, registry, asked, answers)), words: wordsRead },
+    judgment: { ...(await explained(ctx, registry, asked, answers)), words: ctx.words ?? [] },
     occurrence,
     stated: literal,
     intrinsic,

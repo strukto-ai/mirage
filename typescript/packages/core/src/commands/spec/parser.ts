@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { LineFacts } from '../../types.ts'
+import { type LineFacts, PathSpec } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BUILTIN_SPECS, isBuiltinGrammar } from './builtins.ts'
@@ -58,6 +58,7 @@ import { flagOccurrences } from './flag_view.ts'
 import { expandOldStyle } from './oldstyle.ts'
 import {
   type Argument,
+  type Attached,
   type CommandSpec,
   type ParsedFlagValue,
   type ValueType,
@@ -138,6 +139,12 @@ export class ParsedArgs {
   // read as an option, VALUE for an option's detached value, OPERAND for an
   // argument, null for a word the scan never reads.
   readonly wordRoles: (WordKind | null)[]
+  // Each value typed onto its option word (`--file=x`, `-fx`), in scan
+  // order. `wordPaths` reads the PATH ones.
+  readonly attached: Attached[]
+  // PATH values no word typed, which a default or the environment
+  // supplied, resolved.
+  readonly suppliedPathValues: string[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
   // abbreviated longs matching several options (typed prefix, matched
@@ -196,6 +203,8 @@ export class ParsedArgs {
           | 'wordKinds'
           | 'wordBases'
           | 'wordRoles'
+          | 'attached'
+          | 'suppliedPathValues'
           | 'invalidOptions'
           | 'ambiguousOptions'
           | 'optionErrorKinds'
@@ -222,6 +231,8 @@ export class ParsedArgs {
     this.wordKinds = init.wordKinds ?? []
     this.wordBases = init.wordBases ?? []
     this.wordRoles = init.wordRoles ?? []
+    this.attached = init.attached ?? []
+    this.suppliedPathValues = init.suppliedPathValues ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
     this.optionErrorKinds = init.optionErrorKinds ?? []
@@ -596,6 +607,7 @@ export function parseCommand(
   let base = cwd
   const wordBases: (string | null)[] = new Array<string | null>(argv.length).fill(null)
   const rawBases: string[] = []
+  const typedOnto: Attached[] = []
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
@@ -716,7 +728,27 @@ export function parseCommand(
       wordKinds[scanOrigins[i + offset + 1] ?? -1] =
         kinds[offset + (attachedValue === null ? 0 : 1)] ?? cs.kindOf.get(spelling) ?? 'str'
     }
+    if (attachedValue !== null) recordAttached(spelling, attachedValue, kinds[0])
     return detached + 1
+  }
+
+  // Keep a value typed onto its option word, with the option as typed and
+  // the directory a PATH value resolves against: the operand base for the
+  // base option itself (`-C a -Cb` is `a/b`), else the cwd, as a detached
+  // value of the same option resolves.
+  const recordAttached = (spelling: string, value: string, kind?: ValueType): void => {
+    const slot = scanOrigins[i] ?? -1
+    const word = argv[slot] ?? ''
+    const typed =
+      value !== '' && word.endsWith(value) ? word.slice(0, word.length - value.length) : word
+    const moves = cs.baseDest !== null && cs.destOf(spelling) === cs.baseDest
+    typedOnto.push({
+      slot,
+      option: typed.endsWith('=') ? typed.slice(0, -1) : typed,
+      value,
+      base: moves ? base : cwd,
+      kind: kind ?? cs.kindOf.get(spelling) ?? null,
+    })
   }
 
   while (i < scanArgv.length) {
@@ -857,6 +889,7 @@ export function parseCommand(
           (cs.longValueSpellings.has(spelling) || cs.longOptionalSpellings.has(spelling))
         ) {
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, spelling, tok.slice(eqPos + 1))
+          recordAttached(spelling, tok.slice(eqPos + 1))
           base = rebase(flags, cs, spelling, tok.slice(eqPos + 1), base)
         } else if (cs.longValueSpellings.has(etok)) {
           // Declared value flag at end of line with no argument.
@@ -912,6 +945,7 @@ export function parseCommand(
       for (const vf of cs.attachSpellings) {
         if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, tok.slice(vf.length))
+          recordAttached(vf, tok.slice(vf.length))
           base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
           matchedOptional = true
@@ -949,6 +983,7 @@ export function parseCommand(
         if (tok.startsWith(vf) && tok.length > vf.length && !whole) {
           const attachedValue = attached(tok.slice(vf.length), equalsValues)
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, vf, attachedValue)
+          recordAttached(vf, attachedValue)
           base = rebase(flags, cs, vf, attachedValue, base)
           i += 1
           matchedValue = true
@@ -1038,6 +1073,7 @@ export function parseCommand(
           const attachedValue = attached(mixed.attached, equalsValues)
           for (const name of mixed.bools) setBoolFlag(flags, cs, name)
           setValueFlag(flags, refusals, cs, wordChoiceDestSet, mixed.valueFlag, attachedValue)
+          recordAttached(mixed.valueFlag, attachedValue)
           base = rebase(flags, cs, mixed.valueFlag, attachedValue, base)
           i += 1
           continue
@@ -1304,6 +1340,17 @@ export function parseCommand(
           ? WordKind.VALUE
           : null,
   )
+  const suppliedPathValues: string[] = []
+  for (const [name, kind] of cs.kindByDest) {
+    if (kind !== 'path' || !(name in flags) || typedDests.includes(name)) continue
+    const value = flags[name]
+    const parts = Array.isArray(value) ? value : [value]
+    const types = cs.valueTypesByDest.get(name) ?? ['path']
+    parts.forEach((part, index) => {
+      if (typeof part === 'string' && part !== '-' && types[index % types.length] === 'path')
+        suppliedPathValues.push(part)
+    })
+  }
   const parsed = new ParsedArgs({
     flags,
     args: classified,
@@ -1328,12 +1375,50 @@ export function parseCommand(
     wordKinds,
     wordBases,
     wordRoles,
+    attached: typedOnto,
+    suppliedPathValues,
   })
   if (parses !== undefined) {
     if (parses.size >= PARSES_KEPT) parses.clear()
     parses.set(key, parsed)
   }
   return parsed
+}
+
+/**
+ * The path each word of a parsed line names, aligned with argv. A PATH value
+ * or operand resolves against its word's base and an attached value lands on
+ * its option word. An empty value names no file, nor does a `-` operand
+ * (standard input); an option's `-` resolves like any other value, since only
+ * some commands read it as standard input (`cp -t -` copies into a directory
+ * named `-`). Built on demand, because every line is parsed and only a reader
+ * of its words needs this, and operands only when `operands` asks, because a
+ * builtin's operand paths come from the classifier and a line can carry many
+ * thousands of them. Mirrors Python's `word_paths`.
+ */
+export function wordPaths(
+  parsed: ParsedArgs,
+  argv: readonly string[],
+  cwd: string,
+  operands: boolean,
+): (PathSpec | null)[] {
+  const skip = new Set<WordKind | null>(
+    operands ? [WordKind.OPTION] : [WordKind.OPTION, WordKind.OPERAND],
+  )
+  const typed: [number, string, string][] = []
+  argv.forEach((word, slot) => {
+    if (parsed.wordKinds[slot] === 'path' && !skip.has(parsed.wordRoles[slot] ?? null))
+      typed.push([slot, word, parsed.wordBases[slot] ?? cwd])
+  })
+  const paths: (PathSpec | null)[] = new Array<PathSpec | null>(argv.length).fill(null)
+  const attached = parsed.attached
+    .filter((a) => a.kind === 'path')
+    .map((a): [number, string, string] => [a.slot, a.value, a.base])
+  for (const [slot, value, against] of [...typed, ...attached]) {
+    const stdin = value === '-' && parsed.wordRoles[slot] === WordKind.OPERAND
+    if (value !== '' && !stdin) paths[slot] = PathSpec.fromStrPath(value, undefined, against)
+  }
+  return paths
 }
 
 export function parseToKwargs(parsed: ParsedArgs): Record<string, ParsedFlagValue> {

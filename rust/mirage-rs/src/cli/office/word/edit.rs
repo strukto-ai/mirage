@@ -8,14 +8,16 @@
 
 use std::collections::HashSet;
 
+use super::super::errors::{Fail, SetFail};
 use super::super::media::{self, Media};
 use super::super::package::Pkg;
 use super::super::slides::edit::emu;
 use super::super::tree::{
     self, Id, Kid, MC, Tree, W, W14, WP, XML, insert_at, remove_attr, set_attr_ns,
 };
-use super::super::{Fail, SetFail};
-use super::{Word, fail};
+use super::super::types::{Added, Place};
+use super::doc::Word;
+use super::fail;
 
 /// The order `w:rPr` holds its children in.
 const RPR_ORDER: &[&str] = &[
@@ -1554,17 +1556,6 @@ fn style_ids(pkg: &Pkg<'_>) -> HashSet<String> {
         })
         .unwrap_or_default()
 }
-
-/// A position `add` and `move` take: an index or an anchor path.
-pub(in super::super) struct Place<'a> {
-    pub(in super::super) index: Option<i64>,
-    pub(in super::super) after: Option<&'a str>,
-    pub(in super::super) before: Option<&'a str>,
-}
-
-/// What `add` answers: the new element's path, the props it did not read
-/// and its advisory warnings.
-pub(in super::super) type Added = (String, Vec<String>, Vec<String>);
 
 /// The element types `add` makes in a document, as OfficeCLI lists them.
 const TYPES: &str = "paragraph (p), run (r), table (tbl), row, cell, picture, chart, ole (object, embed), equation, comment, section, footnote, endnote, toc, style, watermark, bookmark, hyperlink, field, break, sdt, header, footer";
@@ -3414,7 +3405,7 @@ pub(in super::super) fn set(
         "tbl" => ("table", OTHER_VALID),
         _ => ("element", OTHER_VALID),
     };
-    super::super::partial(path, props, &took, warnings, element, valid)
+    super::super::errors::partial(path, props, &took, warnings, element, valid)
 }
 
 /// The paragraph props OfficeCLI lists when it refuses one.

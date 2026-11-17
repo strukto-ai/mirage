@@ -3,12 +3,14 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use super::builtin::{self, Fault};
-use super::eval::{BLOCKS, BYTES, ITEMS, MEMORY, STEPS};
+use super::builtin;
+use super::fault::Fault;
 use super::lalr::{self, Action, Assoc, Tables};
+use super::meter::Limits;
+use super::meter::{BLOCKS, BYTES, ITEMS, MEMORY, STEPS};
 use super::parse::parse_value;
 use super::value::{Number, Object, Value};
-use super::vm::{Limits, Pending};
+use super::vm::Pending;
 
 /// Bison's YYMAXDEPTH: the parser stack jq's parser grows up to.
 const STACK: usize = 10000;

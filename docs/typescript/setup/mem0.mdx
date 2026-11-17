@@ -1,71 +1,158 @@
 ---
 title: Mem0
 icon: /images/mem0.svg
-description: Mount scoped Mem0 Platform memories as JSON files from Node or the browser.
+description: Virtualize a Mem0 memory scope from Node or the browser.
 ---
 
-`Mem0VFS` is a browser-safe, read-only view of one Mem0 user, agent, or run scope. Every memory is rendered as `<memory-id>.json`; the [`search` CLI](/typescript/cli/search) performs semantic search in that same scope.
+`Mem0VFS` mounts the memories of one Mem0 scope, a user, an agent or a run,
+read-only. Each memory is one `<memory-id>.json` file. The API key and the
+scope are set up on the [Mem0 page](/home/setup/mem0).
 
-<Warning>
-  Mem0 API keys are secrets. Use this VFS from Node or another trusted runtime; do not embed a Platform API key in a public browser bundle. Browser applications should call a server-side proxy instead.
-</Warning>
+## Install
 
-```ts
-import { Mem0VFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
-
-const memories = new Mem0VFS({
-  apiKey: process.env.MEM0_API_KEY!,
-  userId: 'alex',
-})
-
-const ws = new Workspace({ '/memories': memories }, { mode: MountMode.READ })
-ws.registerCli('search', SEARCH)
-await ws.shell('ls /memories/')
-await ws.shell('search --top-k 5 "quarterly planning" /memories/')
+```bash
+npm install @struktoai/mirage-node
 ```
 
-Exactly one of `userId`, `agentId`, or `runId` is required.
+## Configure
+
+```ts
+import { Mem0VFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const memory = new Mem0VFS({
+  apiKey: process.env.MEM0_API_KEY!,
+  userId: process.env.MEM0_USER_ID!,
+})
+const ws = new Workspace({ '/memory': memory }, { mode: MountMode.READ })
+
+const result = await ws.shell('ls /memory && grep -rl allergic /memory')
+console.log(result.stdoutText)
+await ws.close()
+```
+
+An agent or run scope sets `agentId` or `runId` instead of `userId`. `host`
+(default `https://api.mem0.ai`) points at another Mem0 API host.
+
+### Fields
 
 {/* generated: config-table mem0 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Mem0 Platform API key. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
-| <code style={{ whiteSpace: 'nowrap' }}>userId</code> | Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>agentId</code> | Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>runId</code> | Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultPageSize</code><br />default `100` | Memories fetched per request while listing the scope. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultSearchLimit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="apiKey" type={"string"} required post={["secret"]}>
+  Mem0 Platform API key.
+</ResponseField>
+<ResponseField name="host" type={"string"} default={"'https://api.mem0.ai'"}>
+  Mem0 API base URL.
+</ResponseField>
+<ResponseField name="userId" type={"string"}>
+  Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`.
+</ResponseField>
+<ResponseField name="agentId" type={"string"}>
+  Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`.
+</ResponseField>
+<ResponseField name="runId" type={"string"}>
+  Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`.
+</ResponseField>
+<ResponseField name="defaultPageSize" type={"number"} default={"100"}>
+  Memories fetched per request while listing the scope.
+</ResponseField>
+<ResponseField name="defaultSearchLimit" type={"number"} default={"10"}>
+  How many results `search` returns unless the line sets `top_k`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
 
-The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.
+## Authentication
+
+The mount sends a Mem0 Platform API key, created on the dashboard's **API
+Keys** page; the organization and project come from the key. Exactly one of
+`userId`, `agentId` and `runId` is set. A pair is refused: Mem0 splits a memory
+added with both into separate memories, so a combined filter matches nothing.
+
+## Layout
+
+```text
+/memory/
+  6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+  b52e7a19-0c4d-4a8e-9f3b-2d6c1e8a7f40.json
+```
+
+The tree is flat: one file per memory in the scope, named by memory id. A file
+holds the full record: `memory`, `categories`, `metadata`, `created_at`,
+`updated_at` and the rest.
+
+## Behavior
+
+- **Read-only:** no command changes the memories.
+- **Times:** `stat` reports `updated_at`, or `created_at` when unset, as the
+  modified time.
+- **grep:** `grep` and `rg` search the JSON that `cat` prints, so a match can
+  come from metadata such as categories and timestamps.
+- **Freshness:** the first `ls` fetches every memory in the scope, and reads
+  reuse it until the cache expires. `search` always asks Mem0.
+
+### Search
+
+The [`search` CLI](/typescript/cli/search) runs Mem0's semantic search in the
+same scope. Register it on the workspace:
+
+```ts
+import { SEARCH } from '@struktoai/mirage-node'
+
+ws.registerCli('search', SEARCH)
+```
+
+```bash
+search --top-k 5 "quarterly planning" /memory/
+```
+
+`--top-k` defaults to `defaultSearchLimit` (10). `--threshold` is between 0 and
+1. Each hit prints its file and score, then the memory, ranked by score.
+
+## Browser
+
+The same `Mem0VFS` runs in the browser from `@struktoai/mirage-browser`.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { Mem0VFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const memory = new Mem0VFS({ apiKey: MEM0_API_KEY, userId: 'alex' })
+const ws = new Workspace({ '/memory': memory }, { mode: MountMode.READ })
+```
+
+- A Mem0 API key is a secret. Never put a Platform key in a public browser
+  bundle; a browser app calls a server-side proxy instead.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
 {/* generated: vfs-md mem0 start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `mem0`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
       <memory-id>.json
     ```
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -73,7 +160,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -125,4 +212,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md mem0 end */}

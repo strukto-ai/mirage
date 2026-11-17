@@ -1,14 +1,20 @@
 ---
 title: Discord
-description: Mount Discord guilds, channels, messages, attachments, and members as a Mirage virtual filesystem for Python agents.
+description: Virtualize Discord servers from Python.
 icon: /images/discord-logo.svg
 ---
-The Discord VFS exposes guild, channel, and member data as a virtual
-filesystem mounted at some prefix such as `/discord/`.
 
-For token setup, see [Discord Setup](/home/setup/discord).
+`DiscordVFS` mounts the Discord servers a bot is in as read-only files: each
+channel as one folder per day of messages and attachments, plus members. The
+bot token is set up on the [Discord page](/home/setup/discord).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -17,38 +23,134 @@ from mirage import MountMode, Workspace
 from mirage.vfs.discord import DiscordConfig, DiscordVFS
 
 config = DiscordConfig(token=os.environ["DISCORD_BOT_TOKEN"])
-vfs = DiscordVFS(config=config)
-ws = Workspace({"/discord": vfs}, mode=MountMode.READ)
+ws = Workspace({"/discord": DiscordVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /discord && tree -L 2 /discord")
+print(await result.stdout_str())
+await ws.close()
 ```
 
+`start_time` and `end_time` bound the mount to a time range.
+
+### Fields
+
 {/* generated: config-table discord start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>start_time</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Discord bot token, sent as `Authorization: Bot <token>`. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | Discord API root. Unset uses `https://discord.com/api/v10`; set it to point at a fake or proxy. |
+<ResponseField name="start_time" type={"str"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="end_time" type={"str"}>
+  End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open.
+</ResponseField>
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"str"} required post={["secret"]}>
+  Discord bot token, sent as `Authorization: Bot <token>`.
+</ResponseField>
+<ResponseField name="base_url" type={"str"}>
+  Discord API root. Unset uses `https://discord.com/api/v10`; set it to point at a fake or proxy.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table discord end */}
+
+## Authentication
+
+`token` is a bot token, sent with Discord's `Bot <token>` scheme. The bot
+needs:
+
+- **Message Content Intent**: without it, message text and attachments come
+  back empty.
+- **Server Members Intent**: for the `members/` folder; without it, `members/`
+  is empty.
+- The **View Channels** and **Read Message History** permissions in each
+  server it reads. The mount never posts.
+
+A channel the bot cannot read answers `Permission denied`: `ls` names it and
+fails, `find` reports it and walks on. A channel deleted since it was listed
+answers `No such file or directory`.
+
+## Layout
+
+```text
+/discord/
+  Acme Labs__1098765432101234567/
+    channels/
+      general__1098765432101234570/
+        2026-11-16/
+          chat.jsonl
+          files/
+            diagram__1174567890123456789.png
+    members/
+      alice__1012345678901234567.json
+```
+
+- **Names:** a server, channel, member or attachment is
+  `<display-name>__<id>`, so the CLI's flags take the snowflake id from the
+  path and two entities with one name never collide. Spaces, apostrophes and
+  emoji are kept; only `/` becomes `∕` (U+2215). Quote names with spaces.
+  `stat` also shows the id.
+- **Servers:** the root lists one folder per server the bot is in.
+- **`channels/`:** text channels (types 0, 5 and 15), each with one folder per
+  day for the 30 days up to its newest message, so an inactive channel shows
+  days around its last activity, not today.
+- **`chat.jsonl`:** one message per line as Discord's API returns it, with
+  `.id`, `.content`, `.author.username` and `.attachments`.
+- **`files/`:** the attachments posted that day, named
+  `<stem>__<attachment-id>.<ext>`. `cat` downloads one from Discord's CDN.
+- **`members/`:** one file per member, holding the member as Discord's API
+  returns it.
+
+## Behavior
+
+- **Read only:** send, edit, react, open threads and polls, look up members
+  and servers, and search with the [`discord`](/python/cli/discord) CLI.
+- **Search:** `grep -r` and `rg` read every day's `chat.jsonl` under the folder
+  they walk, one history fetch per day, so name a day folder or a date glob
+  for a large channel. Discord's own search is not used: it cannot say which
+  days hold a word, since a reply carries the message it answers
+  (`referenced_message`).
+- **Time scope:** `start_time` and `end_time` bound the mount with RFC 3339
+  timestamps that carry a timezone, at most to the millisecond. Start is
+  inclusive, end exclusive, and an unset bound is open. Listings then cover
+  that period instead of the recent window, day folders use UTC, messages are
+  picked by creation time and attachments follow their messages. Direct
+  paths, `stat`, date globs, `grep` and `rg` cannot leave the scope. Members
+  and server metadata stay visible. The scope applies to the mount, not to
+  the `discord` CLI; rebuild the mount to change it.
+- **Upstream changes:** a `read` mount refuses writes through Mirage; it does
+  not freeze edits or deletions made in Discord.
+- **Rate limits:** many reads of `chat.jsonl` can hit Discord's per-route rate
+  limits. A read that gets a 429 waits the `retry_after` Discord sends and
+  retries; one that outlasts the retries fails, so slow down or name specific
+  channels.
+
+## Integration
+
+Discord answers these commands through its own API, so less is read. See
+[Integration](/home/integration/overview).
+
+- `head` and `tail`: on a `chat.jsonl` file, the messages API answers instead
+  of a download of the whole day.
+- `tail -f`: each new message as it is posted.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>`.
 
 {/* generated: vfs-md discord start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `discord`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -63,25 +165,19 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
           <username>__<user-id>.json    # member profile
     ```
 
-    - A guild, channel, member or attachment name is `<display-name>__<id>`.
-      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
-      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
-      names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.content`,
-      `.author.username` and `.attachments`. A day's `files/` may be empty.
-    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included. Users and
-      channel metadata stay available as context.
-    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
-      directory. Under a channel that reads every listed day, attachments
-      included: they download from the CDN, and binary ones such as JPG or
-      PDF produce noise.
+    - A guild, channel, member or attachment name is `<display-name>__<id>`;
+      only `/` becomes `∕` (U+2215). `ls` the parent for exact names and
+      quote names with spaces.
+    - `chat.jsonl` holds one message per line (`.content`,
+      `.author.username`, `.attachments`).
+    - Without `start_time`/`end_time`, a channel lists the 30 days up to its
+      newest message; a date glob finds earlier days.
+    - `grep -r` on a channel reads every listed day, attachments included;
+      they download from the CDN and binary ones produce noise.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -89,7 +185,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -129,23 +225,17 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
           <username>__<user-id>.json    # member profile
     ```
 
-    - A guild, channel, member or attachment name is `<display-name>__<id>`.
-      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
-      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
-      names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.content`,
-      `.author.username` and `.attachments`. A day's `files/` may be empty.
-    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included. Users and
-      channel metadata stay available as context.
-    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
-      directory. Under a channel that reads every listed day, attachments
-      included: they download from the CDN, and binary ones such as JPG or
-      PDF produce noise.
+    - A guild, channel, member or attachment name is `<display-name>__<id>`;
+      only `/` becomes `∕` (U+2215). `ls` the parent for exact names and
+      quote names with spaces.
+    - `chat.jsonl` holds one message per line (`.content`,
+      `.author.username`, `.attachments`).
+    - Without `start_time`/`end_time`, a channel lists the 30 days up to its
+      newest message; a date glob finds earlier days.
+    - `grep -r` on a channel reads every listed day, attachments included;
+      they download from the CDN and binary ones produce noise.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
     ## Supported Unix Commands for VFS
 
@@ -167,255 +257,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md discord end */}
-
-Display names keep their original spelling from Discord (spaces,
-apostrophes, emoji are all preserved). Only `/` is replaced with `∕`
-(U+2215) so it cannot collide with a directory boundary. The Discord
-snowflake ID is appended after `__` (double underscore) on guild,
-channel, member, and attachment names so VFS specific commands can
-extract it without an extra lookup, and so two same named entities never
-collide. Quote names containing spaces in shell commands. `stat` also
-exposes the ID in the `extra` dict (see [Finding IDs](#finding-ids)).
-
-### Guilds
-
-The root lists one directory per guild the bot has access to.
-
-### Channels
-
-`/discord/<guild>/channels/` lists text channels (types 0, 5, 15).
-Each channel directory contains day-partitioned **directories** for the
-30 days leading up to the channel's last message. Each day directory
-holds:
-
-- `chat.jsonl`, the day's messages (one JSON object per line).
-- `files/`, attachments posted on that day. Each blob is named
-  `<stem>__<attachment-id>.<ext>`, where the stem keeps the original
-  filename's spelling (only `/` is replaced). The ID suffix keeps the
-  filename collision-free. `cat`'ing a blob downloads it from the
-  Discord CDN.
-
-The date range is derived from `last_message_id` on the channel object,
-so inactive channels show dates around their last activity, not today.
-
-Soft errors (403 missing permissions, 404 unknown channel, 429 rate
-limit) on a single day are swallowed so listings, `find`, and `grep`
-keep working across the rest of the tree.
-
-### Members
-
-`/discord/<guild>/members/` lists one `.json` file per member.
-Reading a member file returns the full member payload from the
-Discord API.
-
-## Smart Commands
-
-### grep / rg
-
-`grep -r` and `rg` read every day's `chat.jsonl` under the directory they walk,
-so a channel or guild costs one history fetch per day. Name a day directory or a
-date glob to search a large channel. Discord's own search is not used: a reply
-carries the message it answers (`referenced_message`), which that search does
-not tie to the reply's day, so it cannot say which days hold a word.
-
-### head / tail
-
-`head` and `tail` on file-level paths use the Discord messages API directly
-(`GET /channels/{id}/messages`) instead of downloading the full day's history.
-
-## Cache
-
-The Discord VFS uses `IndexCacheStore` (same as S3, disk and GitHub).
-Index entries store guild IDs, channel IDs, and `last_message_id` for
-date range computation. File bytes go through the workspace
-file cache.
-
-## Integration
-
-What Discord answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Discord |
-| --- | --- |
-| `tail -f` | Each new message as it is posted |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.discord import DiscordConfig, DiscordVFS
-
-load_dotenv(".env.development")
-
-config = DiscordConfig(token=os.environ["DISCORD_BOT_TOKEN"])
-vfs = DiscordVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/discord": vfs}, mode=MountMode.READ)
-
-    # List guilds
-    r = await ws.shell("ls /discord/")
-    print(await r.stdout_str())
-
-    guild = (await r.stdout_str()).strip().splitlines()[0]
-
-    # List channels
-    r = await ws.shell(f'ls "/discord/{guild}/channels/"')
-    print(await r.stdout_str())
-
-    ch = (await r.stdout_str()).strip().splitlines()[0]
-    base = f"/discord/{guild}/channels/{ch}"
-
-    # Discover an available day, then read a few messages
-    r = await ws.shell(f'ls "{base}/" | tail -n 1')
-    day = (await r.stdout_str()).strip()
-    r = await ws.shell(f'head -n 3 "{base}/{day}/chat.jsonl"')
-    print(await r.stdout_str())
-
-    # Extract usernames with jq
-    r = await ws.shell(
-        f'jq -r ".author.username" "{base}/{day}/chat.jsonl"')
-    print(await r.stdout_str())
-
-    # Count messages per user
-    r = await ws.shell(
-        f'cat "{base}/{day}/chat.jsonl"'
-        ' | jq -r ".author.username" | sort | uniq -c')
-    print(await r.stdout_str())
-
-    # List attachments for a day
-    r = await ws.shell(f'ls "{base}/{day}/files/"')
-    print(await r.stdout_str())
-
-    # Search every day of the channel
-    r = await ws.shell(f'grep -r hello "{base}/"')
-    print(await r.stdout_str())
-
-    # Search across the guild
-    r = await ws.shell(f'grep -r hello "/discord/{guild}/"')
-    print(await r.stdout_str())
-
-    # Navigate with cd/pwd
-    await ws.shell(f'cd "{base}"')
-    r = await ws.shell("pwd")
-    print(await r.stdout_str())
-
-    # Relative paths after cd
-    r = await ws.shell("ls | tail -n 5")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-See `examples/python/vfs/discord/discord.py` for the full working example.
-
-## Finding IDs
-
-VFS-specific commands require Discord snowflake IDs
-(`channel_id`, `guild_id`, `message_id`). These can be extracted
-from the filesystem:
-
-```bash
-# Guild ID - use stat
-stat "/discord/My Server__111222333444555666"
-# → extra={"guild_id": "1256522563555819574"}
-
-# Channel ID - use stat
-stat "/discord/My Server__111222333444555666/channels/general__777888999000111222"
-# → extra={"channel_id": "1256522563555819574"}
-
-# Message ID - inside JSONL messages
-jq -r '"\(.id) [\(.author.username)] \(.content)"' \
-  "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-# → 1489887688978075769 [alice] hello world
-
-# Find a message then reply
-jq -r 'select(.content | test("hello")) | .id' \
-  "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-# → 1489887688978075769
-discord send --channel 1256522563555819574 \
-  --text "Reply" --reply-to 1489887688978075769
-```
-
-## Working with Large Channels
-
-Tips for efficient access on busy channels:
-
-```bash
-# Check message count per day
-wc -l "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-
-# Read only recent messages
-tail -n 10 "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-
-# Search one day
-grep "keyword" "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-
-# Extract specific fields
-jq -r '"\(.author.username): \(.content)"' \
-  "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl" | head -n 20
-
-# Count messages per user
-cat "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl" \
-  | jq -r '.author.username' | sort | uniq -c
-```
-
-## Shell Commands
-
-Standard commands available on the mounted Discord tree:
-
-| Command         | Notes                                                          |
-| --------------- | -------------------------------------------------------------- |
-| `ls`            | List guilds, channels, members, dates, attachments             |
-| `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment   |
-| `head` / `tail` | Smart: uses messages API for file scope                        |
-| `grep` / `rg`   | Pattern search (file or directory level)                       |
-| `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all) |
-| `wc`            | Line/word/byte counts                                          |
-| `stat`          | File metadata (name, size, type, ID via `extra`)               |
-| `find`          | Recursive search with `-name`, `-maxdepth`                     |
-| `tree`          | Directory tree view                                            |
-
-Acting on Discord (sending, editing, reactions, threads, polls,
-member and guild info, search) goes through the
-[discord CLI](/python/cli/discord) when installed; the mounted tree
-stays read-oriented. The `<name>__<id>` path segments supply the
-snowflake IDs the CLI flags take.
-
-## Time scope
-
-Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
-`start_time`/`end_time` to Python; `startTime`/`endTime` to the TypeScript
-constructor). Bounds are RFC3339 timestamps with an explicit timezone and
-at most millisecond precision. Start is inclusive; end is exclusive.
-An omitted or null bound is open. Start must precede end.
-
-```yaml
-mounts:
-  /history:
-    vfs: discord
-    mode: read
-    config:
-      token: "<bot-token>"
-      start_time: "2026-06-01T10:00:00Z"
-      end_time: "2026-06-02T00:00:00Z"
-```
-
-With a bound configured, channel listings cover the selected period rather
-than the default recent window. Day directories use UTC. Messages are selected
-by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files. User/member
-and channel/server metadata remain visible as context.
-
-These settings apply to the VFS, not to separately installed account CLIs.
-`mode: read` prevents mount writes; it does not freeze upstream edits or deletions.
-Rebuild/remount the VFS to change its scope so cached listings and bytes are cleared.

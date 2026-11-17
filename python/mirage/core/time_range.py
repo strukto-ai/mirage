@@ -112,8 +112,8 @@ class TimeRange:
         )
         return (
             f"\n\nTime scope: `start_time={start}` (inclusive), "
-            f"`end_time={end}` (exclusive). "
-            "Explicit paths and globs cannot escape this scope."
+            f"`end_time={end}` (exclusive); "
+            "explicit paths and globs cannot escape it."
         )
 
 

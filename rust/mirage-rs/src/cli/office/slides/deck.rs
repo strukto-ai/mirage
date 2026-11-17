@@ -4,7 +4,7 @@
 //! The deck itself: its slides, layouts, masters and theme, what a shape
 //! inherits from them, and the presentation, slide and theme nodes.
 
-use super::super::Fail;
+use super::super::errors::Fail;
 use super::super::node::{Node, Value};
 use super::super::package::{Pkg, core_properties, extended_properties, theme_properties};
 use super::super::tree::{A, C, E, P, R, Tree};

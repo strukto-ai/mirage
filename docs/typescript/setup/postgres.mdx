@@ -1,102 +1,162 @@
 ---
 title: Postgres
 icon: /images/postgres-logo.svg
-description: Mount a Postgres database as a read-only filesystem of schemas, tables, and rows.
+description: Virtualize a Postgres database from Node or the browser.
 ---
 
-`PostgresVFS` connects to Postgres via a DSN and exposes its schemas and tables as a tree.
+`PostgresVFS` turns a Postgres database into a read-only tree: every schema is a
+folder of tables and views, and each one holds its column types, a summary of
+what it means and its rows as JSON lines. The connection string and a read-only
+role are set up on the [Postgres page](/home/setup/postgres).
 
-Setup steps for the DSN and required permissions live at [Postgres Credentials](/home/setup/postgres).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node pg
+npm install @struktoai/mirage-node pg
 ```
+
+## Configure
 
 ```ts
 import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-node'
 
 const pg = new PostgresVFS({
   dsn: process.env.DATABASE_URL!,
-  schemas: ['public', 'analytics'],
+  schemas: ['public'],
 })
-
 const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
-try {
-  const result = await ws.shell('ls /pg/public/')
-  console.log(result.stdoutText)
-} finally {
-  await ws.close()
-}
+
+const result = await ws.shell('head -n 3 /pg/public/tables/customers/rows.jsonl')
+console.log(result.stdoutText)
+await ws.close()
 ```
+
+`schemas` limits the tree to those schemas. `maxReadRows` and `maxReadBytes`
+set how much one read of `rows.jsonl` may return.
+
+### Fields
+
+{/* generated: config-table postgres start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="dsn" type={"string"} required post={["secret"]}>
+  Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.
+</ResponseField>
+<ResponseField name="schemas" type={"string[]"}>
+  Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.
+</ResponseField>
+<ResponseField name="defaultRowLimit" type={"number"} default={"1000"}>
+  Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.
+</ResponseField>
+<ResponseField name="maxReadRows" type={"number"} default={"10000"}>
+  Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.
+</ResponseField>
+<ResponseField name="maxReadBytes" type={"number"} default={"10485760 (10 MiB)"}>
+  Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table postgres end */}
+
+## Authentication
+
+The role in `dsn` needs `USAGE` on each schema the mount shows and `SELECT` on
+its tables and views. Add `?sslmode=require` when the server needs TLS.
+
+## Layout
+
+```text
+/pg/
+  database.json
+  public/
+    tables/
+      customers/
+        schema.json
+        semantic.json
+        rows.jsonl
+    views/
+      paid_orders/
+        schema.json
+        semantic.json
+        rows.jsonl
+```
+
+- `database.json`: every table with its estimated rows and size, and the
+  relationships between them.
+- `schema.json`: columns, keys and indexes.
+- `semantic.json`: what a table means: dimensions, time dimensions and facts,
+  comments, enum domains and example values.
+- `rows.jsonl`: one row per line.
+
+## Behavior
+
+- **Read-only:** the mount only reads; no command changes the database.
+- **Read limits:** a whole read of `rows.jsonl` past `maxReadRows` (counted on
+  the rows the table really has) or `maxReadBytes` fails with `File too large`,
+  and so does a `head -n` or `tail -n` count past it; `wc -l` counts past it.
+  `defaultRowLimit` is what a windowed read with an offset but no limit
+  returns.
+- **File size:** `rows.jsonl` is rendered on demand, so `stat -c %s` and
+  `ls -l` show `-` while its byte length is unknown. `wc -c rows.jsonl` counts
+  it, within the read limits.
+- **Snapshots:** the DSN is redacted. Hand the mount back at load (the third
+  argument of `Workspace.load`, or a config over the server and CLI).
 
 ## Browser
 
-```bash
-pnpm add @struktoai/mirage-browser
-```
+The browser `PostgresVFS` from `@struktoai/mirage-browser` reaches the
+database over Neon's HTTP transport, with the same fields.
 
-The default browser driver uses Neon's HTTP transport. Replace the connection
-string below with one for a read-only demo role on Neon. Browser users can inspect
-this credential. Keep private database credentials in a Node backend.
+```bash
+npm install @struktoai/mirage-browser
+```
 
 ```ts
 import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-browser'
 
 const pg = new PostgresVFS({
-  dsn: 'postgresql://mirage_reader:password@your-endpoint.neon.tech/app?sslmode=require',
+  dsn: 'postgresql://mirage_reader:password@<endpoint>.neon.tech/app?sslmode=require',
   schemas: ['public'],
 })
 const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
-
-try {
-  const result = await ws.shell('ls /pg/public/')
-  console.log(result.stdoutText)
-} finally {
-  await ws.close()
-}
 ```
 
-## Config
+- Anyone who opens the page can read the connection string. Use a read-only
+  demo role on Neon, and keep private credentials in a Node backend.
 
-{/* generated: config-table postgres start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>dsn</code><br />required, secret | Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string. |
-| <code style={{ whiteSpace: 'nowrap' }}>schemas</code> | Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultRowLimit</code><br />default `1000` | Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches. |
-| <code style={{ whiteSpace: 'nowrap' }}>maxReadRows</code><br />default `10000` | Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
-| <code style={{ whiteSpace: 'nowrap' }}>maxReadBytes</code><br />default `10485760` (10 MiB) | Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`). |
+## Integration
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table postgres end */}
+Postgres answers these commands through its own API, so fewer rows are read.
+See [Integration](/home/integration/overview).
 
-## Mount mode
+- `grep` and `rg` on one file: `LIKE` (`ILIKE` for `-i`) fetches only the rows
+  that may match.
+- `head -n N`: `LIMIT N`.
+- `tail -n N`: the last N rows by one query.
+- `wc -l`: `COUNT(*)`.
+- `tail -f`: polls for rows past the last key, on a table with a primary key.
 
-`read` only. Postgres mounts are read-only at the VFS level.
-
-## Snapshot behavior
-
-The DSN is redacted on snapshot. Hand the mount back at load (the third argument of `Workspace.load`, or a config over the server and CLI).
+The [Python Postgres page](/python/vfs/postgres#integration) lists when each
+search answers and what it can miss.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path>`.
 
 {/* generated: vfs-md postgres start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `postgres`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -112,16 +172,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
           rows.jsonl
     ```
 
-    - Read `database.json` first to plan joins.
-    - Read `semantic.json` to learn what a table means: it splits columns
-      into dimensions (group by), time_dimensions and facts (aggregate), and
-      carries COMMENTs, enum domains and example values.
-    - Reading `rows.jsonl` is refused for a table above the configured row
-      or byte threshold. Use `head`, `tail` or `wc`, which ask SQL for only
-      what they need, or `grep`, which fetches only the matching rows when
-      SQL can find every match.
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -129,7 +185,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `postgres` for the matching lines. `head`, `tail` and `wc -l` ask `postgres` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -170,14 +226,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
           rows.jsonl
     ```
 
-    - Read `database.json` first to plan joins.
-    - Read `semantic.json` to learn what a table means: it splits columns
-      into dimensions (group by), time_dimensions and facts (aggregate), and
-      carries COMMENTs, enum domains and example values.
-    - Reading `rows.jsonl` is refused for a table above the configured row
-      or byte threshold. Use `head`, `tail` or `wc`, which ask SQL for only
-      what they need, or `grep`, which fetches only the matching rows when
-      SQL can find every match.
+    - Read `database.json` first to plan joins, and a table's
+      `semantic.json` for its dimensions, facts and example values.
+    - `rows.jsonl` is refused above the configured row or byte limit; use
+      `head`, `tail`, `wc` or `grep` on it instead.
 
     ## Supported Unix Commands for VFS
 
@@ -199,18 +251,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md postgres end */}
-
-## Integration
-
-What PostgreSQL answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On PostgreSQL |
-| --- | --- |
-| `grep`, `rg` on one file | `LIKE` (`ILIKE` for `-i`) fetches only the rows that may match |
-| `head -n N` | `LIMIT N` |
-| `tail -n N` | The last N rows by one query |
-| `wc -l` | `COUNT(*)` |
-| `tail -f` | Polls for rows past the last key, on a table with a primary key |
-
-The [Python PostgreSQL docs](/python/vfs/postgres#integration) list when each search answers and what it can miss.

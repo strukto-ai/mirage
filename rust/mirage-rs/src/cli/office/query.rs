@@ -11,7 +11,7 @@
 
 use std::cell::RefCell;
 
-use super::Fail;
+use super::errors::Fail;
 use super::node::{Json, Node, Value};
 use super::read::{Comment, Doc, Grid, Range, Table, comment_node, type_name};
 use super::sheet::cell_ref;

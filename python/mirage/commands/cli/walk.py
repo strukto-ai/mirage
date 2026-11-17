@@ -14,6 +14,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from typing import NamedTuple
 
 from mirage.commands.cli.cobra import (
     COBRA_EXIT,
@@ -29,7 +30,7 @@ from mirage.commands.cli.constants import (
     USAGE_EXIT,
 )
 from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
-from mirage.commands.cli.types import CLI, WalkFlagBag, WalkResult
+from mirage.commands.cli.types import CLI, WalkFlagBag, WalkResult, WalkWord
 from mirage.commands.spec.compile import (
     CompiledSpec,
     compile_spec,
@@ -48,7 +49,12 @@ from mirage.commands.spec.help import (
     render_help,
     usage_line,
 )
-from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
+from mirage.commands.spec.types import (
+    Argument,
+    CommandSpec,
+    UsageStyle,
+    WordKind,
+)
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
@@ -484,6 +490,21 @@ def _unknown_verb(
     return WalkResult(output=encode_text(text), stream="stderr", exit_code=1)
 
 
+class _Taken(NamedTuple):
+    """A group option's value as the walk took it.
+
+    Args:
+        dest (str): the option's dest.
+        value (str): the value as typed.
+        slot (int): the argv position it stands in; the option word's
+            own for an attached value.
+    """
+
+    dest: str
+    value: str
+    slot: int
+
+
 def _record_bool(flags: WalkFlagBag, cs: CompiledSpec, spelling: str) -> None:
     """Record a boolean occurrence under its canonical dashed spelling.
 
@@ -501,7 +522,12 @@ def _record_bool(flags: WalkFlagBag, cs: CompiledSpec, spelling: str) -> None:
 
 
 def _record_value(
-    flags: WalkFlagBag, cs: CompiledSpec, spelling: str, value: str
+    flags: WalkFlagBag,
+    cs: CompiledSpec,
+    spelling: str,
+    value: str,
+    taken: list[_Taken],
+    slot: int,
 ) -> None:
     """Record a value occurrence under its canonical dashed spelling.
 
@@ -513,9 +539,11 @@ def _record_value(
         cs (CompiledSpec): the node's compiled tables.
         spelling (str): dashed spelling as typed.
         value (str): the flag's value.
+        taken (list[_Taken]): every value taken so far, in order.
+        slot (int): the argv position this value stands in.
     """
     dest = cs.dest_of(spelling)
-    flags.occurrences.append((dest, value))
+    taken.append(_Taken(dest, value, slot))
     if dest in cs.multiple_dests:
         prev = flags.get(dest)
         if isinstance(prev, list):
@@ -527,11 +555,19 @@ def _record_value(
 
 
 def _record_values(
-    flags: WalkFlagBag, cs: CompiledSpec, spelling: str, values: Sequence[str]
+    flags: WalkFlagBag,
+    cs: CompiledSpec,
+    spelling: str,
+    values: Sequence[str],
+    taken: list[_Taken],
+    at: Sequence[int],
 ) -> None:
     """Store one fixed-width occurrence, extending only repeatable values."""
     dest = cs.dest_of(spelling)
-    flags.occurrences.extend((dest, value) for value in values)
+    taken.extend(
+        _Taken(dest, value, slot)
+        for value, slot in zip(values, at, strict=True)
+    )
     previous = flags.get(dest)
     flags[dest] = (
         [*previous, *values]
@@ -548,11 +584,13 @@ def _match_short(
     token: str,
     following: Sequence[str],
     style: UsageStyle,
+    taken: list[_Taken],
+    at: int,
 ) -> tuple[int, WalkResult | None] | None:
     """Match a complete short spelling before splitting a short cluster."""
     for vf in cs.attach_spellings:
         if token.startswith(vf) and len(token) > len(vf):
-            _record_value(flags, cs, vf, token[len(vf) :])
+            _record_value(flags, cs, vf, token[len(vf) :], taken, at)
             return (1, None)
     for vf in cs.value_spellings:
         if token == vf or token.startswith(vf):
@@ -566,20 +604,61 @@ def _match_short(
             values = ([attached] if attached else []) + list(
                 following[:remaining]
             )
+            where = ([at] if attached else []) + list(
+                range(at + 1, at + 1 + remaining)
+            )
             if arity is not None:
-                _record_values(flags, cs, vf, values)
+                _record_values(flags, cs, vf, values, taken, where)
             else:
-                _record_value(flags, cs, vf, values[0])
+                _record_value(flags, cs, vf, values[0], taken, where[0])
             return remaining + 1, None
     if token in cs.bool_spellings:
         if token in cs.detached_optional_spellings and _optional_value(
             following[0] if following else None
         ):
-            _record_value(flags, cs, token, following[0])
+            _record_value(flags, cs, token, following[0], taken, at + 1)
             return 2, None
         _record_bool(flags, cs, token)
         return 1, None
     return None
+
+
+def _lead_words(
+    lead: Sequence[str],
+    verbs: Sequence[int],
+    taken: Sequence[_Taken],
+    paths: Mapping[int, PathSpec],
+) -> tuple[WalkWord, ...]:
+    """What each word a walk consumed before its leaf is.
+
+    A verb is a SUBCOMMAND, a value standing as its own word a VALUE
+    (``-x`` in ``-C -x``), and any other word an option, which names
+    itself as typed when it carries its value (``-Cb``, ``--file=x``).
+
+    Args:
+        lead (Sequence[str]): the consumed words.
+        verbs (Sequence[int]): where each verb stands among them.
+        taken (Sequence[_Taken]): every value taken, in order.
+        paths (Mapping[int, PathSpec]): each PATH value's path by the
+            position it stands in.
+    """
+    words = [WalkWord(WordKind.OPTION) for _ in lead]
+    for at in verbs:
+        words[at] = WalkWord(WordKind.SUBCOMMAND)
+    for t in taken:
+        word = lead[t.slot]
+        if word == t.value:
+            words[t.slot] = WalkWord(WordKind.VALUE, path=paths.get(t.slot))
+        else:
+            option = (
+                word[: len(word) - len(t.value)]
+                if t.value and word.endswith(t.value)
+                else word
+            )
+            words[t.slot] = WalkWord(
+                WordKind.OPTION, option.removesuffix("="), paths.get(t.slot)
+            )
+    return tuple(words)
 
 
 def _expand_group_long(
@@ -610,7 +689,12 @@ def _expand_group_long(
 
 
 def _resolve_group_paths(
-    cs: CompiledSpec, flags: WalkFlagBag, cwd: str, bases: list[PathSpec]
+    cs: CompiledSpec,
+    flags: WalkFlagBag,
+    cwd: str,
+    bases: list[PathSpec],
+    taken: Sequence[_Taken],
+    paths: dict[int, PathSpec],
 ) -> None:
     """Resolve PATH-typed group values against the working directory.
 
@@ -623,29 +707,49 @@ def _resolve_group_paths(
 
     Keep the typed spelling and its walk verdict, just as leaf PATH
     values do. The operand base resolves first; other path options are
-    relative to it, including environment-supplied values.
+    relative to it, including environment-supplied values. Each typed
+    value's path is also kept by the argv position it stands in.
 
     Args:
         cs (CompiledSpec): the node's compiled tables.
         flags (WalkFlagBag): accumulated group flags, updated in place.
         cwd (str): current working directory.
         bases (list[PathSpec]): ordered directory changes to validate.
+        taken (Sequence[_Taken]): every value taken so far, in order.
+        paths (dict[int, PathSpec]): each typed value's path by its
+            position, updated in place.
     """
     base: str | PathSpec = cwd
+    typed = [(t.dest, t.value, t.slot) for t in taken]
     if cs.base_dest is not None:
         value = flags.get(cs.base_dest)
         if isinstance(value, str):
-            values = [
-                word
-                for name, word in flags.occurrences
-                if name == cs.base_dest and isinstance(word, str)
+            values: list[tuple[str, int | None]] = [
+                (word, slot)
+                for name, word, slot in typed
+                if name == cs.base_dest
             ]
             scope = PathSpec.from_str_path(".", cwd=cwd)
-            for word in values or [value]:
+            for word, slot in values or [(value, None)]:
                 scope = PathSpec.from_str_path(word or ".", cwd=scope)
-                bases.append(scope)
+                if slot is None or slot not in paths:
+                    bases.append(scope)
+                if slot is not None:
+                    paths[slot] = scope
             flags[cs.base_dest] = scope
             base = scope
+    seen: dict[str, int] = {}
+    for name, word, slot in typed:
+        if name == cs.base_dest or cs.kind_by_dest.get(name) != "path":
+            continue
+        index = seen.get(name, 0)
+        seen[name] = index + 1
+        value_types = cs.value_types_by_dest.get(name, ("path",))
+        if (
+            slot not in paths
+            and value_types[index % len(value_types)] == "path"
+        ):
+            paths[slot] = PathSpec.from_str_path(word, cwd=base)
     for dest, kind in cs.kind_by_dest.items():
         if kind != "path" or dest not in flags or dest == cs.base_dest:
             continue
@@ -670,6 +774,8 @@ def _finish_node(
     cwd: str,
     style: UsageStyle,
     bases: list[PathSpec],
+    taken: Sequence[_Taken],
+    paths: dict[int, PathSpec],
     env: Mapping[str, str] | None = None,
     defer_env: bool = False,
 ) -> WalkResult | None:
@@ -690,6 +796,10 @@ def _finish_node(
         flags (WalkFlagBag): accumulated group flags.
         cwd (str): current working directory, for PATH values.
         style (UsageStyle): the root's dialect, for any refusal.
+        bases (list[PathSpec]): ordered directory changes to validate.
+        taken (Sequence[_Taken]): every value taken so far, in order.
+        paths (dict[int, PathSpec]): each typed PATH value's path by its
+            position, updated in place.
         env (Mapping[str, str] | None): session environment for
             ``Argument.env`` fallbacks, None outside a session.
         defer_env (bool): leave absent env-backed requirements for the
@@ -711,7 +821,7 @@ def _finish_node(
                 flags[dest] = [default]
             else:
                 flags[dest] = default
-    _resolve_group_paths(cs, flags, cwd, bases)
+    _resolve_group_paths(cs, flags, cwd, bases, taken, paths)
     # Numeric-typed values before choices, argparse's order; wording is
     # git's parse-options refusal (`--depth` on a non-integer), one
     # phrase for int and float alike.
@@ -798,6 +908,8 @@ def walk(
     positions: tuple[int, ...] = ()
     flags: WalkFlagBag = WalkFlagBag()
     bases: list[PathSpec] = []
+    taken: list[_Taken] = []
+    paths: dict[int, PathSpec] = {}
     i = 0
 
     while True:
@@ -805,10 +917,11 @@ def walk(
         # its remaining argv rides the ordinary spec machinery for
         # validation, then passes to the program verbatim.
         if not node.subcommands:
+            flags.occurrences = [(t.dest, t.value) for t in taken]
             return WalkResult(
                 leaf=node,
                 path=path,
-                verb_positions=positions,
+                words=_lead_words(argv[:i], positions, taken, paths),
                 group_flags=flags,
                 operand_bases=tuple(bases),
                 argv=tuple(argv[i:]),
@@ -831,7 +944,17 @@ def walk(
             )
             if alias is not None and token in alias.aliases:
                 refused = _finish_node(
-                    name, node, cs, flags, cwd, style, bases, env, defer_env
+                    name,
+                    node,
+                    cs,
+                    flags,
+                    cwd,
+                    style,
+                    bases,
+                    taken,
+                    paths,
+                    env,
+                    defer_env,
                 )
                 if refused is not None:
                     return refused
@@ -893,7 +1016,7 @@ def walk(
                 # or --color=auto would be refused as taking no value.
                 if spelling in cs.long_optional_spellings:
                     if eq:
-                        _record_value(flags, cs, spelling, attached)
+                        _record_value(flags, cs, spelling, attached, taken, i)
                     elif (
                         spelling in cs.detached_optional_spellings
                         and _optional_value(
@@ -901,7 +1024,7 @@ def walk(
                         )
                     ):
                         i += 1
-                        _record_value(flags, cs, spelling, argv[i])
+                        _record_value(flags, cs, spelling, argv[i], taken, i)
                     else:
                         _record_bool(flags, cs, spelling)
                 elif spelling in cs.long_bool_spellings:
@@ -916,7 +1039,9 @@ def walk(
                 elif spelling in cs.long_value_spellings:
                     arity = cs.nargs_by_dest.get(cs.dest_of(spelling))
                     if arity == 1 and eq:
-                        _record_values(flags, cs, spelling, [attached])
+                        _record_values(
+                            flags, cs, spelling, [attached], taken, [i]
+                        )
                     elif arity is not None:
                         if eq:
                             return _usage_error(
@@ -934,14 +1059,19 @@ def walk(
                                 style,
                             )
                         _record_values(
-                            flags, cs, spelling, argv[i + 1 : i + 1 + arity]
+                            flags,
+                            cs,
+                            spelling,
+                            argv[i + 1 : i + 1 + arity],
+                            taken,
+                            range(i + 1, i + 1 + arity),
                         )
                         i += arity
                     elif eq:
-                        _record_value(flags, cs, spelling, attached)
+                        _record_value(flags, cs, spelling, attached, taken, i)
                     elif i + 1 < len(argv):
                         i += 1
-                        _record_value(flags, cs, spelling, argv[i])
+                        _record_value(flags, cs, spelling, argv[i], taken, i)
                     else:
                         return _usage_error(
                             name,
@@ -988,6 +1118,8 @@ def walk(
                     token,
                     argv[i + 1 :],
                     style,
+                    taken,
+                    i,
                 )
                 if whole is not None:
                     consumed, refused = whole
@@ -1032,10 +1164,17 @@ def walk(
                         values = ([rest] if rest else []) + list(
                             argv[i + 1 : i + remaining + 1]
                         )
+                        where = ([i] if rest else []) + list(
+                            range(i + 1, i + remaining + 1)
+                        )
                         if arity is not None:
-                            _record_values(flags, cs, spelling, values)
+                            _record_values(
+                                flags, cs, spelling, values, taken, where
+                            )
                         else:
-                            _record_value(flags, cs, spelling, values[0])
+                            _record_value(
+                                flags, cs, spelling, values[0], taken, where[0]
+                            )
                         i += remaining
                         break
                     else:
@@ -1049,7 +1188,17 @@ def walk(
                 i += 1
                 continue
             refused = _finish_node(
-                name, node, cs, flags, cwd, style, bases, env, defer_env
+                name,
+                node,
+                cs,
+                flags,
+                cwd,
+                style,
+                bases,
+                taken,
+                paths,
+                env,
+                defer_env,
             )
             if refused is not None:
                 return refused
@@ -1077,7 +1226,17 @@ def walk(
         if descended:
             continue
         refused = _finish_node(
-            name, node, cs, flags, cwd, style, bases, env, defer_env
+            name,
+            node,
+            cs,
+            flags,
+            cwd,
+            style,
+            bases,
+            taken,
+            paths,
+            env,
+            defer_env,
         )
         if refused is not None:
             return refused

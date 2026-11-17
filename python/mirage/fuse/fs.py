@@ -130,7 +130,7 @@ class MirageFS:
     def write(self, path: str, data: bytes, offset: int, fh: int) -> int:
         return self._call(self.core.write, path, data, offset, fh)
 
-    def create(self, path: str, mode: int, fi: Any = None) -> int:
+    def create(self, path: str, mode: int, _fi: Any = None) -> int:
         return self._call(self.core.create, path, mode)
 
     def mkdir(self, path: str, mode: int) -> None:
@@ -227,7 +227,7 @@ class MirageFS:
             return
         self._call(self.core.setattr, path, None, None, None, atime, mtime)
 
-    def access(self, path: str, amode: int) -> None:
+    def access(self, path: str, _amode: int) -> None:
         self._call(self.core.getattr, path)
 
     def setxattr(
@@ -261,7 +261,7 @@ class MirageFS:
     def flush(self, path: str, fh: int) -> None:
         self._call(self.core.flush, path, fh)
 
-    def fsync(self, path: str, datasync: int, fh: int) -> None:
+    def fsync(self, path: str, _datasync: int, fh: int) -> None:
         self.flush(path, fh)
 
     def open(self, path: str, flags: int) -> int:

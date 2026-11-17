@@ -18,7 +18,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import PARSE_KEPT_CHARS, PARSES_KEPT
-from mirage.commands.spec.parser import parse_command, parse_to_kwargs
+from mirage.commands.spec.parser import (
+    parse_command,
+    parse_to_kwargs,
+    word_paths,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 
@@ -2139,3 +2143,51 @@ def test_a_declared_word_is_never_a_shorter_option_with_a_value():
     assert whole.texts() == ["a"]
     attached = parse_command(spec, ["-l3", "a"], "/", "pdftotext")
     assert dict(parse_to_kwargs(attached)) == {"args_l": "3"}
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["-C", "a", "-Cb", "x"], [None, "/d/a", "/d/a/b", "/d/a/b/x"]),
+        (
+            ["-C", "a", "--directory=b", "x"],
+            [None, "/d/a", "/d/a/b", "/d/a/b/x"],
+        ),
+        (
+            ["-C", "a", "-cfrel.tar", "x"],
+            [None, "/d/a", "/d/rel.tar", "/d/a/x"],
+        ),
+        (["--file=-", "-c", "x"], ["/d/-", None, "/d/x"]),
+    ],
+)
+def test_word_paths_resolve_each_word_where_tar_reads_it(argv, expected):
+    parsed = parse_command(SPECS["tar"], argv, "/d", "tar")
+    paths = word_paths(parsed, argv, "/d", operands=True)
+    assert [p.virtual if p is not None else None for p in paths] == expected
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["-f", "-", "x"], [None, "/d/-", "/d/x"]),
+        (["--file=", "x"], [None, "/d/x"]),
+        (["--file=../p", "x"], ["/p", "/d/x"]),
+    ],
+)
+def test_word_paths_name_no_file_for_an_empty_value_and_a_file_for_a_dash(
+    argv, expected
+):
+    parsed = parse_command(SPECS["grep"], argv, "/d", "grep")
+    paths = word_paths(parsed, argv, "/d", operands=True)
+    assert [p.virtual if p is not None else None for p in paths] == expected
+
+
+def test_word_paths_name_a_directory_for_a_dash_given_to_cp_t():
+    argv = ["-t", "-", "a"]
+    parsed = parse_command(SPECS["cp"], argv, "/d", "cp")
+    paths = word_paths(parsed, argv, "/d", operands=True)
+    assert [p.virtual if p is not None else None for p in paths] == [
+        None,
+        "/d/-",
+        "/d/a",
+    ]

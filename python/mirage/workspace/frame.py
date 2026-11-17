@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
+from mirage.execution.process.handle import ProcessHandle
+from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.shell.console import JobConsole
 from mirage.shell.types import TSNodeLike
-
-if TYPE_CHECKING:
-    from mirage.execution.process.handle import ProcessHandle
-    from mirage.io.types import ByteSource, IOResult
-    from mirage.runtime.types import RouteDecision, RuntimeIdentity
-    from mirage.shell.console import JobConsole
-    from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.session import SessionState
 
 
 class ProcessSubLine(Protocol):

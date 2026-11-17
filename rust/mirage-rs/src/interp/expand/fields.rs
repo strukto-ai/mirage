@@ -1,12 +1,58 @@
 //! Field splitting: a word's pieces cut into fields on IFS, and the
 //! joins and splats that place a field boundary.
 
-use super::{Chunk, Expander, Host};
-
 use crate::glob;
 use crate::interp::shell::IFS_DEFAULT;
 use crate::interp::write::Fault;
 use crate::utf8::unit_len;
+
+/// One stretch of an expanded word: its text, whether quoting made its
+/// glob characters literal, and whether field splitting reads it, which
+/// only an unquoted expansion's value is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    pub text: Vec<u8>,
+    pub quoted: bool,
+    pub split: bool,
+}
+
+/// A word's pieces, and the boundary between two elements of a splat
+/// (`$@`, `${a[@]}`), which reads as its joiner where nothing splits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Chunk {
+    Piece(Piece),
+    Break(Vec<u8>),
+}
+
+impl Chunk {
+    /// Text as typed outside quotes: live, never split.
+    pub fn literal(text: impl Into<Vec<u8>>) -> Self {
+        Chunk::Piece(Piece {
+            text: text.into(),
+            quoted: false,
+            split: false,
+        })
+    }
+
+    /// Text quoting protects: literal, never split.
+    pub fn quoted(text: impl Into<Vec<u8>>) -> Self {
+        Chunk::Piece(Piece {
+            text: text.into(),
+            quoted: true,
+            split: false,
+        })
+    }
+
+    /// An expansion's value: literal inside double quotes, otherwise
+    /// split and globbed.
+    pub fn value(text: impl Into<Vec<u8>>, quoted: bool) -> Self {
+        Chunk::Piece(Piece {
+            text: text.into(),
+            quoted,
+            split: !quoted,
+        })
+    }
+}
 
 /// The bytes of a value field splitting scans between two pauses.
 const SPLIT_SLICE: usize = 64 * 1024;
@@ -187,35 +233,4 @@ pub async fn split_fields(
         fields.push(current);
     }
     Ok(fields)
-}
-
-impl<H: Host> Expander<'_, H> {
-    /// A word in a command's argument list: its pieces, its tilde prefix
-    /// expanded, split into fields on IFS.
-    pub async fn fields(&mut self, node: usize) -> Result<Vec<Field>, Fault> {
-        if matches!(self.kind(node), "concatenation" | "brace_expression")
-            && self.shell.option("braceexpand")
-        {
-            if let Some(words) = self.brace_words(node).await? {
-                let mut out = Vec::new();
-                for mut chunks in words {
-                    self.tilde(&mut chunks);
-                    out.extend(self.split(&chunks).await?);
-                }
-                return Ok(out);
-            }
-        }
-        let mut chunks = self.chunks(node, false).await?;
-        self.tilde(&mut chunks);
-        self.assignment_tildes(&mut chunks);
-        self.split(&chunks).await
-    }
-
-    /// Split a word's pieces into fields on the shell's IFS, pausing as a
-    /// long value is scanned.
-    async fn split(&mut self, chunks: &[Chunk]) -> Result<Vec<Field>, Fault> {
-        let (host, shell) = (&mut *self.host, &*self.shell);
-        let pause = &mut async || host.pause(shell).await;
-        split_fields(chunks, shell.ifs(), shell.utf8(), pause).await
-    }
 }

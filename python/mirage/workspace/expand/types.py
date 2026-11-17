@@ -16,21 +16,20 @@ from __future__ import annotations
 
 from asyncio import Event
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from mirage.execution.job import JobTable
-    from mirage.execution.line.handle import LineHandle
-    from mirage.execution.process.handle import ProcessHandle
-    from mirage.io.types import ByteSource, IOResult
-    from mirage.policy.types import HandOff
-    from mirage.rs.session import ShellVars
-    from mirage.runtime.types import RouteDecision, RuntimeIdentity
-    from mirage.shell.call_stack import CallStack
-    from mirage.shell.console import JobConsole
-    from mirage.shell.types import TSNodeLike
-    from mirage.workspace.evaluation import EvaluationContext
-    from mirage.workspace.session.session import SessionState
+from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.process.handle import ProcessHandle
+from mirage.io.types import ByteSource, IOResult
+from mirage.policy.types import HandOff
+from mirage.rs.session import ShellVars
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.shell.call_stack import CallStack
+from mirage.shell.console import JobConsole
+from mirage.shell.types import TSNodeLike
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.session.session import SessionState
 
 
 class ExecuteFn(Protocol):

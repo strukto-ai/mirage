@@ -132,8 +132,8 @@
       "id": "fmt_carriage_return_starts_a_word",
       "seq": 16100144,
       "targets": ["ram", "opfs", "disk"],
-      "command": "printf 'aaaa\\rbbbb cccc\\n' | fmt -w 8",
-      "expect": { "exit": 0, "stdout": "aaaa\n\rbbbb\ncccc\n", "stderr": "" },
+      "command": "printf 'aaaa\\rbbbb cccc\\n' | fmt -w 8; { yes x | head -n 12000 | tr -d '\\n'; echo ' yy zz'; } | fmt -w 20 | awk '{ print length($0) }'",
+      "expect": { "exit": 0, "stdout": "aaaa\n\rbbbb\ncccc\n12000\n5\n", "stderr": "" },
       "flags": ["w"]
     }
   ]

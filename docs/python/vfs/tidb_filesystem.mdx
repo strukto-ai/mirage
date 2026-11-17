@@ -1,63 +1,128 @@
 ---
 title: TiDB Cloud Filesystem
 icon: /images/tidb-logo.svg
-description: Mount a TiDB Cloud Filesystem, or a self-hosted drive9 server, as a filesystem.
+description: Virtualize a TiDB Cloud Filesystem or a self-hosted drive9 server from Python.
 ---
 
 `TiDBFilesystemVFS` mounts a [TiDB Cloud Filesystem](https://www.pingcap.com/tidb/tidb-cloud-filesystem/)
-through its REST API. Agents list, read, write, move and remove files under
-the mount with ordinary shell commands, and no FUSE mount is needed.
+through its REST API: its directories and files appear with their own names
+and bytes, with no FUSE mount needed. Tokens and region hosts are set up on
+the [TiDB page](/home/setup/tidb).
 
-For tokens and regions, see [TiDB Cloud Filesystem Setup](/home/setup/tidb).
+## Install
 
-## Config
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
 
 from mirage import MountMode, Workspace
 from mirage.vfs.tidb_filesystem import (
-	TiDBFilesystemConfig,
-	TiDBFilesystemVFS,
+    TiDBFilesystemConfig,
+    TiDBFilesystemVFS,
 )
 
-vfs = TiDBFilesystemVFS(TiDBFilesystemConfig(
-	host=os.environ["TIDB_FILESYSTEM_HOST"],
-	token=os.environ["TIDB_FILESYSTEM_TOKEN"],
-	root_path="/workspace",
-))
-ws = Workspace({"/fs": vfs}, mode=MountMode.WRITE)
+config = TiDBFilesystemConfig(
+    host=os.environ["TIDB_FILESYSTEM_HOST"],
+    token=os.environ["TIDB_FILESYSTEM_TOKEN"],
+)
+ws = Workspace({"/fs": TiDBFilesystemVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("mkdir -p /fs/notes && echo hello > /fs/notes/a.txt && ls /fs/notes")
+print(await result.stdout_str())
+await ws.close()
 ```
 
+`root_path`, such as `/workspace`, mounts one directory. Use
+`MountMode.EXEC` when `python3` or `js` should run scripts from the mount.
+
+### Fields
+
 {/* generated: config-table tidb_filesystem start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | The file system's endpoint, such as `https://aws-us-east-1.drive9.ai` for its region, or the origin of a self-hosted drive9 server. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | The file system token, sent as a bearer token. |
-| <code style={{ whiteSpace: 'nowrap' }}>root_path</code><br />default `'/'` | Directory inside the file system that becomes the mount root, such as `/projects/a` for a token scoped to it; `..` segments are refused. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="host" type={"str"} required>
+  The file system's endpoint, such as `https://aws-us-east-1.drive9.ai` for its region, or the origin of a self-hosted drive9 server.
+</ResponseField>
+<ResponseField name="token" type={"str"} required post={["secret"]}>
+  The file system token, sent as a bearer token.
+</ResponseField>
+<ResponseField name="root_path" type={"str"} default={"'/'"}>
+  Directory inside the file system that becomes the mount root, such as `/projects/a` for a token scoped to it; `..` segments are refused.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table tidb_filesystem end */}
 
-## Mount mode
+## Authentication
 
-`read`, `write` or `exec`. Use `exec` if `python3` or `js` should run scripts from the mount.
+`token` is the file system's owner token or a scoped token, sent as a bearer
+token. `host` is the endpoint of the file system's region, such as
+`https://aws-us-east-1.drive9.ai`; a token works only against its own region.
+
+A scoped token reaches only the path it was created for, and only with the
+operations it allows (`read`, `list`, `search`, `write`, `delete`). Mount it
+with `root_path` set to that path, since it cannot list the file system's
+root.
+
+TiDB Cloud Filesystem runs on the open-source
+[drive9](https://github.com/mem9-ai/drive9) server, and the same VFS mounts a
+self-hosted drive9 server: set `host` to its origin and `token` to an API key
+it issued.
+
+## Layout
+
+```text
+/fs/
+  notes/
+    a.txt
+  workspace/
+    data.json
+```
+
+`/fs/notes/a.txt` is `/notes/a.txt` in the file system, or
+`<root_path>/notes/a.txt` with `root_path` set. `..` segments in `root_path`
+are refused.
+
+## Behavior
+
+- **Large files:** a file under 50,000 bytes is written with one request; a
+  larger one goes up in parts, a few at a time, and reads of it stream from
+  object storage, ranged when a command reads only part of it.
+- **Appends:** `>>` onto a file of 50,000 bytes or more sends only the new
+  bytes and the file's last part; a smaller file is read and written back.
+- **Moves and deletes:** `mv` is one server-side rename, for a file or a whole
+  directory. `rm -r` is one recursive delete.
+- **Copies:** `cp` reads the file and writes the copy, so the two never share
+  content.
+- **Local errors:** before a write, `mkdir` or `mv`, the mount checks the
+  destination and its parents, so a missing parent, a file in the way or a
+  directory target fails as it does on a local disk.
+- **Extent layout:** a file in the extent layout, which only the file system's
+  FUSE client writes and reads, reads as `Operation not supported`.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with TiDB Cloud Filesystem mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md tidb_filesystem start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -65,7 +130,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with TiDB Cloud Filesystem mount
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -86,7 +151,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with TiDB Cloud Filesystem mount
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -108,52 +173,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with TiDB Cloud Filesystem mount
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md tidb_filesystem end */}
-
-## Behavior
-
-- A file under 50,000 bytes is written with one request; a larger one goes up
-  in parts, a few at a time, and reads of it stream from object storage,
-  ranged when a command reads only part of it.
-- `>>` onto a file of 50,000 bytes or more sends only the new bytes and the
-  file's last part; a smaller file is read and written back.
-- `mv` is one server-side rename, for a file or a whole directory. `rm -r`
-  is one recursive delete.
-- `cp` reads the file and writes the copy, so the two never share content.
-- Before a write, `mkdir` or `mv`, Mirage asks the file system what the
-  destination and its parents are, so a missing parent, a file in the way or a
-  directory target fails as it does on a local disk.
-- A file in the extent layout, which only the file system's FUSE client
-  writes and reads, reads as `Operation not supported`.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from mirage import MountMode, Workspace
-from mirage.vfs.tidb_filesystem import (
-	TiDBFilesystemConfig,
-	TiDBFilesystemVFS,
-)
-
-vfs = TiDBFilesystemVFS(TiDBFilesystemConfig(
-	host=os.environ["TIDB_FILESYSTEM_HOST"],
-	token=os.environ["TIDB_FILESYSTEM_TOKEN"],
-))
-
-
-async def main() -> None:
-	ws = Workspace({"/fs": vfs}, mode=MountMode.WRITE)
-	await ws.shell("mkdir -p /fs/notes && echo hello > /fs/notes/a.txt")
-	r = await ws.shell("ls -l /fs/notes && cat /fs/notes/a.txt")
-	print(await r.stdout_str())
-	await ws.close()
-
-
-if __name__ == "__main__":
-	asyncio.run(main())
-```
-
-See `examples/python/vfs/tidb_filesystem/tidb_filesystem.py`.

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::builtin::invalid_module_path;
-use super::main::EXHAUSTED;
+use super::meter::EXHAUSTED;
 use super::parse::{Scanned, Scanner};
 use super::syntax::{self, Def, Import, Parsed};
 use super::value::Value;

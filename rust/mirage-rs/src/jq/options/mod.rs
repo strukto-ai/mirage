@@ -18,16 +18,13 @@ use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
 use super::main::Config as RunConfig;
+use super::main::ERROR_SYSTEM;
 use crate::constants::WORK;
 use crate::{Stream, StreamError, latin1_bytes, parse_config};
 
 /// The tape name of an operand, and of an option the parser refused.
 const OPERAND: &str = "";
 const REFUSED: &str = "?";
-
-/// jq's exit status for an option it refuses and a binding it cannot
-/// read.
-pub(super) const ERROR_SYSTEM: i32 = 2;
 
 const DEFAULT_INDENT: u8 = 2;
 
@@ -468,7 +465,7 @@ impl Loop {
                 "color_output" | "monochrome_output" | "unbuffered" => {}
                 switch => match SWITCHES.iter().find(|known| **known == switch) {
                     Some(known) => self.switches.push(known),
-                    None => return Err(crate::scan::unknown("jq", switch)),
+                    None => return Err(crate::scan_grammar::unknown("jq", switch)),
                 },
             }
         }

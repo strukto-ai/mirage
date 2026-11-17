@@ -1,23 +1,25 @@
 ---
-title: Integration
+title: VFS Integration
 sidebarTitle: Overview
-description: Connect your backend's search and query APIs to familiar shell commands.
+description: Answer shell commands from a service's own search, queries and metadata.
 icon: plug
 ---
 
-Mirage can use your backend's search, queries and metadata to answer shell
-commands with fewer requests and downloads. For example, `grep` can use a
-RAG index to find candidate documents, and `head` can fetch a few database
-rows without reading the whole table.
+A VFS can answer some commands from its service's search, queries or metadata
+instead of reading files. `head` can show the first lines without downloading
+the whole file.
 
-| Capability | Commands | Your backend provides |
+Each capability is a set of methods a VFS overrides, and the commands they make
+cheaper:
+
+| Capability | Methods | Commands |
 | --- | --- | --- |
-| [Search](/home/integration/search) | `grep`, `rg` | Candidate files or lines from a search index. |
-| [Lines](/home/integration/lines) | `head`, `tail`, `wc -l` | First or last rows, line counts and live updates. |
-| [Checksums](/home/integration/checksums) | `md5sum`, `sha256sum` and other hash commands | A stored hash or a hash computed remotely. |
-| [Walks](/home/integration/walks) | `find`, `du`, `ls -R`, `tree` | A directory tree returned in bulk. |
+| [Search](/home/integration/search) | `files_containing`, `lines_containing` | `grep`, `rg` |
+| [Lines](/home/integration/lines) | `first_lines`, `last_lines`, `line_count`, `follow` | `head`, `tail`, `wc -l`, `tail -f` |
+| [Checksums](/home/integration/checksums) | `checksum` | `md5sum`, `sha256sum` and other hash commands |
+| [Walks](/home/integration/walks) | `read_tree` | `find`, `du`, `ls -R`, `tree` |
 
-Supported VFS types already connect these capabilities where available.
-For a [custom VFS](/home/setup/custom-vfs), implement the methods in each guide. Mirage handles
-command options and formatting, and uses ordinary file reads or directory
-listings when a capability cannot answer.
+Built-in VFSs already implement these where their service allows. A
+[custom VFS](/home/setup/vfs/new) overrides the methods it can answer.
+Mirage still handles options and output, and reads or lists files whenever a
+method returns `None`.

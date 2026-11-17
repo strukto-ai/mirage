@@ -1,16 +1,20 @@
 ---
 title: Dify
 icon: /images/dify-logo.svg
-description: Mount a Dify Knowledge dataset as a read-only virtual filesystem.
+description: Virtualize a Dify Knowledge dataset from Python.
 ---
 
-The Dify VFS exposes completed Dify Knowledge documents as text files
-mounted at a prefix such as `/knowledge/`. Each file is assembled from the
-document's completed, enabled segments.
+`DifyVFS` mounts a Dify Knowledge dataset, read-only, as a tree of text files.
+Each document is one file, assembled from its segments. The API key and the
+dataset are set up on the [Dify page](/home/setup/dify).
 
-For API key setup, see [Dify Setup](/home/setup/dify).
+## Install
 
-## Config
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -20,55 +24,150 @@ from mirage.vfs.dify import DifyConfig, DifyVFS
 
 config = DifyConfig(
     api_key=os.environ["DIFY_API_KEY"],
-    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
+    base_url=os.environ["DIFY_BASE_URL"],
     dataset_id=os.environ["DIFY_DATASET_ID"],
-    slug_metadata_name=os.environ.get("DIFY_SLUG_METADATA_NAME", "slug"),
 )
-vfs = DifyVFS(config=config)
-ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
+ws = Workspace({"/knowledge": DifyVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("find /knowledge -type f && grep -rn billing /knowledge")
+print(await result.stdout_str())
+await ws.close()
 ```
 
-The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so restored cache entries are served as saved and other reads reach the live backend.
+`slug_metadata_name` picks the document metadata field that holds each path
+(default `slug`). `max_concurrency`, `retry_attempts` and `retry_max_delay`
+bound the requests in flight and the retries after a 429, a 5xx or a
+transport error.
+
+### Fields
 
 {/* generated: config-table dify start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Dify Knowledge API key, sent as `Authorization: Bearer`. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />required | Dify API root, such as `https://api.dify.ai/v1`. |
-| <code style={{ whiteSpace: 'nowrap' }}>dataset_id</code><br />required | ID of the Knowledge dataset the mount shows. |
-| <code style={{ whiteSpace: 'nowrap' }}>slug_metadata_name</code><br />default `'slug'` | Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_concurrency</code><br />default `10` | The most Dify API requests in flight at once. |
-| <code style={{ whiteSpace: 'nowrap' }}>retry_attempts</code><br />default `4` | Attempts per request, the first included. A 429, a 5xx or a transport error is retried. |
-| <code style={{ whiteSpace: 'nowrap' }}>retry_max_delay</code><br />default `30.0` | Longest wait in seconds before a retry, whether from backoff or `Retry-After`. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} required post={["secret"]}>
+  Dify Knowledge API key, sent as `Authorization: Bearer`.
+</ResponseField>
+<ResponseField name="base_url" type={"str"} required>
+  Dify API root, such as `https://api.dify.ai/v1`.
+</ResponseField>
+<ResponseField name="dataset_id" type={"str"} required>
+  ID of the Knowledge dataset the mount shows.
+</ResponseField>
+<ResponseField name="slug_metadata_name" type={"str"} default={"'slug'"}>
+  Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name.
+</ResponseField>
+<ResponseField name="max_concurrency" type={"int"} default={"10"}>
+  The most Dify API requests in flight at once.
+</ResponseField>
+<ResponseField name="retry_attempts" type={"int"} default={"4"}>
+  Attempts per request, the first included. A 429, a 5xx or a transport error is retried.
+</ResponseField>
+<ResponseField name="retry_max_delay" type={"float"} default={"30.0"}>
+  Longest wait in seconds before a retry, whether from backoff or `Retry-After`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table dify end */}
+
+## Authentication
+
+The mount sends a Dify Knowledge API key, created under **Knowledge**,
+**Service API**. The key reaches either every knowledge base or only the one
+mounted, and that knowledge base keeps **API Access** on.
+
+## Layout
+
+```text
+/knowledge/
+  README.md
+  guides/
+    api.md
+    quickstart.md
+  policies/
+    support.md
+```
+
+A document's path is the value of its `slug` metadata field; without one, the
+file takes the document name.
+
+| Dify document | Metadata | Mirage path |
+| --- | --- | --- |
+| `Quickstart` | `slug=guides/quickstart.md` | `/knowledge/guides/quickstart.md` |
+| `README.md` | no slug | `/knowledge/README.md` |
+
+- `/` makes folders. No empty segment, `.` or `..`.
+- Each slug is unique across the dataset.
+- A slug is never also a folder: `guides` and `guides/quickstart.md` cannot
+  both be documents.
+- Only enabled, fully indexed, unarchived documents appear.
+
+## Behavior
+
+- **Read-only:** no command changes the dataset.
+- **Plain text:** a file is its completed, enabled segments joined by line
+  breaks, whatever the original format.
+- **Tree refresh:** listings are reused until the index expires, so a document
+  edited in Dify can show its old path and metadata until then.
+- **Snapshots:** a snapshot keeps the config, and loading it needs the mount
+  handed back through `mounts=`.
+
+### Search
+
+The [`search` CLI](/python/cli/search) asks Dify's dataset retrieval API.
+Register it on the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
+
+```bash
+search "how do I reset my password" /knowledge/
+search --method hybrid --top-k 5 "billing policy" /knowledge/policies/
+search --method semantic --threshold 0.4 "quickstart" /knowledge/guides/*.md
+```
+
+`--method` takes `semantic` (the default), `fulltext`, `hybrid` or `keyword`.
+`--top-k` defaults to 10 and is capped at 100. `--threshold` is between 0 and
+1; another value, or another method, exits 1 before Dify ranks anything. Each
+hit prints its path and score, then the segment, and two hits in one document
+stay two records:
+
+```text
+/knowledge/policies/refunds:0.82
+Refunds are allowed within 30 days.
+```
+
+A search under a path filters retrieval by the slug field, or by
+`document_name` for a document without a slug. That filter needs **Built-in
+Fields** turned on in the dataset's metadata settings. Without it, a scoped
+search on name-based files may return nothing while `ls`, `find`, `cat` and
+`grep` still see them, so a slug on every document is the reliable choice.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
 
 {/* generated: vfs-md dify start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `dify`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
-    - A Dify knowledge base, mounted read only.
     - Every file is plain text assembled from the document's Dify segments,
       whatever its original extension.
-    - `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
-      files.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -76,7 +175,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -103,11 +202,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
 
     ### `/<path>`
 
-    - A Dify knowledge base, mounted read only.
     - Every file is plain text assembled from the document's Dify segments,
       whatever its original extension.
-    - `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
-      files.
 
     ## Supported Unix Commands for VFS
 
@@ -129,214 +225,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md dify end */}
-
-Dify documents are mapped to paths using the configured slug metadata field.
-The default metadata field name is `slug`. If a document has no configured slug
-metadata, Mirage falls back to the Dify document name.
-
-```text
-/knowledge/
-  README.md
-  guides/
-    quickstart.md
-    api.md
-  policies/
-    support.md
-```
-
-Example mapping:
-
-| Dify document | Metadata | Mirage path |
-| ------------- | -------- | ----------- |
-| `Quickstart` | `slug=guides/quickstart.md` | `/knowledge/guides/quickstart.md` |
-| `README.md` | no slug | `/knowledge/README.md` |
-
-### Creating Slug Metadata in Dify
-
-In the Dify Knowledge UI, open a document and add a metadata item whose name
-matches `slug_metadata_name`. The default name is `slug`.
-
-```text
-name: slug
-value: guides/quickstart.md
-```
-
-For a custom Dify metadata name:
-
-```python
-config = DifyConfig(
-    api_key=os.environ["DIFY_API_KEY"],
-    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
-    dataset_id=os.environ["DIFY_DATASET_ID"],
-    slug_metadata_name="path",
-)
-```
-
-Then use:
-
-```text
-name: path
-value: guides/quickstart.md
-```
-
-Mirage reads `doc_metadata` from Dify and uses this value as the document's
-virtual path below the mount prefix.
-
-Use these rules for slug metadata values:
-
-- Use `/` to create folders.
-- Do not use empty segments, `.`, or `..`.
-- Keep each slug metadata value unique across the dataset.
-- Do not use a path that is also needed as a folder. For example, `guides` and `guides/quickstart.md` cannot both be document paths.
-
-Only visible documents are included:
-
-- `enabled` is `true`
-- `indexing_status` is `completed`
-- `archived` is `false`
-
-## Reading Documents
-
-`cat`, `head`, `tail`, and `grep` read Dify document segments. Segment content
-is joined with a single newline between chunks.
-
-```bash
-ls /knowledge/
-find /knowledge/ -type f
-cat /knowledge/guides/quickstart.md
-head -n 20 /knowledge/guides/quickstart.md
-grep -i "billing" /knowledge/guides/quickstart.md
-wc /knowledge/guides/quickstart.md
-```
-
-## Search
-
-The [`search` CLI](/python/cli/search) asks Dify's dataset retrieval API. Use
-it when meaning matters more than exact text matching. Register it on the
-workspace:
-
-```python
-from mirage.commands.cli.builtin.search import SEARCH
-
-ws.register_cli("search", SEARCH)
-```
-
-```bash
-search "how do I reset my password" /knowledge/
-search --method hybrid --top-k 5 "billing policy" /knowledge/policies/
-search --method semantic --threshold 0.4 "quickstart" /knowledge/guides/*.md
-```
-
-Supported methods:
-
-| Method | Dify retrieval mode |
-| ------ | ------------------- |
-| `semantic` | semantic search |
-| `fulltext` | full text search |
-| `hybrid` | hybrid search |
-| `keyword` | keyword search |
-
-`--top-k` defaults to 10 and is capped at `100`. `--threshold` must be between
-`0` and `1`; another value, or another method, exits 1 before Dify ranks
-anything.
-
-Results are emitted one retrieval hit per block:
-
-```text
-/knowledge/policies/refunds:0.82
-Refunds are allowed within 30 days.
-```
-
-Mirage uses the configured slug metadata field to derive the path, and falls
-back to the Dify document name when that metadata is missing. Multiple hits
-from the same document remain separate records.
-
-Scoped search uses Dify metadata filtering. Documents with the configured slug
-metadata field are filtered by that field; name-based documents are filtered by
-`document_name`, which requires Dify Built-in Fields to be enabled in dataset
-metadata.
-
-### Scoped Search Requirements
-
-Mirage converts a scoped search path into Dify metadata filters:
-
-| Mirage target | Dify metadata filter |
-| ------------- | -------------------- |
-| Document with configured slug metadata | `<slug_metadata_name> in [...]` |
-| Document without configured slug metadata | `document_name in [...]` |
-| Folder or glob | `<slug_metadata_name>` / `document_name` filters for all matched files |
-
-To make scoped search reliable:
-
-1. Add the configured slug metadata field to every document.
-1. Enable Dify **Built-in Fields** in the dataset metadata settings.
-1. Ensure `document_name` is available if you rely on name-based paths.
-
-If Built-in Fields are disabled, scoped search against documents without the
-configured slug metadata field may return empty results even though `cat`,
-`grep`, and `find` can still see the same file.
-
-## Cache
-
-The VFS uses Mirage's index cache for the virtual tree. Directory listings
-and path resolution reuse the cached document tree until the index expires or
-the workspace is recreated. If documents are edited directly in Dify, repeated
-operations can temporarily see cached paths and metadata.
-
-Document content is still read from Dify when commands materialize file data.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.search import SEARCH
-from mirage.vfs.dify import DifyConfig, DifyVFS
-
-load_dotenv(".env.development")
-
-config = DifyConfig(
-    api_key=os.environ["DIFY_API_KEY"],
-    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
-    dataset_id=os.environ["DIFY_DATASET_ID"],
-    slug_metadata_name=os.environ.get("DIFY_SLUG_METADATA_NAME", "slug"),
-)
-vfs = DifyVFS(config=config)
-
-
-async def main() -> None:
-    ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
-    ws.register_cli("search", SEARCH)
-
-    r = await ws.shell("ls /knowledge/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /knowledge/ -type f | head -n 10")
-    print(await r.stdout_str())
-
-    r = await ws.shell('search --method hybrid --top-k 5 "getting started" /knowledge/')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-A runnable version is available at
-`examples/python/vfs/dify/dify.py`.
-
-## Shell Commands
-
-| Command | Notes |
-| ------- | ----- |
-| `ls` | List folders and documents |
-| `cat` | Read full document text from completed segments |
-| `head` / `tail` | Read the first or last lines/bytes |
-| `grep` | Exact or regex matching over streamed document text |
-| `find` | Search the virtual tree by name, type, depth, and size |
-| `wc` | Count lines, words, bytes, characters, and max line length |

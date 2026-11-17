@@ -281,6 +281,18 @@ SUMMARIES = {
     ),
 }
 UNLISTED = frozenset({"search"})
+GROUPS = (
+    ("Files", ("office", "pdftotext", "pdfinfo")),
+    ("Developer", ("gh", "git", "hf")),
+    ("Chat", ("slack", "discord", "himalaya")),
+    ("Productivity", ("gws", "ntn", "linear", "trello", "airtable")),
+)
+CORE_BARREL = ROOT / "typescript/packages/core/src/index.ts"
+CORE_SPECS = ROOT / "typescript/packages/core/src/commands/cli/specs.ts"
+IMG_STYLE = (
+    "{{ display: 'inline', width: '1em', height: '1em', "
+    "margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }}"
+)
 
 
 def commands(
@@ -398,26 +410,94 @@ def license_block(name: str) -> str:
     return "\n".join([*rows, LICENSE_END])
 
 
+def logo(name: str) -> str:
+    """Render a CLI's sidebar icon inline, as the VFS overview does.
+
+    Args:
+        name (str): The bundled CLI, whose home setup page names the icon.
+    """
+    page = (ROOT / "docs/home/setup/cli" / f"{name}.mdx").read_text()
+    found = re.search(r"^icon: (\S+)$", page, re.M)
+    if found is None:
+        raise SystemExit(f"docs/home/setup/cli/{name}.mdx has no icon")
+    icon = found.group(1)
+    if icon.startswith("/"):
+        return f'<img noZoom src="{icon}" alt="" style={IMG_STYLE} />'
+    return f'<Icon icon="{icon}" size={{14}} /> '
+
+
+def exported(source: Path, pattern: str) -> frozenset[str]:
+    """Name the bundled CLIs whose constants a TypeScript source lists.
+
+    Args:
+        source (Path): The TypeScript file to read.
+        pattern (str): A regex whose first group holds comma-separated names.
+    """
+    found = re.findall(pattern, source.read_text(), re.M | re.S)
+    names = {word.strip() for group in found for word in group.split(",")}
+    return frozenset(
+        name for name in BUILTIN_CLI_SPECS if name.upper() in names
+    )
+
+
+def browser_clis() -> frozenset[str]:
+    """Name the CLIs core's barrel exports, which the browser package re-exports."""
+    return exported(CORE_BARREL, r"^export \{([^}]*)\} from")
+
+
+def cloudflare_clis() -> frozenset[str]:
+    """Name the CLIs in core's spec table, which a Workers app builds."""
+    return exported(
+        CORE_SPECS,
+        r"^const CLI_SPECS = new Map<string, CLI>\(\s*\[([^\]]*)\]",
+    )
+
+
 def catalog(language: str) -> str:
     """Render the listed CLI inventory for an overview page.
 
     Args:
         language (str): The documentation section containing the links.
     """
+    listed = set(BUILTIN_CLI_SPECS) - UNLISTED
+    grouped = [name for _, names in GROUPS for name in names]
+    if sorted(grouped) != sorted(listed):
+        raise SystemExit(
+            f"Group every listed CLI once: {listed ^ set(grouped)}"
+        )
+    if language == "home/setup":
+        browser, cloudflare = browser_clis(), cloudflare_clis()
+        rows = [START]
+        for title, names in GROUPS:
+            rows += [
+                *([""] if len(rows) > 1 else []),
+                f"### {title}",
+                "",
+                "| CLI | Supported operations | Commands | Python | Node.js "
+                "| Browser | Cloudflare |",
+                "| --- | --- | :-: | :-: | :-: | :-: | :-: |",
+            ]
+            for name in names:
+                count = sum(1 for _ in commands(cli_spec_for(name).spec))
+                web = "✓" if name in browser else ""
+                edge = "✓" if name in cloudflare else ""
+                rows.append(
+                    f"| {logo(name)}[{name}](/home/setup/cli/{name}) "
+                    f"| {SUMMARIES[name]} | {count} | ✓ | ✓ | {web} | {edge} |"
+                )
+        return "\n".join([*rows, END])
     rows = [
         START,
         "| Program | Supported operations | Commands | Upstream license |",
         "| --- | --- | --- | --- |",
     ]
-    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
-        spec = cli_spec_for(name)
-        count = sum(1 for _ in commands(spec.spec))
+    for name in sorted(listed):
+        count = sum(1 for _ in commands(cli_spec_for(name).spec))
         upstream = LICENSES[name].upstream
-        if language != "home/setup":
-            upstream = f"[{upstream}](/{language}/cli/{name}#license)"
+        upstream = f"[{upstream}](/{language}/cli/{name}#license)"
         rows.append(
-            f"| [{name}](/{language}/cli/{name}) | {SUMMARIES[name]} | {count} "
-            f"| {upstream} |"
+            f"| {logo(name)}[{name}](/{language}/cli/{name}) "
+            f"| {SUMMARIES[name]} | {count} | {upstream} |"
         )
     return "\n".join([*rows, END])
 
@@ -461,7 +541,7 @@ def main() -> int:
         directory = ROOT / "docs" / language / "cli"
         documented = {p.stem for p in directory.glob("*.mdx")} - {
             "index",
-            "custom",
+            "new",
             "mcp",
         }
         if documented != set(BUILTIN_CLI_SPECS):

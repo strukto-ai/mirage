@@ -1,88 +1,177 @@
 ---
 title: SharePoint
 icon: microsoft
-description: Get a Microsoft Graph access token for the SharePoint VFS.
+description: Virtualize SharePoint Online sites and document libraries through Microsoft Graph.
 ---
 
-The SharePoint VFS talks to Microsoft SharePoint Online through the
-[Microsoft Graph API](https://learn.microsoft.com/en-us/graph/). It
-authenticates with an OAuth2 **bearer access token**. Unlike OneDrive, you do
-**not** need a drive id: the VFS discovers sites and document libraries for
-you, so a token with the right SharePoint permissions is all it needs.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-## Credentials
+Every SharePoint site the token can reach becomes a folder of its document
+libraries, each holding its real files as raw bytes. No drive ID is needed:
+the mount finds the sites and libraries itself.
 
-You only need an **access token**. Pick whichever path fits.
+## Setup
 
-### Option A: App-only (client credentials)
+The mount needs only a Microsoft Graph access token with SharePoint access.
 
-Best for scripted, automated, and CI runs. There is no signed-in user, and it
-works for SharePoint because the VFS uses `/sites` and `/sites/{id}/drives`
-(no `/me` context required).
+<AccordionGroup>
+  <Accordion title="App-only token (client credentials)">
+    Best for scripts and CI. There is no signed-in user; the mount works
+    through `/sites` and `/sites/{id}/drives`, which need no `/me` context.
 
-1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
-   **Identity** -> **Applications** -> **App registrations** -> **New registration**.
-1. Under **API permissions** -> **Microsoft Graph** -> **Application
-   permissions**, add `Sites.Read.All` for read-only, or `Sites.ReadWrite.All`
-   (plus `Files.ReadWrite.All` for writes) for full access. Click
-   **Grant admin consent**.
-1. Under **Certificates & secrets**, create a **client secret**.
-1. Request a token with the client-credentials flow:
+    1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go
+       to **Entra ID** > **App registrations** > **New registration**.
+    1. Under **API permissions** > **Microsoft Graph** > **Application
+       permissions**, add `Sites.Read.All` to read or `Sites.ReadWrite.All`
+       to write, then click **Grant admin consent**.
+    1. Under **Certificates & secrets**, create a **client secret**.
+    1. Request a token:
 
-```bash
-TENANT_ID="<your tenant id>"
-CLIENT_ID="<your app client id>"
-CLIENT_SECRET="<your client secret>"
+       ```bash
+       curl -s -X POST "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
+         -d "client_id=$CLIENT_ID" \
+         -d "client_secret=$CLIENT_SECRET" \
+         -d "scope=https://graph.microsoft.com/.default" \
+         -d "grant_type=client_credentials" | jq -r .access_token
+       ```
+  </Accordion>
+  <Accordion title="Delegated token (Graph Explorer)">
+    The fastest way to try it as a user. The token lasts about an hour and
+    reaches only what that user can.
 
-curl -s -X POST "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
-  -d "client_id=$CLIENT_ID" \
-  -d "client_secret=$CLIENT_SECRET" \
-  -d "scope=https://graph.microsoft.com/.default" \
-  -d "grant_type=client_credentials" | jq -r .access_token
-```
+    1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer)
+       and sign in.
+    1. Run a SharePoint query such as `GET /sites?search=*` and consent when
+       asked.
+    1. Open the **Access token** tab and copy the token.
+  </Accordion>
+  <Accordion title="Check access">
+    With the token in `TOKEN`, list the sites and one site's libraries:
 
-### Option B: Delegated (Graph Explorer)
-
-Fastest way to try it as yourself. The token lasts about an hour, which is
-plenty for a test run.
-
-1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer) and **Sign in**.
-1. Run any SharePoint query (for example `GET /sites?search=*`) and consent when prompted.
-1. Open the **Access token** tab and copy the token.
-
-This is a **delegated** token scoped to your own SharePoint access.
-
-<Note>
-A static token is short-lived (about 60 minutes). For long-running mounts, pass
-a `Callable[[], str]` provider as `access_token` instead of a string. The
-VFS refreshes on `401`, so the mount survives token expiry.
-</Note>
-
-### Verify access
-
-With your token exported as `TOKEN`:
-
-```bash
-# list sites you can see (name + id)
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://graph.microsoft.com/v1.0/sites?search=*" | jq '.value[] | {displayName, id}'
-
-# list the document libraries (drives) in a site
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
-```
-
-### Set environment variables
+    ```bash
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "https://graph.microsoft.com/v1.0/sites?search=*" | jq '.value[] | {displayName, id}'
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
+    ```
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-MS_GRAPH_DRIVE_TOKEN=<token>
+export MS_GRAPH_DRIVE_TOKEN=eyJ0eXAi...
 ```
 
-<Note>
-Snapshots and version pinning rely on SharePoint **version history**, which is
-on by default. Older versions are only readable while the library retains them
-(the version cap is configurable, and an admin can disable versioning).
-</Note>
+A token string lasts about 60 minutes. For a long-running mount, pass a
+callable as `access_token`: it is called for each request and again after a
+`401`, so the mount outlives one token.
 
-For SDK guides, see [SharePoint (Python)](/python/vfs/sharepoint) and [SharePoint (TypeScript)](/typescript/setup/sharepoint).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /sharepoint:
+        vfs: sharepoint
+        mode: read
+        config:
+          access_token: ${MS_GRAPH_DRIVE_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id sp
+    mirage shell -w sp -c 'ls /sharepoint'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.sharepoint import SharePointConfig, SharePointVFS
+
+    config = SharePointConfig(access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"])
+    ws = Workspace({"/sharepoint": SharePointVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /sharepoint")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SharePointVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/sharepoint': new SharePointVFS({
+          accessToken: process.env.MS_GRAPH_DRIVE_TOKEN!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /sharepoint')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/sharepoint/
+  Engineering/
+    Documents/
+      specs/
+        api.md
+    Design Reviews/
+  Marketing/
+    Documents/
+```
+
+- Paths read `/<site>/<library>/<path>`, with the site's display name.
+  `tenant_host` and `site_filter` narrow the sites listed.
+- `site` plus `drive` mounts one library as the root, and `key_prefix` one
+  folder inside it.
+- Snapshots pin files through version history, which is on by default; old
+  versions read only while the library keeps them (an admin can cap or turn
+  off versioning).
+
+## Sample runs
+
+```bash
+$ ls /sharepoint
+Engineering
+Marketing
+```
+
+```bash
+$ ls /sharepoint/Engineering
+Design Reviews
+Documents
+```
+
+```bash
+$ head -n 2 /sharepoint/Engineering/Documents/specs/api.md
+# API spec
+Version 3 adds pagination to every list call.
+```
+
+On a `write` mount, `tee`, `cp`, `mv`, `rm` and `mkdir` change the library;
+the token needs a write permission such as `Sites.ReadWrite.All`.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/sharepoint">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/sharepoint">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>
