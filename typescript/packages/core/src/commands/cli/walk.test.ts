@@ -915,19 +915,50 @@ describe('walk value paths', () => {
   }
 
   it.each([
-    [['-C', 'a', '-Cb', 'mid', 'leaf'], { 1: '/w/a', 2: '/w/a/b' }, [1]],
-    [['-C', 'a', '--dir=d', 'mid', 'leaf'], { 1: '/w/a', 2: '/w/a/d' }, [1]],
-    [['-C', '-x', 'mid', 'leaf'], { 1: '/w/-x' }, [1]],
+    [
+      ['-C', 'a', '-Cb', 'mid', 'leaf'],
+      [
+        ['option', null, null],
+        ['value', null, '/w/a'],
+        ['option', '-C', '/w/a/b'],
+        ['subcommand', null, null],
+        ['subcommand', null, null],
+      ],
+    ],
+    [
+      ['-C', 'a', '--dir=d', 'mid', 'leaf'],
+      [
+        ['option', null, null],
+        ['value', null, '/w/a'],
+        ['option', '--dir', '/w/a/d'],
+        ['subcommand', null, null],
+        ['subcommand', null, null],
+      ],
+    ],
+    [
+      ['-C', '-x', 'mid', 'leaf'],
+      [
+        ['option', null, null],
+        ['value', null, '/w/-x'],
+        ['subcommand', null, null],
+        ['subcommand', null, null],
+      ],
+    ],
     [
       ['--pair', 'n1', 'f1', 'mid', '--pair', 'n2', 'f2', 'leaf'],
-      { 2: '/w/f1', 6: '/w/f2' },
-      [1, 2, 5, 6],
+      [
+        ['option', null, null],
+        ['value', null, null],
+        ['value', null, '/w/f1'],
+        ['subcommand', null, null],
+        ['option', null, null],
+        ['value', null, null],
+        ['value', null, '/w/f2'],
+        ['subcommand', null, null],
+      ],
     ],
-  ])('keeps each group value by where it stands: %j', (argv, paths, values) => {
+  ])('names each word it consumes and the path it carries: %j', (argv, words) => {
     const result = walk('r', basedTree(), argv, '/w')
-    expect(
-      Object.fromEntries([...result.valuePaths].map(([slot, path]) => [slot, path.virtual])),
-    ).toEqual(paths)
-    expect(result.valuePositions).toEqual(values)
+    expect(result.words.map((w) => [w.kind, w.option, w.path?.virtual ?? null])).toEqual(words)
   })
 })

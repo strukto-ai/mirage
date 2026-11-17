@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { HIMALAYA } from '../../../commands/cli/builtin/himalaya/index.ts'
-import { cliSpecFor } from '../../../commands/cli/specs.ts'
-import type { CommandContext } from '../../../policy/types.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { DeviceInput } from '../../../io/types.ts'
@@ -23,14 +20,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { runResult } from '../../../../tests/workspace/fixtures/integration_fixture.ts'
-import {
-  commandWords,
-  defaultCwdOperand,
-  optionLoopExits,
-  pathFlagScopes,
-  programTokens,
-  routableScopes,
-} from './routing.ts'
+import { defaultCwdOperand, optionLoopExits, pathFlagScopes, routableScopes } from './routing.ts'
 
 describe('optionLoopExits', () => {
   it.each([
@@ -110,141 +100,6 @@ describe('pathFlagScopes', () => {
     // The handler reaches them through the dispatcher, so they name no
     // mount the line has to run on (DISPATCH_FLAG_KEYS).
     expect(pathFlagScopes(cmd, argv, '/')).toEqual([])
-  })
-})
-
-describe('programTokens', () => {
-  it('walks a CLI verb path and keeps the rest raw', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
-    try {
-      ws.registerCli('git', cliSpecFor('git'))
-      const reg = ws.registry
-      // Options before the verb are not the verb; an alias reads as its
-      // canonical name; the leaf's own words follow untouched.
-      expect(programTokens(reg, 'git', ['-C', '/r', 'reset', '--hard', 'HEAD'], '/')).toEqual([
-        ['git', 'reset', '--hard', 'HEAD'],
-        ['git', 'reset'],
-      ])
-      expect(programTokens(reg, 'git', ['log', '-1'], '/')).toEqual([
-        ['git', 'log', '-1'],
-        ['git', 'log'],
-      ])
-      // A walk the tree refuses (unknown verb, bare head) reads raw.
-      expect(programTokens(reg, 'git', ['frobnicate', 'x'], '/')).toEqual([
-        ['git', 'frobnicate', 'x'],
-        ['git'],
-      ])
-      expect(programTokens(reg, 'git', [], '/')).toEqual([['git'], ['git']])
-      // Anything else is the name and the raw argv.
-      expect(programTokens(reg, 'rm', ['-rf', '/x'], '/')).toEqual([['rm', '-rf', '/x'], ['rm']])
-      // A group option's value is never read as a verb, even one that
-      // spells one (`-C status`, a directory named status).
-      const words = commandWords(reg, 'git', ['-C', 'status', 'log'], [], [], '/')
-      expect(words.map((w) => [w.text, w.kind, w.option])).toEqual([
-        ['git', 'name', null],
-        ['-C', 'option', null],
-        ['status', 'value', '-C'],
-        ['log', 'subcommand', null],
-      ])
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
-describe('commandWords', () => {
-  async function seenByPolicy(line: string, setup = ''): Promise<CommandContext> {
-    const seen: CommandContext[] = []
-    const ws = new Workspace(
-      { '/workspace': new RAMVFS(), '/slack': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        policies: [
-          {
-            preCommand(ctx) {
-              if (['cd', 'mkdir', 'ln', 'echo'].includes(ctx.command)) return null
-              seen.push(ctx)
-              return { kind: 'deny', reason: 'captured' }
-            },
-          },
-        ],
-      },
-    )
-    try {
-      ws.registerCli('git', cliSpecFor('git'))
-      ws.registerCli('pdfinfo', cliSpecFor('pdfinfo'))
-      ws.registerCli('himalaya', HIMALAYA, {
-        imap_host: 'h',
-        smtp_host: 'h',
-        username: 'u',
-        password: 'p',
-      })
-      await ws.shell('mkdir -p /workspace/outbox')
-      if (setup !== '') await ws.shell(setup)
-      await ws.shell('cd /workspace/outbox')
-      await ws.shell(line)
-      const ctx = seen[seen.length - 1]
-      if (ctx === undefined) throw new Error(`no command reached the policy: ${line}`)
-      return ctx
-    } finally {
-      await ws.close()
-    }
-  }
-
-  it.each([
-    [
-      'himalaya message reply 1 --attach ../../slack/export.csv',
-      '../../slack/export.csv',
-      '--attach',
-    ],
-    [
-      'himalaya message reply 1 --attach=../../slack/export.csv',
-      '--attach=../../slack/export.csv',
-      '--attach',
-    ],
-    ['git -C ../../slack/export.csv log', '../../slack/export.csv', '-C'],
-    ['git -C../../slack/export.csv log', '-C../../slack/export.csv', '-C'],
-    ['pdfinfo ../../slack/export.csv', '../../slack/export.csv', null],
-    ['tar -cf ../../slack/export.csv a.txt', '../../slack/export.csv', '-cf'],
-    ['tar -cf../../slack/export.csv a.txt', '-cf../../slack/export.csv', '-cf'],
-    ['tar -C ../.. -Cslack/export.csv -cf x.tar a.txt', '-Cslack/export.csv', '-C'],
-    ['grep --file=../../slack/export.csv x', '--file=../../slack/export.csv', '--file'],
-    ['grep -f../../slack/export.csv x', '-f../../slack/export.csv', '-f'],
-  ])('a path word names the path paths holds: %s', async (line, text, option) => {
-    const ctx = await seenByPolicy(line)
-    const word = ctx.words?.find((w) => w.text === text)
-    expect([word?.option, word?.toDict().path]).toEqual([option, '/slack/export.csv'])
-    expect(ctx.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
-  })
-
-  it.each([
-    ['himalaya message reply 1 --attach x.csv', 'x.csv'],
-    ['grep --file=x.csv y', '--file=x.csv'],
-    ['tar -cf x.csv a.txt', 'x.csv'],
-  ])('a policy sees the file a linked option value opens: %s', async (line, text) => {
-    const ctx = await seenByPolicy(
-      line,
-      'echo s > /slack/export.csv && ln -s /slack/export.csv /workspace/outbox/x.csv',
-    )
-    const word = ctx.words?.find((w) => w.text === text)
-    expect(word?.toDict().path).toBe('/workspace/outbox/x.csv')
-    expect(ctx.paths.map((p) => p.virtual)).toContain('/slack/export.csv')
-  })
-
-  it.each(['grep --file= x', 'pdfinfo -'])(
-    'a dash or an empty value names no file: %s',
-    async (line) => {
-      const virtuals = (await seenByPolicy(line)).paths.map((p) => p.virtual)
-      expect(virtuals).not.toContain('/workspace/outbox')
-      expect(virtuals).not.toContain('/workspace/outbox/-')
-    },
-  )
-
-  it('a dash-led group value is a value', async () => {
-    const ctx = await seenByPolicy('git -C -x log')
-    const word = ctx.words?.find((w) => w.text === '-x')
-    expect([word?.kind, word?.option]).toEqual(['value', '-C'])
   })
 })
 

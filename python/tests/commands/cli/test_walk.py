@@ -867,23 +867,55 @@ def _based_tree() -> CommandSpec:
 
 
 @pytest.mark.parametrize(
-    "argv, paths, values",
+    "argv, words",
     [
-        (["-C", "a", "-Cb", "mid", "leaf"], {1: "/w/a", 2: "/w/a/b"}, (1,)),
+        (
+            ["-C", "a", "-Cb", "mid", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, "/w/a"),
+                ("option", "-C", "/w/a/b"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
+        ),
         (
             ["-C", "a", "--dir=d", "mid", "leaf"],
-            {1: "/w/a", 2: "/w/a/d"},
-            (1,),
+            [
+                ("option", None, None),
+                ("value", None, "/w/a"),
+                ("option", "--dir", "/w/a/d"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
         ),
-        (["-C", "-x", "mid", "leaf"], {1: "/w/-x"}, (1,)),
+        (
+            ["-C", "-x", "mid", "leaf"],
+            [
+                ("option", None, None),
+                ("value", None, "/w/-x"),
+                ("subcommand", None, None),
+                ("subcommand", None, None),
+            ],
+        ),
         (
             ["--pair", "n1", "f1", "mid", "--pair", "n2", "f2", "leaf"],
-            {2: "/w/f1", 6: "/w/f2"},
-            (1, 2, 5, 6),
+            [
+                ("option", None, None),
+                ("value", None, None),
+                ("value", None, "/w/f1"),
+                ("subcommand", None, None),
+                ("option", None, None),
+                ("value", None, None),
+                ("value", None, "/w/f2"),
+                ("subcommand", None, None),
+            ],
         ),
     ],
 )
-def test_walk_keeps_each_group_value_by_where_it_stands(argv, paths, values):
+def test_walk_names_each_word_it_consumes_and_the_path_it_carries(argv, words):
     result = walk("r", _based_tree(), argv, "/w")
-    assert {k: v.virtual for k, v in result.value_paths.items()} == paths
-    assert result.value_positions == values
+    assert [
+        (w.kind.value, w.option, w.path.virtual if w.path else None)
+        for w in result.words
+    ] == words

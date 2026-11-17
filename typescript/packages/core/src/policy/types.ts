@@ -582,8 +582,10 @@ export interface CommandContext {
   line?: string
   command: string
   /**
-   * Every path the line names: the positional operands first, then the
-   * values of any path-valued flags. What a path-pattern guard matches on.
+   * Every path the line reaches: its words' paths in the order they stand,
+   * then values typed onto their option and values a default supplied, the
+   * link targets the command reaches, a bare command's working directory
+   * and the redirect targets. What a path-pattern guard matches on.
    */
   paths: readonly PathSpec[]
   /**

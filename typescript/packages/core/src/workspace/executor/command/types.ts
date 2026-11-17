@@ -15,7 +15,7 @@
 import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { WordChoices } from '../../../commands/spec/word_choice.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import type { HandOff } from '../../../policy/types.ts'
+import type { CommandWord, HandOff } from '../../../policy/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../execution/job/index.ts'
@@ -94,3 +94,19 @@ export type ExecuteNodeFn = (
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
+
+/**
+ * One command read once, as its grammar reads it: every view a policy gets
+ * of the line comes from here. `words` holds one per word after the name, in
+ * argv order, each with its kind, the option it belongs to and the path it
+ * names; `supplied` the PATH option values no word typed, which a default
+ * or the environment supplied; `tokens` the line as an admission pattern
+ * reads it; `program` the name and a tree's verb path. Mirrors Python's
+ * `LineReading`.
+ */
+export interface LineReading {
+  readonly words: readonly CommandWord[]
+  readonly supplied: readonly PathSpec[]
+  readonly tokens: readonly string[]
+  readonly program: readonly string[]
+}
