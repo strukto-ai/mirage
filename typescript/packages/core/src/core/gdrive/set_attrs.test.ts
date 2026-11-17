@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { makeGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { GoogleApiError } from '../google/client.ts'
 import { setAttrs } from './set_attrs.ts'
 
 const MTIME = '2020-01-01T00:00:00+00:00'
@@ -39,5 +40,24 @@ describe('gdrive setAttrs', () => {
       sent.length === 0 ? [] : ['f1'],
     )
     expect(drive.patchFile.mock.calls.map((call) => call[1])).toEqual(sent)
+  })
+
+  it.each<[number, string]>([
+    [404, 'ENOENT'],
+    [403, 'EACCES'],
+  ])('answers a %i from the patch as %s', async (status, code) => {
+    const drive = stubDrive()
+    drive.patchFile.mockRejectedValue(new GoogleApiError('File not found: f1.', status))
+    await expect(
+      setAttrs(makeGDriveAccessor(drive), PathSpec.fromStrPath('/a.txt'), { mtime: MTIME }, ROW),
+    ).rejects.toMatchObject({ code })
+  })
+
+  it('passes any other failed patch through', async () => {
+    const drive = stubDrive()
+    drive.patchFile.mockRejectedValue(new GoogleApiError('down', 500))
+    await expect(
+      setAttrs(makeGDriveAccessor(drive), PathSpec.fromStrPath('/a.txt'), { mtime: MTIME }, ROW),
+    ).rejects.toBeInstanceOf(GoogleApiError)
   })
 })

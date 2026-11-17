@@ -17,6 +17,7 @@ from datetime import datetime
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
+from mirage.core.google.client import GoogleApiError
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import to_iso_z
@@ -37,7 +38,9 @@ async def set_attrs(
     """Store a modified time as the item's Drive ``modifiedTime``, and
     return the fields Drive does not keep: permission bits, ownership
     and the access time land in the namespace's overlay, and so does a
-    time for the mount root, which is no item of the mount's own.
+    time for the mount root, which is no item of the mount's own. An
+    item another client removes between the lookup and the patch is
+    ENOENT, as one missing at the lookup is.
 
     Args:
         accessor (GDriveAccessor): backend accessor.
@@ -63,8 +66,13 @@ async def set_attrs(
     entry = await live_row(accessor, path, entry)
     if entry is None:
         raise enoent(path)
-    await accessor.drive.patch_file(
-        entry.extra["file_id"],
-        {"modifiedTime": to_iso_z(datetime.fromisoformat(mtime))},
-    )
+    try:
+        await accessor.drive.patch_file(
+            entry.extra["file_id"],
+            {"modifiedTime": to_iso_z(datetime.fromisoformat(mtime))},
+        )
+    except GoogleApiError as exc:
+        if exc.status != 404:
+            raise
+        raise enoent(path) from exc
     return residual

@@ -17,6 +17,7 @@ import { enoent } from '../../errors/fs.ts'
 import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { GoogleApiError } from '../google/client.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
@@ -24,7 +25,9 @@ import { eaccesOnDenied } from './resolve.ts'
  * Store a modified time as the item's Drive `modifiedTime`, and return the
  * fields Drive does not keep: permission bits, ownership and the access time
  * land in the namespace's overlay, and so does a time for the mount root,
- * which is no item of the mount's own. Mirrors Python's `set_attrs`.
+ * which is no item of the mount's own. An item another client removes between
+ * the lookup and the patch is ENOENT, as one missing at the lookup is. Mirrors
+ * Python's `set_attrs`.
  */
 export const setAttrs = eaccesOnDenied(async function setAttrs(
   accessor: GDriveAccessor,
@@ -44,8 +47,13 @@ export const setAttrs = eaccesOnDenied(async function setAttrs(
   }
   const live = await liveRow(accessor, path, entry)
   if (live === null) throw enoent(path)
-  await accessor.drive.patchFile(live.extra.file_id as string, {
-    body: { modifiedTime: toIsoZ(new Date(fields.mtime)) },
-  })
+  try {
+    await accessor.drive.patchFile(live.extra.file_id as string, {
+      body: { modifiedTime: toIsoZ(new Date(fields.mtime)) },
+    })
+  } catch (err) {
+    if (!(err instanceof GoogleApiError) || err.status !== 404) throw err
+    throw enoent(path)
+  }
   return residual
 })
