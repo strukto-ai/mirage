@@ -1,0 +1,64 @@
+---
+title: From MCP
+icon: plug
+description: Install an MCP server's tools as one CLI, with Python or TypeScript.
+---
+
+An MCP server's tools become one CLI: each tool is a subcommand that takes the
+tool's arguments as one JSON object. Full guide:
+[Python](/python/cli/mcp) · [TypeScript](/typescript/cli/mcp).
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+clis:
+  issues:
+    cli: mcp
+    machine: in_process
+    config:
+      url: https://mcp.example.com/mcp
+      auth:
+        type: bearer
+        token:
+          from: env
+          key: ISSUES_TOKEN
+```
+
+`mirage workspace create workspace.yaml` builds it on the server. In code,
+read the server's tools and register them on an existing `ws`:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import mcp_cli
+
+    config = {
+        "url": "https://mcp.example.com/mcp",
+        "auth": {"type": "bearer", "token": os.environ["ISSUES_TOKEN"]},
+    }
+    ws.register_cli("issues", await mcp_cli(config), config)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { mcpCli } from '@struktoai/mirage-node'
+
+    const config = {
+      url: 'https://mcp.example.com/mcp',
+      auth: { type: 'bearer', token: process.env.ISSUES_TOKEN! },
+    }
+    ws.registerCli('issues', await mcpCli(config), config)
+    ```
+  </Tab>
+</Tabs>
+
+A tool named `search_issues` becomes the subcommand `search-issues`:
+
+```bash
+issues --help
+issues search-issues --help
+issues search-issues '{"query": "login bug"}'
+```
