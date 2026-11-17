@@ -586,6 +586,7 @@ def start_shell(
             ignores=SHELL_IGNORED_SIGNALS,
             one_command=one_command,
             stdin=stdin,
+            traits=current_caller().traits,
         )
     except BlockingIOError as exc:
         raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
@@ -926,6 +927,7 @@ async def handle_background(
             limit=session.processes.max,
             simple=one_program(left, session),
             program=program_text(left, session),
+            traits=current_caller().traits,
         )
     except BaseException as exc:
         release_job()

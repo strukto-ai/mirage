@@ -25,6 +25,7 @@ import {
   redirectRunnerFor,
   redirectSyntaxFor,
   runAsProgram,
+  setTraits,
   runWithCaller,
   runWithRedirectPaths,
   sessionAccess,
@@ -45,9 +46,9 @@ import {
   resolveProducer,
   type Route,
 } from '../../policy/index.ts'
+import type { ProcessTraits } from '../../execution/process/types.ts'
 import { agreed } from '../../policy/policies.ts'
 import type { EntryGate } from '../../policy/types.ts'
-import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
@@ -106,15 +107,13 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { RUNNERS } from '../lookup/constants.ts'
+import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import {
   lookup,
-  mirageProgramAt,
   routedConsumer,
+  runsWrapper,
   wrapperAnswer,
-  wrapperProgramWords,
-  wrapperRefusal,
-  wrapperRunsOutside,
+  wrapperTraits,
 } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -1020,21 +1019,17 @@ async function runArgv(
       }
       try {
         place(admitted?.route ?? null)
-        // A wrapper a runtime takes starts its program where Mirage cannot,
-        // so the program is judged here, and where a policy places it the
-        // wrapper goes with it. One process runs them all, so every route
-        // answering for them has to agree.
+        // A wrapper a machine takes by name starts its program there, where
+        // Mirage never runs it, so the program is judged here, and where a
+        // policy places it the wrapper goes with it. One process runs them
+        // all, so every route answering for them has to agree.
         const gate = admitted
+        const placedLine = context.frame.routing
         if (
           gate !== null &&
-          wrapperRunsOutside(
-            name,
-            argv.args,
-            session,
-            registry,
-            context.frame.routing,
-            namespace.sessionLinks(session),
-          )
+          PROGRAM_WRAPPERS.has(name) &&
+          placedLine !== undefined &&
+          Object.hasOwn(placedLine.bindings, name)
         ) {
           const verdict = await wrappedVerdict(
             [name, ...argv.args].map((w) => ({ raw: w, text: w })),
@@ -1211,12 +1206,20 @@ class Relay extends JobConsole {
  * Run the program a wrapper runs, as a program, its output handed over as it
  * runs. Mirrors Python's `_run_program`.
  */
+/**
+ * Run a wrapper's program in Mirage, as the program it execs, its output
+ * handed over as it runs: the process it runs as, and all it starts, carry
+ * what the wrapper changed. `warned` is what the wrapper says before it runs
+ * the program. Mirrors Python's `_run_program`.
+ */
 function runProgram(
   executeFn: ExecuteFn,
   name: string,
   line: string,
   session: SessionState,
   stdin: ByteSource | null,
+  traits: ProcessTraits,
+  warned = '',
 ): RedirectResult {
   const node = new ExecutionNode({ command: name })
   const run = async (
@@ -1224,13 +1227,16 @@ function runProgram(
     errors: OutputFn,
     signal: AbortSignal,
   ): Promise<RunResult> => {
+    if (warned !== '') await errors(encodeText(warned))
     const ran = await runAsProgram(session, () =>
-      executeFn(line, {
-        sessionId: session.sessionId,
-        signal,
-        sink: new Relay(output, errors),
-        ...(stdin !== null ? { stdin } : {}),
-      }),
+      setTraits(traits, () =>
+        executeFn(line, {
+          sessionId: session.sessionId,
+          signal,
+          sink: new Relay(output, errors),
+          ...(stdin !== null ? { stdin } : {}),
+        }),
+      ),
     )
     if (ran.stdout !== null) {
       for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
@@ -1246,6 +1252,43 @@ function runProgram(
   const [stdout, io] = runOutput(run)
   return [stdout, io, node]
 }
+
+/**
+ * A wrapper Mirage runs (`nice`, `nohup`, `setsid`, `stdbuf`, `ionice`): it
+ * answers for itself (`nice` alone, a bad option, a program it cannot exec),
+ * or execs its program with what it changes (`wrapperTraits`). The runner it
+ * runs as, when it is a job's or a stage's one command, becomes the program;
+ * the program is judged, placed and run as any command is, and a machine with
+ * processes of its own is handed the wrapper's words before it. Mirrors
+ * Python's `_run_wrapper`.
+ */
+function runWrapper(
+  executeFn: ExecuteFn,
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  stdin: ByteSource | null,
+): RedirectResult {
+  const caller = currentCaller()
+  const answer = wrapperAnswer(name, args, session, registry, caller.traits.niceness)
+  if (answer.runsFrom === null) {
+    const err = encodeText(answer.stderr)
+    return [
+      answer.stdout === '' ? null : encodeText(answer.stdout),
+      new IOResult({
+        exitCode: answer.exitCode,
+        ...(err.byteLength > 0 ? { stderr: err } : {}),
+      }),
+      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
+    ]
+  }
+  const [traits, warned] = wrapperTraits(name, args, answer.runsFrom, caller.traits)
+  const line = shellJoin(args.slice(answer.runsFrom))
+  caller.process?.wrap(traits, line)
+  return runProgram(executeFn, name, line, session, stdin, traits, warned)
+}
+
 /** A command the gate refused, as its run answers it. */
 function refused(command: string, verdict: Refused): RedirectResult {
   return [
@@ -1440,20 +1483,8 @@ async function routeArgv(
     ]
   }
 
-  const links = namespace.sessionLinks(session)
-  const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing, links)
-  if (at !== null) {
-    const refused = wrapperRefusal(name, argv.args, session, registry)
-    if (refused !== null) {
-      const [code, said] = refused
-      const err = encodeText(said)
-      return [
-        null,
-        new IOResult({ exitCode: code, stderr: err }),
-        new ExecutionNode({ command: name, exitCode: code, stderr: err }),
-      ]
-    }
-    return runProgram(executeFn, name, shellJoin(argv.args.slice(at)), session, stdin)
+  if (runsWrapper(name, argv.args, session, context.frame.routing)) {
+    return runWrapper(executeFn, name, argv.args, session, registry, stdin)
   }
 
   const [consumer, routing] = routedConsumer(
@@ -1462,52 +1493,10 @@ async function routeArgv(
     session,
     registry,
     context.frame.routing,
-    links,
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
-    const entry = routing.bindings[key] ?? null
-    const named = wrapperProgramWords(
-      name,
-      argv.args,
-      session,
-      registry,
-      entry === null ? null : entry.machine,
-      links,
-    )
-    const cut = argv.args.length + 1 - named.length
-    const args = named.slice(1)
-    const typed = argv.args.slice(cut)
-    const handed = new Argv(
-      named[0] ?? name,
-      args,
-      argv.operands.slice(cut).map((op, i) => (args[i] === typed[i] ? op : (args[i] ?? op))),
-      cut === 0 ? argv.prefix : [],
-    )
-    return runExternal(handed, stdin, session, registry, routing, signal, sink)
-  }
-
-  if (consumer === Consumer.UNKNOWN && RUNNERS.has(name)) {
-    const answer = wrapperAnswer(name, argv.args, session, registry)
-    if (answer.runsFrom !== null) {
-      return runProgram(
-        executeFn,
-        name,
-        shellJoin(argv.args.slice(answer.runsFrom)),
-        session,
-        stdin,
-      )
-    }
-    const err = encodeText(answer.stderr)
-    return [
-      answer.stdout === '' ? null : encodeText(answer.stdout),
-      new IOResult({
-        exitCode: answer.exitCode,
-        ...(err.byteLength > 0 ? { stderr: err } : {}),
-      }),
-      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
-    ]
+    return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
   // `--help` as a builtin's first word: bash answers it with the builtin's

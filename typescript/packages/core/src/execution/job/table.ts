@@ -15,7 +15,7 @@
 import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
-import { shownMachine } from '../process/types.ts'
+import { shownMachine, type ProcessTraits } from '../process/types.ts'
 import { currentRequest, type IncomingRequest } from '../../io/web/request.ts'
 import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
@@ -350,6 +350,8 @@ export class JobTable {
     simple?: boolean
     // How its process shows that program; absent for the command line.
     program?: string | null
+    // What the wrappers around the job changed for its process.
+    traits?: ProcessTraits
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -399,6 +401,7 @@ export class JobTable {
       oneCommand: init.simple === true,
       background: true,
       programIgnores: IGNORED_SIGNALS,
+      ...(init.traits !== undefined ? { traits: init.traits } : {}),
     })
     const { line, group } = process.record
     let jobId: number

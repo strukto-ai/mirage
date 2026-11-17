@@ -220,26 +220,26 @@ async function withBox(
 
 // A wrapper a runtime outside Mirage runs execs its program there, so the
 // program is admitted as `env`, `timeout` and `command` have theirs admitted.
-describe('a wrapper run outside Mirage', () => {
+describe('a wrapper Mirage runs', () => {
   it.each([
-    'nohup python3 -c x',
-    'nice -n 5 python3 -c x',
-    'stdbuf -oL python3 -c x',
-    'setsid -w python3 -c x',
-    'ionice -c 3 python3 -c x',
-    'nohup nice python3 -c x',
-    'nohup python3 -c x & wait $!',
-    'nohup time python3 -c x',
-    'nohup nice time -p python3 -c x',
-    'nohup time env python3 -c x',
-  ])('runs no program the allow list leaves out: %s', async (line) => {
+    ['nohup tool -c x', 'tool -c x'],
+    ['nice -n 5 tool -c x', 'tool -c x'],
+    ['stdbuf -oL tool -c x', 'tool -c x'],
+    ['setsid -w tool -c x', 'tool -c x'],
+    ['ionice -c 3 tool -c x', 'tool -c x'],
+    ['nohup nice tool -c x', 'tool -c x'],
+    ['nohup tool -c x & wait $!', 'tool -c x & wait $!'],
+    ['nohup time tool -c x', 'time tool -c x'],
+    ['nohup nice time -p tool -c x', 'time -p tool -c x'],
+    ['nohup time env tool -c x', 'time env tool -c x'],
+  ])('runs no program the allow list leaves out: %s', async (line, bare) => {
     await withBox(
       { commands: { allow: [...WRAPPERS, 'wait', 'time', 'env'] } },
       async (ws, box) => {
-        const bare = await ws.shell('python3 -c x', { sessionId: 's' })
+        const alone = await ws.shell(bare, { sessionId: 's' })
         const io = await ws.shell(line, { sessionId: 's' })
-        expect(bare.exitCode).toBe(126)
-        expect([io.exitCode, text(io.stderr)]).toEqual([126, text(bare.stderr)])
+        expect([alone.exitCode, io.exitCode]).toEqual([126, 126])
+        expect(text(io.stderr)).toContain('tool: Permission denied\n')
         expect(box.ran).toEqual([])
       },
     )
@@ -254,16 +254,23 @@ describe('a wrapper run outside Mirage', () => {
     })
   })
 
-  it.each([
-    'nohup python3 -c x',
-    'nohup --help',
-    'nohup -- python3 -c x',
-    'nice --ad 5 python3 -c x',
-  ])('runs a listed program: %s', async (line) => {
-    await withBox({ commands: { allow: ['nohup', 'nice', 'python3'] } }, async (ws, box) => {
-      const io = await ws.shell(line, { sessionId: 's' })
+  it.each(['nohup tool -c x', 'nohup -- tool -c x', 'nice --ad 5 tool -c x'])(
+    'hands a machine its words before a listed program: %s',
+    async (line) => {
+      await withBox({ commands: { allow: ['nohup', 'nice', 'tool'] } }, async (ws, box) => {
+        const io = await ws.shell(line, { sessionId: 's' })
+        expect(io.exitCode).toBe(0)
+        expect(box.ran).toEqual([line.split(' ')])
+      })
+    },
+  )
+
+  it('answers its own help', async () => {
+    await withBox({}, async (ws, box) => {
+      const io = await ws.shell('nohup --help')
       expect(io.exitCode).toBe(0)
-      expect(box.ran).toEqual([line.split(' ')])
+      expect(text(io.stdout)).toContain('Usage: nohup')
+      expect(box.ran).toEqual([])
     })
   })
 
@@ -283,9 +290,9 @@ describe('a wrapper run outside Mirage', () => {
   // the gate finds that answer there rather than asking again.
   it('asks about its program once', async () => {
     await withBox(
-      { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } },
+      { commands: { ask: [{ reason: 'nod', commands: ['tool'] }] } },
       async (ws, box) => {
-        const line = 'nohup python3 -c x'
+        const line = 'nohup tool -c x'
         const held = await ws.shell(line, { sessionId: 's' })
         expect(held.exitCode).toBe(126)
         const pending = ws.decisions.pending()
@@ -293,7 +300,7 @@ describe('a wrapper run outside Mirage', () => {
         await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
         const ran = await ws.shell(line, { sessionId: 's' })
         expect(ran.exitCode).toBe(0)
-        expect(box.ran).toEqual([['nohup', 'python3', '-c', 'x']])
+        expect(box.ran).toEqual([['nohup', 'tool', '-c', 'x']])
         expect(ws.decisions.pending()).toEqual([])
       },
     )
@@ -318,17 +325,16 @@ describe('a wrapper run outside Mirage', () => {
     })
   })
 
-  // GNU env splits -S into a command line the gate cannot read, and the
-  // machine runs its own pip, not the session's function of that name.
   it.each([
-    ['', "nohup time env --split-string='python3 -c x'", 'env'],
-    ['', "nohup time env -S 'python3 -c x'", 'env'],
-    ['pip() { echo harmless; }', 'nohup time pip --version', 'pip'],
-  ])('admits what the machine runs: %s %s', async (setup, line, refused) => {
+    ['', "nohup time env --split-string='tool -c x'", "time env --split-string='tool -c x'"],
+    ['', "nohup time env -S 'tool -c x'", "time env -S 'tool -c x'"],
+    ['pip() { echo harmless; }', 'nohup time pip --version', 'time pip --version'],
+  ])('runs its program as it runs bare: %s %s', async (setup, line, bare) => {
     await withBox({ commands: { allow: ['nohup', 'time', 'env', 'echo'] } }, async (ws, box) => {
       if (setup !== '') await ws.shell(setup, { sessionId: 's' })
+      const alone = await ws.shell(bare, { sessionId: 's' })
       const io = await ws.shell(line, { sessionId: 's' })
-      expect([io.exitCode, text(io.stderr)]).toEqual([126, `${refused}: Permission denied\n`])
+      expect([io.exitCode, text(io.stdout)]).toEqual([alone.exitCode, text(alone.stdout)])
       expect(box.ran).toEqual([])
     })
   })
@@ -445,21 +451,25 @@ function routedWs(routes: Record<string, Route>): Workspace {
 
 // One process runs the wrapper and its programs, so routes answering for them
 // have to agree, as two policies placing one line do.
+// Mirage runs the wrapper and hands its route to what it runs, where the
+// program's own route places it, as for the program run alone.
 describe('routes under one wrapper', () => {
-  it.each<[Record<string, Route>, string]>([
+  it.each<[Record<string, Route>, string, string]>([
     [
       {
         tool_a: { kind: 'route', machine: 'a' },
         tool_b: { kind: 'route', machine: 'b' },
       },
       TWO_TOOLS,
+      TWO_TOOLS.replace('nohup ', ''),
     ],
     [
       {
-        nice: { kind: 'route', machine: 'b' },
-        hostname: { kind: 'route', machine: 'machine' },
+        tool_a: { kind: 'route', machine: 'b' },
+        tool_b: { kind: 'route', machine: 'b' },
       },
-      'nohup nice hostname',
+      TWO_TOOLS,
+      TWO_TOOLS.replace('nohup ', ''),
     ],
     [
       {
@@ -467,28 +477,15 @@ describe('routes under one wrapper', () => {
         hostname: { kind: 'route', machine: 'b' },
       },
       'nohup hostname',
+      'hostname',
     ],
-  ])('refuse the line when they disagree: %j', async (routes, line) => {
+    [{ nice: { kind: 'route', machine: 'b' } }, 'nohup nice hostname', 'nohup nice hostname'],
+  ])('place its program as it runs bare: %j', async (routes, line, bare) => {
     const ws = routedWs(routes)
     try {
+      const alone = await ws.shell(bare)
       const io = await ws.shell(line)
-      expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
-      expect(io.decision?.reason.startsWith('policies place the line on different machines')).toBe(
-        true,
-      )
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('place the wrapper when they agree', async () => {
-    const ws = routedWs({
-      tool_a: { kind: 'route', machine: 'b' },
-      tool_b: { kind: 'route', machine: 'b' },
-    })
-    try {
-      const io = await ws.shell(TWO_TOOLS)
-      expect([io.exitCode, text(io.stdout)]).toEqual([0, 'b\n'])
+      expect([io.exitCode, text(io.stdout)]).toEqual([alone.exitCode, text(alone.stdout)])
     } finally {
       await ws.close()
     }
@@ -572,7 +569,7 @@ describe('a wrapper running a program spelled by its path', () => {
 })
 
 describe('a wrapper over a path-spelled program', () => {
-  it('is refused where the routes answering for it disagree', async () => {
+  it("yields its route to its program's own", async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
@@ -593,9 +590,9 @@ describe('a wrapper over a path-spelled program', () => {
       const bare = await ws.explain('nice python3 -c 1')
       const said = await ws.explain('nice /usr/bin/python3 -c 1')
       const ran = await ws.shell('nice /usr/bin/python3 -c 1')
-      expect(ran.exitCode).toBe(126)
-      expect(explained(said.node)[0]).toEqual(explained(bare.node)[0])
-      expect(explained(said.node)[0]?.[1]).toBe(126)
+      expect([ran.exitCode, text(ran.stdout)]).toEqual([0, 'c\n'])
+      expect(explained(said.node).at(-1)).toEqual(explained(bare.node).at(-1))
+      expect(explained(said.node).at(-1)?.[2]).toBe('c')
     } finally {
       await ws.close()
     }
@@ -667,7 +664,7 @@ it('a wrapper keeps the path of a program named like an option', async () => {
   try {
     const io = await ws.shell('nice /usr/bin/--help')
     expect(io.exitCode).toBe(0)
-    expect(box.ran).toEqual([['nice', '/usr/bin/--help']])
+    expect(box.ran).toEqual([['nice', '--', '--help']])
   } finally {
     await ws.close()
   }
@@ -796,4 +793,32 @@ describe('a path no file of Mirage answers', () => {
       await ws.close()
     }
   })
+})
+
+it('a nohup job survives a hangup', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+  try {
+    const io = await ws.shell(
+      'nohup sleep 3 & p=$!; sleep 0.2; kill -HUP $p; sleep 0.2; ' +
+        'kill -0 $p && echo alive; kill $p; wait $p; echo rc=$?',
+    )
+    expect(text(io.stdout)).toBe('alive\nrc=143\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  ['nice nice', '10\n'],
+  ['nice sh -c nice', '10\n'],
+  ["nice -n 3 sh -c 'nice -n 2 nice'", '5\n'],
+  ['nohup nice -n 4 nice', '4\n'],
+  ['nice -n 15 nice -n 9 nice', '19\n'],
+])('nice prints the niceness its wrappers gave it: %s', async (line, out) => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+  try {
+    expect(text((await ws.shell(line)).stdout)).toBe(out)
+  } finally {
+    await ws.close()
+  }
 })

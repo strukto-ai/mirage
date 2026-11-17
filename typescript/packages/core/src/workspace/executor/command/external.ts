@@ -19,7 +19,10 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted } from '../../../utils/abort.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
+import { currentCaller } from '../../../context/session_context.ts'
+import type { ProcessTraits } from '../../../execution/process/types.ts'
+import type { MachineName } from '../../../execution/types.ts'
+import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
@@ -34,6 +37,24 @@ import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { Channel, type JobConsole } from '../../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
+
+/**
+ * The words a machine is handed for a program: on one with processes of its
+ * own, the wrappers around the program first (`nice -n 5 gcc`), so they make
+ * their change there, with `--` before a program named like an option;
+ * Mirage's own `in_process` machine keeps them in the process it runs the
+ * program as. Mirrors Python's `handed_tokens`.
+ */
+export function handedTokens(
+  tokens: readonly string[],
+  traits: ProcessTraits,
+  machine: MachineName | null,
+): readonly string[] {
+  if (traits.wrappers.length === 0 || machine === null || machine.provider === IN_PROCESS)
+    return tokens
+  if (tokens[0]?.startsWith('-') === true) return [...traits.wrappers, '--', ...tokens]
+  return [...traits.wrappers, ...tokens]
+}
 
 /**
  * Execute one admitted program; its surrounding shell stays in Mirage.
@@ -57,12 +78,21 @@ export async function runExternal(
   const bindings = routing.bindings
   const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
   const runtime = bindings[key]
-  const command = shellJoin(argv.tokens)
   if (runtime == null) {
     const denied = admissionDenial(argv.name)
     const stderr = await denied.materializeStderr()
-    return [null, denied, new ExecutionNode({ command, exitCode: CANNOT_EXECUTE_STATUS, stderr })]
+    return [
+      null,
+      denied,
+      new ExecutionNode({
+        command: shellJoin(argv.tokens),
+        exitCode: CANNOT_EXECUTE_STATUS,
+        stderr,
+      }),
+    ]
   }
+  const tokens = handedTokens(argv.tokens, currentCaller().traits, runtime.machine)
+  const command = shellJoin(tokens)
   // A runtime that runs an argv gets one; a line runtime gets the program
   // as one quoted line.
   const process = isProcessExecutor(runtime)
@@ -88,7 +118,7 @@ export async function runExternal(
       const result = await executeProgram(
         runtime,
         argv.name,
-        process ? argv.tokens : [],
+        process ? tokens : [],
         { ...ctx, signal: stop },
         { kind, output, errors: told },
       )

@@ -38,6 +38,7 @@ from mirage.execution.job.types import Job, JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import PLAIN_TRAITS, ProcessTraits
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import JobId, LineId
 from mirage.shell.console import JobConsole
@@ -326,6 +327,7 @@ class JobTable:
         limit: int | None = None,
         simple: bool = False,
         program: str | None = None,
+        traits: ProcessTraits = PLAIN_TRAITS,
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -351,6 +353,8 @@ class JobTable:
                 (``JobHandle.simple``), which its process runs as.
             program (str | None): how its process shows that program;
                 None for the command line.
+            traits (ProcessTraits): what the wrappers around the job
+                changed for its process.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -389,6 +393,7 @@ class JobTable:
             one_command=simple,
             program_ignores=IGNORED_SIGNALS,
             background=True,
+            traits=traits,
         )
         line, group = process.record.line, process.record.group
         try:

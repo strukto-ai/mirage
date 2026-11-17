@@ -431,6 +431,7 @@ export const SIGNAL_DESCRIPTIONS: ReadonlyMap<number, string> = new Map([
 // The signals no report names when they end a job's last process: INT and
 // PIPE end it silently, TERM as "Terminated" alone in the foreground.
 export const UNREPORTED_SIGNALS: ReadonlySet<number> = new Set([2, 13])
+export const SIGHUP = 1
 export const SIGTERM = 15
 export const SIGKILL = 9
 export const SIGCHLD = 17

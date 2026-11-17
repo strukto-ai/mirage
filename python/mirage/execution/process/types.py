@@ -51,6 +51,10 @@ class Process:
     one whose stdout is its stdin (the stage before it in a pipeline),
     ``fd`` the one writing each descriptor a ``<( )`` gave it, by number,
     and ``argv`` each whose output a ``$( )`` made its arguments of.
+
+    What a wrapper changed for it (``ProcessTraits``): its ``niceness``,
+    and the pid of the ``leader`` of its own session (``setsid``), None
+    in its shell's.
     """
 
     id: ProcessId
@@ -77,6 +81,8 @@ class Process:
     stdin: int | None = None
     fd: dict[int, int] = field(default_factory=dict)
     argv: tuple[int, ...] = ()
+    niceness: int = 0
+    leader: int | None = None
 
     @property
     def pid(self) -> int:
@@ -100,6 +106,33 @@ class Process:
     def shown_machine(self) -> str:
         """Where the agent sees it running."""
         return str(self.machine) if self.is_program else WORKSPACE_MACHINE
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessTraits:
+    """What a process runs as beyond its words, which a wrapper changes
+    for the program it runs and everything that program starts in turn:
+    ``nice`` its ``niceness``, ``nohup`` the signals it ``ignores``,
+    ``setsid`` whether it ``leads`` a group and session of its own.
+    ``wrappers`` are the words that changed them, which a machine with
+    processes of its own is handed before the program, so its own
+    wrappers make the change there.
+
+    Args:
+        niceness (int): the niceness, 0 to 19.
+        ignores (frozenset[int]): the signals it ignores.
+        leads (bool): it leads a group and session of its own.
+        wrappers (tuple[str, ...]): the wrapper words, outermost first.
+    """
+
+    niceness: int = 0
+    ignores: frozenset[int] = frozenset()
+    leads: bool = False
+    wrappers: tuple[str, ...] = ()
+
+
+# The traits of a process no wrapper changed.
+PLAIN_TRAITS = ProcessTraits()
 
 
 ProcessRunner = Callable[[], Coroutine[Any, Any, int]]

@@ -18,6 +18,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
+from mirage.execution.process.types import ProcessTraits
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
@@ -41,7 +42,7 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import routed_consumer, wrapper_traits
 from mirage.workspace.session import SessionState
 
 
@@ -422,7 +423,6 @@ def _commands(node) -> list[str]:
         (False, "nice gcc x.c", "docker"),
         (True, "make -j2", "e2b"),
         (True, "nice make", "e2b"),
-        (True, "nice", "e2b"),
         (True, "sudo gcc x.c", "e2b"),
     ],
 )
@@ -437,7 +437,7 @@ async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
         io = await ws.shell(line)
         assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
         said = await ws.explain(line)
-        assert _commands(said.node)[0] == runs
+        assert _commands(said.node)[-1] == runs
     finally:
         await ws.close()
 
@@ -549,7 +549,7 @@ async def test_command_past_a_wrapper_function_is_explained_as_it_runs():
         io = await ws.shell("command nice gcc x.c")
         assert await io.stdout_str() == "docker\n"
         said = await ws.explain("command nice gcc x.c")
-        assert _commands(said.node) == ["", "docker", "docker"]
+        assert _commands(said.node) == ["", "", "docker"]
         assert "nice" in ws.get_session(ws.default_session_id).functions
     finally:
         await ws.close()
@@ -600,16 +600,16 @@ async def test_a_wrapper_around_mirages_program_runs_it_in_mirage(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, out",
+    "line, code, out",
     [
-        ("foo() { echo hi; }; nice foo", "hi\n"),
-        ("nice python3 -c 1", "e2b\n"),
-        ("nice --help grep x", "e2b\n"),
-        ("ionice -p 1 grep x", "e2b\n"),
+        ("foo() { echo hi; }; nice foo", 0, "hi\n"),
+        ("nice", 0, "0\n"),
+        ("nice python3 -c 1", 127, ""),
+        ("ionice -p 1 grep x", 0, "e2b\n"),
     ],
 )
 async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
-    line, out
+    line, code, out
 ):
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -618,7 +618,7 @@ async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
     )
     try:
         io = await ws.shell(line)
-        assert (io.exit_code, await io.stdout_str()) == (0, out)
+        assert (io.exit_code, await io.stdout_str()) == (code, out)
     finally:
         await ws.close()
 
@@ -790,3 +790,63 @@ def test_lscpu_captured_by_name_stays_the_program():
     )
     consumer, _ = routed_consumer("lscpu", (), session, ws.registry, routing)
     assert consumer is Consumer.EXTERNAL
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "at", "traits", "warned"),
+    [
+        (
+            "nice",
+            ["gcc"],
+            0,
+            ProcessTraits(niceness=10, wrappers=("nice",)),
+            "",
+        ),
+        (
+            "nice",
+            ["-n", "5", "gcc"],
+            2,
+            ProcessTraits(niceness=5, wrappers=("nice", "-n", "5")),
+            "",
+        ),
+        (
+            "nice",
+            ["-n", "-5", "gcc"],
+            2,
+            ProcessTraits(wrappers=("nice", "-n", "-5")),
+            "nice: cannot set niceness: Permission denied\n",
+        ),
+        (
+            "nohup",
+            ["gcc"],
+            0,
+            ProcessTraits(ignores=frozenset({1}), wrappers=("nohup",)),
+            "",
+        ),
+        (
+            "setsid",
+            ["-w", "gcc"],
+            1,
+            ProcessTraits(leads=True, wrappers=("setsid", "-w")),
+            "",
+        ),
+        (
+            "stdbuf",
+            ["-oL", "gcc"],
+            1,
+            ProcessTraits(wrappers=("stdbuf", "-oL")),
+            "",
+        ),
+    ],
+)
+def test_a_wrapper_changes_the_traits_of_its_program(
+    name, args, at, traits, warned
+):
+    assert wrapper_traits(name, args, at, ProcessTraits()) == (traits, warned)
+
+
+def test_nice_never_sets_the_niceness_past_19():
+    worn, _ = wrapper_traits(
+        "nice", ["-n", "9", "gcc"], 2, ProcessTraits(niceness=15)
+    )
+    assert worn.niceness == 19

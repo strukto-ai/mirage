@@ -122,8 +122,8 @@ To pick the machine for one line yourself, pass it to the call:
 A [policy](/home/policy/policies) in code can return `Route(machine=...)`
 too. At `pre_command` it moves one command: in `ls; python3 train.py`, only
 `python3` goes to the machine. Behind `nohup`, `nice`, `setsid`, `stdbuf` or
-`ionice`, the wrapper goes where its program goes, except to an `in_process`
-machine, where Mirage drops it.
+`ionice`, the program goes where its own route sends it, and a route on the
+wrapper places what has none.
 
 ## Rules
 

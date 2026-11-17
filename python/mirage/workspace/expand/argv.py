@@ -52,8 +52,8 @@ from mirage.workspace.lookup import (
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.lookup.lookup import (
-    mirage_program_at,
     routed_consumer,
+    runs_wrapper,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -159,15 +159,10 @@ async def expand_argv(
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
     typed = [unmark_globs(w) for w in expanded[consumed:]]
-    links = None if namespace is None else namespace.session_links(session)
     consumer, routing = routed_consumer(
-        name, typed, session, registry, context.frame.routing, links
+        name, typed, session, registry, context.frame.routing
     )
-    if (
-        consumer is Consumer.UNKNOWN
-        and mirage_program_at(name, typed, session, registry, routing, links)
-        is not None
-    ):
+    if runs_wrapper(name, typed, session, routing):
         consumer = Consumer.EXTERNAL
     refused = runtime_refused(name, session, registry, routing)
     if name not in session.functions and consumer is not Consumer.EXTERNAL:

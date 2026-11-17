@@ -36,6 +36,9 @@ export interface ProcessUsage {
  * stdout is its stdin (the stage before it in a pipeline), `fd` the one
  * writing each descriptor a `<( )` gave it, by number, and `argv` each whose
  * output a `$( )` made its arguments of.
+ *
+ * What a wrapper changed for it (`ProcessTraits`): its `niceness`, and the pid
+ * of the `leader` of its own session (`setsid`), null in its shell's.
  */
 export interface Process {
   readonly id: ProcessId
@@ -63,7 +66,32 @@ export interface Process {
   readonly stdin?: number | null
   readonly fd?: Readonly<Record<number, number>>
   readonly argv?: readonly number[]
+  readonly niceness?: number
+  readonly leader?: number | null
 }
+
+/**
+ * What a process runs as beyond its words, which a wrapper changes for the
+ * program it runs and everything that program starts in turn: `nice` its
+ * `niceness`, `nohup` the signals it `ignores`, `setsid` whether it `leads` a
+ * group and session of its own. `wrappers` are the words that changed them,
+ * which a machine with processes of its own is handed before the program, so
+ * its own wrappers make the change there. Mirrors Python's `ProcessTraits`.
+ */
+export interface ProcessTraits {
+  readonly niceness: number
+  readonly ignores: ReadonlySet<number>
+  readonly leads: boolean
+  readonly wrappers: readonly string[]
+}
+
+/** The traits of a process no wrapper changed. */
+export const PLAIN_TRAITS: ProcessTraits = Object.freeze({
+  niceness: 0,
+  ignores: new Set<number>(),
+  leads: false,
+  wrappers: [],
+})
 
 /** Whether a process is a program on a machine, not Mirage's own. */
 export function isProgram(process: Process): boolean {

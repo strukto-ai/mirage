@@ -292,3 +292,72 @@ async def test_ps_is_a_program_of_its_own_on_a_longer_line():
         ]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "out"),
+    [
+        ("ps -o ni,pri,priority,opri,comm", "  0  19  20  80 ps\n"),
+        ("nice ps -o ni,comm", " 10 ps\n"),
+        (
+            "nice -n 5 nohup ps -o ni,pri,priority,opri,comm",
+            "  5  14  25  85 ps\n",
+        ),
+        ("nice -n 3 sh -c 'ps -o ni,comm'", "  3 ps\n"),
+    ],
+)
+async def test_ps_shows_the_niceness_its_wrappers_gave_it(line, out):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(line)
+        assert (await io.stdout_str()).split("\n", 1)[1] == out
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ps_under_setsid_leads_its_own_group_and_session():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell("setsid ps -o pid=,pgid=,sid=,comm=")
+        pid, pgid, sid, comm = (await io.stdout_str()).split()
+        assert (pgid, sid, comm) == (pid, pid, "ps")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "out"),
+    [
+        ("nice -n 7 sleep 3 & sleep 0.2; ps -o ni=,comm=; kill %1", "7 sleep"),
+        ("nohup sleep 3 & sleep 0.2; ps -o ni=,comm=; kill %1", "0 sleep"),
+    ],
+)
+async def test_ps_shows_a_wrapped_job_as_its_program(line, out):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(line)
+        rows = [
+            " ".join(r.split()) for r in (await io.stdout_str()).splitlines()
+        ]
+        assert out in rows
+        await ws.shell("wait")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_setsid_job_leads_its_own_group_and_session():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(
+            "setsid sleep 3 & p=$!; sleep 0.2; ps -o pid=,pgid=,sid= -p $p; "
+            "kill $p"
+        )
+        pid, pgid, sid = (await io.stdout_str()).split()
+        assert pgid == sid == pid
+        await ws.shell("wait")
+    finally:
+        await ws.close()

@@ -98,8 +98,8 @@ export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean,
   pmem: ['%MEM', 4, true, 'mem_percent'],
   c: ['C', 2, true, 'zero'],
   cp: ['CP', 3, true, 'zero'],
-  ni: ['NI', 3, true, 'zero'],
-  nice: ['NI', 3, true, 'zero'],
+  ni: ['NI', 3, true, 'nice'],
+  nice: ['NI', 3, true, 'nice'],
   pri: ['PRI', 3, true, 'pri'],
   priority: ['PRI', 3, true, 'priority'],
   opri: ['PRI', 3, true, 'opri'],
@@ -146,14 +146,16 @@ export const USAGE_FACTS: Readonly<Record<string, string>> = {
   vsz: '0',
 }
 
+// The priority columns procps derives from the niceness: PRI is 19 less it,
+// `priority` 20 more and `opri` 80 more, as debian:stable-slim prints.
+export const PRIORITY_BASE = 20
+export const OLD_PRIORITY_BASE = 80
+
 export const FIXED: Readonly<Record<string, string>> = {
   tpgid: '-1',
   tty: '?',
   zero: '0',
   one: '1',
-  pri: '19',
-  priority: '20',
-  opri: '80',
   dash: '-',
   cls: 'TS',
 }

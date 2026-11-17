@@ -660,7 +660,7 @@ export class Workspace {
     this.closers.push(() => this.runtimeWorld.close())
     this.closers.push(() => this.machineTable.close(this.machinesPaused))
     this.closers.push(() => this.registry.clis.close())
-    this.router = new Router(this.registry, this.runtimeWorld, this.namespace)
+    this.router = new Router(this.registry, this.runtimeWorld)
     this.registry.bindClocks()
     this.machineTable.holdHandles()
   }
@@ -1747,12 +1747,11 @@ export class Workspace {
           stderr: refused.stderrText,
         }
       }
-      const shown = wholeLine ? judged : this.router.refuseDisagreeing(judged, placed)
       const said = explainedLine(
         line,
-        shown,
+        judged,
         wholeLine ? judged : verdicts,
-        this.router.placements(shown, placed),
+        this.router.placements(judged, placed),
         reparse,
         wholeLine,
       )

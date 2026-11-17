@@ -19,7 +19,6 @@ import type {
   Claimant,
   CommandContext,
   Deny,
-  Occurrence,
   Pending,
   Route,
   RouteContext,
@@ -29,16 +28,11 @@ import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
-import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
-import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
+import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
-import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { NamespaceLinks } from '../../view/types.ts'
-import { type Judged, refusedWhereItStands, type Walked } from '../node/explain.ts'
-import { programLines, type Word, wordValue } from '../node/inner_lines.ts'
-import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
+import type { Judged, Walked } from '../node/explain.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
@@ -90,59 +84,13 @@ function apart(decision: RouteDecision<Runtime>): RouteDecision<Runtime> {
   return { ...decision, bindings }
 }
 
-/**
- * The judged commands a wrapper's run answers for, as the run walks them: a
- * shell line under the wrapper is the machine's to run, so what it names
- * places nothing.
- */
-function wrappedPrograms(
-  words: readonly Word[],
-  occurrence: Occurrence,
-  judged: readonly Judged[],
-  session: SessionState,
-  registry: MountRegistry,
-  links: NamespaceLinks,
-): Judged[] {
-  const found: Judged[] = []
-  for (const inner of programLines(words, session, registry, links)) {
-    if (inner.argv.length === 0) continue
-    const place = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
-    const held = judged.find((other) => sameOccurrence(other.occurrence, place))
-    if (held !== undefined)
-      found.push(held, ...wrappedPrograms(inner.argv, place, judged, session, registry, links))
-  }
-  return found
-}
-
-/** The judged commands a wrapper's run answers for; none for any other command. */
-function programsOf(
-  one: Judged,
-  judged: readonly Judged[],
-  registry: MountRegistry,
-  namespace: Namespace,
-): Judged[] {
-  const command = one.judgment.command
-  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined || one.session === undefined)
-    return []
-  return wrappedPrograms(
-    [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
-    one.occurrence,
-    judged,
-    one.session,
-    registry,
-    namespace.sessionLinks(one.session),
-  )
-}
-
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
-  private readonly namespace: Namespace
 
-  constructor(registry: MountRegistry, runtimes: Runtimes, namespace: Namespace) {
+  constructor(registry: MountRegistry, runtimes: Runtimes) {
     this.registry = registry
     this.runtimes = runtimes
-    this.namespace = namespace
   }
 
   async decide(
@@ -235,24 +183,14 @@ export class Router {
    * The machine that serves a command under a decision, as its run places
    * it: the `@external` one for a program no name binds (a path runs
    * through the workspace's exec path first); empty when the workspace
-   * runs it itself. A
-   * `preCommand` route of the command places it over the line's decision,
-   * as its run does, and so does the route of a program a wrapper takes
-   * along to a runtime (`programs`, the commands its run answers for,
-   * outermost first).
+   * runs it itself, a wrapper Mirage runs included. A `preCommand` route of
+   * the command places it over the line's decision, as its run does.
    * Mirrors Python's `Router.placement_for`.
    */
-  placementFor(
-    one: Judged,
-    line: RouteDecision<Runtime>,
-    programs: readonly Judged[] = [],
-  ): string {
+  placementFor(one: Judged, line: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(line.bindings)
     if (whole !== null) return whole.name
-    const placed = this.ownPlaced(one, line)
-    const answer = this.wrapperAnswer(one, placed, programs)
-    if (answer?.kind !== 'route') return this.serving(one, placed)
-    return this.serving(one, this.overlaid(placed, answer))
+    return this.serving(one, this.ownPlaced(one, line))
   }
 
   /** A decision with a command's own `preCommand` route over it. */
@@ -280,37 +218,6 @@ export class Router {
   }
 
   /**
-   * What the routes answering for a wrapper a runtime takes and for the
-   * programs its run judges come to, as its run settles them; null for any
-   * other command. Mirrors Python's `Router._wrapper_answer`.
-   */
-  private wrapperAnswer(
-    one: Judged,
-    placed: RouteDecision<Runtime>,
-    programs: readonly Judged[],
-  ): Deny | Route | null {
-    if (
-      one.ctx === undefined ||
-      one.session === undefined ||
-      !wrapperRunsOutside(
-        one.judgment.command,
-        one.ctx.argv,
-        one.session,
-        this.registry,
-        placed,
-        this.namespace.sessionLinks(one.session),
-      )
-    ) {
-      return null
-    }
-    return agreed(
-      [one, ...programs]
-        .map((held) => commandRoute(held.judgment.answers))
-        .filter((route): route is Route => route !== null),
-    )
-  }
-
-  /**
    * The placement a command runs under: its line's, with the route of each
    * command running it (`eval`) over that, as its run keeps it.
    */
@@ -329,37 +236,12 @@ export class Router {
   }
 
   /**
-   * A line's judged commands, each wrapper whose routes one run cannot honor
-   * refused at its own node, as its run refuses it. A wrapper or program its
-   * gate stops keeps that answer: the run stops there before it compares
-   * routes. Mirrors Python's `Router.refuse_disagreeing`.
-   */
-  refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
-    return judged.map((one) => {
-      const programs = programsOf(one, judged, this.registry, this.namespace)
-      if (programs.length === 0) return one
-      if ([one, ...programs].some((held) => held.judgment.exitCode !== 0)) return one
-      const answer = this.wrapperAnswer(
-        one,
-        this.ownPlaced(one, this.outerPlaced(one, judged, decision)),
-        programs,
-      )
-      return answer?.kind === 'deny' ? refusedWhereItStands(one, answer) : one
-    })
-  }
-
-  /**
    * `placementFor` for each of a line's judged commands, one a line runs in
    * turn (`eval`) under the placement a `preCommand` route gave the command
    * running it, as its run keeps it. Mirrors Python's `Router.placements`.
    */
   placements(judged: readonly Judged[], decision: RouteDecision<Runtime>): (one: Judged) => string {
-    return (one) =>
-      this.placementFor(
-        one,
-        this.outerPlaced(one, judged, decision),
-        programsOf(one, judged, this.registry, this.namespace),
-      )
+    return (one) => this.placementFor(one, this.outerPlaced(one, judged, decision))
   }
 
   /**
@@ -390,19 +272,13 @@ export class Router {
     let decision = placed
     let fallback = placed.fallback
     if (one.ctx !== undefined && one.session !== undefined) {
-      const links = this.namespace.sessionLinks(one.session)
-      if (
-        mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed, links) !== null
-      ) {
-        return ''
-      }
+      if (runsWrapper(command, one.ctx.argv, one.session, placed)) return ''
       const [consumer, rerouted] = routedConsumer(
         command,
         one.ctx.argv,
         one.session,
         this.registry,
         placed,
-        links,
       )
       decision = rerouted ?? placed
       if (consumer === Consumer.EXTERNAL && !command.includes('/')) {

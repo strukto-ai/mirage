@@ -166,23 +166,21 @@ WRAPPERS = ["nohup", "nice", "stdbuf", "setsid", "ionice"]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("line", "refused"),
+    ("line", "bare"),
     [
-        ("nohup python3 -c x", "python3"),
-        ("nice -n 5 python3 -c x", "python3"),
-        ("stdbuf -oL python3 -c x", "python3"),
-        ("setsid -w python3 -c x", "python3"),
-        ("ionice -c 3 python3 -c x", "python3"),
-        ("nohup nice python3 -c x", "python3"),
-        ("nohup python3 -c x & wait $!", "python3"),
-        ("nohup time python3 -c x", "python3"),
-        ("nohup nice time -p python3 -c x", "python3"),
-        ("nohup time env python3 -c x", "python3"),
+        ("nohup tool -c x", "tool -c x"),
+        ("nice -n 5 tool -c x", "tool -c x"),
+        ("stdbuf -oL tool -c x", "tool -c x"),
+        ("setsid -w tool -c x", "tool -c x"),
+        ("ionice -c 3 tool -c x", "tool -c x"),
+        ("nohup nice tool -c x", "tool -c x"),
+        ("nohup tool -c x & wait $!", "tool -c x & wait $!"),
+        ("nohup time tool -c x", "time tool -c x"),
+        ("nohup nice time -p tool -c x", "time -p tool -c x"),
+        ("nohup time env tool -c x", "time env tool -c x"),
     ],
 )
-async def test_an_outside_wrapper_runs_no_program_the_allow_list_leaves_out(
-    line, refused
-):
+async def test_a_wrapper_runs_no_program_the_allow_list_leaves_out(line, bare):
     box = Box()
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
@@ -192,10 +190,11 @@ async def test_an_outside_wrapper_runs_no_program_the_allow_list_leaves_out(
                 "commands": {"allow": [*WRAPPERS, "wait", "time", "env"]}
             },
         )
-        bare = await ws.shell(f"{refused} -c x", session_id="s")
+        alone = await ws.shell(bare, session_id="s")
         r = await ws.shell(line, session_id="s")
-        assert bare.exit_code == 126
-        assert (r.exit_code, r.stderr) == (126, bare.stderr)
+        assert alone.exit_code == r.exit_code == 126
+        assert r.stderr is not None
+        assert b"tool: Permission denied\n" in r.stderr
         assert box.ran == []
     finally:
         await ws.close()
@@ -221,22 +220,36 @@ async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
 @pytest.mark.parametrize(
     "line",
     [
-        "nohup python3 -c x",
-        "nohup --help",
-        "nohup -- python3 -c x",
-        "nice --ad 5 python3 -c x",
+        "nohup tool -c x",
+        "nohup -- tool -c x",
+        "nice --ad 5 tool -c x",
     ],
 )
-async def test_an_outside_wrapper_runs_a_listed_program(line):
+async def test_a_wrapper_hands_a_machine_its_words_before_a_listed_program(
+    line,
+):
     box = Box()
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
-            "s", profile={"commands": {"allow": ["nohup", "nice", "python3"]}}
+            "s", profile={"commands": {"allow": ["nohup", "nice", "tool"]}}
         )
         r = await ws.shell(line, session_id="s")
         assert r.exit_code == 0
         assert box.ran == [line.split()]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_answers_its_own_help():
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        r = await ws.shell("nohup --help")
+        assert r.exit_code == 0
+        assert "Usage: nohup" in await r.stdout_str()
+        assert box.ran == []
     finally:
         await ws.close()
 
@@ -277,19 +290,17 @@ async def test_an_outside_wrapper_s_program_is_asked_once():
         ws.create_session(
             "s",
             profile={
-                "commands": {
-                    "ask": [{"reason": "nod", "commands": ["python3"]}]
-                }
+                "commands": {"ask": [{"reason": "nod", "commands": ["tool"]}]}
             },
         )
-        line = "nohup python3 -c x"
+        line = "nohup tool -c x"
         held = await ws.shell(line, session_id="s")
         assert held.exit_code == 126
         (pending,) = ws.decisions.pending()
         await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
         ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
-        assert box.ran == [["nohup", "python3", "-c", "x"]]
+        assert box.ran == [["nohup", "tool", "-c", "x"]]
         assert ws.decisions.pending() == ()
     finally:
         await ws.close()
@@ -329,18 +340,22 @@ async def test_an_outside_wrapper_runs_a_path_only_without_an_allow_list(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("setup", "line", "refused"),
+    ("setup", "line", "bare"),
     [
-        ("", "nohup time env --split-string='python3 -c x'", "env"),
-        ("", "nohup time env -S 'python3 -c x'", "env"),
-        ("pip() { echo harmless; }", "nohup time pip --version", "pip"),
+        (
+            "",
+            "nohup time env --split-string='tool -c x'",
+            "time env --split-string='tool -c x'",
+        ),
+        ("", "nohup time env -S 'tool -c x'", "time env -S 'tool -c x'"),
+        (
+            "pip() { echo harmless; }",
+            "nohup time pip --version",
+            "time pip --version",
+        ),
     ],
 )
-async def test_an_outside_wrapper_s_program_is_what_the_machine_runs(
-    setup, line, refused
-):
-    # GNU env splits -S into a command line the gate cannot read, and the
-    # machine runs its own pip, not the session's function of that name.
+async def test_a_wrapper_s_program_answers_as_it_does_bare(setup, line, bare):
     box = Box()
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
@@ -350,11 +365,9 @@ async def test_an_outside_wrapper_s_program_is_what_the_machine_runs(
         )
         if setup:
             await ws.shell(setup, session_id="s")
+        alone = await ws.shell(bare, session_id="s")
         r = await ws.shell(line, session_id="s")
-        assert (r.exit_code, r.stderr) == (
-            126,
-            f"{refused}: Permission denied\n".encode(),
-        )
+        assert (r.exit_code, r.stdout) == (alone.exit_code, alone.stdout)
         assert box.ran == []
     finally:
         await ws.close()
@@ -437,38 +450,25 @@ def _routed(routes: dict[str, Route]) -> Workspace:
             TWO_TOOLS,
         ),
         (
-            {"nice": Route(machine="b"), "hostname": Route("machine")},
-            "nohup nice hostname",
+            {"tool_a": Route(machine="b"), "tool_b": Route(machine="b")},
+            TWO_TOOLS,
         ),
         (
             {"nohup": Route(machine="a"), "hostname": Route(machine="b")},
             "nohup hostname",
         ),
+        ({"nice": Route(machine="b")}, "nohup nice hostname"),
     ],
 )
-async def test_routes_one_process_cannot_honor_refuse_the_wrapper(
-    routes, line
-):
-    # One process runs the wrapper and its programs, so routes answering for
-    # them have to agree, as two policies placing one line do.
+async def test_a_wrapper_s_program_runs_where_it_runs_bare(routes, line):
+    # Mirage runs the wrapper and hands its route to what it runs, where the
+    # program's own route places it, as for the program run alone.
     ws = _routed(routes)
     try:
+        bare = line.removeprefix("nohup ").removeprefix("nice ")
+        alone = await ws.shell(bare if routes.get("nice") is None else line)
         r = await ws.shell(line)
-        assert (r.exit_code, r.stdout) == (126, b"")
-        assert r.decision is not None
-        assert r.decision.reason.startswith(
-            "policies place the line on different machines"
-        )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_routes_that_agree_place_the_wrapper():
-    ws = _routed({"tool_a": Route(machine="b"), "tool_b": Route(machine="b")})
-    try:
-        r = await ws.shell(TWO_TOOLS)
-        assert (r.exit_code, r.stdout) == (0, b"b\n")
+        assert (r.exit_code, r.stdout) == (alone.exit_code, alone.stdout)
     finally:
         await ws.close()
 
@@ -552,7 +552,7 @@ async def test_a_wrapper_goes_where_a_path_spelled_program_is_routed(line):
 
 
 @pytest.mark.asyncio
-async def test_routes_that_disagree_refuse_a_wrapper_over_a_path_spelled_one():
+async def test_a_wrapper_s_route_yields_to_its_path_spelled_program_s():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -568,9 +568,9 @@ async def test_routes_that_disagree_refuse_a_wrapper_over_a_path_spelled_one():
         bare = await ws.explain("nice python3 -c 1")
         said = await ws.explain("nice /usr/bin/python3 -c 1")
         ran = await ws.shell("nice /usr/bin/python3 -c 1")
-        assert ran.exit_code == 126
-        assert _explained(said.node)[0] == _explained(bare.node)[0]
-        assert _explained(said.node)[0][1] == 126
+        assert (ran.exit_code, ran.stdout) == (0, b"c\n")
+        assert _explained(said.node)[-1] == _explained(bare.node)[-1]
+        assert _explained(said.node)[-1][2] == "c"
     finally:
         await ws.close()
 
@@ -714,7 +714,7 @@ async def test_a_wrapper_keeps_the_path_of_a_program_named_like_an_option():
     try:
         r = await ws.shell("nice /usr/bin/--help")
         assert r.exit_code == 0
-        assert box.ran == [["nice", "/usr/bin/--help"]]
+        assert box.ran == [["nice", "--", "--help"]]
     finally:
         await ws.close()
 
@@ -832,5 +832,37 @@ async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
         r = await ws.shell("/opt/tool a")
         assert r.exit_code == 127
         assert b"No such file or directory" in r.stderr
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_nohup_job_survives_a_hangup():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(
+            "nohup sleep 3 & p=$!; sleep 0.2; kill -HUP $p; sleep 0.2; "
+            "kill -0 $p && echo alive; kill $p; wait $p; echo rc=$?"
+        )
+        assert await io.stdout_str() == "alive\nrc=143\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "out"),
+    [
+        ("nice nice", "10\n"),
+        ("nice sh -c nice", "10\n"),
+        ("nice -n 3 sh -c 'nice -n 2 nice'", "5\n"),
+        ("nohup nice -n 4 nice", "4\n"),
+        ("nice -n 15 nice -n 9 nice", "19\n"),
+    ],
+)
+async def test_nice_prints_the_niceness_its_wrappers_gave_it(line, out):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        assert await (await ws.shell(line)).stdout_str() == out
     finally:
         await ws.close()

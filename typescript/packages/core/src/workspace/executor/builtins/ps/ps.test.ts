@@ -279,3 +279,60 @@ it('ps is a program of its own on a longer line', async () => {
     await ws.close()
   }
 })
+
+describe('ps under wrappers', () => {
+  it.each([
+    ['ps -o ni,pri,priority,opri,comm', '  0  19  20  80 ps\n'],
+    ['nice ps -o ni,comm', ' 10 ps\n'],
+    ['nice -n 5 nohup ps -o ni,pri,priority,opri,comm', '  5  14  25  85 ps\n'],
+    ["nice -n 3 sh -c 'ps -o ni,comm'", '  3 ps\n'],
+  ])('shows the niceness its wrappers gave it: %s', async (line, out) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    try {
+      const io = await ws.shell(line)
+      expect((await stdoutStr(io)).split('\n').slice(1).join('\n')).toBe(out)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('leads its own group and session under setsid', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    try {
+      const io = await ws.shell('setsid ps -o pid=,pgid=,sid=,comm=')
+      const [pid, pgid, sid, comm] = (await stdoutStr(io)).split(/\s+/).filter((w) => w !== '')
+      expect([pgid, sid, comm]).toEqual([pid, pid, 'ps'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['nice -n 7 sleep 3 & sleep 0.2; ps -o ni=,comm=; kill %1', '7 sleep'],
+    ['nohup sleep 3 & sleep 0.2; ps -o ni=,comm=; kill %1', '0 sleep'],
+  ])('shows a wrapped job as its program: %s', async (line, out) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    try {
+      const io = await ws.shell(line)
+      const rows = (await stdoutStr(io)).split('\n').map((row) => row.trim().split(/\s+/).join(' '))
+      expect(rows).toContain(out)
+      await ws.shell('wait')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('shows a setsid job leading its own group and session', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    try {
+      const io = await ws.shell(
+        'setsid sleep 3 & p=$!; sleep 0.2; ps -o pid=,pgid=,sid= -p $p; kill $p',
+      )
+      const [pid, pgid, sid] = (await stdoutStr(io)).split(/\s+/).filter((w) => w !== '')
+      expect([pgid, sid]).toEqual([pid, pid])
+      await ws.shell('wait')
+    } finally {
+      await ws.close()
+    }
+  })
+})

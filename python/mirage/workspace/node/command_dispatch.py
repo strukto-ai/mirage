@@ -40,6 +40,7 @@ from mirage.context import (
     reset_caller,
     set_program_invocation,
     set_redirect_paths,
+    set_traits,
 )
 from mirage.context.session_context import (
     RedirectResult,
@@ -47,6 +48,7 @@ from mirage.context.session_context import (
     syntax_head,
 )
 from mirage.execution.job import JobTable
+from mirage.execution.process.types import ProcessTraits
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, OutputState, materialize
@@ -62,7 +64,6 @@ from mirage.policy import (
 )
 from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
-from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
@@ -139,15 +140,13 @@ from mirage.workspace.lookup import (
     Consumer,
     runtime_refused,
 )
-from mirage.workspace.lookup.constants import RUNNERS
+from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
 from mirage.workspace.lookup.lookup import (
     lookup,
-    mirage_program_at,
     routed_consumer,
+    runs_wrapper,
     wrapper_answer,
-    wrapper_program_words,
-    wrapper_refusal,
-    wrapper_runs_outside,
+    wrapper_traits,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -970,17 +969,15 @@ async def _run_argv(
 
         try:
             place(admitted.route if admitted is not None else None)
-            # A wrapper a runtime takes starts its program where Mirage
-            # cannot, so the program is judged here, and where a policy
-            # places it the wrapper goes with it. One process runs them
-            # all, so every route answering for them has to agree.
-            if admitted is not None and wrapper_runs_outside(
-                name,
-                argv.args,
-                session,
-                registry,
-                context.frame.routing,
-                namespace.session_links(session),
+            # A wrapper a machine takes by name starts its program there,
+            # where Mirage never runs it, so the program is judged here, and
+            # where a policy places it the wrapper goes with it. One process
+            # runs them all, so every route answering for them has to agree.
+            if (
+                admitted is not None
+                and name in PROGRAM_WRAPPERS
+                and context.frame.routing is not None
+                and name in context.frame.routing.bindings
             ):
                 verdict = await _wrapped_verdict(
                     [Word(w, w) for w in (name, *argv.args)],
@@ -1163,9 +1160,12 @@ def _run_program(
     line: str,
     session: SessionState,
     stdin: ByteSource | None,
+    traits: ProcessTraits,
+    warned: str = "",
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run a wrapper's program in Mirage, its output handed over as it
-    runs.
+    """Run a wrapper's program in Mirage, as the program it execs, its
+    output handed over as it runs: the process it runs as, and all it
+    starts, carry what the wrapper changed.
 
     Args:
         execute_fn (ExecuteFn): runs a line in the session.
@@ -1173,11 +1173,16 @@ def _run_program(
         line (str): the program's words, quoted.
         session (SessionState): the session it runs in.
         stdin (ByteSource | None): its input.
+        traits (ProcessTraits): what the wrappers around it changed.
+        warned (str): what the wrapper says before it runs the program.
     """
     node = ExecutionNode(command=name)
 
     async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+        if warned:
+            await errors(encode_text(warned))
         token = set_program_invocation(session)
+        worn = set_traits(traits)
         try:
             ran = await execute_fn(
                 line,
@@ -1190,6 +1195,7 @@ def _run_program(
                     await output(chunk)
             said = await ran.materialize_stderr()
         finally:
+            reset_caller(worn)
             reset_caller(token)
         node.exit_code = ran.exit_code
         return RunResult(
@@ -1198,6 +1204,52 @@ def _run_program(
 
     stdout, io = run_output(run)
     return stdout, io, node
+
+
+def _run_wrapper(
+    execute_fn: ExecuteFn,
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    stdin: ByteSource | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """A wrapper Mirage runs (``nice``, ``nohup``, ``setsid``,
+    ``stdbuf``, ``ionice``): it answers for itself (``nice`` alone, a bad
+    option, a program it cannot exec), or execs its program with what it
+    changes (``wrapper_traits``). The runner it runs as, when it is a
+    job's or a stage's one command, becomes the program; the program is
+    judged, placed and run as any command is, and a machine with
+    processes of its own is handed the wrapper's words before it.
+
+    Args:
+        execute_fn (ExecuteFn): runs a line in the session.
+        name (str): the wrapper.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): mount registry (command registration).
+        stdin (ByteSource | None): its input.
+    """
+    caller = current_caller()
+    answer = wrapper_answer(
+        name, args, session, registry, caller.traits.niceness
+    )
+    if answer.runs_from is None:
+        err = encode_text(answer.stderr)
+        return (
+            encode_text(answer.stdout) if answer.stdout else None,
+            IOResult(exit_code=answer.exit_code, stderr=err or None),
+            ExecutionNode(
+                command=name, exit_code=answer.exit_code, stderr=err
+            ),
+        )
+    traits, warned = wrapper_traits(
+        name, args, answer.runs_from, caller.traits
+    )
+    line = shell_join(args[answer.runs_from :])
+    if caller.process is not None:
+        caller.process.wrap(traits, line)
+    return _run_program(execute_fn, name, line, session, stdin, traits, warned)
 
 
 async def _run_namespace_program(
@@ -1599,77 +1651,18 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=code, stderr=err),
         )
 
-    links = namespace.session_links(session)
-    at = mirage_program_at(
-        name, argv.args, session, registry, context.frame.routing, links
-    )
-    if at is not None:
-        refused = wrapper_refusal(name, argv.args, session, registry)
-        if refused is not None:
-            code, said = refused
-            err = encode_text(said)
-            return (
-                None,
-                IOResult(exit_code=code, stderr=err),
-                ExecutionNode(command=name, exit_code=code, stderr=err),
-            )
-        return _run_program(
-            execute_fn, name, shell_join(argv.args[at:]), session, stdin
+    if runs_wrapper(name, argv.args, session, context.frame.routing):
+        return _run_wrapper(
+            execute_fn, name, argv.args, session, registry, stdin
         )
 
     consumer, routing = routed_consumer(
-        name, argv.args, session, registry, context.frame.routing, links
+        name, argv.args, session, registry, context.frame.routing
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
-        entry = routing.bindings.get(
-            name, routing.bindings.get(EXTERNAL_COMMANDS)
-        )
-        named = wrapper_program_words(
-            name,
-            argv.args,
-            session,
-            registry,
-            None if entry is None else entry.machine,
-            links,
-        )
-        cut = len(argv.args) + 1 - len(named)
-        argv = dataclasses.replace(
-            argv,
-            name=named[0],
-            args=tuple(named[1:]),
-            operands=tuple(
-                op if word == typed else word
-                for op, word, typed in zip(
-                    argv.operands[cut:],
-                    named[1:],
-                    argv.args[cut:],
-                    strict=True,
-                )
-            ),
-            prefix=argv.prefix if cut == 0 else (),
-        )
         return await run_external(
             argv, stdin, session, registry, routing, sink
-        )
-
-    if consumer is Consumer.UNKNOWN and name in RUNNERS:
-        answer = wrapper_answer(name, argv.args, session, registry)
-        if answer.runs_from is not None:
-            return _run_program(
-                execute_fn,
-                name,
-                shell_join(argv.args[answer.runs_from :]),
-                session,
-                stdin,
-            )
-        err = encode_text(answer.stderr)
-        return (
-            encode_text(answer.stdout) if answer.stdout else None,
-            IOResult(exit_code=answer.exit_code, stderr=err or None),
-            ExecutionNode(
-                command=name, exit_code=answer.exit_code, stderr=err
-            ),
         )
 
     # ── `--help` as a builtin's first word ─────

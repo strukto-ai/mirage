@@ -35,6 +35,7 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.context import (
+    current_caller,
     reset_caller,
     set_current_evaluation,
     set_program_invocation,
@@ -440,6 +441,7 @@ async def _supervise(
             ignores=SHELL_IGNORED_SIGNALS,
             own_group=not foreground,
             one_command=True,
+            traits=current_caller().traits,
         )
     except BlockingIOError:
         return _refuse(FORK_FAILED)

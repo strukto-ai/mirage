@@ -17,7 +17,6 @@ import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import {
   Outcome,
-  Scope,
   type Action,
   type CommandContext,
   type CommandExplanation,
@@ -259,12 +258,12 @@ describe('routing on machines', () => {
     }
   })
 
-  it('explains a wrapper where its program is placed', async () => {
+  it('explains a wrapper in Mirage and its program where its route places it', async () => {
     const ws = workspace(new ProgramOnB())
     try {
       const said = await ws.explain('nohup hostname')
       expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
-        ['nohup', 'b'],
+        ['nohup', ''],
         ['hostname', 'b'],
       ])
     } finally {
@@ -291,18 +290,18 @@ describe('routing on machines', () => {
     }
   })
 
-  it('explains a wrapper whose routes disagree as refused', async () => {
+  it("explains a wrapper's program where its own route places it", async () => {
     const ws = workspace(new WrapperApart())
     try {
       const said = await ws.explain('nohup hostname; echo after')
       const nodes = [...commands(said.node)]
       const wrapper = nodes.find((c) => c.command === 'nohup')
+      const program = nodes.find((c) => c.command === 'hostname')
       const run = await ws.shell('nohup hostname')
-      expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
-      expect(wrapper?.decision).toEqual(run.decision)
-      expect(wrapper?.stderr).toBe(DEC.decode(run.stderr))
+      expect([wrapper?.machine, program?.machine]).toEqual(['', 'b'])
+      expect([run.exitCode, DEC.decode(run.stdout)]).toEqual([0, 'b\n'])
       const echo = nodes.find((c) => c.command === 'echo')
-      expect([echo?.outcome, echo?.exitCode]).toEqual([Outcome.ALLOW, 0])
+      expect(echo?.outcome).toBe(Outcome.ALLOW)
     } finally {
       await ws.close()
     }
@@ -331,24 +330,6 @@ describe('routing on machines', () => {
       }
     },
   )
-
-  it('explains disagreeing routes as refused once an approval is given', async () => {
-    const ws = workspace(
-      new Answers('nohup', { kind: 'ask', reason: 'sign-off' }),
-      new WrapperApart(),
-    )
-    try {
-      const first = await ws.shell('nohup hostname')
-      await ws.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW, Scope.SESSION)
-      const said = await ws.explain('nohup hostname')
-      const wrapper = [...commands(said.node)].find((c) => c.command === 'nohup')
-      const run = await ws.shell('nohup hostname')
-      expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
-      expect(wrapper?.decision).toEqual(run.decision)
-    } finally {
-      await ws.close()
-    }
-  })
 
   it('explains the machine a routed eval runs its line on', async () => {
     const ws = workspace(new EvalOnB())

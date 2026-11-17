@@ -20,6 +20,7 @@ import {
   shownMachine,
   shownPid,
   type Process,
+  type ProcessTraits,
   type ProcessUsage,
 } from '../../../../execution/process/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -31,6 +32,7 @@ import { zoneFromEnv } from '../../../../utils/timezone.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { LOWEST_PRIORITY } from '../../../lookup/constants.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
 import { grantsOf, jobResult, onMachine, sessionOf } from '../jobspec.ts'
 import * as constants from './constants.ts'
@@ -205,9 +207,15 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
   if (fact in constants.USAGE_FACTS) return usageCell(fact, info.usage ?? null)
   if (fact === 'machine') return shownMachine(info)
   const session =
-    info.sessionId === ctx.sessionId && ctx.shellPid !== null
+    info.leader ??
+    (info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
-      : info.group || info.id.pid
+      : info.group || info.id.pid)
+  const niceness = info.niceness ?? 0
+  if (fact === 'nice') return String(niceness)
+  if (fact === 'pri') return String(LOWEST_PRIORITY - niceness)
+  if (fact === 'priority') return String(constants.PRIORITY_BASE + niceness)
+  if (fact === 'opri') return String(constants.OLD_PRIORITY_BASE + niceness)
   if (fact === 'pid') return String(shownPid(info))
   // What outlives its parent is init's, as on any machine.
   if (fact === 'ppid') {
@@ -248,8 +256,10 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
  * The processes as bash runs them. A background pipeline's stages are its
  * shell's children, with nothing between them, and `ps` is a program of its
  * own: run last on a line, the shell replaced itself with it; run before more
- * of the line, it is the shell's child. Answers the processes to list and the
- * one to show running. Mirrors Python's `_as_bash_runs_them`.
+ * of the line, it is the shell's child. Its own row carries what its wrappers
+ * changed (`nice ps`, `setsid ps`), as the program they exec. Answers the
+ * processes to list and the one to show running. Mirrors Python's
+ * `_as_bash_runs_them`.
  */
 function asBashRunsThem(
   listed: readonly Process[],
@@ -257,6 +267,7 @@ function asBashRunsThem(
   running: Process | null,
   nextPid: number,
   lastOnLine: boolean,
+  traits: ProcessTraits,
 ): [readonly Process[], Process | null] {
   const jobs = new Map(
     listed
@@ -269,18 +280,30 @@ function asBashRunsThem(
       const above = info.parent === null ? undefined : jobs.get(info.parent)
       return above === undefined ? info : { ...info, parent: above }
     })
-  if (running === null || !/[;&|\n]/.test(running.command)) return [rows, running]
-  if (lastOnLine) {
-    const shown = { ...running, command: own }
+  const alone = running !== null && !/[;&|\n]/.test(running.command)
+  if (running === null || (alone && traits.wrappers.length === 0)) return [rows, running]
+  if (lastOnLine || alone) {
+    const shown = wearing({ ...running, command: own }, traits)
     return [rows.map((row) => (row.id.pid === shown.id.pid ? shown : row)), shown]
   }
-  const child = {
-    ...running,
-    id: new ProcessId(running.id.workspaceId, nextPid),
-    parent: running.id.pid,
-    command: own,
-  }
+  const child = wearing(
+    {
+      ...running,
+      id: new ProcessId(running.id.workspaceId, nextPid),
+      parent: running.id.pid,
+      command: own,
+    },
+    traits,
+  )
   return [[...rows, child], child]
+}
+
+/** A row with what the wrappers around it changed. Mirrors Python's `_wearing`. */
+function wearing(info: Process, traits: ProcessTraits): Process {
+  if (traits.leads) {
+    return { ...info, niceness: traits.niceness, group: info.id.pid, leader: info.id.pid }
+  }
+  return { ...info, niceness: traits.niceness }
 }
 
 function forest(rows: readonly Process[]): [Process, string][] {
@@ -341,6 +364,7 @@ export async function handlePs(
     currentCaller().process?.record ?? null,
     jobTable.processes.lastPid + 1,
     session?.lineNode != null && endsLine(session.lineNode),
+    currentCaller().traits,
   )
   const rows = listed.filter(
     (info) => (every || options.pids.has(shownPid(info))) && onMachine(info, options.machine),

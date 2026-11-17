@@ -13,6 +13,7 @@ from mirage.execution.process.types import (
     Process,
     ProcessRunner,
     ProcessState,
+    ProcessTraits,
     ProcessUsage,
 )
 from mirage.execution.types import MachineName, MachinePid
@@ -228,6 +229,39 @@ class ProcessHandle:
                 command=command or self._record.command,
                 fd=fd or self._record.fd,
                 argv=argv or self._record.argv,
+            )
+            self._tell()
+            return True
+
+    def wrap(self, traits: ProcessTraits, command: str) -> bool:
+        """Run on as the program a wrapper that is a stage's or a job's
+        one command runs in its place (``nohup sleep 3 &``), as a wrapper
+        execs its program: its record names the program, with what the
+        wrapper changed (its niceness, a group and session of its own),
+        and it ignores what the wrapper made it ignore. The program may
+        still take it (``take``).
+
+        Args:
+            traits (ProcessTraits): what the wrappers around the program
+                changed.
+            command (str): the program's words.
+
+        Returns:
+            bool: whether it was the wrapper's to change; False for a
+            runner started for more than one command, or a shell.
+        """
+        with self._lock:
+            if not self.one_command or self._record.parent is None:
+                return False
+            self.ignores = self.ignores | traits.ignores
+            self.program_ignores = self.program_ignores | traits.ignores
+            pid = self._record.pid
+            self._record = replace(
+                self._record,
+                command=command,
+                niceness=traits.niceness,
+                group=pid if traits.leads else self._record.group,
+                leader=pid if traits.leads else self._record.leader,
             )
             self._tell()
             return True

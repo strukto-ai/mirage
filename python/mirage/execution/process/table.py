@@ -14,7 +14,13 @@ from mirage.execution.process.config import ProcessPermissions, ProcessScope
 from mirage.execution.process.constants import FIRST_PID, KEPT_SIGNALS
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
 from mirage.execution.process.session import SessionProcesses
-from mirage.execution.process.types import Process, ProcessRunner, ProcessState
+from mirage.execution.process.types import (
+    PLAIN_TRAITS,
+    Process,
+    ProcessRunner,
+    ProcessState,
+    ProcessTraits,
+)
 from mirage.execution.types import (
     LineId,
     MachineName,
@@ -143,6 +149,7 @@ class ProcessTable:
         stdin: int | None = None,
         fd: dict[int, int] | None = None,
         argv: tuple[int, ...] = (),
+        traits: ProcessTraits = PLAIN_TRAITS,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -192,6 +199,9 @@ class ProcessTable:
                 ``<( )`` gave it, by number.
             argv (tuple[int, ...]): the pids whose output became its
                 arguments.
+            traits (ProcessTraits): what the wrappers it runs under
+                changed: its niceness, the signals it ignores as well, and
+                whether it leads a group and session of its own.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -241,7 +251,7 @@ class ProcessTable:
                     else above[1].record.line,
                     parent,
                     above[1].record.group
-                    if above is not None and not own_group
+                    if above is not None and not own_group and not traits.leads
                     else pid,
                     command,
                     cwd,
@@ -257,17 +267,25 @@ class ProcessTable:
                     stdin=stdin,
                     fd=fd or {},
                     argv=argv,
+                    niceness=traits.niceness,
+                    leader=(
+                        pid
+                        if traits.leads
+                        else above[1].record.leader
+                        if above is not None
+                        else None
+                    ),
                 ),
                 run,
                 lambda done: self._retire(done, handle),
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
-                ignores,
+                ignores | traits.ignores,
                 self._now,
             )
             handle.one_command = one_command
             handle.pauses = self._pauses
-            handle.program_ignores = program_ignores
+            handle.program_ignores = program_ignores | traits.ignores
             handle.background = background or (
                 above is not None and above[1].background
             )

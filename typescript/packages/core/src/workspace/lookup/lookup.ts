@@ -18,8 +18,8 @@ import { SHELL_SPECS } from '../../commands/spec/shell.ts'
 import { versionLine } from '../../commands/spec/standard.ts'
 import { SYNOPSES } from '../../commands/spec/synopsis.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { MachineName } from '../../execution/types.ts'
-import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../runtime/constants.ts'
+import type { ProcessTraits } from '../../execution/process/types.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
@@ -45,6 +45,7 @@ import {
   readWrapper,
 } from './constants.ts'
 import { Consumer, WrapperAnswer } from './types.ts'
+import { SIGHUP } from '../../shell/constants.ts'
 import { CycleError, resolvePath } from '../../utils/path.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -101,9 +102,10 @@ export function isTool(name: string, session: SessionState): boolean {
 
 /**
  * Whether a job's one program runs past the workspace, with a pid of its own
- * there: what the executor answers when it runs the word, so a wrapper or any
- * program no layer of the workspace holds counts as one a name captures does.
- * Mirrors Python's `runs_on_machine`.
+ * there: what the executor answers when it runs the word, a wrapper's program
+ * for a wrapper Mirage runs (it execs its program in place), and any program
+ * no layer of the workspace holds as one a name captures. Mirrors Python's
+ * `runs_on_machine`.
  */
 export function runsOnMachine(
   registry: MountRegistry,
@@ -111,26 +113,39 @@ export function runsOnMachine(
   session: SessionState,
   routing: RouteDecision<Runtime>,
 ): boolean {
-  const head = words[0] ?? ''
-  const named = Object.hasOwn(routing.bindings, head)
-  let runtime: unknown = named ? routing.bindings[head] : routing.fallback
-  const args = words.slice(1).filter((word) => word !== null)
-  if (
-    !named &&
-    args.length === words.length - 1 &&
-    mirageProgramAt(head, args, session, registry, routing) === null
-  ) {
-    const [consumer, placed] = routedConsumer(head, args, session, registry, routing)
-    if (consumer === Consumer.EXTERNAL && placed !== undefined)
-      runtime = Object.hasOwn(placed.bindings, head)
-        ? placed.bindings[head]
-        : placed.bindings[EXTERNAL_COMMANDS]
-  }
+  let head = words[0] ?? ''
+  let args: readonly string[] = words.slice(1).filter((word) => word !== null)
+  if (args.length === words.length - 1) [head, args] = unwrapped(head, args, session, routing)
+  let runtime: unknown
+  if (Object.hasOwn(routing.bindings, head)) runtime = routing.bindings[head]
+  else if (lookup(head, session, registry, routing) === Consumer.EXTERNAL)
+    runtime = routing.bindings[EXTERNAL_COMMANDS]
+  else runtime = routing.fallback
   return (
     runtime !== null &&
     runtime !== undefined &&
     (runtime as { reach?: string }).reach !== 'workspace'
   )
+}
+
+/**
+ * The program a chain of wrappers Mirage runs comes to, and its words: the
+ * command itself when it is no such wrapper. A machine that captures a
+ * wrapper by name runs it. Mirrors Python's `_unwrapped`.
+ */
+function unwrapped(
+  head: string,
+  args: readonly string[],
+  session: SessionState,
+  routing: RouteDecision<Runtime>,
+): [string, readonly string[]] {
+  while (runsWrapper(head, args, session, routing)) {
+    const [at] = readWrapper(head, args)
+    if (at === null) break
+    head = args[at] ?? ''
+    args = args.slice(at + 1)
+  }
+  return [head, args]
 }
 
 /**
@@ -185,9 +200,8 @@ function isNative(runtime: Runtime | null | undefined, name: string): boolean {
 }
 
 /**
- * `lookup`'s answer, with a wrapper no Mirage layer owns bound to the
- * runtime that captures its program by name (`nice gcc`). Mirrors Python's
- * `routed_consumer`.
+ * `lookup`'s answer, with `lscpu` the session's own when it picks the
+ * machines it answers for. Mirrors Python's `routed_consumer`.
  */
 export function routedConsumer(
   name: string,
@@ -195,7 +209,6 @@ export function routedConsumer(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
-  links: NamespaceLinks | null = null,
 ): [Consumer, RouteDecision<Runtime> | undefined] {
   if (
     name === MACHINE_VIEW &&
@@ -205,18 +218,7 @@ export function routedConsumer(
     picksMachine(args)
   )
     return [Consumer.SESSION, routing]
-  const consumer = lookup(name, session, registry, routing)
-  if (routing === undefined || !outsideMirage(consumer)) return [consumer, routing]
-  const program = wrapped(name, args, routing.bindings, session, registry, links)
-  if (program === null) return [consumer, routing]
-  const bindings = Object.assign(
-    Object.create(null) as Record<string, Runtime | null>,
-    routing.bindings,
-    {
-      [name]: routing.bindings[program] ?? null,
-    },
-  )
-  return [Consumer.EXTERNAL, { ...routing, bindings }]
+  return [lookup(name, session, registry, routing), routing]
 }
 
 /**
@@ -237,97 +239,54 @@ export function withoutCapture(
 }
 
 /**
- * The words a command hands the machine that runs it, name first: each
- * program a wrapper runs that a `/usr/bin` path spells named instead (`nice
- * /usr/bin/gcc` hands `nice gcc`), as the plain path runs that program by
- * name, since a machine cannot read a workspace link; a name the wrapper
- * would read as an option keeps its path. Mirage's own `in_process` machine
- * has no process for a wrapper to change, so it gets the program's words
- * alone (`gcc x.c`). Mirrors Python's `wrapper_program_words`.
+ * Whether Mirage runs a wrapper itself (`wrapperAnswer`): one no function
+ * shadows and no machine captures by name, with a program to run, or one that
+ * answers for itself without one (`nice` alone prints the niceness). Mirrors
+ * Python's `runs_wrapper`.
  */
-export function wrapperProgramWords(
+export function runsWrapper(
   name: string,
   args: readonly string[],
   session: SessionState,
-  registry: MountRegistry,
-  machine: MachineName | null,
-  links: NamespaceLinks | null = null,
-): string[] {
-  const words = [name, ...args]
-  let head = name
-  let start = 1
-  let program = 0
-  while (PROGRAM_WRAPPERS.has(head)) {
-    const [found] = readWrapper(head, words.slice(start))
-    if (found === null) break
-    const at = start + found
-    const word = words[at] ?? ''
-    head = pathProgram(word, session, registry, links) ?? word
-    if (!head.startsWith('-')) words[at] = head
-    program = at
-    start = at + 1
-  }
-  if (machine !== null && machine.provider === IN_PROCESS) return words.slice(program)
-  return words
-}
-
-/**
- * Where a wrapper's program stands in its words when Mirage runs that
- * program itself, without the wrapper (`nice grep`); null otherwise. Mirrors
- * Python's `mirage_program_at`.
- */
-export function mirageProgramAt(
-  name: string,
-  args: readonly string[],
-  session: SessionState,
-  registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
-  links: NamespaceLinks | null = null,
-): number | null {
-  const bindings = routing?.bindings ?? registry.runtimeBindings
+): boolean {
   if (
     !PROGRAM_WRAPPERS.has(name) ||
-    Object.hasOwn(bindings, name) ||
-    !outsideMirage(lookup(name, session, registry, routing)) ||
-    wrapped(name, args, bindings, session, registry, links) !== null
+    Object.hasOwn(session.functions, name) ||
+    (routing !== undefined && Object.hasOwn(routing.bindings, name))
   )
-    return null
-  const [at] = readWrapper(name, args)
-  if (at === null) return null
-  const word = args[at] ?? ''
-  const inner = pathProgram(word, session, registry, links) ?? word
-  if (PROGRAM_WRAPPERS.has(inner)) {
-    const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing, links)
-    return deeper === null ? null : at
-  }
-  if (outsideMirage(lookup(inner, session, registry, routing))) return null
-  if (INTERPRETER_NAMES.has(inner) && !((bindings[inner] ?? null) instanceof LanguageRuntime))
-    return null
-  return at
+    return false
+  return RUNNERS.has(name) || readWrapper(name, args)[0] !== null
 }
 
 /**
- * The status and stderr GNU's wrapper answers instead of running its
- * program: a bad option, or a word it cannot exec (`nice cd`). Mirrors
- * Python's `wrapper_refusal`.
+ * What a wrapper changes for the program at `at` in its words, over the
+ * traits it runs under, and what it warns first: `nice` the niceness (10
+ * more, or its adjustment, never past 19; a negative one is refused, as for a
+ * user who is not root), `nohup` HUP ignored, `setsid` a group and session of
+ * its own. Each records its words for a machine with processes of its own.
+ * Mirrors Python's `wrapper_traits`.
  */
-/**
- * Whether a wrapper goes to a runtime with its program under it (`nohup
- * python3` on a machine), so Mirage never runs that program itself.
- */
-export function wrapperRunsOutside(
+export function wrapperTraits(
   name: string,
   args: readonly string[],
-  session: SessionState,
-  registry: MountRegistry,
-  routing: RouteDecision<Runtime> | undefined,
-  links: NamespaceLinks | null = null,
-): boolean {
-  return (
-    PROGRAM_WRAPPERS.has(name) &&
-    mirageProgramAt(name, args, session, registry, routing, links) === null &&
-    routedConsumer(name, args, session, registry, routing, links)[0] === Consumer.EXTERNAL
-  )
+  at: number,
+  traits: ProcessTraits,
+): [ProcessTraits, string] {
+  const worn: ProcessTraits = {
+    ...traits,
+    wrappers: [...traits.wrappers, name, ...args.slice(0, at)],
+  }
+  if (name === 'nice') {
+    const adjustment = niceAdjustment(args.slice(0, at))
+    if (adjustment !== null && adjustment < 0)
+      return [worn, 'nice: cannot set niceness: Permission denied\n']
+    const step = adjustment ?? DEFAULT_NICENESS
+    return [{ ...worn, niceness: Math.min(traits.niceness + step, LOWEST_PRIORITY) }, '']
+  }
+  if (name === 'nohup') return [{ ...worn, ignores: new Set([...worn.ignores, SIGHUP]) }, '']
+  if (name === 'setsid') return [{ ...worn, leads: true }, '']
+  return [worn, '']
 }
 
 export function wrapperRefusal(
@@ -365,48 +324,27 @@ function helpWord(args: readonly string[]): string | null {
   return null
 }
 
-/** `nice` followed down a chain of itself to the end: the niceness it comes
- * to, an adjustment with nothing to run refused. */
-function niceness(args: readonly string[]): WrapperAnswer {
-  let level = 0
-  const warned: string[] = []
-  let words = [...args]
-  for (;;) {
-    const [at] = readWrapper('nice', words)
-    const adjustment = niceAdjustment(at === null ? words : words.slice(0, at))
-    if (at === null && adjustment !== null)
-      return usage('nice', 'nice: a command must be given with an adjustment', 125)
-    if (adjustment !== null && adjustment < 0)
-      warned.push('nice: cannot set niceness: Permission denied\n')
-    else if (adjustment !== null) level = Math.min(level + adjustment, LOWEST_PRIORITY)
-    else if (at !== null) level = Math.min(level + DEFAULT_NICENESS, LOWEST_PRIORITY)
-    if (at === null) break
-    words = words.slice(at + 1)
-  }
-  return new WrapperAnswer({ stdout: `${String(level)}\n`, stderr: warned.join('') })
-}
-
-/** Whether a chain of `nice` ends with nothing left to run. */
-function endsBare(args: readonly string[]): boolean {
-  let words = [...args]
-  for (;;) {
-    const [at] = readWrapper('nice', words)
-    if (at === null) return true
-    if (words[at] !== 'nice') return false
-    words = words.slice(at + 1)
-  }
+/**
+ * `nice` with nothing to run: the niceness it runs at, an adjustment with
+ * nothing to run refused. Mirrors Python's `_niceness`.
+ */
+function niceness(args: readonly string[], level: number): WrapperAnswer {
+  if (niceAdjustment(args) !== null)
+    return usage('nice', 'nice: a command must be given with an adjustment', 125)
+  return new WrapperAnswer({ stdout: `${String(level)}\n` })
 }
 
 /**
- * What a wrapper does with no program it can hand to a Mirage layer: refuse
- * the line, say what it is, print the niceness, or run a path or another
- * wrapper through the shell.
+ * What a wrapper Mirage runs does: refuse the line, say what it is, print the
+ * niceness, or run its program (`runsFrom`). `level` is the niceness of the
+ * process it runs as. Mirrors Python's `wrapper_answer`.
  */
 export function wrapperAnswer(
   name: string,
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  level = 0,
 ): WrapperAnswer {
   const refused = wrapperRefusal(name, args, session, registry)
   if (refused !== null) {
@@ -414,10 +352,7 @@ export function wrapperAnswer(
     return new WrapperAnswer({ exitCode: code, stderr: said })
   }
   const [at] = readWrapper(name, args)
-  if (at !== null) {
-    if (name === 'nice' && args[at] === 'nice' && endsBare(args)) return niceness(args)
-    return new WrapperAnswer({ runsFrom: at })
-  }
+  if (at !== null) return new WrapperAnswer({ runsFrom: at })
   const word = helpWord(args)
   if (word === '--version') return new WrapperAnswer({ stdout: versionLine(name) })
   if (word === '--help') {
@@ -425,37 +360,9 @@ export function wrapperAnswer(
     if (spec === undefined) throw new Error(`${name}: no spec`)
     return new WrapperAnswer({ stdout: renderHelp(name, spec, [], undefined, SYNOPSES[name]) })
   }
-  if (name === 'nice') return niceness(args)
+  if (name === 'nice') return niceness(args, level)
   if (name === 'setsid') return usage(name, 'setsid: no command specified', 1)
   return usage(name, `${name}: missing operand`, 125)
-}
-
-/** Whether no Mirage layer runs the command. */
-function outsideMirage(consumer: Consumer): boolean {
-  return consumer === Consumer.EXTERNAL || consumer === Consumer.UNKNOWN
-}
-
-/**
- * The program a wrapper runs, nested wrappers followed, when a runtime
- * captures it by name and runs it natively; a word spelled by its
- * `/usr/bin` path is that program, as the plain path runs it. `links`, the
- * session's, are followed to it; null reads the word as typed.
- */
-function wrapped(
-  name: string,
-  args: readonly string[],
-  bindings: Readonly<Record<string, Runtime | null | undefined>>,
-  session: SessionState,
-  registry: MountRegistry,
-  links: NamespaceLinks | null,
-): string | null {
-  if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return null
-  const [at] = readWrapper(name, args)
-  if (at === null) return null
-  const word = args[at] ?? ''
-  const inner = pathProgram(word, session, registry, links) ?? word
-  if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
-  return wrapped(inner, args.slice(at + 1), bindings, session, registry, links)
 }
 
 /**

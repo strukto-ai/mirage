@@ -2,7 +2,7 @@ import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.t
 import { FIRST_PID, KEPT_SIGNALS } from './constants.ts'
 import { underCeiling, type PathSpec, type ProcessScope } from '../../types.ts'
 import { newPauseGate, ProcessHandle, type ExecutionBind, type PauseGate } from './handle.ts'
-import type { Process, ProcessRunner } from './types.ts'
+import { PLAIN_TRAITS, type Process, type ProcessRunner, type ProcessTraits } from './types.ts'
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineName, type MachineResources, ProcessId } from '../types.ts'
@@ -121,7 +121,9 @@ export class ProcessTable {
    * `programIgnores` what that program ignores as well, where `ignores` is
    * more than a shell's. `stdin` is the pid whose stdout is its stdin, `fd`
    * the pid writing each descriptor a `<( )` gave it, by number, and `argv`
-   * the pids whose output became its arguments.
+   * the pids whose output became its arguments. `traits` are what the
+   * wrappers it runs under changed: its niceness, the signals it ignores as
+   * well, and whether it leads a group and session of its own.
    */
   start(init: {
     sessionId: string
@@ -144,7 +146,9 @@ export class ProcessTable {
     stdin?: number | null
     fd?: Readonly<Record<number, number>>
     argv?: readonly number[]
+    traits?: ProcessTraits
   }): ProcessHandle {
+    const traits = init.traits ?? PLAIN_TRAITS
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
     if (
@@ -169,7 +173,8 @@ export class ProcessTable {
         sessionId: init.sessionId,
         line: init.line ?? (above === undefined ? null : above.handle.record.line),
         parent: init.parent ?? null,
-        group: (init.ownGroup === true ? undefined : above?.handle.record.group) ?? pid,
+        group:
+          (init.ownGroup === true || traits.leads ? undefined : above?.handle.record.group) ?? pid,
         command: init.command,
         cwd: init.cwd,
         machine: init.machine ?? this.machine,
@@ -186,6 +191,8 @@ export class ProcessTable {
         stdin: init.stdin ?? null,
         fd: init.fd ?? {},
         argv: init.argv ?? [],
+        niceness: traits.niceness,
+        leader: traits.leads ? pid : (above?.handle.record.leader ?? null),
       },
       init.run,
       () => {
@@ -209,13 +216,13 @@ export class ProcessTable {
         this.terminateChildren(pid, signal)
       },
       this.bind,
-      init.ignores,
+      new Set([...(init.ignores ?? []), ...traits.ignores]),
       this.now,
     )
     handle.oneCommand = init.oneCommand === true
     handle.pauses = this.pauses
     handle.background = init.background === true || above?.handle.background === true
-    handle.programIgnores = init.programIgnores ?? new Set()
+    handle.programIgnores = new Set([...(init.programIgnores ?? []), ...traits.ignores])
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     this.ancestors.set(pid, ancestry)
