@@ -46,6 +46,34 @@ async def test_split_records_preserve_binary_channels_and_exit_status():
     assert err == b"oops\n"
 
 
+async def test_many_records_in_one_chunk_arrive_in_order():
+    lines = [b"%d\n" % i for i in range(1000)]
+    out = bytearray()
+    body = b"".join(
+        record(stream="stdout", data=base64.b64encode(line).decode())
+        for line in lines
+    ) + record(status="done", result={"exit_code": 0}, error=None)
+
+    async def source():
+        yield body
+
+    async def stdout(data):
+        out.extend(data)
+
+    await consume_stream(source(), stdout, ignore)
+    assert out == b"".join(lines)
+
+
+async def oversized():
+    for _ in range(17):
+        yield b"x" * (64 * 1024)
+
+
+async def test_a_record_past_the_cap_is_refused_across_chunks():
+    with pytest.raises(ValueError, match="too large"):
+        await consume_stream(oversized(), ignore, ignore)
+
+
 @pytest.mark.parametrize(
     "body",
     [

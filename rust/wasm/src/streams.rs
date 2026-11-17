@@ -248,9 +248,9 @@ pub extern "C" fn mirage_rs_take_stderr(handle: u32) -> i32 {
     })
 }
 
-/// Put the request the stream waits on at `mirage_rs_output`, its JSON
-/// header then the bytes it carries; returns the header's length, or -1
-/// when it waits on none.
+/// Put the request the stream waits on at `mirage_rs_output`, the bytes it
+/// carries then its JSON header, so the bytes stay where the stream wrote
+/// them; returns the header's length, or -1 when it waits on none.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_request(handle: u32) -> i32 {
     with_slot(handle, -1, |slot| {
@@ -259,8 +259,8 @@ pub extern "C" fn mirage_rs_request(handle: u32) -> i32 {
         let mut data = Vec::new();
         match slot.stream.request(&mut data) {
             Some(header) => {
-                slot.out.extend_from_slice(&header);
-                slot.out.append(&mut data);
+                data.extend_from_slice(&header);
+                slot.out = data;
                 i32::try_from(header.len()).unwrap_or(-1)
             }
             None => -1,
@@ -292,15 +292,16 @@ pub extern "C" fn mirage_rs_stage(handle: u32, len: usize) -> i32 {
     })
 }
 
-/// Answer the request taken last with the staged reply: `reply_len` bytes
-/// of JSON, then the bytes it carries.
+/// Answer the request taken last with the staged reply: the bytes it
+/// carries, then `reply_len` bytes of JSON, which come off the end so the
+/// bytes before them are handed over where they lie.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_respond(handle: u32, reply_len: usize) -> i32 {
     with_slot(handle, 1, |slot| {
         slot.out.clear();
         mirage_rs::release_capacity(&mut slot.out);
         let mut data = std::mem::take(&mut slot.staged);
-        let reply: Vec<u8> = data.drain(..reply_len.min(data.len())).collect();
+        let reply = data.split_off(data.len().saturating_sub(reply_len));
         match slot.stream.respond_owned(&reply, data, &mut slot.out) {
             Ok(()) => 0,
             Err(err) => {

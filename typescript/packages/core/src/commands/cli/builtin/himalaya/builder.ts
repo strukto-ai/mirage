@@ -340,16 +340,16 @@ function quotedPrintable(data: Uint8Array, isBody: boolean): number[] {
   const out: number[] = []
   let column = 0
   const plain = (chunk: readonly number[]): void => {
-    let rest = chunk
-    while (column + rest.length > MAX_CONTENT_LEN) {
+    let at = 0
+    while (column + chunk.length - at > MAX_CONTENT_LEN) {
       const room = Math.max(MAX_CONTENT_LEN - column, 0)
-      pushAll(out, rest.slice(0, room))
+      pushAll(out, chunk.slice(at, at + room))
       out.push(0x3d, 0x0d, 0x0a)
       column = 0
-      rest = rest.slice(room)
+      at += room
     }
-    pushAll(out, rest)
-    column += rest.length
+    pushAll(out, chunk.slice(at))
+    column += chunk.length - at
   }
   const escape = (byte: number): void => {
     if (column + 3 > MAX_CONTENT_LEN) {

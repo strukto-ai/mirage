@@ -12,8 +12,8 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, NAMEREF, PIPESTATUS, Slot, Store, Value,
-    entry_bytes, strip_key_quotes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, LOWER, NAMEREF, PIPESTATUS, RANDOM, Slot,
+    Store, UPPER, Value, entry_bytes, strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -727,6 +727,20 @@ impl<'a> Writer<'a> {
         if self.store.is_readonly(&name, false) {
             return Ok(Element::Readonly);
         }
+        // `x+=v` on a scalar no attribute reshapes grows it in place rather
+        // than copying what it holds into a new value each time.
+        let plain = self
+            .store
+            .record(&name)
+            .is_some_and(|var| var.attrs & (INTEGER | LOWER | UPPER | NAMEREF) == 0);
+        if append && slot.is_none() && plain && name != PIPESTATUS && name != RANDOM {
+            let held = self.store.record(&name).and_then(|var| var.value.as_ref());
+            let before = entry_bytes(&name, held);
+            self.check(before, before + value.len())?;
+            if self.store.append_text(&name, value, self.allexport) {
+                return Ok(Element::Landed);
+            }
+        }
         let held = match (&slot, &converted) {
             (None, _) => self
                 .store
@@ -853,7 +867,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED};
+    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED, UPPER, Var};
 
     fn writer(store: &mut Store) -> Writer<'_> {
         Writer {
@@ -874,6 +888,27 @@ mod tests {
 
     fn scalar(text: &str) -> Value {
         Value::Scalar(text.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn an_append_grows_a_plain_scalar_in_place() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.seed("x", scalar("ab"));
+        let held = store.held();
+        writer(&mut store).element("x", None, b"cd", true).unwrap();
+        let record: *const Var = store.record("x").unwrap();
+        writer(&mut store).element("x", None, b"ef", true).unwrap();
+        assert_eq!(text(&store, "x").as_deref(), Some("abcdef"));
+        assert_eq!(store.held(), held + 4);
+        assert_eq!(record, store.record("x").unwrap() as *const Var);
+        store.set_attr("u", Some(UPPER), true);
+        writer(&mut store).element("u", None, b"ab", false).unwrap();
+        writer(&mut store).element("u", None, b"cd", true).unwrap();
+        assert_eq!(text(&store, "u").as_deref(), Some("ABCD"));
+        let mut bounded = writer(&mut store);
+        bounded.limit = Some(bounded.store.held() + 1);
+        assert!(bounded.element("x", None, b"gh", true).is_err());
+        assert_eq!(text(&store, "x").as_deref(), Some("abcdef"));
     }
 
     #[test]

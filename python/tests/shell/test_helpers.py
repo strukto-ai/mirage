@@ -41,6 +41,7 @@ from mirage.shell.helpers import (
     is_backgrounded,
     literal_word,
     quoted_parts,
+    read_row,
     source_parts,
     split_env_prefix,
 )
@@ -1106,3 +1107,19 @@ def _commands(node):
 def test_a_shells_last_command_runs_in_its_place(line, last):
     commands = _commands(_parse(line))
     assert [get_text(c) for c in commands if ends_line(c)] == last
+
+
+def test_read_row_takes_a_line_whole_and_a_spanning_command_with_its_end():
+    line = "a; b\nc; { d\ne; }; f\ng"
+    raw = _parse(line).named_children
+    assert [read_row(s) for s in raw] == [0, 0, 1, 1, 1, 3]
+    program = parse_program(line)
+    held = program.root.named_children
+    assert [read_row(held[at]) for at in (4, 5, 0, 3, 1, 2)] == [
+        1,
+        3,
+        0,
+        1,
+        0,
+        1,
+    ]

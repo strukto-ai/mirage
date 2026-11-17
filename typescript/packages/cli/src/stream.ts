@@ -40,13 +40,17 @@ export async function consumeStream(
   stdout: (data: Uint8Array) => Promise<void>,
   stderr: (data: Uint8Array) => Promise<void>,
 ): Promise<Completion> {
-  let pending = Buffer.alloc(0)
+  let held: Uint8Array[] = []
+  let heldBytes = 0
   for await (const chunk of source) {
-    pending = Buffer.concat([pending, chunk])
+    let start = 0
     let newline: number
-    while ((newline = pending.indexOf(10)) >= 0) {
-      const line = pending.subarray(0, newline)
-      pending = pending.subarray(newline + 1)
+    while ((newline = chunk.indexOf(10, start)) >= 0) {
+      const tail = chunk.subarray(start, newline)
+      const line = held.length === 0 ? tail : Buffer.concat([...held, tail])
+      held = []
+      heldBytes = 0
+      start = newline + 1
       if (line.length > MAX_RECORD_BYTES) throw new Error('daemon stream record is too large')
       const record: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(line))
       if (typeof record !== 'object' || record === null || Array.isArray(record))
@@ -71,7 +75,11 @@ export async function consumeStream(
         return value as unknown as Completion
       } else throw new Error('invalid daemon stream record')
     }
-    if (pending.length > MAX_RECORD_BYTES) throw new Error('daemon stream record is too large')
+    if (start < chunk.length) {
+      held.push(chunk.subarray(start))
+      heldBytes += chunk.length - start
+    }
+    if (heldBytes > MAX_RECORD_BYTES) throw new Error('daemon stream record is too large')
   }
   throw new Error('daemon stream ended without a completion record')
 }

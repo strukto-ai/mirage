@@ -89,7 +89,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   unread(data: Uint8Array): void {
-    this.buf = concat([data, this.buf])
+    if (this.buf.byteLength === 0 && data.buffer instanceof ArrayBuffer) {
+      this.buf = data as Uint8Array<ArrayBuffer>
+      this.trim()
+    } else this.buf = concat([data, this.buf])
   }
 
   get loaded(): number {

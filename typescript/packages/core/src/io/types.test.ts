@@ -127,6 +127,29 @@ describe('IOResult.merge', () => {
     const b = new IOResult({ stderr: new TextEncoder().encode('B') })
     const merged = await a.merge(b)
     expect(new TextDecoder().decode(merged.stderr as Uint8Array)).toBe('A:B')
+    const empty = await new IOResult({ stderr: new Uint8Array(0) }).merge(
+      new IOResult({ stderr: new Uint8Array(0) }),
+    )
+    expect(empty.stderr).toBeNull()
+  })
+
+  it("keeps each side's stderr its own across many merges", async () => {
+    const encoder = new TextEncoder()
+    let merged = new IOResult()
+    let before = ''
+    for (let i = 0; i < 1000; i++) {
+      const said = i % 3 === 0 ? null : `${String(i)}\n`
+      if (said !== null) before += said
+      merged = await merged.merge(
+        new IOResult({ stderr: said === null ? null : encoder.encode(said) }),
+      )
+    }
+    const left = merged
+    merged = await left.merge(new IOResult({ stderr: encoder.encode('end\n') }))
+    merged.addStderr(encoder.encode('more\n'))
+    left.addStderr(encoder.encode('left\n'))
+    expect(new TextDecoder().decode(merged.stderr as Uint8Array)).toBe(`${before}end\nmore\n`)
+    expect(new TextDecoder().decode(left.stderr as Uint8Array)).toBe(`${before}left\n`)
   })
 
   it('takes exit_code from the right side by default', async () => {

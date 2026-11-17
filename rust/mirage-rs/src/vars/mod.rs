@@ -690,6 +690,37 @@ impl Store {
         true
     }
 
+    /// Append `text` to the scalar `name` holds in place, as `land` stores
+    /// the joined value: the record assigned, a managed pointer dropped,
+    /// exported under `set -a`. The table and the record are copied first
+    /// only while a fork or a saved scope shares them. False when the
+    /// record holds no scalar, or is `GLOBIGNORE`, which `place` watches.
+    pub fn append_text(&mut self, name: &str, text: &[u8], allexport: bool) -> bool {
+        if name == "GLOBIGNORE"
+            || !self
+                .record(name)
+                .is_some_and(|var| matches!(var.value, Some(Value::Scalar(_))))
+        {
+            return false;
+        }
+        let Some(var) = Arc::make_mut(&mut self.vars).get_mut(name) else {
+            return false;
+        };
+        let var = Arc::make_mut(var);
+        let Some(Value::Scalar(held)) = var.value.as_mut() else {
+            return false;
+        };
+        held.extend_from_slice(text);
+        var.attrs &= !UNASSIGNED;
+        var.managed = None;
+        if allexport {
+            var.attrs |= EXPORT;
+        }
+        self.held += text.len();
+        self.stamp = fresh_stamp();
+        true
+    }
+
     /// A copy for a fork of the session: the same records, a generator that
     /// starts afresh unless `unset RANDOM` ended it, and `LINENO` and
     /// `BASHPID` as special as they were.
