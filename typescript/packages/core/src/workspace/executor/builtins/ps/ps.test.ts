@@ -290,7 +290,7 @@ describe('ps under wrappers', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     try {
       const io = await ws.shell(line)
-      expect((stdoutStr(io)).split('\n').slice(1).join('\n')).toBe(out)
+      expect(stdoutStr(io).split('\n').slice(1).join('\n')).toBe(out)
     } finally {
       await ws.close()
     }
@@ -300,7 +300,9 @@ describe('ps under wrappers', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     try {
       const io = await ws.shell('setsid ps -o pid=,pgid=,sid=,comm=')
-      const [pid, pgid, sid, comm] = (stdoutStr(io)).split(/\s+/).filter((w) => w !== '')
+      const [pid, pgid, sid, comm] = stdoutStr(io)
+        .split(/\s+/)
+        .filter((w) => w !== '')
       expect([pgid, sid, comm]).toEqual([pid, pid, 'ps'])
     } finally {
       await ws.close()
@@ -314,7 +316,9 @@ describe('ps under wrappers', () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     try {
       const io = await ws.shell(line)
-      const rows = (stdoutStr(io)).split('\n').map((row) => row.trim().split(/\s+/).join(' '))
+      const rows = stdoutStr(io)
+        .split('\n')
+        .map((row) => row.trim().split(/\s+/).join(' '))
       expect(rows).toContain(out)
       await ws.shell('wait')
     } finally {
@@ -328,7 +332,9 @@ describe('ps under wrappers', () => {
       const io = await ws.shell(
         'setsid sleep 3 & p=$!; sleep 0.2; ps -o pid=,pgid=,sid= -p $p; kill $p',
       )
-      const [pid, pgid, sid] = (stdoutStr(io)).split(/\s+/).filter((w) => w !== '')
+      const [pid, pgid, sid] = stdoutStr(io)
+        .split(/\s+/)
+        .filter((w) => w !== '')
       expect([pgid, sid]).toEqual([pid, pid])
       await ws.shell('wait')
     } finally {
