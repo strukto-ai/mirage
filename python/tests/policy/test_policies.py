@@ -169,7 +169,7 @@ class UserRule(Policy):
 
 @pytest.mark.asyncio
 async def test_builtin_runs_first_then_user_policies_in_order():
-    policies = Policies([MountRootPolicy(_registry())])
+    policies = Policies(root=MountRootPolicy(_registry()))
     policies.add(UserRule())
     # Both match `rm /data`; the built-in GNU message wins by order.
     deny = await policies.pre_command(_ctx("rm", [_path("/data")]))

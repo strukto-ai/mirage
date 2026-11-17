@@ -41,6 +41,13 @@
             "exit": 0,
             "stdout": "keep-out\n"
           }
+        },
+        {
+          "command": "X=ls; $X /ram",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:X=ls; $X /ram\n"
+          }
         }
       ]
     },
@@ -98,6 +105,13 @@
           "expect": {
             "exit": 126,
             "stderr": "$cmd: Permission denied\n"
+          }
+        },
+        {
+          "command": "r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
           }
         },
         {
@@ -266,6 +280,171 @@
           "expect": {
             "exit": 0,
             "stdout": "box:cat /ram/a\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_coded_policy",
+      "note": "A whole-line runtime expands the line itself, so a pre_command policy reads it as typed. While one is installed, in code or in the profile, a word only the runtime can expand and a line the gate cannot read are refused, as under a rule that reads every command's arguments.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "deny_flag",
+            "command": "rm",
+            "flag": "-rf",
+            "reason": "no recursive deletes"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "rm -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "F=-rf; rm $F /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo 'rm -rf /ram/x' | sh",
+          "expect": {
+            "exit": 126,
+            "stderr": "sh: Permission denied\n"
+          }
+        },
+        {
+          "command": "r? -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
+          }
+        },
+        {
+          "command": "rm -r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "[[ abc == a* ]]",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:[[ abc == a* ]]\n"
+          }
+        },
+        {
+          "command": "rm /ram/x",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:rm /ram/x\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_profile_policy",
+      "note": "A whole-line runtime expands the line itself, so a pre_command policy reads it as typed. While one is installed, in code or in the profile, a word only the runtime can expand and a line the gate cannot read are refused, as under a rule that reads every command's arguments.",
+      "world": {
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
+            "captures": [
+              "@line"
+            ]
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "policy": {
+              "pre_command": [
+                {
+                  "script": {
+                    "language": "python",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'rm' and '-rf' in ctx['argv']:\n        return {'kind': 'deny', 'reason': 'no recursive deletes'}\n    return None\n"
+                  },
+                  "runtime": "monty"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "F=-rf; rm $F /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo 'rm -rf /ram/x' | sh",
+          "expect": {
+            "exit": 126,
+            "stderr": "sh: Permission denied\n"
+          }
+        },
+        {
+          "command": "r? -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
+          }
+        },
+        {
+          "command": "rm -r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "[[ abc == a* ]]",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:[[ abc == a* ]]\n"
+          }
+        },
+        {
+          "command": "rm /ram/x",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:rm /ram/x\n"
           }
         }
       ]

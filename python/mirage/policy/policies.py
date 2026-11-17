@@ -37,6 +37,7 @@ from mirage.errors.types import FsCondition
 from mirage.observe.context import command_records
 from mirage.policy.base import Policy
 from mirage.policy.builtin.mount_mode import MountModePolicy
+from mirage.policy.builtin.mount_root import MountRootPolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.composition import (
     Composition,
@@ -781,8 +782,8 @@ class Policies:
     """Ordered policies; at every method the first Deny wins, and every
     Ask is put to the host.
 
-    Built-ins are seeded first (MountRegistry registers
-    MountRootPolicy), then the document's deny rules compiled by the
+    The mount-root built-in comes first (MountRegistry hands it over as
+    ``root``), then the document's deny rules compiled by the
     workspace, then user policies in registration order
     (``Workspace(policies=...)``, then anything added later through
     ``add``). There is no allow arm, so adding a policy can only
@@ -808,10 +809,18 @@ class Policies:
     Args:
         policies (list[Policy] | None): initial policies, consulted in
             order before anything registered later through add().
+        root (MountRootPolicy | None): the mount-root built-in, held
+            apart from the registered policies as the mount-mode one is,
+            and asked before all of them.
     """
 
-    def __init__(self, policies: list[Policy] | None = None) -> None:
+    def __init__(
+        self,
+        policies: list[Policy] | None = None,
+        root: MountRootPolicy | None = None,
+    ) -> None:
         self._policies: list[Policy] = list(policies or [])
+        self._root = root
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
         self._orders: dict[tuple[str, bool, bool], tuple[int, ...]] = {}
@@ -918,7 +927,11 @@ class Policies:
     def _rescan(self) -> None:
         wanted = set()
         self._orders = {}
-        policies = [*self._policies, *filter(None, [self._placement])]
+        policies = [
+            *filter(None, [self._root]),
+            *self._policies,
+            *filter(None, [self._placement]),
+        ]
         for method in VALIDITY:
             base = getattr(Policy, method)
             for policy in policies:
@@ -964,7 +977,7 @@ class Policies:
                 the policies that answered nothing or only a Limit, and
                 those without the method.
         """
-        snapshot = tuple(self._policies)
+        snapshot = (*filter(None, [self._root]), *self._policies)
         placement = self._placement
         orders = self._orders
         policies = (

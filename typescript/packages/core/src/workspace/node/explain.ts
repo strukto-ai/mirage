@@ -378,15 +378,19 @@ async function explained(
  * command a rule reads must not reach it with any of them in hand. A command
  * a path or mount rule reads is refused when it walks (`find`, `grep -r`,
  * `tar -c`) or names a glob; one a rule reads the arguments of when a word
- * only the runtime can expand stands among them, when the runtime appends
- * operands (`xargs`, `find -exec`) or when it runs after a `cd` the walk
- * could not follow; and any command, under any rule, that runs lines the
- * gate cannot read (a sourced file, a script, `eval "$p"`). With no rule in
- * force nothing is refused on this account: the words are admitted as
- * typed, which is all a coded policy ever saw. `words` are the words after
- * the name and the statement's redirect targets, as the gate read them;
- * `operands` the words after the name, classified; `cwd` the working
- * directory the line runs in. Mirrors the Python `_line_decision`.
+ * only the runtime can expand (a parameter, a substitution, an unquoted glob)
+ * stands among them, when the runtime appends operands (`xargs`,
+ * `find -exec`) or when it runs after a `cd` the walk could not follow; and
+ * any command, under any rule, that runs lines the gate cannot read (a
+ * sourced file, a script, `eval "$p"`). A user policy answering `preCommand`
+ * (in code, or a profile's program) is shown every command's expanded words
+ * off such a runtime, so here it refuses as a rule that reads every command's
+ * arguments does; it is never shown a walk's files, so a walk stays. With
+ * neither in force nothing is refused on this account. `words` are the
+ * command's words, name first, and the statement's redirect targets, as the
+ * gate read them; `operands` the words after the name, classified; `coded` whether a policy
+ * other than Mirage's own answers `preCommand` for the session; `cwd` the
+ * working directory the line runs in. Mirrors the Python `_line_decision`.
  */
 function lineDecision(
   name: string,
@@ -396,6 +400,7 @@ function lineDecision(
   redirects: readonly PathSpec[],
   inners: readonly InnerLine[],
   rules: AdmissionRules | null,
+  coded: boolean,
   open: boolean,
   lost: boolean,
   cwd: string,
@@ -409,13 +414,15 @@ function lineDecision(
     )
     if (globby) return 'expands a pattern only the runtime can read'
   }
-  if (readsArgs(rules, name)) {
-    const unread = words.find((w) => w.text === null)?.raw
+  if (coded || readsArgs(rules, name)) {
+    const unread = words.find((w) => w.text === null || w.glob === true)?.raw
     if (unread !== undefined) return unreadable(unread)
     if (open) return 'runs on operands the gate cannot read'
     if (lost) return 'runs after a cd the gate cannot follow'
   }
-  if (hasRules(rules) && inners.some((inner) => !innerReadable(inner))) return UNREADABLE_LINES
+  if ((coded || hasRules(rules)) && inners.some((inner) => !innerReadable(inner))) {
+    return UNREADABLE_LINES
+  }
   return null
 }
 
@@ -475,7 +482,7 @@ async function* judgeWords(
     return
   }
   if (head.text === null && !wholeLine) return
-  if (head.text === null && hasRules(rules)) {
+  if (wholeLine && (head.text === null || head.glob === true) && hasRules(rules)) {
     yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
     return
   }
@@ -527,16 +534,19 @@ async function* judgeWords(
           namespace === null ? null : namespace.sessionLinks(session),
           open,
         )
+  const coded =
+    wholeLine && (await registry.policies.wantsFor('preCommand', session.sessionId, true))
   const refused =
     wholeLine && asked?.kind !== 'deny'
       ? lineDecision(
           name,
           args,
-          readWords,
+          [head, ...readWords],
           classified.slice(1),
           redirects,
           inners,
           rules,
+          coded,
           open,
           lost,
           session.cwd,
@@ -1165,9 +1175,10 @@ async function admitted(
  * command, so `cat < /data/secret` is judged on the file it opens; the lines
  * a command runs (`eval`, `sh -c`, `xargs`, `env` ... see `innerLines`) are
  * judged in turn; and what the runtime would do past the gate is refused
- * under a rule that would have read it (`lineDecision`). A command a
- * `preCommand` route places off the runtime or machine the line runs whole
- * on (`offLine`) is refused too, since one run cannot put it elsewhere.
+ * under a rule, or a user `preCommand` policy, that would have read it
+ * (`lineDecision`). A command a `preCommand` route places off the runtime or
+ * machine the line runs whole on (`offLine`) is refused too, since one run
+ * cannot put it elsewhere.
  * `reparse` parses the text a word runs the way the line reader parsed the
  * line.
  *

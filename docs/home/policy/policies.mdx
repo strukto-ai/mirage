@@ -267,6 +267,13 @@ output: exit 126 and a decision record.
 
 `NoForcePush`, at the top of this page.
 
+A machine that takes a line whole (`@line`) expands its words itself, so a
+method reads them as typed. While a `pre_command` method is installed, in code
+or in the session's profile, such a line exits 126 when it holds a word only
+the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
+line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
+the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
+
 ### post_command
 
 <CodeGroup>

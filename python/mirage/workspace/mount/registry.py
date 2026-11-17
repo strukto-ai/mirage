@@ -211,12 +211,12 @@ class MountRegistry:
             str, tuple[NetworkRule | None, NetworkRule | None]
         ] = {}
         # Command admission policies. Policies itself is a bare
-        # mechanism; the registry seeds the POSIX mount-root rule
+        # mechanism; the registry hands it the POSIX mount-root rule
         # (mount-root semantics are mount semantics), and user policies
         # follow it (the document's deny rules, then Workspace policies=).
         # Registry-hosted like runtime_bindings so the executor reaches
         # them without new parameter threading.
-        self.policies = Policies([MountRootPolicy(self)])
+        self.policies = Policies(root=MountRootPolicy(self))
 
         # Installed CLIs. Not mount state: CLIs are fully separate from
         # mounts (a CLI exists because it was installed, never because

@@ -394,6 +394,7 @@ def _line_decision(
     redirects: Sequence[PathSpec],
     inners: Sequence[InnerLine],
     rules: AdmissionRules | None,
+    coded: bool,
     open_: bool,
     lost: bool,
     cwd: str,
@@ -407,24 +408,30 @@ def _line_decision(
     reads must not reach it with any of them in hand. A command a path
     or mount rule reads is refused when it walks (``find``,
     ``grep -r``, ``tar -c``) or names a glob; one a rule reads the
-    arguments of when a word only the runtime can expand stands among
-    them, when the runtime appends operands (``xargs``, ``find -exec``)
-    or when it runs after a ``cd`` the walk could not follow; and any
-    command, under any rule, that runs lines the gate cannot read (a
-    sourced file, a script, ``eval "$p"``). With no rule in force
-    nothing is refused on this account: the words are admitted as
-    typed, which is all a coded policy ever saw.
+    arguments of when a word only the runtime can expand (a parameter,
+    a substitution, an unquoted glob) stands among them, when the
+    runtime appends operands (``xargs``, ``find -exec``) or when it runs
+    after a ``cd`` the walk could not follow; and any command, under any
+    rule, that runs lines the gate cannot read (a sourced file, a
+    script, ``eval "$p"``). A user policy answering ``pre_command`` (in
+    code, or a profile's program) is shown every command's expanded
+    words off such a runtime, so here it refuses as a rule that reads
+    every command's arguments does; it is never shown a walk's files,
+    so a walk stays. With neither in force nothing is refused on this
+    account.
 
     Args:
         name (str): the command name.
         args (list[str]): the words after it.
-        words (Sequence[Word]): the same words and the statement's
-            redirect targets, as the gate read them.
+        words (Sequence[Word]): the command's words, name first, and
+            the statement's redirect targets, as the gate read them.
         operands (Sequence[str | PathSpec]): the words after the name,
             classified.
         redirects (Sequence[PathSpec]): the redirect targets' paths.
         inners (Sequence[InnerLine]): the lines the command runs.
         rules (AdmissionRules | None): the session's admission rules.
+        coded (bool): whether a policy other than Mirage's own answers
+            ``pre_command`` for the session.
         open_ (bool): whether the runtime appends operands the gate
             cannot read.
         lost (bool): whether a ``cd`` the walk could not follow ran
@@ -440,15 +447,17 @@ def _line_decision(
             if isinstance(p, PathSpec)
         ):
             return "expands a pattern only the runtime can read"
-    if reads_args(rules, name):
-        unread = next((w.raw for w in words if w.text is None), None)
+    if coded or reads_args(rules, name):
+        unread = next((w.raw for w in words if w.text is None or w.glob), None)
         if unread is not None:
             return unreadable(unread)
         if open_:
             return "runs on operands the gate cannot read"
         if lost:
             return "runs after a cd the gate cannot follow"
-    if has_rules(rules) and any(not inner.readable for inner in inners):
+    if (coded or has_rules(rules)) and any(
+        not inner.readable for inner in inners
+    ):
         return UNREADABLE_LINES
     return None
 
@@ -537,7 +546,7 @@ async def _judge_words(
         return
     if head.text is None and not whole_line:
         return
-    if head.text is None and has_rules(rules):
+    if whole_line and (head.text is None or head.glob) and has_rules(rules):
         yield Judged(
             _denied(head.raw, unreadable(head.raw)), occurrence, False
         )
@@ -598,15 +607,19 @@ async def _judge_words(
             open_,
         )
     )
+    coded = whole_line and await registry.policies.wants_for(
+        "pre_command", session.session_id, coded_only=True
+    )
     refused = (
         _line_decision(
             name,
             args,
-            read_words,
+            [head, *read_words],
             classified[1:],
             redirects,
             inners,
             rules,
+            coded,
             open_,
             lost,
             session.cwd,
@@ -1432,10 +1445,10 @@ async def admit_line(
     ``cat < /data/secret`` is judged on the file it opens; the lines a
     command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
     ``inner_lines``) are judged in turn; and what the runtime would do
-    past the gate is refused under a rule that would have read it
-    (:func:`_line_decision`). A command a ``pre_command`` route places
-    off the runtime or machine the line runs whole on is refused too,
-    since one run cannot put it elsewhere.
+    past the gate is refused under a rule, or a user ``pre_command``
+    policy, that would have read it (:func:`_line_decision`). A command
+    a ``pre_command`` route places off the runtime or machine the line
+    runs whole on is refused too, since one run cannot put it elsewhere.
 
     No gate follows this pass: the runtime runs the line whole, so
     every grant it matches is claimed on the line's hand-off exactly as
