@@ -132,9 +132,7 @@ def run_output(
     async def close() -> None:
         nonlocal closing
         if closing is None:
-            closing = asyncio.Task(
-                finalize(), loop=asyncio.get_running_loop(), eager_start=True
-            )
+            closing = asyncio.create_task(finalize())
         await closing
 
     async def output() -> AsyncIterator[bytes]:
