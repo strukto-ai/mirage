@@ -21,7 +21,7 @@ import { MovableStream } from './stream.ts'
 
 export type Wire = Record<string, util.JSONType>
 
-const CACHE_SIZE = 1024
+export const CACHE_SIZE = 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
@@ -61,7 +61,14 @@ export function ruleWire(rule: CommandRule): Wire {
 /** A rule set in the stream's wire shape. Mirrors Python's rules_wire. */
 export function rulesWire(rules: Partial<AdmissionRules>): Wire {
   return {
-    allow: rules.allow == null ? null : rules.allow.map(units),
+    allow:
+      rules.allow == null
+        ? null
+        : rules.allow.map((entry) =>
+            typeof entry === 'string'
+              ? units(entry)
+              : { command: units(entry.command), flags: entry.flags.map(units) },
+          ),
     deny: (rules.deny ?? []).map(ruleWire),
     ask: (rules.ask ?? []).map(ruleWire),
   }

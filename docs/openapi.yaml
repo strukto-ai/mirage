@@ -2240,7 +2240,11 @@ paths:
             "kind": "deny",
             "reason": "rm is not allowed in this workspace",
             "policy": "PermissionsPolicy",
-            "ask_id": null
+            "ask_id": null,
+            "matched": {
+              "command": ["rm"],
+              "flags": []
+            }
           },
           "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38"
         }
@@ -8217,11 +8221,37 @@ components:
             - type: string
             - type: 'null'
           description: Approval request ID, for `pending`.
+        matched:
+          anyOf:
+            - $ref: '#/components/schemas/PolicyMatch'
+            - type: 'null'
+          description: What fired in the profile rule that refused, for `deny`. Null for any other
+            refusal.
       required:
         - kind
         - reason
         - policy
         - ask_id
+        - matched
+    PolicyMatch:
+      type: object
+      description: The command path and options of the rule pattern that matched the line, or the
+        line's own command path when the allow list refused it.
+      properties:
+        command:
+          type: array
+          items:
+            type: string
+          description: Command name and its subcommands, by their canonical names.
+        flags:
+          type: array
+          items:
+            type: string
+          description: Options the pattern names, by their canonical spelling. Empty when it names
+            none.
+      required:
+        - command
+        - flags
     ShellResult:
       type: object
       description: Returned by default, when the command has ended.
@@ -9008,6 +9038,7 @@ components:
                     reason: writes under /data are not allowed
                     policy: PermissionsPolicy
                     ask_id: null
+                    matched: null
             storage_full:
               summary: The backend is out of space or quota
               value:

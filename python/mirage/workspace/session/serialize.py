@@ -18,6 +18,7 @@ from typing import Any
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
     AdmissionRules,
+    AllowFlags,
     CommandRule,
     Decision,
     ProfileScript,
@@ -58,6 +59,29 @@ def rule_from_dict(data: Mapping[str, Any]) -> CommandRule:
     )
 
 
+def allow_to_dict(entry: str | AllowFlags) -> str | dict[str, Any]:
+    """One allow entry as the record stores it.
+
+    Args:
+        entry (str | AllowFlags): a pattern, or a command with its
+            option set.
+    """
+    if isinstance(entry, str):
+        return entry
+    return {"command": entry.command, "flags": list(entry.flags)}
+
+
+def allow_from_dict(data: str | Mapping[str, Any]) -> str | AllowFlags:
+    """One allow entry read back from a record.
+
+    Args:
+        data (str | Mapping[str, Any]): what ``allow_to_dict`` wrote.
+    """
+    if isinstance(data, str):
+        return data
+    return AllowFlags(data["command"], tuple(data["flags"]))
+
+
 def commands_to_dict(rules: AdmissionRules) -> dict[str, Any]:
     """A session's compiled admission rules as the record stores them.
 
@@ -65,7 +89,9 @@ def commands_to_dict(rules: AdmissionRules) -> dict[str, Any]:
         rules (AdmissionRules): the compiled rules.
     """
     return {
-        "allow": list(rules.allow) if rules.allow is not None else None,
+        "allow": [allow_to_dict(entry) for entry in rules.allow]
+        if rules.allow is not None
+        else None,
         "ask": [rule_to_dict(r) for r in rules.ask],
         "deny": [rule_to_dict(r) for r in rules.deny],
     }
@@ -79,7 +105,9 @@ def commands_from_dict(data: Mapping[str, Any]) -> AdmissionRules:
     """
     allow = data.get("allow")
     return AdmissionRules(
-        allow=tuple(allow) if allow is not None else None,
+        allow=tuple(allow_from_dict(entry) for entry in allow)
+        if allow is not None
+        else None,
         ask=tuple(rule_from_dict(r) for r in data.get("ask", ())),
         deny=tuple(rule_from_dict(r) for r in data.get("deny", ())),
     )

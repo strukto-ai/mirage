@@ -959,7 +959,7 @@ it('walks a nested mount under the command’s own gate while another session’
   )
   const sealed = ws.createSession('sealed', {
     profile: SessionProfile({
-      commands: { deny: [{ reason: 'sealed', commands: { pause: ['/data/sub/box'] } }] },
+      commands: { deny: [{ reason: 'sealed', command: 'pause', paths: ['/data/sub/box'] }] },
     }),
   })
   const free = ws.createSession('free')

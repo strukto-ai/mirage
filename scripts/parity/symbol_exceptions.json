@@ -1836,6 +1836,26 @@
   "commands/cli/walk": {
    "typescript_only": {
     "GRAMMARS": "TypeScript keeps each leaf's parse grammar in a WeakMap keyed by the leaf, as compileSpec keeps its tables; Python keeps it on the leaf itself, since a frozen dataclass key would hash every field on every parse."
+    }
+   },
+  "policy/profile": {
+   "typescript_only": {
+    "stringList": "Validates vars.hide entries through the document stream; Python's pydantic model types the field as a tuple of strings."
+   }
+  },
+  "policy/match/grammar": {
+   "typescript_only": {
+    "READS": "The pattern reads kept per grammar behind patternReads; Python's functools.lru_cache holds the same entries."
+   }
+  },
+  "policy/match/pattern": {
+   "typescript_only": {
+    "EXPANSIONS": "The group expansions kept per pattern behind expandPattern; Python's functools.lru_cache on _expansion holds the same entries."
+   }
+  },
+  "policy/match/rule": {
+   "typescript_only": {
+    "READS_WIRE": "The wire form kept per pattern-read list behind lineWords; Python's functools.lru_cache on _reads_wire holds the same entries."
    }
   }
  }

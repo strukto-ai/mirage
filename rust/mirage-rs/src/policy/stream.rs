@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use super::admission::Line;
 use super::{
-    AdmissionMatcher, CommandFacts, LinkCandidate, LinkStep, Mode, Profile, Rules, Text,
-    Visibility, VisibilityMatcher, Whitespace, classify_paths, compile_profile, is_glob,
-    pattern_matches, pattern_reaches, restrict_profile, show_head, split_pattern,
+    AdmissionMatcher, CommandFacts, LinkCandidate, LinkStep, Mode, PatternRead, Profile, Reading,
+    Rules, Text, Visibility, VisibilityMatcher, Whitespace, classify_paths, compile_profile,
+    expand_pattern, is_glob, pattern_matches, pattern_reaches, restrict_profile, show_head,
+    split_pattern,
 };
 use crate::{Stream, StreamError, parse_config};
 
@@ -77,10 +79,18 @@ enum Request {
     },
     IoReach {
         tokens: Vec<Text>,
+        #[serde(default)]
+        line: Option<Reading>,
+        #[serde(default)]
+        reads: Vec<PatternRead>,
         path: Text,
     },
     IoRefusal {
         tokens: Vec<Text>,
+        #[serde(default)]
+        line: Option<Reading>,
+        #[serde(default)]
+        reads: Vec<PatternRead>,
         path: Text,
         granted: Vec<usize>,
     },
@@ -109,6 +119,9 @@ enum Request {
         entry: Text,
     },
     SplitPattern {
+        pattern: Text,
+    },
+    ExpandPattern {
         pattern: Text,
     },
     PatternMatches {
@@ -179,12 +192,33 @@ impl Policy {
             Request::ReadsArgs { name } => reply(out, rules.reads_args(&name)),
             Request::ScopesPaths { name } => reply(out, rules.scopes_paths(&name)),
             Request::Decide { facts } => reply(out, rules.decide(&facts)),
-            Request::IoReach { tokens, path } => reply(out, rules.io_reach(&tokens, &path)),
+            Request::IoReach {
+                tokens,
+                line,
+                reads,
+                path,
+            } => {
+                let line = Line {
+                    tokens: &tokens,
+                    read: line.as_ref(),
+                    reads: &reads,
+                };
+                reply(out, rules.io_reach(&line, &path))
+            }
             Request::IoRefusal {
                 tokens,
+                line,
+                reads,
                 path,
                 granted,
-            } => reply(out, rules.io_refusal(&tokens, &path, &granted)),
+            } => {
+                let line = Line {
+                    tokens: &tokens,
+                    read: line.as_ref(),
+                    reads: &reads,
+                };
+                reply(out, rules.io_refusal(&line, &path, &granted))
+            }
             Request::OpRuling {
                 subtree,
                 path,
@@ -205,6 +239,10 @@ impl Policy {
             Request::IsGlob { entry } => reply(out, is_glob(&entry)),
             Request::ShowHead { entry } => reply(out, show_head(&entry)),
             Request::SplitPattern { pattern } => reply(out, split_pattern(&pattern, self.dialect)),
+            Request::ExpandPattern { pattern } => match expand_pattern(&pattern, self.dialect) {
+                Ok(patterns) => reply(out, patterns),
+                Err(problem) => reply(out, problem),
+            },
             Request::PatternMatches { pattern, tokens } => {
                 reply(out, pattern_matches(&pattern, &tokens, self.dialect))
             }

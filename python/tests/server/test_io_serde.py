@@ -43,6 +43,7 @@ async def test_a_refused_result_carries_the_record():
         "reason": "sign-off",
         "policy": "",
         "ask_id": "abc123",
+        "matched": None,
     }
 
 

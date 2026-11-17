@@ -12,20 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
+from functools import lru_cache
 from typing import Any
 
 from mirage.commands.spec.types import WordKind
 from mirage.policy.constants import METADATA_OPS, SUBTREE_OPS
 from mirage.policy.match.allow import line_tokens
+from mirage.policy.match.grammar import pattern_reads
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
+    CommandRead,
     CommandRule,
+    Grammar,
     VfsContext,
 )
 from mirage.rs.document import units
-from mirage.rs.policy import admission_matcher
+from mirage.rs.policy import CACHE_SIZE, admission_matcher
 from mirage.types import PathSpec
 
 
@@ -51,19 +55,74 @@ def _path_fact(path: PathSpec) -> dict[str, list[int]]:
     }
 
 
-def command_facts(ctx: CommandContext) -> dict[str, Any]:
-    """What a line's rules are read against, in the stream's wire shape:
-    its tokens and paths, and the host's word on its command: whether it
-    moves or removes whole subtrees (``CommandContext.subtree``) and
-    whether it is a move whose last operand is the destination.
+def read_wire(read: CommandRead) -> dict[str, Any]:
+    """A read in the stream's wire shape.
+
+    Args:
+        read (CommandRead): a line's or a pattern's read.
+    """
+    return {
+        "path": [units(v) for v in read.path],
+        "flags": [
+            {"name": units(f.name), "values": [units(v) for v in f.values]}
+            for f in read.flags
+        ],
+        "operands": [units(v) for v in read.operands],
+    }
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def _reads_wire(
+    rules: AdmissionRules, path: tuple[str, ...], grammar: Grammar
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "pattern": units(pattern),
+            "read": None if read is None else read_wire(read),
+        }
+        for pattern, read in pattern_reads(rules, path, grammar)
+    ]
+
+
+def line_words(
+    ctx: CommandContext, rules: AdmissionRules | None
+) -> dict[str, Any]:
+    """What a pattern is compared on, in the stream's wire shape: the
+    line's tokens, and when its grammar read it, that read and each
+    pattern on its command read with the same grammar.
 
     Args:
         ctx (CommandContext): the classified command.
+        rules (AdmissionRules | None): the session's admission rules.
+    """
+    words: dict[str, Any] = {"tokens": [units(v) for v in line_tokens(ctx)]}
+    if rules is None or ctx.read is None or ctx.grammar is None:
+        return words
+    return {
+        **words,
+        "line": read_wire(ctx.read),
+        "reads": _reads_wire(rules, ctx.read.path, ctx.grammar),
+    }
+
+
+def command_facts(
+    ctx: CommandContext, rules: AdmissionRules | None = None
+) -> dict[str, Any]:
+    """What a line's rules are read against, in the stream's wire shape:
+    its words (``line_words``) and paths, and the host's word on its
+    command: whether it moves or removes whole subtrees
+    (``CommandContext.subtree``) and whether it is a move whose last
+    operand is the destination.
+
+    Args:
+        ctx (CommandContext): the classified command.
+        rules (AdmissionRules | None): the session's admission rules,
+            whose patterns are read with the line's grammar.
     """
     moves = ctx.command == "mv"
     target = ctx.move_target if moves and ctx.paths else None
     return {
-        "tokens": [units(v) for v in line_tokens(ctx)],
+        **line_words(ctx, rules),
         "tool": ctx.tool,
         "cwd": units(ctx.cwd),
         "paths": [_path_fact(path) for path in ctx.paths],
@@ -76,7 +135,7 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
 
 
 def io_reach(
-    rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
+    rules: AdmissionRules | None, ctx: CommandContext, virtual: str
 ) -> bool:
     """Whether a rule in force could reach an entry at or under this
     path for the running line: the rule names the line and its paths,
@@ -88,16 +147,13 @@ def io_reach(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line as an admission pattern reads
-            it, command name first.
+        ctx (CommandContext): the running command.
         virtual (str): absolute virtual path of the walk's start point.
     """
     return (
         rules is not None
         and admission_matcher(rules).ask(
-            "io_reach",
-            tokens=[units(v) for v in tokens],
-            path=units(virtual),
+            "io_reach", **line_words(ctx, rules), path=units(virtual)
         )
         is True
     )
@@ -121,7 +177,7 @@ def _rule_at(rules: AdmissionRules, index: int) -> CommandRule:
 
 def io_refusal(
     rules: AdmissionRules | None,
-    tokens: Sequence[str],
+    ctx: CommandContext,
     virtual: str,
     granted: Collection[CommandRule],
 ) -> str | None:
@@ -144,7 +200,7 @@ def io_refusal(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line's tokens, command name first.
+        ctx (CommandContext): the running command.
         virtual (str): absolute virtual path of the entry.
         granted (Collection[CommandRule]): the ask rules the line runs
             under a grant for.
@@ -153,7 +209,7 @@ def io_refusal(
         return None
     result = admission_matcher(rules).ask(
         "io_refusal",
-        tokens=[units(v) for v in tokens],
+        **line_words(ctx, rules),
         path=units(virtual),
         granted=_grant_indices(rules, granted),
     )

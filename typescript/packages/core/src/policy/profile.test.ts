@@ -135,8 +135,8 @@ describe('SessionProfile', () => {
     const p = SessionProfile({
       commands: {
         allow: ['ls', 'git log'],
-        ask: ['git push', { reason: 'sign-off', commands: { rm: ['/shared/*'] } }],
-        deny: [{ reason: 'no', commands: { rm: ['/repo/*'] } }],
+        ask: ['git push', { reason: 'sign-off', command: 'rm', paths: ['/shared/*'] }],
+        deny: [{ reason: 'no', command: 'rm', paths: ['/repo/*'] }],
       },
     })
     expect(p.commands?.allow).toEqual(['ls', 'git log'])
@@ -168,7 +168,7 @@ describe('SessionProfile', () => {
     const p = SessionProfile({
       commands: {
         deny: [
-          { reason: 'no deletes', commands: { rm: ['/repo/*'] } },
+          { reason: 'no deletes', command: 'rm', paths: ['/repo/*'] },
           'python3',
           { commands: ['shred'] },
         ],
@@ -197,10 +197,16 @@ describe('SessionProfile', () => {
         deny: [
           {
             reason: 'prod is protected',
-            commands: { rm: ['/repo/prod/*', '/shared/*'], mv: ['/repo/prod/*'] },
+            command: 'rm',
+            paths: ['/repo/prod/*', '/shared/*'],
+          },
+          {
+            reason: 'prod is protected',
+            command: 'mv',
+            paths: ['/repo/prod/*'],
           },
         ],
-        ask: [{ commands: { 'git push': ['/repo/*'] } }],
+        ask: [{ command: 'git push', paths: ['/repo/*'] }],
       },
     })
     expect(p.commands?.deny).toEqual([
@@ -213,17 +219,27 @@ describe('SessionProfile', () => {
   })
 
   it.each([
-    [{ reason: 'x', commands: ['rm', 'mv'], paths: ['/a'] }, /map each command to its paths/],
-    [{ reason: 'x', commands: { rm: ['/a'] }, paths: ['/b'] }, /takes no paths of its own/],
+    [
+      { reason: 'x', commands: ['rm', 'mv'], paths: ['/a'] },
+      /one \{command, paths\} rule per command/,
+    ],
+    [
+      { reason: 'x', commands: { rm: ['/a'] } },
+      /scope one command to paths with \{command, paths\}/,
+    ],
     [{ reason: 'x' }, /names no command and no path/],
-    [{ reason: 'x', commands: {} }, /must name at least one command/],
-    [{ reason: 'x', commands: { rm: [] } }, /must list at least one path/],
-    [{ reason: 'x', commands: { rm: '/a' } }, /must be a list of strings/],
-    [{ reason: 'x', commands: { ' ': ['/a'] } }, /keys must name a command/],
-    [{ reason: 'x', commands: { rm: ['/a', ' '] } }, /commands\[rm\]\[1\] must name a path/],
+    [{ reason: 'x', command: 'rm' }, /takes paths/],
+    [
+      { reason: 'x', command: 'rm', commands: ['mv'], paths: ['/a'] },
+      /has both command and commands/,
+    ],
+    [{ reason: 'x', command: 'rm', paths: [] }, /must list at least one path/],
+    [{ reason: 'x', command: 'rm', paths: '/a' }, /must be a list of strings/],
+    [{ reason: 'x', command: ' ', paths: ['/a'] }, /command must name a command/],
+    [{ reason: 'x', command: 'rm', paths: ['/a', ' '] }, /paths\[1\] must name a path/],
     [{ reason: 'x', paths: [''] }, /paths\[0\] must name a path/],
     [{ reason: 1 }, /reason must be a string/],
-    [{ reason: 'x', command: ['rm'] }, /unknown field `command`/],
+    [{ reason: 'x', command: ['rm'], paths: ['/a'] }, /command must name a command/],
     [7, /must be a command pattern or a mapping/],
   ])('refuses a rule that does not say which command a path belongs to: %j', (bad, message) => {
     expect(() => SessionProfile({ commands: { deny: [bad] } })).toThrow(message)
@@ -240,7 +256,7 @@ describe('SessionProfile', () => {
       // and it means the same thing inside a mount section as outside.
       expect(() => SessionProfile({ paths: { hide: [entry] } })).toThrow(/is relative/)
       expect(() =>
-        SessionProfile({ commands: { ask: [{ commands: { rm: ['/ok', entry] } }] } }),
+        SessionProfile({ commands: { ask: [{ command: 'rm', paths: ['/ok', entry] }] } }),
       ).toThrow(/is relative/)
       expect(() => SessionProfile({ commands: { deny: [{ paths: [entry] }] } })).toThrow(
         /is relative/,
@@ -507,7 +523,7 @@ const DOCUMENT = {
       mode: 'read',
       paths: { hide: ['/repo/.env'], show: { '/repo/.env.example': null }, reasons: [] },
       commands: {
-        ask: [{ reason: 'sign-off', commands: { 'git push': ['/repo'] } }],
+        ask: [{ reason: 'sign-off', command: 'git push', paths: ['/repo'] }],
         deny: [{ reason: 'denied by policy', commands: ['git rebase'] }],
       },
     },
@@ -519,7 +535,7 @@ const DOCUMENT = {
     reasons: [{ patterns: ['*.pem'], reason: 'keys' }],
   },
   commands: {
-    ask: [{ reason: 'shared', commands: { rm: ['/scratch/*'] } }],
+    ask: [{ reason: 'shared', command: 'rm', paths: ['/scratch/*'] }],
     deny: [
       { reason: 'sealed', paths: ['/repo/sealed'] },
       { reason: 'denied by policy', commands: ['curl'] },

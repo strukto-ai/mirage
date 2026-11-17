@@ -328,7 +328,7 @@ describe('vfsMd', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: SessionProfile({ commands: { deny: [{ commands: { rm: ['/data/*'] } }] } }),
+          default: SessionProfile({ commands: { deny: [{ command: 'rm', paths: ['/data/*'] }] } }),
         },
       },
     )

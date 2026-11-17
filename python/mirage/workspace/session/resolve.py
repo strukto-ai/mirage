@@ -33,6 +33,7 @@ from mirage.policy.profile import (
 )
 from mirage.policy.types import (
     AdmissionRules,
+    AllowFlags,
     CommandRule,
     HideReason,
     ProfileScript,
@@ -152,7 +153,15 @@ def _rules_from(value: Mapping[str, Any] | None) -> AdmissionRules | None:
     return AdmissionRules(
         allow=None
         if value["allow"] is None
-        else tuple(from_units(v) for v in value["allow"]),
+        else tuple(
+            from_units(v)
+            if isinstance(v, list)
+            else AllowFlags(
+                from_units(v["command"]),
+                tuple(from_units(f) for f in v["flags"]),
+            )
+            for v in value["allow"]
+        ),
         deny=tuple(_rule_from(v) for v in value["deny"]),
         ask=tuple(_rule_from(v) for v in value["ask"]),
     )

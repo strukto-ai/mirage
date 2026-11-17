@@ -20,6 +20,7 @@ import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { CommandSpecInit, UsageStyle } from '../../commands/spec/types.ts'
 import { effectivePathMode } from '../../context/session_context.ts'
 import { decide } from '../../policy/match/decide.ts'
+import { allowPatterns } from '../../policy/match/grammar.ts'
 import { patternReaches, splitPattern } from '../../policy/match/pattern.ts'
 import { Outcome } from '../../policy/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
@@ -111,9 +112,9 @@ function forms(
 ): (readonly string[])[] {
   const found: (readonly string[])[] = [words]
   const [command] = words
-  const allow = session.commands?.allow ?? null
-  if (command !== undefined && allow !== null) {
-    for (const pattern of allow) {
+  const rules = session.commands
+  if (command !== undefined && rules !== null && rules.allow !== null) {
+    for (const pattern of allowPatterns(rules)) {
       const form = [...words, ...splitPattern(pattern).slice(words.length)]
       if (
         form.length > words.length &&

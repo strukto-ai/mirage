@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLI } from '../../commands/cli/types.ts'
 import { leafOptions, walk } from '../../commands/cli/walk.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -37,8 +37,8 @@ import {
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
-import { lineTokens } from '../../policy/match/allow.ts'
-import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
+import { allowPatterns } from '../../policy/match/grammar.ts'
+import { splitPattern } from '../../policy/match/pattern.ts'
 import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
@@ -55,6 +55,7 @@ import { fileOperands, TEST_NAMES } from '../executor/builtins/condition/operand
 import { followPaths } from '../executor/builtins/links/links.ts'
 import { contextWords, linePaths, readLine } from '../executor/command/reading.ts'
 import { reachesService } from '../executor/command/cli.ts'
+import type { LineReading } from '../executor/command/types.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
@@ -163,14 +164,14 @@ export class Admitted implements EntryGate {
   // running command: a rule in force at any path its scope could cover.
   // The dispatcher checks coded file policies separately.
   scopes(virtual: string): boolean {
-    return ioReach(this.rules, this.ctx.tokens ?? [], virtual)
+    return ioReach(this.rules, this.ctx, virtual)
   }
 
   // The reason a rule in force refuses this entry, null when the line was
   // admitted on it or nothing refuses it.
   refusal(virtual: string): string | null {
     if (this.judged.has(norm(virtual))) return null
-    return ioRefusal(this.rules, this.ctx.tokens ?? [], virtual, this.granted)
+    return ioRefusal(this.rules, this.ctx, virtual, this.granted)
   }
 }
 
@@ -285,9 +286,11 @@ export function redirectPaths(
 /**
  * Whether the allow list refuses a CLI that reaches a service. Such a CLI
  * (an account or script CLI) reaches its service by id, past every hide, so
- * under a profile that hides paths it runs only where a pattern starting
- * with its own name matches the line. `*` and a pattern for another of its
- * verbs do not count. Mirrors the Python `unlisted_service`.
+ * under a profile that hides paths it runs only where an entry starting
+ * with its own name matches the line. `*` does not count. An entry that
+ * names the command closes it to the entries naming it, which the allow
+ * list itself holds the line to, so what is left here is whether any entry
+ * names it at all. Mirrors the Python `unlisted_service`.
  */
 export function unlistedService(
   ctx: CommandContext,
@@ -303,23 +306,27 @@ export function unlistedService(
   ) {
     return false
   }
-  const tokens = lineTokens(ctx)
-  return !(session.commands?.allow ?? []).some(
-    (p) => splitPattern(p)[0] === ctx.command && patternMatches(p, tokens),
-  )
+  const rules = session.commands
+  return rules === null || !allowPatterns(rules).some((p) => splitPattern(p)[0] === ctx.command)
 }
 
 /**
  * Whether a command tree's leaf the line reaches may change state, read off
- * the options the line carries by canonical spelling. Mirrors Python's
- * `_tree_writes`.
+ * the line's own reading when that reading is this tree's, else off a walk
+ * under the session environment. Mirrors the tree branch of Python's
+ * `_writes`.
  */
 function treeWrites(
   name: string,
   cli: CLI,
   args: readonly string[],
+  reading: LineReading,
   session: SessionState,
 ): boolean {
+  if (reading.read !== null && reading.grammar?.spec === cli.spec) {
+    const options = reading.read.flags.map((flag) => flag.name)
+    return cli.handlers[reading.program.slice(1).join(' ')]?.writes(options) === true
+  }
   const env = envSnapshot(session)
   const result = walk(name, cli.spec, [...args], session.cwd, env)
   return (
@@ -350,6 +357,7 @@ function writes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
+  reading: LineReading,
   facts: LineFacts,
   session: SessionState,
   registry: MountRegistry,
@@ -364,9 +372,7 @@ function writes(
     return true
   if (consumer !== Consumer.CLI && consumer !== Consumer.MOUNT) return false
   const tree = registry.clis.get(name)?.cli ?? null
-  if (tree !== null) {
-    return treeWrites(name, tree, args, session)
-  }
+  if (tree !== null) return treeWrites(name, tree, args, reading, session)
   const candidates = registry.invocationCandidates(
     name,
     [],
@@ -378,7 +384,7 @@ function writes(
     return candidates.some((mount) => {
       const cli = mount.cliFor(name)
       if (cli === null) return mount.mayWrite(name)
-      return treeWrites(name, cli, args, session)
+      return treeWrites(name, cli, args, reading, session)
     })
   }
   const runs = runsAs(name, registry)
@@ -429,9 +435,7 @@ function writes(
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
   return reached.some((mount) => {
     const cli = mount.cliFor(runs)
-    if (cli !== null) {
-      return treeWrites(runs, cli, args, session)
-    }
+    if (cli !== null) return treeWrites(runs, cli, args, reading, session)
     return [...extensions].some((extension) => mount.mayWrite(runs, extension, facts.writes))
   })
 }
@@ -480,7 +484,7 @@ export async function gate(
   )
   const words = seenWords(session, contextWords(name, reading, redirects), unread)
   await budget.run()
-  const write = writes(name, args, operands, facts, session, registry, namespace, implied)
+  const write = writes(name, args, operands, reading, facts, session, registry, namespace, implied)
   await budget.run()
   const ctx: CommandContext = {
     line,
@@ -492,6 +496,8 @@ export async function gate(
     sessionId: session.sessionId,
     tokens: [...reading.tokens],
     program: [...reading.program],
+    read: reading.read,
+    grammar: reading.grammar,
     tool,
     walks: facts.walks,
     write,

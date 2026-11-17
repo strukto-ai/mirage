@@ -608,7 +608,7 @@ describe('subtree mutations against hides', () => {
     const ws = await boxed(
       SessionProfile({
         paths: { hide: ['/repo/only/h'] },
-        commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
+        commands: { deny: [{ reason: 'kept', command: 'rmdir', paths: ['/repo/only/h'] }] },
       }),
     )
     expect((await ws.shell('mkdir /repo/only/leaf')).exitCode).toBe(0)

@@ -1184,7 +1184,7 @@ describe('command permissions end to end', () => {
         '[',
       ],
       deny: [
-        { reason: 'no deletes in the repo', commands: { rm: ['/repo/*'] } },
+        { reason: 'no deletes in the repo', command: 'rm', paths: ['/repo/*'] },
         { reason: 'frozen', paths: ['/repo/locked/*'] },
       ],
     },
@@ -1373,8 +1373,9 @@ describe('command permissions end to end', () => {
           default: SessionProfile({
             commands: {
               deny: [
-                { reason: 'sealed', commands: { cat: ['/data/secret*'], head: ['/data/secret*'] } },
-                { reason: 'keep the link', commands: { rm: ['/data/link'] } },
+                { reason: 'sealed', command: 'cat', paths: ['/data/secret*'] },
+                { reason: 'sealed', command: 'head', paths: ['/data/secret*'] },
+                { reason: 'keep the link', command: 'rm', paths: ['/data/link'] },
               ],
             },
           }),
@@ -1425,8 +1426,8 @@ describe('command permissions end to end', () => {
           default: SessionProfile({
             commands: {
               deny: [
-                { reason: 'sealed', commands: { cat: ['/data/secret*'] } },
-                { reason: 'audit is append-only', commands: { echo: ['/data/audit.log'] } },
+                { reason: 'sealed', command: 'cat', paths: ['/data/secret*'] },
+                { reason: 'audit is append-only', command: 'echo', paths: ['/data/audit.log'] },
               ],
             },
           }),
@@ -1586,7 +1587,13 @@ describe('command permissions end to end', () => {
               deny: [
                 {
                   reason: 'sealed',
-                  commands: { chmod: ['/a/b/secret'], chown: ['/a/b/secret'] },
+                  command: 'chmod',
+                  paths: ['/a/b/secret'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'chown',
+                  paths: ['/a/b/secret'],
                 },
               ],
             },
@@ -1715,7 +1722,7 @@ describe('command permissions end to end', () => {
             commands: {
               deny: [
                 { reason: 'no deletes', commands: ['rm'] },
-                { reason: 'sealed', commands: { cat: ['/repo/secret*'] } },
+                { reason: 'sealed', command: 'cat', paths: ['/repo/secret*'] },
                 { reason: 'no pushes', commands: ['git push'] },
               ],
             },
@@ -1798,11 +1805,18 @@ describe('command permissions end to end', () => {
               deny: [
                 {
                   reason: 'sealed',
-                  commands: {
-                    ls: ['/repo/sealed'],
-                    find: ['/repo/sealed'],
-                    grep: ['/repo/sealed'],
-                  },
+                  command: 'ls',
+                  paths: ['/repo/sealed'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'find',
+                  paths: ['/repo/sealed'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'grep',
+                  paths: ['/repo/sealed'],
                 },
               ],
             },
@@ -1852,9 +1866,9 @@ describe('command permissions end to end', () => {
           default: SessionProfile({
             commands: {
               allow: ['mkdir', 'echo', 'touch', 'cat', 'rm', 'ls', 'head'],
-              ask: [{ reason: 'sign-off', commands: { rm: ['/repo/shared/*'] } }],
+              ask: [{ reason: 'sign-off', command: 'rm', paths: ['/repo/shared/*'] }],
               deny: [
-                { reason: 'private', commands: { cat: ['/repo/private'] } },
+                { reason: 'private', command: 'cat', paths: ['/repo/private'] },
                 { reason: 'sealed', paths: ['/repo/sealed/*'] },
                 { reason: 'no heads', commands: ['head'] },
               ],
@@ -1955,7 +1969,7 @@ describe('ask end to end', () => {
   const ASK_DOC = SessionProfile({
     commands: {
       ask: [{ reason: 'sign-off', commands: ['rm'] }, 'head'],
-      deny: [{ reason: 'no deletes in the repo', commands: { rm: ['/repo/*'] } }],
+      deny: [{ reason: 'no deletes in the repo', command: 'rm', paths: ['/repo/*'] }],
     },
   })
 
@@ -2156,9 +2170,10 @@ describe('a walk below the operand meets the rule guard', () => {
         'rm',
         'test',
       ],
-      ask: [{ reason: 'nod', commands: { grep: ['/data/t/asked/*'] } }],
+      ask: [{ reason: 'nod', command: 'grep', paths: ['/data/t/asked/*'] }],
       deny: [
-        { reason: 'private', commands: { grep: ['/data/t/private'], ls: ['/data/t/private'] } },
+        { reason: 'private', command: 'grep', paths: ['/data/t/private'] },
+        { reason: 'private', command: 'ls', paths: ['/data/t/private'] },
         { reason: 'sealed', paths: ['/data/t/sealed'] },
         { reason: 'frozen', paths: ['/data/t/locked/*'] },
       ],
@@ -2300,16 +2315,35 @@ describe('a relayed walk meets the command rules', () => {
       deny: [
         {
           reason: 'cut',
-          commands: {
-            split: ['/data/out/xab'],
-            csplit: ['/data/out/xx01'],
-            awk: ['/data/out/locked'],
-            mktemp: ['/data/tmpd/*'],
-            unzip: ['/data/uz/*'],
-          },
+          command: 'split',
+          paths: ['/data/out/xab'],
         },
-        { reason: 'tarred', commands: { tar: ['/data/r/sec', '/data/r/ghost'] } },
-        { reason: 'copied', commands: { cp: ['/data/r/sec', '/data/dst/sec', '/data/r/ghost'] } },
+        {
+          reason: 'cut',
+          command: 'csplit',
+          paths: ['/data/out/xx01'],
+        },
+        {
+          reason: 'cut',
+          command: 'awk',
+          paths: ['/data/out/locked'],
+        },
+        {
+          reason: 'cut',
+          command: 'mktemp',
+          paths: ['/data/tmpd/*'],
+        },
+        {
+          reason: 'cut',
+          command: 'unzip',
+          paths: ['/data/uz/*'],
+        },
+        { reason: 'tarred', command: 'tar', paths: ['/data/r/sec', '/data/r/ghost'] },
+        {
+          reason: 'copied',
+          command: 'cp',
+          paths: ['/data/r/sec', '/data/dst/sec', '/data/r/ghost'],
+        },
       ],
     },
   })
@@ -2432,12 +2466,11 @@ describe('a warm walk is refused as the cold walk is', () => {
     paths: { hide: ['/data/w/h.txt'] },
     commands: {
       deny: [
-        {
+        ...['grep', 'rg', 'cat', 'cp', 'tar'].map((command) => ({
           reason: 'sealed',
-          commands: Object.fromEntries(
-            ['grep', 'rg', 'cat', 'cp', 'tar'].map((name) => [name, ['/data/w/a.txt']]),
-          ),
-        },
+          command,
+          paths: ['/data/w/a.txt'],
+        })),
         { reason: 'walled', paths: ['/data/w/p.txt'] },
       ],
     },
@@ -2516,7 +2549,10 @@ describe('a warm walk is refused as the cold walk is', () => {
 describe('a dispatched read through a link meets the target rule', () => {
   const LINKED_DOC: SessionProfile = SessionProfile({
     commands: {
-      deny: [{ reason: 'sealed', commands: { awk: ['/data/secret'], sed: ['/data/secret'] } }],
+      deny: [
+        { reason: 'sealed', command: 'awk', paths: ['/data/secret'] },
+        { reason: 'sealed', command: 'sed', paths: ['/data/secret'] },
+      ],
     },
   })
 
@@ -2600,7 +2636,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   it('holds the rule through a linked parent', async () => {
     const doc = SessionProfile({
       commands: {
-        deny: [{ reason: 'sealed', commands: { zap: ['/data/real/secret'] } }],
+        deny: [{ reason: 'sealed', command: 'zap', paths: ['/data/real/secret'] }],
       },
     })
     for (const op of ['unlink', 'rename']) {
@@ -2633,7 +2669,13 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
         deny: [
           {
             reason: 'sealed',
-            commands: { sed: ['/data/dalias/secret'], cat: ['/data/dalias/secret'] },
+            command: 'sed',
+            paths: ['/data/dalias/secret'],
+          },
+          {
+            reason: 'sealed',
+            command: 'cat',
+            paths: ['/data/dalias/secret'],
           },
         ],
       },
@@ -2667,7 +2709,18 @@ describe('a walk the executor fans out meets the command rules', () => {
       deny: [
         {
           reason: 'sealed',
-          commands: { rg: ['/data/w/a.txt'], find: ['/data/w/a.txt'], tree: ['/data/sub/x'] },
+          command: 'rg',
+          paths: ['/data/w/a.txt'],
+        },
+        {
+          reason: 'sealed',
+          command: 'find',
+          paths: ['/data/w/a.txt'],
+        },
+        {
+          reason: 'sealed',
+          command: 'tree',
+          paths: ['/data/sub/x'],
         },
       ],
     },
@@ -2736,7 +2789,7 @@ describe('a walk the executor fans out meets the command rules', () => {
 describe('a dispatched op is judged by the gate of the command that issued it', () => {
   const SEALED_DOC = SessionProfile({
     commands: {
-      deny: [{ reason: 'sealed', commands: { sed: ['/data/real/secret'] } }],
+      deny: [{ reason: 'sealed', command: 'sed', paths: ['/data/real/secret'] }],
     },
   })
   const OPEN_DOC = SessionProfile({})
@@ -2802,7 +2855,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
           mixed: SessionProfile({
             commands: {
               deny: [
-                { reason: 'sealed', commands: { cat: ['/data/real/secret'] } },
+                { reason: 'sealed', command: 'cat', paths: ['/data/real/secret'] },
                 { reason: 'walled', paths: ['/data/real/walled'] },
               ],
             },

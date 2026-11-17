@@ -62,10 +62,21 @@ const DOC = SessionProfile({
       'source',
     ],
     deny: [
-      { reason: 'sealed', commands: { cat: ['/data/secret*'] } },
+      { reason: 'sealed', command: 'cat', paths: ['/data/secret*'] },
       {
         reason: 'private',
-        commands: { ls: ['/data/private'], grep: ['/data/private'], rg: ['/data/private'] },
+        command: 'ls',
+        paths: ['/data/private'],
+      },
+      {
+        reason: 'private',
+        command: 'grep',
+        paths: ['/data/private'],
+      },
+      {
+        reason: 'private',
+        command: 'rg',
+        paths: ['/data/private'],
       },
     ],
   },

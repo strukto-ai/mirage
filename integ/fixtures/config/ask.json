@@ -35,15 +35,18 @@
               "ask": [
                 {
                   "reason": "sign-off",
-                  "commands": {
-                    "rm": [
-                      "/d/shared/*"
-                    ],
-                    "mv": [
-                      "/d/shared/*",
-                      "/d/docs"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/shared/*"
+                  ]
+                },
+                {
+                  "reason": "sign-off",
+                  "command": "mv",
+                  "paths": [
+                    "/d/shared/*",
+                    "/d/docs"
+                  ]
                 }
               ]
             }
@@ -113,11 +116,10 @@
             "commands": {
               "ask": [
                 {
-                  "commands": {
-                    "git push": [
-                      "/d/*"
-                    ]
-                  }
+                  "command": "git push",
+                  "paths": [
+                    "/d/*"
+                  ]
                 },
                 {
                   "paths": [
@@ -147,11 +149,10 @@
                     "git rebase",
                     {
                       "reason": "prod",
-                      "commands": {
-                        "rm": [
-                          "/d/prod/*"
-                        ]
-                      }
+                      "command": "rm",
+                      "paths": [
+                        "/d/prod/*"
+                      ]
                     },
                     {
                       "reason": "keys",

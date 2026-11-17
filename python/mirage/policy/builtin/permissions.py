@@ -69,14 +69,15 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         if decision.outcome is Outcome.ALLOW:
             return None
         rule = decision.rule
+        matched = decision.matched
         if rule is None:
             program = " ".join(ctx.program or (ctx.command,))
-            return Deny(f"{program} is not allowed")
+            return Deny(f"{program} is not allowed", matched=matched)
         if decision.outcome is Outcome.ASK:
             return Ask(rule.reason, rule, decision.asks)
-        if decision.matched_path is None:
-            return Deny(rule.reason, rule=rule)
-        return Deny(rule.reason, path=decision.matched_path, rule=rule)
+        return Deny(
+            rule.reason, path=decision.matched_path, rule=rule, matched=matched
+        )
 
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):

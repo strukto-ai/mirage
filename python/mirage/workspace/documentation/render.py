@@ -23,6 +23,7 @@ from mirage.commands.spec.standard import standard_request
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.policy.match.decide import decide
+from mirage.policy.match.grammar import allow_patterns
 from mirage.policy.match.pattern import pattern_reaches, split_pattern
 from mirage.policy.types import CommandContext, Outcome
 from mirage.types import MountMode, PathSpec
@@ -133,7 +134,7 @@ def forms(
     found = [tuple(words)]
     rules = session.commands
     if words and rules is not None and rules.allow is not None:
-        for pattern in rules.allow:
+        for pattern in allow_patterns(rules):
             form = (*words, *split_pattern(pattern)[len(words) :])
             if (
                 len(form) > len(words)

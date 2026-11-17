@@ -12,16 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 import pytest
 
 from mirage import Workspace
 from mirage.commands.cli.types import CLI, CLIHandler
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.policy.errors import PolicyError
-from mirage.policy.types import AdmissionRules, CommandRule
+from mirage.policy.types import (
+    AdmissionRules,
+    AllowFlags,
+    CommandRule,
+    Grammar,
+)
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.session.validate import check_cli_verbs, check_rules
+from mirage.workspace.session.validate import check_cli_patterns, check_rules
 
 
 def _rules(allow=None, ask=(), deny=()) -> AdmissionRules:
@@ -61,7 +68,7 @@ def test_a_rule_on_an_installed_builtin_passes():
 
 def test_a_word_that_is_not_a_builtin_is_left_alone():
     # It may be a CLI the host registers after the workspace is built,
-    # which is what check_cli_verbs covers at create_session.
+    # which is what check_cli_patterns covers at create_session.
     check_rules(
         _rules(
             allow=("ls",),
@@ -192,30 +199,102 @@ def test_nothing_to_check_passes():
     check_rules(_rules())
 
 
-def test_a_rule_naming_a_verb_its_cli_does_not_have_is_refused():
-    verbs = {"git": frozenset({"status", "push"})}
-    with pytest.raises(PolicyError, match="no verb for"):
-        check_cli_verbs(
-            _rules(deny=(CommandRule(reason="no", commands=("git shove",)),)),
-            verbs,
-        )
-    # A verb it does have, a wildcard, and a head word no CLI claims all
-    # pass: the last may be a command, a function, or a later install.
-    check_cli_verbs(
-        _rules(deny=(CommandRule(reason="no", commands=("git push",)),)), verbs
+GIT = Grammar(
+    CommandSpec(
+        name="git",
+        subcommands=(
+            CommandSpec(name="status"),
+            CommandSpec(
+                name="remote",
+                subcommands=(
+                    CommandSpec(
+                        name="add",
+                        arguments=(
+                            Argument("-f", "--fetch", action="store_true"),
+                        ),
+                    ),
+                ),
+            ),
+            CommandSpec(
+                name="add",
+                arguments=(
+                    Argument("-f", "--force", action="store_true"),
+                    Argument("--dry-run", action="store_true"),
+                ),
+            ),
+        ),
+    ),
+    tree=True,
+)
+
+
+def _deny(*patterns: str) -> AdmissionRules:
+    return _rules(deny=(CommandRule(reason="no", commands=patterns),))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "says"),
+    [
+        ("git shove", "has no verb git shove"),
+        ("git remote shove", "has no verb git remote shove"),
+        ("git add --dry", "--dry is a prefix of an option"),
+        ("git * -f", "write its long name"),
+        ("git * --prune", "no git subcommand the * stands for has --prune"),
+        ("git {status,shove}", "has no verb git shove"),
+        ("git add --frobnicate", "git add does not read --frobnicate"),
+    ],
+)
+def test_a_cli_pattern_its_tree_cannot_read_is_refused(pattern, says):
+    with pytest.raises(PolicyError, match=re.escape(says)):
+        check_cli_patterns(_deny(pattern), {"git": GIT})
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "git status",
+        "git *",
+        "git * --force",
+        "git * * --fetch",
+        "git add -f",
+        "git",
+        "slack send --now",
+    ],
+)
+def test_a_cli_pattern_its_tree_reads_loads(pattern):
+    check_cli_patterns(_deny(pattern), {"git": GIT})
+    check_cli_patterns(None, {"git": GIT})
+
+
+@pytest.mark.parametrize(
+    ("pattern", "says"),
+    [
+        ("rm --no-such-flag", "rm has no option --no-such-flag"),
+        ("rm --rec", "--rec is a prefix of an option"),
+        ("rm -Z", "rm has no option -Z"),
+    ],
+)
+def test_a_builtin_pattern_its_spec_cannot_read_is_refused(pattern, says):
+    with pytest.raises(PolicyError, match=re.escape(says)):
+        check_rules(_deny(pattern))
+    with pytest.raises(PolicyError, match=re.escape(says)):
+        check_rules(_rules(allow=(pattern,)))
+
+
+def test_a_builtin_pattern_in_any_spelling_loads():
+    check_rules(_deny("rm -rf", "rm --recursive --force", "head -n 1"))
+    check_rules(_rules(allow=(AllowFlags("rm", ("-f", "-v")),)))
+    with pytest.raises(PolicyError, match="rm has no option -Z"):
+        check_rules(_rules(allow=(AllowFlags("rm", ("-Z",)),)))
+
+
+def test_a_group_in_the_name_and_a_star_in_allow_are_warned(caplog):
+    check_rules(
+        _rules(allow=("*", "gh * view"), deny=_deny("{rm,mv} -f").deny)
     )
-    check_cli_verbs(
-        _rules(deny=(CommandRule(reason="no", commands=("git *",)),)), verbs
-    )
-    check_cli_verbs(
-        _rules(deny=(CommandRule(reason="no", commands=("slack send",)),)),
-        verbs,
-    )
-    # A bare head word names no verb, so there is nothing to check.
-    check_cli_verbs(
-        _rules(deny=(CommandRule(reason="no", commands=("git",)),)), verbs
-    )
-    check_cli_verbs(None, verbs)
+    said = caplog.text
+    assert "{rm,mv} -f: a group in the command name" in said
+    assert "gh * view: a * admits every subcommand" in said
 
 
 def _noop(config, paths, texts, ctx):
@@ -248,7 +327,7 @@ def test_create_session_reads_the_verbs_of_an_installed_cli():
                 ]
             }
         }
-        with pytest.raises(PolicyError, match="no verb for"):
+        with pytest.raises(PolicyError, match="has no verb"):
             ws.create_session("bad", permissions=doc)
         ok = {
             "commands": {

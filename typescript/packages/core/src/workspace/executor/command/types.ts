@@ -15,7 +15,7 @@
 import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { WordChoices } from '../../../commands/spec/word_choice.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import type { CommandWord, HandOff } from '../../../policy/types.ts'
+import type { CommandRead, CommandWord, Grammar, HandOff } from '../../../policy/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../execution/job/index.ts'
@@ -110,4 +110,11 @@ export interface LineReading {
   readonly supplied: readonly PathSpec[]
   readonly tokens: readonly string[]
   readonly program: readonly string[]
+  /**
+   * The line as its grammar reads it, the facts a rule pattern is compared
+   * on; null for a command no spec describes or a line its spec refuses.
+   */
+  readonly read: CommandRead | null
+  /** The grammar that read it; null with `read`. */
+  readonly grammar: Grammar | null
 }

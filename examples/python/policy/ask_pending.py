@@ -24,7 +24,8 @@ ROLE = {
         "ask": [
             {
                 "reason": "secrets are reviewed",
-                "commands": {"cat": ["/data/secret.txt"]},
+                "command": "cat",
+                "paths": ["/data/secret.txt"],
             },
             {"reason": "deletes are reviewed", "commands": ["rm"]},
         ],

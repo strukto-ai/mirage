@@ -216,7 +216,7 @@ describe('compileProfile commands', () => {
           '/repo': {
             commands: {
               ask: ['git rebase'],
-              deny: [{ reason: 'ro', commands: { rm: ['/repo/*.lock'] } }],
+              deny: [{ reason: 'ro', command: 'rm', paths: ['/repo/*.lock'] }],
             },
           },
           '/scratch': 'r',

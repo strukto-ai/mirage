@@ -392,7 +392,8 @@ async def test_a_wrappers_pattern_is_no_path_to_a_path_rule():
                     "deny": [
                         {
                             "reason": "sealed",
-                            "commands": {"fgrep": ["/private/*"]},
+                            "command": "fgrep",
+                            "paths": ["/private/*"],
                         }
                     ]
                 }

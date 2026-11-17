@@ -954,6 +954,23 @@ WalkErrno = Literal["ENOENT", "ELOOP"]
 
 
 @dataclass(frozen=True, slots=True)
+class Matched:
+    """What fired in a profile rule: the subcommand path and the options
+    of the pattern that matched the line, or the line's own path when
+    the allow list refused it.
+
+    Args:
+        command (tuple[str, ...]): the command name and its canonical
+            subcommands, as the pattern names them.
+        flags (tuple[str, ...]): the options the pattern names, by
+            canonical spelling; empty when it names none.
+    """
+
+    command: tuple[str, ...]
+    flags: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class PolicyDecision:
     """Why a line did not run, for the caller that reads the result.
 
@@ -972,12 +989,15 @@ class PolicyDecision:
         policy (str): the class name of the policy that spoke; empty
             for an ask, which belongs to the host rather than a policy.
         ask_id (str | None): the approval id to quote, for ``pending``.
+        matched (Matched | None): what fired in the profile rule that
+            refused, for ``deny``; None for any other refusal.
     """
 
     kind: PolicyDecisionKind
     reason: str
     policy: str = ""
     ask_id: str | None = None
+    matched: Matched | None = None
 
 
 class VFSName(StrEnum):

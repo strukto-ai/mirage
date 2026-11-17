@@ -38,6 +38,7 @@ from mirage.policy.constants import (
 )
 from mirage.policy.types import (
     AdmissionRules,
+    AllowFlags,
     CommandRule,
     HideReason,
     ProfileScript,
@@ -59,28 +60,6 @@ from mirage.types import (
 from mirage.utils.path import norm
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
-
-
-def _string_list(
-    value: Any, where: str, names: str | None = None
-) -> tuple[str, ...]:
-    """A document list field, refused unless every item is a string.
-
-    A scalar ``commands: rm`` would otherwise ``tuple()`` into
-    ``('r', 'm')`` and the command it meant to refuse stay allowed, so
-    the document fails to load instead, as it does in TypeScript. An
-    entry that names something must also hold a token: a blank command
-    pattern is a prefix of every line, so a stray ``""`` would allow,
-    ask about or deny every command, and a blank path entry is the
-    root, so it would hide or deny the whole tree.
-
-    Args:
-        value (Any): the field as written, None when absent.
-        where (str): the field's name, for the message.
-        names (str | None): what a non-blank entry names (``a
-            command``, ``a path``); None accepts blank entries.
-    """
-    return tuple(validate_document("strings", value, where, names=names))
 
 
 def _absolute_paths(entries: tuple[str, ...], where: str) -> None:
@@ -130,12 +109,12 @@ def _rules(v: Any, where: str) -> Any:
 
     A bare string is one command pattern over the whole line, with the
     verb's default reason. A mapping carries ``reason`` (defaulting) and
-    exactly one of: ``commands`` as a list, a whole-line rule on each
-    pattern; ``commands`` as a mapping, each command pattern on its own
-    paths (one rule per command); ``paths`` alone, a path rule on every
-    command. A list of commands beside a list of paths is refused,
-    because it does not say which command the paths belong to, and a
-    rule naming neither is refused rather than read as "every command".
+    exactly one of: ``commands``, a whole-line rule on each pattern;
+    ``command`` with ``paths``, one pattern on those paths; ``paths``
+    alone, a path rule on every command. A list of commands beside a
+    list of paths is refused, because it does not say which command the
+    paths belong to, and a rule naming neither is refused rather than
+    read as "every command".
 
     Args:
         v (Any): the list as written, or compiled rules, which the
@@ -167,9 +146,31 @@ def _rules(v: Any, where: str) -> Any:
 
 
 def _parse_allow(v: Any) -> Any:
+    """Coerce ``commands.allow`` to its entries: a pattern string, or a
+    ``{command, flags}`` entry that runs the command only with options
+    from the set.
+
+    Args:
+        v (Any): the list as written, or compiled entries.
+    """
     if v is None:
         return None
-    return _string_list(v, "commands.allow", names="a command")
+    raw = (
+        [
+            {"command": e.command, "flags": list(e.flags)}
+            if isinstance(e, AllowFlags)
+            else e
+            for e in v
+        ]
+        if isinstance(v, (list, tuple))
+        else v
+    )
+    return tuple(
+        e
+        if isinstance(e, str)
+        else AllowFlags(e["command"], tuple(e["flags"]))
+        for e in validate_document("allow", raw, "commands.allow")
+    )
 
 
 def _paths(raw: Any, where: str) -> dict[str, Any]:
@@ -298,15 +299,15 @@ class CommandsBlock(BaseModel):
     either is one command pattern with the default reason.
 
     Args:
-        allow (tuple[str, ...] | None): the profile's allow patterns;
-            None (unstated) allows everything.
+        allow (tuple[str | AllowFlags, ...] | None): the profile's allow
+            entries; None (unstated) allows everything.
         ask (tuple[CommandRule, ...]): what needs sign-off, in order.
         deny (tuple[CommandRule, ...]): the profile's refusals, in order.
     """
 
     model_config = _DOC
 
-    allow: tuple[str, ...] | None = None
+    allow: tuple[str | AllowFlags, ...] | None = None
     ask: tuple[CommandRule, ...] = ()
     deny: tuple[CommandRule, ...] = ()
 
@@ -783,26 +784,35 @@ def _paths_doc(block: PathsBlock) -> dict[str, Any]:
 
 def _commands_doc(block: CommandsBlock | MountCommandsBlock) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "ask": [_rule_doc(rule) for rule in block.ask],
-        "deny": [_rule_doc(rule) for rule in block.deny],
+        "ask": [doc for rule in block.ask for doc in _rule_docs(rule)],
+        "deny": [doc for rule in block.deny for doc in _rule_docs(rule)],
     }
     if isinstance(block, CommandsBlock) and block.allow is not None:
-        doc["allow"] = list(block.allow)
+        doc["allow"] = [
+            e
+            if isinstance(e, str)
+            else {"command": e.command, "flags": list(e.flags)}
+            for e in block.allow
+        ]
     return doc
 
 
-def _rule_doc(rule: CommandRule) -> dict[str, Any]:
-    # A rule naming commands and paths is the mapping form, each
-    # command on the rule's paths; it reads back as one rule per
-    # command, which admits exactly what the one rule did.
+def _rule_docs(rule: CommandRule) -> list[dict[str, Any]]:
+    """A rule as document entries. One naming commands and paths is
+    written one command per entry, each on the rule's paths, which
+    admits exactly what the one rule did.
+
+    Args:
+        rule (CommandRule): the rule.
+    """
     if rule.commands and rule.paths:
-        return {
-            "reason": rule.reason,
-            "commands": {c: list(rule.paths) for c in rule.commands},
-        }
+        return [
+            {"reason": rule.reason, "command": c, "paths": list(rule.paths)}
+            for c in rule.commands
+        ]
     if rule.paths:
-        return {"reason": rule.reason, "paths": list(rule.paths)}
-    return {"reason": rule.reason, "commands": list(rule.commands)}
+        return [{"reason": rule.reason, "paths": list(rule.paths)}]
+    return [{"reason": rule.reason, "commands": list(rule.commands)}]
 
 
 @dataclass(frozen=True, slots=True)

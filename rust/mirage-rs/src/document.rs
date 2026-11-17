@@ -160,6 +160,71 @@ fn under(raw: &Doc, root: &[u32], at: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuse a pattern whose `{a,b}` group cannot expand.
+fn grouped(pattern: &Doc, at: &str, dialect: Whitespace) -> Result<(), String> {
+    let Doc::Text(text) = pattern else {
+        return Ok(());
+    };
+    crate::policy::expand_pattern(text, dialect)
+        .map(|_| ())
+        .map_err(|problem| format!("{at}: {problem}"))
+}
+
+fn patterns(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    let checked = strings(raw, at, Some("a command"), dialect)?;
+    if let Doc::List(items) = &checked {
+        for (i, item) in items.iter().enumerate() {
+            grouped(item, &format!("{at}[{i}]"), dialect)?;
+        }
+    }
+    Ok(checked)
+}
+
+/// `commands.allow`: patterns, and `{command, flags}` entries that run a
+/// command only with options from a set.
+fn allow(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    let entries = raw.list(at, "a list of command patterns")?;
+    for (i, entry) in entries.iter().enumerate() {
+        let at = format!("{at}[{i}]");
+        match entry {
+            Doc::Text(_) => {
+                if !nonblank(entry, dialect) {
+                    return Err(format!("{at} must name a command"));
+                }
+                grouped(entry, &at, dialect)?;
+            }
+            Doc::Map(_) => {
+                fields(entry, &["command", "flags"], &at)?;
+                let command = entry.get("command");
+                if !nonblank(command, dialect) {
+                    return Err(format!("{at}.command must name a command"));
+                }
+                if let Doc::Text(text) = command
+                    && crate::policy::expand_pattern(text, dialect)
+                        .is_ok_and(|expanded| expanded.len() > 1)
+                {
+                    return Err(format!(
+                        "{at}.command holds a group; write one entry per command"
+                    ));
+                }
+                if matches!(entry.get("flags"), Doc::Null) {
+                    return Err(format!("{at} lists no flags; write the command as a string"));
+                }
+                let flags = strings(entry.get("flags"), &format!("{at}.flags"), None, dialect)?;
+                if let Doc::List(items) = &flags {
+                    for (j, flag) in items.iter().enumerate() {
+                        if !matches!(flag, Doc::Text(text) if text.len() > 1 && text[0] == 45) {
+                            return Err(format!("{at}.flags[{j}] must be an option, such as -f"));
+                        }
+                    }
+                }
+            }
+            _ => return Err(format!("{at} must be a command pattern or a {{command, flags}} entry")),
+        }
+    }
+    Ok(Doc::List(entries.to_vec()))
+}
+
 fn rule(raw: &Doc, at: &str, reason: &[u32], dialect: Whitespace) -> Answer {
     if matches!(raw, Doc::Text(_)) {
         return Ok(Doc::List(vec![object(vec![
@@ -178,7 +243,7 @@ fn rule(raw: &Doc, at: &str, reason: &[u32], dialect: Whitespace) -> Answer {
     if !matches!(raw, Doc::Map(_)) {
         return Err(format!("{at} must be a command pattern or a mapping"));
     }
-    fields(raw, &["reason", "commands", "paths"], at)?;
+    fields(raw, &["reason", "commands", "command", "paths"], at)?;
     let default_reason = Doc::Text(reason.to_vec());
     let reason = raw
         .mapping(at)?
@@ -189,37 +254,39 @@ fn rule(raw: &Doc, at: &str, reason: &[u32], dialect: Whitespace) -> Answer {
         return Err(format!("{at}.reason must be a string"));
     }
     let commands = raw.get("commands");
+    let command = raw.get("command");
     let paths = raw.get("paths");
-    if let Doc::Map(entries) = commands {
-        if !matches!(paths, Doc::Null) {
+    if matches!(commands, Doc::Map(_)) {
+        return Err(format!(
+            "{at}.commands is a list; scope one command to paths with {{command, paths}}"
+        ));
+    }
+    if !matches!(command, Doc::Null) {
+        if !matches!(commands, Doc::Null) {
+            return Err(format!("{at} has both command and commands; keep one"));
+        }
+        if !nonblank(command, dialect) {
+            return Err(format!("{at}.command must name a command"));
+        }
+        grouped(command, &format!("{at}.command"), dialect)?;
+        if matches!(paths, Doc::Null) {
             return Err(format!(
-                "{at} maps each command to its paths, so it takes no paths of its own"
+                "{at}.command takes paths; without paths write the pattern as a string"
             ));
         }
-        if entries.is_empty() {
-            return Err(format!("{at}.commands must name at least one command"));
+        let paths = strings(paths, &format!("{at}.paths"), Some("a path"), dialect)?;
+        if matches!(&paths, Doc::List(items) if items.is_empty()) {
+            return Err(format!("{at}.paths must list at least one path"));
         }
-        let mut out = Vec::new();
-        for (pattern, paths) in entries {
-            if !nonblank(pattern, dialect) {
-                return Err(format!("{at}.commands keys must name a command"));
-            }
-            let at = format!("{at}.commands[{}]", pattern.shown());
-            let paths = strings(paths, &at, Some("a path"), dialect)?;
-            if matches!(&paths, Doc::List(items) if items.is_empty()) {
-                return Err(format!("{at} must list at least one path"));
-            }
-            out.push(object(vec![
-                ("reason", reason.clone()),
-                ("commands", Doc::List(vec![pattern.clone()])),
-                ("paths", paths),
-            ]));
-        }
-        return Ok(Doc::List(out));
+        return Ok(Doc::List(vec![object(vec![
+            ("reason", reason.clone()),
+            ("commands", Doc::List(vec![command.clone()])),
+            ("paths", paths),
+        ])]));
     }
     if !matches!(commands, Doc::Null) && !matches!(paths, Doc::Null) {
         return Err(format!(
-            "{at} lists commands beside paths; map each command to its paths instead"
+            "{at} lists commands beside paths; write one {{command, paths}} rule per command"
         ));
     }
     if matches!(commands, Doc::Null) && matches!(paths, Doc::Null) {
@@ -229,12 +296,7 @@ fn rule(raw: &Doc, at: &str, reason: &[u32], dialect: Whitespace) -> Answer {
         ("reason", reason.clone()),
         (
             "commands",
-            strings(
-                commands,
-                &format!("{at}.commands"),
-                Some("a command"),
-                dialect,
-            )?,
+            patterns(commands, &format!("{at}.commands"), dialect)?,
         ),
         (
             "paths",
@@ -572,6 +634,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "absolute" => absolute(&raw, &at).map(|()| Doc::Null),
         "under" => under(&raw, &root, &at).map(|()| Doc::Null),
         "rule" => rule(&raw, &at, &reason, dialect),
+        "allow" => allow(&raw, &at, dialect),
         "rules" => rules(&raw, &at, &reason, dialect),
         "paths" => paths(&raw, &at, dialect),
         "config" => workspace_fields(&raw, names.as_deref().unwrap_or("workspace"), &at),
@@ -657,29 +720,79 @@ mod tests {
     }
 
     #[test]
-    fn scoped_commands_preserve_mapping_order_and_reject_ambiguous_rules() {
-        let commands = object(vec![("z", texts(&["/last"])), ("a", texts(&["/first"]))]);
-        let raw = object(vec![("commands", commands.clone())]);
+    fn a_scoped_rule_names_one_command_and_the_map_form_is_gone() {
+        let raw = object(vec![
+            ("command", Doc::text("rm -r")),
+            ("paths", texts(&["/keep/*"])),
+        ]);
         let Doc::List(parsed) = rule(&raw, "deny", &[120], Whitespace::Python).unwrap() else {
             panic!()
         };
-        assert_eq!(parsed[0].get("commands"), &texts(&["z"]));
-        assert_eq!(parsed[1].get("paths"), &texts(&["/first"]));
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].get("commands"), &texts(&["rm -r"]));
+        assert_eq!(parsed[0].get("paths"), &texts(&["/keep/*"]));
         assert_eq!(parsed[0].get("reason"), &Doc::text("x"));
-        let mixed = object(vec![("commands", commands), ("paths", texts(&["/other"]))]);
-        assert!(
-            rule(&mixed, "deny", &[], Whitespace::Python)
-                .unwrap_err()
-                .contains("no paths of its own")
+        let refused = |raw: Doc, says: &str| {
+            let err = rule(&raw, "deny", &[], Whitespace::Python).unwrap_err();
+            assert!(err.contains(says), "{err}");
+        };
+        let map = object(vec![("z", texts(&["/last"]))]);
+        refused(object(vec![("commands", map)]), "{command, paths}");
+        refused(object(vec![("command", Doc::text("rm"))]), "takes paths");
+        refused(
+            object(vec![
+                ("command", Doc::text("rm")),
+                ("commands", texts(&["ls"])),
+                ("paths", texts(&["/a"])),
+            ]),
+            "keep one",
         );
-        let mixed = object(vec![
-            ("commands", texts(&["rm"])),
-            ("paths", texts(&["/other"])),
+        refused(
+            object(vec![
+                ("commands", texts(&["rm"])),
+                ("paths", texts(&["/other"])),
+            ]),
+            "one {command, paths} rule per command",
+        );
+        refused(
+            object(vec![("commands", texts(&["gh pr {view, diff}"]))]),
+            "commands[0]: a group",
+        );
+    }
+
+    #[test]
+    fn an_allow_list_takes_patterns_and_flag_sets() {
+        let flags = object(vec![
+            ("command", Doc::text("rm")),
+            ("flags", texts(&["-f", "-v"])),
         ]);
-        assert!(
-            rule(&mixed, "deny", &[], Whitespace::Python)
-                .unwrap_err()
-                .contains("map each command")
+        let list = Doc::List(vec![Doc::text("*"), Doc::text("gh pr {view,diff}"), flags]);
+        assert!(allow(&list, "commands.allow", Whitespace::Python).is_ok());
+        let refused = |entry: Doc, says: &str| {
+            let err = allow(&Doc::List(vec![entry]), "commands.allow", Whitespace::Python)
+                .unwrap_err();
+            assert!(err.contains(says), "{err}");
+        };
+        refused(Doc::text("gh {pr,"), "not closed");
+        refused(object(vec![("command", Doc::text("rm"))]), "lists no flags");
+        refused(
+            object(vec![("command", Doc::text("rm")), ("flags", texts(&["f"]))]),
+            "must be an option",
+        );
+        refused(
+            object(vec![
+                ("command", Doc::text("{rm,mv}")),
+                ("flags", texts(&["-f"])),
+            ]),
+            "one entry per command",
+        );
+        refused(
+            object(vec![
+                ("command", Doc::text("rm")),
+                ("flags", texts(&[])),
+                ("paths", texts(&["/a"])),
+            ]),
+            "unknown field",
         );
     }
 

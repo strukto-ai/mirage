@@ -151,7 +151,13 @@ describe('errors', () => {
       code: 'policy_refused',
       message: 'Permission denied',
       errno: 'EACCES',
-      decision: { kind: 'pending', reason: 'sign-off', policy: '', ask_id: 'abc123' },
+      decision: {
+        kind: 'pending',
+        reason: 'sign-off',
+        policy: '',
+        ask_id: 'abc123',
+        matched: null,
+      },
     })
   })
 })

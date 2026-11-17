@@ -257,6 +257,7 @@ export function decisionOf(action: Deny | Pending): PolicyDecision | null {
     reason: action.reason,
     policy: action.policy ?? '',
     askId: null,
+    ...(action.matched === undefined ? {} : { matched: action.matched }),
   }
 }
 

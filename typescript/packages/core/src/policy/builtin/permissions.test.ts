@@ -108,7 +108,11 @@ describe('PermissionsPolicy', () => {
     // refusal naming the program, not "command not found".
     expect(
       p.preCommand(ctx('git', ['push'], { sessionId: 'rev', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'deny', reason: 'git push is not allowed' })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'git push is not allowed',
+      matched: { command: ['git'], flags: [] },
+    })
     // A word that is not a tool is never refused by an allow list.
     expect(p.preCommand(ctx('cd', ['/x'], { sessionId: 'rev', tool: false }))).toBeNull()
     expect(p.preCommand(ctx('python3', ['-c', '1']))).toBeNull()
@@ -121,7 +125,12 @@ describe('PermissionsPolicy', () => {
     // works inside that mount (here by cwd).
     expect(
       p.preCommand(ctx('git', ['push'], { cwd: '/repo/sub', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'deny', reason: 'history is read-only here', rule: MOUNT_DENY })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'history is read-only here',
+      rule: MOUNT_DENY,
+      matched: { command: ['git', 'push'], flags: [] },
+    })
     // Off the mount, the same line falls through to the ask rule: the
     // deny rules ran first and had no opinion.
     expect(
@@ -134,6 +143,7 @@ describe('PermissionsPolicy', () => {
         reason: 'no deletes in the repo',
         path: 'x',
         rule: FULL.deny[1],
+        matched: { command: ['rm'], flags: [] },
       },
     )
     expect(p.preCommand(ctx('rm', ['/scratch/x'], { paths: [path('/scratch/x')] }))).toBeNull()
@@ -164,6 +174,7 @@ describe('PermissionsPolicy', () => {
       reason: 'sealed',
       path: '/repo/sealed/y',
       rule: deep,
+      matched: { command: ['rm'], flags: [] },
     })
     // Outside the deeper rule's anchor the shallow one is what is left.
     expect(p.preCommand(ctx('rm', ['/repo/x'], { paths: [path('/repo/x')] }))).toEqual({
@@ -208,6 +219,7 @@ describe('PermissionsPolicy', () => {
       reason: 'private',
       path: '/repo/private/x',
       rule: deny,
+      matched: { command: ['cat'], flags: [] },
     })
     // The unrelated entry still speaks where it does anchor.
     expect(
@@ -231,7 +243,12 @@ describe('PermissionsPolicy', () => {
     const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
     expect(
       p.preCommand(ctx('git', ['branch'], { cwd: '/repo', program: ['git', 'branch'] })),
-    ).toEqual({ kind: 'deny', reason: 'no branches', rule: deny })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'no branches',
+      rule: deny,
+      matched: { command: ['git', 'branch'], flags: [] },
+    })
     // Give the mount rule a path and it is on the other axis, where
     // being deeper is what lets it carve out the exception.
     const scopedRule: CommandRule = {
@@ -269,6 +286,7 @@ describe('PermissionsPolicy', () => {
       kind: 'deny',
       reason: 'history is read-only here',
       rule: MOUNT_DENY,
+      matched: { command: ['git', 'push'], flags: [] },
     })
     // An ask rule with paths asks only when the line names the path.
     const shared: AdmissionRules = {
@@ -315,6 +333,7 @@ describe('PermissionsPolicy', () => {
       reason: 'history is read-only here',
       policy: 'PermissionsPolicy',
       rule: MOUNT_DENY,
+      matched: { command: ['git', 'push'], flags: [] },
     })
     expect(policies.wants('preVfs')).toBe(true)
   })

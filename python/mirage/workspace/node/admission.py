@@ -46,10 +46,9 @@ from mirage.policy.match import (
     Outcome,
     io_reach,
     io_refusal,
-    line_tokens,
-    pattern_matches,
     split_pattern,
 )
+from mirage.policy.match.grammar import allow_patterns
 from mirage.policy.policies import command_route, settled
 from mirage.shell.helpers import (
     get_redirects,
@@ -82,6 +81,7 @@ from mirage.workspace.executor.command.routing import (
     routable_scopes,
     routed_operands,
 )
+from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.spec_hints import (
@@ -179,7 +179,7 @@ class Admitted:
         Args:
             virtual (str): absolute virtual path of a walk's start point.
         """
-        return io_reach(self.rules, self.ctx.tokens, virtual)
+        return io_reach(self.rules, self.ctx, virtual)
 
     def check(self, virtual: str) -> None:
         """Raise ``PolicyDenied`` when a rule in force refuses this entry
@@ -203,7 +203,7 @@ class Admitted:
         """
         if _norm(virtual) in self.judged:
             return None
-        return io_refusal(self.rules, self.ctx.tokens, virtual, self.granted)
+        return io_refusal(self.rules, self.ctx, virtual, self.granted)
 
 
 def _seen(
@@ -269,9 +269,11 @@ def unlisted_service(
     """Whether the allow list refuses a CLI that reaches a service.
 
     Such a CLI (an account or script CLI) reaches its service by id, past
-    every hide, so under a profile that hides paths it runs only where a
-    pattern starting with its own name matches the line. ``*`` and a
-    pattern for another of its verbs do not count.
+    every hide, so under a profile that hides paths it runs only where
+    an entry starting with its own name matches the line. ``*`` does
+    not count. An entry that names the command closes it to the entries
+    naming it, which the allow list itself holds the line to, so what is
+    left here is whether any entry names it at all.
 
     Args:
         ctx (CommandContext): the classified command.
@@ -286,26 +288,37 @@ def unlisted_service(
         or session.visibility.paths is None
     ):
         return False
-    tokens = line_tokens(ctx)
     rules = session.commands
-    return not any(
-        split_pattern(p)[:1] == (ctx.command,) and pattern_matches(p, tokens)
-        for p in (rules.allow if rules is not None else None) or ()
+    return rules is None or not any(
+        split_pattern(p)[:1] == (ctx.command,) for p in allow_patterns(rules)
     )
 
 
 def _tree_writes(
-    name: str, tree: CLI, args: list[str], session: SessionState
+    name: str,
+    tree: CLI,
+    args: list[str],
+    reading: LineReading,
+    session: SessionState,
 ) -> bool:
     """Whether a command tree's leaf the line reaches may change state,
-    read off the options the line carries by canonical spelling.
+    read off the line's own reading when that reading is this tree's,
+    else off a walk under the session environment.
 
     Args:
         name (str): command name, expanded.
         tree (CLI): the command tree.
         args (list[str]): the words after the name.
+        reading (LineReading): the line read once.
         session (SessionState): the session running the line.
     """
+    if reading.read is not None and (
+        reading.grammar is not None and reading.grammar.spec is tree.spec
+    ):
+        handler = tree.handlers.get(" ".join(reading.program[1:]))
+        return handler is not None and handler.writes(
+            [flag.name for flag in reading.read.flags]
+        )
     env = env_snapshot(session)
     result = walk(name, tree.spec, args, session.cwd, env)
     return result.leaf is not None and tree.handlers[
@@ -317,6 +330,7 @@ def _writes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
+    reading: LineReading,
     facts: LineFacts,
     session: SessionState,
     registry: MountRegistry,
@@ -347,6 +361,8 @@ def _writes(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
+        reading (LineReading): the line read once; a tree it read is
+            not walked again.
         facts (LineFacts): what the line does, read off its words.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the mounts and the
@@ -378,7 +394,9 @@ def _writes(
                     trees.append(candidate_tree)
                 elif mount.may_write(name):
                     return True
-        return any(_tree_writes(name, t, args, session) for t in trees)
+        return any(
+            _tree_writes(name, t, args, reading, session) for t in trees
+        )
     runs = runs_as(name, registry)
     # The words that route the run, picked as execution picks them: a
     # stdin `-` and an assignment route nowhere, and a path-valued option,
@@ -428,7 +446,7 @@ def _writes(
     for mount in reached:
         candidate_tree = mount.cli_for(runs)
         if candidate_tree is not None:
-            if _tree_writes(runs, candidate_tree, args, session):
+            if _tree_writes(runs, candidate_tree, args, reading, session):
                 return True
         elif any(
             mount.may_write(runs, extension, facts.writes)
@@ -538,7 +556,15 @@ async def gate(
     )
     await budget.run()
     write = _writes(
-        name, args, operands, facts, session, registry, namespace, implied
+        name,
+        args,
+        operands,
+        reading,
+        facts,
+        session,
+        registry,
+        namespace,
+        implied,
     )
     await budget.run()
     ctx = CommandContext(
@@ -551,6 +577,8 @@ async def gate(
         session_id=session.session_id,
         tokens=reading.tokens,
         program=reading.program,
+        read=reading.read,
+        grammar=reading.grammar,
         tool=tool,
         walks=facts.walks,
         write=write,

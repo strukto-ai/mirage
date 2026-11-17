@@ -55,10 +55,14 @@ PROFILES = {
                 {
                     "reason": "a runbook edit needs a nod",
                     # Anchor depth 1: /runbook, then a wildcard.
-                    "commands": {
-                        "rm": ["/runbook/*"],
-                        "cp": ["/runbook/*"],
-                    },
+                    "command": "rm",
+                    "paths": ["/runbook/*"],
+                },
+                {
+                    "reason": "a runbook edit needs a nod",
+                    # Anchor depth 1: /runbook, then a wildcard.
+                    "command": "cp",
+                    "paths": ["/runbook/*"],
                 },
             ],
             "deny": [
@@ -90,7 +94,8 @@ PROFILES = {
                             # 1 that also covers these files. Writing
                             # it in the mount section is not what makes
                             # it win; the extra component is.
-                            "commands": {"rm": ["/runbook/frozen/*"]},
+                            "command": "rm",
+                            "paths": ["/runbook/frozen/*"],
                         },
                     ],
                 },

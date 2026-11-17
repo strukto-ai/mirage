@@ -88,11 +88,10 @@
               "deny": [
                 {
                   "reason": "sealed",
-                  "commands": {
-                    "rm": [
-                      "/d/sealed/*"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/sealed/*"
+                  ]
                 }
               ]
             }

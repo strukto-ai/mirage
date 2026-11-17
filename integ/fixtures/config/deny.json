@@ -35,15 +35,18 @@
               "deny": [
                 {
                   "reason": "prod",
-                  "commands": {
-                    "rm": [
-                      "/d/prod/*"
-                    ],
-                    "mv": [
-                      "/d/prod/*",
-                      "/d/docs"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/prod/*"
+                  ]
+                },
+                {
+                  "reason": "prod",
+                  "command": "mv",
+                  "paths": [
+                    "/d/prod/*",
+                    "/d/docs"
+                  ]
                 }
               ]
             }
@@ -113,11 +116,10 @@
             "commands": {
               "deny": [
                 {
-                  "commands": {
-                    "rm": [
-                      "/d/*"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/*"
+                  ]
                 },
                 {
                   "paths": [
@@ -153,11 +155,10 @@
                     },
                     {
                       "reason": "prod",
-                      "commands": {
-                        "rm": [
-                          "/d/prod/*"
-                        ]
-                      }
+                      "command": "rm",
+                      "paths": [
+                        "/d/prod/*"
+                      ]
                     },
                     {
                       "reason": "keys",

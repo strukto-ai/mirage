@@ -84,6 +84,7 @@ interface WireDecision {
   reason: string
   policy: string
   ask_id: string | null
+  matched?: { command: string[]; flags: string[] } | null
 }
 
 interface WireResult {
@@ -131,6 +132,7 @@ function decisionOf(wire: WireDecision | null): PolicyDecision | null {
     reason: wire.reason,
     policy: wire.policy,
     askId: wire.ask_id,
+    matched: wire.matched ?? null,
   }
 }
 

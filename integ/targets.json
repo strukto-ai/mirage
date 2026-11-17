@@ -854,14 +854,17 @@
             "deny": [
               {
                 "reason": "held for review",
-                "commands": {
-                  "grep": [
-                    "/data/warmwalk/locked.txt"
-                  ],
-                  "tar": [
-                    "/data/warmwalk/locked.txt"
-                  ]
-                }
+                "command": "grep",
+                "paths": [
+                  "/data/warmwalk/locked.txt"
+                ]
+              },
+              {
+                "reason": "held for review",
+                "command": "tar",
+                "paths": [
+                  "/data/warmwalk/locked.txt"
+                ]
               },
               {
                 "reason": "kept off limits",
@@ -3385,11 +3388,10 @@
             "ask": [
               {
                 "reason": "profile nod",
-                "commands": {
-                  "rm": [
-                    "/scratch/both/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/both/*"
+                ]
               }
             ]
           }
@@ -3464,22 +3466,20 @@
             "ask": [
               {
                 "reason": "span review",
-                "commands": {
-                  "cat": [
-                    "/scratch/span/*",
-                    "/scratch/deep/a/b/c/*"
-                  ]
-                }
+                "command": "cat",
+                "paths": [
+                  "/scratch/span/*",
+                  "/scratch/deep/a/b/c/*"
+                ]
               }
             ],
             "deny": [
               {
                 "reason": "span sealed",
-                "commands": {
-                  "cat": [
-                    "/scratch/span/sealed/*"
-                  ]
-                }
+                "command": "cat",
+                "paths": [
+                  "/scratch/span/sealed/*"
+                ]
               }
             ]
           }
@@ -3489,21 +3489,19 @@
             "ask": [
               {
                 "reason": "carve nod",
-                "commands": {
-                  "rm": [
-                    "/scratch/carve/open/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/carve/open/*"
+                ]
               }
             ],
             "deny": [
               {
                 "reason": "carve locked",
-                "commands": {
-                  "rm": [
-                    "/scratch/carve/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/carve/*"
+                ]
               }
             ]
           }
@@ -3513,38 +3511,47 @@
             "ask": [
               {
                 "reason": "outbox nod",
-                "commands": {
-                  "cp": [
-                    "/scratch/outbox/deep/*"
-                  ],
-                  "mv": [
-                    "/scratch/outbox/deep/*"
-                  ]
-                }
+                "command": "cp",
+                "paths": [
+                  "/scratch/outbox/deep/*"
+                ]
+              },
+              {
+                "reason": "outbox nod",
+                "command": "mv",
+                "paths": [
+                  "/scratch/outbox/deep/*"
+                ]
               },
               {
                 "reason": "staging nod",
-                "commands": {
-                  "cp": [
-                    "/scratch/stage/*"
-                  ],
-                  "mv": [
-                    "/scratch/stage/*"
-                  ]
-                }
+                "command": "cp",
+                "paths": [
+                  "/scratch/stage/*"
+                ]
+              },
+              {
+                "reason": "staging nod",
+                "command": "mv",
+                "paths": [
+                  "/scratch/stage/*"
+                ]
               }
             ],
             "deny": [
               {
                 "reason": "courier sealed",
-                "commands": {
-                  "cp": [
-                    "/scratch/vaultc/*"
-                  ],
-                  "mv": [
-                    "/scratch/vaultc/*"
-                  ]
-                }
+                "command": "cp",
+                "paths": [
+                  "/scratch/vaultc/*"
+                ]
+              },
+              {
+                "reason": "courier sealed",
+                "command": "mv",
+                "paths": [
+                  "/scratch/vaultc/*"
+                ]
               }
             ]
           }
@@ -3663,30 +3670,27 @@
             "ask": [
               {
                 "reason": "sign-off",
-                "commands": {
-                  "rm": [
-                    "/scratch/shared/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/shared/*"
+                ]
               },
               "head",
               {
                 "reason": "both: needs a nod",
-                "commands": {
-                  "rm": [
-                    "/scratch/both/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/both/*"
+                ]
               }
             ],
             "deny": [
               {
                 "reason": "no deletes in the repo",
-                "commands": {
-                  "rm": [
-                    "/repo/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/repo/*"
+                ]
               },
               {
                 "reason": "sealed until review",
@@ -3696,33 +3700,38 @@
               },
               {
                 "reason": "private",
-                "commands": {
-                  "cat": [
-                    "/scratch/private"
-                  ],
-                  "ls": [
-                    "/scratch/private"
-                  ],
-                  "grep": [
-                    "/scratch/private"
-                  ]
-                }
+                "command": "cat",
+                "paths": [
+                  "/scratch/private"
+                ]
+              },
+              {
+                "reason": "private",
+                "command": "ls",
+                "paths": [
+                  "/scratch/private"
+                ]
+              },
+              {
+                "reason": "private",
+                "command": "grep",
+                "paths": [
+                  "/scratch/private"
+                ]
               },
               {
                 "reason": "both: locked",
-                "commands": {
-                  "rm": [
-                    "/scratch/both/locked/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/both/locked/*"
+                ]
               },
               {
                 "reason": "both: locked, second voice",
-                "commands": {
-                  "rm": [
-                    "/scratch/both/locked/*"
-                  ]
-                }
+                "command": "rm",
+                "paths": [
+                  "/scratch/both/locked/*"
+                ]
               },
               {
                 "reason": "no branches",
@@ -3759,11 +3768,10 @@
                   },
                   {
                     "reason": "owner: sealed",
-                    "commands": {
-                      "rm": [
-                        "/repo/sealed/*"
-                      ]
-                    }
+                    "command": "rm",
+                    "paths": [
+                      "/repo/sealed/*"
+                    ]
                   }
                 ]
               }
@@ -3854,14 +3862,17 @@
             "deny": [
               {
                 "reason": "kept behind the link",
-                "commands": {
-                  "sed": [
-                    "/scratch/lw/flink"
-                  ],
-                  "awk": [
-                    "/scratch/lw/secret"
-                  ]
-                }
+                "command": "sed",
+                "paths": [
+                  "/scratch/lw/flink"
+                ]
+              },
+              {
+                "reason": "kept behind the link",
+                "command": "awk",
+                "paths": [
+                  "/scratch/lw/secret"
+                ]
               }
             ]
           }

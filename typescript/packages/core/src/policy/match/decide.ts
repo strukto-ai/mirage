@@ -73,13 +73,21 @@ export function sourceOf(rule: CommandRule): string {
  */
 export function decide(ctx: CommandContext, rules: AdmissionRules | null): Ruling {
   if (rules === null)
-    return { outcome: Outcome.ALLOW, rule: null, matchedPath: null, source: '', asks: [] }
-  const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as {
+    return {
+      outcome: Outcome.ALLOW,
+      rule: null,
+      matchedPath: null,
+      source: '',
+      asks: [],
+      matched: null,
+    }
+  const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx, rules) }) as {
     readonly outcome: Outcome
     readonly rule: number | null
     readonly matched_path: number[] | null
     readonly allow_list: boolean
     readonly asks: readonly number[]
+    readonly matched: { readonly command: number[][]; readonly flags: number[][] } | null
   }
   const listed = [...rules.deny, ...rules.ask]
   const ruleAt = (id: number): CommandRule => {
@@ -94,5 +102,12 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
     matchedPath: answer.matched_path === null ? null : fromUnits(answer.matched_path),
     source: answer.allow_list ? 'commands.allow' : rule === null ? '' : sourceOf(rule),
     asks: answer.asks.map(ruleAt),
+    matched:
+      answer.matched === null
+        ? null
+        : {
+            command: answer.matched.command.map(fromUnits),
+            flags: answer.matched.flags.map(fromUnits),
+          },
   }
 }

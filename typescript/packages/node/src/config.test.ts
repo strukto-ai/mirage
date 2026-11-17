@@ -1002,7 +1002,13 @@ describe('configToWorkspaceArgs', () => {
             deny: [
               {
                 reason: 'production data is protected',
-                commands: { rm: ['/repo/prod/*'], mv: ['/repo/prod/*'] },
+                command: 'rm',
+                paths: ['/repo/prod/*'],
+              },
+              {
+                reason: 'production data is protected',
+                command: 'mv',
+                paths: ['/repo/prod/*'],
               },
               'python3',
             ],

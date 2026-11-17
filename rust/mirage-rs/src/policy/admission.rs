@@ -1,12 +1,197 @@
-use super::pattern::prefix_matches;
+use super::pattern::{expanded, prefix_matches};
 use super::{
-    CommandFacts, Outcome, PathFact, Rule, Rules, Ruling, Subject, Text, Visibility,
-    VisibilityMatcher, Whitespace, anchor_depth, classify_paths, split_pattern,
+    AllowEntry, CommandFacts, Matched, Outcome, PathFact, PatternRead, Reading, Rule, Rules,
+    Ruling, Subject, Text, Visibility, VisibilityMatcher, Whitespace, anchor_depth,
+    classify_paths, split_pattern,
 };
+
+const DASH: u32 = 45;
+const SPACE: u32 = 32;
+
+/// A line as the matcher reads it: its tokens, and when its grammar read
+/// it, that read and each pattern's read with the same grammar.
+#[derive(Clone, Copy)]
+pub struct Line<'a> {
+    pub tokens: &'a [Text],
+    pub read: Option<&'a Reading>,
+    pub reads: &'a [PatternRead],
+}
+
+impl<'a> Line<'a> {
+    pub fn of(facts: &'a CommandFacts) -> Self {
+        Self {
+            tokens: &facts.tokens,
+            read: facts.line.as_ref(),
+            reads: &facts.reads,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn words(tokens: &'a [Text]) -> Self {
+        Self {
+            tokens,
+            read: None,
+            reads: &[],
+        }
+    }
+
+    /// The line's read and a pattern's, when both were read; the
+    /// pattern's is None when it cannot match this line at all.
+    fn read_of(&self, pattern: &[u32]) -> Option<(&'a Reading, Option<&'a Reading>)> {
+        let have = self.read?;
+        let entry = self.reads.iter().find(|r| r.pattern == pattern)?;
+        Some((have, entry.read.as_ref()))
+    }
+
+    fn path(&self) -> Vec<Text> {
+        self.read
+            .map(|read| read.path.clone())
+            .unwrap_or_else(|| self.tokens.iter().take(1).cloned().collect())
+    }
+}
+
+fn dashed(word: &[u32]) -> bool {
+    word.len() > 1 && word[0] == DASH
+}
+
+/// Whether a pattern's read covers the line's: its subcommand path is a
+/// prefix of the line's, the line carries each of its options (with
+/// each value it gives, in whatever spelling), and its operands are a
+/// prefix of the line's, `*` standing for any one word.
+fn covers(want: &Reading, have: &Reading) -> bool {
+    want.path.len() <= have.path.len()
+        && prefix_matches(&want.path, &have.path)
+        && want.flags.iter().all(|flag| {
+            have.flags.iter().any(|carried| {
+                carried.name == flag.name && flag.values.iter().all(|v| carried.values.contains(v))
+            })
+        })
+        && want.operands.len() <= have.operands.len()
+        && prefix_matches(&want.operands, &have.operands)
+}
+
+/// One pattern as a group expanded it: its text, which keys its read,
+/// and its words, which a line no grammar read is matched on.
+struct Pattern {
+    text: Text,
+    words: Vec<Text>,
+}
+
+impl Pattern {
+    fn compile(written: &[u32], whitespace: Whitespace) -> Vec<Self> {
+        expanded(written, whitespace)
+            .into_iter()
+            .map(|text| Self {
+                words: split_pattern(&text, whitespace),
+                text,
+            })
+            .collect()
+    }
+
+    fn fits(&self, line: &Line) -> bool {
+        match line.read_of(&self.text) {
+            Some((have, Some(want))) => covers(want, have),
+            Some((_, None)) => false,
+            None => self.words.len() <= line.tokens.len() && prefix_matches(&self.words, line.tokens),
+        }
+    }
+
+    fn matched(&self, line: &Line) -> Matched {
+        if let Some((_, Some(want))) = line.read_of(&self.text) {
+            return Matched {
+                command: want.path.clone(),
+                flags: want.flags.iter().map(|flag| flag.name.clone()).collect(),
+            };
+        }
+        let at = self
+            .words
+            .iter()
+            .position(|word| dashed(word))
+            .unwrap_or(self.words.len());
+        Matched {
+            command: self.words[..at].to_vec(),
+            flags: self.words[at..].iter().filter(|w| dashed(w)).cloned().collect(),
+        }
+    }
+}
+
+/// One allow entry, compiled.
+enum Entry {
+    Pattern(Pattern),
+    Only {
+        key: Text,
+        words: Vec<Text>,
+        flags: Vec<Text>,
+    },
+}
+
+impl Entry {
+    fn compile(entry: &AllowEntry, whitespace: Whitespace) -> Vec<Self> {
+        match entry {
+            AllowEntry::Pattern(written) => Pattern::compile(written, whitespace)
+                .into_iter()
+                .map(Self::Pattern)
+                .collect(),
+            AllowEntry::Only { command, flags } => {
+                let mut key = command.clone();
+                for flag in flags {
+                    key.push(SPACE);
+                    key.extend_from_slice(flag);
+                }
+                vec![Self::Only {
+                    key,
+                    words: split_pattern(command, whitespace),
+                    flags: flags.clone(),
+                }]
+            }
+        }
+    }
+
+    fn words(&self) -> &[Text] {
+        match self {
+            Self::Pattern(pattern) => &pattern.words,
+            Self::Only { words, .. } => words,
+        }
+    }
+
+    /// Whether this entry names the command a line runs, which closes
+    /// that command to the entries naming it.
+    fn names(&self, head: Option<&Text>) -> bool {
+        self.words()
+            .first()
+            .is_some_and(|word| word != &[42] && Some(word) == head)
+    }
+
+    fn admits(&self, line: &Line) -> bool {
+        match self {
+            Self::Pattern(pattern) => pattern.fits(line),
+            Self::Only { key, words, flags } => match line.read_of(key) {
+                Some((have, Some(want))) => {
+                    want.path.len() <= have.path.len()
+                        && prefix_matches(&want.path, &have.path)
+                        && want.operands.len() <= have.operands.len()
+                        && prefix_matches(&want.operands, &have.operands)
+                        && have
+                            .flags
+                            .iter()
+                            .all(|carried| want.flags.iter().any(|f| f.name == carried.name))
+                }
+                Some((_, None)) => false,
+                None => {
+                    words.len() <= line.tokens.len()
+                        && prefix_matches(words, line.tokens)
+                        && line.tokens[words.len()..]
+                            .iter()
+                            .all(|token| !dashed(token) || flags.contains(token))
+                }
+            },
+        }
+    }
+}
 
 struct CompiledRule {
     value: Rule,
-    patterns: Vec<Vec<Text>>,
+    patterns: Vec<Pattern>,
     scope: VisibilityMatcher,
     entries: Vec<(usize, VisibilityMatcher)>,
 }
@@ -16,7 +201,7 @@ impl CompiledRule {
         let patterns = value
             .commands
             .iter()
-            .map(|p| split_pattern(p, whitespace))
+            .flat_map(|p| Pattern::compile(p, whitespace))
             .collect();
         let compiled_scope = scope(&value.paths);
         let entries = value
@@ -32,12 +217,12 @@ impl CompiledRule {
         }
     }
 
-    fn names(&self, tokens: &[Text]) -> bool {
-        self.patterns.is_empty()
-            || self
-                .patterns
-                .iter()
-                .any(|p| p.len() <= tokens.len() && prefix_matches(p, tokens))
+    fn names(&self, line: &Line) -> bool {
+        self.patterns.is_empty() || self.patterns.iter().any(|p| p.fits(line))
+    }
+
+    fn heads(&self, head: &[Text]) -> bool {
+        self.patterns.is_empty() || self.patterns.iter().any(|p| prefix_matches(&p.words, head))
     }
 }
 
@@ -49,17 +234,17 @@ fn scope(entries: &[Text]) -> VisibilityMatcher {
 }
 
 pub struct AdmissionMatcher {
-    allow: Option<Vec<Vec<Text>>>,
+    allow: Option<Vec<Entry>>,
     rules: Vec<CompiledRule>,
     denies: usize,
 }
 
 impl AdmissionMatcher {
     pub fn new(rules: Rules, whitespace: Whitespace) -> Self {
-        let allow = rules.allow.map(|patterns| {
-            patterns
+        let allow = rules.allow.map(|entries| {
+            entries
                 .iter()
-                .map(|p| split_pattern(p, whitespace))
+                .flat_map(|entry| Entry::compile(entry, whitespace))
                 .collect()
         });
         let denies = rules.deny.len();
@@ -85,18 +270,32 @@ impl AdmissionMatcher {
     }
 
     pub fn head_allowed(&self, name: &[u32]) -> bool {
-        self.allow
-            .as_ref()
-            .is_none_or(|patterns| patterns.iter().any(|p| prefix_matches(p, &[name.to_vec()])))
+        self.allow.as_ref().is_none_or(|entries| {
+            entries
+                .iter()
+                .any(|e| prefix_matches(e.words(), &[name.to_vec()]))
+        })
     }
 
-    pub fn line_allowed(&self, tokens: &[Text], tool: bool) -> bool {
-        !tool
-            || self.allow.as_ref().is_none_or(|patterns| {
-                patterns
-                    .iter()
-                    .any(|p| p.len() <= tokens.len() && prefix_matches(p, tokens))
-            })
+    /// Whether the allow list lets a line run. An entry naming the
+    /// line's command closes that command to the entries naming it, so
+    /// `["*", "gh pr view"]` runs every command and `gh` only as `gh pr
+    /// view`; a command no entry names is admitted by any entry that
+    /// matches it, a `*` among them.
+    pub fn line_allowed(&self, line: &Line, tool: bool) -> bool {
+        if !tool {
+            return true;
+        }
+        let Some(entries) = self.allow.as_ref() else {
+            return true;
+        };
+        let head = line.tokens.first();
+        let named: Vec<&Entry> = entries.iter().filter(|e| e.names(head)).collect();
+        if named.is_empty() {
+            entries.iter().any(|e| e.admits(line))
+        } else {
+            named.iter().any(|e| e.admits(line))
+        }
     }
 
     pub fn has_rules(&self) -> bool {
@@ -105,21 +304,20 @@ impl AdmissionMatcher {
 
     pub fn reads_args(&self, name: &[u32]) -> bool {
         let head = [name.to_vec()];
-        self.allow.as_ref().is_some_and(|patterns| {
-            patterns
-                .iter()
-                .any(|p| p.len() > 1 && prefix_matches(p, &head))
+        self.allow.as_ref().is_some_and(|entries| {
+            entries.iter().any(|e| {
+                prefix_matches(e.words(), &head)
+                    && (e.words().len() > 1 || matches!(e, Entry::Only { .. }))
+            })
         }) || self.rules.iter().any(|rule| {
             let mount = rule.value.mount.as_deref().unwrap_or_default();
-            let names =
-                rule.patterns.is_empty() || rule.patterns.iter().any(|p| prefix_matches(p, &head));
-            names
+            rule.heads(&head)
                 && (!rule.value.paths.is_empty()
                     || !mount.is_empty()
                     || rule
                         .patterns
                         .iter()
-                        .any(|p| p.len() > 1 && prefix_matches(p, &head)))
+                        .any(|p| p.words.len() > 1 && prefix_matches(&p.words, &head)))
         })
     }
 
@@ -127,16 +325,14 @@ impl AdmissionMatcher {
         let head = [name.to_vec()];
         self.rules.iter().any(|rule| {
             let mount = rule.value.mount.as_deref().unwrap_or_default();
-            (!rule.value.paths.is_empty() || !mount.is_empty())
-                && (rule.patterns.is_empty()
-                    || rule.patterns.iter().any(|p| prefix_matches(p, &head)))
+            (!rule.value.paths.is_empty() || !mount.is_empty()) && rule.heads(&head)
         })
     }
 
     pub fn rule_applies(&self, id: usize, facts: &CommandFacts) -> bool {
         let rule = &self.rules[id];
         let mount = rule.value.mount.as_deref().unwrap_or_default();
-        rule.names(&facts.tokens) && (mount.is_empty() || touches(mount, facts))
+        rule.names(&Line::of(facts)) && (mount.is_empty() || touches(mount, facts))
     }
 
     pub fn hidden_depth(&self, id: usize, path: &[u32]) -> usize {
@@ -179,10 +375,15 @@ impl AdmissionMatcher {
     }
 
     pub fn decide(&self, facts: &CommandFacts) -> Ruling {
-        if !self.line_allowed(&facts.tokens, facts.tool) {
+        let line = Line::of(facts);
+        if !self.line_allowed(&line, facts.tool) {
             return Ruling {
                 outcome: Outcome::Deny,
                 allow_list: true,
+                matched: Some(Matched {
+                    command: line.path(),
+                    flags: Vec::new(),
+                }),
                 ..Ruling::default()
             };
         }
@@ -222,12 +423,19 @@ impl AdmissionMatcher {
         if chosen.outcome == Outcome::Ask {
             chosen.asks = asks;
         }
+        if let Some(id) = chosen.rule {
+            chosen.matched = self.rules[id]
+                .patterns
+                .iter()
+                .find(|p| p.fits(&line))
+                .map(|p| p.matched(&line));
+        }
         chosen
     }
 
-    pub fn match_io(&self, id: usize, tokens: &[Text], path: &[u32], subtree: bool) -> bool {
+    pub fn match_io(&self, id: usize, line: &Line, path: &[u32], subtree: bool) -> bool {
         let rule = &self.rules[id];
-        if !rule.names(tokens) {
+        if !rule.names(line) {
             return false;
         }
         if rule.value.paths.is_empty() {
@@ -241,8 +449,8 @@ impl AdmissionMatcher {
         }
     }
 
-    pub fn io_reach(&self, tokens: &[Text], path: &[u32]) -> bool {
-        (0..self.rules.len()).any(|id| self.match_io(id, tokens, path, true))
+    pub fn io_reach(&self, line: &Line, path: &[u32]) -> bool {
+        (0..self.rules.len()).any(|id| self.match_io(id, line, path, true))
     }
 
     fn ungranted(
@@ -255,10 +463,10 @@ impl AdmissionMatcher {
         (!asks || !granted.contains(&id)).then_some((id, asks))
     }
 
-    pub fn io_refusal(&self, tokens: &[Text], path: &[u32], granted: &[usize]) -> Option<usize> {
+    pub fn io_refusal(&self, line: &Line, path: &[u32], granted: &[usize]) -> Option<usize> {
         self.ungranted(
             self.winner(|id| {
-                self.match_io(id, tokens, path, false)
+                self.match_io(id, line, path, false)
                     .then(|| self.hidden_depth(id, path))
             }),
             granted,
@@ -386,6 +594,7 @@ fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::FlagFact;
     use serde_json::Value;
 
     fn text(value: &str) -> Text {
@@ -410,6 +619,50 @@ mod tests {
             mount: value["mount"].as_str().map(text),
         }
     }
+    fn reading(value: &Value) -> Option<Reading> {
+        if value.is_null() {
+            return None;
+        }
+        Some(Reading {
+            path: strings(&value["path"]),
+            flags: value["flags"]
+                .as_array()
+                .map(|flags| {
+                    flags
+                        .iter()
+                        .map(|flag| FlagFact {
+                            name: text(flag["name"].as_str().unwrap()),
+                            values: strings(&flag["values"]),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            operands: strings(&value["operands"]),
+        })
+    }
+    fn reads(value: &Value) -> Vec<PatternRead> {
+        value
+            .as_array()
+            .map(|reads| {
+                reads
+                    .iter()
+                    .map(|entry| PatternRead {
+                        pattern: text(entry["pattern"].as_str().unwrap()),
+                        read: reading(&entry["read"]),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    fn allow(value: &Value) -> AllowEntry {
+        match value.as_str() {
+            Some(pattern) => AllowEntry::Pattern(text(pattern)),
+            None => AllowEntry::Only {
+                command: text(value["command"].as_str().unwrap()),
+                flags: strings(&value["flags"]),
+            },
+        }
+    }
     fn path(value: Text) -> PathFact {
         PathFact {
             virtual_path: value.clone(),
@@ -425,7 +678,7 @@ mod tests {
             let rules = &case["rules"];
             let matcher = AdmissionMatcher::new(
                 Rules {
-                    allow: rules["allow"].as_array().map(|_| strings(&rules["allow"])),
+                    allow: rules["allow"].as_array().map(|values| values.iter().map(allow).collect()),
                     deny: rules["deny"].as_array().unwrap().iter().map(rule).collect(),
                     ask: rules["ask"].as_array().unwrap().iter().map(rule).collect(),
                 },
@@ -435,6 +688,8 @@ mod tests {
             let command = facts["command"].as_str().unwrap();
             let result = matcher.decide(&CommandFacts {
                 tokens: strings(&facts["tokens"]),
+                line: reading(&facts["line"]),
+                reads: reads(&facts["reads"]),
                 tool: facts["tool"].as_bool().unwrap(),
                 cwd: text(facts["cwd"].as_str().unwrap()),
                 paths: strings(&facts["paths"]).into_iter().map(path).collect(),
@@ -477,6 +732,161 @@ mod tests {
         }
     }
 
+    fn flag(name: &str, values: &[&str]) -> FlagFact {
+        FlagFact {
+            name: text(name),
+            values: values.iter().map(|v| text(v)).collect(),
+        }
+    }
+    fn read(path: &[&str], flags: Vec<FlagFact>, operands: &[&str]) -> Reading {
+        Reading {
+            path: path.iter().map(|w| text(w)).collect(),
+            flags,
+            operands: operands.iter().map(|w| text(w)).collect(),
+        }
+    }
+    fn facts(tokens: &[&str], line: Reading, reads: Vec<(&str, Option<Reading>)>) -> CommandFacts {
+        CommandFacts {
+            tokens: tokens.iter().map(|w| text(w)).collect(),
+            line: Some(line),
+            reads: reads
+                .into_iter()
+                .map(|(pattern, read)| PatternRead {
+                    pattern: text(pattern),
+                    read,
+                })
+                .collect(),
+            ..CommandFacts::default()
+        }
+    }
+    fn deny(patterns: &[&str]) -> AdmissionMatcher {
+        AdmissionMatcher::new(
+            Rules {
+                deny: vec![Rule {
+                    commands: patterns.iter().map(|p| text(p)).collect(),
+                    ..Rule::default()
+                }],
+                ..Rules::default()
+            },
+            Whitespace::Python,
+        )
+    }
+
+    #[test]
+    fn a_read_pattern_matches_its_flags_in_any_spelling_and_order() {
+        let matcher = deny(&["rm -rf"]);
+        let rf = read(&["rm"], vec![flag("--recursive", &[]), flag("--force", &[])], &[]);
+        let line = |flags: Vec<FlagFact>| {
+            facts(
+                &["rm", "-fr", "/a"],
+                read(&["rm"], flags, &["/a"]),
+                vec![("rm -rf", Some(rf.clone()))],
+            )
+        };
+        let both = line(vec![flag("--force", &[]), flag("--recursive", &[])]);
+        let ruling = matcher.decide(&both);
+        assert_eq!(ruling.outcome, Outcome::Deny);
+        assert_eq!(
+            ruling.matched,
+            Some(Matched {
+                command: vec![text("rm")],
+                flags: vec![text("--recursive"), text("--force")],
+            })
+        );
+        assert_eq!(matcher.decide(&line(vec![flag("--recursive", &[])])).outcome, Outcome::Allow);
+    }
+
+    #[test]
+    fn a_value_matches_exactly_and_a_bare_option_any_value() {
+        let matcher = deny(&["head -n 1", "gh pr list --state"]);
+        let head = |value: &str| {
+            facts(
+                &["head"],
+                read(&["head"], vec![flag("--lines", &[value])], &[]),
+                vec![(
+                    "head -n 1",
+                    Some(read(&["head"], vec![flag("--lines", &["1"])], &[])),
+                )],
+            )
+        };
+        assert_eq!(matcher.decide(&head("1")).outcome, Outcome::Deny);
+        assert_eq!(matcher.decide(&head("2")).outcome, Outcome::Allow);
+        let gh = facts(
+            &["gh", "pr", "list"],
+            read(&["gh", "pr", "list"], vec![flag("--state", &["open"])], &[]),
+            vec![(
+                "gh pr list --state",
+                Some(read(&["gh", "pr", "list"], vec![flag("--state", &[])], &[])),
+            )],
+        );
+        assert_eq!(matcher.decide(&gh).outcome, Outcome::Deny);
+    }
+
+    #[test]
+    fn an_unreadable_pattern_never_matches_and_an_unread_one_is_literal() {
+        let matcher = deny(&["git * --force"]);
+        let log = facts(
+            &["git", "log"],
+            read(&["git", "log"], vec![], &[]),
+            vec![("git * --force", None)],
+        );
+        assert_eq!(matcher.decide(&log).outcome, Outcome::Allow);
+        let literal = CommandFacts {
+            tokens: vec![text("git"), text("x"), text("--force")],
+            ..CommandFacts::default()
+        };
+        assert_eq!(matcher.decide(&literal).outcome, Outcome::Deny);
+    }
+
+    #[test]
+    fn an_entry_naming_a_command_closes_it_and_star_admits_the_rest() {
+        let matcher = AdmissionMatcher::new(
+            Rules {
+                allow: Some(vec![
+                    text("*").into(),
+                    text("gh pr {view,diff}").into(),
+                    AllowEntry::Only {
+                        command: text("rm"),
+                        flags: vec![text("-f"), text("-v")],
+                    },
+                ]),
+                ..Rules::default()
+            },
+            Whitespace::Python,
+        );
+        let words = |line: &[&str]| line.iter().map(|w| text(w)).collect::<Vec<_>>();
+        assert!(matcher.line_allowed(&Line::words(&words(&["cat", "/a"])), true));
+        assert!(matcher.line_allowed(&Line::words(&words(&["gh", "pr", "diff", "5"])), true));
+        assert!(!matcher.line_allowed(&Line::words(&words(&["gh", "pr", "merge", "5"])), true));
+        let rm = |flags: Vec<FlagFact>| {
+            facts(
+                &["rm"],
+                read(&["rm"], flags, &["/a"]),
+                vec![(
+                    "rm -f -v",
+                    Some(read(
+                        &["rm"],
+                        vec![flag("--force", &[]), flag("--verbose", &[])],
+                        &[],
+                    )),
+                )],
+            )
+        };
+        let forced = rm(vec![flag("--force", &[])]);
+        assert!(matcher.line_allowed(&Line::of(&forced), true));
+        let recursive = rm(vec![flag("--force", &[]), flag("--recursive", &[])]);
+        assert!(!matcher.line_allowed(&Line::of(&recursive), true));
+        assert_eq!(
+            matcher.decide(&recursive).matched,
+            Some(Matched {
+                command: vec![text("rm")],
+                flags: vec![],
+            })
+        );
+        assert!(matcher.line_allowed(&Line::words(&words(&["rm", "-f", "/a"])), true));
+        assert!(!matcher.line_allowed(&Line::words(&words(&["rm", "-r", "/a"])), true));
+    }
+
     #[test]
     fn grant_only_satisfies_the_winning_ask() {
         let matcher = AdmissionMatcher::new(
@@ -511,7 +921,7 @@ mod tests {
             Some((1, true))
         );
         assert_eq!(
-            matcher.io_refusal(&[text("cp")], &text("/repo/outbox/x"), &[1]),
+            matcher.io_refusal(&Line::words(&[text("cp")]), &text("/repo/outbox/x"), &[1]),
             None
         );
     }

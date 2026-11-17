@@ -101,7 +101,15 @@ def rules_wire(rules: AdmissionRules) -> Wire:
     return {
         "allow": None
         if rules.allow is None
-        else [units(v) for v in rules.allow],
+        else [
+            units(v)
+            if isinstance(v, str)
+            else {
+                "command": units(v.command),
+                "flags": [units(f) for f in v.flags],
+            }
+            for v in rules.allow
+        ],
         "deny": [rule_wire(rule) for rule in rules.deny],
         "ask": [rule_wire(rule) for rule in rules.ask],
     }

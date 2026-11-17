@@ -15,7 +15,7 @@
 import { units } from '../../rs/document.ts'
 import { admissionMatcher } from '../../rs/policy.ts'
 import type { AdmissionRules, CommandContext } from '../types.ts'
-import { patternMatches } from './pattern.ts'
+import { expandPattern, patternMatches } from './pattern.ts'
 
 /**
  * Whether a session's allow list has a pattern for a command name. A
@@ -50,6 +50,8 @@ export function runs(name: string, rules: AdmissionRules | null): boolean {
       (rule.paths ?? []).length === 0 &&
       ['', '/'].includes(rule.mount ?? '') &&
       ((rule.commands ?? []).length === 0 ||
-        (rule.commands ?? []).some((p) => patternMatches(p, [name]))),
+        (rule.commands ?? []).some((written) =>
+          expandPattern(written).some((p) => patternMatches(p, [name])),
+        )),
   )
 }

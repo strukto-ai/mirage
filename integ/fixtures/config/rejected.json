@@ -953,7 +953,7 @@
       }
     },
     {
-      "name": "command rule maps commands and also lists paths",
+      "name": "command rule: the commands map is gone",
       "config": {
         "mounts": {
           "/d": {
@@ -970,16 +970,14 @@
                     "rm": [
                       "/d/a"
                     ]
-                  },
-                  "paths": [
-                    "/d/b"
-                  ]
+                  }
                 }
               ]
             }
           }
         }
-      }
+      },
+      "error": "{command, paths}"
     },
     {
       "name": "command rule names no command and no path",
@@ -1003,7 +1001,7 @@
       }
     },
     {
-      "name": "command rule maps a command to no path",
+      "name": "command rule scopes a command to no path",
       "config": {
         "mounts": {
           "/d": {
@@ -1016,18 +1014,18 @@
               "deny": [
                 {
                   "reason": "x",
-                  "commands": {
-                    "rm": []
-                  }
+                  "command": "rm",
+                  "paths": []
                 }
               ]
             }
           }
         }
-      }
+      },
+      "error": "must list at least one path"
     },
     {
-      "name": "command rule maps a command to a scalar",
+      "name": "command rule: paths is a list, not a scalar",
       "config": {
         "mounts": {
           "/d": {
@@ -1040,9 +1038,8 @@
               "deny": [
                 {
                   "reason": "x",
-                  "commands": {
-                    "rm": "/d/a"
-                  }
+                  "command": "rm",
+                  "paths": "/d/a"
                 }
               ]
             }
@@ -1068,7 +1065,7 @@
       }
     },
     {
-      "name": "command rule: a blank mapping key names no command",
+      "name": "command rule: a blank command names nothing",
       "config": {
         "mounts": {
           "/d": {
@@ -1081,11 +1078,10 @@
               "deny": [
                 {
                   "reason": "x",
-                  "commands": {
-                    " ": [
-                      "/d/a"
-                    ]
-                  }
+                  "command": " ",
+                  "paths": [
+                    "/d/a"
+                  ]
                 }
               ]
             }
@@ -1150,17 +1146,165 @@
               "deny": [
                 {
                   "reason": "x",
-                  "commands": {
-                    "rm": [
-                      " "
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    " "
+                  ]
                 }
               ]
             }
           }
         }
       }
+    },
+    {
+      "name": "command rule: command takes paths",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "x",
+                  "command": "rm"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "takes paths"
+    },
+    {
+      "name": "command rule: command beside commands",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "x",
+                  "command": "rm",
+                  "commands": [
+                    "mv"
+                  ],
+                  "paths": [
+                    "/d/a"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "has both command and commands"
+    },
+    {
+      "name": "command pattern: a group that is not closed",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "x",
+                  "commands": [
+                    "gh pr {view,diff"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "a group is not closed"
+    },
+    {
+      "name": "allow: a flag set entry lists no flags",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "allow": [
+                {
+                  "command": "rm"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "lists no flags"
+    },
+    {
+      "name": "allow: a flag set entry names an operand",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "allow": [
+                {
+                  "command": "rm",
+                  "flags": [
+                    "x"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "must be an option"
+    },
+    {
+      "name": "allow: a flag set entry with a group in its command",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "allow": [
+                {
+                  "command": "{rm,mv}",
+                  "flags": [
+                    "-f"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "error": "write one entry per command"
     },
     {
       "name": "top level: there is no workspace permissions block",
@@ -1238,9 +1382,8 @@
                   "deny": [
                     {
                       "reason": "x",
-                      "commands": {
-                        "rm": []
-                      }
+                      "command": "rm",
+                      "paths": []
                     }
                   ]
                 }

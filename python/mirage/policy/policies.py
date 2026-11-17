@@ -296,6 +296,7 @@ def decision_of(action: Deny | Pending) -> PolicyDecision | None:
         kind="failed" if action.failed else "deny",
         reason=action.reason,
         policy=action.policy,
+        matched=action.matched,
     )
 
 

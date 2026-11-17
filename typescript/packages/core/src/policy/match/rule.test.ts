@@ -30,6 +30,10 @@ import { CALLS } from '../../workspace/dispatcher/constants.ts'
 import { lineFacts } from '../../workspace/lookup/index.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
 
+function line(...tokens: string[]): CommandContext {
+  return { command: tokens[0] ?? '', paths: [], argv: tokens.slice(1), cwd: '/', tokens }
+}
+
 function callOf(name: string): VfsCall {
   const call = CALLS.get(name)
   if (call === undefined) throw new Error(`no call ${name}`)
@@ -316,7 +320,7 @@ describe('rules', () => {
       paths: ['/data/both/*'],
     }
     const rules: AdmissionRules = { allow: null, ask: [ask, later], deny: [deny] }
-    const tokens = ['rm', '-r', '/data/both']
+    const tokens = line('rm', '-r', '/data/both')
     // deny > ask, wherever either was written.
     expect(ioRefusal(rules, tokens, '/data/both/locked/y', [ask])).toBe('locked')
     // The first matching ask rule speaks: refused without a grant under
@@ -346,7 +350,7 @@ describe('rules', () => {
     const deny: CommandRule = { reason: 'ro repo', commands: ['rm'], paths: ['/repo/*'] }
     const ask: CommandRule = { reason: 'sealed', commands: ['rm'], paths: ['/repo/sealed/*'] }
     const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
-    const tokens = ['rm', '-r', '/repo']
+    const tokens = line('rm', '-r', '/repo')
     expect(ioRefusal(rules, tokens, '/repo/sealed/secret', [ask])).toBeNull()
     // Without the grant the deeper ask still wins, and asks.
     expect(ioRefusal(rules, tokens, '/repo/sealed/secret', [])).toBe('sealed')
@@ -361,20 +365,20 @@ describe('rules', () => {
     const env: CommandRule = { reason: 'secrets', paths: ['/repo/.env'] }
     const rmOnly: CommandRule = { reason: 'no deletes', commands: ['rm'], paths: ['/data/*'] }
     const rules: AdmissionRules = { allow: null, deny: [env], ask: [rmOnly] }
-    const find = ['find', '/repo', '/s3', '/data']
+    const find = line('find', '/repo', '/s3', '/data')
     expect(ioReach(rules, find, '/repo')).toBe(true)
     expect(ioReach(rules, find, '/repo/.env')).toBe(true)
     expect(ioReach(rules, find, '/s3')).toBe(false)
     // A rule naming another command does not reach this line's walk.
     expect(ioReach(rules, find, '/data')).toBe(false)
-    expect(ioReach(rules, ['rm', '-r', '/data'], '/data')).toBe(true)
+    expect(ioReach(rules, line('rm', '-r', '/data'), '/data')).toBe(true)
     // A whole-line rule has no paths to reach an entry with.
     const whole: AdmissionRules = {
       allow: null,
       ask: [],
       deny: [{ reason: 'no', commands: ['rm'] }],
     }
-    expect(ioReach(whole, ['rm', '-r', '/data'], '/data')).toBe(false)
+    expect(ioReach(whole, line('rm', '-r', '/data'), '/data')).toBe(false)
     expect(ioReach(null, find, '/repo')).toBe(false)
   })
 

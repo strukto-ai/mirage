@@ -92,6 +92,7 @@ function decisionOf(result: Record<string, unknown> | null): PolicyDecision | nu
         reason: string
         policy: string
         ask_id: string | null
+        matched?: { command: string[]; flags: string[] } | null
       }
     | null
     | undefined
@@ -101,6 +102,7 @@ function decisionOf(result: Record<string, unknown> | null): PolicyDecision | nu
     reason: raw.reason,
     policy: raw.policy,
     askId: raw.ask_id,
+    matched: raw.matched ?? null,
   }
 }
 

@@ -158,14 +158,17 @@
               "deny": [
                 {
                   "reason": "sealed",
-                  "commands": {
-                    "python3": [
-                      "/data/sealed/*"
-                    ],
-                    "node": [
-                      "/data/sealed/*"
-                    ]
-                  }
+                  "command": "python3",
+                  "paths": [
+                    "/data/sealed/*"
+                  ]
+                },
+                {
+                  "reason": "sealed",
+                  "command": "node",
+                  "paths": [
+                    "/data/sealed/*"
+                  ]
                 }
               ]
             }
@@ -393,14 +396,17 @@
               "deny": [
                 {
                   "reason": "blocked alias",
-                  "commands": {
-                    "python3": [
-                      "/data/blocked/*"
-                    ],
-                    "node": [
-                      "/data/blocked/*"
-                    ]
-                  }
+                  "command": "python3",
+                  "paths": [
+                    "/data/blocked/*"
+                  ]
+                },
+                {
+                  "reason": "blocked alias",
+                  "command": "node",
+                  "paths": [
+                    "/data/blocked/*"
+                  ]
                 }
               ]
             }
@@ -452,14 +458,17 @@
               "deny": [
                 {
                   "reason": "private target",
-                  "commands": {
-                    "python3": [
-                      "/data/private/*"
-                    ],
-                    "node": [
-                      "/data/private/*"
-                    ]
-                  }
+                  "command": "python3",
+                  "paths": [
+                    "/data/private/*"
+                  ]
+                },
+                {
+                  "reason": "private target",
+                  "command": "node",
+                  "paths": [
+                    "/data/private/*"
+                  ]
                 }
               ]
             }

@@ -581,7 +581,7 @@ describe('a wrapper', () => {
         profiles: {
           default: SessionProfile({
             commands: {
-              deny: [{ reason: 'sealed', commands: { fgrep: ['/private/*'] } }],
+              deny: [{ reason: 'sealed', command: 'fgrep', paths: ['/private/*'] }],
             },
           }),
         },

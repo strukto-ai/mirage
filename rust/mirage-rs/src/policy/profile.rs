@@ -363,7 +363,7 @@ mod tests {
     fn restriction_merge_keeps_order_and_weakens_mount_caps() {
         let base = Profile {
             commands: Some(Rules {
-                allow: Some(vec![text("ls")]),
+                allow: Some(vec![text("ls").into()]),
                 ask: vec![rule("base", &[])],
                 ..Rules::default()
             }),

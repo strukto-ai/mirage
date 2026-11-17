@@ -140,7 +140,11 @@ DOCUMENT = {
             },
             "commands": {
                 "ask": [
-                    {"reason": "sign-off", "commands": {"git push": ["/repo"]}}
+                    {
+                        "reason": "sign-off",
+                        "command": "git push",
+                        "paths": ["/repo"],
+                    }
                 ],
                 "deny": [
                     {"reason": "denied by policy", "commands": ["git rebase"]}
@@ -155,7 +159,9 @@ DOCUMENT = {
         "reasons": [{"patterns": ["*.pem"], "reason": "keys"}],
     },
     "commands": {
-        "ask": [{"reason": "shared", "commands": {"rm": ["/scratch/*"]}}],
+        "ask": [
+            {"reason": "shared", "command": "rm", "paths": ["/scratch/*"]}
+        ],
         "deny": [
             {"reason": "sealed", "paths": ["/repo/sealed"]},
             {"reason": "denied by policy", "commands": ["curl"]},
@@ -279,9 +285,15 @@ def test_profile_commands_block_takes_allow_ask_and_deny():
                 "allow": ["ls", "git log"],
                 "ask": [
                     "git push",
-                    {"reason": "sign-off", "commands": {"rm": ["/shared/*"]}},
+                    {
+                        "reason": "sign-off",
+                        "command": "rm",
+                        "paths": ["/shared/*"],
+                    },
                 ],
-                "deny": [{"reason": "no", "commands": {"rm": ["/repo/*"]}}],
+                "deny": [
+                    {"reason": "no", "command": "rm", "paths": ["/repo/*"]}
+                ],
             }
         }
     )
@@ -358,7 +370,11 @@ def test_commands_deny_accepts_rules_and_bare_names():
         {
             "commands": {
                 "deny": [
-                    {"reason": "no deletes", "commands": {"rm": ["/repo/*"]}},
+                    {
+                        "reason": "no deletes",
+                        "command": "rm",
+                        "paths": ["/repo/*"],
+                    },
                     "python3",
                     {"commands": ["shred"]},
                 ]
@@ -412,13 +428,16 @@ def test_a_rule_maps_each_command_to_its_own_paths():
                 "deny": [
                     {
                         "reason": "prod is protected",
-                        "commands": {
-                            "rm": ["/repo/prod/*", "/shared/*"],
-                            "mv": ["/repo/prod/*"],
-                        },
-                    }
+                        "command": "rm",
+                        "paths": ["/repo/prod/*", "/shared/*"],
+                    },
+                    {
+                        "reason": "prod is protected",
+                        "command": "mv",
+                        "paths": ["/repo/prod/*"],
+                    },
                 ],
-                "ask": [{"commands": {"git push": ["/repo/*"]}}],
+                "ask": [{"command": "git push", "paths": ["/repo/*"]}],
             }
         }
     )
@@ -448,29 +467,38 @@ def test_a_rule_maps_each_command_to_its_own_paths():
     [
         (
             {"reason": "x", "commands": ["rm", "mv"], "paths": ["/a"]},
-            "map each command to its paths",
+            "one {command, paths} rule per command",
         ),
         (
-            {"reason": "x", "commands": {"rm": ["/a"]}, "paths": ["/b"]},
-            "takes no paths of its own",
+            {"reason": "x", "commands": {"rm": ["/a"]}},
+            "scope one command to paths with {command, paths}",
         ),
         ({"reason": "x"}, "names no command and no path"),
-        ({"reason": "x", "commands": {}}, "must name at least one command"),
+        ({"reason": "x", "command": "rm"}, "takes paths"),
         (
-            {"reason": "x", "commands": {"rm": []}},
+            {
+                "reason": "x",
+                "command": "rm",
+                "commands": ["mv"],
+                "paths": ["/a"],
+            },
+            "has both command and commands",
+        ),
+        (
+            {"reason": "x", "command": "rm", "paths": []},
             "must list at least one path",
         ),
         (
-            {"reason": "x", "commands": {"rm": "/a"}},
+            {"reason": "x", "command": "rm", "paths": "/a"},
             "must be a list of strings",
         ),
         (
-            {"reason": "x", "commands": {" ": ["/a"]}},
-            "keys must name a command",
+            {"reason": "x", "command": " ", "paths": ["/a"]},
+            "command must name a command",
         ),
         (
-            {"reason": "x", "commands": {"rm": ["/a", " "]}},
-            "commands[rm][1] must name a path",
+            {"reason": "x", "command": "rm", "paths": ["/a", " "]},
+            "paths[1] must name a path",
         ),
         ({"reason": "x", "paths": [""]}, "paths[0] must name a path"),
         (7, "must be a command pattern or a mapping"),
@@ -497,7 +525,7 @@ def test_a_relative_path_is_refused_everywhere(entry):
         SessionProfile.model_validate({"paths": {"hide": [entry]}})
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
-            {"commands": {"ask": [{"commands": {"rm": ["/ok", entry]}}]}}
+            {"commands": {"ask": [{"command": "rm", "paths": ["/ok", entry]}]}}
         )
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
@@ -995,7 +1023,8 @@ COMMANDS_DOC = {
         "deny": [
             {
                 "reason": "no deletes in the repo",
-                "commands": {"rm": ["/repo/*"]},
+                "command": "rm",
+                "paths": ["/repo/*"],
             },
             {"reason": "frozen", "paths": ["/repo/locked/*"]},
         ],
@@ -1249,12 +1278,19 @@ LINK_DOC = {
         "deny": [
             {
                 "reason": "sealed",
-                "commands": {
-                    "cat": ["/data/secret*"],
-                    "head": ["/data/secret*"],
-                },
+                "command": "cat",
+                "paths": ["/data/secret*"],
             },
-            {"reason": "keep the link", "commands": {"rm": ["/data/link"]}},
+            {
+                "reason": "sealed",
+                "command": "head",
+                "paths": ["/data/secret*"],
+            },
+            {
+                "reason": "keep the link",
+                "command": "rm",
+                "paths": ["/data/link"],
+            },
         ],
     }
 }
@@ -1311,10 +1347,11 @@ async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
 SEALED_REDIRECT_DOC = {
     "commands": {
         "deny": [
-            {"reason": "sealed", "commands": {"cat": ["/data/secret*"]}},
+            {"reason": "sealed", "command": "cat", "paths": ["/data/secret*"]},
             {
                 "reason": "audit is append-only",
-                "commands": {"echo": ["/data/audit.log"]},
+                "command": "echo",
+                "paths": ["/data/audit.log"],
             },
         ],
     }
@@ -1530,11 +1567,14 @@ async def test_a_command_rule_reaches_what_chmod_r_walks_into():
                     "deny": [
                         {
                             "reason": "sealed",
-                            "commands": {
-                                "chmod": ["/a/b/secret"],
-                                "chown": ["/a/b/secret"],
-                            },
-                        }
+                            "command": "chmod",
+                            "paths": ["/a/b/secret"],
+                        },
+                        {
+                            "reason": "sealed",
+                            "command": "chown",
+                            "paths": ["/a/b/secret"],
+                        },
                     ]
                 }
             }
@@ -1706,7 +1746,7 @@ LITERAL_DOC = {
     "commands": {
         "deny": [
             {"reason": "no deletes", "commands": ["rm"]},
-            {"reason": "sealed", "commands": {"cat": ["/repo/secret*"]}},
+            {"reason": "sealed", "command": "cat", "paths": ["/repo/secret*"]},
             {"reason": "no pushes", "commands": ["git push"]},
         ],
     }
@@ -1826,12 +1866,19 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
                     "deny": [
                         {
                             "reason": "sealed",
-                            "commands": {
-                                "ls": ["/repo/sealed"],
-                                "find": ["/repo/sealed"],
-                                "grep": ["/repo/sealed"],
-                            },
-                        }
+                            "command": "ls",
+                            "paths": ["/repo/sealed"],
+                        },
+                        {
+                            "reason": "sealed",
+                            "command": "find",
+                            "paths": ["/repo/sealed"],
+                        },
+                        {
+                            "reason": "sealed",
+                            "command": "grep",
+                            "paths": ["/repo/sealed"],
+                        },
                     ]
                 }
             }
@@ -1880,10 +1927,18 @@ VEILED_DOC = {
     "commands": {
         "allow": ["mkdir", "echo", "touch", "cat", "rm", "ls", "head"],
         "ask": [
-            {"reason": "sign-off", "commands": {"rm": ["/repo/shared/*"]}}
+            {
+                "reason": "sign-off",
+                "command": "rm",
+                "paths": ["/repo/shared/*"],
+            }
         ],
         "deny": [
-            {"reason": "private", "commands": {"cat": ["/repo/private"]}},
+            {
+                "reason": "private",
+                "command": "cat",
+                "paths": ["/repo/private"],
+            },
             {"reason": "sealed", "paths": ["/repo/sealed/*"]},
             {"reason": "no heads", "commands": ["head"]},
         ],
@@ -1974,7 +2029,8 @@ ASK_DOC = {
         "deny": [
             {
                 "reason": "no deletes in the repo",
-                "commands": {"rm": ["/repo/*"]},
+                "command": "rm",
+                "paths": ["/repo/*"],
             }
         ],
     }
@@ -2259,14 +2315,19 @@ WALK_DOC = {
             "rm",
             "test",
         ],
-        "ask": [{"reason": "nod", "commands": {"grep": ["/data/t/asked/*"]}}],
+        "ask": [
+            {"reason": "nod", "command": "grep", "paths": ["/data/t/asked/*"]}
+        ],
         "deny": [
             {
                 "reason": "private",
-                "commands": {
-                    "grep": ["/data/t/private"],
-                    "ls": ["/data/t/private"],
-                },
+                "command": "grep",
+                "paths": ["/data/t/private"],
+            },
+            {
+                "reason": "private",
+                "command": "ls",
+                "paths": ["/data/t/private"],
             },
             {"reason": "sealed", "paths": ["/data/t/sealed"]},
             {"reason": "frozen", "paths": ["/data/t/locked/*"]},
@@ -2383,23 +2444,38 @@ RELAY_DOC = {
         "deny": [
             {
                 "reason": "cut",
-                "commands": {
-                    "split": ["/data/out/xab"],
-                    "csplit": ["/data/out/xx01"],
-                    "awk": ["/data/out/locked"],
-                    "mktemp": ["/data/tmpd/*"],
-                    "unzip": ["/data/uz/*"],
-                },
+                "command": "split",
+                "paths": ["/data/out/xab"],
+            },
+            {
+                "reason": "cut",
+                "command": "csplit",
+                "paths": ["/data/out/xx01"],
+            },
+            {
+                "reason": "cut",
+                "command": "awk",
+                "paths": ["/data/out/locked"],
+            },
+            {
+                "reason": "cut",
+                "command": "mktemp",
+                "paths": ["/data/tmpd/*"],
+            },
+            {
+                "reason": "cut",
+                "command": "unzip",
+                "paths": ["/data/uz/*"],
             },
             {
                 "reason": "tarred",
-                "commands": {"tar": ["/data/r/sec", "/data/r/ghost"]},
+                "command": "tar",
+                "paths": ["/data/r/sec", "/data/r/ghost"],
             },
             {
                 "reason": "copied",
-                "commands": {
-                    "cp": ["/data/r/sec", "/data/dst/sec", "/data/r/ghost"]
-                },
+                "command": "cp",
+                "paths": ["/data/r/sec", "/data/dst/sec", "/data/r/ghost"],
             },
         ],
     },
@@ -2519,13 +2595,14 @@ WARM_DOC = {
     "paths": {"hide": ["/data/w/h.txt"]},
     "commands": {
         "deny": [
-            {
-                "reason": "sealed",
-                "commands": {
-                    name: ["/data/w/a.txt"]
-                    for name in ("grep", "rg", "cat", "cp", "tar")
-                },
-            },
+            *(
+                {
+                    "reason": "sealed",
+                    "command": name,
+                    "paths": ["/data/w/a.txt"],
+                }
+                for name in ("grep", "rg", "cat", "cp", "tar")
+            ),
             {"reason": "walled", "paths": ["/data/w/p.txt"]},
         ],
     },
@@ -2615,12 +2692,19 @@ FANOUT_DOC = {
         "deny": [
             {
                 "reason": "sealed",
-                "commands": {
-                    "rg": ["/data/w/a.txt"],
-                    "find": ["/data/w/a.txt"],
-                    "tree": ["/data/sub/x"],
-                },
-            }
+                "command": "rg",
+                "paths": ["/data/w/a.txt"],
+            },
+            {
+                "reason": "sealed",
+                "command": "find",
+                "paths": ["/data/w/a.txt"],
+            },
+            {
+                "reason": "sealed",
+                "command": "tree",
+                "paths": ["/data/sub/x"],
+            },
         ],
     }
 }
@@ -2750,11 +2834,14 @@ LINKED_DOC = {
         "deny": [
             {
                 "reason": "sealed",
-                "commands": {
-                    "awk": ["/data/secret"],
-                    "sed": ["/data/secret"],
-                },
-            }
+                "command": "awk",
+                "paths": ["/data/secret"],
+            },
+            {
+                "reason": "sealed",
+                "command": "sed",
+                "paths": ["/data/secret"],
+            },
         ],
     }
 }
@@ -2837,7 +2924,8 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
             "deny": [
                 {
                     "reason": "sealed",
-                    "commands": {"zap": ["/data/real/secret"]},
+                    "command": "zap",
+                    "paths": ["/data/real/secret"],
                 }
             ],
         }
@@ -2879,11 +2967,14 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
             "deny": [
                 {
                     "reason": "sealed",
-                    "commands": {
-                        "sed": ["/data/dalias/secret"],
-                        "cat": ["/data/dalias/secret"],
-                    },
-                }
+                    "command": "sed",
+                    "paths": ["/data/dalias/secret"],
+                },
+                {
+                    "reason": "sealed",
+                    "command": "cat",
+                    "paths": ["/data/dalias/secret"],
+                },
             ],
         }
     }
@@ -2919,7 +3010,11 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
 SPELLED_DOC = {
     "commands": {
         "deny": [
-            {"reason": "sealed", "commands": {"sed": ["/data/real/secret"]}}
+            {
+                "reason": "sealed",
+                "command": "sed",
+                "paths": ["/data/real/secret"],
+            }
         ],
     }
 }
@@ -3000,7 +3095,8 @@ async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
             "deny": [
                 {
                     "reason": "sealed",
-                    "commands": {"cat": ["/data/real/secret"]},
+                    "command": "cat",
+                    "paths": ["/data/real/secret"],
                 },
                 {"reason": "walled", "paths": ["/data/real/walled"]},
             ],
@@ -3124,7 +3220,11 @@ async def test_every_permissions_entry_point_accepts_the_plain_document():
             permissions={
                 "commands": {
                     "deny": [
-                        {"reason": "no", "commands": {"cat": ["/data/*"]}}
+                        {
+                            "reason": "no",
+                            "command": "cat",
+                            "paths": ["/data/*"],
+                        }
                     ]
                 }
             },

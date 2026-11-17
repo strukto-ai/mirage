@@ -44,6 +44,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.cli.walk import owns_argv
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.context import (
@@ -121,7 +122,13 @@ from mirage.policy import (
 )
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
-from mirage.policy.types import DryRun, PolicyCaller, policy_caller
+from mirage.policy.types import (
+    AdmissionRules,
+    DryRun,
+    Grammar,
+    PolicyCaller,
+    policy_caller,
+)
 from mirage.rs.diff_pool import DiffPool
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import (
@@ -228,7 +235,10 @@ from mirage.workspace.session.resolve import (
 )
 from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
-from mirage.workspace.session.validate import check_cli_verbs
+from mirage.workspace.session.validate import (
+    check_cli_patterns,
+    unread_patterns,
+)
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import (
     DriftQueue,
@@ -2635,7 +2645,7 @@ class Workspace:
         compiled = self._compile(
             with_inline(base, inline, self._workspace_processes), profile
         )
-        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
+        self._check_cli_patterns(compiled.policies.commands)
         return self._session_mgr.create(session_id, profile=compiled)
 
     async def session(
@@ -2688,15 +2698,29 @@ class Workspace:
         )
         return Session(self, session_id)
 
-    def _cli_verbs(self) -> dict[str, frozenset[str]]:
-        """The verbs each installed CLI declares, keyed by head word.
+    def _check_cli_patterns(self, rules: AdmissionRules | None) -> None:
+        """Refuse a pattern an installed CLI cannot read, and warn of one
+        whose options no grammar reads.
+
+        Args:
+            rules (AdmissionRules | None): the session's compiled rules.
+        """
+        grammars = self._cli_grammars()
+        check_cli_patterns(rules, grammars)
+        for warning in unread_patterns(rules, grammars):
+            logger.warning(warning)
+
+    def _cli_grammars(self) -> dict[str, Grammar]:
+        """The grammar of each installed CLI, keyed by head word.
 
         Read at ``create_session`` rather than at compile time because a
         CLI is registered on the workspace after it is built.
         """
         return {
-            name: frozenset(
-                child.name for child in (install.cli.spec.subcommands or ())
+            name: Grammar(
+                install.cli.spec,
+                tree=True,
+                passthrough=owns_argv(install.cli),
             )
             for name, install in self._registry.clis.items().items()
         }
@@ -2788,8 +2812,8 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
-        check_cli_verbs(
-            self._compile(doc, name).policies.commands, self._cli_verbs()
+        check_cli_patterns(
+            self._compile(doc, name).policies.commands, self._cli_grammars()
         )
         self._profiles[name] = doc
 
@@ -2815,7 +2839,7 @@ class Workspace:
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
         compiled = self._compile(self._base_profile(profile), profile)
-        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
+        self._check_cli_patterns(compiled.policies.commands)
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:

@@ -22,6 +22,7 @@ from mirage.policy.types import (
 )
 from mirage.rs.document import from_units
 from mirage.rs.policy import admission_matcher
+from mirage.types import Matched
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
@@ -73,7 +74,9 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     """
     if rules is None:
         return Ruling(Outcome.ALLOW)
-    result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
+    result = admission_matcher(rules).ask(
+        "decide", facts=command_facts(ctx, rules)
+    )
     listed = (*rules.deny, *rules.ask)
     rule = None if result["rule"] is None else listed[result["rule"]]
     matched = result["matched_path"]
@@ -87,6 +90,12 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         if rule is not None
         else "",
         asks=tuple(listed[index] for index in result["asks"]),
+        matched=None
+        if result["matched"] is None
+        else Matched(
+            command=tuple(from_units(v) for v in result["matched"]["command"]),
+            flags=tuple(from_units(v) for v in result["matched"]["flags"]),
+        ),
     )
 
 

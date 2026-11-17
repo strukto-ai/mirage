@@ -15,8 +15,21 @@
 import { SPECS } from '../../commands/spec/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
-import { splitPattern } from '../../policy/match/pattern.ts'
-import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
+import { patternProblem } from '../../policy/match/grammar.ts'
+import { expandPattern, splitPattern } from '../../policy/match/pattern.ts'
+import type { AdmissionRules, CommandRule, Grammar } from '../../policy/types.ts'
+
+/** Opt in by assigning a warning sink, as Python's module logger warns. */
+export const logger: { warn?: (message: string) => void } = {}
+
+export const BUILTIN_GRAMMARS: ReadonlyMap<string, Grammar> = new Map(
+  Object.entries(SPECS).map(([name, spec]) => [name, { spec, tree: false, passthrough: false }]),
+)
+
+/** Written patterns with each `{a,b}` group expanded, in order. */
+export function expanded(patterns: readonly string[]): string[] {
+  return patterns.flatMap((written) => expandPattern(written))
+}
 
 /** The command name a pattern starts with, empty for a bare wildcard. */
 function head(pattern: string): string {
@@ -58,7 +71,7 @@ function shadowed(ask: CommandRule, deny: CommandRule): boolean {
   const askCommands = ask.commands ?? []
   if (denyCommands.length === 0) return true
   if (askCommands.length === 0) return false
-  return askCommands.every((a) => denyCommands.some((d) => coversPattern(d, a)))
+  return expanded(askCommands).every((a) => expanded(denyCommands).some((d) => coversPattern(d, a)))
 }
 
 /**
@@ -68,7 +81,7 @@ function shadowed(ask: CommandRule, deny: CommandRule): boolean {
  * not one: the allow list refuses the command first, so nothing reaches
  * the rule and the operator is protected only in the document. Only a name this repo
  * ships a spec for is judged, because any other word may be a CLI the
- * host registers after the workspace is built, which `checkCliVerbs`
+ * host registers after the workspace is built, which `checkCliPatterns`
  * checks at `createSession` instead.
  */
 function uninstalled(rules: AdmissionRules): string | null {
@@ -78,7 +91,7 @@ function uninstalled(rules: AdmissionRules): string | null {
     ['ask', rules.ask],
   ] as const) {
     for (const rule of entries) {
-      for (const pattern of rule.commands ?? []) {
+      for (const pattern of expanded(rule.commands ?? [])) {
         const name = head(pattern)
         if (name === '' || !(name in SPECS)) continue
         if (!headAllowed(name, rules)) {
@@ -111,50 +124,140 @@ function deadAsk(rules: AdmissionRules): string | null {
 }
 
 /**
- * Refuse a document whose rules cannot behave as written.
- *
- * Both checks name a rule that is dead on arrival, which is worse than a
- * missing rule because it reads as a guard. Raised where the document is
- * compiled, so a deployment learns at startup rather than the first time
- * an agent types the line the operator thought was covered.
+ * Every pattern a rule set writes, with the list it is in and each of its
+ * groups expanded: (list, pattern as written, expanded).
  */
-export function checkRules(rules: AdmissionRules | null): void {
-  if (rules === null) return
-  for (const problem of [uninstalled(rules), deadAsk(rules)]) {
-    if (problem !== null) throw new PolicyError(problem)
+function written(rules: AdmissionRules): [string, string, string][] {
+  const out: [string, string, string][] = []
+  for (const entry of rules.allow ?? []) {
+    if (typeof entry === 'string') {
+      for (const p of expandPattern(entry)) out.push(['allow', entry, p])
+    }
   }
-}
-
-/**
- * Refuse a rule naming a verb the CLI it names does not have.
- *
- * Deferred to `createSession` rather than done beside the other two,
- * because a CLI is registered on the workspace after it is built: at
- * compile time `git push` is just two words, and only once `git` is
- * installed is there a program tree to check the verb against. A head
- * word no installed CLI claims is left alone, since it may be a command,
- * a function, or a CLI registered later.
- */
-export function checkCliVerbs(
-  rules: AdmissionRules | null,
-  verbs: ReadonlyMap<string, ReadonlySet<string>>,
-): void {
-  if (rules === null) return
+  for (const entry of rules.allow ?? []) {
+    if (typeof entry !== 'string') out.push(['allow', entry.pattern, entry.pattern])
+  }
   for (const [verb, entries] of [
     ['deny', rules.deny],
     ['ask', rules.ask],
   ] as const) {
     for (const rule of entries) {
       for (const pattern of rule.commands ?? []) {
-        const tokens = splitPattern(pattern)
-        const cli = tokens[0]
-        const name = tokens[1]
-        if (tokens.length < 2 || cli === undefined || !verbs.has(cli)) continue
-        if (name === '*' || (name !== undefined && verbs.get(cli)?.has(name) === true)) continue
-        throw new PolicyError(
-          `${verb} rule names ${pattern}, which the ${cli} CLI has no verb for, so the rule can never fire`,
-        )
+        for (const p of expandPattern(pattern)) out.push([verb, pattern, p])
       }
     }
   }
+  return out
+}
+
+/**
+ * Refuse a pattern its command cannot read as written: a subcommand or
+ * option it does not have, a long option written by a prefix, a short
+ * option past a subcommand `*`, or an option no subcommand under the `*`
+ * declares. A command with no grammar in `grammars` is left alone, and
+ * matches word by word.
+ */
+export function checkPatterns(
+  rules: AdmissionRules | null,
+  grammars: ReadonlyMap<string, Grammar>,
+): void {
+  if (rules === null) return
+  for (const [where, writtenAs, pattern] of written(rules)) {
+    const words = splitPattern(pattern)
+    const grammar = words[0] === undefined ? undefined : grammars.get(words[0])
+    if (grammar === undefined) continue
+    const problem = patternProblem(grammar, words)
+    if (problem !== null) throw new PolicyError(`commands.${where}: ${writtenAs}: ${problem}`)
+  }
+}
+
+/**
+ * What a document writes that loads but may not mean what it says: a group
+ * in the command name (`{rm,mv} -f` reads as two rules on two commands),
+ * and a subcommand `*` in the allow list, which admits a subcommand the
+ * command gains later.
+ */
+export function patternWarnings(rules: AdmissionRules | null): string[] {
+  if (rules === null) return []
+  const out = new Set<string>()
+  for (const [where, writtenAs] of written(rules)) {
+    const words = splitPattern(writtenAs)
+    const first = words[0]
+    if (first !== undefined && expandPattern(first).length > 1)
+      out.add(
+        `commands.${where}: ${writtenAs}: a group in the command name writes one rule per command`,
+      )
+    if (where === 'allow' && words.slice(1).includes('*'))
+      out.add(
+        `commands.allow: ${writtenAs}: a * admits every subcommand there, including any added later`,
+      )
+  }
+  return [...out]
+}
+
+/**
+ * Refuse a document whose rules cannot behave as written.
+ *
+ * The checks name a rule that is dead on arrival, which is worse than a
+ * missing rule because it reads as a guard, or a pattern a builtin's
+ * grammar cannot read (`checkPatterns`). Raised where the document is
+ * compiled, so a deployment learns at startup rather than the first time
+ * an agent types the line the operator thought was covered. What loads but
+ * may surprise is logged as a warning (`patternWarnings`).
+ */
+export function checkRules(rules: AdmissionRules | null): void {
+  if (rules === null) return
+  for (const problem of [uninstalled(rules), deadAsk(rules)]) {
+    if (problem !== null) throw new PolicyError(problem)
+  }
+  checkPatterns(rules, BUILTIN_GRAMMARS)
+  for (const warning of patternWarnings(rules)) logger.warn?.(warning)
+}
+
+/**
+ * Refuse a pattern an installed CLI cannot read: a verb it does not have
+ * at any level, a long option written by a prefix, or a subcommand `*`
+ * whose option no verb there declares.
+ *
+ * Deferred to `createSession` rather than done beside the other checks,
+ * because a CLI is registered on the workspace after it is built: at
+ * compile time `git push` is just two words, and only once `git` is
+ * installed is there a program tree to check it against. A head word no
+ * installed CLI claims is left alone, since it may be a command, a
+ * function, or a CLI registered later. `trees` holds each installed CLI's
+ * grammar, keyed by head word.
+ */
+export function checkCliPatterns(
+  rules: AdmissionRules | null,
+  trees: ReadonlyMap<string, Grammar>,
+): void {
+  checkPatterns(rules, trees)
+}
+
+/**
+ * The patterns that carry an option on a command with no grammar, neither
+ * an installed CLI nor a builtin, so their options match as written, in
+ * order. Asked once a session is created, when every CLI it will run is
+ * installed.
+ */
+export function unreadPatterns(
+  rules: AdmissionRules | null,
+  trees: ReadonlyMap<string, Grammar>,
+): string[] {
+  if (rules === null) return []
+  const out = new Set<string>()
+  for (const [where, writtenAs, pattern] of written(rules)) {
+    const words = splitPattern(pattern)
+    const first = words[0]
+    if (
+      first !== undefined &&
+      !trees.has(first) &&
+      !BUILTIN_GRAMMARS.has(first) &&
+      words.slice(1).some((word) => word.startsWith('-') && word !== '-')
+    )
+      out.add(
+        `commands.${where}: ${writtenAs}: ${first} has no grammar here, so its options match as written, in order`,
+      )
+  }
+  return [...out]
 }

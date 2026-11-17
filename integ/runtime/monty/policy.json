@@ -80,11 +80,10 @@
               "deny": [
                 {
                   "reason": "protected",
-                  "commands": {
-                    "python3": [
-                      "/ram/secret.py"
-                    ]
-                  }
+                  "command": "python3",
+                  "paths": [
+                    "/ram/secret.py"
+                  ]
                 }
               ]
             }
@@ -153,11 +152,10 @@
               "deny": [
                 {
                   "reason": "protected",
-                  "commands": {
-                    "python3": [
-                      "/ram/secret.py"
-                    ]
-                  }
+                  "command": "python3",
+                  "paths": [
+                    "/ram/secret.py"
+                  ]
                 }
               ]
             }

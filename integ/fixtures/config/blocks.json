@@ -48,21 +48,19 @@
                 "git push",
                 {
                   "reason": "sign-off",
-                  "commands": {
-                    "rm": [
-                      "/d/shared/*"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/shared/*"
+                  ]
                 }
               ],
               "deny": [
                 {
                   "reason": "no rm here",
-                  "commands": {
-                    "rm": [
-                      "/d/*"
-                    ]
-                  }
+                  "command": "rm",
+                  "paths": [
+                    "/d/*"
+                  ]
                 },
                 "shred"
               ]

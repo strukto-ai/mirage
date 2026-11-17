@@ -61,14 +61,17 @@
               "deny": [
                 {
                   "reason": "protected",
-                  "commands": {
-                    "cat": [
-                      "/ram/secret.txt"
-                    ],
-                    "grep": [
-                      "/ram/secret.txt"
-                    ]
-                  }
+                  "command": "cat",
+                  "paths": [
+                    "/ram/secret.txt"
+                  ]
+                },
+                {
+                  "reason": "protected",
+                  "command": "grep",
+                  "paths": [
+                    "/ram/secret.txt"
+                  ]
                 }
               ]
             }
@@ -233,11 +236,10 @@
               "deny": [
                 {
                   "reason": "protected",
-                  "commands": {
-                    "grep": [
-                      "/ram/secret.txt"
-                    ]
-                  }
+                  "command": "grep",
+                  "paths": [
+                    "/ram/secret.txt"
+                  ]
                 }
               ]
             }

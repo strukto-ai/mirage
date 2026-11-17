@@ -67,12 +67,13 @@ const ALLOW = [
 const PROFILE = SessionProfile({
   commands: {
     allow: ALLOW,
-    deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
+    deny: [{ reason: 'production data is protected', command: 'rm', paths: ['/data/prod/*'] }],
     ask: [
       { reason: 'pushes need sign-off', commands: ['git push'] },
       {
         reason: 'secrets need sign-off',
-        commands: { cat: ['/data/secret.txt', '/data/secret file', '/data/secrét'] },
+        command: 'cat',
+        paths: ['/data/secret.txt', '/data/secret file', '/data/secrét'],
       },
     ],
   },
@@ -1008,7 +1009,13 @@ describe('prejudge', () => {
               deny: [
                 {
                   reason: 'sealed',
-                  commands: { cat: ['/data/secret*'], grep: ['/data/secret*'] },
+                  command: 'cat',
+                  paths: ['/data/secret*'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'grep',
+                  paths: ['/data/secret*'],
                 },
               ],
             },
@@ -1052,7 +1059,13 @@ describe('prejudge', () => {
               deny: [
                 {
                   reason: 'sealed',
-                  commands: { cat: ['/data/secret*'], grep: ['/data/secret*'] },
+                  command: 'cat',
+                  paths: ['/data/secret*'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'grep',
+                  paths: ['/data/secret*'],
                 },
               ],
             },
@@ -1141,7 +1154,7 @@ describe('prejudge', () => {
           r: SessionProfile({
             commands: {
               allow: ['grep'],
-              ask: [{ reason: 'nod', commands: { grep: ['/data'] } }],
+              ask: [{ reason: 'nod', command: 'grep', paths: ['/data'] }],
             },
           }),
         },
@@ -1208,7 +1221,7 @@ describe('prejudge', () => {
     // path a word names outright stays read though it is the lost cwd;
     // a grep pattern spelling that cwd names no path.
     const sealed = SessionProfile({
-      commands: { deny: [{ reason: 'sealed', commands: { grep: ['/data/prod'] } }] },
+      commands: { deny: [{ reason: 'sealed', command: 'grep', paths: ['/data/prod'] }] },
     })
     const w = new Workspace(
       { '/data': new RAMVFS() },

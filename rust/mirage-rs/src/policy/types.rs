@@ -52,10 +52,26 @@ pub struct Rule {
     pub mount: Option<Text>,
 }
 
+/// One `commands.allow` entry: a pattern, or a command that runs only
+/// with options from a set (`{command: rm, flags: [-f, -v]}`; an empty
+/// set admits no option at all).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum AllowEntry {
+    Pattern(Text),
+    Only { command: Text, flags: Vec<Text> },
+}
+
+impl From<Text> for AllowEntry {
+    fn from(pattern: Text) -> Self {
+        Self::Pattern(pattern)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Rules {
-    pub allow: Option<Vec<Text>>,
+    pub allow: Option<Vec<AllowEntry>>,
     pub deny: Vec<Rule>,
     pub ask: Vec<Rule>,
 }
@@ -135,9 +151,40 @@ pub struct PathFact {
     pub display_path: Text,
 }
 
+/// One option a line or a pattern carries, by its canonical spelling.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct FlagFact {
+    pub name: Text,
+    #[serde(default)]
+    pub values: Vec<Text>,
+}
+
+/// A line or a pattern as its command's grammar reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Reading {
+    pub path: Vec<Text>,
+    #[serde(default)]
+    pub flags: Vec<FlagFact>,
+    #[serde(default)]
+    pub operands: Vec<Text>,
+}
+
+/// A pattern read with the line's grammar, keyed by the pattern as its
+/// group expanded. `read` is None for a pattern that reads but cannot
+/// match this line (its subcommand `*` names a node without the option).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct PatternRead {
+    pub pattern: Text,
+    pub read: Option<Reading>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct CommandFacts {
     pub tokens: Vec<Text>,
+    #[serde(default)]
+    pub line: Option<Reading>,
+    #[serde(default)]
+    pub reads: Vec<PatternRead>,
     pub tool: bool,
     pub cwd: Text,
     pub paths: Vec<PathFact>,
@@ -152,6 +199,8 @@ impl Default for CommandFacts {
     fn default() -> Self {
         Self {
             tokens: Vec::new(),
+            line: None,
+            reads: Vec::new(),
             tool: true,
             cwd: vec![47],
             paths: Vec::new(),
@@ -191,6 +240,14 @@ pub enum Outcome {
     Ask = 2,
 }
 
+/// What fired: the subcommand path and the options of the pattern that
+/// matched, or the line's own path when the allow list refused it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Matched {
+    pub command: Vec<Text>,
+    pub flags: Vec<Text>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Ruling {
     pub outcome: Outcome,
@@ -198,4 +255,5 @@ pub struct Ruling {
     pub matched_path: Option<Text>,
     pub allow_list: bool,
     pub asks: Vec<usize>,
+    pub matched: Option<Matched>,
 }

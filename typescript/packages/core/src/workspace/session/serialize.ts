@@ -13,15 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { METHODS } from '../../policy/constants.ts'
-import type {
-  AdmissionRules,
-  CommandRule,
-  Decision,
-  Outcome,
-  ProfileScript,
-  ProfileScripts,
-  Scope,
-  ScriptMethod,
+import {
+  type AdmissionRules,
+  AllowFlags,
+  type CommandRule,
+  type Decision,
+  type Outcome,
+  type ProfileScript,
+  type ProfileScripts,
+  type Scope,
+  type ScriptMethod,
 } from '../../policy/types.ts'
 import type { Language } from '../../runtime/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
@@ -54,9 +55,23 @@ export function ruleFromDict(data: RuleJSON): CommandRule {
   }
 }
 
+/** One allow entry as the record stores it. Mirrors Python's `allow_to_dict`. */
+export function allowToDict(
+  entry: string | AllowFlags,
+): string | { command: string; flags: readonly string[] } {
+  return typeof entry === 'string' ? entry : { command: entry.command, flags: [...entry.flags] }
+}
+
+/** One allow entry read back from a record. Mirrors Python's `allow_from_dict`. */
+export function allowFromDict(
+  data: string | { command: string; flags: readonly string[] },
+): string | AllowFlags {
+  return typeof data === 'string' ? data : new AllowFlags(data.command, data.flags)
+}
+
 export function commandsToDict(spec: AdmissionRules) {
   return {
-    allow: spec.allow === null ? null : [...spec.allow],
+    allow: spec.allow === null ? null : spec.allow.map(allowToDict),
     ask: spec.ask.map(ruleToDict),
     deny: spec.deny.map(ruleToDict),
   }
@@ -64,7 +79,7 @@ export function commandsToDict(spec: AdmissionRules) {
 
 export function commandsFromDict(data: ReturnType<typeof commandsToDict>): AdmissionRules {
   return {
-    allow: data.allow ?? null,
+    allow: data.allow == null ? null : data.allow.map(allowFromDict),
     ask: data.ask.map(ruleFromDict),
     deny: data.deny.map(ruleFromDict),
   }

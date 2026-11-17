@@ -65,6 +65,7 @@ describe('ioResultToDict', () => {
         reason: 'sign-off',
         policy: '',
         ask_id: 'abc123',
+        matched: null,
       },
     })
   })

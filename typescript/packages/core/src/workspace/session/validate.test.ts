@@ -13,14 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
-import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
+import {
+  type AdmissionRules,
+  AllowFlags,
+  type CommandRule,
+  type Grammar,
+} from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { checkCliVerbs, checkRules } from './validate.ts'
+import { checkCliPatterns, checkRules, logger } from './validate.ts'
 
 function rules(over: Partial<AdmissionRules> = {}): AdmissionRules {
   return { allow: null, ask: [], deny: [], ...over }
@@ -51,7 +56,7 @@ describe('checkRules', () => {
 
   it('leaves a word that is not a builtin alone', () => {
     // It may be a CLI the host registers after the workspace is built,
-    // which is what checkCliVerbs covers at createSession.
+    // which is what checkCliPatterns covers at createSession.
     checkRules(rules({ allow: ['ls'], deny: [rule({ reason: 'no', commands: ['mycli run'] })] }))
   })
 
@@ -157,21 +162,100 @@ describe('checkRules', () => {
   })
 })
 
-describe('checkCliVerbs', () => {
-  const verbs = new Map<string, ReadonlySet<string>>([['git', new Set(['status', 'push'])]])
+const GIT: Grammar = {
+  spec: new CommandSpec({
+    name: 'git',
+    subcommands: [
+      new CommandSpec({ name: 'status' }),
+      new CommandSpec({
+        name: 'remote',
+        subcommands: [
+          new CommandSpec({
+            name: 'add',
+            arguments: [new Argument(['-f', '--fetch'], { action: 'store_true' })],
+          }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'add',
+        arguments: [
+          new Argument(['-f', '--force'], { action: 'store_true' }),
+          new Argument(['--dry-run'], { action: 'store_true' }),
+        ],
+      }),
+    ],
+  }),
+  tree: true,
+  passthrough: false,
+}
 
-  it('refuses a rule naming a verb its CLI does not have', () => {
+function deny(...patterns: string[]): AdmissionRules {
+  return rules({ deny: [rule({ reason: 'no', commands: patterns })] })
+}
+
+describe('checkCliPatterns', () => {
+  const trees = new Map([['git', GIT]])
+
+  it.each([
+    ['git shove', 'has no verb git shove'],
+    ['git remote shove', 'has no verb git remote shove'],
+    ['git add --dry', '--dry is a prefix of an option'],
+    ['git * -f', 'write its long name'],
+    ['git * --prune', 'no git subcommand the * stands for has --prune'],
+    ['git {status,shove}', 'has no verb git shove'],
+    ['git add --frobnicate', 'git add does not read --frobnicate'],
+  ])('refuses %s, which its tree cannot read', (pattern, says) => {
     expect(() => {
-      checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git shove'] })] }), verbs)
-    }).toThrow(/no verb for/)
+      checkCliPatterns(deny(pattern), trees)
+    }).toThrow(says)
   })
 
-  it('passes a known verb, a wildcard, an unclaimed head word and a bare name', () => {
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git push'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git *'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['slack send'] })] }), verbs)
-    checkCliVerbs(rules({ deny: [rule({ reason: 'no', commands: ['git'] })] }), verbs)
-    checkCliVerbs(null, verbs)
+  it.each([
+    'git status',
+    'git *',
+    'git * --force',
+    'git * * --fetch',
+    'git add -f',
+    'git',
+    'slack send --now',
+  ])('loads %s, which its tree reads', (pattern) => {
+    checkCliPatterns(deny(pattern), trees)
+    checkCliPatterns(null, trees)
+  })
+})
+
+describe('checkRules reads a builtin pattern with its spec', () => {
+  it.each([
+    ['rm --no-such-flag', 'rm has no option --no-such-flag'],
+    ['rm --rec', '--rec is a prefix of an option'],
+    ['rm -Z', 'rm has no option -Z'],
+  ])('refuses %s', (pattern, says) => {
+    expect(() => {
+      checkRules(deny(pattern))
+    }).toThrow(says)
+    expect(() => {
+      checkRules(rules({ allow: [pattern] }))
+    }).toThrow(says)
+  })
+
+  it('loads a pattern in any spelling', () => {
+    checkRules(deny('rm -rf', 'rm --recursive --force', 'head -n 1'))
+    checkRules(rules({ allow: [new AllowFlags('rm', ['-f', '-v'])] }))
+    expect(() => {
+      checkRules(rules({ allow: [new AllowFlags('rm', ['-Z'])] }))
+    }).toThrow('rm has no option -Z')
+  })
+
+  it('warns of a group in the name and a * in the allow list', () => {
+    const said: string[] = []
+    logger.warn = (message) => said.push(message)
+    try {
+      checkRules(rules({ allow: ['*', 'gh * view'], deny: deny('{rm,mv} -f').deny }))
+    } finally {
+      delete logger.warn
+    }
+    expect(said.some((m) => m.includes('{rm,mv} -f: a group in the command name'))).toBe(true)
+    expect(said.some((m) => m.includes('gh * view: a * admits every subcommand'))).toBe(true)
   })
 })
 
@@ -199,7 +283,7 @@ describe('createSession reads the verbs of an installed CLI', () => {
           commands: { deny: [{ reason: 'no', commands: ['prog walk'] }] },
         }),
       }),
-    ).toThrow(/no verb for/)
+    ).toThrow(/has no verb/)
     ws.createSession('good', {
       permissions: SessionProfile({
         commands: { deny: [{ reason: 'no', commands: ['prog run'] }] },

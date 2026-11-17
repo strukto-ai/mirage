@@ -278,7 +278,7 @@ describe('session cancel and kill', () => {
       const refused = await app.inject({
         method: 'PATCH',
         url: `/v1/workspaces/${id}/sessions/a`,
-        payload: { profile: { commands: { bogus: [] } } },
+        payload: { profile: { command: 'bogus', paths: [] } },
       })
       expect(refused.statusCode).toBe(400)
     } finally {

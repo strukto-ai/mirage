@@ -33,7 +33,7 @@ const PYODIDE = {
 }
 
 const GUARDED = SessionProfile({
-  commands: { deny: [{ reason: 'protected', commands: { python3: ['/secret.py'] } }] },
+  commands: { deny: [{ reason: 'protected', command: 'python3', paths: ['/secret.py'] }] },
 })
 
 function guarded(): Workspace {

@@ -61,17 +61,18 @@ export class PermissionsPolicy implements Policy, SessionScopedMixin {
     const decision = decide(ctx, this.sessions.commandsOf(ctx.sessionId ?? ''))
     if (decision.outcome === Outcome.ALLOW) return null
     const rule = decision.rule
+    const matched = decision.matched === null ? {} : { matched: decision.matched }
     if (rule === null) {
       const program = (
         ctx.program !== undefined && ctx.program.length > 0 ? ctx.program : [ctx.command]
       ).join(' ')
-      return { kind: 'deny', reason: `${program} is not allowed` }
+      return { kind: 'deny', reason: `${program} is not allowed`, ...matched }
     }
     if (decision.outcome === Outcome.ASK) {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
-    if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason, rule }
-    return { kind: 'deny', reason: rule.reason, path: decision.matchedPath, rule }
+    const path = decision.matchedPath === null ? {} : { path: decision.matchedPath }
+    return { kind: 'deny', reason: rule.reason, ...path, rule, ...matched }
   }
 
   preVfs(ctx: VfsContext): Action | null {

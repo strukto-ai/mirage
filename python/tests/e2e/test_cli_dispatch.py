@@ -397,7 +397,7 @@ async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
             "wildcard": {"paths": hidden, "commands": {"allow": ["*"]}},
             "other": {
                 "paths": hidden,
-                "commands": {"allow": ["*", "sl message read"]},
+                "commands": {"allow": ["*", "sl message send --to y"]},
             },
             "named": {"paths": hidden, "commands": {"allow": ["*", "sl"]}},
         },
@@ -447,11 +447,14 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
                     "deny": [
                         {
                             "reason": "sealed",
-                            "commands": {
-                                "peek": ["/data/secret.txt"],
-                                "later": ["/data/secret.txt"],
-                            },
-                        }
+                            "command": "peek",
+                            "paths": ["/data/secret.txt"],
+                        },
+                        {
+                            "reason": "sealed",
+                            "command": "later",
+                            "paths": ["/data/secret.txt"],
+                        },
                     ]
                 }
             }
@@ -742,7 +745,11 @@ async def test_a_cli_calling_a_custom_function_meets_hides_and_its_rules():
             "sealed": {
                 "commands": {
                     "deny": [
-                        {"reason": "sealed", "commands": {"shelf": ["/data"]}}
+                        {
+                            "reason": "sealed",
+                            "command": "shelf",
+                            "paths": ["/data"],
+                        }
                     ]
                 }
             },

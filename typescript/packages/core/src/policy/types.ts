@@ -17,8 +17,16 @@ import type { FileView, SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { SecretRef } from '../secrets/config.ts'
-import type { JsonValue, Limit, MountMode, PathSpec, Producer, PolicyDecision } from '../types.ts'
-import type { WordKind } from '../commands/spec/types.ts'
+import type {
+  JsonValue,
+  Limit,
+  Matched,
+  MountMode,
+  PathSpec,
+  Producer,
+  PolicyDecision,
+} from '../types.ts'
+import type { CommandSpec, WordKind } from '../commands/spec/types.ts'
 import type { SessionView } from '../view/types.ts'
 
 /**
@@ -75,6 +83,8 @@ export interface Deny {
   /** The profile rule that refused, as an Ask carries the rule that asked;
    * absent for a coded condition. */
   rule?: CommandRule
+  /** What fired in that rule, or in the allow list. */
+  matched?: Matched
 }
 
 /**
@@ -177,6 +187,8 @@ export interface Ruling {
    * ordinary case.
    */
   readonly asks: readonly CommandRule[]
+  /** The path and options that fired; null on ALLOW and for a rule naming no command. */
+  readonly matched: Matched | null
 }
 
 /**
@@ -404,6 +416,71 @@ export interface SessionDecisionsQuery {
 }
 
 /**
+ * A `commands.allow` entry that runs a command only with options from a
+ * set: `{command: rm, flags: [-f, -v]}` runs `rm -f` and `rm -vf` and
+ * refuses `rm -r`. An empty set runs the command with no option at all.
+ * Where a pattern string means "has these options", this means "has
+ * nothing but these". `flags` match in any spelling the command's grammar
+ * reads as the same option. Mirrors the Python `AllowFlags`.
+ */
+export class AllowFlags {
+  readonly command: string
+  readonly flags: readonly string[]
+
+  constructor(command: string, flags: readonly string[] = []) {
+    this.command = command
+    this.flags = Object.freeze([...flags])
+    Object.freeze(this)
+  }
+
+  /** The command and its options as one pattern, which the command's grammar reads to name the options. */
+  get pattern(): string {
+    return [this.command, ...this.flags].join(' ')
+  }
+}
+
+/**
+ * One option a command line or a rule pattern carries: `name` its
+ * canonical spelling, its first long name (`--recursive` for `-r`, `-R`
+ * and `--recursive`); `values` the values it was given, in order, empty
+ * for a switch, and in a pattern for an option written without its
+ * value, which matches any. Mirrors the Python `FlagFact`.
+ */
+export interface FlagFact {
+  readonly name: string
+  readonly values: readonly string[]
+}
+
+/**
+ * A command line or a rule pattern as its command's grammar reads it,
+ * which is what a rule pattern is compared on: `path` the command name
+ * and its canonical subcommand path (`gh pr list` for `gh pr ls`),
+ * `flags` the options it carries at every level of the path in the order
+ * they were read, `operands` the leaf's operand words as written. Mirrors
+ * the Python `CommandRead`.
+ */
+export interface CommandRead {
+  readonly path: readonly string[]
+  readonly flags: readonly FlagFact[]
+  readonly operands: readonly string[]
+}
+
+/**
+ * The grammar a line was read with, which reads a rule pattern on the
+ * same command the same way. Compared by identity: the spec is chosen per
+ * line, so two lines of one name may hold two grammars. `spec` is the
+ * root of a command tree, else the command's own; `tree` whether it is
+ * walked subcommand by subcommand; `passthrough` whether a script owns
+ * the leaf's words, so none of them is an option mirage reads. Mirrors
+ * the Python `Grammar`.
+ */
+export interface Grammar {
+  readonly spec: CommandSpec
+  readonly tree: boolean
+  readonly passthrough: boolean
+}
+
+/**
  * One profile's admission rules, compiled: the whole permission document a
  * session runs under. A session is evaluated against exactly one of
  * these. It holds the profile's allow list, its ask and deny rules, and
@@ -414,7 +491,7 @@ export interface SessionDecisionsQuery {
  * decide`). `allow` null when the profile states no list.
  */
 export interface AdmissionRules {
-  allow: readonly string[] | null
+  allow: readonly (string | AllowFlags)[] | null
   ask: readonly CommandRule[]
   deny: readonly CommandRule[]
 }
@@ -648,6 +725,17 @@ export interface CommandContext {
    * `cwd`; null when it names none. Absent reads as null.
    */
   moveTarget?: string | null
+  /**
+   * The line as its grammar reads it, the facts a rule pattern is
+   * compared on; null for a command no spec describes or a line its spec
+   * refuses, which a pattern matches word by word. Absent reads as null.
+   */
+  read?: CommandRead | null
+  /**
+   * The grammar that read the line, which reads each rule pattern on the
+   * same command; null with `read`. Absent reads as null.
+   */
+  grammar?: Grammar | null
   /** The session, read only: a write through it is refused. Filled when a method is asked. */
   session?: SessionView
   /**

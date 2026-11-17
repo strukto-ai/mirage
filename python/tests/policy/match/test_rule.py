@@ -341,6 +341,12 @@ def test_a_metadata_op_is_let_through():
     )
 
 
+def _line(*tokens: str) -> CommandContext:
+    return CommandContext(
+        command=tokens[0], paths=(), argv=tokens[1:], cwd="/", tokens=tokens
+    )
+
+
 def test_io_refusal_applies_the_gate_precedence_to_an_entry():
     deny = CommandRule(
         reason="locked", commands=("rm",), paths=("/data/both/locked/*",)
@@ -352,7 +358,7 @@ def test_io_refusal_applies_the_gate_precedence_to_an_entry():
         reason="a later nod", commands=("rm",), paths=("/data/both/*",)
     )
     rules = AdmissionRules(ask=(ask, later), deny=(deny,))
-    tokens = ("rm", "-r", "/data/both")
+    tokens = _line("rm", "-r", "/data/both")
     # deny > ask, wherever either was written.
     assert io_refusal(rules, tokens, "/data/both/locked/y", (ask,)) == "locked"
     # The first matching ask rule speaks: refused without a grant under
@@ -383,7 +389,7 @@ def test_io_refusal_orders_by_anchor_depth_like_the_admission_gate():
         reason="sealed", commands=("rm",), paths=("/repo/sealed/*",)
     )
     rules = AdmissionRules(ask=(ask,), deny=(deny,))
-    tokens = ("rm", "-r", "/repo")
+    tokens = _line("rm", "-r", "/repo")
     assert io_refusal(rules, tokens, "/repo/sealed/secret", (ask,)) is None
     # Without the grant the deeper ask still wins, and asks.
     assert io_refusal(rules, tokens, "/repo/sealed/secret", ()) == "sealed"
@@ -400,16 +406,16 @@ def test_io_reach_reads_each_start_point_on_its_own():
         reason="no deletes", commands=("rm",), paths=("/data/*",)
     )
     rules = AdmissionRules(deny=(env,), ask=(rm_only,))
-    find = ("find", "/repo", "/s3", "/data")
+    find = _line("find", "/repo", "/s3", "/data")
     assert io_reach(rules, find, "/repo")
     assert io_reach(rules, find, "/repo/.env")
     assert not io_reach(rules, find, "/s3")
     # A rule naming another command does not reach this line's walk.
     assert not io_reach(rules, find, "/data")
-    assert io_reach(rules, ("rm", "-r", "/data"), "/data")
+    assert io_reach(rules, _line("rm", "-r", "/data"), "/data")
     # A whole-line rule has no paths to reach an entry with.
     whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
-    assert not io_reach(whole, ("rm", "-r", "/data"), "/data")
+    assert not io_reach(whole, _line("rm", "-r", "/data"), "/data")
     assert not io_reach(None, find, "/repo")
 
 

@@ -63,7 +63,15 @@ import {
   type SessionProfile,
 } from '../../policy/profile.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
-import { DryRun, Outcome, policyCaller, type ShellExplanation } from '../../policy/types.ts'
+import {
+  type AdmissionRules,
+  DryRun,
+  type Grammar,
+  Outcome,
+  policyCaller,
+  type ShellExplanation,
+} from '../../policy/types.ts'
+import { ownsArgv } from '../../commands/cli/walk.ts'
 import { ChildProcess } from '../../execution/process/child.ts'
 import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
 import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
@@ -180,7 +188,7 @@ import { SessionManager } from '../session/manager.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { type SessionState, varsFromEntries, varsFromEnv } from '../session/session.ts'
 import { envSnapshot, sessionView } from '../session/state.ts'
-import { checkCliVerbs } from '../session/validate.ts'
+import { checkCliPatterns, logger as validateLogger, unreadPatterns } from '../session/validate.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
 import { indexConfigDump } from '../snapshot/config.ts'
@@ -1390,16 +1398,10 @@ export class Workspace {
       withInline(base, inline, this.workspaceProcesses),
       options.profile ?? null,
     )
-    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
+    this.checkCliPatterns(compiled.policies.commands)
     return this.sessionManager.create(sessionId, { profile: compiled })
   }
 
-  /**
-   * The verbs each installed CLI declares, keyed by head word.
-   *
-   * Read at `createSession` rather than at compile time because a CLI is
-   * registered on the workspace after it is built.
-   */
   /**
    * One session's two entry points: `shell` and `vfs` bound to it.
    *
@@ -1427,10 +1429,23 @@ export class Workspace {
     return new Session(this, sessionId)
   }
 
-  private cliVerbs(): ReadonlyMap<string, ReadonlySet<string>> {
-    const out = new Map<string, ReadonlySet<string>>()
+  /** Refuse a pattern an installed CLI cannot read, and warn of one whose options no grammar reads. */
+  private checkCliPatterns(rules: AdmissionRules | null): void {
+    const grammars = this.cliGrammars()
+    checkCliPatterns(rules, grammars)
+    for (const warning of unreadPatterns(rules, grammars)) validateLogger.warn?.(warning)
+  }
+
+  /**
+   * The grammar of each installed CLI, keyed by head word.
+   *
+   * Read at `createSession` rather than at compile time because a CLI is
+   * registered on the workspace after it is built.
+   */
+  private cliGrammars(): ReadonlyMap<string, Grammar> {
+    const out = new Map<string, Grammar>()
     for (const [name, install] of this.registry.clis.items()) {
-      out.set(name, new Set(install.cli.spec.subcommands.map((child) => child.name)))
+      out.set(name, { spec: install.cli.spec, tree: true, passthrough: ownsArgv(install.cli) })
     }
     return out
   }
@@ -1502,7 +1517,7 @@ export class Workspace {
         sourceFor(entry.managed.source)
       }
     }
-    checkCliVerbs(this.compile(profile, name).policies.commands, this.cliVerbs())
+    checkCliPatterns(this.compile(profile, name).policies.commands, this.cliGrammars())
     this.profilesInternal[name] = profile
   }
 
@@ -1519,7 +1534,7 @@ export class Workspace {
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const compiled = this.compile(this.baseProfile(profile), profile)
-    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
+    this.checkCliPatterns(compiled.policies.commands)
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')

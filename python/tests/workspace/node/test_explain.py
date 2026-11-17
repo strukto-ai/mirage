@@ -117,20 +117,20 @@ PROFILE = {
         "deny": [
             {
                 "reason": "production data is protected",
-                "commands": {"rm": ["/data/prod/*"]},
+                "command": "rm",
+                "paths": ["/data/prod/*"],
             }
         ],
         "ask": [
             {"reason": "pushes need sign-off", "commands": ["git push"]},
             {
                 "reason": "secrets need sign-off",
-                "commands": {
-                    "cat": [
-                        "/data/secret.txt",
-                        "/data/secret file",
-                        "/data/secrét",
-                    ]
-                },
+                "command": "cat",
+                "paths": [
+                    "/data/secret.txt",
+                    "/data/secret file",
+                    "/data/secrét",
+                ],
             },
         ],
     },
@@ -1217,11 +1217,14 @@ SEALED_READS = {
         "deny": [
             {
                 "reason": "sealed",
-                "commands": {
-                    "cat": ["/data/secret*"],
-                    "grep": ["/data/secret*"],
-                },
-            }
+                "command": "cat",
+                "paths": ["/data/secret*"],
+            },
+            {
+                "reason": "sealed",
+                "command": "grep",
+                "paths": ["/data/secret*"],
+            },
         ],
     }
 }
@@ -1376,7 +1379,11 @@ async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
                 "commands": {
                     "allow": ["grep"],
                     "ask": [
-                        {"reason": "nod", "commands": {"grep": ["/data"]}}
+                        {
+                            "reason": "nod",
+                            "command": "grep",
+                            "paths": ["/data"],
+                        }
                     ],
                 }
             }
@@ -1476,7 +1483,11 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
     sealed = {
         "commands": {
             "deny": [
-                {"reason": "sealed", "commands": {"grep": ["/data/prod"]}}
+                {
+                    "reason": "sealed",
+                    "command": "grep",
+                    "paths": ["/data/prod"],
+                }
             ]
         }
     }

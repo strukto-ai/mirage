@@ -28,7 +28,7 @@ const ROLE = SessionProfile(
     commands: {
       allow: ["ls", "cat", "rm"],
       ask: [
-        { reason: "secrets are reviewed", commands: { cat: ["/data/secret.txt"] } },
+        { reason: "secrets are reviewed", command: 'cat', paths: ["/data/secret.txt"] },
         { reason: "deletes are reviewed", commands: ["rm"] },
       ],
     },

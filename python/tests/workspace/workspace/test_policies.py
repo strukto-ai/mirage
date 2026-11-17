@@ -42,7 +42,14 @@ from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.monty import runtime as monty_runtime
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
-from mirage.types import Limit, MountMode, OnExceed, PathSpec, PolicyDecision
+from mirage.types import (
+    Limit,
+    Matched,
+    MountMode,
+    OnExceed,
+    PathSpec,
+    PolicyDecision,
+)
 from mirage.utils.path import norm
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -165,7 +172,10 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         assert result.exit_code == 126
         assert result.stderr == b"source: Permission denied\n"
         assert result.decision == PolicyDecision(
-            kind="deny", reason="disabled", policy="PermissionsPolicy"
+            kind="deny",
+            reason="disabled",
+            policy="PermissionsPolicy",
+            matched=Matched(command=("source",), flags=()),
         )
         result = await ws.shell("touch /data/prod/x")
         assert result.exit_code == 1
@@ -1628,7 +1638,7 @@ async def test_a_once_nod_lasts_while_the_line_streams_and_no_longer():
         ws.create_session(
             "agent",
             profile={
-                "commands": {"ask": [{"commands": {"cat": ["/data/b"]}}]}
+                "commands": {"ask": [{"command": "cat", "paths": ["/data/b"]}]}
             },
         )
         line = "cat /data/a /data/b | tail -c 4"

@@ -20,13 +20,14 @@ import {
   type ProfileMount,
   type SessionProfile,
 } from '../../policy/profile.ts'
-import type {
-  AdmissionRules,
-  CommandRule,
-  HideReason,
-  ProfileScript,
-  ProfileScripts,
-  ScriptMethod,
+import {
+  type AdmissionRules,
+  AllowFlags,
+  type CommandRule,
+  type HideReason,
+  type ProfileScript,
+  type ProfileScripts,
+  type ScriptMethod,
 } from '../../policy/types.ts'
 import {
   layerProcesses,
@@ -69,7 +70,7 @@ interface RuleReply {
   readonly mount: number[] | null
 }
 interface RulesReply {
-  readonly allow: number[][] | null
+  readonly allow: (number[] | { command: number[]; flags: number[][] })[] | null
   readonly deny: readonly RuleReply[]
   readonly ask: readonly RuleReply[]
 }
@@ -145,7 +146,14 @@ function ruleFrom(value: RuleReply): CommandRule {
 function rulesFrom(value: RulesReply | null): AdmissionRules | null {
   if (value === null) return null
   return {
-    allow: value.allow === null ? null : value.allow.map(fromUnits),
+    allow:
+      value.allow === null
+        ? null
+        : value.allow.map((entry) =>
+            Array.isArray(entry)
+              ? fromUnits(entry)
+              : new AllowFlags(fromUnits(entry.command), entry.flags.map(fromUnits)),
+          ),
     deny: value.deny.map(ruleFrom),
     ask: value.ask.map(ruleFrom),
   }

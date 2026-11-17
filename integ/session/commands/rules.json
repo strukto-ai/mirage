@@ -464,14 +464,16 @@
           "commands": {
             "deny": [
               {
-                "commands": {
-                  "cat": [
-                    "/scratch/redirect-private"
-                  ],
-                  "rg": [
-                    "/scratch/redirect-private"
-                  ]
-                }
+                "command": "cat",
+                "paths": [
+                  "/scratch/redirect-private"
+                ]
+              },
+              {
+                "command": "rg",
+                "paths": [
+                  "/scratch/redirect-private"
+                ]
               }
             ]
           }

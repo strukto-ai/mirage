@@ -772,9 +772,11 @@ profiles:
     commands:
       deny:
         - reason: production data is protected
-          commands:
-            rm: ["/repo/prod/*"]
-            mv: ["/repo/prod/*"]
+          command: rm
+          paths: ["/repo/prod/*"]
+        - reason: production data is protected
+          command: mv
+          paths: ["/repo/prod/*"]
         - python3
     paths:
       hide: ["/scratch/finance"]
@@ -847,8 +849,8 @@ profiles:
     commands:
       deny:
         - reason: no deletes in the repo
-          commands:
-            rm: ["/repo"]
+          command: rm
+          paths: ["/repo"]
   reviewer:
     cwd: /repo
     mounts: {/repo: r}

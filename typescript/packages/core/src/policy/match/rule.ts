@@ -19,8 +19,18 @@ import { admissionMatcher } from '../../rs/policy.ts'
 import type { PathSpec } from '../../types.ts'
 import { METADATA_OPS, SUBTREE_OPS } from '../constants.ts'
 import { sameRule } from '../decisions.ts'
-import type { AdmissionRules, CommandContext, CommandRule, VfsContext } from '../types.ts'
+import type {
+  AdmissionRules,
+  CommandContext,
+  CommandRead,
+  CommandRule,
+  Grammar,
+  VfsContext,
+} from '../types.ts'
 import { lineTokens } from './allow.ts'
+import { patternReads } from './grammar.ts'
+
+const READS_WIRE = new WeakMap<readonly [string, CommandRead | null][], util.JSONType[]>()
 
 /**
  * The paths a command's operands name, in order: what `rm -r` removes or
@@ -35,17 +45,60 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 function pathFact(path: PathSpec): Record<string, util.JSONType> {
   return { virtual_path: units(path.virtual), display_path: units(path.rawPath || path.virtual) }
 }
+/** A read in the stream's wire shape. Mirrors Python's read_wire. */
+export function readWire(read: CommandRead): Record<string, util.JSONType> {
+  return {
+    path: read.path.map(units),
+    flags: read.flags.map((flag) => ({ name: units(flag.name), values: flag.values.map(units) })),
+    operands: read.operands.map(units),
+  }
+}
+function readsWire(
+  rules: AdmissionRules,
+  path: readonly string[],
+  grammar: Grammar,
+): util.JSONType[] {
+  const reads = patternReads(rules, path, grammar)
+  const hit = READS_WIRE.get(reads)
+  if (hit !== undefined) return hit
+  const wire = reads.map(([pattern, read]) => ({
+    pattern: units(pattern),
+    read: read === null ? null : readWire(read),
+  }))
+  READS_WIRE.set(reads, wire)
+  return wire
+}
+/**
+ * What a pattern is compared on, in the stream's wire shape: the line's
+ * tokens, and when its grammar read it, that read and each pattern on its
+ * command read with the same grammar. Mirrors Python's line_words.
+ */
+export function lineWords(
+  ctx: CommandContext,
+  rules: AdmissionRules | null,
+): Record<string, util.JSONType> {
+  const words = { tokens: lineTokens(ctx).map(units) }
+  const read = ctx.read ?? null
+  const grammar = ctx.grammar ?? null
+  if (rules === null || read === null || grammar === null) return words
+  return { ...words, line: readWire(read), reads: readsWire(rules, read.path, grammar) }
+}
 /**
  * What a line's rules are read against, in the stream's wire shape: its
- * tokens and paths, and the host's word on its command: whether it moves or
- * removes whole subtrees (`CommandContext.subtree`) and whether it is a move
- * whose last operand is the destination. Mirrors Python's command_facts.
+ * words (`lineWords`) and paths, and the host's word on its command:
+ * whether it moves or removes whole subtrees (`CommandContext.subtree`)
+ * and whether it is a move whose last operand is the destination. `rules`
+ * are the session's, whose patterns are read with the line's grammar.
+ * Mirrors Python's command_facts.
  */
-export function commandFacts(ctx: CommandContext): Record<string, util.JSONType> {
+export function commandFacts(
+  ctx: CommandContext,
+  rules: AdmissionRules | null = null,
+): Record<string, util.JSONType> {
   const moves = ctx.command === 'mv'
   const target = moves && ctx.paths.length > 0 ? (ctx.moveTarget ?? null) : null
   return {
-    tokens: lineTokens(ctx).map(units),
+    ...lineWords(ctx, rules),
     tool: ctx.tool ?? true,
     cwd: units(ctx.cwd),
     paths: ctx.paths.map(pathFact),
@@ -96,13 +149,13 @@ export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
  */
 export function ioReach(
   rules: AdmissionRules | null,
-  tokens: readonly string[],
+  ctx: CommandContext,
   virtual: string,
 ): boolean {
   return (
     rules !== null &&
     admissionMatcher(rules).ask('io_reach', {
-      tokens: tokens.map(units),
+      ...lineWords(ctx, rules),
       path: units(virtual),
     }) === true
   )
@@ -138,13 +191,13 @@ function ruleAt(rules: AdmissionRules, id: number): CommandRule {
  */
 export function ioRefusal(
   rules: AdmissionRules | null,
-  tokens: readonly string[],
+  ctx: CommandContext,
   virtual: string,
   granted: readonly CommandRule[],
 ): string | null {
   if (rules === null) return null
   const id = admissionMatcher(rules).ask('io_refusal', {
-    tokens: tokens.map(units),
+    ...lineWords(ctx, rules),
     path: units(virtual),
     granted: grantIndices(rules, granted),
   }) as number | null

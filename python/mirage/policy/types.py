@@ -19,12 +19,13 @@ from typing import Any, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from mirage.commands.spec.types import WordKind
+from mirage.commands.spec.types import CommandSpec, WordKind
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
 from mirage.types import (
     JsonValue,
     Limit,
+    Matched,
     MountMode,
     PathSpec,
     PolicyDecision,
@@ -89,6 +90,9 @@ class Deny:
             None refuses the command whole.
         rule (CommandRule | None): the profile rule that refused, as an
             Ask carries the rule that asked; None for a coded condition.
+        matched (Matched | None): what fired in that rule, or in the
+            allow list; not part of what the refusal is, so two denials
+            differing only here compare equal.
     """
 
     kind: ClassVar[str] = "deny"
@@ -99,6 +103,7 @@ class Deny:
     error: OSError | None = None
     path: str | None = None
     rule: "CommandRule | None" = None
+    matched: Matched | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +223,8 @@ class Ruling:
             given for and no other, so a deeper ask on a destination
             cannot carry a source past the ask written for it. One
             entry is the ordinary case.
+        matched (Matched | None): the path and options that fired; None
+            on ALLOW and for a rule naming no command.
     """
 
     outcome: Outcome
@@ -225,6 +232,7 @@ class Ruling:
     matched_path: str | None = None
     source: str = ""
     asks: tuple[CommandRule, ...] = ()
+    matched: Matched | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,6 +554,30 @@ class SessionDecisionsQuery(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class AllowFlags:
+    """A ``commands.allow`` entry that runs a command only with options
+    from a set: ``{command: rm, flags: [-f, -v]}`` runs ``rm -f`` and
+    ``rm -vf`` and refuses ``rm -r``. An empty set runs the command with
+    no option at all. Where a pattern string means "has these options",
+    this means "has nothing but these".
+
+    Args:
+        command (str): the command, and its subcommands, the entry names.
+        flags (tuple[str, ...]): the options a line may carry, in any
+            spelling the command's grammar reads as the same option.
+    """
+
+    command: str
+    flags: tuple[str, ...] = ()
+
+    @property
+    def pattern(self) -> str:
+        """The command and its options as one pattern, which the
+        command's grammar reads to name the options."""
+        return " ".join((self.command, *self.flags))
+
+
+@dataclass(frozen=True, slots=True)
 class AdmissionRules:
     """One profile's admission rules, compiled: the whole permission
     document a session runs under.
@@ -558,14 +590,14 @@ class AdmissionRules:
     resolved by anchor depth, then by verb (``policy/match/decide``).
 
     Args:
-        allow (tuple[str, ...] | None): the profile's allow patterns; None
-            when it states no list (everything visible).
+        allow (tuple[str | AllowFlags, ...] | None): the profile's allow
+            entries; None when it states no list (everything visible).
         ask (tuple[CommandRule, ...]): rules admitted only with an
             approval.
         deny (tuple[CommandRule, ...]): rules refused with a reason.
     """
 
-    allow: tuple[str, ...] | None = None
+    allow: tuple[str | AllowFlags, ...] | None = None
     ask: tuple[CommandRule, ...] = ()
     deny: tuple[CommandRule, ...] = ()
 
@@ -658,6 +690,60 @@ class SessionScriptsQuery(Protocol):
             session_id (str): the session, empty when none is bound.
         """
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class FlagFact:
+    """One option a command line or a rule pattern carries.
+
+    Args:
+        name (str): the option's canonical spelling, its first long name
+            (``--recursive`` for ``-r``, ``-R`` and ``--recursive``).
+        values (tuple[str, ...]): the values it was given, in order;
+            empty for a switch, and in a pattern for an option written
+            without its value, which matches any.
+    """
+
+    name: str
+    values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CommandRead:
+    """A command line or a rule pattern as its command's grammar reads
+    it, which is what a rule pattern is compared on.
+
+    Args:
+        path (tuple[str, ...]): the command name and its canonical
+            subcommand path (``gh pr list`` for ``gh pr ls``).
+        flags (tuple[FlagFact, ...]): the options it carries, at every
+            level of the path, in the order they were read.
+        operands (tuple[str, ...]): the leaf's operand words as written.
+    """
+
+    path: tuple[str, ...]
+    flags: tuple[FlagFact, ...] = ()
+    operands: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class Grammar:
+    """The grammar a line was read with, which reads a rule pattern on
+    the same command the same way. Compared by identity: the spec is
+    chosen per line, so two lines of one name may hold two grammars.
+
+    Args:
+        spec (CommandSpec): the command's spec: the root of a command
+            tree, else the command's own.
+        tree (bool): whether ``spec`` is a command tree that is walked
+            subcommand by subcommand.
+        passthrough (bool): whether a script owns the leaf's words, so
+            none of them is an option mirage reads.
+    """
+
+    spec: CommandSpec
+    tree: bool = False
+    passthrough: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -810,6 +896,13 @@ class CommandContext:
             line names by option (``-t``, ``--target-directory``), as
             its grammar reads the line and resolved in ``cwd``; None
             when it names none.
+        read (CommandRead | None): the line as its grammar reads it, the
+            facts a rule pattern is compared on; None for a command no
+            spec describes or a line its spec refuses, which a pattern
+            matches word by word.
+        grammar (Grammar | None): the grammar that read the line, which
+            reads each rule pattern on the same command; None with
+            ``read``.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
         vfs (FileView | None): the session's files, read only: a write is
@@ -834,6 +927,8 @@ class CommandContext:
     write: bool = False
     subtree: bool = False
     move_target: str | None = None
+    read: CommandRead | None = None
+    grammar: Grammar | None = None
     session: SessionView | None = None
     vfs: FileView | None = None
     caller: PolicyCaller | None = None

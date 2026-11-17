@@ -13,9 +13,46 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
+from functools import lru_cache
 
 from mirage.rs.document import from_units, units
-from mirage.rs.policy import admission_matcher
+from mirage.rs.policy import CACHE_SIZE, admission_matcher
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def _expansion(pattern: str) -> tuple[str, ...] | str:
+    answer = admission_matcher(None).ask(
+        "expand_pattern", pattern=units(pattern)
+    )
+    if isinstance(answer, list):
+        return tuple(from_units(v) for v in answer)
+    return str(answer)
+
+
+def expand_pattern(pattern: str) -> tuple[str, ...]:
+    """The patterns a written pattern stands for: each ``{a,b}`` group
+    in a word gives one pattern per member, in order, so ``gh pr
+    {view,diff}`` is ``gh pr view`` then ``gh pr diff``. A pattern with
+    no group, or one whose group the document would refuse, is itself.
+
+    Args:
+        pattern (str): the pattern as written in the document.
+    """
+    answer = _expansion(pattern)
+    return (pattern,) if isinstance(answer, str) else answer
+
+
+def group_problem(pattern: str) -> str | None:
+    """Why a pattern's ``{a,b}`` group is refused, None when it has
+    none or every group is well formed: a group holds a comma, no
+    space, no other group, no empty member and no ``*``, and expands to
+    at most 64 patterns.
+
+    Args:
+        pattern (str): the pattern as written in the document.
+    """
+    answer = _expansion(pattern)
+    return answer if isinstance(answer, str) else None
 
 
 def split_pattern(pattern: str) -> tuple[str, ...]:

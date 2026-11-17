@@ -542,6 +542,18 @@ export interface Producer {
 export type PolicyDecisionKind = 'deny' | 'pending' | 'failed'
 
 /**
+ * What fired in a profile rule: the subcommand path and the options of
+ * the pattern that matched the line, or the line's own path when the
+ * allow list refused it. `command` is the command name and its canonical
+ * subcommands; `flags` the options by canonical spelling, empty when the
+ * pattern names none. Mirrors the Python `Matched`.
+ */
+export interface Matched {
+  readonly command: readonly string[]
+  readonly flags: readonly string[]
+}
+
+/**
  * Why a line did not run, for the caller that reads the result.
  *
  * stderr keeps bash's voice (`<cmd>: Permission denied`), which says
@@ -561,6 +573,8 @@ export interface PolicyDecision {
   readonly reason: string
   readonly policy: string
   readonly askId: string | null
+  /** What fired in the profile rule that refused, for `deny`; null for any other refusal. */
+  readonly matched?: Matched | null
 }
 
 export const VFSName = Object.freeze({

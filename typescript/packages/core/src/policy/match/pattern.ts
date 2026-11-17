@@ -13,7 +13,40 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fromUnits, units } from '../../rs/document.ts'
-import { admissionMatcher } from '../../rs/policy.ts'
+import { admissionMatcher, CACHE_SIZE } from '../../rs/policy.ts'
+
+const EXPANSIONS = new Map<string, readonly string[] | string>()
+
+function expansion(pattern: string): readonly string[] | string {
+  const hit = EXPANSIONS.get(pattern)
+  if (hit !== undefined) return hit
+  const answer = admissionMatcher(null).ask('expand_pattern', { pattern: units(pattern) })
+  const out = Array.isArray(answer) ? (answer as number[][]).map(fromUnits) : String(answer)
+  if (EXPANSIONS.size >= CACHE_SIZE) EXPANSIONS.clear()
+  EXPANSIONS.set(pattern, out)
+  return out
+}
+
+/**
+ * The patterns a written pattern stands for: each `{a,b}` group in a word
+ * gives one pattern per member, in order, so `gh pr {view,diff}` is `gh pr
+ * view` then `gh pr diff`. A pattern with no group, or one whose group the
+ * document would refuse, is itself.
+ */
+export function expandPattern(pattern: string): readonly string[] {
+  const answer = expansion(pattern)
+  return typeof answer === 'string' ? [pattern] : answer
+}
+
+/**
+ * Why a pattern's `{a,b}` group is refused, null when it has none or every
+ * group is well formed: a group holds a comma, no space, no other group,
+ * no empty member and no `*`, and expands to at most 64 patterns.
+ */
+export function groupProblem(pattern: string): string | null {
+  const answer = expansion(pattern)
+  return typeof answer === 'string' ? answer : null
+}
 
 /**
  * A command pattern's tokens. Whitespace-split; trailing wildcards are

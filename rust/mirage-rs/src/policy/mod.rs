@@ -1,4 +1,4 @@
-mod admission;
+pub(crate) mod admission;
 mod approvals;
 pub(crate) mod composition;
 pub(crate) mod pattern;
@@ -8,7 +8,7 @@ mod types;
 mod visibility;
 
 pub use admission::AdmissionMatcher;
-pub use pattern::{pattern_matches, pattern_reaches, split_pattern};
+pub use pattern::{expand_pattern, pattern_matches, pattern_reaches, split_pattern};
 pub use types::*;
 
 pub use profile::{compile_profile, restrict_profile};

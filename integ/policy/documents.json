@@ -6,14 +6,16 @@
       "where": "commands.deny",
       "value": [
         {
-          "commands": {
-            "z": [
-              "/z"
-            ],
-            "a": [
-              "/a"
-            ]
-          }
+          "command": "z",
+          "paths": [
+            "/z"
+          ]
+        },
+        {
+          "command": "a",
+          "paths": [
+            "/a"
+          ]
         }
       ],
       "options": {

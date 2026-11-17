@@ -14,7 +14,7 @@ from mirage.cli.client import DaemonClient
 from mirage.cli.output import error_message, exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.constants import INTERRUPTED_STATUS
-from mirage.types import PolicyDecision
+from mirage.types import Matched, PolicyDecision
 from mirage.workspace.tools.io_text import decision_line
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,19 @@ def decision_of(result: dict[str, Any] | None) -> PolicyDecision | None:
         result (dict[str, Any] | None): the completion's result.
     """
     decision = (result or {}).get("decision")
-    return PolicyDecision(**decision) if isinstance(decision, dict) else None
+    if not isinstance(decision, dict):
+        return None
+    matched = decision.get("matched")
+    return PolicyDecision(
+        **{
+            **decision,
+            "matched": Matched(
+                tuple(matched["command"]), tuple(matched["flags"])
+            )
+            if isinstance(matched, dict)
+            else None,
+        }
+    )
 
 
 async def stream_shell(

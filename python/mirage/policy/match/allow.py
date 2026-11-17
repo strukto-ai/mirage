@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.pattern import pattern_matches
+from mirage.policy.match.pattern import expand_pattern, pattern_matches
 from mirage.policy.types import AdmissionRules, CommandContext
 from mirage.rs.document import units
 from mirage.rs.policy import admission_matcher
@@ -64,7 +64,11 @@ def runs(name: str, rules: AdmissionRules | None) -> bool:
         and rule.mount in ("", "/")
         and (
             not rule.commands
-            or any(pattern_matches(p, (name,)) for p in rule.commands)
+            or any(
+                pattern_matches(p, (name,))
+                for written in rule.commands
+                for p in expand_pattern(written)
+            )
         )
         for rule in rules.deny
     )

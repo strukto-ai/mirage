@@ -39,13 +39,14 @@ import {
   METHODS,
   PROGRAM_RUNTIME,
 } from './constants.ts'
-import type {
-  AdmissionRules,
-  CommandRule,
-  HideReason,
-  ProfileScript,
-  ProfileScripts,
-  ScriptMethod,
+import {
+  type AdmissionRules,
+  AllowFlags,
+  type CommandRule,
+  type HideReason,
+  type ProfileScript,
+  type ProfileScripts,
+  type ScriptMethod,
 } from './types.ts'
 
 /**
@@ -86,10 +87,12 @@ export interface VarsBlock {
  * every line of a body passes the gate itself. `ask` rules are admitted
  * only with a host approval; `deny` rules refuse with a reason. A bare
  * string in either is one command pattern with the default reason.
- * `allow` null or absent (unstated) allows everything.
+ * `allow` null or absent (unstated) allows everything; an entry is a
+ * pattern, or `{command, flags}`, which runs the command only with options
+ * from the set.
  */
 export interface CommandsBlock {
-  readonly allow?: readonly string[] | null
+  readonly allow?: readonly (string | AllowFlags)[] | null
   readonly ask?: readonly CommandRule[]
   readonly deny?: readonly CommandRule[]
 }
@@ -316,22 +319,37 @@ function underMount(entries: readonly string[], root: string, where: string): vo
 /**
  * Coerce a `deny` or `ask` list to its rules. A bare string is one
  * command pattern over the whole line, with the arm's default reason. A
- * mapping carries `reason` (defaulting) and exactly one of: `commands`
- * as a list, a whole-line rule on each pattern; `commands` as a mapping,
- * each command pattern on its own paths (one command to many paths, one
- * rule per command); `paths` alone, a path rule on every command. A list
- * of commands beside a list of paths is refused, because it does not say
- * which command the paths belong to, and a rule naming neither is
- * refused rather than read as "every command".
+ * mapping carries `reason` (defaulting) and exactly one of: `commands`, a
+ * whole-line rule on each pattern; `command` with `paths`, one pattern on
+ * those paths; `paths` alone, a path rule on every command. A list of
+ * commands beside a list of paths is refused, because it does not say
+ * which command the paths belong to, and a rule naming neither is refused
+ * rather than read as "every command".
  */
 function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
   const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
   return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
 }
 
-function parseAllow(raw: unknown, where: string): readonly string[] | null {
+/**
+ * Coerce `commands.allow` to its entries: a pattern string, or a
+ * `{command, flags}` entry that runs the command only with options from
+ * the set.
+ */
+function parseAllow(raw: unknown, where: string): readonly (string | AllowFlags)[] | null {
   if (raw === undefined || raw === null) return null
-  return stringList(raw, `${where}.allow`, 'a command')
+  const written = Array.isArray(raw)
+    ? raw.map((entry: unknown) =>
+        entry instanceof AllowFlags ? { command: entry.command, flags: [...entry.flags] } : entry,
+      )
+    : raw
+  const entries = validateDocument('allow', written, `${where}.allow`) as (
+    | string
+    | { command: string; flags: string[] }
+  )[]
+  return entries.map((entry) =>
+    typeof entry === 'string' ? entry : new AllowFlags(entry.command, entry.flags),
+  )
 }
 
 /** Validate a `paths:` block. Every entry is absolute or a name pattern. */
@@ -744,25 +762,27 @@ function pathsDoc(block: PathsBlock): Record<string, unknown> {
 
 function commandsDoc(block: CommandsBlock | MountCommandsBlock): Record<string, unknown> {
   const doc: Record<string, unknown> = {
-    ask: (block.ask ?? []).map(ruleDoc),
-    deny: (block.deny ?? []).map(ruleDoc),
+    ask: (block.ask ?? []).flatMap(ruleDocs),
+    deny: (block.deny ?? []).flatMap(ruleDocs),
   }
-  if ('allow' in block && block.allow != null) doc.allow = [...block.allow]
+  if ('allow' in block && block.allow != null)
+    doc.allow = block.allow.map((entry) =>
+      typeof entry === 'string' ? entry : { command: entry.command, flags: [...entry.flags] },
+    )
   return doc
 }
 
-function ruleDoc(rule: CommandRule): Record<string, unknown> {
+/**
+ * A rule as document entries. One naming commands and paths is written
+ * one command per entry, each on the rule's paths, which admits exactly
+ * what the one rule did.
+ */
+function ruleDocs(rule: CommandRule): Record<string, unknown>[] {
   const commands = rule.commands ?? []
   const paths = rule.paths ?? []
-  // A rule naming commands and paths is the mapping form, each command
-  // on the rule's paths; it reads back as one rule per command, which
-  // admits exactly what the one rule did.
   if (commands.length > 0 && paths.length > 0) {
-    return {
-      reason: rule.reason,
-      commands: Object.fromEntries(commands.map((c) => [c, [...paths]])),
-    }
+    return commands.map((command) => ({ reason: rule.reason, command, paths: [...paths] }))
   }
-  if (paths.length > 0) return { reason: rule.reason, paths: [...paths] }
-  return { reason: rule.reason, commands: [...commands] }
+  if (paths.length > 0) return [{ reason: rule.reason, paths: [...paths] }]
+  return [{ reason: rule.reason, commands: [...commands] }]
 }

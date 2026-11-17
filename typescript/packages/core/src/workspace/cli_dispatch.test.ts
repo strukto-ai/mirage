@@ -411,7 +411,7 @@ describe('policy cli fact', () => {
         profiles: {
           hides: { paths: hidden },
           wildcard: { paths: hidden, commands: { allow: ['*'] } },
-          other: { paths: hidden, commands: { allow: ['*', 'sl message read'] } },
+          other: { paths: hidden, commands: { allow: ['*', 'sl message send --to y'] } },
           named: { paths: hidden, commands: { allow: ['*', 'sl'] } },
         },
       },
@@ -455,7 +455,13 @@ describe('policy cli fact', () => {
               deny: [
                 {
                   reason: 'sealed',
-                  commands: { peek: ['/data/secret.txt'], later: ['/data/secret.txt'] },
+                  command: 'peek',
+                  paths: ['/data/secret.txt'],
+                },
+                {
+                  reason: 'sealed',
+                  command: 'later',
+                  paths: ['/data/secret.txt'],
                 },
               ],
             },
@@ -723,7 +729,7 @@ describe('a session hides reach what a CLI prints', () => {
             commands: { allow: ['*', 'shelf'] },
           },
           sealed: SessionProfile({
-            commands: { deny: [{ reason: 'sealed', commands: { shelf: ['/data'] } }] },
+            commands: { deny: [{ reason: 'sealed', command: 'shelf', paths: ['/data'] }] },
           }),
         },
       },
