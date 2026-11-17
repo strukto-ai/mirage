@@ -34,6 +34,7 @@ import {
   runWithSession,
 } from '../context/session_context.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
+import { yieldBytes } from '../io/stream.ts'
 import { enotsup } from '../errors/fs.ts'
 import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
@@ -450,10 +451,7 @@ describe('workspaceBridge append on a mount with no append', () => {
         asked.push({ ...kwargs })
         if (stored.read !== undefined) throw stored.read
         if (stored.body === null) throw Object.assign(new Error('nope'), { code: 'ENOENT' })
-        const body = stored.body
-        return (async function* () {
-          yield body
-        })()
+        return yieldBytes(stored.body)
       }
       if (name === 'write') {
         const body = (args ?? [])[0] as ByteSource
