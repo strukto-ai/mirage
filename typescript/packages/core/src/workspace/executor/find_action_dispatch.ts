@@ -48,7 +48,7 @@ import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { shellQuoteAlways } from '../../utils/quote.ts'
+import { quoteArg, shellQuoteAlways } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import type { StatPath } from '../../view/types.ts'
@@ -162,6 +162,8 @@ async function runExec(
   stdin: SharedStdin | null,
   where: string | null,
   signal: AbortSignal | undefined,
+  // Whether the line runs under a UTF-8 locale.
+  utf8 = false,
 ): Promise<IOResult> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
@@ -173,7 +175,7 @@ async function runExec(
   if (missing) {
     return new IOResult({
       exitCode: 1,
-      stderr: encodeText(`find: '${head}': No such file or directory\n`),
+      stderr: encodeText(`find: ${quoteArg(head, utf8)}: No such file or directory\n`),
     })
   }
   // A function or alias of the head's name is invisible to execvp, so the
@@ -248,10 +250,11 @@ async function rowStat(
   vfs: Files | null,
   statPath: StatPath | null,
   errors: Uint8Array[],
+  utf8 = false,
 ): Promise<FileStat | null> {
-  const path = ps.rawPath || ps.virtual
+  const shown = ps.rawPath || ps.virtual
   if (statPath === null) {
-    errors.push(encodeText(`find: '${path}': no stat function\n`))
+    errors.push(encodeText(`find: ${quoteArg(shown, utf8)}: no stat function\n`))
     return null
   }
   const link = linkView(vfs ?? undefined)?.statAt(ps.virtual) ?? null
@@ -263,11 +266,11 @@ async function rowStat(
     // reason there (`frozen`, not the `Permission denied` its EACCES
     // code would spell).
     const why = err instanceof PolicyDenied ? err.message : strerrorOf(err)
-    errors.push(encodeText(`find: '${path}': ${why}\n`))
+    errors.push(encodeText(`find: ${quoteArg(shown, utf8)}: ${why}\n`))
     return null
   }
   if (st === null) {
-    errors.push(encodeText(`find: '${path}': ${posixPhrase('ENOENT')}\n`))
+    errors.push(encodeText(`find: ${quoteArg(shown, utf8)}: ${posixPhrase('ENOENT')}\n`))
     return null
   }
   return st
@@ -388,7 +391,7 @@ export async function openFindFiles(
     try {
       await dispatch('write', fileSpec(file, cwd), [new Uint8Array()])
     } catch (err) {
-      return encodeText(`find: '${file}': ${strerrorOf(err)}\n`)
+      return encodeText(`find: ${quoteArg(file, expr.utf8)}: ${strerrorOf(err)}\n`)
     }
   }
   return null
@@ -424,7 +427,7 @@ export async function runListedFind(
     return new IOResult({
       exitCode: 1,
       stderr: encodeText(
-        `find: extra operand ${shellQuoteAlways(typed[0] ?? '')}\n` +
+        `find: extra operand ${quoteArg(typed[0] ?? '', expr.utf8)}\n` +
           'find: file operands cannot be combined with -files0-from\n',
       ),
     })
@@ -447,7 +450,7 @@ export async function runListedFind(
     return new IOResult({
       exitCode: 1,
       stderr: encodeText(
-        `find: cannot open ${shellQuoteAlways(source)} for reading: ${strerrorOf(err)}\n`,
+        `find: cannot open ${quoteArg(source, expr.utf8)} for reading: ${strerrorOf(err)}\n`,
       ),
     })
   }
@@ -485,14 +488,16 @@ export async function runListedFind(
 /**
  * Write what `-fprint`, `-fprint0`, `-fprintf` and `-fls` collected, each
  * file once; `moved` says an `-exec` child ran, which may have moved or
- * removed a file. Returns find's line for each file it could not write,
- * empty when every one was written. Mirrors Python's `_write_files`.
+ * removed a file, and `utf8` that the line runs under a UTF-8 locale.
+ * Returns find's line for each file it could not write, empty when every one
+ * was written. Mirrors Python's `_write_files`.
  */
 async function writeFiles(
   sinks: Map<string, Uint8Array[]>,
   cwd: string,
   dispatch: DispatchFn | null,
   moved: boolean,
+  utf8 = false,
 ): Promise<Uint8Array> {
   const failed: Uint8Array[] = []
   for (const [file, rows] of sinks) {
@@ -513,7 +518,7 @@ async function writeFiles(
     try {
       await dispatch('write', spec, [concat(rows)])
     } catch (err) {
-      failed.push(encodeText(`find: '${file}': ${strerrorOf(err)}\n`))
+      failed.push(encodeText(`find: ${quoteArg(file, utf8)}: ${strerrorOf(err)}\n`))
     }
   }
   return concat(failed)
@@ -727,7 +732,7 @@ export async function applyFindActions(
       // held from there, as GNU stats a row once.
       let known =
         stats && (statted || startVirtuals.has(match.virtual))
-          ? await rowStat(match, vfs, statPath, [])
+          ? await rowStat(match, vfs, statPath, [], expr.utf8)
           : null
       for (const [position, action] of actions.entries()) {
         const formatter = formatters.get(position)
@@ -755,12 +760,13 @@ export async function applyFindActions(
             once,
             where,
             signal,
+            expr.utf8,
           )
           yield* ran(run)
           if (run.exitCode !== 0) break
         } else if (readsStat(action)) {
           if (known === null) {
-            known = await rowStat(match, vfs, statPath, errors)
+            known = await rowStat(match, vfs, statPath, errors, expr.utf8)
             heard()
           }
           if (known === null) {
@@ -811,6 +817,7 @@ export async function applyFindActions(
           once,
           where,
           signal,
+          expr.utf8,
         )
         try {
           yield* ran(run)
@@ -827,7 +834,7 @@ export async function applyFindActions(
     try {
       for (const engine of formatters.values()) engine.close()
       if (walked) {
-        const unwritten = await writeFiles(sinks, cwd, dispatch, hasExec)
+        const unwritten = await writeFiles(sinks, cwd, dispatch, hasExec, expr.utf8)
         put(Channel.STDERR, unwritten)
         failed ||= unwritten.byteLength > 0
       }

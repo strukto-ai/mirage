@@ -68,6 +68,35 @@ def _ps_pids(value: str, option: str) -> set[int]:
     return pids
 
 
+def _ps_names(value: str, option: str) -> set[str]:
+    """One ``-C`` list of command names, refused in procps's words.
+
+    Args:
+        value (str): the list, comma or blank separated.
+        option (str): the option as typed, for the missing-list error.
+    """
+    if not value:
+        raise ValueError(f"list of command names must follow {option}")
+    names: set[str] = set()
+    for item in value.split(","):
+        if not item.strip():
+            raise ValueError("improper list")
+        names.update(item.split())
+    return names
+
+
+def _comm(command: str) -> str:
+    """A command line's name as procps keeps it: the program's base name,
+    cut to 15 characters.
+
+    Args:
+        command (str): the command line.
+    """
+    words = command.split()
+    head = words[0] if words else ""
+    return head.rsplit("/", 1)[-1][: constants.COMM_WIDTH]
+
+
 def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
     """One ``-o`` list: ``key`` or ``key=header``, refused in procps's words.
 
@@ -97,8 +126,8 @@ def _parse_ps(words: list[str]) -> PsOptions:
     """Parse the procps selection and output options a runner answers.
 
     SysV letters after one dash, BSD letters with none, and the
-    ``--pid``/``--format``/``--forest``/``--machine`` long forms; ``-p`` and ``-o``
-    repeat and accumulate. BSD ``f`` and ``--forest`` draw the forest;
+    ``--pid``/``--format``/``--forest``/``--machine`` long forms; ``-p``,
+    ``-C`` and ``-o`` repeat and accumulate. BSD ``f`` and ``--forest`` draw the forest;
     ``-f`` and BSD ``u``/``w`` pick a layout the processes do not have,
     so they leave the plain one.
 
@@ -106,6 +135,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
         words (list[str]): arguments after ps.
     """
     pids: set[int] = set()
+    names: set[str] = set()
     columns: list[tuple[str, str]] = []
     select_all = False
     forest = False
@@ -145,7 +175,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
                 continue
             if flag == "f":
                 continue
-            if flag not in "po":
+            if flag not in "pCo":
                 raise ValueError("unsupported SysV option")
             value, letters = letters, ""
             if not value:
@@ -153,10 +183,17 @@ def _parse_ps(words: list[str]) -> PsOptions:
                 at += 1
             if flag == "p":
                 pids |= _ps_pids(value, "-p")
+            elif flag == "C":
+                names |= _ps_names(value, "-C")
             else:
                 columns += _ps_columns(value, "-o")
     return PsOptions(
-        frozenset(pids), select_all, tuple(columns), forest, machine
+        frozenset(pids),
+        select_all,
+        tuple(columns),
+        forest,
+        machine,
+        frozenset(name[: constants.COMM_WIDTH] for name in names),
     )
 
 
@@ -281,8 +318,7 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
         )
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
-        head = info.command.split()[0] if info.command.split() else ""
-        return branch + head.rsplit("/", 1)[-1][:15]
+        return branch + _comm(info.command)
     if fact in ("user", "group"):
         own = info.session_id == ctx.session_id
         return (ctx.group if own else None) or UNKNOWN_NAME
@@ -439,7 +475,9 @@ async def handle_ps(
     (``constants.COLUMNS``), ``machine`` among them; a
     header row prints unless every header is empty. BSD ``f`` and
     ``--forest`` draw each command under its parent's. A ``-p`` number
-    is a pid as ``ps`` shows it. Selecting nothing (``-p`` of
+    is a pid as ``ps`` shows it; a ``-C`` name selects the processes
+    whose command name, cut to 15 characters as procps keeps it, is
+    the name cut the same way. ``-p`` and ``-C`` add up. Selecting nothing (``-p`` of
     an absent PID) exits 1, as procps does, and an option error is
     procps's message and usage. A program's CPU and memory columns are
     what the scan read of it (``USAGE_FACTS``); Mirage's own processes
@@ -462,7 +500,7 @@ async def handle_ps(
         return job_result(cmd_str, f"error: {exc}\n{constants.USAGE}", 1)
     sid = session_of(session)
     await job_table.processes.scan()
-    every = options.all or not options.pids
+    every = options.all or not (options.pids or options.names)
     caller = current_caller()
     runner = caller.process
     node = session._line_node if session is not None else None
@@ -477,7 +515,11 @@ async def handle_ps(
     rows = [
         info
         for info in listed
-        if (every or info.shown_pid in options.pids)
+        if (
+            every
+            or info.shown_pid in options.pids
+            or _comm(info.command) in options.names
+        )
         and on_machine(info, options.machine)
     ]
     columns = options.columns or constants.PLAIN

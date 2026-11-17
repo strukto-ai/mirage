@@ -26,6 +26,8 @@ export interface PsOptions {
   readonly columns: readonly (readonly [string, string])[]
   readonly forest: boolean
   readonly machine: string | null
+  /** `-C` selection, each name cut to the 15 characters procps keeps of a command name. */
+  readonly names: ReadonlySet<string>
 }
 
 /**

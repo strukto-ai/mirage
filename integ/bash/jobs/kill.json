@@ -71,6 +71,41 @@
       }
     },
     {
+      "id": "job_ps_selects_by_command_name",
+      "seq": 502430,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 5 & p=$!; ps -C sleep -o comm=; ps -C nosuch -o comm=; echo none=$?; ps -C \"\" -o comm= 2>&1 | head -1; ps -C sleep,,x -o comm= 2>&1 | head -1; kill \"$p\"; wait \"$p\" 2>/dev/null || :)",
+      "expect": {
+        "exit": 0,
+        "stdout": "sleep\nnone=1\nerror: list of command names must follow -C\nerror: improper list\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "job_ps_missing_pid_exits_one",
       "seq": 502407,
       "targets": [

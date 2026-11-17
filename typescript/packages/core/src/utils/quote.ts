@@ -111,6 +111,23 @@ function quote(name: string, style: string, hide = false): string {
   }
 }
 
+/**
+ * A word as gnulib's `quote()` writes it into a diagnostic, quotes included:
+ * between `‘` and `’` under a UTF-8 locale, a valid character as itself and a
+ * control, a backslash or a byte that is no UTF-8 escaped; in the C locale
+ * between `'` and `'`, an apostrophe, a backslash and every byte outside
+ * printable ASCII escaped. Mirrors Python's `quote_arg`.
+ */
+export function quoteArg(text: string, utf8 = false): string {
+  const stream = openStreamSync('quote', { style: 'arg', utf8 })
+  try {
+    stream.feed(encodeText(text))
+    return decodeText(stream.finish())
+  } finally {
+    stream.close()
+  }
+}
+
 // Whether a command reports its path operands shell-quoted.
 export function quotesOperands(cmdName: string): boolean {
   return SHELL_QUOTED_COMMANDS.has(cmdName)

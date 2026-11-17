@@ -204,21 +204,21 @@
           "command": "free | grep -c '^Mem:'",
           "expect": {
             "exit": 0,
-            "stdout": "2\n"
+            "stdout": "1\n"
           }
         },
         {
-          "command": "free -m | awk '/^Mem:/ && !/mirage$/{exit !($2 > 0)}'; echo $?",
+          "command": "free | head -1",
+          "expect": {
+            "exit": 0,
+            "stdout": "               total        used        free      shared  buff/cache   available\n"
+          }
+        },
+        {
+          "command": "free -m | awk '/^Mem:/{exit !($2 > 0 && NF == 7)}'; echo $?",
           "expect": {
             "exit": 0,
             "stdout": "0\n"
-          }
-        },
-        {
-          "command": "free -m | awk '/^Mem:/ && /mirage$/{print $2, $5, $6}'",
-          "expect": {
-            "exit": 0,
-            "stdout": "96 - -\n"
           }
         },
         {

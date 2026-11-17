@@ -48,6 +48,67 @@ describe('handlePs', () => {
     expect(decode(out as Uint8Array)).toBe(`${HEADER}\n${row(job.pid, 'sleep')}\n`)
   })
 
+  it.each([
+    [['-C', 'sleep']],
+    [['-Csleep']],
+    [['-C', 'nosuch,sleep']],
+    [['-C', 'nosuch sleep']],
+    [['-C', 'nosuch', '-C', 'sleep']],
+  ])('selects by command name: %j', async (args) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command: 'sleep', run: pendingRun(abort), abort, cwd: '/' })
+    const other = new AbortController()
+    await jt.submit({ command: 'foo 1', run: pendingRun(other), abort: other, cwd: '/' })
+    const [out, io] = await handlePs(jt, ['ps', ...args])
+    expect([decode(out as Uint8Array), io.exitCode]).toEqual([
+      `${HEADER}\n${row(job.pid, 'sleep')}\n`,
+      0,
+    ])
+  })
+
+  it('adds a name selection to a pid selection', async () => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const job = await jt.submit({ command: 'sleep', run: pendingRun(abort), abort, cwd: '/' })
+    const other = new AbortController()
+    const foo = await jt.submit({
+      command: 'foo 1',
+      run: pendingRun(other),
+      abort: other,
+      cwd: '/',
+    })
+    const [out] = await handlePs(jt, ['ps', '-C', 'foo', '-p', String(job.pid), '-o', 'pid,comm'])
+    expect(
+      decode(out as Uint8Array)
+        .split('\n')
+        .slice(1, 3),
+    ).toEqual([`${String(job.pid).padStart(7)} sleep`, `${String(foo.pid).padStart(7)} foo`])
+  })
+
+  // procps keeps 15 characters of a command's name and compares a -C name cut
+  // the same way; a path or another case is no match.
+  it.each([
+    ['abcdefghijklmnopqrst', true],
+    ['abcdefghijklmno', true],
+    ['abcdefghijklmnop', true],
+    ['/bin/abcdefghijklmnopqrst', false],
+    ['ABCDEFGHIJKLMNO', false],
+    ['abcdefghijklmn', false],
+  ] as const)('compares the name procps keeps: %s', async (name, found) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    await jt.submit({
+      command: '/bin/abcdefghijklmnopqrst 30',
+      run: pendingRun(abort),
+      abort,
+      cwd: '/',
+    })
+    const [out, io] = await handlePs(jt, ['ps', '-C', name, '-o', 'comm'])
+    const rows = found ? ['COMMAND', 'abcdefghijklmno', ''] : ['COMMAND', '']
+    expect([decode(out as Uint8Array).split('\n'), io.exitCode]).toEqual([rows, found ? 0 : 1])
+  })
+
   it('prints its header alone when no job is running', async () => {
     const jt = new JobTable()
     const [out, io] = await handlePs(jt, ['ps'])
@@ -226,6 +287,12 @@ it.each([
   [['-o', 'pid,,cmd'], 'improper format list'],
   [['-o', 'foo'], 'unknown user-defined format specifier "foo"'],
   [['-o', '='], 'unknown user-defined format specifier ""'],
+  [['-C'], 'list of command names must follow -C'],
+  [['-C', ''], 'list of command names must follow -C'],
+  [['-C', 'sleep,,foo'], 'improper list'],
+  [['-C', ','], 'improper list'],
+  [['-C', ' '], 'improper list'],
+  [['--command', 'sleep'], 'unknown gnu long option'],
   [['-K'], 'unsupported SysV option'],
   [['--bogus'], 'unknown gnu long option'],
   [['bogus'], 'unsupported option (BSD syntax)'],

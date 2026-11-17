@@ -387,3 +387,114 @@ it.each([
   await ws.close()
   expect([io.stdoutText, io.stderrText]).toEqual([stdout, ''])
 })
+
+const REGEX_TYPES = [
+  'findutils-default',
+  'ed',
+  'emacs',
+  'gnu-awk',
+  'grep',
+  'posix-awk',
+  'awk',
+  'posix-basic',
+  'posix-egrep',
+  'egrep',
+  'posix-extended',
+  'posix-minimal-basic',
+  'sed',
+]
+
+function quotedTypes(open: string, close: string): string {
+  return REGEX_TYPES.map((name) => `${open}${name}${close}`).join(', ')
+}
+
+// Pinned on debian:stable-slim findutils under LANG=C and LANG=C.UTF-8: a
+// word gnulib's quote() names goes between curly quotes under UTF-8, while a
+// quote the message itself spells (`-name', '-not') stays ASCII.
+describe('find quotes a word as the locale does', () => {
+  it.each([
+    [
+      'find nosuch',
+      "find: 'nosuch': No such file or directory",
+      'find: ‘nosuch’: No such file or directory',
+    ],
+    [
+      'find "it\'s"',
+      "find: 'it\\'s': No such file or directory",
+      "find: ‘it's’: No such file or directory",
+    ],
+    [
+      "find 'a\\b'",
+      "find: 'a\\\\b': No such file or directory",
+      'find: ‘a\\\\b’: No such file or directory',
+    ],
+    [
+      'find é',
+      "find: '\\303\\251': No such file or directory",
+      'find: ‘é’: No such file or directory',
+    ],
+    [
+      'find . -maxdepth x',
+      "find: Expected a positive decimal integer argument to -maxdepth, but got 'x'",
+      'find: Expected a positive decimal integer argument to -maxdepth, but got ‘x’',
+    ],
+    ['find . -perm zz', "find: invalid mode 'zz'", 'find: invalid mode ‘zz’'],
+    [
+      'find . -links x',
+      "find: non-numeric argument to -links: 'x'",
+      'find: non-numeric argument to -links: ‘x’',
+    ],
+    [
+      'find . -regextype bogus',
+      `find: Unknown regular expression type 'bogus'; valid types are ${quotedTypes("'", "'")}.`,
+      `find: Unknown regular expression type ‘bogus’; valid types are ${quotedTypes('‘', '’')}.`,
+    ],
+    [
+      'find . -newer nosuch',
+      "find: 'nosuch': No such file or directory",
+      'find: ‘nosuch’: No such file or directory',
+    ],
+    [
+      'find . -newermt bogusdate',
+      "find: I cannot figure out how to interpret 'bogusdate' as a date or time",
+      'find: I cannot figure out how to interpret ‘bogusdate’ as a date or time',
+    ],
+    [
+      'find . -maxdepth 0 -exec nosuchcmd \\;',
+      "find: 'nosuchcmd': No such file or directory",
+      'find: ‘nosuchcmd’: No such file or directory',
+    ],
+    [
+      'find -files0-from nosuch',
+      "find: cannot open 'nosuch' for reading: No such file or directory",
+      'find: cannot open ‘nosuch’ for reading: No such file or directory',
+    ],
+    [
+      'find . -fprint /nonexist/x',
+      "find: '/nonexist/x': No such file or directory",
+      'find: ‘/nonexist/x’: No such file or directory',
+    ],
+    ['find . -name', "find: missing argument to `-name'", "find: missing argument to `-name'"],
+    [
+      'find -not',
+      "find: expected an expression after '-not'",
+      "find: expected an expression after '-not'",
+    ],
+  ])('%s', async (line, c, utf8) => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      for (const [prefix, said] of [
+        ['', c],
+        ['export LANG=C.UTF-8; ', utf8],
+        ['LANG=C.UTF-8 ', utf8],
+        ['export LANG=C.UTF-8; LC_ALL=C ', c],
+      ] as const) {
+        const r = await ws.shell(prefix + line)
+        const code = line.includes('-exec') ? 0 : 1
+        expect([r.stderrText, r.exitCode], prefix).toEqual([`${said}\n`, code])
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+})

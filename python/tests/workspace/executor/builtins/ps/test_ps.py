@@ -51,6 +51,72 @@ async def test_ps_lists_only_the_running_jobs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-C", "sleep"],
+        ["-Csleep"],
+        ["-C", "nosuch,sleep"],
+        ["-C", "nosuch sleep"],
+        ["-C", "nosuch", "-C", "sleep"],
+    ],
+)
+async def test_ps_selects_by_command_name(args):
+    table = JobTable()
+    job = await submit_pending(table)
+    other = await submit_pending(table, command="foo 1")
+    out, io, _ = await handle_ps(table, ["ps", *args])
+    assert (out.decode(), io.exit_code) == (
+        f"{HEADER}\n{_row(job.pid, 'sleep')}\n",
+        0,
+    )
+    await table.kill(job.id)
+    await table.kill(other.id)
+
+
+# procps keeps 15 characters of a command's name and compares a -C name
+# cut the same way; a path or another case is no match.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,found",
+    [
+        ("abcdefghijklmnopqrst", True),
+        ("abcdefghijklmno", True),
+        ("abcdefghijklmnop", True),
+        ("/bin/abcdefghijklmnopqrst", False),
+        ("ABCDEFGHIJKLMNO", False),
+        ("abcdefghijklmn", False),
+    ],
+)
+async def test_ps_compares_the_name_procps_keeps(name, found):
+    table = JobTable()
+    job = await submit_pending(table, command="/bin/abcdefghijklmnopqrst 30")
+    out, io, _ = await handle_ps(table, ["ps", "-C", name, "-o", "comm"])
+    rows = ["COMMAND", "abcdefghijklmno"] if found else ["COMMAND"]
+    assert (out.decode().splitlines(), io.exit_code) == (
+        rows,
+        0 if found else 1,
+    )
+    await table.kill(job.id)
+
+
+@pytest.mark.asyncio
+async def test_ps_adds_a_name_selection_to_a_pid_selection():
+    table = JobTable()
+    job = await submit_pending(table)
+    other = await submit_pending(table, command="foo 1")
+    out, _, _ = await handle_ps(
+        table, ["ps", "-C", "foo", "-p", str(job.pid), "-o", "pid,comm"]
+    )
+    assert out.decode().splitlines()[1:] == [
+        f"{job.pid:>7} sleep",
+        f"{other.pid:>7} foo",
+    ]
+    await table.kill(job.id)
+    await table.kill(other.id)
+
+
+@pytest.mark.asyncio
 async def test_ps_prints_its_header_alone_when_no_job_is_running():
     out, io, _ = await handle_ps(JobTable(), ["ps"])
     assert (out, io.exit_code) == (f"{HEADER}\n".encode(), 1)
@@ -232,6 +298,12 @@ _PS_USAGE = (
         (["-o", "pid,,cmd"], b"improper format list"),
         (["-o", "foo"], b'unknown user-defined format specifier "foo"'),
         (["-o", "="], b'unknown user-defined format specifier ""'),
+        (["-C"], b"list of command names must follow -C"),
+        (["-C", ""], b"list of command names must follow -C"),
+        (["-C", "sleep,,foo"], b"improper list"),
+        (["-C", ","], b"improper list"),
+        (["-C", " "], b"improper list"),
+        (["--command", "sleep"], b"unknown gnu long option"),
         (["-K"], b"unsupported SysV option"),
         (["--bogus"], b"unknown gnu long option"),
         (["bogus"], b"unsupported option (BSD syntax)"),

@@ -16,6 +16,7 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import CycleError
+from mirage.utils.quote import quote_arg
 from mirage.view.types import StatPath
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
@@ -23,23 +24,29 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 
 
-def missing_reference_line(ref: str) -> bytes:
+def missing_reference_line(ref: str, utf8: bool = False) -> bytes:
     """GNU's line for a ``-newer`` reference that does not exist.
 
     Args:
         ref (str): the reference as typed.
+        utf8 (bool): the line runs under a UTF-8 locale.
     """
-    return encode_text(f"find: '{ref}': No such file or directory\n")
+    return encode_text(
+        f"find: {quote_arg(ref, utf8)}: No such file or directory\n"
+    )
 
 
-def loop_reference_line(ref: str) -> bytes:
+def loop_reference_line(ref: str, utf8: bool = False) -> bytes:
     """GNU's line for a ``-newer`` reference that is a symlink loop,
     under a policy that follows it.
 
     Args:
         ref (str): the reference as typed.
+        utf8 (bool): the line runs under a UTF-8 locale.
     """
-    return encode_text(f"find: '{ref}': Too many levels of symbolic links\n")
+    return encode_text(
+        f"find: {quote_arg(ref, utf8)}: Too many levels of symbolic links\n"
+    )
 
 
 async def reference_stat(
@@ -94,6 +101,7 @@ async def resolve_newer_refs(
     stat_path: StatPath,
     namespace: Namespace | None = None,
     follow: bool = False,
+    utf8: bool = False,
 ) -> tuple[list[float], bytes | None]:
     """Each ``-newer FILE`` reference's modification time.
 
@@ -117,6 +125,7 @@ async def resolve_newer_refs(
         follow (bool): whether the leading ``-H``/``-L`` follows a
             reference that is a symlink; ``-P``, the default, reads the
             link itself.
+        utf8 (bool): the line runs under a UTF-8 locale.
 
     Returns:
         The times in epoch seconds and None, or an empty list and the
@@ -129,9 +138,9 @@ async def resolve_newer_refs(
         try:
             stat = await reference_stat(virtual, stat_path, namespace, follow)
         except CycleError:
-            return [], loop_reference_line(ref)
+            return [], loop_reference_line(ref, utf8)
         if stat is None:
-            return [], missing_reference_line(ref)
+            return [], missing_reference_line(ref, utf8)
         # A reference with no reported mtime is never "older" than
         # anything: the epoch bound admits every dated entry, which is
         # the most a backend without times can honestly say.

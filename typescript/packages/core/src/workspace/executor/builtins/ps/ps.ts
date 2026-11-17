@@ -50,6 +50,23 @@ function psPids(value: string, option: string): number[] {
   })
 }
 
+/** One `-C` list of command names, refused in procps's words. */
+function psNames(value: string, option: string): string[] {
+  if (value === '') throw new Error(`list of command names must follow ${option}`)
+  const names: string[] = []
+  for (const item of value.split(',')) {
+    if (item.trim() === '') throw new Error('improper list')
+    for (const name of item.split(/\s+/)) if (name !== '') names.push(name)
+  }
+  return names
+}
+
+/** A command line's name as procps keeps it: the program's base name, cut to 15 characters. */
+function comm(command: string): string {
+  const head = command.split(/\s+/).find((word) => word !== '') ?? ''
+  return (head.split('/').pop() ?? '').slice(0, constants.COMM_WIDTH)
+}
+
 /** One `-o` list: `key` or `key=header`, refused in procps's words. */
 function psColumns(value: string, option: string): [string, string][] {
   if (value.trim() === '') throw new Error(`format specification must follow ${option}`)
@@ -70,8 +87,8 @@ function psColumns(value: string, option: string): [string, string][] {
 /**
  * Parse the procps selection and output options a runner answers: SysV
  * letters after one dash, BSD letters with none, and the
- * `--pid`/`--format`/`--forest` long forms; `-p` and `-o` repeat and
- * accumulate. BSD `f` and `--forest` draw the forest; `-f` and BSD `u`/`w`
+ * `--pid`/`--format`/`--forest`/`--machine` long forms; `-p`, `-C` and `-o`
+ * repeat and accumulate. BSD `f` and `--forest` draw the forest; `-f` and BSD `u`/`w`
  * pick a layout the processes do not have, so they leave the plain one.
  */
 function parsePs(words: string[]): PsOptions {
@@ -79,6 +96,7 @@ function parsePs(words: string[]): PsOptions {
   const select = (picked: number[]) => {
     for (const pid of picked) pids.add(pid)
   }
+  const names = new Set<string>()
   const columns: [string, string][] = []
   let all = false
   let forest = false
@@ -116,14 +134,16 @@ function parsePs(words: string[]): PsOptions {
         continue
       }
       if (flag === 'f') continue
-      if (flag !== 'p' && flag !== 'o') throw new Error('unsupported SysV option')
+      if (flag !== 'p' && flag !== 'C' && flag !== 'o') throw new Error('unsupported SysV option')
       const value = letters !== '' ? letters : (words[at++] ?? '')
       letters = ''
       if (flag === 'p') select(psPids(value, '-p'))
+      else if (flag === 'C')
+        for (const name of psNames(value, '-C')) names.add(name.slice(0, constants.COMM_WIDTH))
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, all, columns, forest, machine }
+  return { pids, all, columns, forest, machine, names }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -233,10 +253,7 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
       (info.id.pid === ctx.running && info.state === 'running' ? 'R' : constants.STATES[info.state])
     return state + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
-  if (fact === 'comm') {
-    const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
-    return branch + (head.split('/').pop() ?? '').slice(0, 15)
-  }
+  if (fact === 'comm') return branch + comm(info.command)
   if (fact === 'user' || fact === 'group') {
     return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
   }
@@ -334,7 +351,9 @@ function forest(rows: readonly Process[]): [Process, string][] {
  * process can answer (`constants.COLUMNS`), `machine` among them;
  * a header row prints unless every header is empty. BSD `f` and `--forest`
  * draw each command under its parent's. A `-p` number is a pid as `ps` shows
- * it. Selecting nothing (`-p` of an absent PID) exits 1, as
+ * it; a `-C` name selects the processes whose command name, cut to 15
+ * characters as procps keeps it, is the name cut the same way. `-p` and `-C`
+ * add up. Selecting nothing (`-p` of an absent PID) exits 1, as
  * procps does, and an option error is procps's message and usage. A process
  * has no CPU, RSS or TTY accounting, and ps never broadens the profile's
  * view.
@@ -357,7 +376,7 @@ export async function handlePs(
   }
   const sid = sessionOf(session)
   await jobTable.processes.scan()
-  const every = options.all || options.pids.size === 0
+  const every = options.all || (options.pids.size === 0 && options.names.size === 0)
   const [listed, running] = asBashRunsThem(
     jobTable.processes.visible(sid, grantsOf(session)),
     cmdStr,
@@ -367,7 +386,9 @@ export async function handlePs(
     currentCaller().traits,
   )
   const rows = listed.filter(
-    (info) => (every || options.pids.has(shownPid(info))) && onMachine(info, options.machine),
+    (info) =>
+      (every || options.pids.has(shownPid(info)) || options.names.has(comm(info.command))) &&
+      onMachine(info, options.machine),
   )
   const columns = options.columns.length > 0 ? options.columns : constants.PLAIN
   const keys = columns.map(([key]) => key)

@@ -302,10 +302,23 @@ function readCount(text: string): [number, string] {
 }
 
 /**
+ * The machines `free` answers for: one machine alone, as the real `free` on
+ * it prints, where the line names none; the workspace and an engine run in
+ * Mirage, so they join only an answer that already holds several machines,
+ * or a workspace that has none. Mirrors Python's `_answering`.
+ */
+function answering(scope: MachineScope): MachineScope {
+  if (scope.picked || scope.ids.length !== 1) return scope
+  return { ids: scope.ids, picked: false, several: false, workspace: false, engines: [] }
+}
+
+/**
  * Print the memory of the machines a line can use, in procps's columns,
  * `machineScope` choosing which; several print a row each with a `MACHINE`
- * column on the right, and are never added up. The workspace answers too, in
- * any workspace, with its `max_memory`. Mirrors Python's `handle_free`.
+ * column on the right, and are never added up. One machine answers alone,
+ * as the real `free` there does (`answering`). The workspace answers with its
+ * `max_memory` where it has no machine, beside several, or as
+ * `--machine mirage`. Mirrors Python's `handle_free`.
  */
 export async function handleFree(
   jobTable: JobTable,
@@ -346,8 +359,9 @@ export async function handleFree(
   const name = parse.flags.machine
   const named = typeof name === 'string' ? name : null
   const processes = jobTable.processes
-  const scope = machineScope(processes, named, true)
-  if (scope === null) return jobResult(cmdStr, `free: ${named ?? ''}: no such machine\n`, 1)
+  const found = machineScope(processes, named, true)
+  if (found === null) return jobResult(cmdStr, `free: ${named ?? ''}: no such machine\n`, 1)
+  const scope = answering(found)
   const options = freeOptions(units, parse.flags)
   const memory = memoryBudget()
   const [rows, errors] = await read(processes, scope, memory)

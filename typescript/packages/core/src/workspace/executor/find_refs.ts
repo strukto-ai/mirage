@@ -21,16 +21,18 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { quoteArg } from '../../utils/quote.ts'
 
-/** GNU's line for a `-newer` reference that does not exist. */
-export function missingReferenceLine(ref: string): Uint8Array {
-  return encodeText(`find: '${ref}': No such file or directory\n`)
+/** GNU's line for a `-newer` reference that does not exist; `utf8` says the
+ * line runs under a UTF-8 locale. */
+export function missingReferenceLine(ref: string, utf8 = false): Uint8Array {
+  return encodeText(`find: ${quoteArg(ref, utf8)}: No such file or directory\n`)
 }
 
 /** GNU's line for a `-newer` reference that is a symlink loop, under a
- * policy that follows it. */
-export function loopReferenceLine(ref: string): Uint8Array {
-  return encodeText(`find: '${ref}': Too many levels of symbolic links\n`)
+ * policy that follows it; `utf8` says the line runs under a UTF-8 locale. */
+export function loopReferenceLine(ref: string, utf8 = false): Uint8Array {
+  return encodeText(`find: ${quoteArg(ref, utf8)}: Too many levels of symbolic links\n`)
 }
 
 /**
@@ -75,7 +77,8 @@ export async function referenceStat(
  * reference that does not exist is GNU's error, exit 1, and no walk runs;
  * so is a symlink loop under `-H` or `-L`, in GNU's other words. `follow`
  * is whether the leading `-H`/`-L` follows a reference that is a symlink;
- * `-P`, the default, reads the link itself. Returns the times in epoch
+ * `-P`, the default, reads the link itself; `utf8` says the line runs under
+ * a UTF-8 locale. Returns the times in epoch
  * seconds and null, or an empty list and the error line for the first
  * reference that does not exist.
  */
@@ -86,6 +89,7 @@ export async function resolveNewerRefs(
   statPath: StatPath,
   namespace: Namespace | null = null,
   follow = false,
+  utf8 = false,
 ): Promise<[number[], Uint8Array | null]> {
   const times: number[] = []
   for (const ref of refs) {
@@ -95,10 +99,10 @@ export async function resolveNewerRefs(
     try {
       stat = await referenceStat(virtual, statPath, namespace, follow)
     } catch (err) {
-      if (err instanceof CycleError) return [[], loopReferenceLine(ref)]
+      if (err instanceof CycleError) return [[], loopReferenceLine(ref, utf8)]
       throw err
     }
-    if (stat === null) return [[], missingReferenceLine(ref)]
+    if (stat === null) return [[], missingReferenceLine(ref, utf8)]
     // A reference with no reported mtime is never "older" than anything:
     // the epoch bound admits every dated entry, which is the most a
     // backend without times can honestly say.

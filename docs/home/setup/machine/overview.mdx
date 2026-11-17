@@ -322,6 +322,8 @@ and for each machine. `uptime` and `top -b` answer for the machines. One answer
 prints what the real command prints. Several print a row each with the machine
 on the right, so a column you read by position stays where it is; `hostname`
 prints one name a line. Figures are never added up, as one program cannot use another machine's memory.
+With one machine, `free` answers for that machine alone, in the real `free`'s
+table, and `free --machine mirage` shows the workspace.
 
 ```bash
 $ nproc

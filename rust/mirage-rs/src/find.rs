@@ -18,6 +18,7 @@
 
 use serde_json::{Value as Json, json};
 
+use crate::quote::quote_arg;
 use crate::regex::parse::{Dialect, parse as compile_regex};
 use crate::scan_grammar::{OPERAND, Typed, Values, unknown};
 use crate::sort::number::strtod_prefix;
@@ -183,6 +184,10 @@ const REGEX_TYPES: &[(&[u8], Dialect, bool)] = &[
 
 type Fail = Vec<u8>;
 
+/// The option that says the line runs under a UTF-8 locale, where a word a
+/// diagnostic quotes goes between `‘` and `’`.
+const UTF8: &str = "utf8";
+
 fn say(parts: &[&[u8]]) -> Fail {
     parts.concat()
 }
@@ -244,21 +249,24 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-fn words(options: &[Typed]) -> Result<Vec<Vec<u8>>, StreamError> {
-    options
-        .iter()
-        .map(|(name, raw)| {
-            if name == OPERAND {
-                Ok(raw.clone())
-            } else {
-                Err(unknown("find", name))
-            }
-        })
-        .collect()
+/// The words typed, and whether the line runs under a UTF-8 locale.
+fn words(options: &[Typed]) -> Result<(Vec<Vec<u8>>, bool), StreamError> {
+    let mut argv = Vec::new();
+    let mut utf8 = false;
+    for (name, raw) in options {
+        if name == OPERAND {
+            argv.push(raw.clone());
+        } else if name == UTF8 {
+            utf8 = true;
+        } else {
+            return Err(unknown("find", name));
+        }
+    }
+    Ok((argv, utf8))
 }
 
 pub(crate) fn layout(options: &[Typed]) -> Result<Values, StreamError> {
-    let argv = words(options)?;
+    let (argv, _) = words(options)?;
     let mut values = Values::new();
     values.insert("start".to_owned(), json!(start_of(&argv)));
     values.insert("spans".to_owned(), json!(exec_spans(&argv)));
@@ -266,9 +274,9 @@ pub(crate) fn layout(options: &[Typed]) -> Result<Values, StreamError> {
 }
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
-    let argv = words(options)?;
+    let (argv, utf8) = words(options)?;
     let start = start_of(&argv);
-    let parsed = Parser::new(&argv[start..]).run()?;
+    let parsed = Parser::new(&argv[start..], utf8).run()?;
     let mut values = parsed.values();
     values.insert("start".to_owned(), json!(start));
     Ok(values)
@@ -690,6 +698,7 @@ impl Parsed {
 
 struct Parser<'a> {
     tokens: &'a [Vec<u8>],
+    utf8: bool,
     pos: usize,
     depth: usize,
     nested: usize,
@@ -715,9 +724,10 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Vec<u8>]) -> Self {
+    fn new(tokens: &'a [Vec<u8>], utf8: bool) -> Self {
         Parser {
             tokens,
+            utf8,
             pos: 0,
             depth: 0,
             nested: 0,
@@ -1066,15 +1076,15 @@ impl<'a> Parser<'a> {
                 let Some((_, dialect, extended)) =
                     REGEX_TYPES.iter().find(|(name, _, _)| *name == value)
                 else {
-                    let listed: Vec<String> = REGEX_TYPES
+                    let listed: Vec<Vec<u8>> = REGEX_TYPES
                         .iter()
-                        .map(|(name, _, _)| format!("'{}'", byte_text(name)))
+                        .map(|(name, _, _)| quote_arg(name, self.utf8))
                         .collect();
                     return Err(say(&[
-                        b"find: Unknown regular expression type '",
-                        value,
-                        b"'; valid types are ",
-                        listed.join(", ").as_bytes(),
+                        b"find: Unknown regular expression type ",
+                        &quote_arg(value, self.utf8),
+                        b"; valid types are ",
+                        &listed.join(&b", "[..]),
                         b".",
                     ]));
                 };
@@ -1084,11 +1094,11 @@ impl<'a> Parser<'a> {
             b"-type" => type_node(tok, value, Node::Type),
             b"-xtype" => type_node(tok, value, Node::XType),
             b"-perm" => {
-                let (mode, bits) = perm(value, &mut self.warnings)?;
+                let (mode, bits) = perm(value, self.utf8, &mut self.warnings)?;
                 Ok(Node::Perm { mode, bits })
             }
             b"-used" => {
-                let (cmp, count) = count(tok, value)
+                let (cmp, count) = count(tok, value, self.utf8)
                     .map_err(|_| say(&[b"find: Invalid argument ", value, b" to -used"]))?;
                 Ok(Node::Count {
                     field: "used",
@@ -1098,7 +1108,7 @@ impl<'a> Parser<'a> {
             }
             b"-fstype" => Ok(Node::FsType(value.to_vec())),
             b"-links" | b"-uid" | b"-gid" | b"-inum" => {
-                let (cmp, count) = count(tok, value)?;
+                let (cmp, count) = count(tok, value, self.utf8)?;
                 Ok(Node::Count {
                     field: match tok {
                         b"-links" => "links",
@@ -1125,7 +1135,8 @@ impl<'a> Parser<'a> {
                         id,
                         b" argument to ",
                         tok,
-                        b": ''",
+                        b": ",
+                        &quote_arg(b"", self.utf8),
                     ]));
                 }
                 Ok(Node::Owner {
@@ -1164,11 +1175,11 @@ impl<'a> Parser<'a> {
                 Ok(Node::True)
             }
             b"-maxdepth" => {
-                self.maxdepth = Some(depth(tok, value)?);
+                self.maxdepth = Some(depth(tok, value, self.utf8)?);
                 Ok(Node::True)
             }
             b"-mindepth" => {
-                self.mindepth = Some(depth(tok, value)?);
+                self.mindepth = Some(depth(tok, value, self.utf8)?);
                 Ok(Node::True)
             }
             b"-size" => {
@@ -1446,21 +1457,13 @@ fn type_node(flag: &[u8], value: &[u8], node: fn(u8) -> Node) -> Result<Node, Fa
 
 /// `-maxdepth` and `-mindepth`: a word of ASCII digits no larger than
 /// `INT_MAX`.
-fn depth(flag: &[u8], value: &[u8]) -> Result<u64, Fail> {
+fn depth(flag: &[u8], value: &[u8], utf8: bool) -> Result<u64, Fail> {
     if value.is_empty() || !value.iter().all(u8::is_ascii_digit) {
-        let mut quoted: Vec<u8> = Vec::new();
-        for &byte in value {
-            if byte == b'\'' {
-                quoted.push(b'\\');
-            }
-            quoted.push(byte);
-        }
         return Err(say(&[
             b"find: Expected a positive decimal integer argument to ",
             flag,
-            b", but got '",
-            &quoted,
-            b"'",
+            b", but got ",
+            &quote_arg(value, utf8),
         ]));
     }
     let digits = byte_text(value);
@@ -1558,8 +1561,15 @@ fn age(flag: &[u8], spec: &[u8]) -> Result<(u8, f64), Fail> {
 /// `-links`, `-uid` and `-gid`: a sign, then a whole number C's
 /// strtoumax reads to the end of the word, blanks before it allowed but
 /// a second sign that is a minus refused.
-fn count(flag: &[u8], spec: &[u8]) -> Result<(u8, u64), Fail> {
-    let refused = || say(&[b"find: non-numeric argument to ", flag, b": '", spec, b"'"]);
+fn count(flag: &[u8], spec: &[u8], utf8: bool) -> Result<(u8, u64), Fail> {
+    let refused = || {
+        say(&[
+            b"find: non-numeric argument to ",
+            flag,
+            b": ",
+            &quote_arg(spec, utf8),
+        ])
+    };
     let (cmp, body) = signed(spec);
     let digits = body.trim_ascii_start();
     let digits = digits.strip_prefix(b"+").unwrap_or(digits);
@@ -1591,8 +1601,8 @@ fn class_bits(who: u8) -> u32 {
 /// more operations, each `+`, `-` or `=` with letters from `rwxXst` or
 /// one class to copy. Nothing is masked: no umask applies to a mode
 /// that only compares.
-fn perm(spec: &[u8], warnings: &mut Vec<Vec<u8>>) -> Result<(u32, Bits), Fail> {
-    let invalid = || say(&[b"find: invalid mode '", spec, b"'"]);
+fn perm(spec: &[u8], utf8: bool, warnings: &mut Vec<Vec<u8>>) -> Result<(u32, Bits), Fail> {
+    let invalid = || say(&[b"find: invalid mode ", &quote_arg(spec, utf8)]);
     let (bits, body) = match spec.first() {
         Some(b'-') => (Bits::All, &spec[1..]),
         Some(b'/') => (Bits::Any, &spec[1..]),
@@ -1830,6 +1840,63 @@ mod tests {
         let (shown, status) = refusal("find", &options);
         assert_eq!(status, 1, "{tokens:?}");
         shown
+    }
+
+    fn refuse_utf8(tokens: &[&str]) -> String {
+        let mut owned = tape(tokens);
+        owned.push((super::UTF8, Vec::new()));
+        let options: Vec<(&str, &[u8])> = owned.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+        let (shown, status) = refusal("find", &options);
+        assert_eq!(status, 1, "{tokens:?}");
+        shown
+    }
+
+    #[test]
+    fn a_utf8_locale_quotes_a_word_between_curly_quotes() {
+        for (tokens, c, utf8) in [
+            (
+                &["-maxdepth", "a'b"][..],
+                "find: Expected a positive decimal integer argument to -maxdepth, but got 'a\\'b'",
+                "find: Expected a positive decimal integer argument to -maxdepth, but got \u{2018}a'b\u{2019}",
+            ),
+            (
+                &["-links", "x"],
+                "find: non-numeric argument to -links: 'x'",
+                "find: non-numeric argument to -links: \u{2018}x\u{2019}",
+            ),
+            (
+                &["-perm", "zz"],
+                "find: invalid mode 'zz'",
+                "find: invalid mode \u{2018}zz\u{2019}",
+            ),
+            (
+                &["-user", ""],
+                "find: invalid user name or UID argument to -user: ''",
+                "find: invalid user name or UID argument to -user: \u{2018}\u{2019}",
+            ),
+            (
+                &["-name"],
+                "find: missing argument to `-name'",
+                "find: missing argument to `-name'",
+            ),
+            (
+                &["-not"],
+                "find: expected an expression after '-not'",
+                "find: expected an expression after '-not'",
+            ),
+            (
+                &["-regex", "["],
+                "find: failed to compile regular expression '[': Invalid regular expression",
+                "find: failed to compile regular expression '[': Invalid regular expression",
+            ),
+        ] {
+            assert_eq!(refuse(tokens), c, "{tokens:?}");
+            assert_eq!(refuse_utf8(tokens), utf8, "{tokens:?}");
+        }
+        let listed = refuse_utf8(&["-regextype", "bogus"]);
+        assert!(listed.starts_with(
+            "find: Unknown regular expression type \u{2018}bogus\u{2019}; valid types are \u{2018}findutils-default\u{2019}, \u{2018}ed\u{2019},"
+        ));
     }
 
     fn name(pattern: &str) -> Json {

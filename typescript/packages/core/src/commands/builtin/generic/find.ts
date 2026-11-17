@@ -38,7 +38,9 @@ import { posixPhrase } from '../../../errors/posix.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { parseFindExpression, type FindExpr } from '../../../rs/find.ts'
 import { FileType, Follow, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
+import { utf8Locale } from '../../../shell/bytes.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
+import { quoteArg } from '../../../utils/quote.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { readerOf } from '../../../workspace/files.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -259,6 +261,7 @@ export function findGeneric(
         }
   const records: PathRecord[] = []
   const io = new IOResult({ records })
+  const utf8 = utf8Locale(ctx.env)
   async function* stream(): AsyncGenerator<Uint8Array> {
     const missing: string[] = []
     // Each row names the start point it was found under, in operand order:
@@ -295,7 +298,7 @@ export function findGeneric(
         // name, a link loop), and every probe below goes by the path it
         // simplifies to.
         missing.push(
-          `find: '${root.rawPath}': ${fsStrerror(walkRefusal(root)) ?? posixPhrase('ENOENT')}`,
+          `find: ${quoteArg(root.rawPath, utf8)}: ${fsStrerror(walkRefusal(root)) ?? posixPhrase('ENOENT')}`,
         )
         continue
       }
@@ -305,7 +308,9 @@ export function findGeneric(
         const refusal = await dotRefusal(statOrEnoent(startStat), root, linkFollow(linksOf(ctx)))
         if (refusal !== null) {
           const label = root.rawPath !== '' ? root.rawPath : root.virtual
-          missing.push(`find: '${label}': ${fsStrerror(refusal) ?? posixPhrase('ENOENT')}`)
+          missing.push(
+            `find: ${quoteArg(label, utf8)}: ${fsStrerror(refusal) ?? posixPhrase('ENOENT')}`,
+          )
           continue
         }
       }
@@ -319,7 +324,9 @@ export function findGeneric(
           // (`find: 'P': Permission denied`), not an escaped error.
           const detail = fsStrerror(err)
           if (detail === null) throw err
-          missing.push(`find: '${root.rawPath !== '' ? root.rawPath : root.virtual}': ${detail}`)
+          missing.push(
+            `find: ${quoteArg(root.rawPath !== '' ? root.rawPath : root.virtual, utf8)}: ${detail}`,
+          )
           continue
         }
         if (start === null) {
@@ -327,14 +334,16 @@ export function findGeneric(
           // rest, and exits 1. Reported as the operand was typed, falling
           // back to the resolved path for a synthesized root.
           const label = root.rawPath !== '' ? root.rawPath : root.virtual
-          missing.push(`find: '${label}': ${await missingStartDetail(root, missingStat)}`)
+          missing.push(
+            `find: ${quoteArg(label, utf8)}: ${await missingStartDetail(root, missingStat)}`,
+          )
           continue
         }
         if (start.type !== FileType.DIRECTORY && root.rawPath.endsWith('/')) {
           // POSIX reads `x/` as `x/.`, so an operand typed with a trailing
           // slash has to name a directory; GNU refuses the rest with
           // ENOTDIR rather than reporting the entry itself.
-          missing.push(`find: '${root.rawPath}': Not a directory`)
+          missing.push(`find: ${quoteArg(root.rawPath, utf8)}: Not a directory`)
           continue
         }
         known = start
@@ -388,18 +397,18 @@ export function findGeneric(
       // could not read. Drained per start point, so the lines stay under
       // the operand that walked them.
       for (const shown of respellRaw(unreadable?.() ?? [], root.virtual, root.rawPath)) {
-        missing.push(`find: '${shown}': Permission denied`)
+        missing.push(`find: ${quoteArg(shown, utf8)}: Permission denied`)
       }
       // An entry the walk could not stat is named the same way, and stays
       // listed where no test needed its stat.
       for (const [path, err] of unstatted?.() ?? []) {
         const shown = respellOne(path, root.virtual, root.rawPath)
-        missing.push(`find: '${shown}': ${strerrorOf(err)}`)
+        missing.push(`find: ${quoteArg(shown, utf8)}: ${strerrorOf(err)}`)
       }
       for (const [path, above] of loops?.() ?? []) {
         missing.push(
-          `find: File system loop detected; '${respellOne(path, root.virtual, root.rawPath)}' ` +
-            `is part of the same file system loop as '${respellOne(above, root.virtual, root.rawPath)}'.`,
+          `find: File system loop detected; ${quoteArg(respellOne(path, root.virtual, root.rawPath), utf8)} ` +
+            `is part of the same file system loop as ${quoteArg(respellOne(above, root.virtual, root.rawPath), utf8)}.`,
         )
       }
       for (const line of stopped?.() ?? []) missing.push(`find: ${line}`)

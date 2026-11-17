@@ -51,7 +51,7 @@ from mirage.io.types import ByteSource
 from mirage.policy.types import HandOff
 from mirage.rs.find import FindExpr, parse_find
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import NOT_FOUND_STATUS
@@ -399,7 +399,8 @@ async def _bound_find(
     """
     session = context.session
     try:
-        parsed = parse_find(spelled_words(parts[1:]))
+        utf8 = utf8_locale(env_snapshot(session))
+        parsed = parse_find(spelled_words(parts[1:]), utf8)
         # Every -newer reference is statted through the dispatcher
         # here, once, before the expression is bound; a date GNU
         # refuses stops the stats at the references typed before it.
@@ -417,6 +418,7 @@ async def _bound_find(
                 namespace,
                 line_facts("find", parts, session.cwd).follows
                 is not Follow.NONE,
+                utf8,
             )
             if ref_err is not None:
                 return _failed(cmd_str, 1, ref_err)
