@@ -10,7 +10,7 @@
 //
 // `-V`: the order GNU sort documents for version numbers inside text.
 
-use super::key::{Mods, kept};
+use super::modifiers::{Mods, kept};
 use std::cmp::Ordering;
 
 /// Compares the non-digit parts of a version.

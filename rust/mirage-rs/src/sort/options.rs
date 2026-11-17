@@ -8,7 +8,8 @@
 
 use serde_json::{Value as Json, json};
 
-use super::key::{Compare, Key, Mods};
+use super::key::{Compare, Key};
+use super::modifiers::Mods;
 use crate::scan::{OPERAND, Typed, Values, unknown};
 use crate::{StreamError, number, quoted};
 

@@ -422,7 +422,7 @@ fn orders_versions_as_gnu_does() {
 
 #[test]
 fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
-    use super::key::Mods;
+    use super::modifiers::Mods;
     use super::version::{VersionScan, version_cmp};
 
     let skipped = b"!\x01".repeat(800);
@@ -483,7 +483,7 @@ fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
                 source
                     .iter()
                     .copied()
-                    .filter(|&byte| super::key::kept(byte, &mods))
+                    .filter(|&byte| super::modifiers::kept(byte, &mods))
                     .map(|byte| {
                         if mods.fold {
                             byte.to_ascii_uppercase()
