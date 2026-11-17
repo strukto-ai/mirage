@@ -80,11 +80,31 @@ describe('a line of several commands', () => {
     await ws.close()
   })
 
-  it('records a line of one command whole', async () => {
+  it.each([
+    ['cat <<A\nx\nA\n', 'x\n'],
+    ['cat <<A\n \t\nA\n', ' \t\n'],
+    ['echo é\\\n😀\n', 'é😀\n'],
+    ['if false; then\necho skipped\nfi\n', ''],
+  ])('records a line of one command whole: %s', async (source, stdout) => {
     const ws = build()
-    await ws.shell('cat <<A\nx\nA\n')
+    await ws.shell(source)
     const history = await ws.history()
-    expect(history.map((e) => e.command ?? e.stdout)).toEqual(['cat <<A\nx\nA\n', 'x\n'])
+    expect(history.map((e) => e.command ?? e.stdout)).toEqual([source, stdout])
+    await ws.close()
+  })
+
+  it('records blank rows around a single transformed command', async () => {
+    const ws = build()
+    await ws.shell(' \t\necho é\\\n😀\n\t \n')
+    const history = await ws.history()
+    expect(history.map((e) => e.command ?? e.stdout)).toEqual([
+      ' \t',
+      '',
+      'echo é😀',
+      'é😀\n',
+      '\t ',
+      '',
+    ])
     await ws.close()
   })
 
