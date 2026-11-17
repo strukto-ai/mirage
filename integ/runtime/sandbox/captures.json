@@ -128,6 +128,13 @@
           }
         },
         {
+          "command": "dash -c 'ls -A /tmp | grep \"^[.]mirage\"; echo clean'",
+          "expect": {
+            "exit": 0,
+            "stdout": "clean\n"
+          }
+        },
+        {
           "command": "( true; perl -e 'sleep 2' ) & sleep 0.5; ps -o ppid=,comm= | awk -v s=$$ '$2 == \"perl\" { print ($1 == s ? \"shell\" : \"other\") }'; wait",
           "expect": {
             "exit": 0,

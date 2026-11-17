@@ -17,7 +17,7 @@ import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
-import { EXEC_PRELUDE, runArgv, runStatusPath } from '@struktoai/mirage-core/machine/constants'
+import { EXEC_PRELUDE, runArgv } from '@struktoai/mirage-core/machine/constants'
 import { ownSession } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
@@ -114,7 +114,6 @@ describe('MicrosandboxMachine pause', () => {
     const msb = fakeMsb()
     const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
     await machine.connect()
-    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
     await machine.close()
     await machine.close()
     await machine.pause()
@@ -137,15 +136,6 @@ describe('MicrosandboxMachine pause', () => {
     await closing
     await machine.pause()
     expect(msb.calls.at(-1)).toEqual(['pause', 'sb', '--quiet'])
-  })
-  it('never resumes on close a sandbox paused meanwhile', async () => {
-    const msb = fakeMsb()
-    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
-    await machine.connect()
-    msb.state = 'Paused'
-    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
-    await machine.close()
-    expect(msb.calls.map((call) => call[0])).toEqual(['status', 'status'])
   })
   it('stops a resume on the caller signal', async () => {
     const msb = fakeMsb('Paused')
@@ -285,7 +275,7 @@ describe('MicrosandboxMachine', () => {
             EXEC_PRELUDE,
             'sh',
             '/work',
-            ...ownSession(runArgv('runid', runStatusPath('runid'), [], words)),
+            ...ownSession(runArgv('runid', words)),
           ],
           input,
         ],

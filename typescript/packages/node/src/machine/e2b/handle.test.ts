@@ -35,8 +35,8 @@ import {
   RUN_WRAPPER,
   encodeOutput,
   isRun,
+  machineDirLine,
   runArgv,
-  runStatusPath,
   stopLine,
   wrapLine,
 } from '@struktoai/mirage-core/machine/constants'
@@ -349,11 +349,7 @@ describe('E2BMachine', () => {
     expect(FakeMachine.last.commands.calls).toEqual([
       [
         encodeOutput(
-          wrapLine(
-            runArgv('runid', runStatusPath('runid'), [], ['/bin/sh', '-c', 'wc -l | cat']),
-            { E: '1' },
-            '/workspace',
-          ),
+          wrapLine(runArgv('runid', ['/bin/sh', '-c', 'wc -l | cat']), { E: '1' }, '/workspace'),
         ),
         data !== null,
       ],
@@ -705,7 +701,7 @@ class MountingE2BMachine extends FakedE2BMachine {
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
-    const inner = isRun(argv) ? argv.slice(7) : argv
+    const inner = isRun(argv) ? argv.slice(5) : argv
     const run = inner[2] === MOUNT_GUARD ? inner.slice(inner.indexOf('--', 5) + 1) : inner
     return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
   }
@@ -717,7 +713,8 @@ class MountingE2BMachine extends FakedE2BMachine {
     return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
   }
 
-  override openPipe(command: string): Promise<MachinePipe> {
+  override openPipe(line: string): Promise<MachinePipe> {
+    const command = line.startsWith(machineDirLine()) ? line.slice(machineDirLine().length) : line
     const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
     this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined

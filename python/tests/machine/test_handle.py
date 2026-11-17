@@ -14,6 +14,7 @@
 
 import asyncio
 import shlex
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -27,16 +28,19 @@ from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.machine import MachineConfig, MachineHandle
 from mirage.machine.constants import (
+    FIFO_NAME,
     NOT_RUNNING_STATUS,
     PROCESS,
+    RUN_EXIT_MARK,
     RUN_PID_HOLD,
     RUN_PID_MARK,
     faketime_probe,
+    fifo_line,
     is_run,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
-from mirage.machine.handle import PidLineFilter
+from mirage.machine.handle import ExitLineFilter, PidLineFilter
 from mirage.machine.types import RunStatus
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
@@ -62,8 +66,8 @@ class RecordingMachine(MachineHandle):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
-            env = {**env, PROCESS: argv[5].partition("=")[2]}
-            argv = argv[7:]
+            env = {**env, PROCESS: argv[4].partition("=")[2]}
+            argv = argv[5:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
@@ -114,9 +118,24 @@ class FifoBox(RecordingMachine):
         data = None if stdin is None else await materialize(stdin)
         if "rm -f" in line and self.lost:
             raise ConnectionError("gone")
-        return await super().exec_line(line, data, env, cwd)
+        done = await super().exec_line(line, data, env, cwd)
+        if "mkfifo" not in line:
+            return done
+        return replace(
+            done, stdout=f"/home/u/.mirage/fd-{_named(line)}".encode()
+        )
 
     lost = False
+
+
+def _named(line: str) -> str:
+    return line.rpartition(f'"$d/{FIFO_NAME}-')[2].partition('"')[0]
+
+
+def _fifo(lines: list[str]) -> tuple[str, str]:
+    [made] = [line for line in lines if "mkfifo" in line]
+    assert made == fifo_line(_named(made))
+    return made, f"/home/u/.mirage/fd-{_named(made)}"
 
 
 # A process substitution a program reads by path becomes a named pipe on
@@ -133,9 +152,7 @@ async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
     finally:
         await ws.close()
     lines = [line for line, _, _ in box.execs]
-    [made] = [line for line in lines if line.startswith("mkfifo ")]
-    fifo = made.removeprefix("mkfifo -m 600 ")
-    assert fifo.startswith("/tmp/.mirage-fd-")
+    made, fifo = _fifo(lines)
     ran = lines.index(f"node read.js {fifo} /dev/fd/9 /dev/fd/62")
     assert lines.index("connect") < lines.index(made) < ran
     fed = [(line, data) for line, data, _ in box.execs if "exec cat" in line]
@@ -153,8 +170,7 @@ async def test_a_functions_program_reads_its_calls_substitution():
         assert io.exit_code == 0
     finally:
         await ws.close()
-    [made] = [line for line, _, _ in box.execs if line.startswith("mkfifo ")]
-    fifo = made.removeprefix("mkfifo -m 600 ")
+    _, fifo = _fifo([line for line, _, _ in box.execs])
     assert f"node read.js {fifo}" in [line for line, _, _ in box.execs]
 
 
@@ -728,7 +744,7 @@ async def test_the_pid_line_comes_out_of_stderr_after_the_clients_words():
         search=True,
     )
     assert out == b"Defaulted container\nerr\n"
-    assert seen == [RunStatus(812, 99.0, None)]
+    assert seen == [RunStatus(812, 99.0)]
 
 
 # stdout carries the line only at its very start; anything else passes at
@@ -737,7 +753,7 @@ async def test_the_pid_line_comes_out_of_stderr_after_the_clients_words():
 async def test_stdout_gives_up_the_pid_line_only_at_its_start():
     assert await _filtered([RUN_PID_MARK + b"7 1\nout"], search=False) == (
         b"out",
-        [RunStatus(7, 1.0, None)],
+        [RunStatus(7, 1.0)],
     )
     late = b"x" + RUN_PID_MARK + b"7 1\n"
     assert await _filtered([late], search=False) == (late, [])
@@ -750,6 +766,70 @@ async def test_a_stream_with_no_pid_line_keeps_every_byte():
     assert await _filtered([b"only err"], search=True) == (b"only err", [])
     big = b"e" * (RUN_PID_HOLD + 1)
     assert await _filtered([big, b"!"], search=True) == (big + b"!", [])
+
+
+async def _exited(chunks: list[bytes]) -> tuple[bytes, list[int]]:
+    out = bytearray()
+    codes: list[int] = []
+
+    async def keep(chunk: bytes) -> None:
+        out.extend(chunk)
+
+    line = ExitLineFilter(keep, codes.append)
+    for chunk in chunks:
+        await line.write(chunk)
+    await line.finish()
+    return bytes(out), codes
+
+
+# The exit line can arrive in pieces; it comes out and its status is told,
+# and what the program left running writes after it passes.
+@pytest.mark.asyncio
+async def test_the_exit_line_comes_out_and_gives_the_status():
+    chunks = [
+        b"err\n",
+        RUN_EXIT_MARK[:4],
+        RUN_EXIT_MARK[4:] + b"4",
+        b"2\nlater\n",
+    ]
+    assert await _exited(chunks) == (b"err\nlater\n", [42])
+
+
+# A mark with no status line after it is the program's own, and so is a
+# piece of one the stream ends on.
+@pytest.mark.asyncio
+async def test_a_mark_without_a_status_line_is_the_programs_own():
+    own = b"x" + RUN_EXIT_MARK + b"abc\n"
+    assert await _exited([own]) == (own, [])
+    assert await _exited([RUN_EXIT_MARK + b"1234\n"]) == (
+        RUN_EXIT_MARK + b"1234\n",
+        [],
+    )
+    assert await _exited([b"y" + RUN_EXIT_MARK[:3]]) == (
+        b"y" + RUN_EXIT_MARK[:3],
+        [],
+    )
+
+
+class LeftOpenBox(RecordingMachine):
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        await errors(RUN_EXIT_MARK + b"3\n")
+        await asyncio.Event().wait()
+
+
+# A program that exits while what it left running holds the exec open
+# ends with the status its exit line gave, without waiting for the exec.
+@pytest.mark.asyncio
+async def test_a_run_ends_on_its_exit_line_while_the_exec_stays_open():
+    box = LeftOpenBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        async with asyncio.timeout(5):
+            io = await ws.shell("train")
+        assert io.exit_code == 3
+        assert await materialize(io.stderr) == b""
+    finally:
+        await ws.close()
 
 
 class PidLineBox(RecordingMachine):

@@ -39,10 +39,11 @@ import {
   MOUNT_WAIT_SECONDS,
   PIPE_SERVER_HINT,
   SSHFS_HINT,
-  SSHFS_LOG_PREFIX,
+  SSHFS_LOG_NAME,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
   UNMOUNT_WAIT_SECONDS,
+  machineDirLine,
   mountField,
 } from './constants.ts'
 
@@ -126,9 +127,9 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
 
 /**
  * The prefixes ssh serves a machine: its top prefixes but `/tmp`, which
- * stays the machine's own. The machine keeps its sockets, temporary files
- * and Mirage's own run reports there, and a user who is not root cannot
- * mount over it. A mount under `/tmp` is still served at its own path.
+ * stays the machine's own. The machine keeps its sockets and temporary
+ * files there, and a user who is not root cannot mount over it. A mount
+ * under `/tmp` is still served at its own path.
  */
 export function servedPrefixes(prefixes: Iterable<string>): string[] {
   return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
@@ -772,12 +773,13 @@ export class MachineMounts {
         `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
       )
     }
-    const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
+    const log = `"$d/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log"`
     this.serves += 1
     const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
     const pipe = await this.openPipe(
-      `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
+      machineDirLine() +
+        `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
     )
     const entry: Served = {
       source,
@@ -821,7 +823,7 @@ export class MachineMounts {
           const diagnostic = (await pipe.diagnostic?.()) ?? ''
           let reason = diagnostic
           try {
-            const written = await this.run(`cat ${log}`, signal)
+            const written = await this.run(machineDirLine() + `cat ${log}`, signal)
             const logText = said(written.stdout)
             if (logText) reason = logText + (diagnostic ? `; helper said: ${diagnostic}` : '')
           } catch (error) {
@@ -892,10 +894,15 @@ export class MachineMounts {
     }
   }
 
-  /** Remove the helper's setup log; keeping it only costs a file. */
+  /**
+   * Remove the helper's setup log; keeping it only costs a file.
+   *
+   * @param log the quoted log path in Mirage's folder on the machine, `$d`
+   *   for the folder.
+   */
   private async dropLog(log: string): Promise<void> {
     try {
-      const removed = await this.run(`rm -f -- ${log}`)
+      const removed = await this.run(machineDirLine() + `rm -f -- ${log}`)
       if (removed.exitCode !== 0) console.debug('could not remove sshfs log:', said(removed.stderr))
     } catch (err) {
       console.debug('could not remove sshfs log:', err)

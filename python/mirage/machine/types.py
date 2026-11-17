@@ -29,14 +29,12 @@ PauseAction: TypeAlias = Literal["pause"]
 
 @dataclass(frozen=True, slots=True)
 class RunStatus:
-    """What a run has reported on its machine (``RUN_WRAPPER``): its
-    program's pid and start in clock ticks, None until it starts, and
-    its exit status, None until it exits.
+    """What a run's pid line says (``RUN_WRAPPER``): its program's pid
+    and start in clock ticks, None when the line gives none.
     """
 
-    pid: int | None
+    pid: int
     started: float | None
-    exit_code: int | None
 
 
 @dataclass(frozen=True, slots=True)

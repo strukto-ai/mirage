@@ -15,7 +15,7 @@
 import logging
 from typing import Any
 
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.machine.constants import (
     decode_output,
     encode_output,
@@ -23,14 +23,11 @@ from mirage.machine.constants import (
 )
 from mirage.machine.daytona import sdk
 from mirage.machine.daytona.config import DaytonaConfig
-from mirage.machine.daytona.constants import (
-    PAUSED_STATE,
-    stdin_path,
-    stdin_redirect,
-)
+from mirage.machine.daytona.constants import PAUSED_STATE
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +38,10 @@ class DaytonaMachine(MachineHandle):
     You create the sandbox yourself (dashboard, `daytona sandbox
     create`, or the SDK); mirage only connects by ``sandbox_id`` and
     execs lines. ``api_key`` falls back to DAYTONA_API_KEY. Daytona's
-    exec has no stdin and reports combined output once the command
-    ends, so piped bytes are uploaded and redirected in, stderr comes
-    back None, and a stream gets its output at the end. The output is
+    exec takes no stdin and reports combined output once the command
+    ends, so a run given input is refused (126) before it starts,
+    stderr comes back None, and a stream gets its output at the end. The
+    output is
     base64-encoded in the sandbox, since the exec returns it as text
     (``encode_output``: the sandbox needs dd and base64). close()
     releases the SDK client and never touches the sandbox. Mirage pauses
@@ -117,23 +115,19 @@ class DaytonaMachine(MachineHandle):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
+        if stdin is not None and stdin != b"":
+            return RunResult(
+                stdout=b"",
+                stderr=f"mirage: {self.machine}: the sandbox takes no input\n".encode(),
+                exit_code=CANNOT_EXECUTE_STATUS,
+            )
         command = encode_output(wrap_line(argv, env, cwd), combined=True)
-        if stdin is not None:
-            path = stdin_path()
-            await self._upload(path, await materialize(stdin))
-            command = stdin_redirect(command, path)
         response = await self._sandbox.process.exec(command)
         return RunResult(
             stdout=decode_output(str(response.result)),
             stderr=None,
             exit_code=int(response.exit_code),
         )
-
-    async def _upload(self, path: str, data: bytes) -> None:
-        parent = path.rsplit("/", 1)[0]
-        if parent:
-            await self._sandbox.fs.create_folder(parent, "755")
-        await self._sandbox.fs.upload_file(data, path)
 
     async def close(self) -> None:
         """Release the SDK client once a connect under way has settled; the

@@ -35,7 +35,13 @@ import type { MachinePipe, MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { isRun, MOUNT_GUARD, SSHFS_OPTIONS, UNMOUNT_WAIT_SECONDS } from './constants.ts'
+import {
+  isRun,
+  machineDirLine,
+  MOUNT_GUARD,
+  SSHFS_OPTIONS,
+  UNMOUNT_WAIT_SECONDS,
+} from './constants.ts'
 import {
   killLine,
   mountTable,
@@ -111,7 +117,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    let run = isRun(argv) ? argv.slice(7) : argv
+    let run = isRun(argv) ? argv.slice(5) : argv
     if (run[2] === MOUNT_GUARD) {
       const checked = this.runGuard(run)
       if (checked.exitCode !== 0) return checked
@@ -233,7 +239,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
-  openPipe(command: string): Promise<MachinePipe> {
+  openPipe(line: string): Promise<MachinePipe> {
+    expect(line.startsWith(machineDirLine())).toBe(true)
+    const command = line.slice(machineDirLine().length)
     this.pipes.push(command)
     const source = words(command)[5] ?? ''
     const prefix = words(command)[6] ?? ''

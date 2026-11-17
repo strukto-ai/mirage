@@ -17,7 +17,6 @@ import { currentCaller } from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
-import type { ProcessHandle } from '../execution/process/handle.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
@@ -25,7 +24,7 @@ import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import { abortable, hasAborted, mergeSignals, settledWithin, sleep } from '../utils/abort.ts'
+import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -34,28 +33,24 @@ import {
   CHECK_LINE,
   CHECK_MARK,
   CHECK_WAIT_SECONDS,
+  EXIT_DIGITS,
   FAKETIME_PROBE_SECONDS,
   MACHINE_STOP_WAIT_SECONDS,
   NOT_RUNNING_STATUS,
   RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
+  RUN_EXIT_MARK,
   RUN_PID_HOLD,
   RUN_PID_MARK,
-  RUN_START_WAIT_SECONDS,
-  RUN_WATCH_SECONDS,
   SCAN_FACTS_MARK,
   SCAN_MARK,
-  SCAN_RUN_MARK,
   SCAN_WAIT_SECONDS,
   faketimeEnv,
   faketimeProbe,
-  removeLine,
   resourcesLine,
   runArgv,
-  runStatusPath,
   scanLine,
   signalLine,
-  statusLine,
   stopLine,
 } from './constants.ts'
 import { parseResources } from './resources.ts'
@@ -114,7 +109,7 @@ export class PidLineFilter {
     const end = at >= 0 ? held.indexOf(0x0a, at) : -1
     if (end >= 0) {
       const text = new TextDecoder().decode(held.subarray(at + RUN_PID_MARK.byteLength, end))
-      const report = parseStatus(text, '')
+      const report = parsePid(text)
       if (report !== null) this.found(report)
       held = concat([held.subarray(0, at), held.subarray(end + 1)])
     } else if (
@@ -130,18 +125,91 @@ export class PidLineFilter {
 }
 
 /**
- * `data`, a stream an exec returned whole, with its pid line taken out
- * (`PidLineFilter`). Mirrors Python's `_without_pid_line`.
+ * One stream of a run with the exit line its wrapper writes once the program
+ * has exited (`RUN_EXIT_MARK`) taken out, and the status the line gives
+ * handed to `ended`. Only an ending that can still become the line is held;
+ * everything else passes as it arrives, what the program left running
+ * included. Mirrors Python's `ExitLineFilter`.
  */
-async function withoutPidLine(
+export class ExitLineFilter {
+  private held = new Uint8Array()
+  private passing = false
+
+  constructor(
+    private readonly sink: OutputFn,
+    private readonly ended: (code: number) => void,
+  ) {}
+
+  /** Pass on what can no longer be, or hold, the exit line. */
+  readonly write = async (data: Uint8Array): Promise<void> => {
+    let out = data
+    if (!this.passing) {
+      const held = concat([this.held, data])
+      this.held = new Uint8Array()
+      out = this.take(held)
+    }
+    if (out.byteLength > 0) await this.sink(out)
+  }
+
+  /** Pass on what is still held once the stream has ended. */
+  async finish(): Promise<void> {
+    const held = this.held
+    this.held = new Uint8Array()
+    this.passing = true
+    if (held.byteLength > 0) await this.sink(held)
+  }
+
+  /**
+   * What is held, less the exit line once it is out, and less an ending that
+   * may still become it, which stays held.
+   */
+  private take(held: Uint8Array): Uint8Array {
+    const out: Uint8Array[] = []
+    let rest = held
+    for (let at = findBytes(rest, RUN_EXIT_MARK); at >= 0; at = findBytes(rest, RUN_EXIT_MARK)) {
+      const tail = rest.subarray(at + RUN_EXIT_MARK.byteLength)
+      const end = tail.findIndex((byte) => byte < 0x30 || byte > 0x39)
+      const digits = end < 0 ? tail.byteLength : end
+      if (digits > 0 && digits <= EXIT_DIGITS && tail[digits] === 0x0a) {
+        this.passing = true
+        this.ended(Number(new TextDecoder().decode(tail.subarray(0, digits))))
+        return concat([...out, rest.subarray(0, at), tail.subarray(digits + 1)])
+      }
+      if (digits === tail.byteLength && digits <= EXIT_DIGITS) {
+        this.held = rest.slice(at)
+        return concat([...out, rest.subarray(0, at)])
+      }
+      out.push(rest.subarray(0, at + 1))
+      rest = rest.subarray(at + 1)
+    }
+    let keep = Math.min(rest.byteLength, RUN_EXIT_MARK.byteLength - 1)
+    while (keep > 0 && !startsWith(RUN_EXIT_MARK, rest.subarray(rest.byteLength - keep))) keep -= 1
+    this.held = rest.slice(rest.byteLength - keep)
+    return concat([...out, rest.subarray(0, rest.byteLength - keep)])
+  }
+}
+
+/**
+ * `data`, a stream an exec returned whole, with its exit line taken out
+ * (`ExitLineFilter`), and its pid line too when `found` still waits for it
+ * (`PidLineFilter`). Mirrors Python's `_without_run_lines`.
+ *
+ * @param data the stream.
+ * @param found told what the pid line says; null once it is known.
+ * @param search look for the pid line past the stream's start.
+ */
+async function withoutRunLines(
   data: Uint8Array,
-  found: (report: RunStatus) => void,
+  found: ((report: RunStatus) => void) | null,
   search: boolean,
 ): Promise<Uint8Array> {
   const out: Uint8Array[] = []
-  const line = new PidLineFilter((chunk) => Promise.resolve(void out.push(chunk)), found, search)
-  await line.write(data)
-  await line.finish()
+  const keep: OutputFn = (chunk) => Promise.resolve(void out.push(chunk))
+  const pidLine = found === null ? null : new PidLineFilter(keep, found, search)
+  const exitLine = new ExitLineFilter(pidLine?.write ?? keep, () => undefined)
+  await exitLine.write(data)
+  await exitLine.finish()
+  await pidLine?.finish()
   return concat(out)
 }
 
@@ -190,14 +258,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The runs executing here right now; a scan asks only a machine with
   // one, or with processes an earlier scan found.
   private runs = 0
-  // Each executing run's end and what finishes with it, by tag, for a look
-  // at its report to settle while its exec stays open.
-  private readonly ended = new Map<
-    string,
-    { settle: (code: number) => void; finished: Promise<unknown> }
-  >()
-  // The reports of runs that have ended, which the next run removes.
-  private spent: string[] = []
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -297,26 +357,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // outside a process gets a tag of its own.
     const runner = currentCaller().process
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
-    const status = runStatusPath(tag)
-    const spent = this.spent
-    this.spent = []
     const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     const letGo = new AbortController()
     let settle: (code: number) => void = () => undefined
     const ended = new Promise<number>((resolve) => {
       settle = resolve
     })
-    let finished: () => void = () => undefined
-    const left = new Promise<void>((resolve) => {
-      finished = resolve
-    })
-    this.ended.set(tag, { settle, finished: runner?.join() ?? left })
     this.runs += 1
     const reported: RunStatus[] = []
     const found = (report: RunStatus): void => {
       if (reported.length > 0) return
       reported.push(report)
-      if (report.pid !== null && report.started !== null)
+      if (report.started !== null)
         runner?.setMachinePid({ pid: report.pid, started: report.started, exited: null })
     }
     const pidLine = new PidLineFilter(
@@ -324,31 +376,35 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       found,
       true,
     )
+    const exitLine = new ExitLineFilter(pidLine.write, (code) => {
+      settle(code)
+    })
     const execution = this.execArgv(
-      runArgv(tag, status, spent, run),
+      runArgv(tag, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
       output ?? ((data) => Promise.resolve(void kept[0].push(data))),
-      pidLine.write,
+      exitLine.write,
       mergeSignals(ctx.signal, letGo.signal),
     )
-    const background = runner?.background === true
-    const watching = new AbortController()
-    const watcher = background
-      ? this.reportStart(runner, status, execution)
-      : this.watch(status, settle, watching.signal)
     let done: RunResult
     try {
       done = await this.outcome(execution, ended, letGo)
+      await exitLine.finish()
       await pidLine.finish()
       // An exec that returns its streams whole, or joined into stdout,
-      // brings the line back with them.
-      if (reported.length === 0 && done.stderr !== null && done.stderr.byteLength > 0)
-        done = { ...done, stderr: await withoutPidLine(done.stderr, found, true) }
-      if (reported.length === 0 && done.stdout.byteLength > 0)
-        done = { ...done, stdout: await withoutPidLine(done.stdout, found, false) }
-      if (background) await watcher
+      // brings the lines back with them.
+      if (done.stderr !== null && done.stderr.byteLength > 0)
+        done = {
+          ...done,
+          stderr: await withoutRunLines(done.stderr, reported.length === 0 ? found : null, true),
+        }
+      if (done.stdout.byteLength > 0)
+        done = {
+          ...done,
+          stdout: await withoutRunLines(done.stdout, reported.length === 0 ? found : null, false),
+        }
     } catch (error) {
       if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
@@ -357,6 +413,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (!(error instanceof ConnectionLostError)) throw error
       logger.debug?.(`${String(this.machine)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
+      await exitLine.finish()
       await pidLine.finish()
       const said = new TextEncoder().encode(`mirage: ${String(this.machine)}: connection lost\n`)
       done = {
@@ -365,11 +422,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         exitCode: HANGUP_EXIT_CODE,
       }
     } finally {
-      watching.abort()
       this.runs -= 1
-      this.ended.delete(tag)
-      this.spent.push(status)
-      finished()
     }
     done = {
       stdout: done.stdout.byteLength > 0 ? done.stdout : concat(kept[0]),
@@ -395,11 +448,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
-   * How a run ended: its exec's answer, or, when a look at its report found
-   * its program gone while the exec stays open because something the program
-   * left running holds its output, the status the report gave. That exec is
-   * let go after a moment for the output still arriving, and what the
-   * program left running stays. Mirrors Python's `_outcome`.
+   * How a run ended: its exec's answer, or, when its exit line says its
+   * program has exited while the exec stays open because something the
+   * program left running holds its output, the status the line gave. That
+   * exec is let go after a moment for the output still arriving, and what
+   * the program left running stays. Mirrors Python's `_outcome`.
    */
   private async outcome(
     execution: Promise<RunResult>,
@@ -416,75 +469,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
     return { stdout: new Uint8Array(), stderr: null, exitCode: code }
-  }
-
-  /** One run's report as it stands, null when it wrote none. */
-  private async readStatus(status: string): Promise<RunStatus | null> {
-    const done = await this.connectedLine(statusLine(status), SCAN_WAIT_SECONDS)
-    const lines = new TextDecoder().decode(done.stdout).split('\n')
-    return parseStatus(lines[0] ?? '', lines[1] ?? '')
-  }
-
-  /**
-   * Look for the end of a foreground run, which someone waits on, every
-   * `RUN_WATCH_SECONDS`. A look that fails is tried again. Mirrors Python's
-   * `_watch`.
-   */
-  private async watch(
-    status: string,
-    settle: (code: number) => void,
-    signal: AbortSignal,
-  ): Promise<void> {
-    while (!signal.aborted) {
-      try {
-        await sleep(RUN_WATCH_SECONDS * 1000, signal)
-        const found = await this.readStatus(status)
-        if (found?.exitCode != null) {
-          settle(found.exitCode)
-          return
-        }
-      } catch (error) {
-        if (!hasAborted(signal)) console.debug(`${this.machine.toString()}: run not read:`, error)
-      }
-    }
-  }
-
-  /**
-   * Give a background run's process its program's pid as soon as the program
-   * has started, which `$!` waits for, unless its pid line already did. One
-   * that ended at once still reported it, so a look after the exec ended is
-   * the last. Mirrors Python's `_report_start`.
-   */
-  private async reportStart(
-    runner: ProcessHandle,
-    status: string,
-    execution: Promise<RunResult>,
-  ): Promise<void> {
-    const run = { ended: false }
-    const finished = (): void => {
-      run.ended = true
-    }
-    execution.then(finished, finished)
-    let delay = 0.01
-    for (let waited = 0; waited < RUN_START_WAIT_SECONDS;) {
-      if (runner.record.machinePid !== null) return
-      const lastLook = run.ended
-      let found: RunStatus | null = null
-      try {
-        found = await this.readStatus(status)
-      } catch (error) {
-        console.debug(`${this.machine.toString()}: run not read:`, error)
-      }
-      if (found?.pid != null) {
-        if (found.started !== null)
-          runner.setMachinePid({ pid: found.pid, started: found.started, exited: null })
-        return
-      }
-      if (lastLook) return
-      await sleep(delay * 1000)
-      waited += delay
-      delay = Math.min(delay * 2, 0.5)
-    }
   }
 
   /**
@@ -518,17 +502,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const done = await this.connectedLine(scanLine(workspace), SCAN_WAIT_SECONDS)
     if (done.exitCode !== 0)
       throw new Error(`${this.machine.toString()}: scan exited ${String(done.exitCode)}`)
-    const [rows, reports] = parseScan(done.stdout, workspace)
-    const finishing: Promise<unknown>[] = []
-    for (const [tag, report] of reports) {
-      const running = this.ended.get(tag)
-      if (report.exitCode === null || running === undefined) continue
-      running.settle(report.exitCode)
-      finishing.push(running.finished)
-    }
-    // So whoever asked sees those runs as ended, not as about to.
-    if (finishing.length > 0) await settledWithin(Promise.all(finishing), RUN_DRAIN_SECONDS + 1)
-    return rows
+    return parseScan(done.stdout)
   }
 
   /**
@@ -624,17 +598,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /** Connect, then run one of Mirage's own lines, within `seconds` in all. */
-  /** Remove the reports no later run will, leaving them when the machine does not answer. */
-  private async removeSpent(): Promise<void> {
-    const spent = this.spent
-    this.spent = []
-    try {
-      await this.connectedLine(removeLine(spent), MACHINE_STOP_WAIT_SECONDS)
-    } catch (error) {
-      console.debug(`${this.machine.toString()}: reports not removed:`, error)
-    }
-  }
-
   private async connectedLine(line: string, seconds: number): Promise<RunResult> {
     const deadline = AbortSignal.timeout(seconds * 1000)
     await this.ensureConnected(deadline)
@@ -754,7 +717,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   async close(): Promise<void> {
     if (this.pauses) await Promise.allSettled([this.connecting])
     try {
-      if (this.spent.length > 0) await this.removeSpent()
       await this.mounts?.close()
     } finally {
       this.pausable = this.reached
@@ -791,25 +753,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 }
 
-/** A run's report from its two lines (`RUN_WRAPPER`), null when it wrote nothing yet. */
-function parseStatus(first: string, second: string): RunStatus | null {
+/** What a run's pid line says (`RUN_WRAPPER`), null when it names no pid. */
+function parsePid(text: string): RunStatus | null {
   const digits = /^[0-9]+$/
-  const [pid = '', started = ''] = first.trim().split(/\s+/)
+  const [pid = '', started = ''] = text.trim().split(/\s+/)
   if (!digits.test(pid)) return null
-  const code = second.trim()
-  return {
-    pid: Number(pid),
-    started: digits.test(started) ? Number(started) : null,
-    exitCode: digits.test(code) ? Number(code) : null,
-  }
+  return { pid: Number(pid), started: digits.test(started) ? Number(started) : null }
 }
 
-/**
- * What a scan printed (`scanLine`): each process, knowing the program its
- * run reported, and each run's report by tag. A line without a mark, or with
- * a field that is not a number, is a message the provider mixed in. Mirrors
- * Python's `_parse_scan`.
- */
 /** What `SCAN_FACTS_MARK`'s row says, null if it is not numbers. */
 function parseFacts(text: string): ScanFacts | null {
   const fields = text.trim().split(/\s+/)
@@ -845,31 +796,18 @@ function usageOf(
   }
 }
 
-function parseScan(
-  stdout: Uint8Array | null,
-  workspace: string,
-): [MachineProcess[], Map<string, RunStatus>] {
+/**
+ * What a scan printed (`scanLine`): each process. A line without a mark, or
+ * with a field that is not a number, is a message the provider mixed in.
+ * Mirrors Python's `_parse_scan`.
+ */
+function parseScan(stdout: Uint8Array | null): MachineProcess[] {
   const found: MachineProcess[] = []
-  const reports = new Map<string, RunStatus>()
   const digits = /^[0-9]+$/
   let facts: ScanFacts | null = null
   for (const line of new TextDecoder().decode(stdout ?? new Uint8Array()).split('\n')) {
     if (line.startsWith(`${SCAN_FACTS_MARK} `)) {
       facts = parseFacts(line.slice(2))
-      continue
-    }
-    if (line.startsWith(`${SCAN_RUN_MARK} `)) {
-      const rest = line.slice(2)
-      const space = rest.indexOf(' ')
-      const number = rest.slice(0, space)
-      const text = rest.slice(space + 1)
-      const at = text.indexOf(';')
-      const report = parseStatus(
-        at < 0 ? text : text.slice(0, at),
-        at < 0 ? '' : text.slice(at + 1),
-      )
-      if (space > 0 && digits.test(number) && report !== null)
-        reports.set(`${workspace}:${number}`, report)
       continue
     }
     const fields = line.split(' ')
@@ -886,11 +824,5 @@ function parseScan(
       usage: usageOf(facts, Number(started), fields.slice(6, 10)),
     })
   }
-  return [
-    found.map((row) => {
-      const report = reports.get(row.tag)
-      return report === undefined ? row : { ...row, program: report.pid }
-    }),
-    reports,
-  ]
+  return found
 }

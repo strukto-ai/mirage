@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import shlex
-import uuid
-
 from mirage.machine.types import PauseAction
 
 # The state a paused sandbox reports; the next connect starts it again.
@@ -23,45 +20,3 @@ PAUSED_STATE = "paused"
 # What ``on_pause`` takes for a sandbox: pause it, keeping its disk and
 # memory (Daytona's VM sandboxes only).
 ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
-
-# Providers whose exec API has no stdin stream (Daytona) upload
-# piped bytes to a per-invocation file and redirect it into the line.
-STDIN_PREFIX = "/tmp/.mirage_stdin"
-
-
-def stdin_path() -> str:
-    """A unique in-sandbox path for one invocation's stdin bytes.
-
-    Unique per invocation so concurrent lines on the same runtime
-    never overwrite each other's payload.
-    """
-    return f"{STDIN_PREFIX}_{uuid.uuid4().hex}"
-
-
-def stdin_redirect(line: str, path: str) -> str:
-    """The line rewritten to read its stdin from an uploaded file.
-
-    Runs the line in a subshell with stdin redirected from ``path``,
-    removes the file afterward, and preserves the line's exit code.
-    Daytona uses this when its exec API has no stdin stream; a PTY
-    would merge streams and mangle bytes.
-
-    Known limitations, all inherent to the file transport:
-    - stdin is fully buffered and uploaded before the line starts;
-      nothing is streamed, so no interactive stdin.
-    - the bytes briefly touch the sandbox's /tmp, readable by other
-      processes in the sandbox and left behind if the exec dies
-      before the ``rm`` runs (a later line's unique path is never
-      affected).
-    - each stdin line costs two extra provider API calls (mkdir +
-      upload).
-    - the sandbox must have a POSIX sh (subshell, ``$?``, ``rm``).
-    If a provider ever adds real exec stdin, drop this for that
-    provider (docker already streams via ``docker exec -i``).
-
-    Args:
-        line (str): the raw shell line.
-        path (str): the uploaded stdin file (from stdin_path()).
-    """
-    quoted = shlex.quote(path)
-    return f"(\n{line}\n) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"

@@ -23,7 +23,6 @@ from mirage.io.types import materialize
 from mirage.machine.constants import (
     EXEC_PRELUDE,
     run_argv,
-    run_status_path,
 )
 from mirage.machine.smolvm import SmolvmMachine
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -257,7 +256,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
             EXEC_PRELUDE,
             "sh",
             "/work",
-            *run_argv("run", run_status_path("run"), (), argv),
+            *run_argv("run", argv),
         ],
         b"input",
     )

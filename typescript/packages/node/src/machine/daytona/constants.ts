@@ -19,39 +19,3 @@ export const PAUSED_STATE = 'paused'
 
 /** What `onPause` takes for a sandbox: pause it, keeping its disk and memory (Daytona's VM sandboxes only). */
 export const ON_PAUSE: readonly PauseAction[] = ['pause']
-
-// Providers whose exec API has no stdin stream (Daytona) upload
-// piped bytes to a per-invocation file and redirect it into the line.
-const STDIN_PREFIX = '/tmp/.mirage_stdin'
-
-/**
- * A unique in-sandbox path for one invocation's stdin bytes: unique
- * per invocation so concurrent lines on the same runtime never
- * overwrite each other's payload.
- */
-export function stdinPath(): string {
-  return `${STDIN_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}`
-}
-
-/**
- * The line rewritten to read its stdin from an uploaded file: runs
- * the line in a subshell with stdin redirected from the path, removes
- * the file afterward, and preserves the line's exit code. Daytona uses
- * this when its exec API has no stdin stream; a PTY would merge
- * streams and mangle bytes.
- *
- * Known limitations, all inherent to the file transport:
- * - stdin is fully buffered and uploaded before the line starts;
- *   nothing is streamed, so no interactive stdin.
- * - the bytes briefly touch the machine's /tmp, readable by other
- *   processes in the machine and left behind if the exec dies before
- *   the `rm` runs (a later line's unique path is never affected).
- * - each stdin line costs two extra provider API calls (mkdir +
- *   upload).
- * - the machine must have a POSIX sh (subshell, `$?`, `rm`).
- * If a provider ever adds real exec stdin, drop this for that
- * provider (docker already streams via `docker exec -i`).
- */
-export function stdinRedirect(line: string, path: string): string {
-  return `(\n${line}\n) < ${path}; _s=$?; rm -f ${path}; exit $_s`
-}

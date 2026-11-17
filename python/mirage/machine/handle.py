@@ -23,7 +23,6 @@ from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
-from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import ProcessUsage
 from mirage.execution.types import MachineName, MachinePid, MachineResources
 from mirage.io.types import ByteSource
@@ -32,28 +31,24 @@ from mirage.machine.constants import (
     CHECK_LINE,
     CHECK_MARK,
     CHECK_WAIT_SECONDS,
+    EXIT_DIGITS,
     FAKETIME_PROBE_SECONDS,
     MACHINE_STOP_WAIT_SECONDS,
     NOT_RUNNING_STATUS,
     RESOURCE_WAIT_SECONDS,
     RUN_DRAIN_SECONDS,
+    RUN_EXIT_MARK,
     RUN_PID_HOLD,
     RUN_PID_MARK,
-    RUN_START_WAIT_SECONDS,
-    RUN_WATCH_SECONDS,
     SCAN_FACTS_MARK,
     SCAN_MARK,
-    SCAN_RUN_MARK,
     SCAN_WAIT_SECONDS,
     faketime_env,
     faketime_probe,
-    remove_line,
     resources_line,
     run_argv,
-    run_status_path,
     scan_line,
     signal_line,
-    status_line,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
@@ -129,8 +124,8 @@ class PidLineFilter:
             at = 0 if held.startswith(RUN_PID_MARK) else -1
         end = held.find(b"\n", at) if at >= 0 else -1
         if end >= 0:
-            report = _parse_status(
-                held[at + len(RUN_PID_MARK) : end].decode(errors="replace"), ""
+            report = _parse_pid(
+                held[at + len(RUN_PID_MARK) : end].decode(errors="replace")
             )
             if report is not None:
                 self._found(report)
@@ -144,25 +139,110 @@ class PidLineFilter:
         return held
 
 
-async def _without_pid_line(
-    data: bytes, found: Callable[[RunStatus], None], search: bool
+class ExitLineFilter:
+    """One stream of a run with the exit line its wrapper writes once the
+    program has exited (``RUN_EXIT_MARK``) taken out, and the status the
+    line gives handed to ``ended``.
+
+    Only an ending that can still become the line is held; everything
+    else passes as it arrives, what the program left running included.
+
+    Args:
+        sink (OutputFn): receives the stream without the line.
+        ended (Callable[[int], None]): told the program's exit status.
+    """
+
+    def __init__(self, sink: OutputFn, ended: Callable[[int], None]) -> None:
+        self._sink = sink
+        self._ended = ended
+        self._held = b""
+        self._passing = False
+
+    async def write(self, data: bytes) -> None:
+        """Pass on what can no longer be, or hold, the exit line.
+
+        Args:
+            data (bytes): the stream's next bytes.
+        """
+        if not self._passing:
+            held, self._held = self._held + data, b""
+            data = self._take(held)
+        if data:
+            await self._sink(data)
+
+    async def finish(self) -> None:
+        """Pass on what is still held once the stream has ended."""
+        held, self._held = self._held, b""
+        self._passing = True
+        if held:
+            await self._sink(held)
+
+    def _take(self, held: bytes) -> bytes:
+        """What is held, less the exit line once it is out, and less an
+        ending that may still become it, which stays held.
+
+        Args:
+            held (bytes): what is held so far.
+        """
+        out = bytearray()
+        while (at := held.find(RUN_EXIT_MARK)) >= 0:
+            rest = held[at + len(RUN_EXIT_MARK) :]
+            digits = len(rest) - len(rest.lstrip(b"0123456789"))
+            if (
+                0 < digits <= EXIT_DIGITS
+                and rest[digits : digits + 1] == b"\n"
+            ):
+                self._passing = True
+                self._ended(int(rest[:digits]))
+                return bytes(out + held[:at] + rest[digits + 1 :])
+            if digits == len(rest) and digits <= EXIT_DIGITS:
+                self._held = held[at:]
+                return bytes(out + held[:at])
+            out += held[: at + 1]
+            held = held[at + 1 :]
+        keep = next(
+            (
+                size
+                for size in range(
+                    min(len(held), len(RUN_EXIT_MARK) - 1), 0, -1
+                )
+                if RUN_EXIT_MARK.startswith(held[-size:])
+            ),
+            0,
+        )
+        self._held = held[len(held) - keep :]
+        return bytes(out + held[: len(held) - keep])
+
+
+async def _without_run_lines(
+    data: bytes,
+    found: Callable[[RunStatus], None] | None,
+    search: bool,
 ) -> bytes:
-    """``data``, a stream an exec returned whole, with its pid line
-    taken out (``PidLineFilter``).
+    """``data``, a stream an exec returned whole, with its exit line
+    taken out (``ExitLineFilter``), and its pid line too when ``found``
+    still waits for it (``PidLineFilter``).
 
     Args:
         data (bytes): the stream.
-        found (Callable[[RunStatus], None]): told what the line says.
-        search (bool): look for the line past the stream's start.
+        found (Callable[[RunStatus], None] | None): told what the pid
+            line says; None once it is known.
+        search (bool): look for the pid line past the stream's start.
     """
     out = bytearray()
 
     async def keep(chunk: bytes) -> None:
         out.extend(chunk)
 
-    line = PidLineFilter(keep, found, search)
-    await line.write(data)
-    await line.finish()
+    sink: OutputFn = keep
+    pid_line = PidLineFilter(keep, found, search) if found else None
+    if pid_line is not None:
+        sink = pid_line.write
+    exit_line = ExitLineFilter(sink, lambda _: None)
+    await exit_line.write(data)
+    await exit_line.finish()
+    if pid_line is not None:
+        await pid_line.finish()
     return bytes(out)
 
 
@@ -223,13 +303,6 @@ class MachineHandle:
         # The runs executing here right now; a scan asks only a machine
         # with one, or with processes an earlier scan found.
         self._executing = 0
-        # Each executing run's end and its task, by tag, for a look at its
-        # report to settle while its exec stays open.
-        self._ended: dict[
-            str, tuple[asyncio.Future[int], asyncio.Task[Any]]
-        ] = {}
-        # The reports of runs that have ended, which the next run removes.
-        self._spent: list[str] = []
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -328,8 +401,6 @@ class MachineHandle:
         # outside a process gets a tag of its own.
         runner = current_caller().process
         tag = str(runner.record.id) if runner is not None else uuid.uuid4().hex
-        status = run_status_path(tag)
-        spent, self._spent = self._spent, []
         kept: tuple[bytearray, bytearray] = (bytearray(), bytearray())
 
         async def keep_output(data: bytes) -> None:
@@ -344,52 +415,48 @@ class MachineHandle:
             if reported:
                 return
             reported.append(report)
-            if (
-                runner is not None
-                and report.pid is not None
-                and report.started is not None
-            ):
+            if runner is not None and report.started is not None:
                 runner.set_machine_pid(MachinePid(report.pid, report.started))
 
-        pid_line = PidLineFilter(errors or keep_errors, found, search=True)
         ended: asyncio.Future[int] = asyncio.get_running_loop().create_future()
-        task = asyncio.current_task()
-        if task is not None:
-            self._ended[tag] = (ended, task)
+
+        def exited(code: int) -> None:
+            if not ended.done():
+                ended.set_result(code)
+
+        pid_line = PidLineFilter(errors or keep_errors, found, search=True)
+        exit_line = ExitLineFilter(pid_line.write, exited)
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
-                run_argv(tag, status, spent, run),
+                run_argv(tag, run),
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
                 output or keep_output,
-                pid_line.write,
+                exit_line.write,
             )
-        )
-        background = runner is not None and runner.background
-        watching = asyncio.ensure_future(
-            self._report_start(runner, status, execution)
-            if runner is not None and background
-            else self._watch(status, ended)
         )
         try:
             done = await self._outcome(execution, ended)
+            await exit_line.finish()
             await pid_line.finish()
             # An exec that returns its streams whole, or joined into
-            # stdout, brings the line back with them.
-            if not reported and done.stderr:
+            # stdout, brings the lines back with them.
+            if done.stderr:
                 done = replace(
                     done,
-                    stderr=await _without_pid_line(done.stderr, found, True),
+                    stderr=await _without_run_lines(
+                        done.stderr, None if reported else found, True
+                    ),
                 )
-            if not reported and done.stdout:
+            if done.stdout:
                 done = replace(
                     done,
-                    stdout=await _without_pid_line(done.stdout, found, False),
+                    stdout=await _without_run_lines(
+                        done.stdout, None if reported else found, False
+                    ),
                 )
-            if background:
-                await watching
         except asyncio.CancelledError:
             execution.cancel()
             await asyncio.gather(execution, return_exceptions=True)
@@ -406,6 +473,7 @@ class MachineHandle:
             logger.debug("%s: connection lost", self.machine, exc_info=True)
             if runner is not None:
                 runner.program_signaled(HANGUP_EXIT_CODE - 128)
+            await exit_line.finish()
             await pid_line.finish()
             said = f"mirage: {self.machine}: connection lost\n".encode()
             done = RunResult(
@@ -414,10 +482,7 @@ class MachineHandle:
                 exit_code=HANGUP_EXIT_CODE,
             )
         finally:
-            watching.cancel()
             self._executing -= 1
-            self._ended.pop(tag, None)
-            self._spent.append(status)
         done = RunResult(
             stdout=done.stdout or bytes(kept[0]),
             stderr=done.stderr or (bytes(kept[1]) or None),
@@ -441,15 +506,15 @@ class MachineHandle:
     async def _outcome(
         self, execution: asyncio.Future[RunResult], ended: asyncio.Future[int]
     ) -> RunResult:
-        """How a run ended: its exec's answer, or, when a look at its
-        report found its program gone while the exec stays open because
+        """How a run ended: its exec's answer, or, when its exit line
+        says its program has exited while the exec stays open because
         something the program left running holds its output, the status
-        the report gave. That exec is let go after a moment for the
-        output still arriving, and what the program left running stays.
+        the line gave. That exec is let go after a moment for the output
+        still arriving, and what the program left running stays.
 
         Args:
             execution (asyncio.Future[RunResult]): the exec.
-            ended (asyncio.Future[int]): the program's reported status.
+            ended (asyncio.Future[int]): the status the exit line gave.
         """
         either: set[asyncio.Future[Any]] = {execution, ended}
         await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
@@ -460,79 +525,6 @@ class MachineHandle:
         execution.cancel()
         await asyncio.gather(execution, return_exceptions=True)
         return RunResult(stdout=b"", stderr=None, exit_code=ended.result())
-
-    async def _read_status(self, status: str) -> RunStatus | None:
-        """One run's report as it stands, None when it wrote none.
-
-        Args:
-            status (str): the file it reports in.
-
-        Raises:
-            Exception: the machine could not be reached.
-        """
-        done = await self._connected_line(
-            status_line(status), SCAN_WAIT_SECONDS
-        )
-        lines = (done.stdout or b"").decode(errors="replace").split("\n")
-        return _parse_status(lines[0], lines[1] if len(lines) > 1 else "")
-
-    async def _watch(self, status: str, ended: asyncio.Future[int]) -> None:
-        """Look for the end of a foreground run, which someone waits on,
-        every ``RUN_WATCH_SECONDS``. A look that fails is tried again.
-
-        Args:
-            status (str): the file it reports in.
-            ended (asyncio.Future[int]): settled with the program's status.
-        """
-        while not ended.done():
-            await asyncio.sleep(RUN_WATCH_SECONDS)
-            try:
-                found = await self._read_status(status)
-            except Exception as exc:
-                logger.debug("%s: run not read: %s", self.machine, exc)
-                continue
-            if found is not None and found.exit_code is not None:
-                if not ended.done():
-                    ended.set_result(found.exit_code)
-
-    async def _report_start(
-        self,
-        runner: ProcessHandle,
-        status: str,
-        execution: asyncio.Future[RunResult],
-    ) -> None:
-        """Give a background run's process its program's pid as soon as
-        the program has started, which ``$!`` waits for, unless its pid
-        line already did. One that ended at once still reported it, so a
-        look after the exec ended is the last.
-
-        Args:
-            runner (ProcessHandle): the run's process.
-            status (str): the file it reports in.
-            execution (asyncio.Future[RunResult]): the exec.
-        """
-        delay = 0.01
-        waited = 0.0
-        while waited < RUN_START_WAIT_SECONDS:
-            if runner.record.machine_pid is not None:
-                return
-            finished = execution.done()
-            try:
-                found = await self._read_status(status)
-            except Exception as exc:
-                logger.debug("%s: run not read: %s", self.machine, exc)
-                found = None
-            if found is not None and found.pid is not None:
-                if found.started is not None:
-                    runner.set_machine_pid(
-                        MachinePid(found.pid, found.started)
-                    )
-                return
-            if finished:
-                return
-            await asyncio.sleep(delay)
-            waited += delay
-            delay = min(delay * 2, 0.5)
 
     async def check(self) -> bool:
         """Reach the machine and run the check line (``CHECK_LINE``),
@@ -575,20 +567,7 @@ class MachineHandle:
         )
         if done.exit_code != 0:
             raise RuntimeError(f"{self.machine}: scan exited {done.exit_code}")
-        rows, reports = _parse_scan(done.stdout, workspace)
-        finishing: list[asyncio.Task[Any]] = []
-        for tag, report in reports.items():
-            running = self._ended.get(tag)
-            if report.exit_code is None or running is None:
-                continue
-            ended, task = running
-            if not ended.done():
-                ended.set_result(report.exit_code)
-            finishing.append(task)
-        # So whoever asked sees those runs as ended, not as about to.
-        if finishing:
-            await asyncio.wait(finishing, timeout=RUN_DRAIN_SECONDS + 1)
-        return rows
+        return _parse_scan(done.stdout)
 
     async def resources(self, cpu: bool) -> MachineResources:
         """What the machine holds now (``resources_line``), within
@@ -729,17 +708,6 @@ class MachineHandle:
                     self.machine,
                 )
 
-    async def _remove_spent(self) -> None:
-        """Remove the reports no later run will, leaving them when the
-        machine does not answer."""
-        spent, self._spent = self._spent, []
-        try:
-            await self._connected_line(
-                remove_line(spent), MACHINE_STOP_WAIT_SECONDS
-            )
-        except Exception as exc:
-            logger.debug("%s: reports not removed: %s", self.machine, exc)
-
     async def _setup(self, line: str) -> RunResult:
         """Run one of Mirage's own lines on the machine: its environment,
         at ``/``.
@@ -832,8 +800,6 @@ class MachineHandle:
             async with self._connect_lock:
                 pass
         try:
-            if self._spent:
-                await self._remove_spent()
             if self._mounts is not None:
                 await self._mounts.close()
         finally:
@@ -861,22 +827,19 @@ class MachineHandle:
         machine; a machine already gone counts as paused."""
 
 
-def _parse_status(first: str, second: str) -> RunStatus | None:
-    """A run's report from its two lines (``RUN_WRAPPER``), None when it
-    wrote nothing yet.
+def _parse_pid(text: str) -> RunStatus | None:
+    """What a run's pid line says (``RUN_WRAPPER``), None when it names
+    no pid.
 
     Args:
-        first (str): the pid and start, space separated.
-        second (str): the exit status.
+        text (str): the pid and start, space separated.
     """
-    words = first.split()
+    words = text.split()
     if not words or not words[0].isdigit():
         return None
-    code = second.strip()
     return RunStatus(
         int(words[0]),
         float(words[1]) if len(words) > 1 and words[1].isdigit() else None,
-        int(code) if code.isdigit() else None,
     )
 
 
@@ -922,32 +885,20 @@ def _usage_of(
     )
 
 
-def _parse_scan(
-    stdout: bytes | None, workspace: str
-) -> tuple[list[MachineProcess], dict[str, RunStatus]]:
-    """What a scan printed (``scan_line``): each process, knowing the
-    program its run reported, and each run's report by tag. A line
-    without a mark, or with a field that is not a number, is a message
-    the provider mixed in.
+def _parse_scan(stdout: bytes | None) -> list[MachineProcess]:
+    """What a scan printed (``scan_line``): each process. A line without
+    a mark, or with a field that is not a number, is a message the
+    provider mixed in.
 
     Args:
         stdout (bytes | None): what the scan printed.
-        workspace (str): the workspace's id, which each tag starts with.
     """
     found: list[MachineProcess] = []
-    reports: dict[str, RunStatus] = {}
     facts: ScanFacts | None = None
     for line in (stdout or b"").decode(errors="replace").splitlines():
         mark, _, rest = line.partition(" ")
         if mark == SCAN_FACTS_MARK:
             facts = _parse_facts(rest)
-            continue
-        if mark == SCAN_RUN_MARK:
-            number, _, text = rest.partition(" ")
-            first, _, second = text.partition(";")
-            report = _parse_status(first, second)
-            if number.isdigit() and report is not None:
-                reports[f"{workspace}:{number}"] = report
             continue
         fields = rest.split(" ", 9)
         if mark != SCAN_MARK or len(fields) < 10:
@@ -966,9 +917,4 @@ def _parse_scan(
                 usage=_usage_of(facts, float(started), ticks),
             )
         )
-    return [
-        replace(row, program=reports[row.tag].pid)
-        if row.tag in reports
-        else row
-        for row in found
-    ], reports
+    return found

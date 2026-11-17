@@ -45,7 +45,7 @@ def line_of(cmd: list[str]) -> str:
     """
     inner = cmd[5:] if len(cmd) > 2 and cmd[2] == EXEC_PRELUDE else cmd
     if is_run(inner):
-        inner = inner[7:]
+        inner = inner[5:]
     if inner[:2] == ["/bin/sh", "-c"]:
         return inner[2]
     return " ".join(inner)

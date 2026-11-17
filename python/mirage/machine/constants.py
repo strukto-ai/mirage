@@ -94,9 +94,10 @@ SSHFS_OPTIONS = (
     f"negative_timeout={KERNEL_CACHE_SECONDS}"
 )
 
-# Where sshfs writes its errors in the machine, one file per prefix; its
-# stdout is the SFTP stream, so its stderr cannot share the pipe.
-SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
+# sshfs's errors go to a log of its own per prefix in Mirage's folder on
+# the machine (``MACHINE_DIR``): its stdout is the SFTP stream, and E2B's
+# pipe joins stderr to it.
+SSHFS_LOG_NAME = "sshfs"
 
 # How an sshfs source names the mirage serving it:
 # ``mirage-<id>-<instance>-<n>:<prefix>``, so each instance knows its own
@@ -213,9 +214,9 @@ STOP_POLL_SECONDS = 0.02
 # the programs it runs and may name none of the system's directories.
 TOOLS_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# How often something waiting for a run looks for its end on the machine,
-# and how long a run's output gets to arrive once its program has exited
-# while what the program left running keeps the exec open.
+# How often something waiting for a process a scan found looks at the
+# machines, and how long a run's output gets to arrive once its program
+# has exited while what the program left running keeps the exec open.
 RUN_WATCH_SECONDS = 2.0
 RUN_DRAIN_SECONDS = 0.5
 
@@ -223,41 +224,41 @@ RUN_DRAIN_SECONDS = 0.5
 # for.
 RUN_START_WAIT_SECONDS = 10.0
 
-# Where a run reports on its machine, then the workspace and the process.
-RUN_STATUS_PREFIX = "/tmp/.mirage-run-"
-
-# Where a process substitution a program names by path becomes a named
-# pipe on its machine, which Mirage feeds.
-FIFO_PREFIX = "/tmp/.mirage-fd-"
+# The folder Mirage keeps its own files in on a machine, under the home of
+# the user its lines run as; one per user in ``$TMPDIR`` (``/tmp``) only
+# when that home cannot hold it (``machine_dir_line``). A process
+# substitution a program names by path becomes a named pipe there, which
+# Mirage feeds (``FIFO_NAME``).
+MACHINE_DIR = ".mirage"
+FIFO_NAME = "fd"
 
 # Every program runs as a child of this wrapper, which outlives it to say
 # how it ended, since an exec holds on while anything the program started
-# keeps its output open (E2B, msb). ``$1`` is the file it reports in, which
-# it creates only if nothing is there; ``$2`` the tag's assignment, exported
-# for the program alone so the wrapper shows in no scan and takes no signal
-# by tag; ``$3`` the reports of earlier runs to remove; then the program.
-# The subshell execs it, so the pid written first is the program's, with
-# its start in clock ticks; its exit status follows on the next line. The
-# pid and start also go out on stderr ahead of anything the program writes,
-# behind ``RUN_PID_MARK``, so the exec that runs the program brings them
-# back itself. A shell reports a child a signal ended on its stderr, so the
-# wrapper's goes nowhere and the program gets the real one back. It needs
-# only a POSIX shell at ``/bin/sh``.
+# keeps its output open (E2B, msb). ``$1`` is the tag's assignment,
+# exported for the program alone so the wrapper shows in no scan and takes
+# no signal by tag; then the program. The subshell execs it, so the pid
+# the wrapper writes is the program's, with its start in clock ticks, on
+# stderr behind ``RUN_PID_MARK`` ahead of anything the program writes;
+# once the program exits its status follows behind ``RUN_EXIT_MARK``, so
+# the exec that runs the program brings both back itself. A shell reports
+# a child a signal ended on its stderr, so the wrapper's goes nowhere and
+# the program gets the real one back. It needs only a POSIX shell at
+# ``/bin/sh``.
 RUN_WRAPPER = (
-    "f=$1; t=$2; o=$3; shift 3; "
-    f'[ -z "$o" ] || PATH={TOOLS_PATH} rm -f $o 2>/dev/null; '
+    "t=$1; shift; "
     "exec 6>&2 2>/dev/null; "
-    'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; '
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
-    'echo "$PPID ${20}"; '
-    'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\' >>"$g"; '
+    'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
-    's=$?; echo "$s" >>"$g"; exit "$s"'
+    's=$?; printf "\\036mirage-exit %s\\n" "$s" >&6; exit "$s"'
 )
 
-# The mark ahead of the pid line the wrapper writes on stderr, a record
-# separator first so no program's output starts with it.
+# The marks ahead of the pid line and the exit line the wrapper writes on
+# stderr, a record separator first so no program's output starts with it.
 RUN_PID_MARK = b"\x1emirage-pid "
+RUN_EXIT_MARK = b"\x1emirage-exit "
+# The most digits an exit status has, 0 to 255.
+EXIT_DIGITS = 3
 # How much of stderr may come ahead of that line, the exec client's own
 # words, before a run is taken to have written none.
 RUN_PID_HOLD = 4096
@@ -396,54 +397,49 @@ SCAN_WAIT_SECONDS = 10.0
 
 # What each row a scan prints starts with, so a provider that mixes the
 # line's stderr into its stdout (Daytona) never passes a message for one:
-# a process, or a run's report.
+# a process, or the machine's figures.
 SCAN_MARK = "M"
-SCAN_RUN_MARK = "R"
 SCAN_FACTS_MARK = "F"
 
 
-def _report_name(text: str) -> str:
-    """``text`` as part of a report's file name, which a scan's glob and
-    an unquoted ``rm`` both read as one word.
+def machine_dir_line() -> str:
+    """The shell words that set ``d`` to Mirage's folder on the machine
+    (``MACHINE_DIR``), made if need be and the line's user's own: under
+    that user's home, else beside it in ``$TMPDIR`` (``/tmp``). A line
+    that finds neither exits 1 there.
+    """
+    return (
+        f"d=$(PATH={TOOLS_PATH}; "
+        f'for c in ${{HOME:+"$HOME/{MACHINE_DIR}"}} '
+        f'"${{TMPDIR:-/tmp}}/{MACHINE_DIR}-$(id -u)"; do '
+        'mkdir -p "$c" 2>/dev/null && [ -O "$c" ] && [ -w "$c" ] && '
+        '{ printf %s "$c"; break; }; done); '
+        f'[ -n "$d" ] || {{ echo "mirage: no folder of its own for {MACHINE_DIR}" >&2; '
+        "exit 1; }; "
+    )
+
+
+def fifo_line(name: str) -> str:
+    """The shell line that makes a named pipe in Mirage's folder on the
+    machine (``machine_dir_line``) and prints its path.
 
     Args:
-        text (str): the workspace id, or a whole tag.
+        name (str): the pipe's own part of its name.
     """
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", text)
+    return (
+        machine_dir_line()
+        + f'p="$d/{FIFO_NAME}-{name}"; mkfifo -m 600 "$p" && printf %s "$p"'
+    )
 
 
-def run_status_path(tag: str) -> str:
-    """The file the run ``tag`` names reports in on its machine.
-
-    Args:
-        tag (str): the run's tag, ``<workspace>:<process>``.
-    """
-    head, _, number = tag.rpartition(":")
-    name = f"{_report_name(head)}-{number}" if head else _report_name(tag)
-    return f"{RUN_STATUS_PREFIX}{name}"
-
-
-def run_argv(
-    tag: str, status: str, spent: Sequence[str], argv: Sequence[str]
-) -> tuple[str, ...]:
+def run_argv(tag: str, argv: Sequence[str]) -> tuple[str, ...]:
     """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
 
     Args:
         tag (str): the run's tag.
-        status (str): the file it reports in (``run_status_path``).
-        spent (Sequence[str]): the reports of runs that have ended.
         argv (Sequence[str]): the program and its arguments.
     """
-    return (
-        "/bin/sh",
-        "-c",
-        RUN_WRAPPER,
-        "sh",
-        status,
-        f"{PROCESS}={tag}",
-        " ".join(spent),
-        *argv,
-    )
+    return ("/bin/sh", "-c", RUN_WRAPPER, "sh", f"{PROCESS}={tag}", *argv)
 
 
 def is_run(argv: Sequence[str]) -> bool:
@@ -462,27 +458,7 @@ def run_tag(argv: Sequence[str]) -> str:
     Args:
         argv (Sequence[str]): what ``run_argv`` built.
     """
-    return argv[5].partition("=")[2]
-
-
-def status_line(status: str) -> str:
-    """The shell line that prints one run's report, nothing while there
-    is none.
-
-    Args:
-        status (str): the file it reports in.
-    """
-    path = single_quote(status)
-    return f"PATH={TOOLS_PATH}; [ -O {path} ] && cat {path} 2>/dev/null; true"
-
-
-def remove_line(spent: Sequence[str]) -> str:
-    """The shell line that removes the reports of runs that have ended.
-
-    Args:
-        spent (Sequence[str]): their files.
-    """
-    return f"PATH={TOOLS_PATH}; rm -f {' '.join(spent)}"
+    return argv[4].partition("=")[2]
 
 
 def scan_line(workspace: str) -> str:
@@ -496,9 +472,7 @@ def scan_line(workspace: str) -> str:
     third), its CPU time in user and system mode, its virtual size and
     resident pages (``stat``'s 14th, 15th, 23rd and 24th) and its
     arguments, space separated. A process that exits mid-scan is skipped.
-    Each run's report prints one row as well: ``SCAN_RUN_MARK``, the
-    process it is, then the report's first line and its second after a
-    ``;``. One row, ``SCAN_FACTS_MARK``, gives what turns those into
+    One row, ``SCAN_FACTS_MARK``, gives what turns those into
     usage: seconds since boot, clock ticks a second, the page size and
     the machine's memory in KiB. Nothing else is printed. It needs what
     ``stop_line`` does.
@@ -508,14 +482,8 @@ def scan_line(workspace: str) -> str:
             with.
     """
     mark = single_quote(f"{PROCESS}={workspace}:")
-    reports = f"{RUN_STATUS_PREFIX}{_report_name(workspace)}-"
     return (
         f"PATH={TOOLS_PATH}; m={mark}; "
-        f"for f in {reports}*; do "
-        '[ -f "$f" ] && [ -O "$f" ] || continue; a=; b=; '
-        '{ read -r a; read -r b; } <"$f"; '
-        f'printf \'{SCAN_RUN_MARK} %s %s;%s\\n\' "${{f##*-}}" "$a" "$b"; '
-        "done; "
         "read -r u _ 2>/dev/null </proc/uptime; "
         "h=$(getconf CLK_TCK 2>/dev/null) || h=100; "
         "b=$(getconf PAGESIZE 2>/dev/null) || b=4096; "

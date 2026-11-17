@@ -24,7 +24,6 @@ from mirage.commands.config import Context
 from mirage.machine.constants import (
     EXEC_PRELUDE,
     run_argv,
-    run_status_path,
 )
 from mirage.machine.microsandbox import MicrosandboxMachine
 from mirage.machine.microsandbox.constants import own_session
@@ -162,9 +161,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 EXEC_PRELUDE,
                 "sh",
                 "/work",
-                *own_session(
-                    run_argv("run", run_status_path("run"), (), words)
-                ),
+                *own_session(run_argv("run", words)),
             ],
             stdin,
         ),
@@ -423,7 +420,6 @@ async def test_a_later_workspace_that_never_ran_leaves_the_sandbox_alone(
     msb = _msb(monkeypatch)
     machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
     await machine.connect()
-    machine._spent = ["/tmp/report"]
     await machine.close()
     await machine.close()
     await machine.pause()
@@ -463,17 +459,6 @@ async def test_a_probe_close_on_another_loop_skipped_marks_nothing(
     await machine.close()
     await machine.pause()
     assert ["pause", "sb", "--quiet"] not in msb.calls
-
-
-@pytest.mark.asyncio
-async def test_close_never_resumes_a_sandbox_paused_meanwhile(monkeypatch):
-    msb = _msb(monkeypatch)
-    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
-    await machine.connect()
-    msb.state = "Paused"
-    machine._spent = ["/tmp/report"]
-    await machine.close()
-    assert [call[0] for call in msb.calls] == ["status", "status"]
 
 
 def _asks(**config) -> bool:

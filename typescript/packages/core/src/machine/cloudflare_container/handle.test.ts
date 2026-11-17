@@ -22,6 +22,7 @@ import {
   PIPE_DIAGNOSTIC_BYTES,
   PROCESS,
   isRun,
+  machineDirLine,
   stopLine,
 } from '../constants.ts'
 import { ConnectionLostError } from '../errors.ts'
@@ -73,18 +74,20 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
   }
 }
 
-// The line an exec runs: its argv past the prelude, a run's wrapper and a mount guard.
+// The line an exec runs: its argv past the prelude, a run's wrapper, a mount guard and
+// the words that find Mirage's folder on the machine.
 function lineOf(argv: readonly string[]): string {
   let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
-  if (isRun(inner)) inner = inner.slice(7)
+  if (isRun(inner)) inner = inner.slice(5)
   if (inner[2] === MOUNT_GUARD) inner = inner.slice(inner.indexOf('--', 5) + 1)
-  return inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
+  const line = inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
+  return line.startsWith(machineDirLine()) ? line.slice(machineDirLine().length) : line
 }
 
 // The mountpoints a line's mount guard holds it to, none for an unguarded line.
 function guardedPoints(argv: readonly string[]): string[] {
   let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
-  if (isRun(inner)) inner = inner.slice(7)
+  if (isRun(inner)) inner = inner.slice(5)
   if (inner[2] !== MOUNT_GUARD) return []
   return inner.slice(5, inner.indexOf('--', 5)).filter((_, at) => at % 4 === 0)
 }

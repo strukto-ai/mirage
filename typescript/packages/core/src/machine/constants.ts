@@ -81,9 +81,10 @@ export const SSHFS_OPTIONS =
   `entry_timeout=${String(KERNEL_CACHE_SECONDS)},` +
   `negative_timeout=${String(KERNEL_CACHE_SECONDS)}`
 
-// Where sshfs writes its errors in the machine, one file per prefix; its
-// stdout is the SFTP stream, so its stderr cannot share the pipe.
-export const SSHFS_LOG_PREFIX = '/tmp/.mirage_sshfs'
+// sshfs's errors go to a log of its own per prefix in Mirage's folder on the
+// machine (`MACHINE_DIR`): its stdout is the SFTP stream, and E2B's pipe joins
+// stderr to it.
+export const SSHFS_LOG_NAME = 'sshfs'
 
 // How an sshfs source names the mirage serving it: `mirage-<id>-<instance>-<n>:<prefix>`,
 // so each instance knows its own mounts from another's on the same machine.
@@ -197,49 +198,49 @@ export const STOP_POLL_SECONDS = 0.02
 export const TOOLS_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 // Output as base64 lines per read, status on fd 3, for an exec that returns text.
-// How often something waiting for a run looks for its end on the machine,
-// and how long a run's output gets to arrive once its program has exited
-// while what the program left running keeps the exec open.
+// How often something waiting for a process a scan found looks at the
+// machines, and how long a run's output gets to arrive once its program has
+// exited while what the program left running keeps the exec open.
 export const RUN_WATCH_SECONDS = 2
 export const RUN_DRAIN_SECONDS = 0.5
 
 // How long a background run may take to report its pid, which `$!` waits for.
 export const RUN_START_WAIT_SECONDS = 10
 
-// Where a run reports on its machine, then the workspace and the process.
-export const RUN_STATUS_PREFIX = '/tmp/.mirage-run-'
-
-// Where a process substitution a program names by path becomes a named pipe
-// on its machine, which Mirage feeds.
-export const FIFO_PREFIX = '/tmp/.mirage-fd-'
+// The folder Mirage keeps its own files in on a machine, under the home of
+// the user its lines run as; one per user in `$TMPDIR` (`/tmp`) only when
+// that home cannot hold it (`machineDirLine`). A process substitution a
+// program names by path becomes a named pipe there, which Mirage feeds
+// (`FIFO_NAME`).
+export const MACHINE_DIR = '.mirage'
+export const FIFO_NAME = 'fd'
 
 // Every program runs as a child of this wrapper, which outlives it to say
 // how it ended, since an exec holds on while anything the program started
-// keeps its output open (E2B, msb). `$1` is the file it reports in, which it
-// creates only if nothing is there; `$2` the tag's assignment, exported for
-// the program alone so the wrapper shows in no scan and takes no signal by
-// tag; `$3` the reports of earlier runs to remove; then the program. The
-// subshell execs it, so the pid written first is the program's, with its
-// start in clock ticks; its exit status follows on the next line. The pid
-// and start also go out on stderr ahead of anything the program writes,
-// behind `RUN_PID_MARK`, so the exec that runs the program brings them back
-// itself. A shell reports a child a signal ended on its stderr, so the
-// wrapper's goes nowhere and the program gets the real one back. It needs
-// only a POSIX shell at `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
+// keeps its output open (E2B, msb). `$1` is the tag's assignment, exported
+// for the program alone so the wrapper shows in no scan and takes no signal
+// by tag; then the program. The subshell execs it, so the pid the wrapper
+// writes is the program's, with its start in clock ticks, on stderr behind
+// `RUN_PID_MARK` ahead of anything the program writes; once the program
+// exits its status follows behind `RUN_EXIT_MARK`, so the exec that runs the
+// program brings both back itself. A shell reports a child a signal ended on
+// its stderr, so the wrapper's goes nowhere and the program gets the real
+// one back. It needs only a POSIX shell at `/bin/sh`. Mirrors Python's
+// `RUN_WRAPPER`.
 export const RUN_WRAPPER =
-  'f=$1; t=$2; o=$3; shift 3; ' +
-  `[ -z "$o" ] || PATH=${TOOLS_PATH} rm -f $o 2>/dev/null; ` +
+  't=$1; shift; ' +
   'exec 6>&2 2>/dev/null; ' +
-  'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; ' +
   "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
-  'echo "$PPID ${20}"; ' +
-  'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\' >>"$g"; ' +
+  'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; ' +
   'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
-  's=$?; echo "$s" >>"$g"; exit "$s"'
+  's=$?; printf "\\036mirage-exit %s\\n" "$s" >&6; exit "$s"'
 
-// The mark ahead of the pid line the wrapper writes on stderr, a record
-// separator first so no program's output starts with it.
+// The marks ahead of the pid line and the exit line the wrapper writes on
+// stderr, a record separator first so no program's output starts with it.
 export const RUN_PID_MARK = new TextEncoder().encode('\x1emirage-pid ')
+export const RUN_EXIT_MARK = new TextEncoder().encode('\x1emirage-exit ')
+// The most digits an exit status has, 0 to 255.
+export const EXIT_DIGITS = 3
 // How much of stderr may come ahead of that line, the exec client's own
 // words, before a run is taken to have written none.
 export const RUN_PID_HOLD = 4096
@@ -371,26 +372,36 @@ export const SCAN_WAIT_SECONDS = 10
 
 // What each row a scan prints starts with, so a provider that mixes the
 // line's stderr into its stdout (Daytona) never passes a message for one: a
-// process, or a run's report.
+// process, or the machine's figures.
 export const SCAN_MARK = 'M'
-export const SCAN_RUN_MARK = 'R'
 export const SCAN_FACTS_MARK = 'F'
 
-/** `text` as part of a report's file name, which a scan's glob and an unquoted `rm` both read as one word. */
-function reportName(text: string): string {
-  return text.replace(/[^A-Za-z0-9_.-]/g, '_')
+/**
+ * The shell words that set `d` to Mirage's folder on the machine
+ * (`MACHINE_DIR`), made if need be and the line's user's own: under that
+ * user's home, else beside it in `$TMPDIR` (`/tmp`). A line that finds
+ * neither exits 1 there. Mirrors Python's `machine_dir_line`.
+ */
+export function machineDirLine(): string {
+  return (
+    `d=$(PATH=${TOOLS_PATH}; ` +
+    `for c in \${HOME:+"$HOME/${MACHINE_DIR}"} ` +
+    `"\${TMPDIR:-/tmp}/${MACHINE_DIR}-$(id -u)"; do ` +
+    'mkdir -p "$c" 2>/dev/null && [ -O "$c" ] && [ -w "$c" ] && ' +
+    '{ printf %s "$c"; break; }; done); ' +
+    `[ -n "$d" ] || { echo "mirage: no folder of its own for ${MACHINE_DIR}" >&2; ` +
+    'exit 1; }; '
+  )
 }
 
 /**
- * The file the run `tag` names reports in on its machine. Mirrors Python's
- * `run_status_path`.
+ * The shell line that makes a named pipe in Mirage's folder on the machine
+ * (`machineDirLine`) and prints its path. Mirrors Python's `fifo_line`.
  *
- * @param tag the run's tag, `<workspace>:<process>`.
+ * @param name the pipe's own part of its name.
  */
-export function runStatusPath(tag: string): string {
-  const at = tag.lastIndexOf(':')
-  const name = at > 0 ? `${reportName(tag.slice(0, at))}-${tag.slice(at + 1)}` : reportName(tag)
-  return `${RUN_STATUS_PREFIX}${name}`
+export function fifoLine(name: string): string {
+  return machineDirLine() + `p="$d/${FIFO_NAME}-${name}"; mkfifo -m 600 "$p" && printf %s "$p"`
 }
 
 /**
@@ -398,17 +409,10 @@ export function runStatusPath(tag: string): string {
  * Python's `run_argv`.
  *
  * @param tag the run's tag.
- * @param status the file it reports in (`runStatusPath`).
- * @param spent the reports of runs that have ended.
  * @param argv the program and its arguments.
  */
-export function runArgv(
-  tag: string,
-  status: string,
-  spent: readonly string[],
-  argv: readonly string[],
-): string[] {
-  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', status, `${PROCESS}=${tag}`, spent.join(' '), ...argv]
+export function runArgv(tag: string, argv: readonly string[]): string[] {
+  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', `${PROCESS}=${tag}`, ...argv]
 }
 
 /**
@@ -421,18 +425,7 @@ export function isRun(argv: readonly string[]): boolean {
 
 /** The tag a program's run carries (`runArgv`). Mirrors Python's `run_tag`. */
 export function runTag(argv: readonly string[]): string {
-  return (argv[5] ?? '').slice(PROCESS.length + 1)
-}
-
-/** The shell line that prints one run's report, nothing while there is none. */
-export function statusLine(status: string): string {
-  const path = singleQuote(status)
-  return `PATH=${TOOLS_PATH}; [ -O ${path} ] && cat ${path} 2>/dev/null; true`
-}
-
-/** The shell line that removes the reports of runs that have ended. */
-export function removeLine(spent: readonly string[]): string {
-  return `PATH=${TOOLS_PATH}; rm -f ${spent.join(' ')}`
+  return (argv[4] ?? '').slice(PROCESS.length + 1)
 }
 
 /**
@@ -442,23 +435,15 @@ export function removeLine(spent: readonly string[]): string {
  * `SCAN_MARK`, the tag, its pid, its parent's pid, when it started in clock
  * ticks after boot (`stat`'s 22nd field), its state letter (`stat`'s third)
  * and its arguments, space separated. A process that exits mid-scan is
- * skipped. Each run's report prints one row as well: `SCAN_RUN_MARK`, the
- * process it is, then the report's first line and its second after a `;`.
- * Nothing else is printed. It needs what `stopLine` does. Mirrors Python's
+ * skipped. Nothing else is printed. It needs what `stopLine` does. Mirrors Python's
  * `scan_line`.
  *
  * @param workspace the workspace's id, which every tag starts with.
  */
 export function scanLine(workspace: string): string {
   const mark = singleQuote(`${PROCESS}=${workspace}:`)
-  const reports = `${RUN_STATUS_PREFIX}${reportName(workspace)}-`
   return (
     `PATH=${TOOLS_PATH}; m=${mark}; ` +
-    `for f in ${reports}*; do ` +
-    '[ -f "$f" ] && [ -O "$f" ] || continue; a=; b=; ' +
-    '{ read -r a; read -r b; } <"$f"; ' +
-    `printf '${SCAN_RUN_MARK} %s %s;%s\\n' "\${f##*-}" "$a" "$b"; ` +
-    'done; ' +
     'read -r u _ 2>/dev/null </proc/uptime; ' +
     'h=$(getconf CLK_TCK 2>/dev/null) || h=100; ' +
     'b=$(getconf PAGESIZE 2>/dev/null) || b=4096; ' +

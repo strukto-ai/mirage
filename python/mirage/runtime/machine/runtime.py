@@ -22,7 +22,7 @@ from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.types import MachineName
-from mirage.machine.constants import FIFO_PREFIX, RUN_DRAIN_SECONDS
+from mirage.machine.constants import RUN_DRAIN_SECONDS, fifo_line
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
@@ -262,12 +262,16 @@ class RemoteRuntime(
                 if ctx.vfs is None or text not in reads:
                     continue
                 await handle.ensure_connected()
-                fifo = f"{FIFO_PREFIX}{uuid.uuid4().hex}"
                 made = await handle.exec_line(
-                    f"mkfifo -m 600 {shell_quote(fifo)}", None, env, "/"
+                    fifo_line(uuid.uuid4().hex), None, env, "/"
                 )
-                if made.exit_code != 0:
-                    logger.debug("%s: mkfifo exited %d", fifo, made.exit_code)
+                fifo = made.stdout.decode(errors="replace")
+                if made.exit_code != 0 or not fifo:
+                    logger.debug(
+                        "%s: named pipe not made: exit %d",
+                        handle.machine,
+                        made.exit_code,
+                    )
                     continue
                 argv[at] = fifo
                 feeds.append(

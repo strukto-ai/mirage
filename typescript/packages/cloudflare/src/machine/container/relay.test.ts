@@ -168,7 +168,7 @@ class ScriptedContainer implements RelayedContainer {
     if (this.down !== null) throw this.down
     await this.held
     let inner = cmd[2] === EXEC_PRELUDE ? cmd.slice(5) : cmd
-    if (isRun(inner)) inner = inner.slice(7)
+    if (isRun(inner)) inner = inner.slice(5)
     const line = inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
     const program =
       line === CHECK_LINE

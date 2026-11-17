@@ -21,6 +21,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.machine import program
+from mirage.machine.constants import machine_dir_line
 from mirage.machine.docker import DockerMachine
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import RunResult
@@ -230,6 +231,7 @@ class MountingDockerMachine(FakeDockerMachine):
         return await super()._exec_program(args, stdin, output)
 
     async def open_pipe(self, command):
+        command = command.removeprefix(machine_dir_line())
         source, prefix = shlex.split(command)[5:7]
         self.table[prefix] = (source, "fuse.sshfs")
         requests = asyncio.StreamReader()

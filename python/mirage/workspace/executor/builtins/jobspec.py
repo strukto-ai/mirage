@@ -78,8 +78,8 @@ def grants_of(session: SessionState | None) -> ProcessPermissions:
 
 async def scanning_while(processes: ProcessTable, waiting: Awaitable[T]) -> T:
     """Wait for ``waiting``, looking at the machines every
-    ``RUN_WATCH_SECONDS`` meanwhile, so a run whose exec stays open ends
-    when its program does.
+    ``RUN_WATCH_SECONDS`` meanwhile, so a process a scan found ends once
+    its machine no longer shows it.
 
     Args:
         processes (ProcessTable): the workspace's processes.

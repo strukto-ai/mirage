@@ -39,8 +39,8 @@ from mirage.machine.constants import (
     PROCESS,
     encode_output,
     is_run,
+    machine_dir_line,
     run_argv,
-    run_status_path,
     stop_line,
     wrap_line,
 )
@@ -267,12 +267,7 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
         (
             encode_output(
                 wrap_line(
-                    run_argv(
-                        "run",
-                        run_status_path("run"),
-                        (),
-                        ("/bin/sh", "-c", "wc -l | cat"),
-                    ),
+                    run_argv("run", ("/bin/sh", "-c", "wc -l | cat")),
                     {"E": "1"},
                     "/workspace",
                 )
@@ -645,7 +640,7 @@ class MountingE2BMachine(E2BMachine):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
-            argv = argv[7:]
+            argv = argv[5:]
         if argv[2:3] == (MOUNT_GUARD,):
             argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
@@ -662,6 +657,7 @@ class MountingE2BMachine(E2BMachine):
         return RunResult(stdout=stdout.encode(), stderr=None, exit_code=0)
 
     async def open_pipe(self, command):
+        command = command.removeprefix(machine_dir_line())
         source, prefix = shlex.split(command)[5:7]
         self.table[prefix] = (source, "fuse.sshfs")
         self.pipes.append(prefix)

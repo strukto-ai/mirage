@@ -35,10 +35,11 @@ from mirage.machine.constants import (
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
     SSHFS_HINT,
-    SSHFS_LOG_PREFIX,
+    SSHFS_LOG_NAME,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
+    machine_dir_line,
     mount_field,
 )
 from mirage.machine.types import MachinePipe, MountType
@@ -133,10 +134,9 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
 def served_prefixes(prefixes: Iterable[str]) -> list[str]:
     """The prefixes ssh serves a machine: its top prefixes but ``/tmp``.
 
-    ``/tmp`` stays the machine's own. The machine keeps its sockets,
-    temporary files and Mirage's own run reports there, and a user who is
-    not root cannot mount over it. A mount under ``/tmp`` is still served
-    at its own path.
+    ``/tmp`` stays the machine's own. The machine keeps its sockets and
+    temporary files there, and a user who is not root cannot mount over
+    it. A mount under ``/tmp`` is still served at its own path.
 
     Args:
         prefixes (Iterable[str]): the mount prefixes the session sees.
@@ -876,13 +876,14 @@ class MachineMounts:
                 f"{self._provider}: cannot make {prefix} in the machine: "
                 f"{said(made.stderr)}"
             )
-        log = single_quote(f"{SSHFS_LOG_PREFIX}_{uuid.uuid4().hex}.log")
+        log = f'"$d/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log"'
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
         pipe = await self._open_pipe(
-            f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} {path} "
-            f"2>{log}"
+            machine_dir_line()
+            + f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} "
+            f"{path} 2>{log}"
         )
         context = Context()
         context.run(SERVED_BY.set, self._machine)
@@ -923,7 +924,9 @@ class MachineMounts:
                     )
                     reason = diagnostic
                     try:
-                        written = await self._run(f"cat {log}")
+                        written = await self._run(
+                            machine_dir_line() + f"cat {log}"
+                        )
                         if log_text := said(written.stdout):
                             reason = log_text + (
                                 f"; helper said: {diagnostic}"
@@ -1020,10 +1023,11 @@ class MachineMounts:
         """Remove the helper's setup log; keeping it only costs a file.
 
         Args:
-            log (str): the quoted log path in the machine.
+            log (str): the quoted log path in Mirage's folder on the
+                machine, ``$d`` for the folder.
         """
         try:
-            removed = await self._run(f"rm -f -- {log}")
+            removed = await self._run(machine_dir_line() + f"rm -f -- {log}")
         except Exception as exc:
             logger.debug("could not remove sshfs log: %s", exc)
             return

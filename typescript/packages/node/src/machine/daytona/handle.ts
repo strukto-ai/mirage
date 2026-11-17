@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { MachineHandle, logger } from '@struktoai/mirage-core/machine/handle'
-import { ON_PAUSE, PAUSED_STATE, stdinPath, stdinRedirect } from './constants.ts'
+import { ON_PAUSE, PAUSED_STATE } from './constants.ts'
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { DaytonaSdk } from './sdk.ts'
@@ -30,10 +31,10 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
  *
  * You create the machine yourself (dashboard, `daytona sandbox
  * create`, or the SDK); mirage only connects by `sandboxId` and execs
- * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec has
- * no stdin and reports combined output once the command ends, so piped
- * bytes are uploaded and redirected in, stderr comes back null, and a
- * stream gets its output at the end. The output is base64-encoded in the
+ * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec takes
+ * no stdin and reports combined output once the command ends, so a run
+ * given input is refused (126) before it starts, stderr comes back null,
+ * and a stream gets its output at the end. The output is base64-encoded in the
  * sandbox, since the exec returns it as text (`encodeOutput`: the machine
  * needs dd and base64). close() releases the SDK client and never
  * touches the machine. Mirage pauses the sandbox only when the workspace
@@ -111,26 +112,21 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     cwd: string,
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
-    let command = encodeOutput(wrapLine(argv, env, cwd), true)
-    if (stdin !== null) {
-      const path = stdinPath()
-      await this.upload(path, await materialize(stdin))
-      command = stdinRedirect(command, path)
-    }
+    if (stdin !== null && !(stdin instanceof Uint8Array && stdin.byteLength === 0))
+      return {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(
+          `mirage: ${this.machine.toString()}: the sandbox takes no input\n`,
+        ),
+        exitCode: CANNOT_EXECUTE_STATUS,
+      }
+    const command = encodeOutput(wrapLine(argv, env, cwd), true)
     const response = await this.sandbox.process.executeCommand(command)
     return {
       stdout: decodeOutput(response.result),
       stderr: null,
       exitCode: response.exitCode,
     }
-  }
-
-  private async upload(path: string, data: Uint8Array): Promise<void> {
-    if (this.sandbox === null) throw new Error('daytona sandbox not connected')
-    const slash = path.lastIndexOf('/')
-    const parent = slash > 0 ? path.slice(0, slash) : ''
-    if (parent !== '') await this.sandbox.fs.createFolder(parent, '755')
-    await this.sandbox.fs.uploadFile(Buffer.from(data), path)
   }
 
   /** Release the SDK client once a connect under way has settled; the machine itself is the user's. */
