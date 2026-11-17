@@ -40,6 +40,11 @@ export interface MachineScope {
   readonly picked: boolean
   readonly several: boolean
   readonly workspace: boolean
+  /**
+   * The `in_process` machines of the engines the line routes programs to,
+   * which run in the workspace and answer as it does, after it.
+   */
+  readonly engines: readonly string[]
 }
 
 /**
@@ -60,13 +65,14 @@ function reachOf(runtime: unknown): string {
 /**
  * The machine a runtime runs its programs on, by id as `ps` shows it: a host
  * program's on its `host` entry, else on the host; null for one that runs
- * none. Mirrors Python's `_machine_of`.
+ * none, or runs them in the workspace (`in_process`). Mirrors Python's
+ * `_machine_of`.
  */
 function machineOf(runtime: unknown, host: string): string | null {
   const reach = reachOf(runtime)
   if (runtime == null || (reach !== 'process' && reach !== 'remote')) return null
   const found = (runtime as { machine: MachineName | null }).machine
-  if (found !== null) return found.toString()
+  if (found !== null) return found.provider === IN_PROCESS ? null : found.toString()
   return reach === 'process' ? host : null
 }
 
@@ -88,13 +94,32 @@ function defaultMachine(
 }
 
 /**
+ * The `in_process` machine of the engine programs run on by default, in
+ * `defaultMachine`'s order; null when a machine of its own comes first.
+ * Mirrors Python's `_default_engine`.
+ */
+function defaultEngine(bindings: Record<string, unknown>, host: string): string | null {
+  for (const runtime of [bindings[EXTERNAL_COMMANDS], ...Object.values(bindings)]) {
+    if (runtime == null) continue
+    const machine = (runtime as { machine?: MachineName | null }).machine
+    if (machine?.provider === IN_PROCESS) return machine.toString()
+    if (machineOf(runtime, host) !== null) return null
+  }
+  return null
+}
+
+/**
  * Which machines a command answers for: the one `--machine` names; in a
  * command substitution, whose reader is a script, only
- * the default one, the workspace when there is no machine; otherwise every
- * one. The host counts only while a runtime
+ * the default one, an engine's when programs run on it by default, the
+ * workspace when there is no machine; otherwise every one. The host counts only while a runtime
  * runs programs on it. A command that also answers for the workspace passes
- * `workspace`, which is `mirage` to `--machine` as it is to `ps`. Null when
- * `name` names none. Mirrors Python's `machine_scope`.
+ * `workspace`, which is `mirage` to `--machine` as it is to `ps`. An
+ * engine's `in_process` machine runs in the workspace, so it answers only
+ * where the workspace does, with the workspace's own figures, never the
+ * server's, and only once the line runs programs past the workspace, as the
+ * views list machines only then. Null when `name` names none. Mirrors
+ * Python's `machine_scope`.
  */
 export function machineScope(
   processes: ProcessTable,
@@ -109,28 +134,42 @@ export function machineScope(
     const shown = reachOf(runtime) === 'process' ? machineOf(runtime, host) : null
     if (shown !== null && !every.includes(shown)) every.push(shown)
   }
+  const engines =
+    workspace &&
+    Object.values(routing?.bindings ?? {}).some((runtime) => reachOf(runtime) !== 'workspace')
+      ? engineMachines()
+      : []
   if (name !== null) {
     if (workspace && namesMachine(WORKSPACE_MACHINE, name))
-      return { ids: [], picked: true, several: false, workspace: true }
-    const named = every.filter((machine) => namesMachine(machine, name))
-    return named[0] === undefined
+      return { ids: [], picked: true, several: false, workspace: true, engines: [] }
+    const named = every.find((machine) => namesMachine(machine, name))
+    if (named !== undefined)
+      return { ids: [named], picked: true, several: false, workspace: false, engines: [] }
+    const engine = engines.find((machine) => namesMachine(machine, name))
+    return engine === undefined
       ? null
-      : { ids: [named[0]], picked: true, several: false, workspace: false }
+      : { ids: [], picked: true, several: false, workspace: false, engines: [engine] }
   }
   const substituted = frame?.substitution === true && routing !== undefined
+  const fallback = substituted ? defaultEngine(routing.bindings, host) : null
+  if (fallback !== null && engines.includes(fallback))
+    return { ids: [], picked: false, several: false, workspace: false, engines: [fallback] }
   if (substituted && every.length > 1)
     return {
       ids: [defaultMachine(routing.bindings, every, host)],
       picked: false,
       several: false,
       workspace: false,
+      engines: [],
     }
   const answers = workspace && !(substituted && every.length > 0)
+  const inside = substituted ? [] : engines
   return {
     ids: every,
     picked: false,
-    several: every.length + (answers ? 1 : 0) > 1,
+    several: every.length + (answers ? 1 : 0) + inside.length > 1,
     workspace: answers,
+    engines: inside,
   }
 }
 
@@ -157,10 +196,11 @@ function engineMachines(): string[] {
  */
 export function processScope(processes: ProcessTable, name: string | null): MachineScope | null {
   if (name !== null && namesMachine(WORKSPACE_MACHINE, name))
-    return { ids: [], picked: true, several: false, workspace: true }
+    return { ids: [], picked: true, several: false, workspace: true, engines: [] }
   const engine =
     name === null ? undefined : engineMachines().find((machine) => namesMachine(machine, name))
-  if (engine !== undefined) return { ids: [engine], picked: true, several: false, workspace: false }
+  if (engine !== undefined)
+    return { ids: [engine], picked: true, several: false, workspace: false, engines: [] }
   return machineScope(processes, name)
 }
 

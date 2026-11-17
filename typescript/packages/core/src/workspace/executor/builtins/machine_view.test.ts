@@ -17,6 +17,12 @@ import { SHELL_SPECS } from '../../../commands/spec/shell.ts'
 import { ProcessTable } from '../../../execution/process/table.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
+import { Runtime } from '../../../runtime/base.ts'
+import { HOST } from '../../../runtime/constants.ts'
+import { MachineName } from '../../../execution/types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { MountMode } from '../../../types.ts'
+import { Workspace } from '../../workspace/workspace.ts'
 import {
   inScope,
   machineScope,
@@ -41,6 +47,7 @@ describe('machine view', () => {
       picked: false,
       several: true,
       workspace: false,
+      engines: [],
     })
   })
 
@@ -51,12 +58,14 @@ describe('machine view', () => {
       picked: true,
       several: false,
       workspace: false,
+      engines: [],
     })
     expect(machineScope(processes, 'e2b:b')).toEqual({
       ids: ['e2b:b'],
       picked: true,
       several: false,
       workspace: false,
+      engines: [],
     })
   })
 
@@ -70,6 +79,7 @@ describe('machine view', () => {
       picked: false,
       several: false,
       workspace: false,
+      engines: [],
     })
   })
 
@@ -79,6 +89,7 @@ describe('machine view', () => {
       picked: false,
       several: true,
       workspace: true,
+      engines: [],
     })
   })
 
@@ -88,6 +99,7 @@ describe('machine view', () => {
       picked: false,
       several: false,
       workspace: true,
+      engines: [],
     })
   })
 
@@ -98,6 +110,7 @@ describe('machine view', () => {
       picked: true,
       several: false,
       workspace: true,
+      engines: [],
     })
     expect(machineScope(processes, 'mirage')).toBeNull()
   })
@@ -109,17 +122,18 @@ describe('machine view', () => {
       picked: true,
       several: false,
       workspace: true,
+      engines: [],
     })
     expect(processScope(processes, 'a')?.ids).toEqual(['docker:a'])
     expect(processScope(processes, 'nosuch')).toBeNull()
   })
 
   it("keeps Mirage's own in scope unless another machine is picked", () => {
-    const one = { ids: ['docker:a'], picked: false, several: false, workspace: false }
+    const one = { ids: ['docker:a'], picked: false, several: false, workspace: false, engines: [] }
     expect(inScope(one, 'mirage')).toBe(true)
     expect(inScope(one, 'docker:a')).toBe(true)
     expect(inScope({ ...one, picked: true }, 'mirage')).toBe(false)
-    const own = { ids: [], picked: true, several: false, workspace: true }
+    const own = { ids: [], picked: true, several: false, workspace: true, engines: [] }
     expect(inScope(own, 'mirage')).toBe(true)
     expect(inScope(own, 'docker:a')).toBe(false)
   })
@@ -167,4 +181,90 @@ describe('machine view', () => {
     expect(node.stderr).toEqual(enc.encode(down + gone))
     expect([io.exitCode, node.exitCode]).toEqual([1, 1])
   })
+})
+
+/** An engine in Mirage's process, on the workspace's own reach. */
+class OwnReach extends Runtime {
+  readonly name = 'engine'
+  override readonly reach = 'workspace'
+
+  constructor() {
+    super({}, ['hold'])
+  }
+}
+
+/** An engine in Mirage's process, on the process reach. */
+class ProcessReach extends Runtime {
+  readonly name = 'engine'
+
+  constructor() {
+    super({}, ['hold'])
+  }
+}
+
+async function shown(ws: Workspace, line: string): Promise<string> {
+  return (await ws.shell(line)).stdoutText
+}
+
+describe('an engine', () => {
+  it("lists no machine on the workspace's reach", async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: [new OwnReach()] },
+    )
+    try {
+      expect(await shown(ws, 'nproc')).toBe('1\n')
+      expect(await shown(ws, 'hostname')).toBe('mirage\n')
+      expect(await shown(ws, 'free')).not.toContain('in_process')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers as the workspace, never as the server', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: [new ProcessReach()] },
+    )
+    try {
+      expect(await shown(ws, 'nproc')).toBe('1  mirage\n1  in_process:engine\n')
+      expect(await shown(ws, 'nproc --machine engine')).toBe('1\n')
+      expect(await shown(ws, 'hostname')).toBe('mirage\nmirage\n')
+      expect(await shown(ws, 'lscpu')).toBe(
+        '             mirage         in_process:engine\n' +
+          'Byte Order:  Little Endian  Little Endian\n' +
+          'CPU(s):      1              1\n',
+      )
+      expect(await shown(ws, 'free')).toContain('in_process:engine')
+      expect(await shown(ws, 'uptime')).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+/** A runtime whose programs run on the host, under its entry's name. */
+class HostRun extends Runtime {
+  readonly name = 'run'
+
+  constructor() {
+    super({}, ['perl'])
+  }
+
+  override get machine(): MachineName {
+    return new MachineName(HOST, this.name)
+  }
+}
+
+it('has a script read the engine programs run on by default', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, machines: [new ProcessReach(), new HostRun()] },
+  )
+  try {
+    expect(await shown(ws, 'echo $(hostname) $(nproc)')).toBe('mirage 1\n')
+    expect(await shown(ws, 'hostname')).toMatch(/^mirage\nmirage\n/)
+  } finally {
+    await ws.close()
+  }
 })

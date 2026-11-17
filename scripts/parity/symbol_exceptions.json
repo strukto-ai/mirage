@@ -337,6 +337,7 @@
   "mount/sftp": {
    "python_only": {
     "epoch_ns": "asyncssh splits an SFTP time into whole seconds and a nanosecond part, which the mount core takes as epoch nanoseconds; ssh2 hands whole seconds, which TypeScript turns into a Date inline.",
+    "PipeChannel": "asyncssh's SFTP handler writes to an SSH channel's writer and asks the channel whether it is closing, so a pipe is wrapped in the three calls it makes; ssh2's SFTP class pushes its answers to a callback, which TypeScript writes to the pipe directly.",
     "PipeReader": "asyncssh's SFTP handler reads an SSH channel's stream, so a pipe is wrapped in the three calls it uses; ssh2's SFTP class takes pushed bytes, which TypeScript feeds from the pipe directly."
    },
    "typescript_only": {

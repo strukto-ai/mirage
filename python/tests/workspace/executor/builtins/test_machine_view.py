@@ -14,9 +14,14 @@
 
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
+from mirage.runtime.base import Runtime
+from mirage.runtime.constants import HOST
+from mirage.runtime.types import RunResult, RuntimeReach
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
     in_scope,
@@ -139,3 +144,90 @@ async def test_a_later_error_is_told_once_after_what_stderr_holds():
     assert io.stderr == (down + cut + gone).encode()
     assert node.stderr == (down + gone).encode()
     assert io.exit_code == node.exit_code == 1
+
+
+class Engine(Runtime):
+    """An engine in Mirage's process, on the workspace's own reach."""
+
+    name = "engine"
+
+    async def open_engine(self):
+        return None
+
+    async def _run(self, kind, engine, paths, texts, ctx, output, errors):
+        return RunResult(stdout=b"", stderr=b"", exit_code=0)
+
+
+class OwnReach(Engine):
+    reach: RuntimeReach = "workspace"
+
+
+class ProcessReach(Engine):
+    reach: RuntimeReach = "process"
+
+
+async def shown(ws, line):
+    result = await ws.shell(line)
+    return await result.stdout_str()
+
+
+@pytest.mark.asyncio
+async def test_an_engine_on_the_workspaces_reach_lists_no_machine():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines=[OwnReach(["hold"])],
+    )
+    try:
+        assert await shown(ws, "nproc") == "1\n"
+        assert await shown(ws, "hostname") == "mirage\n"
+        assert "in_process" not in await shown(ws, "free")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_engine_answers_as_the_workspace_never_as_the_server():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines=[ProcessReach(["hold"])],
+    )
+    try:
+        assert await shown(ws, "nproc") == "1  mirage\n1  in_process:engine\n"
+        assert await shown(ws, "nproc --machine engine") == "1\n"
+        assert await shown(ws, "hostname") == "mirage\nmirage\n"
+        assert await shown(ws, "lscpu") == (
+            "             mirage         in_process:engine\n"
+            "Byte Order:  Little Endian  Little Endian\n"
+            "CPU(s):      1              1\n"
+        )
+        assert "in_process:engine" in await shown(ws, "free")
+        assert await shown(ws, "uptime") == ""
+    finally:
+        await ws.close()
+
+
+class HostRun(Engine):
+    """A runtime whose programs run on the host, under its entry's name."""
+
+    name = "run"
+    reach: RuntimeReach = "process"
+
+    @property
+    def machine(self) -> MachineName:
+        return MachineName(HOST, self.name)
+
+
+@pytest.mark.asyncio
+async def test_a_script_reads_the_engine_programs_run_on_by_default():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines=[ProcessReach(["hold"]), HostRun(["perl"])],
+    )
+    try:
+        assert await shown(ws, "echo $(hostname) $(nproc)") == "mirage 1\n"
+        assert (await shown(ws, "hostname")).startswith("mirage\nmirage\n")
+    finally:
+        await ws.close()

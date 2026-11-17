@@ -53,16 +53,20 @@ class MachineScope:
         picked (bool): the line named one, with ``--machine`` or by its
             placement.
         workspace (bool): the workspace answers too, ahead of them.
+        engines (tuple[str, ...]): the ``in_process`` machines of the
+            engines the line routes programs to, which run in the
+            workspace and answer as it does, after it.
     """
 
     ids: tuple[str, ...]
     picked: bool = False
     workspace: bool = False
+    engines: tuple[str, ...] = ()
 
     @property
     def several(self) -> bool:
         """Whether rows need to say which machine they are about."""
-        return len(self.ids) + self.workspace > 1
+        return len(self.ids) + self.workspace + len(self.engines) > 1
 
 
 def in_scope(scope: MachineScope, machine: str) -> bool:
@@ -93,7 +97,7 @@ def _reach_of(runtime: RuntimeIdentity | None) -> str:
 def _machine_of(runtime: RuntimeIdentity | None, host: str) -> str | None:
     """The machine a runtime runs its programs on, by id as ``ps`` shows
     it: a host program's on its ``host`` entry, else on the host; None for
-    one that runs none.
+    one that runs none, or runs them in the workspace (``in_process``).
 
     Args:
         runtime (RuntimeIdentity | None): the runtime.
@@ -104,7 +108,7 @@ def _machine_of(runtime: RuntimeIdentity | None, host: str) -> str | None:
         return None
     found = Runtime.require(runtime).machine
     if found is not None:
-        return str(found)
+        return None if found.provider == IN_PROCESS else str(found)
     return host if reach == "process" else None
 
 
@@ -127,15 +131,43 @@ def _default_machine(
     return every[0]
 
 
+def _default_engine(
+    routing: RouteDecision[RuntimeIdentity], host: str
+) -> str | None:
+    """The ``in_process`` machine of the engine programs run on by
+    default, in ``_default_machine``'s order; None when a machine of
+    its own comes first.
+
+    Args:
+        routing (RouteDecision): the line's placement.
+        host (str): the host's id.
+    """
+    bindings = routing.bindings
+    for runtime in (bindings.get(EXTERNAL_COMMANDS), *bindings.values()):
+        if runtime is None:
+            continue
+        machine = Runtime.require(runtime).machine
+        if machine is not None and machine.provider == IN_PROCESS:
+            return str(machine)
+        if _machine_of(runtime, host) is not None:
+            return None
+    return None
+
+
 def machine_scope(
     processes: ProcessTable, name: str | None, workspace: bool = False
 ) -> MachineScope | None:
     """Which machines a command answers for: the one ``--machine``
     names; in a command substitution, whose reader
-    is a script, only the default one, the workspace when there is no
-    machine; otherwise every one. The host
+    is a script, only the default one, an engine's when programs run on
+    it by default, the workspace when there is no machine; otherwise
+    every one. The host
     counts only while a runtime runs programs on it, so a workspace that
-    runs none says nothing of it.
+    runs none says nothing of it. An engine's ``in_process`` machine runs
+    in the workspace, so it answers only where the workspace does, with
+    the workspace's own figures, never the server's, and only once the
+    line runs programs past the workspace, as the views list machines
+    only then.
 
     Args:
         processes (ProcessTable): the workspace's processes.
@@ -160,18 +192,40 @@ def machine_scope(
             )
             if shown is not None and shown not in every:
                 every.append(shown)
+    engines = (
+        _engine_machines()
+        if workspace
+        and routing is not None
+        and any(
+            _reach_of(runtime) != "workspace"
+            for runtime in routing.bindings.values()
+        )
+        else []
+    )
     if name is not None:
         if workspace and names_machine(WORKSPACE_MACHINE, name):
             return MachineScope((), True, True)
         named = [machine for machine in every if names_machine(machine, name)]
-        return MachineScope((named[0],), True) if named else None
+        if named:
+            return MachineScope((named[0],), True)
+        engine = [m for m in engines if names_machine(m, name)]
+        return MachineScope((), True, engines=(engine[0],)) if engine else None
     substituted = (
         frame is not None and frame.substitution and routing is not None
     )
+    default = (
+        _default_engine(routing, host)
+        if substituted and routing is not None
+        else None
+    )
+    if default is not None and default in engines:
+        return MachineScope((), engines=(default,))
     if substituted and routing is not None and len(every) > 1:
         return MachineScope((_default_machine(routing, every, host),))
     return MachineScope(
-        tuple(every), workspace=workspace and not (substituted and every)
+        tuple(every),
+        workspace=workspace and not (substituted and every),
+        engines=() if substituted else tuple(engines),
     )
 
 

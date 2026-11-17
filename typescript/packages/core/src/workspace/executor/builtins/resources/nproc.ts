@@ -61,12 +61,11 @@ export async function handleNproc(
   const [rows, errors] = await readMachines(processes, scope, 'nproc')
   const env = session?.env ?? {}
   const every = parse.flags.all === true
-  const figures: [string, number, number][] = rows.map((row) => [
-    row.machine,
-    row.cpus,
-    row.allCpus,
-  ])
-  if (scope.workspace) figures.unshift([WORKSPACE_MACHINE, CPUS, CPUS])
+  const own = scope.workspace ? [WORKSPACE_MACHINE] : []
+  const figures: [string, number, number][] = [
+    ...[...own, ...scope.engines].map((machine): [string, number, number] => [machine, CPUS, CPUS]),
+    ...rows.map((row): [string, number, number] => [row.machine, row.cpus, row.allCpus]),
+  ]
   const counts = figures.map(([, usable, whole]) =>
     Math.max(
       1,

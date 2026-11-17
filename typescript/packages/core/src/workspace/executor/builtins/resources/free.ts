@@ -18,6 +18,7 @@ import { CPUS } from '../../../../commands/builtin/constants.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { WORKSPACE_MACHINE } from '../../../../execution/process/constants.ts'
+import { IN_PROCESS } from '../../../../runtime/constants.ts'
 import type { ProcessTable } from '../../../../execution/process/table.ts'
 import type { MachineResources } from '../../../../execution/types.ts'
 import { type MemoryBudget, memoryBudget } from '../../../../io/memory.ts'
@@ -162,13 +163,17 @@ function oneLine(res: MachineResources, options: FreeOptions): string {
 /**
  * The workspace's own row: its `max_memory`, what it holds of that and what is
  * left, and never a figure of the server it runs on. With no `max_memory` it
- * has no size to say (`shown`). Mirrors Python's `_workspace_row`.
+ * has no size to say (`shown`). An engine's `in_process` machine runs in it
+ * and answers the same. Mirrors Python's `_workspace_row`.
  */
-function workspaceRow(memory: MemoryBudget | null): MachineResources {
+function workspaceRow(
+  memory: MemoryBudget | null,
+  machine: string = WORKSPACE_MACHINE,
+): MachineResources {
   const limit = memory?.limit ?? 0
   const room = memory?.room() ?? 0
   return {
-    machine: WORKSPACE_MACHINE,
+    machine,
     cpus: CPUS,
     allCpus: CPUS,
     epoch: 0,
@@ -203,9 +208,8 @@ function workspaceRow(memory: MemoryBudget | null): MachineResources {
  * `max_memory`. Mirrors Python's `_shown`.
  */
 function shown(res: MachineResources, options: FreeOptions): FreeOptions {
-  return res.machine === WORKSPACE_MACHINE && res.memTotal === 0
-    ? { ...options, blank: true }
-    : options
+  const inside = res.machine === WORKSPACE_MACHINE || res.machine.startsWith(`${IN_PROCESS}:`)
+  return inside && res.memTotal === 0 ? { ...options, blank: true } : options
 }
 
 /** What the scope holds now, the workspace first where it answers. Mirrors Python's `_read`. */
@@ -215,7 +219,11 @@ async function read(
   memory: MemoryBudget | null,
 ): Promise<[MachineResources[], string]> {
   const [rows, errors] = await readMachines(processes, scope, 'free')
-  return [scope.workspace ? [workspaceRow(memory), ...rows] : [...rows], errors]
+  const own = scope.workspace ? [WORKSPACE_MACHINE] : []
+  return [
+    [...[...own, ...scope.engines].map((machine) => workspaceRow(memory, machine)), ...rows],
+    errors,
+  ]
 }
 
 function render(rows: readonly MachineResources[], options: FreeOptions, many: boolean): string {

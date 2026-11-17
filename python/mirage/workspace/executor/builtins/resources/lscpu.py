@@ -76,17 +76,21 @@ def _labels(columns: list[dict[str, str]]) -> list[str]:
     return labels
 
 
-def _table(rows: list[MachineResources]) -> list[str]:
+def _table(
+    rows: list[MachineResources], engines: tuple[str, ...]
+) -> list[str]:
     """One row a field and one column a machine, the workspace first
     with what it can say of itself and ``-`` for the rest, as it is no
-    computer.
+    computer, then each engine's ``in_process`` machine as it.
 
     Args:
         rows (list[MachineResources]): the machines that answered.
+        engines (tuple[str, ...]): the engines' machines.
     """
-    heads = [WORKSPACE_MACHINE, *(row.machine for row in rows)]
-    columns = [WORKSPACE_ROWS, *(_fields(row.cpu_info) for row in rows)]
-    labels = _labels(columns[1:]) or list(WORKSPACE_ROWS)
+    heads = [WORKSPACE_MACHINE, *engines, *(row.machine for row in rows)]
+    inside = [WORKSPACE_ROWS] * (1 + len(engines))
+    columns = [*inside, *(_fields(row.cpu_info) for row in rows)]
+    labels = _labels(columns[len(inside) :]) or list(WORKSPACE_ROWS)
     table = [
         [label, *(column.get(label, NO_FIGURE) for column in columns)]
         for label in labels
@@ -132,8 +136,8 @@ async def handle_lscpu(
         return job_result(cmd_str, f"lscpu: {named}: no such machine\n", 1)
     rows, errors = await read_machines(processes, scope, "lscpu")
     if scope.several:
-        return rows_result(cmd_str, _table(rows), errors)
-    if scope.workspace:
+        return rows_result(cmd_str, _table(rows, scope.engines), errors)
+    if scope.workspace or scope.engines:
         lines = [
             f"{label:<{LSCPU_VALUE_COLUMN}}{value}"
             for label, value in WORKSPACE_ROWS.items()

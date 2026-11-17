@@ -68,12 +68,14 @@ function labels(columns: readonly ReadonlyMap<string, string>[]): string[] {
 
 /**
  * One row a field and one column a machine, the workspace first with what it
- * can say of itself and `-` for the rest, as it is no computer.
+ * can say of itself and `-` for the rest, as it is no computer, then each
+ * engine's `in_process` machine as it.
  */
-function table(rows: readonly MachineResources[]): string[] {
-  const heads = [WORKSPACE_MACHINE, ...rows.map((row) => row.machine)]
-  const columns = [WORKSPACE_ROWS, ...rows.map((row) => fields(row.cpuInfo))]
-  const found = labels(columns.slice(1))
+function table(rows: readonly MachineResources[], engines: readonly string[]): string[] {
+  const heads = [WORKSPACE_MACHINE, ...engines, ...rows.map((row) => row.machine)]
+  const inside = [WORKSPACE_ROWS, ...engines.map(() => WORKSPACE_ROWS)]
+  const columns = [...inside, ...rows.map((row) => fields(row.cpuInfo))]
+  const found = labels(columns.slice(inside.length))
   const body = (found.length > 0 ? found : [...WORKSPACE_ROWS.keys()]).map((label) => [
     label,
     ...columns.map((column) => column.get(label) ?? NO_FIGURE),
@@ -105,8 +107,8 @@ export async function handleLscpu(
   const scope = machineScope(processes, named, true)
   if (scope === null) return jobResult(cmdStr, `lscpu: ${named ?? ''}: no such machine\n`, 1)
   const [rows, errors] = await readMachines(processes, scope, 'lscpu')
-  if (scope.several) return rowsResult(cmdStr, table(rows), errors)
-  if (scope.workspace) {
+  if (scope.several) return rowsResult(cmdStr, table(rows, scope.engines), errors)
+  if (scope.workspace || scope.engines.length > 0) {
     const lines = [...WORKSPACE_ROWS].map(
       ([label, value]) => `${label.padEnd(LSCPU_VALUE_COLUMN)}${value}`,
     )
