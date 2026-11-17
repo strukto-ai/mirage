@@ -384,9 +384,10 @@ def _merged_output(
         runs (list[ByteSpool]): the runs, closed once merged.
         config (Mapping[str, JsonValue]): the engine's, as mirage-rs read it.
     """
-    stream: OpenStream | None = open_stream(
+    engine = open_stream(
         "sort", {**config, "mode": "merge", "inputs": len(runs)}
     )
+    stream: OpenStream | None = engine
     positions = [0] * len(runs)
 
     async def read(index: int) -> bytes | None:
@@ -396,7 +397,7 @@ def _merged_output(
         positions[index] += len(data)
         return data or None
 
-    output = rechunk(merge_output(stream, read), MEMORY_LIMIT)
+    output = rechunk(merge_output(engine, read), MEMORY_LIMIT)
 
     async def close() -> None:
         nonlocal stream
@@ -497,9 +498,11 @@ async def _merge_operands(
             merged = await _merge_spools(merging, config)
             levels.append([merged])
             runs[: len(merging)] = [merged]
-        output = _merged_output(runs, config) if len(runs) > 1 else runs[0]
+        merged_output = (
+            _merged_output(runs, config) if len(runs) > 1 else runs[0]
+        )
         levels.clear()
-        return output
+        return merged_output
     finally:
         for level in levels:
             for run in level:
