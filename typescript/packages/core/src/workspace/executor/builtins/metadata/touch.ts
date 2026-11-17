@@ -190,6 +190,7 @@ export async function handleTouch(
       }
     }
     try {
+      let created = false
       try {
         await dispatch('stat', resolved)
       } catch (err) {
@@ -210,21 +211,25 @@ export async function handleTouch(
           errors.push(`touch: cannot touch '${target.rawPath}': Read-only file system\n`)
           continue
         }
-        // A file touch creates is 0666 under the session's umask; only
-        // a mask away from bash's default is worth a mode write, since
-        // 644 is what a fresh file renders as.
-        if (session.umask !== DEFAULT_UMASK) {
-          const fields: SetAttrFields = { mode: 0o666 & ~session.umask }
-          if (setAtime) fields.atime = stamp
-          if (setMtime) fields.mtime = stamp
-          await setattrVia(dispatch, resolved, fields)
-          continue
-        }
+        created = true
       }
+      // A file touch creates is 0666 under the session's umask; only a mask
+      // away from bash's default is worth a mode write, since 644 is what a
+      // fresh file renders as.
       const fields: SetAttrFields = {}
+      if (created && session.umask !== DEFAULT_UMASK) fields.mode = 0o666 & ~session.umask
       if (setAtime) fields.atime = stamp
       if (setMtime) fields.mtime = stamp
-      await setattrVia(dispatch, resolved, fields)
+      try {
+        await setattrVia(dispatch, resolved, fields)
+      } catch (err) {
+        // GNU sets the times through the descriptor it created the file
+        // with, so another client removing the name in between (an `rm`
+        // that saw the new file) never fails it. Here the time set goes by
+        // name, after the write, and finds nothing there.
+        if (!created || !isEnoent(err)) throw err
+        console.debug(`touch: ${target.rawPath} went before its times were set`, err)
+      }
     } catch (err) {
       if (isRefusal(err)) {
         const action = noCreate ? 'setting times of' : 'cannot touch'
