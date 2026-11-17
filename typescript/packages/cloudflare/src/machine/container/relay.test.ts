@@ -28,6 +28,7 @@ import type {
 } from '@struktoai/mirage-core/machine/cloudflare_container/types'
 import { RELAY_WINDOW_BYTES } from '@struktoai/mirage-core/machine/cloudflare_container/constants'
 import { logger } from '@struktoai/mirage-core/machine/handle'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -356,7 +357,9 @@ describe('ContainerRelay with RelayContainer', () => {
     const client = new MemoryClient(relay)
     const machine = new ContainerMachine('box', {}, client, () => client.start())
     const ctx: Context = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
-    const result = await machine.run(['printf', 'x'], ctx, null, null, null)
+    const result = await answerOf((output, errors) =>
+      machine.run(['printf', 'x'], ctx, null, output, errors),
+    )
     expect(DEC.decode(result.stdout)).toBe('from the relay\n')
     expect(result.exitCode).toBe(0)
     expect(box.starts).toBe(1)
@@ -538,7 +541,7 @@ describe('ContainerRelay limits', () => {
     const client = new MemoryClient(relay)
     const machine = new ContainerMachine('box', {}, client, () => client.start())
     const ctx: Context = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
-    await machine.run(['true'], ctx, null, null, null)
+    await answerOf((output, errors) => machine.run(['true'], ctx, null, output, errors))
     expect(client.opened.some((socket) => !socket.closed)).toBe(true)
     await (client as RelayContainer).close()
     await new Promise((resolve) => setTimeout(resolve, 0))
