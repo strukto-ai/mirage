@@ -1867,28 +1867,33 @@ export class MountEntry {
         ]
       }
       const access = ctx.session?.access()
-      return this.inCommandScope(ctx, async (): Promise<[ByteSource | null, IOResult]> => {
-        for (const cmd of handlers) {
-          const user = this.isUserCommand(cmd)
-          const operands = user ? this.keyedPaths(cmdName, paths) : paths.map(virtualKey)
-          const runCtx = user
-            ? this.commandCtx(this.keyedFlags(flags), ctx, this.prefix)
-            : this.commandCtx(virtualFlags(flags), ctx, '')
-          const refusal = this.commandRefusal(cmdName, cmd, flags, access)
-          if (refusal !== null) return [null, refusal]
-          const result = await this.runOne(
-            cmdName,
-            cmd,
-            operands,
-            texts,
-            { ...runCtx, spec: namedSpec(cmd, cmdName) },
-            access,
-            paths,
-          )
-          if (result !== null) return result
-        }
-        return [null, new IOResult()]
-      })
+      for (const cmd of handlers) {
+        const own = this.generalCmds.get(cmd.name) !== cmd
+        const result = await this.inCommandScope(
+          ctx,
+          async (): Promise<[ByteSource | null, IOResult] | null> => {
+            const user = this.isUserCommand(cmd)
+            const operands = user ? this.keyedPaths(cmdName, paths) : paths.map(virtualKey)
+            const runCtx = user
+              ? this.commandCtx(this.keyedFlags(flags), ctx, this.prefix)
+              : this.commandCtx(virtualFlags(flags), ctx, '')
+            const refusal = this.commandRefusal(cmdName, cmd, flags, access)
+            if (refusal !== null) return [null, refusal]
+            return this.runOne(
+              cmdName,
+              cmd,
+              operands,
+              texts,
+              { ...runCtx, spec: namedSpec(cmd, cmdName) },
+              access,
+              paths,
+            )
+          },
+          own,
+        )
+        if (result !== null) return result
+      }
+      return [null, new IOResult()]
     })
   }
 
@@ -2036,15 +2041,18 @@ export class MountEntry {
    * Run a handler with what its calls read from the context: the mount it
    * runs on, its cache manager, and the dispatcher's stat and link follow
    * the walk guard proves an operand's `.` and `..` with. No session files
-   * (a mount driven directly) binds no probe. Mirrors Python's
-   * `_command_scope`.
+   * (a mount driven directly) binds no probe. A connection the handler opens
+   * names this mount only when the command is the mount's own (`own`): a
+   * general command such as `curl` runs on the mount its cwd is on, which
+   * opened nothing. Mirrors Python's `_command_scope`.
    */
-  private inCommandScope<T>(ctx: Partial<Context>, fn: () => Promise<T>): Promise<T> {
+  private inCommandScope<T>(ctx: Partial<Context>, fn: () => Promise<T>, own = true): Promise<T> {
     const outer = currentCaller()
     const files = ctx.vfs
     return runWithCaller(
       {
         ...this.onMount(outer),
+        vfsMount: own ? this.prefix : outer.vfsMount,
         cache: { manager: this.cacheManager },
         mount: [this.prefix, this.mode],
         walkProbe:

@@ -318,19 +318,22 @@
             "group": "Policy",
             "pages": [
               "home/policy/overview",
-              "home/policy/policies",
+              {
+                "group": "Policies",
+                "icon": "gavel",
+                "pages": [
+                  "home/policy/policies",
+                  "home/policy/line",
+                  "home/policy/command",
+                  "home/policy/vfs",
+                  "home/policy/network",
+                  "home/policy/workspace"
+                ]
+              },
               "home/policy/scripts",
               "home/policy/explain",
               "home/policy/route-machine",
               "home/policy/route-network"
-            ]
-          },
-          {
-            "group": "Service Credentials",
-            "pages": [
-              "home/service-credentials",
-              "home/service-credentials/aws-secrets-manager",
-              "home/service-credentials/1password"
             ]
           },
           {
@@ -387,6 +390,20 @@
             ]
           },
           {
+            "group": "Service Credentials",
+            "pages": [
+              "home/service-credentials",
+              {
+                "group": "Service Credentials",
+                "icon": "lock",
+                "pages": [
+                  "home/service-credentials/aws-secrets-manager",
+                  "home/service-credentials/1password"
+                ]
+              }
+            ]
+          },
+          {
             "group": "Mirage Shell",
             "pages": [
               "home/core/shell",
@@ -405,19 +422,24 @@
             "group": "Infrastructure",
             "pages": [
               "home/infrastructure/overview",
-              "home/infrastructure/namespace",
-              "home/infrastructure/sessions",
-              "home/infrastructure/command-logs",
-              "home/infrastructure/jobs",
-              "home/infrastructure/file-cache",
-              "home/infrastructure/file-index"
+              {
+                "group": "Infrastructure",
+                "icon": "layer-group",
+                "pages": [
+                  "home/infrastructure/namespace",
+                  "home/infrastructure/sessions",
+                  "home/infrastructure/command-logs",
+                  "home/infrastructure/jobs",
+                  "home/infrastructure/file-cache",
+                  "home/infrastructure/file-index"
+                ]
+              }
             ]
           },
           {
             "group": "Notifications",
             "pages": [
-              "home/notifications",
-              "home/notifications/support"
+              "home/notifications"
             ]
           },
           {
@@ -1169,6 +1191,10 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/home/notifications/support",
+      "destination": "/home/notifications"
+    },
     {
       "source": "/home/setup/cli/custom",
       "destination": "/home/setup/cli/new"

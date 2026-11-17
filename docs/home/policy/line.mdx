@@ -1,0 +1,82 @@
+---
+title: Line
+description: Route, hold, refuse or cap a whole line with pre_execute and post_execute.
+icon: align-left
+---
+
+`pre_execute` runs once per line, before any of it runs, and `post_execute`
+once the line ends, with its output. TypeScript spells each method and field in camelCase (`preExecute`, `ctx.exitCode`).
+
+| Method | Runs | Can return |
+| --- | --- | --- |
+| `pre_execute` | once per line, before any of it runs | Deny, Ask, Route |
+| `post_execute` | once per line, after it ends | Deny, Ask, Limit |
+
+## Context
+
+| Field | What it is |
+| --- | --- |
+| `line` | the line the agent typed |
+| `commands` | every command of the line, each the context [`pre_command`](/home/policy/command#context) gets for it |
+| `exit_code`, `output` | `post_execute`: how the line ended and what it printed |
+| `results` | `post_execute`: the line's execution tree, a node per command with its exit code, stderr and records |
+
+`commands` is read before the line runs, so a word only the run can expand
+(`$X`) is not resolved there yet. Every `ctx` also carries the [session fields](/home/policy/policies#context).
+
+## pre_execute
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import Policy, Route, RouteContext
+
+class JobsOnTheBox(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Route | None:
+        paths = [p.virtual for c in ctx.commands for p in c.paths]
+        if any(p.startswith("/jobs/") for p in paths):
+            return Route(machine="box")
+        return None
+```
+
+```typescript TypeScript
+const jobsOnTheBox: Policy = {
+  preExecute(ctx) {
+    const jobs = ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/')))
+    return jobs ? { kind: 'route', machine: 'box' } : null
+  },
+}
+```
+
+</CodeGroup>
+
+`python3 /jobs/train.py` runs on the workspace's `box`
+[machine](/home/setup/machine/overview). See
+[Route Machine](/home/policy/route-machine).
+
+## post_execute
+
+<CodeGroup>
+
+```python Python
+from mirage import Limit
+from mirage.policy import ExecuteResultContext, Policy
+
+class FirstHundredLines(Policy):
+    async def post_execute(self, ctx: ExecuteResultContext) -> Limit:
+        return Limit(max_lines=100)
+```
+
+```typescript TypeScript
+const firstHundredLines: Policy = {
+  postExecute() {
+    return new Limit({ maxLines: 100 })
+  },
+}
+```
+
+</CodeGroup>
+
+A longer output stops at 100 lines, and stderr says
+`output truncated at limit (100 lines); ...`. A Deny here drops the
+output: exit 126 and a decision record.

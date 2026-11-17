@@ -351,7 +351,16 @@ async def test_a_cli_connection_names_its_program_and_words(port):
         ("acme", "deploy"),
         "acme deploy",
     )
+    assert asked.mount == ""
     assert [w.text for w in asked.words] == ["acme", "deploy"]
+
+
+@pytest.mark.asyncio
+async def test_a_command_connection_names_no_mount_from_its_cwd(port):
+    watch = _Watch()
+    line = "cd /data && curl -sS http://127.0.0.1:{port}/"
+    assert await _held(port, line, watch) == 0
+    assert [(c.command, c.mount) for c in watch.asked] == [("curl", "")]
 
 
 @pytest.mark.asyncio

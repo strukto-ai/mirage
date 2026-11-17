@@ -125,7 +125,7 @@ so `codex exec-server forward` runs its tools in a workspace on the Worker.
   | `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
 </Accordion>
 
-## Keep a workspace's files
+## Keep files and sessions
 
 A Worker's memory goes with its isolate. To keep files and sessions, store
 them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's storage
@@ -215,7 +215,7 @@ The `chroma` VFS does not run on Workers.
 - The server API's workspaces live in one isolate's memory: a request routed
   to another isolate does not see them, and eviction drops them. `store.type`
   must be `ram`; a workspace built in code keeps its state in SQL, as
-  [above](#keep-a-workspaces-files).
+  [above](#keep-files-and-sessions).
 - Network rules judge a request by host name, since the isolate never sees
   the address a name reaches, so a `denied_domains` entry naming an address or
   a range is refused, and jwt mode's block on cloud metadata addresses

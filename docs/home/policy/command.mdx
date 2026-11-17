@@ -1,0 +1,97 @@
+---
+title: Command
+description: Admit, hold or refuse each command and CLI with pre_command and post_command.
+icon: terminal
+---
+
+`pre_command` runs before each command or CLI, once the line is parsed and
+expanded, nested commands included; `post_command` runs after it, once its
+output drained. TypeScript spells each method and field in camelCase (`preCommand`, `ctx.exitCode`).
+
+| Method | Runs | Can return |
+| --- | --- | --- |
+| `pre_command` | before each command or CLI | Deny, Ask, Route |
+| `post_command` | after each command, once its output drained | Deny, Ask |
+
+## Context
+
+| Field | What it is |
+| --- | --- |
+| `command` | the program, as the gate read it |
+| `words` | the command line word by word, after expansion |
+| `paths` | every path the command reaches, flat: its words' paths, the targets of links it names, and the working directory a bare `ls` reads |
+| `walks` | whether the command walks a tree |
+| `line` | the line the command was parsed from: the line the agent typed, or for `eval`, `$( )` and a function body, that text |
+| `exit_code`, `stderr` | `post_command`: how it ended |
+| `records` | `post_command`: the calls it made, one dict each: `op`, `path`, `source`, `bytes` and timing |
+
+Each word in `words` has a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or
+`redirect`), the `option` a value belongs to, and the `path` it names.
+For `tar -cf a.tar -C /mnt /data`:
+
+| `text` | `kind` | `option` | `path` |
+| --- | --- | --- | --- |
+| `tar` | `name` | | |
+| `-cf` | `option` | | |
+| `a.tar` | `value` | `-cf` | `/a.tar` |
+| `-C` | `option` | | |
+| `/mnt` | `value` | `-C` | `/mnt` |
+| `/data` | `operand` | | `/data` |
+
+An option typed with its value attached stays one word. Its `option` is
+the option without the value, and its `path` is the value's path. For
+`grep --file=pats.txt notes.txt` typed under `/data`:
+
+| `text` | `kind` | `option` | `path` |
+| --- | --- | --- | --- |
+| `grep` | `name` | | |
+| `--file=pats.txt` | `option` | `--file` | `/data/pats.txt` |
+| `notes.txt` | `operand` | | `/data/notes.txt` |
+
+`option` is the option as typed, so an abbreviation (`--fil`) or another
+spelling of the same option (`-f`) does not match a test on `--file`. To
+guard a file, test `path` or `paths`.
+
+Every `ctx` also carries the [session fields](/home/policy/policies#context).
+
+## pre_command
+
+The [example on Policies](/home/policy/policies) is a `pre_command`: it
+refuses `git push --force`.
+
+A machine that takes a line whole (`@line`) expands its words itself, so a
+method reads them as typed. While a `pre_command` method is installed, in code
+or in the session's profile, such a line exits 126 when it holds a word only
+the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
+line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
+the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
+
+## post_command
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import CommandResultContext, Deny, Policy
+
+class NoSecretsShown(Policy):
+    async def post_command(self, ctx: CommandResultContext) -> Deny | None:
+        if any(r.get("path", "").startswith("/vault/") for r in ctx.records):
+            return Deny("vault reads need an operator")
+        return None
+```
+
+```typescript TypeScript
+const noSecretsShown: Policy = {
+  postCommand(ctx) {
+    const vault = ctx.records.some((r) => typeof r.path === 'string' && r.path.startsWith('/vault/'))
+    return vault ? { kind: 'deny', reason: 'vault reads need an operator' } : null
+  },
+}
+```
+
+</CodeGroup>
+
+`cat /vault/k && echo next` exits 126 with `cat: Permission denied`, and
+`echo` does not run. Output already sent stays sent. A machine that takes
+a line whole (`@line`) runs its commands itself, so no result comes back to
+judge: while a `post_command` method is installed, such a line is refused.

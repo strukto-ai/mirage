@@ -410,6 +410,14 @@ describe('a workspace network rule', () => {
       'acme deploy',
     ])
     expect(asked?.words?.map((word) => word.text)).toEqual(['acme', 'deploy'])
+    expect(asked?.mount).toBe('')
+  })
+
+  it('names no mount for a command run from inside one', async () => {
+    const watch = new Watch()
+    const url = `http://127.0.0.1:${String(port)}/`
+    expect(await held(`cd /data && curl -sS ${url}`, [watch])).toBe(0)
+    expect(watch.asked.map((ctx) => [ctx.command, ctx.mount])).toEqual([['curl', '']])
   })
 
   it('judges a positional connect as any other', async () => {

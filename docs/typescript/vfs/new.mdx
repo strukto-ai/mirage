@@ -74,7 +74,7 @@ start working; leave it out, and those commands answer
 | `mkdir`, `rmdir`, `unlink`, `rmR`, `rename`, `copy`, `dirCopy`, `setattr` | `mkdir`, `rm`, `mv`, `cp`, `chmod`, `touch -d` |
 | `filesContaining`, `linesContaining` | [Search](/home/integration/search) for `grep` and `rg` from the service's own index |
 | `firstLines`, `lastLines`, `lineCount`, `checksum`, `readTree` | Fast `head`, `tail`, `wc -l`, `md5sum`, `find` ([Lines](/home/integration/lines), [Walks](/home/integration/walks)) |
-| `deltaHook` | [Notifications](/home/notifications/support) from the service's change feed |
+| `deltaHook` | [Notifications](/home/notifications#poll) from the service's change feed |
 
 The mount mode still decides whether a write may run. `read` may return an
 async iterable of bytes for a large file, and `write` receives one when a

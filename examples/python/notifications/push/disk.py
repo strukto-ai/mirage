@@ -57,6 +57,18 @@ def write_behind_mirage(root: Path) -> list[tuple[str, dict[str, str]]]:
     ]
 
 
+async def run(ws: Workspace, line: str) -> None:
+    """Run a line and print it with its output.
+
+    Args:
+        ws (Workspace): Workspace to run the line in.
+        line (str): Shell line to run.
+    """
+    result = await ws.shell(line)
+    print(f"$ {line}")
+    print(await result.stdout_str(), end="")
+
+
 async def main() -> None:
     tmp = Path(tempfile.mkdtemp())
     seed(tmp)
@@ -66,22 +78,13 @@ async def main() -> None:
     hook = DiskEventHook(vfs.accessor)
     root = PathSpec.from_str_path(MOUNT, vfs_path="")
 
-    result = await ws.shell(f"cat {MOUNT}/reports/q1.txt")
-    print(f"read before: {(await result.stdout_str()).strip()!r}")
-
-    print("\nfile changes:")
+    await run(ws, f"cat {MOUNT}/reports/q1.txt")
     for event_type, payload in write_behind_mirage(tmp):
         for change in await hook.to_events(root, event_type, payload):
-            print(f"  {change.kind.value:6} {change.path.virtual}")
             await ws.notify(change)
-
-    # notify invalidates the caches for the changed path and its
-    # ancestor listings before delivering, so a read after an event
-    # can never serve pre-change bytes.
-    result = await ws.shell(f"cat {MOUNT}/reports/q1.txt")
-    print(f"\nread after notify: {(await result.stdout_str()).strip()!r}")
-    result = await ws.shell(f"ls {MOUNT}/reports")
-    print(f"listing: {' '.join((await result.stdout_str()).split())}")
+            print(f"{change.kind.value}: {change.path.virtual}")
+    await run(ws, f"cat {MOUNT}/reports/q1.txt")
+    await run(ws, f"ls {MOUNT}/reports")
 
     await ws.close()
     shutil.rmtree(tmp)

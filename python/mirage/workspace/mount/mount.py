@@ -1156,8 +1156,10 @@ class MountEntry:
                         f"{shell_voice()}{cmd_name}: command not found"
                     ),
                 )
-            with self._command_scope(ctx):
-                for cmd in handlers:
+            for cmd in handlers:
+                with self._command_scope(
+                    ctx, own=self._general_cmds.get(cmd.name) is not cmd
+                ):
                     user = self._is_user_command(cmd)
                     operands = (
                         self._keyed_paths(cmd_name, paths)
@@ -1184,7 +1186,7 @@ class MountEntry:
                     )
                     if result is not None:
                         return result
-                return None, IOResult()
+            return None, IOResult()
 
     def write_context(self) -> WriteContext | None:
         """What a write through this mount must carry, None when its writes
@@ -1344,7 +1346,7 @@ class MountEntry:
         )
 
     @contextmanager
-    def _command_scope(self, ctx: Context) -> Iterator[None]:
+    def _command_scope(self, ctx: Context, own: bool = True) -> Iterator[None]:
         """Bind what a handler's calls read from the context.
 
         The recorder's mount, the snapshot revision pins, the mount's
@@ -1353,10 +1355,14 @@ class MountEntry:
         one across mounts and names the mount whose facts they ask; and
         the dispatcher's stat and link follow, which a builder proves an
         operand's `.` and `..` with before it makes what the walk names
-        (``mkdir -p``).
+        (``mkdir -p``). A connection the handler opens names this mount
+        only when the command is the mount's own: a general command such
+        as ``curl`` runs on the mount its cwd is on, which opened nothing.
 
         Args:
             ctx (Context): the handler's context.
+            own (bool): whether the command belongs to this mount rather
+                than being a general one every mount serves.
         """
         outer = current_caller()
         links = link_view(ctx.vfs)
@@ -1364,6 +1370,7 @@ class MountEntry:
         token = bind_caller(
             dataclasses.replace(
                 self._on_mount(outer),
+                vfs_mount=self.prefix if own else outer.vfs_mount,
                 cache_manager=self.cache_manager,
                 mount=(self.prefix, self.mode),
                 walk_probe=(
