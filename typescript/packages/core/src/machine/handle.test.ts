@@ -35,6 +35,8 @@ import {
   RUN_EXIT_MARK,
   RUN_PID_HOLD,
   RUN_PID_MARK,
+  RUN_PROGRAM_AT,
+  runExitMark,
   runTag,
   stopLine,
 } from './constants.ts'
@@ -53,7 +55,7 @@ const DEC = new TextDecoder()
 
 // The argv a sandbox runs, as the line the fakes answer.
 function lineOf(argv: readonly string[]): string {
-  const run = isRun(argv) ? argv.slice(5) : argv
+  const run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
   return run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
 }
 
@@ -128,7 +130,7 @@ function fifoOf(lines: readonly string[]): [string, string] {
   const made = lines.filter((line) => line.includes('mkfifo'))
   expect(made).toHaveLength(1)
   const line = made[0] ?? ''
-  expect(line).toBe(fifoLine(named(line)))
+  expect(line).toBe(fifoLine(named(line), ['/data']))
   return [line, `/home/u/.mirage/fd-${named(line)}`]
 }
 
@@ -850,12 +852,15 @@ describe('PidLineFilter', () => {
   })
 })
 
+const MARK = runExitMark('n1')
+
 async function exited(chunks: readonly Uint8Array[]): Promise<[string, number[]]> {
   const out: Uint8Array[] = []
   const codes: number[] = []
   const line = new ExitLineFilter(
     (chunk) => Promise.resolve(void out.push(chunk)),
     (code) => codes.push(code),
+    MARK,
   )
   for (const chunk of chunks) await line.write(chunk)
   await line.finish()
@@ -868,8 +873,8 @@ describe('ExitLineFilter', () => {
   it('takes the exit line out and gives the status', async () => {
     const chunks = [
       ENC.encode('err\n'),
-      RUN_EXIT_MARK.subarray(0, 4),
-      new Uint8Array([...RUN_EXIT_MARK.subarray(4), ...ENC.encode('4')]),
+      MARK.subarray(0, 4),
+      new Uint8Array([...MARK.subarray(4), ...ENC.encode('4')]),
       ENC.encode('2\nlater\n'),
     ]
     expect(await exited(chunks)).toEqual(['err\nlater\n', [42]])
@@ -878,19 +883,26 @@ describe('ExitLineFilter', () => {
   // A mark with no status line after it is the program's own, and so is a
   // piece of one the stream ends on.
   it("leaves a mark without a status line as the program's own", async () => {
-    const own = `x${DEC.decode(RUN_EXIT_MARK)}abc\n`
+    const own = `x${DEC.decode(MARK)}abc\n`
     expect(await exited([ENC.encode(own)])).toEqual([own, []])
-    const long = `${DEC.decode(RUN_EXIT_MARK)}1234\n`
+    const long = `${DEC.decode(MARK)}1234\n`
     expect(await exited([ENC.encode(long)])).toEqual([long, []])
-    const piece = `y${DEC.decode(RUN_EXIT_MARK.subarray(0, 3))}`
+    const piece = `y${DEC.decode(MARK.subarray(0, 3))}`
     expect(await exited([ENC.encode(piece)])).toEqual([piece, []])
+  })
+
+  // Only the run's own word makes a line its exit: a program that writes the
+  // mark itself, with another word or none, ends nothing.
+  it("leaves an exit line without the run's own word as the program's", async () => {
+    const forged = `${DEC.decode(RUN_EXIT_MARK)}0\n${DEC.decode(runExitMark('other'))}0\n`
+    expect(await exited([ENC.encode(forged)])).toEqual([forged, []])
   })
 })
 
 // A box whose program exits while what it left running holds the exec open.
 class LeftOpenBox extends RecordingMachine {
   protected override async execArgv(
-    _argv: readonly string[],
+    argv: readonly string[],
     _stdin: ByteSource | null,
     _env: Record<string, string>,
     _cwd: string,
@@ -898,7 +910,8 @@ class LeftOpenBox extends RecordingMachine {
     errors?: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    await errors?.(new Uint8Array([...RUN_EXIT_MARK, ...ENC.encode('3\n')]))
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors?.(new Uint8Array([...mark, ...ENC.encode('3\n')]))
     return new Promise((_, reject) => {
       signal?.addEventListener('abort', () => {
         reject(new Error('let go'))
@@ -942,7 +955,8 @@ class SlowStopBox extends RecordingMachine {
         resolve()
       })
     })
-    await errors?.(new Uint8Array([...RUN_EXIT_MARK, ...ENC.encode('0\n')]))
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors?.(new Uint8Array([...mark, ...ENC.encode('0\n')]))
     await new Promise((resolve) => setTimeout(resolve, (RUN_DRAIN_SECONDS + 0.3) * 1000))
     throw new DOMException('execute aborted', 'AbortError')
   }

@@ -197,10 +197,30 @@ async def test_a_line_given_input_is_refused_before_it_runs():
     )
     assert result.exit_code == 126
     assert (
-        result.stderr == b"mirage: daytona:box: the sandbox takes no input\n"
+        result.stderr == b"mirage: daytona:box: the machine takes no input\n"
     )
     sandbox = FakeClient.last
     assert (sandbox.fs.files, sandbox.process.calls) == ({}, [])
+
+
+# A program that reads a process substitution needs its pipe fed, which
+# takes input: refused before anything reaches the sandbox.
+@pytest.mark.asyncio
+async def test_a_program_reading_a_substitution_is_refused_before_it_runs():
+    runtime = DaytonaMachine(
+        "box", config={"sandbox_id": "sb-77", "captures": ["node"]}
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(runtime))
+    try:
+        result = await ws.shell("node read.js <(echo data)")
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            126,
+            b"",
+            b"mirage: daytona:box: the machine takes no input\n",
+        )
+    finally:
+        await ws.close()
+    assert FakeClient.fetched == []
 
 
 @pytest.mark.asyncio

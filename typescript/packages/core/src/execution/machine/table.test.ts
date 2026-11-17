@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { CHECK_LINE, CHECK_MARK, RUN_PID_MARK } from '../../machine/constants.ts'
+import {
+  CHECK_LINE,
+  CHECK_MARK,
+  RUN_PID_MARK,
+  RUN_PROGRAM_AT,
+  runTag,
+} from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
@@ -38,7 +44,7 @@ vi.mock('../../machine/constants.ts', async (importOriginal) => ({
 const DEC = new TextDecoder()
 
 function tagOf(argv: readonly string[]): string {
-  return (argv[4] ?? '').split('=')[1] ?? ''
+  return runTag(argv)
 }
 
 class Box extends MachineHandle {
@@ -132,7 +138,7 @@ class Sleeper extends MachineHandle {
   ): Promise<RunResult> {
     const tag = tagOf(argv)
     this.rows = [
-      { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(5).join(' ') },
+      { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(RUN_PROGRAM_AT).join(' ') },
       { tag, pid: this.base + 1, ppid: this.base, started: 101, args: 'train 2' },
     ]
     if (this.reports && errors !== null)

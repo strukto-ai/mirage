@@ -27,7 +27,6 @@ from mirage.machine.daytona.constants import PAUSED_STATE
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +55,7 @@ class DaytonaMachine(MachineHandle):
 
     provider = "daytona"
     pauses = True
+    takes_input = False
     config_cls = DaytonaConfig
     config: DaytonaConfig
 
@@ -116,11 +116,7 @@ class DaytonaMachine(MachineHandle):
         errors: OutputFn | None,
     ) -> RunResult:
         if stdin is not None and stdin != b"":
-            return RunResult(
-                stdout=b"",
-                stderr=f"mirage: {self.machine}: the sandbox takes no input\n".encode(),
-                exit_code=CANNOT_EXECUTE_STATUS,
-            )
+            return self.input_refused()
         command = encode_output(wrap_line(argv, env, cwd), combined=True)
         response = await self._sandbox.process.exec(command)
         return RunResult(

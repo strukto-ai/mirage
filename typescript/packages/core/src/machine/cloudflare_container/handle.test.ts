@@ -22,7 +22,7 @@ import {
   PIPE_DIAGNOSTIC_BYTES,
   PROCESS,
   isRun,
-  machineDirLine,
+  RUN_PROGRAM_AT,
   stopLine,
 } from '../constants.ts'
 import { ConnectionLostError } from '../errors.ts'
@@ -74,20 +74,18 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
   }
 }
 
-// The line an exec runs: its argv past the prelude, a run's wrapper, a mount guard and
-// the words that find Mirage's folder on the machine.
+// The line an exec runs: its argv past the prelude, a run's wrapper and a mount guard.
 function lineOf(argv: readonly string[]): string {
   let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
-  if (isRun(inner)) inner = inner.slice(5)
+  if (isRun(inner)) inner = inner.slice(RUN_PROGRAM_AT)
   if (inner[2] === MOUNT_GUARD) inner = inner.slice(inner.indexOf('--', 5) + 1)
-  const line = inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
-  return line.startsWith(machineDirLine()) ? line.slice(machineDirLine().length) : line
+  return inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
 }
 
 // The mountpoints a line's mount guard holds it to, none for an unguarded line.
 function guardedPoints(argv: readonly string[]): string[] {
   let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
-  if (isRun(inner)) inner = inner.slice(5)
+  if (isRun(inner)) inner = inner.slice(RUN_PROGRAM_AT)
   if (inner[2] !== MOUNT_GUARD) return []
   return inner.slice(5, inner.indexOf('--', 5)).filter((_, at) => at % 4 === 0)
 }
@@ -203,6 +201,12 @@ const check: Program = async (proc) => {
   return 0
 }
 
+// Mirage's folder on the container, as the line that finds it answers.
+const folder: Program = async (proc) => {
+  await proc.say('/root/.mirage')
+  return 0
+}
+
 /**
  * A Durable Object's container: `programs`, by a line's first word, script
  * what its execs run. A line with no program exits 0.
@@ -238,7 +242,9 @@ class FakeContainer implements Container {
       ? () => 126
       : line === CHECK_LINE
         ? check
-        : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
+        : line.startsWith('d=$(')
+          ? folder
+          : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
     const proc = new FakeProcess(line, program, this.log)
     this.execs.push({ argv, options, proc })
     this.starting = false

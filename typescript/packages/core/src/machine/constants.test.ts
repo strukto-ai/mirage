@@ -13,7 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,13 +32,14 @@ import {
   MOUNT_GUARD,
   PROCESS,
   NOT_RUNNING_STATUS,
-  RUN_EXIT_MARK,
   RUN_PROGRAM_AT,
   SSHFS_OPTIONS,
   TOOLS_PATH,
   decodeOutput,
   mountField,
+  machineDirLine,
   runArgv,
+  runExitMark,
   runTag,
   stopLine,
   wrapLine,
@@ -47,12 +58,48 @@ it('gives a run its words and says how its program ended', () => {
     'a b',
     '',
   ]
-  const argv = runArgv('w:7', program)
+  const argv = runArgv('w:7', 'n1', program)
   expect([argv.slice(RUN_PROGRAM_AT), runTag(argv)]).toEqual([program, 'w:7'])
   const done = spawnSync(argv[0] ?? '', argv.slice(1))
   expect([done.status, done.stdout.toString()]).toEqual([3, 'a b||w:7|'])
-  const mark = new TextDecoder().decode(RUN_EXIT_MARK)
+  const mark = new TextDecoder().decode(runExitMark('n1'))
   expect(done.stderr.toString().endsWith(`err\n${mark}3\n`)).toBe(true)
+})
+
+// The folder the line picks with `home` and `spare` for HOME and TMPDIR, under
+// a umask that would leave a new folder group-writable.
+function folderFor(home: string, spare: string, prefixes: readonly string[]): string {
+  const done = spawnSync(
+    '/bin/sh',
+    ['-c', `umask 002; ${machineDirLine(prefixes)}printf %s "$d"`],
+    { env: { PATH: process.env.PATH ?? '', HOME: home, TMPDIR: spare } },
+  )
+  expect(done.status, done.stderr.toString()).toBe(0)
+  return done.stdout.toString()
+}
+
+// Mirage's folder is the user's alone, made or tightened to 700, and never
+// under a workspace prefix, which a mount there would cover, nor a symlink.
+it("keeps Mirage's folder private and off every workspace prefix", () => {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-dir-'))
+  try {
+    const [work, spare, home] = [join(root, 'work'), join(root, 'spare'), join(root, 'home')]
+    mkdirSync(join(work, 'home'), { recursive: true })
+    mkdirSync(spare)
+    mkdirSync(home)
+    const folder = join(spare, `.mirage-${String(process.getuid?.() ?? 0)}`)
+    mkdirSync(folder)
+    chmodSync(folder, 0o775)
+    expect(folderFor(join(work, 'home'), spare, [work])).toBe(folder)
+    expect(statSync(folder).mode & 0o777).toBe(0o700)
+    symlinkSync(work, join(home, '.mirage'))
+    expect(folderFor(home, spare, [])).toBe(folder)
+    unlinkSync(join(home, '.mirage'))
+    expect(folderFor(home, spare, [work])).toBe(join(home, '.mirage'))
+    expect(statSync(join(home, '.mirage')).mode & 0o777).toBe(0o700)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 describe('wrapLine', () => {

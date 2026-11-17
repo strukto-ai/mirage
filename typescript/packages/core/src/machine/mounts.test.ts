@@ -37,8 +37,8 @@ import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import {
   isRun,
-  machineDirLine,
   MOUNT_GUARD,
+  RUN_PROGRAM_AT,
   SSHFS_OPTIONS,
   UNMOUNT_WAIT_SECONDS,
 } from './constants.ts'
@@ -117,7 +117,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    let run = isRun(argv) ? argv.slice(5) : argv
+    let run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     if (run[2] === MOUNT_GUARD) {
       const checked = this.runGuard(run)
       if (checked.exitCode !== 0) return checked
@@ -210,6 +210,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
         exitCode: this.running.has(source) ? 0 : 1,
       })
     }
+    if (line.startsWith('d=$(PATH=')) {
+      return Promise.resolve({ stdout: ENC.encode('/home/u/.mirage'), stderr: null, exitCode: 0 })
+    }
     if (line === 'command -v sshfs') {
       return Promise.resolve({
         stdout: new Uint8Array(),
@@ -239,9 +242,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
-  openPipe(line: string): Promise<MachinePipe> {
-    expect(line.startsWith(machineDirLine())).toBe(true)
-    const command = line.slice(machineDirLine().length)
+  openPipe(command: string): Promise<MachinePipe> {
     this.pipes.push(command)
     const source = words(command)[5] ?? ''
     const prefix = words(command)[6] ?? ''

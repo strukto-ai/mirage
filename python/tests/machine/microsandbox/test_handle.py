@@ -24,8 +24,8 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.machine.constants import (
     EXEC_PRELUDE,
-    RUN_EXIT_MARK,
     run_argv,
+    run_exit_mark,
 )
 from mirage.machine.microsandbox import MicrosandboxMachine
 from mirage.machine.microsandbox.constants import own_session
@@ -40,10 +40,12 @@ from tests.fixtures.machine import machine_runtime
 def test_a_program_in_a_session_of_its_own_runs_as_given():
     program = ("sh", "-c", 'printf "%s|" "$@"; exit 4', "sh", "a b", "")
     done = subprocess.run(
-        own_session(run_argv("t", program)), capture_output=True, check=False
+        own_session(run_argv("t", "n1", program)),
+        capture_output=True,
+        check=False,
     )
     assert (done.returncode, done.stdout) == (4, b"a b||")
-    assert done.stderr.endswith(RUN_EXIT_MARK + b"4\n")
+    assert done.stderr.endswith(run_exit_mark("n1") + b"4\n")
 
 
 @pytest.mark.asyncio
@@ -174,7 +176,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 EXEC_PRELUDE,
                 "sh",
                 "/work",
-                *own_session(run_argv("run", words)),
+                *own_session(run_argv("run", "run", words)),
             ],
             stdin,
         ),

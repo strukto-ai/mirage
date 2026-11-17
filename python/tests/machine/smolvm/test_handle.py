@@ -256,7 +256,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
             EXEC_PRELUDE,
             "sh",
             "/work",
-            *run_argv("run", argv),
+            *run_argv("run", "run", argv),
         ],
         b"input",
     )

@@ -18,6 +18,7 @@ import type { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineName } from '../../execution/types.ts'
 import { RUN_DRAIN_SECONDS, fifoLine } from '../../machine/constants.ts'
 import type { MachineHandle } from '../../machine/handle.ts'
+import { servedPrefixes } from '../../machine/mounts.ts'
 import type { PathSpec } from '../../types.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import type { Files } from '../../workspace/files.ts'
@@ -220,12 +221,15 @@ export class RemoteRuntime
     const argv = [...texts]
     const feeds: (readonly [string, Promise<void>])[] = []
     const stop = new AbortController()
+    const mountPrefixes = this.binding?.mountPrefixes ?? null
+    const prefixes = mountPrefixes === null ? [] : servedPrefixes(mountPrefixes())
     try {
       for (const [at, text] of texts.entries()) {
         if (ctx.vfs == null || !reads.has(text)) continue
+        if (!handle.takesInput) return handle.inputRefused()
         await handle.ensureConnected(ctx.signal)
         const made = await handle.execLine(
-          fifoLine(crypto.randomUUID().replaceAll('-', '')),
+          fifoLine(crypto.randomUUID().replaceAll('-', ''), prefixes),
           null,
           env,
           '/',

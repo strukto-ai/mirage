@@ -19,7 +19,6 @@ import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
-import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { DaytonaSdk } from './sdk.ts'
@@ -45,6 +44,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
   static override readonly provider = 'daytona'
   protected override readonly pauses = true
+  override readonly takesInput = false
   private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
@@ -113,13 +113,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
     if (stdin !== null && !(stdin instanceof Uint8Array && stdin.byteLength === 0))
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(
-          `mirage: ${this.machine.toString()}: the sandbox takes no input\n`,
-        ),
-        exitCode: CANNOT_EXECUTE_STATUS,
-      }
+      return this.inputRefused()
     const command = encodeOutput(wrapLine(argv, env, cwd), true)
     const response = await this.sandbox.process.executeCommand(command)
     return {

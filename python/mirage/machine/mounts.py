@@ -17,7 +17,7 @@ import importlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextvars import Context
 from typing import Any, TypeVar
 
@@ -719,10 +719,9 @@ class MachineMounts:
             nothing new served; None once in step, or with a mount of the
             machine's own gone, which ``validate`` refuses.
         """
+        served = served_prefixes(binding.resolver.prefixes())
         visible = frozenset(
-            await self._mountable(
-                files, served_prefixes(binding.resolver.prefixes())
-            )
+            await self._mountable(files, served)
             if self._mount_type != "fuse"
             else ()
         )
@@ -797,12 +796,14 @@ class MachineMounts:
             server = pipe_server()
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._provider}: {SSHFS_HINT}")
+            folder = await self._folder(served)
             try:
                 for prefix in new:
                     await self._serve(
                         server(files, session, self._lend),
                         prefix,
                         present,
+                        folder,
                     )
             except BaseException:
                 await self._unmount()
@@ -850,11 +851,27 @@ class MachineMounts:
             )
         return found.exit_code == 0
 
+    async def _folder(self, prefixes: Sequence[str]) -> str:
+        """Mirage's folder on the machine (``machine_dir_line``), where
+        each sshfs keeps its log: resolved once, so every look at a log
+        finds the one sshfs wrote.
+
+        Args:
+            prefixes (Sequence[str]): the workspace prefixes the machine
+                has at the same paths.
+        """
+        found = await self._run(machine_dir_line(prefixes) + 'printf %s "$d"')
+        folder = said(found.stdout)
+        if found.exit_code != 0 or not folder:
+            raise RuntimeError(f"{self._provider}: {said(found.stderr)}")
+        return folder
+
     async def _serve(
         self,
         server: Any,
         prefix: str,
         present: dict[str, tuple[str, str]],
+        folder: str,
     ) -> None:
         self._under[prefix] = present.get(prefix)
         old, kind = present.get(prefix, ("", ""))
@@ -876,13 +893,12 @@ class MachineMounts:
                 f"{self._provider}: cannot make {prefix} in the machine: "
                 f"{said(made.stderr)}"
             )
-        log = f'"$d/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log"'
+        log = single_quote(f"{folder}/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log")
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
         pipe = await self._open_pipe(
-            machine_dir_line()
-            + f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} "
+            f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} "
             f"{path} 2>{log}"
         )
         context = Context()
@@ -924,9 +940,7 @@ class MachineMounts:
                     )
                     reason = diagnostic
                     try:
-                        written = await self._run(
-                            machine_dir_line() + f"cat {log}"
-                        )
+                        written = await self._run(f"cat {log}")
                         if log_text := said(written.stdout):
                             reason = log_text + (
                                 f"; helper said: {diagnostic}"
@@ -1023,11 +1037,10 @@ class MachineMounts:
         """Remove the helper's setup log; keeping it only costs a file.
 
         Args:
-            log (str): the quoted log path in Mirage's folder on the
-                machine, ``$d`` for the folder.
+            log (str): the quoted log path in the machine.
         """
         try:
-            removed = await self._run(machine_dir_line() + f"rm -f -- {log}")
+            removed = await self._run(f"rm -f -- {log}")
         except Exception as exc:
             logger.debug("could not remove sshfs log: %s", exc)
             return

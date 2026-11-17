@@ -37,7 +37,6 @@ from mirage.machine.constants import (
     NOT_RUNNING_STATUS,
     RESOURCE_WAIT_SECONDS,
     RUN_DRAIN_SECONDS,
-    RUN_EXIT_MARK,
     RUN_PID_HOLD,
     RUN_PID_MARK,
     SCAN_FACTS_MARK,
@@ -47,6 +46,7 @@ from mirage.machine.constants import (
     faketime_probe,
     resources_line,
     run_argv,
+    run_exit_mark,
     scan_line,
     signal_line,
     stop_line,
@@ -141,7 +141,7 @@ class PidLineFilter:
 
 class ExitLineFilter:
     """One stream of a run with the exit line its wrapper writes once the
-    program has exited (``RUN_EXIT_MARK``) taken out, and the status the
+    program has exited (``run_exit_mark``) taken out, and the status the
     line gives handed to ``ended``.
 
     Only an ending that can still become the line is held; everything
@@ -150,11 +150,15 @@ class ExitLineFilter:
     Args:
         sink (OutputFn): receives the stream without the line.
         ended (Callable[[int], None]): told the program's exit status.
+        mark (bytes): what the run's exit line starts with.
     """
 
-    def __init__(self, sink: OutputFn, ended: Callable[[int], None]) -> None:
+    def __init__(
+        self, sink: OutputFn, ended: Callable[[int], None], mark: bytes
+    ) -> None:
         self._sink = sink
         self._ended = ended
+        self._mark = mark
         self._held = b""
         self._passing = False
 
@@ -185,8 +189,8 @@ class ExitLineFilter:
             held (bytes): what is held so far.
         """
         out = bytearray()
-        while (at := held.find(RUN_EXIT_MARK)) >= 0:
-            rest = held[at + len(RUN_EXIT_MARK) :]
+        while (at := held.find(self._mark)) >= 0:
+            rest = held[at + len(self._mark) :]
             digits = len(rest) - len(rest.lstrip(b"0123456789"))
             if (
                 0 < digits <= EXIT_DIGITS
@@ -203,10 +207,8 @@ class ExitLineFilter:
         keep = next(
             (
                 size
-                for size in range(
-                    min(len(held), len(RUN_EXIT_MARK) - 1), 0, -1
-                )
-                if RUN_EXIT_MARK.startswith(held[-size:])
+                for size in range(min(len(held), len(self._mark) - 1), 0, -1)
+                if self._mark.startswith(held[-size:])
             ),
             0,
         )
@@ -218,6 +220,7 @@ async def _without_run_lines(
     data: bytes,
     found: Callable[[RunStatus], None] | None,
     search: bool,
+    mark: bytes,
 ) -> bytes:
     """``data``, a stream an exec returned whole, with its exit line
     taken out (``ExitLineFilter``), and its pid line too when ``found``
@@ -228,6 +231,7 @@ async def _without_run_lines(
         found (Callable[[RunStatus], None] | None): told what the pid
             line says; None once it is known.
         search (bool): look for the pid line past the stream's start.
+        mark (bytes): what the run's exit line starts with.
     """
     out = bytearray()
 
@@ -238,7 +242,7 @@ async def _without_run_lines(
     pid_line = PidLineFilter(keep, found, search) if found else None
     if pid_line is not None:
         sink = pid_line.write
-    exit_line = ExitLineFilter(sink, lambda _: None)
+    exit_line = ExitLineFilter(sink, lambda _: None, mark)
     await exit_line.write(data)
     await exit_line.finish()
     if pid_line is not None:
@@ -274,6 +278,10 @@ class MachineHandle:
     # Whether ``_pause_machine`` pauses; only then does close wait for a
     # connect under way, which an unbounded connect would otherwise hold.
     pauses: ClassVar[bool] = False
+    # Whether the machine's exec takes input. One that takes none
+    # (Daytona) refuses a line given any before it runs, and a program
+    # that reads a process substitution, which would need feeding.
+    takes_input: ClassVar[bool] = True
     config: MachineConfig
 
     def __init__(
@@ -401,6 +409,8 @@ class MachineHandle:
         # outside a process gets a tag of its own.
         runner = current_caller().process
         tag = str(runner.record.id) if runner is not None else uuid.uuid4().hex
+        nonce = uuid.uuid4().hex
+        mark = run_exit_mark(nonce)
         kept: tuple[bytearray, bytearray] = (bytearray(), bytearray())
 
         async def keep_output(data: bytes) -> None:
@@ -425,11 +435,11 @@ class MachineHandle:
                 ended.set_result(code)
 
         pid_line = PidLineFilter(errors or keep_errors, found, search=True)
-        exit_line = ExitLineFilter(pid_line.write, exited)
+        exit_line = ExitLineFilter(pid_line.write, exited, mark)
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
-                run_argv(tag, run),
+                run_argv(tag, nonce, run),
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
@@ -447,14 +457,14 @@ class MachineHandle:
                 done = replace(
                     done,
                     stderr=await _without_run_lines(
-                        done.stderr, None if reported else found, True
+                        done.stderr, None if reported else found, True, mark
                     ),
                 )
             if done.stdout:
                 done = replace(
                     done,
                     stdout=await _without_run_lines(
-                        done.stdout, None if reported else found, False
+                        done.stdout, None if reported else found, False, mark
                     ),
                 )
         except asyncio.CancelledError:
@@ -525,6 +535,15 @@ class MachineHandle:
         execution.cancel()
         await asyncio.gather(execution, return_exceptions=True)
         return RunResult(stdout=b"", stderr=None, exit_code=ended.result())
+
+    def input_refused(self) -> RunResult:
+        """What a line that needs input answers on a machine that takes
+        none (``takes_input``): 126, with why."""
+        return RunResult(
+            stdout=b"",
+            stderr=f"mirage: {self.machine}: the machine takes no input\n".encode(),
+            exit_code=CANNOT_EXECUTE_STATUS,
+        )
 
     async def check(self) -> bool:
         """Reach the machine and run the check line (``CHECK_LINE``),

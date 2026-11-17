@@ -632,10 +632,8 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const visible =
-      this.mountType === 'fuse'
-        ? []
-        : await this.mountable(files, servedPrefixes(binding.resolver.prefixes()))
+    const served = servedPrefixes(binding.resolver.prefixes())
+    const visible = this.mountType === 'fuse' ? [] : await this.mountable(files, served)
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
     if (
@@ -700,12 +698,14 @@ export class MachineMounts {
       if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
         throw new Error(`${this.provider}: ${SSHFS_HINT}`)
       }
+      const folder = await this.folder(served, signal)
       try {
         for (const prefix of fresh) {
           await this.serve(
             make(files, session, (op) => this.lend(op)),
             prefix,
             present,
+            folder,
             signal,
           )
         }
@@ -751,10 +751,26 @@ export class MachineMounts {
     return found.exitCode === 0
   }
 
+  /**
+   * Mirage's folder on the machine (`machineDirLine`), where each sshfs keeps
+   * its log: resolved once, so every look at a log finds the one sshfs wrote.
+   * Mirrors Python's `MachineMounts._folder`.
+   *
+   * @param prefixes the workspace prefixes the machine has at the same paths.
+   * @param signal stops the line.
+   */
+  private async folder(prefixes: readonly string[], signal?: AbortSignal): Promise<string> {
+    const found = await this.run(machineDirLine(prefixes) + 'printf %s "$d"', signal)
+    const folder = said(found.stdout)
+    if (found.exitCode !== 0 || !folder) throw new Error(`${this.provider}: ${said(found.stderr)}`)
+    return folder
+  }
+
   private async serve(
     server: PipeServer,
     prefix: string,
     present: ReadonlyMap<string, [string, string]>,
+    folder: string,
     signal?: AbortSignal,
   ): Promise<void> {
     this.under.set(prefix, JSON.stringify(present.get(prefix) ?? null))
@@ -773,13 +789,14 @@ export class MachineMounts {
         `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
       )
     }
-    const log = `"$d/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log"`
+    const log = singleQuote(
+      `${folder}/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log`,
+    )
     this.serves += 1
     const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
     const pipe = await this.openPipe(
-      machineDirLine() +
-        `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
+      `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
     )
     const entry: Served = {
       source,
@@ -823,7 +840,7 @@ export class MachineMounts {
           const diagnostic = (await pipe.diagnostic?.()) ?? ''
           let reason = diagnostic
           try {
-            const written = await this.run(machineDirLine() + `cat ${log}`, signal)
+            const written = await this.run(`cat ${log}`, signal)
             const logText = said(written.stdout)
             if (logText) reason = logText + (diagnostic ? `; helper said: ${diagnostic}` : '')
           } catch (error) {
@@ -897,12 +914,11 @@ export class MachineMounts {
   /**
    * Remove the helper's setup log; keeping it only costs a file.
    *
-   * @param log the quoted log path in Mirage's folder on the machine, `$d`
-   *   for the folder.
+   * @param log the quoted log path in the machine.
    */
   private async dropLog(log: string): Promise<void> {
     try {
-      const removed = await this.run(machineDirLine() + `rm -f -- ${log}`)
+      const removed = await this.run(`rm -f -- ${log}`)
       if (removed.exitCode !== 0) console.debug('could not remove sshfs log:', said(removed.stderr))
     } catch (err) {
       console.debug('could not remove sshfs log:', err)

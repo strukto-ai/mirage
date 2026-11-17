@@ -39,7 +39,6 @@ import {
   NOT_RUNNING_STATUS,
   RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
-  RUN_EXIT_MARK,
   RUN_PID_HOLD,
   RUN_PID_MARK,
   SCAN_FACTS_MARK,
@@ -49,6 +48,7 @@ import {
   faketimeProbe,
   resourcesLine,
   runArgv,
+  runExitMark,
   scanLine,
   signalLine,
   stopLine,
@@ -126,7 +126,7 @@ export class PidLineFilter {
 
 /**
  * One stream of a run with the exit line its wrapper writes once the program
- * has exited (`RUN_EXIT_MARK`) taken out, and the status the line gives
+ * has exited (`runExitMark`) taken out, and the status the line gives
  * handed to `ended`. Only an ending that can still become the line is held;
  * everything else passes as it arrives, what the program left running
  * included. Mirrors Python's `ExitLineFilter`.
@@ -135,9 +135,15 @@ export class ExitLineFilter {
   private held = new Uint8Array()
   private passing = false
 
+  /**
+   * @param sink receives the stream without the line.
+   * @param ended told the program's exit status.
+   * @param mark what the run's exit line starts with.
+   */
   constructor(
     private readonly sink: OutputFn,
     private readonly ended: (code: number) => void,
+    private readonly mark: Uint8Array,
   ) {}
 
   /** Pass on what can no longer be, or hold, the exit line. */
@@ -166,8 +172,8 @@ export class ExitLineFilter {
   private take(held: Uint8Array): Uint8Array {
     const out: Uint8Array[] = []
     let rest = held
-    for (let at = findBytes(rest, RUN_EXIT_MARK); at >= 0; at = findBytes(rest, RUN_EXIT_MARK)) {
-      const tail = rest.subarray(at + RUN_EXIT_MARK.byteLength)
+    for (let at = findBytes(rest, this.mark); at >= 0; at = findBytes(rest, this.mark)) {
+      const tail = rest.subarray(at + this.mark.byteLength)
       const end = tail.findIndex((byte) => byte < 0x30 || byte > 0x39)
       const digits = end < 0 ? tail.byteLength : end
       if (digits > 0 && digits <= EXIT_DIGITS && tail[digits] === 0x0a) {
@@ -182,8 +188,8 @@ export class ExitLineFilter {
       out.push(rest.subarray(0, at + 1))
       rest = rest.subarray(at + 1)
     }
-    let keep = Math.min(rest.byteLength, RUN_EXIT_MARK.byteLength - 1)
-    while (keep > 0 && !startsWith(RUN_EXIT_MARK, rest.subarray(rest.byteLength - keep))) keep -= 1
+    let keep = Math.min(rest.byteLength, this.mark.byteLength - 1)
+    while (keep > 0 && !startsWith(this.mark, rest.subarray(rest.byteLength - keep))) keep -= 1
     this.held = rest.slice(rest.byteLength - keep)
     return concat([...out, rest.subarray(0, rest.byteLength - keep)])
   }
@@ -197,16 +203,18 @@ export class ExitLineFilter {
  * @param data the stream.
  * @param found told what the pid line says; null once it is known.
  * @param search look for the pid line past the stream's start.
+ * @param mark what the run's exit line starts with.
  */
 async function withoutRunLines(
   data: Uint8Array,
   found: ((report: RunStatus) => void) | null,
   search: boolean,
+  mark: Uint8Array,
 ): Promise<Uint8Array> {
   const out: Uint8Array[] = []
   const keep: OutputFn = (chunk) => Promise.resolve(void out.push(chunk))
   const pidLine = found === null ? null : new PidLineFilter(keep, found, search)
-  const exitLine = new ExitLineFilter(pidLine?.write ?? keep, () => undefined)
+  const exitLine = new ExitLineFilter(pidLine?.write ?? keep, () => undefined, mark)
   await exitLine.write(data)
   await exitLine.finish()
   await pidLine?.finish()
@@ -247,6 +255,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   protected connecting: Promise<void> | null = null
   // Whether `pauseMachine` pauses; only then does close wait for a connect under way, which an unbounded connect would otherwise hold.
   protected readonly pauses: boolean = false
+  // Whether the machine's exec takes input. One that takes none (Daytona)
+  // refuses a line given any before it runs, and a program that reads a
+  // process substitution, which would need feeding.
+  readonly takesInput: boolean = true
   // Set by a provider's connect that reached the machine; close hands it to `pausable` for the pause after.
   protected reached = false
   private pausable = false
@@ -357,6 +369,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // outside a process gets a tag of its own.
     const runner = currentCaller().process
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
+    const nonce = crypto.randomUUID().replaceAll('-', '')
+    const mark = runExitMark(nonce)
     const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     const letGo = new AbortController()
     let settle: (code: number) => void = () => undefined
@@ -376,11 +390,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       found,
       true,
     )
-    const exitLine = new ExitLineFilter(pidLine.write, (code) => {
-      settle(code)
-    })
+    const exitLine = new ExitLineFilter(
+      pidLine.write,
+      (code) => {
+        settle(code)
+      },
+      mark,
+    )
     const execution = this.execArgv(
-      runArgv(tag, run),
+      runArgv(tag, nonce, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
@@ -398,12 +416,22 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (done.stderr !== null && done.stderr.byteLength > 0)
         done = {
           ...done,
-          stderr: await withoutRunLines(done.stderr, reported.length === 0 ? found : null, true),
+          stderr: await withoutRunLines(
+            done.stderr,
+            reported.length === 0 ? found : null,
+            true,
+            mark,
+          ),
         }
       if (done.stdout.byteLength > 0)
         done = {
           ...done,
-          stdout: await withoutRunLines(done.stdout, reported.length === 0 ? found : null, false),
+          stdout: await withoutRunLines(
+            done.stdout,
+            reported.length === 0 ? found : null,
+            false,
+            mark,
+          ),
         }
     } catch (error) {
       if (ctx.signal?.aborted === true) {
@@ -482,6 +510,20 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * when the machine could not be reached in time. Mirrors Python's
    * `MachineHandle.check`.
    */
+  /**
+   * What a line that needs input answers on a machine that takes none
+   * (`takesInput`): 126, with why. Mirrors Python's `input_refused`.
+   */
+  inputRefused(): RunResult {
+    return {
+      stdout: new Uint8Array(),
+      stderr: new TextEncoder().encode(
+        `mirage: ${this.machine.toString()}: the machine takes no input\n`,
+      ),
+      exitCode: CANNOT_EXECUTE_STATUS,
+    }
+  }
+
   async check(): Promise<boolean> {
     const ran = await this.connectedLine(CHECK_LINE, CHECK_WAIT_SECONDS)
     if (!new TextDecoder().decode(ran.stdout).includes(CHECK_MARK))

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import stat
 import subprocess
 import uuid
 
@@ -23,13 +24,14 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
-    RUN_EXIT_MARK,
     RUN_PROGRAM_AT,
     SSHFS_OPTIONS,
     TOOLS_PATH,
     decode_output,
+    machine_dir_line,
     mount_field,
     run_argv,
+    run_exit_mark,
     run_tag,
     stop_line,
     wrap_line,
@@ -83,11 +85,50 @@ def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
         "a b",
         "",
     )
-    argv = run_argv("w:7", program)
+    argv = run_argv("w:7", "n1", program)
     assert (argv[RUN_PROGRAM_AT:], run_tag(argv)) == (program, "w:7")
     done = subprocess.run(argv, capture_output=True, check=False)
     assert (done.returncode, done.stdout) == (3, b"a b||w:7|")
-    assert done.stderr.endswith(b"err\n" + RUN_EXIT_MARK + b"3\n")
+    assert done.stderr.endswith(b"err\n" + run_exit_mark("n1") + b"3\n")
+
+
+def _folder(home, spare, prefixes):
+    done = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            "umask 002; " + machine_dir_line(prefixes) + 'printf %s "$d"',
+        ],
+        capture_output=True,
+        check=False,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(home),
+            "TMPDIR": str(spare),
+        },
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.decode()
+
+
+# Mirage's folder is the user's alone, made or tightened to 700, and never
+# under a workspace prefix, which a mount there would cover, nor a symlink.
+def test_mirages_folder_is_private_and_off_every_workspace_prefix(tmp_path):
+    work, spare = tmp_path / "work", tmp_path / "spare"
+    (work / "home").mkdir(parents=True)
+    spare.mkdir()
+    folder = spare / f".mirage-{os.getuid()}"
+    folder.mkdir(mode=0o775)
+    folder.chmod(0o775)
+    assert _folder(work / "home", spare, [str(work)]) == str(folder)
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".mirage").symlink_to(work)
+    assert _folder(home, spare, []) == str(folder)
+    (home / ".mirage").unlink()
+    assert _folder(home, spare, [str(work)]) == str(home / ".mirage")
+    assert stat.S_IMODE((home / ".mirage").stat().st_mode) == 0o700
 
 
 def test_a_path_without_sh_still_runs_the_line(tmp_path):

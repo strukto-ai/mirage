@@ -39,9 +39,9 @@ from mirage.machine import mounts
 from mirage.machine.constants import (
     MOUNT_GUARD,
     PIPE_SERVER_HINT,
+    RUN_PROGRAM_AT,
     SSHFS_OPTIONS,
     is_run,
-    machine_dir_line,
 )
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
@@ -123,7 +123,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
-            argv = argv[5:]
+            argv = argv[RUN_PROGRAM_AT:]
         if argv[2:3] == (MOUNT_GUARD,):
             checked = await self.run_guard(argv)
             if checked.exit_code != 0:
@@ -165,6 +165,10 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
                 stdout=b"",
                 stderr=None,
                 exit_code=0 if source in self.running else 1,
+            )
+        if line.startswith("d=$(PATH="):
+            return RunResult(
+                stdout=b"/home/u/.mirage", stderr=None, exit_code=0
             )
         if line == "command -v sshfs":
             return RunResult(
@@ -214,8 +218,6 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         return RunResult(stdout=out, stderr=err, exit_code=done.returncode)
 
     async def open_pipe(self, command):
-        assert command.startswith(machine_dir_line())
-        command = command.removeprefix(machine_dir_line())
         self.pipes.append(command)
         source, prefix = shlex.split(command)[5:7]
         if self.sshfs_mounts:

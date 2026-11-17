@@ -150,7 +150,7 @@ describe('DaytonaMachine', () => {
     )
     expect(result.exitCode).toBe(126)
     expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
-      'mirage: daytona:box: the sandbox takes no input\n',
+      'mirage: daytona:box: the machine takes no input\n',
     )
     const sandbox = FakeClient.last ?? new FakeMachine('started')
     expect([sandbox.fs.files.size, sandbox.process.calls]).toEqual([0, []])
@@ -176,6 +176,24 @@ const RESTRICTIONS: SessionProfile[] = [
   { commands: { deny: [{ paths: ['/data/secret'], reason: 'x' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
+
+// A program that reads a process substitution needs its pipe fed, which takes
+// input: refused before anything reaches the sandbox.
+it('refuses a program reading a substitution before it runs', async () => {
+  const runtime = makeRuntime({ sandboxId: 'sb-77', captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(runtime) })
+  try {
+    const result = await ws.shell('node read.js <(echo data)')
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      126,
+      '',
+      'mirage: daytona:box: the machine takes no input\n',
+    ])
+    expect(FakeClient.fetched).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
 
 it.each(RESTRICTIONS)('refuses every line under a session restriction', async (profile) => {
   const runtime = makeRuntime({ sandboxId: 'sb-77' })

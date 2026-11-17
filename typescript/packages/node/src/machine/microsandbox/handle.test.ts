@@ -18,7 +18,7 @@ import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
-import { EXEC_PRELUDE, RUN_EXIT_MARK, runArgv } from '@struktoai/mirage-core/machine/constants'
+import { EXEC_PRELUDE, runArgv, runExitMark } from '@struktoai/mirage-core/machine/constants'
 import { ownSession } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
@@ -35,10 +35,12 @@ async function* piped(): AsyncIterable<Uint8Array> {
 // A run's program leads a session of its own, and still gets its words
 // unchanged and says how it ended.
 it('runs a program in a session of its own as given', () => {
-  const argv = ownSession(runArgv('t', ['sh', '-c', 'printf "%s|" "$@"; exit 4', 'sh', 'a b', '']))
+  const argv = ownSession(
+    runArgv('t', 'n1', ['sh', '-c', 'printf "%s|" "$@"; exit 4', 'sh', 'a b', '']),
+  )
   const done = spawnSync(argv[0] ?? '', argv.slice(1))
   expect([done.status, done.stdout.toString()]).toEqual([4, 'a b||'])
-  expect(done.stderr.toString().endsWith(`${DEC.decode(RUN_EXIT_MARK)}4\n`)).toBe(true)
+  expect(done.stderr.toString().endsWith(`${DEC.decode(runExitMark('n1'))}4\n`)).toBe(true)
 })
 
 /** `msb` answering status with `state` and failing the verbs in `refusals`. */
@@ -285,7 +287,7 @@ describe('MicrosandboxMachine', () => {
             EXEC_PRELUDE,
             'sh',
             '/work',
-            ...ownSession(runArgv('runid', words)),
+            ...ownSession(runArgv('runid', 'runid', words)),
           ],
           input,
         ],

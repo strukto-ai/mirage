@@ -223,7 +223,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
       EXEC_PRELUDE,
       'sh',
       '/work',
-      ...runArgv('runid', argv),
+      ...runArgv('runid', 'runid', argv),
     ],
     stdin,
   ])

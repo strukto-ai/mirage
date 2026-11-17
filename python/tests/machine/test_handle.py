@@ -35,9 +35,12 @@ from mirage.machine.constants import (
     RUN_EXIT_MARK,
     RUN_PID_HOLD,
     RUN_PID_MARK,
+    RUN_PROGRAM_AT,
     faketime_probe,
     fifo_line,
     is_run,
+    run_exit_mark,
+    run_tag,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
@@ -67,8 +70,8 @@ class RecordingMachine(MachineHandle):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
-            env = {**env, PROCESS: argv[4].partition("=")[2]}
-            argv = argv[5:]
+            env = {**env, PROCESS: run_tag(argv)}
+            argv = argv[RUN_PROGRAM_AT:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
@@ -135,7 +138,7 @@ def _named(line: str) -> str:
 
 def _fifo(lines: list[str]) -> tuple[str, str]:
     [made] = [line for line in lines if "mkfifo" in line]
-    assert made == fifo_line(_named(made))
+    assert made == fifo_line(_named(made), ["/data"])
     return made, f"/home/u/.mirage/fd-{_named(made)}"
 
 
@@ -769,6 +772,9 @@ async def test_a_stream_with_no_pid_line_keeps_every_byte():
     assert await _filtered([big, b"!"], search=True) == (big + b"!", [])
 
 
+MARK = run_exit_mark("n1")
+
+
 async def _exited(chunks: list[bytes]) -> tuple[bytes, list[int]]:
     out = bytearray()
     codes: list[int] = []
@@ -776,7 +782,7 @@ async def _exited(chunks: list[bytes]) -> tuple[bytes, list[int]]:
     async def keep(chunk: bytes) -> None:
         out.extend(chunk)
 
-    line = ExitLineFilter(keep, codes.append)
+    line = ExitLineFilter(keep, codes.append, MARK)
     for chunk in chunks:
         await line.write(chunk)
     await line.finish()
@@ -789,8 +795,8 @@ async def _exited(chunks: list[bytes]) -> tuple[bytes, list[int]]:
 async def test_the_exit_line_comes_out_and_gives_the_status():
     chunks = [
         b"err\n",
-        RUN_EXIT_MARK[:4],
-        RUN_EXIT_MARK[4:] + b"4",
+        MARK[:4],
+        MARK[4:] + b"4",
         b"2\nlater\n",
     ]
     assert await _exited(chunks) == (b"err\nlater\n", [42])
@@ -800,21 +806,23 @@ async def test_the_exit_line_comes_out_and_gives_the_status():
 # piece of one the stream ends on.
 @pytest.mark.asyncio
 async def test_a_mark_without_a_status_line_is_the_programs_own():
-    own = b"x" + RUN_EXIT_MARK + b"abc\n"
+    own = b"x" + MARK + b"abc\n"
     assert await _exited([own]) == (own, [])
-    assert await _exited([RUN_EXIT_MARK + b"1234\n"]) == (
-        RUN_EXIT_MARK + b"1234\n",
-        [],
-    )
-    assert await _exited([b"y" + RUN_EXIT_MARK[:3]]) == (
-        b"y" + RUN_EXIT_MARK[:3],
-        [],
-    )
+    assert await _exited([MARK + b"1234\n"]) == (MARK + b"1234\n", [])
+    assert await _exited([b"y" + MARK[:3]]) == (b"y" + MARK[:3], [])
+
+
+# Only the run's own word makes a line its exit: a program that writes
+# the mark itself, with another word or none, ends nothing.
+@pytest.mark.asyncio
+async def test_an_exit_line_without_the_runs_own_word_is_the_programs():
+    forged = RUN_EXIT_MARK + b"0\n" + run_exit_mark("other") + b"0\n"
+    assert await _exited([forged]) == (forged, [])
 
 
 class LeftOpenBox(RecordingMachine):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        await errors(RUN_EXIT_MARK + b"3\n")
+        await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"3\n")
         await asyncio.Event().wait()
 
 
@@ -845,7 +853,7 @@ class SlowStopBox(RecordingMachine):
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            await errors(RUN_EXIT_MARK + b"0\n")
+            await errors(run_exit_mark(argv[RUN_PROGRAM_AT - 2]) + b"0\n")
             await asyncio.sleep(RUN_DRAIN_SECONDS + 0.3)
             raise
 

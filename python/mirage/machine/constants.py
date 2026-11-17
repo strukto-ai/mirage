@@ -234,28 +234,30 @@ FIFO_NAME = "fd"
 
 # Every program runs as a child of this wrapper, which outlives it to say
 # how it ended, since an exec holds on while anything the program started
-# keeps its output open (E2B, msb). ``$1`` is the tag's assignment,
-# exported for the program alone so the wrapper shows in no scan and takes
-# no signal by tag; then the program. The subshell execs it, so the pid
-# the wrapper writes is the program's, with its start in clock ticks, on
-# stderr behind ``RUN_PID_MARK`` ahead of anything the program writes;
-# once the program exits its status follows behind ``RUN_EXIT_MARK``, so
-# the exec that runs the program brings both back itself. A shell reports
+# keeps its output open (E2B, msb). ``$1`` is the run's own word, which no
+# program's output can know to forge; ``$2`` the tag's assignment, exported
+# for the program alone so the wrapper shows in no scan and takes no signal
+# by tag; then the program. The subshell execs it, so the pid the wrapper
+# writes is the program's, with its start in clock ticks, on stderr behind
+# ``RUN_PID_MARK`` ahead of anything the program writes; once the program
+# exits its status follows behind ``run_exit_mark``, so the exec that runs
+# the program brings both back itself. A shell reports
 # a child a signal ended on its stderr, so the wrapper's goes nowhere and
 # the program gets the real one back. It needs only a POSIX shell at
 # ``/bin/sh``.
 RUN_WRAPPER = (
-    "t=$1; shift; "
+    "n=$1; t=$2; shift 2; "
     "exec 6>&2 2>/dev/null; "
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
     'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
-    's=$?; printf "\\036mirage-exit %s\\n" "$s" >&6; exit "$s"'
+    's=$?; printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 )
 
 # Where a run's program starts in what ``run_argv`` builds: past
-# ``/bin/sh -c RUN_WRAPPER sh`` and the tag's assignment.
-RUN_PROGRAM_AT = 5
+# ``/bin/sh -c RUN_WRAPPER sh``, the run's own word and the tag's
+# assignment.
+RUN_PROGRAM_AT = 6
 
 # The marks ahead of the pid line and the exit line the wrapper writes on
 # stderr, a record separator first so no program's output starts with it.
@@ -406,44 +408,79 @@ SCAN_MARK = "M"
 SCAN_FACTS_MARK = "F"
 
 
-def machine_dir_line() -> str:
+def machine_dir_line(prefixes: Sequence[str]) -> str:
     """The shell words that set ``d`` to Mirage's folder on the machine
-    (``MACHINE_DIR``), made if need be and the line's user's own: under
-    that user's home, else beside it in ``$TMPDIR`` (``/tmp``). A line
-    that finds neither exits 1 there.
+    (``MACHINE_DIR``), made if need be, the line's user's own and no one
+    else's to write in: under that user's home, else beside it in
+    ``$TMPDIR`` or ``/tmp``. A place under a workspace prefix is passed
+    over, since a mount there would cover what Mirage keeps, and so is a
+    symlink. A line that finds no place exits 1 there.
+
+    Args:
+        prefixes (Sequence[str]): the workspace prefixes the machine has
+            at the same paths (``served_prefixes``).
     """
+    covered = "|".join(
+        single_quote(prefix.rstrip("/") + "/") + "*" for prefix in prefixes
+    )
+    skip = f'case "$c/" in ({covered}) continue;; esac; ' if covered else ""
     return (
-        f"d=$(PATH={TOOLS_PATH}; "
+        f"d=$(PATH={TOOLS_PATH}; u=$(id -u); "
         f'for c in ${{HOME:+"$HOME/{MACHINE_DIR}"}} '
-        f'"${{TMPDIR:-/tmp}}/{MACHINE_DIR}-$(id -u)"; do '
-        'mkdir -p "$c" 2>/dev/null && [ -O "$c" ] && [ -w "$c" ] && '
+        f'"${{TMPDIR:-/tmp}}/{MACHINE_DIR}-$u" "/tmp/{MACHINE_DIR}-$u"; do '
+        f"{skip}"
+        'mkdir -p -m 700 "$c" 2>/dev/null && [ ! -L "$c" ] && [ -O "$c" ] && '
+        'chmod 700 "$c" 2>/dev/null && [ -w "$c" ] && '
         '{ printf %s "$c"; break; }; done); '
         f'[ -n "$d" ] || {{ echo "mirage: no folder of its own for {MACHINE_DIR}" >&2; '
         "exit 1; }; "
     )
 
 
-def fifo_line(name: str) -> str:
+def fifo_line(name: str, prefixes: Sequence[str]) -> str:
     """The shell line that makes a named pipe in Mirage's folder on the
     machine (``machine_dir_line``) and prints its path.
 
     Args:
         name (str): the pipe's own part of its name.
+        prefixes (Sequence[str]): the workspace prefixes the machine has
+            at the same paths.
     """
     return (
-        machine_dir_line()
+        machine_dir_line(prefixes)
         + f'p="$d/{FIFO_NAME}-{name}"; mkfifo -m 600 "$p" && printf %s "$p"'
     )
 
 
-def run_argv(tag: str, argv: Sequence[str]) -> tuple[str, ...]:
+def run_argv(tag: str, nonce: str, argv: Sequence[str]) -> tuple[str, ...]:
     """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
 
     Args:
         tag (str): the run's tag.
+        nonce (str): the run's own word, which its exit line carries
+            (``run_exit_mark``).
         argv (Sequence[str]): the program and its arguments.
     """
-    return ("/bin/sh", "-c", RUN_WRAPPER, "sh", f"{PROCESS}={tag}", *argv)
+    return (
+        "/bin/sh",
+        "-c",
+        RUN_WRAPPER,
+        "sh",
+        nonce,
+        f"{PROCESS}={tag}",
+        *argv,
+    )
+
+
+def run_exit_mark(nonce: str) -> bytes:
+    """What one run's exit line starts with: ``RUN_EXIT_MARK`` and the
+    run's own word, so a program that writes the mark itself ends
+    nothing.
+
+    Args:
+        nonce (str): the run's own word (``run_argv``).
+    """
+    return RUN_EXIT_MARK + nonce.encode() + b" "
 
 
 def is_run(argv: Sequence[str]) -> bool:

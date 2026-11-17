@@ -15,7 +15,6 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { machineDirLine } from '@struktoai/mirage-core/machine/constants'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -223,8 +222,7 @@ class MountingDockerMachine extends FakeDockerMachine {
     return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
   }
 
-  override openPipe(line: string): Promise<MachinePipe> {
-    const command = line.startsWith(machineDirLine()) ? line.slice(machineDirLine().length) : line
+  override openPipe(command: string): Promise<MachinePipe> {
     const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
     this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined

@@ -24,6 +24,7 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.types import MachineName
 from mirage.machine.constants import RUN_DRAIN_SECONDS, fifo_line
 from mirage.machine.handle import MachineHandle
+from mirage.machine.mounts import served_prefixes
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -257,13 +258,21 @@ class RemoteRuntime(
         )
         argv = list(texts)
         feeds: list[tuple[str, asyncio.Task[RunResult]]] = []
+        binding = self._binding
+        prefixes = (
+            served_prefixes(binding.mount_prefixes())
+            if binding is not None and binding.mount_prefixes is not None
+            else []
+        )
         try:
             for at, text in enumerate(texts):
                 if ctx.vfs is None or text not in reads:
                     continue
+                if not handle.takes_input:
+                    return handle.input_refused()
                 await handle.ensure_connected()
                 made = await handle.exec_line(
-                    fifo_line(uuid.uuid4().hex), None, env, "/"
+                    fifo_line(uuid.uuid4().hex, prefixes), None, env, "/"
                 )
                 fifo = made.stdout.decode(errors="replace")
                 if made.exit_code != 0 or not fifo:

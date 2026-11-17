@@ -23,7 +23,13 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineName, MachinePid
-from mirage.machine.constants import CHECK_LINE, CHECK_MARK, RUN_PID_MARK
+from mirage.machine.constants import (
+    CHECK_LINE,
+    CHECK_MARK,
+    RUN_PID_MARK,
+    RUN_PROGRAM_AT,
+    run_tag,
+)
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -31,7 +37,7 @@ from mirage.vfs.ram import RAMVFS
 
 
 def _tag(argv):
-    return argv[4].partition("=")[2]
+    return run_tag(argv)
 
 
 class _Box(MachineHandle):
@@ -104,7 +110,9 @@ class _Sleeper(MachineHandle):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         tag = _tag(argv)
         self.rows = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[5:])),
+            MachineProcess(
+                tag, self.base, 1, 100.0, " ".join(argv[RUN_PROGRAM_AT:])
+            ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "train 2"),
         ]
         if self.reports and errors is not None:
@@ -823,7 +831,9 @@ class _Shared(_Sleeper):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         tag = _tag(argv)
         self.rows_of[self.name] = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[5:])),
+            MachineProcess(
+                tag, self.base, 1, 100.0, " ".join(argv[RUN_PROGRAM_AT:])
+            ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "child"),
         ]
         if errors is not None:
