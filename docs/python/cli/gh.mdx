@@ -266,8 +266,20 @@ invalidate mounted caches; read API methods leave them intact.
 | HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |
 | jq compatibility | Uses jq rather than gojq: builtin error wording and floating-point edge cases can differ. Numbers above 2^53 can lose precision; NaN, infinities and negative zero follow jq's values. |
 
-The original GitHub CLI uses the
-[MIT license](https://github.com/cli/cli/blob/trunk/LICENSE). Mirage's command
-implementation is Apache-2.0; the listed subset and differences define its
-compatibility scope. See
-[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+The listed subset and differences define Mirage's compatibility scope.
+
+{/* BEGIN GENERATED CLI LICENSE */}
+## License
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [GitHub CLI](https://github.com/cli/cli) 2.85.0 | Upstream CLI; its commands, output and API calls are adapted | [MIT](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/gh.txt) |
+| [go-gh](https://github.com/cli/go-gh) 2.13.0 | `--template` and `--jq` handling adapted | [MIT](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/go-gh.txt) |
+| [Go](https://github.com/golang/go) 1.25.5 | HTTP reason phrases and template execution adapted | [BSD-3-Clause](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/go.txt) |
+| [gojq](https://github.com/itchyny/gojq) 0.12.17 | jq builtin errors adapted | [MIT](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/gojq.txt) |
+| [Cobra](https://github.com/spf13/cobra) 1.10.2 | Unknown-command refusals adapted | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/cobra.txt) |
+| [pflag](https://github.com/spf13/pflag) 1.0.10 | Option table and option-error wording adapted | [BSD-3-Clause](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/pflag.txt) |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+{/* END GENERATED CLI LICENSE */}

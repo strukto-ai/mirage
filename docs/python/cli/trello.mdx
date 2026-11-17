@@ -102,7 +102,16 @@ The CLI uses its own account config and needs no Trello mount.
   `trello card create`, to restrict writes.
 - API failures exit 1 with Trello's error.
 
-This is Mirage's Apache-2.0 command implementation for the REST API.
-No compatibility with a separate Trello CLI is claimed; the API link
-documents the service rather than an upstream CLI implementation. See
-[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+Mirage's commands call the REST API directly. No compatibility with a
+separate Trello CLI is claimed; the API link documents the service
+rather than an upstream CLI implementation.
+
+{/* BEGIN GENERATED CLI LICENSE */}
+## License
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+{/* END GENERATED CLI LICENSE */}

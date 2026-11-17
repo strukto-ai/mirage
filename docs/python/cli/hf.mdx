@@ -106,7 +106,15 @@ without creating a local checkout. They are read-only. Use a writable mount
 for editing and `hf upload` to choose the commit boundary.
 
 There is no interactive `auth login` or `auth logout`; the registered config
-supplies the token. Only the listed commands are implemented. Upstream
-`huggingface_hub` uses [Apache-2.0](https://github.com/huggingface/huggingface_hub/blob/main/LICENSE),
-as does Mirage's command implementation. See
-[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+supplies the token. Only the listed commands are implemented.
+
+{/* BEGIN GENERATED CLI LICENSE */}
+## License
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [huggingface_hub](https://github.com/huggingface/huggingface_hub) 1.16.4 | Upstream CLI; its repository file filters are adapted | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/huggingface_hub.txt) |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+{/* END GENERATED CLI LICENSE */}
