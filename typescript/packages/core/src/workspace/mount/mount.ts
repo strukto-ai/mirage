@@ -855,6 +855,19 @@ export class MountEntry {
   }
 
   /**
+   * Each command tree this mount serves, keyed by its name (`cliFor`).
+   * Mirrors Python's `MountEntry.served_trees`.
+   */
+  servedTrees(): Map<string, CLI> {
+    const out = new Map<string, CLI>()
+    for (const name of this.trees.keys()) {
+      const tree = this.cliFor(name)
+      if (tree !== null) out.set(name, tree)
+    }
+    return out
+  }
+
+  /**
    * The command tree this mount serves under `cmdName`, null when the name
    * resolves to any other command here. Mirrors Python's
    * `MountEntry.cli_for`.

@@ -188,7 +188,12 @@ import { SessionManager } from '../session/manager.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { type SessionState, varsFromEntries, varsFromEnv } from '../session/session.ts'
 import { envSnapshot, sessionView } from '../session/state.ts'
-import { checkCliPatterns, logger as validateLogger, unreadPatterns } from '../session/validate.ts'
+import {
+  checkCliPatterns,
+  envFilled,
+  logger as validateLogger,
+  unreadPatterns,
+} from '../session/validate.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
 import { indexConfigDump } from '../snapshot/config.ts'
@@ -1398,7 +1403,10 @@ export class Workspace {
       withInline(base, inline, this.workspaceProcesses),
       options.profile ?? null,
     )
-    this.checkCliPatterns(compiled.policies.commands)
+    this.checkCliPatterns(
+      compiled.policies.commands,
+      new Set(Object.keys(compiled.setup.env ?? {})),
+    )
     return this.sessionManager.create(sessionId, { profile: compiled })
   }
 
@@ -1429,23 +1437,38 @@ export class Workspace {
     return new Session(this, sessionId)
   }
 
-  /** Refuse a pattern an installed CLI cannot read, and warn of one whose options no grammar reads. */
-  private checkCliPatterns(rules: AdmissionRules | null): void {
+  /**
+   * Refuse a pattern an installed CLI cannot read, and warn of one whose
+   * options no grammar reads, or of a `{command, flags}` entry the
+   * session's starting env closes (`envFilled`). `env` holds the variable
+   * names the session starts with, empty where no session starts.
+   */
+  private checkCliPatterns(
+    rules: AdmissionRules | null,
+    env: ReadonlySet<string> = new Set(),
+  ): void {
     const grammars = this.cliGrammars()
     checkCliPatterns(rules, grammars)
-    for (const warning of unreadPatterns(rules, grammars)) validateLogger.warn?.(warning)
+    for (const warning of [...unreadPatterns(rules, grammars), ...envFilled(rules, env, grammars)])
+      validateLogger.warn?.(warning)
   }
 
   /**
-   * The grammar of each installed CLI, keyed by head word.
+   * The grammar of each command tree, keyed by head word: an installed
+   * CLI's, else the first one a mount serves, as lookup resolves the name.
    *
    * Read at `createSession` rather than at compile time because a CLI is
    * registered on the workspace after it is built.
    */
   private cliGrammars(): ReadonlyMap<string, Grammar> {
+    const trees = new Map<string, CLI>()
+    for (const mount of this.registry.allMounts()) {
+      for (const [name, cli] of mount.servedTrees()) if (!trees.has(name)) trees.set(name, cli)
+    }
+    for (const [name, install] of this.registry.clis.items()) trees.set(name, install.cli)
     const out = new Map<string, Grammar>()
-    for (const [name, install] of this.registry.clis.items()) {
-      out.set(name, { spec: install.cli.spec, tree: true, passthrough: ownsArgv(install.cli) })
+    for (const [name, cli] of trees) {
+      out.set(name, { spec: cli.spec, tree: true, passthrough: ownsArgv(cli) })
     }
     return out
   }

@@ -24,6 +24,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Collection,
     Iterable,
     Mapping,
     Sequence,
@@ -237,6 +238,7 @@ from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.validate import (
     check_cli_patterns,
+    env_filled,
     unread_patterns,
 )
 from mirage.workspace.shell_execution import ShellExecution
@@ -2645,7 +2647,9 @@ class Workspace:
         compiled = self._compile(
             with_inline(base, inline, self._workspace_processes), profile
         )
-        self._check_cli_patterns(compiled.policies.commands)
+        self._check_cli_patterns(
+            compiled.policies.commands, compiled.setup.env or {}
+        )
         return self._session_mgr.create(session_id, profile=compiled)
 
     async def session(
@@ -2698,31 +2702,43 @@ class Workspace:
         )
         return Session(self, session_id)
 
-    def _check_cli_patterns(self, rules: AdmissionRules | None) -> None:
+    def _check_cli_patterns(
+        self, rules: AdmissionRules | None, env: Collection[str] = ()
+    ) -> None:
         """Refuse a pattern an installed CLI cannot read, and warn of one
-        whose options no grammar reads.
+        whose options no grammar reads, or of a ``{command, flags}`` entry
+        the session's starting env closes (``env_filled``).
 
         Args:
             rules (AdmissionRules | None): the session's compiled rules.
+            env (Collection[str]): the variable names the session starts
+                with, empty where no session starts.
         """
         grammars = self._cli_grammars()
         check_cli_patterns(rules, grammars)
-        for warning in unread_patterns(rules, grammars):
+        for warning in [
+            *unread_patterns(rules, grammars),
+            *env_filled(rules, env, grammars),
+        ]:
             logger.warning(warning)
 
     def _cli_grammars(self) -> dict[str, Grammar]:
-        """The grammar of each installed CLI, keyed by head word.
+        """The grammar of each command tree, keyed by head word: an
+        installed CLI's, else the first one a mount serves, as lookup
+        resolves the name.
 
         Read at ``create_session`` rather than at compile time because a
         CLI is registered on the workspace after it is built.
         """
+        trees: dict[str, CLI] = {}
+        for mount in self._registry.mounts():
+            for name, cli in mount.served_trees().items():
+                trees.setdefault(name, cli)
+        for name, install in self._registry.clis.items().items():
+            trees[name] = install.cli
         return {
-            name: Grammar(
-                install.cli.spec,
-                tree=True,
-                passthrough=owns_argv(install.cli),
-            )
-            for name, install in self._registry.clis.items().items()
+            name: Grammar(cli.spec, tree=True, passthrough=owns_argv(cli))
+            for name, cli in trees.items()
         }
 
     def _base_profile(

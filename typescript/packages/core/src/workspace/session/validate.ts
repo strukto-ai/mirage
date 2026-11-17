@@ -15,12 +15,19 @@
 import { SPECS } from '../../commands/spec/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
-import { allowPatterns, patternProblem, STAR } from '../../policy/match/grammar.ts'
+import {
+  allowPatterns,
+  envOptions,
+  patternProblem,
+  readPattern,
+  STAR,
+  undeclaredOptions,
+} from '../../policy/match/grammar.ts'
 import { expandPattern, splitPattern } from '../../policy/match/pattern.ts'
 import type { AdmissionRules, CommandRule, Grammar } from '../../policy/types.ts'
 
-/** Opt in by assigning a warning sink, as Python's module logger warns. */
-export const logger: { warn?: (message: string) => void } = {}
+/** Opt in by assigning a sink per level, as Python's module logger logs. */
+export const logger: { warn?: (message: string) => void; info?: (message: string) => void } = {}
 
 export const BUILTIN_GRAMMARS: ReadonlyMap<string, Grammar> = new Map(
   Object.entries(SPECS).map(([name, spec]) => [name, { spec, tree: false, passthrough: false }]),
@@ -173,10 +180,9 @@ export function checkPatterns(
 
 /**
  * What a document writes that loads but may not mean what it says: a group
- * in the command name (`{rm,mv} -f` reads as two rules on two commands), a
- * subcommand `*` in the allow list, which admits a subcommand the command
- * gains later, and each command an allow entry closes beside `*`
- * (`commands.allow closes gh to: gh pr view`).
+ * in the command name (`{rm,mv} -f` reads as two rules on two commands), or
+ * a subcommand `*` in the allow list, which admits a subcommand the command
+ * gains later.
  */
 export function patternWarnings(rules: AdmissionRules | null): string[] {
   if (rules === null) return []
@@ -193,18 +199,26 @@ export function patternWarnings(rules: AdmissionRules | null): string[] {
         `commands.allow: ${writtenAs}: a * admits every subcommand there, including any added later`,
       )
   }
-  const allowed = allowPatterns(rules)
-  if (allowed.includes(STAR)) {
-    const closed = new Map<string, string[]>()
-    for (const pattern of allowed) {
-      const head = splitPattern(pattern)[0]
-      if (head === undefined || head === STAR) continue
-      closed.set(head, [...(closed.get(head) ?? []), pattern])
-    }
-    for (const [head, entries] of closed)
-      out.add(`commands.allow closes ${head} to: ${entries.join(', ')}`)
-  }
   return [...out]
+}
+
+/**
+ * Each command an allow entry closes to its own entries beside `*`
+ * (`commands.allow closes gh to: gh pr view`), which the document means
+ * and its reader may not see.
+ */
+export function closedCommands(rules: AdmissionRules | null): string[] {
+  const allowed = rules === null ? [] : allowPatterns(rules)
+  if (!allowed.includes(STAR)) return []
+  const closed = new Map<string, string[]>()
+  for (const pattern of allowed) {
+    const head = splitPattern(pattern)[0]
+    if (head === undefined || head === STAR) continue
+    closed.set(head, [...(closed.get(head) ?? []), pattern])
+  }
+  return [...closed].map(
+    ([head, entries]) => `commands.allow closes ${head} to: ${entries.join(', ')}`,
+  )
 }
 
 /**
@@ -215,7 +229,8 @@ export function patternWarnings(rules: AdmissionRules | null): string[] {
  * grammar cannot read (`checkPatterns`). Raised where the document is
  * compiled, so a deployment learns at startup rather than the first time
  * an agent types the line the operator thought was covered. What loads but
- * may surprise is logged as a warning (`patternWarnings`).
+ * may surprise is logged as a warning (`patternWarnings`), and each command
+ * the allow list closes as a note (`closedCommands`).
  */
 export function checkRules(rules: AdmissionRules | null): void {
   if (rules === null) return
@@ -224,6 +239,7 @@ export function checkRules(rules: AdmissionRules | null): void {
   }
   checkPatterns(rules, BUILTIN_GRAMMARS)
   for (const warning of patternWarnings(rules)) logger.warn?.(warning)
+  for (const note of closedCommands(rules)) logger.info?.(note)
 }
 
 /**
@@ -247,10 +263,11 @@ export function checkCliPatterns(
 }
 
 /**
- * The patterns that carry an option on a command with no grammar, neither
- * an installed CLI nor a builtin, so their options match as written, in
- * order. Asked once a session is created, when every CLI it will run is
- * installed.
+ * The patterns whose options are not read as options: one on a command
+ * with no grammar, neither an installed CLI nor a builtin, whose options
+ * match as written, in order, and one naming an option its command tree's
+ * leaf does not declare, which reads as an operand (`undeclaredOptions`).
+ * Asked once a session is created, when every CLI it will run is installed.
  */
 export function unreadPatterns(
   rules: AdmissionRules | null,
@@ -261,8 +278,13 @@ export function unreadPatterns(
   for (const [where, writtenAs, pattern] of written(rules)) {
     const words = splitPattern(pattern)
     const first = words[0]
+    if (first === undefined) continue
+    const grammar = trees.get(first)
+    for (const word of grammar === undefined ? [] : undeclaredOptions(grammar, words))
+      out.add(
+        `commands.${where}: ${writtenAs}: ${first} declares no ${word} there, so it matches only a line with ${word} as an operand`,
+      )
     if (
-      first !== undefined &&
       !trees.has(first) &&
       !BUILTIN_GRAMMARS.has(first) &&
       words.slice(1).some((word) => word.startsWith('-') && word !== '-')
@@ -272,4 +294,34 @@ export function unreadPatterns(
       )
   }
   return [...out]
+}
+
+/**
+ * Each `{command, flags}` entry the profile's own `env` closes: a variable
+ * it sets fills an option of that command, a filled option is carried as a
+ * typed one is (an agent could set the same variable), and the entry's
+ * flags leave it out, so the entry refuses the command until its flags
+ * list the option. `env` holds the variable names the profile seeds.
+ */
+export function envFilled(
+  rules: AdmissionRules | null,
+  env: ReadonlySet<string>,
+  trees: ReadonlyMap<string, Grammar>,
+): string[] {
+  const out: string[] = []
+  for (const entry of rules?.allow ?? []) {
+    if (typeof entry === 'string') continue
+    const words = splitPattern(entry.command)
+    const grammar = words[0] === undefined ? undefined : trees.get(words[0])
+    if (grammar === undefined) continue
+    const read = readPattern(grammar, splitPattern(entry.pattern))
+    const listed = new Set(read === null ? [] : read.flags.map((flag) => flag.name))
+    for (const [variable, option] of envOptions(grammar, words)) {
+      if (env.has(variable) && !listed.has(option))
+        out.push(
+          `commands.allow: ${entry.pattern}: env sets ${variable}, which fills ${option}, so this refuses ${entry.command} until its flags list ${option}`,
+        )
+    }
+  }
+  return out
 }

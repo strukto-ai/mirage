@@ -16,7 +16,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
 
 from mirage.commands.cli.walk import find_child, leaf_parse
-from mirage.commands.spec.compile import CompiledSpec, compile_spec
+from mirage.commands.spec.compile import (
+    CompiledSpec,
+    argument_dest,
+    compile_spec,
+)
 from mirage.commands.spec.parser import ParsedArgs, parse_command
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.policy.match.pattern import expand_pattern, split_pattern
@@ -323,7 +327,12 @@ def _options(words: Sequence[str]) -> list[str]:
 def _bindings(
     grammar: Grammar, words: tuple[str, ...]
 ) -> list[tuple[str, ...]]:
-    """Each pattern a subcommand ``*`` can bind to, one per node."""
+    """Each pattern a subcommand ``*`` can bind to, one per node.
+
+    Args:
+        grammar (Grammar): the command's grammar, a command tree.
+        words (tuple[str, ...]): the pattern's words, command name first.
+    """
     out: list[tuple[str, ...]] = []
 
     def fill(node: CommandSpec, done: tuple[str, ...], at: int) -> None:
@@ -345,6 +354,49 @@ def _bindings(
     return out
 
 
+def env_options(grammar: Grammar, words: Sequence[str]) -> dict[str, str]:
+    """The options a line under a command may have filled from the
+    environment, by variable: those of the node ``words`` name, of its
+    ancestors and of every subcommand below it, by canonical spelling.
+
+    Args:
+        grammar (Grammar): the command's grammar.
+        words (Sequence[str]): the command name and its subcommands.
+    """
+    node = grammar.spec
+    found = list(node.arguments)
+    for word in words[1:]:
+        child = find_child(node, word) if grammar.tree else None
+        if child is None:
+            break
+        node = child
+        found += child.arguments
+    below = list(node.subcommands)
+    while below:
+        sub = below.pop()
+        found += sub.arguments
+        below += sub.subcommands
+    return {a.env: argument_dest(a) for a in found if a.env}
+
+
+def undeclared_options(grammar: Grammar, words: Sequence[str]) -> list[str]:
+    """The dashed words a command tree's leaf reads as operands in a
+    pattern, because it declares no such option: the line reads them so
+    too, and the pattern matches only a line that carries the same word.
+
+    Args:
+        grammar (Grammar): the command's grammar.
+        words (Sequence[str]): the pattern's words, command name first.
+    """
+    if not grammar.tree or STAR in words[1:]:
+        return []
+    read = read_pattern(grammar, words)
+    if read is None:
+        return []
+    dashed = set(_options(words[len(read.path) :]))
+    return [word for word in read.operands if word in dashed]
+
+
 def pattern_problem(grammar: Grammar, words: Sequence[str]) -> str | None:
     """Why a pattern cannot be read the way it is written on its
     command, None when it can: a subcommand the command lacks, a long
@@ -352,15 +404,17 @@ def pattern_problem(grammar: Grammar, words: Sequence[str]) -> str | None:
     not have (a command tree's leaf takes an undeclared dashed word as
     an operand only where it has a slot for one), or, past a subcommand
     ``*``, an option written short or one no subcommand there declares.
-    A help or version request matches word by word, as its line does.
+    A help or version request matches word by word, as its line does,
+    and the pattern's other words are checked without it.
 
     Args:
         grammar (Grammar): the command's grammar.
         words (Sequence[str]): the pattern's words, command name first.
     """
     words = tuple(words)
-    if HELP_WORDS.intersection(words[1:]):
-        return None
+    asked = tuple(word for word in words if word not in HELP_WORDS)
+    if len(asked) < len(words):
+        return pattern_problem(grammar, asked)
     if grammar.tree and STAR in words[1:]:
         shorts = [o for o in _options(words) if not o.startswith("--")]
         if shorts:

@@ -1001,6 +1001,15 @@ class MountEntry:
         ]
         return commands, trees
 
+    def served_trees(self) -> dict[str, CLI]:
+        """Each command tree this mount serves, keyed by its name
+        (``cli_for``)."""
+        return {
+            name: tree
+            for name in self._trees
+            if (tree := self.cli_for(name)) is not None
+        }
+
     def cli_for(self, cmd_name: str) -> CLI | None:
         """The command tree this mount serves under ``cmd_name``, None
         when the name resolves to any other command here.

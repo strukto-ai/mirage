@@ -13,13 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from types import MappingProxyType
 
 from mirage.commands.spec import SPECS
 from mirage.policy.errors import PolicyError
 from mirage.policy.match import expand_pattern, head_allowed, split_pattern
-from mirage.policy.match.grammar import STAR, allow_patterns, pattern_problem
+from mirage.policy.match.grammar import (
+    STAR,
+    allow_patterns,
+    env_options,
+    pattern_problem,
+    read_pattern,
+    undeclared_options,
+)
 from mirage.policy.types import (
     AdmissionRules,
     AllowFlags,
@@ -218,9 +225,8 @@ def check_patterns(
 def pattern_warnings(rules: AdmissionRules | None) -> list[str]:
     """What a document writes that loads but may not mean what it says:
     a group in the command name (``{rm,mv} -f`` reads as two rules on
-    two commands), a subcommand ``*`` in the allow list, which admits a
-    subcommand the command gains later, and each command an allow entry
-    closes beside ``*`` (``commands.allow closes gh to: gh pr view``).
+    two commands), or a subcommand ``*`` in the allow list, which admits
+    a subcommand the command gains later.
 
     Args:
         rules (AdmissionRules | None): the compiled document.
@@ -240,18 +246,29 @@ def pattern_warnings(rules: AdmissionRules | None) -> list[str]:
                 f"commands.allow: {written}: a * admits every subcommand "
                 "there, including any added later"
             )
-    allowed = allow_patterns(rules)
-    if STAR in allowed:
-        closed: dict[str, list[str]] = {}
-        for pattern in allowed:
-            head = split_pattern(pattern)[:1]
-            if head and head[0] != STAR:
-                closed.setdefault(head[0], []).append(pattern)
-        out += [
-            f"commands.allow closes {head} to: {', '.join(entries)}"
-            for head, entries in closed.items()
-        ]
     return list(dict.fromkeys(out))
+
+
+def closed_commands(rules: AdmissionRules | None) -> list[str]:
+    """Each command an allow entry closes to its own entries beside
+    ``*`` (``commands.allow closes gh to: gh pr view``), which the
+    document means and its reader may not see.
+
+    Args:
+        rules (AdmissionRules | None): the compiled document.
+    """
+    allowed = () if rules is None else allow_patterns(rules)
+    if STAR not in allowed:
+        return []
+    closed: dict[str, list[str]] = {}
+    for pattern in allowed:
+        head = split_pattern(pattern)[:1]
+        if head and head[0] != STAR:
+            closed.setdefault(head[0], []).append(pattern)
+    return [
+        f"commands.allow closes {head} to: {', '.join(entries)}"
+        for head, entries in closed.items()
+    ]
 
 
 def check_rules(rules: AdmissionRules | None) -> None:
@@ -262,7 +279,8 @@ def check_rules(rules: AdmissionRules | None) -> None:
     grammar cannot read (``check_patterns``). Raised where the document
     is compiled, so a deployment learns at startup rather than the first
     time an agent types the line the operator thought was covered. What
-    loads but may surprise is logged as a warning (``pattern_warnings``).
+    loads but may surprise is logged as a warning (``pattern_warnings``),
+    and each command the allow list closes as a note (``closed_commands``).
 
     Args:
         rules (AdmissionRules | None): the compiled document, None for
@@ -280,6 +298,8 @@ def check_rules(rules: AdmissionRules | None) -> None:
     check_patterns(rules, BUILTIN_GRAMMARS)
     for warning in pattern_warnings(rules):
         logger.warning(warning)
+    for note in closed_commands(rules):
+        logger.info(note)
 
 
 def check_cli_patterns(
@@ -310,10 +330,12 @@ def check_cli_patterns(
 def unread_patterns(
     rules: AdmissionRules | None, trees: Mapping[str, Grammar]
 ) -> list[str]:
-    """The patterns that carry an option on a command with no grammar,
-    neither an installed CLI nor a builtin, so their options match as
-    written, in order. Asked once a session is created, when every CLI
-    it will run is installed.
+    """The patterns whose options are not read as options: one on a
+    command with no grammar, neither an installed CLI nor a builtin,
+    whose options match as written, in order, and one naming an option
+    its command tree's leaf does not declare, which reads as an operand
+    (``undeclared_options``). Asked once a session is created, when
+    every CLI it will run is installed.
 
     Args:
         rules (AdmissionRules | None): the compiled document.
@@ -325,6 +347,15 @@ def unread_patterns(
     out: list[str] = []
     for where, written, pattern in _written(rules):
         words = split_pattern(pattern)
+        grammar = trees.get(words[0]) if words else None
+        for word in (
+            [] if grammar is None else undeclared_options(grammar, words)
+        ):
+            out.append(
+                f"commands.{where}: {written}: {words[0]} declares no "
+                f"{word} there, so it matches only a line with {word} as "
+                "an operand"
+            )
         if (
             words
             and words[0] not in trees
@@ -336,3 +367,40 @@ def unread_patterns(
                 "here, so its options match as written, in order"
             )
     return list(dict.fromkeys(out))
+
+
+def env_filled(
+    rules: AdmissionRules | None,
+    env: Collection[str],
+    trees: Mapping[str, Grammar],
+) -> list[str]:
+    """Each ``{command, flags}`` entry the profile's own ``env`` closes:
+    a variable it sets fills an option of that command, a filled option
+    is carried as a typed one is (an agent could set the same variable),
+    and the entry's flags leave it out, so the entry refuses the command
+    until its flags list the option.
+
+    Args:
+        rules (AdmissionRules | None): the compiled document.
+        env (Collection[str]): the variable names the profile seeds.
+        trees (Mapping[str, Grammar]): each command tree's grammar,
+            keyed by head word.
+    """
+    out: list[str] = []
+    for entry in () if rules is None else rules.allow or ():
+        if isinstance(entry, str):
+            continue
+        words = split_pattern(entry.command)
+        grammar = trees.get(words[0]) if words else None
+        if grammar is None:
+            continue
+        read = read_pattern(grammar, split_pattern(entry.pattern))
+        listed = {f.name for f in read.flags} if read is not None else set()
+        out += [
+            f"commands.allow: {entry.pattern}: env sets {var}, which fills "
+            f"{option}, so this refuses {entry.command} until its flags "
+            f"list {option}"
+            for var, option in env_options(grammar, words).items()
+            if var in env and option not in listed
+        ]
+    return out

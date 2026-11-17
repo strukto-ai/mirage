@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { findChild, leafParse } from '../../commands/cli/walk.ts'
-import { compileSpec, type CompiledSpec } from '../../commands/spec/compile.ts'
+import { argumentDest, compileSpec, type CompiledSpec } from '../../commands/spec/compile.ts'
 import { type ParsedArgs, parseCommand } from '../../commands/spec/parser.ts'
-import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
+import type { Argument, CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { AdmissionRules, CommandRead, FlagFact, Grammar } from '../types.ts'
 import { expandPattern, splitPattern } from './pattern.ts'
@@ -288,17 +288,57 @@ function bindings(grammar: Grammar, words: readonly string[]): string[][] {
 }
 
 /**
+ * The options a line under a command may have filled from the environment,
+ * by variable: those of the node `words` name, of its ancestors and of
+ * every subcommand below it, by canonical spelling. `words` is the command
+ * name and its subcommands.
+ */
+export function envOptions(grammar: Grammar, words: readonly string[]): Map<string, string> {
+  let node = grammar.spec
+  const found: Argument[] = [...node.arguments]
+  for (const word of words.slice(1)) {
+    const child = grammar.tree ? findChild(node, word) : null
+    if (child === null) break
+    node = child
+    found.push(...child.arguments)
+  }
+  const below = [...node.subcommands]
+  for (let sub = below.pop(); sub !== undefined; sub = below.pop()) {
+    found.push(...sub.arguments)
+    below.push(...sub.subcommands)
+  }
+  const out = new Map<string, string>()
+  for (const argument of found)
+    if (argument.env !== null) out.set(argument.env, argumentDest(argument))
+  return out
+}
+
+/**
+ * The dashed words a command tree's leaf reads as operands in a pattern,
+ * because it declares no such option: the line reads them so too, and the
+ * pattern matches only a line that carries the same word.
+ */
+export function undeclaredOptions(grammar: Grammar, words: readonly string[]): string[] {
+  if (!grammar.tree || words.slice(1).includes(STAR)) return []
+  const read = readPattern(grammar, words)
+  if (read === null) return []
+  const dashed = new Set(options(words.slice(read.path.length)))
+  return read.operands.filter((word) => dashed.has(word))
+}
+
+/**
  * Why a pattern cannot be read the way it is written on its command, null
  * when it can: a subcommand the command lacks, a long option written by a
  * prefix of its name, an option the command does not have (a command
  * tree's leaf takes an undeclared dashed word as an operand only where it
  * has a slot for one), or, past a subcommand `*`, an option written short
- * or one no subcommand there declares. A help or version request matches
- * word by word, as its line does.
+ * or one no subcommand there declares. A help or version request matches word by word, as its line
+ * does, and the pattern's other words are checked without it.
  */
 export function patternProblem(grammar: Grammar, words: readonly string[]): string | null {
   const head = words[0] ?? ''
-  if (words.slice(1).some((word) => HELP_WORDS.has(word))) return null
+  const asked = words.filter((word) => !HELP_WORDS.has(word))
+  if (asked.length < words.length) return patternProblem(grammar, asked)
   if (grammar.tree && words.slice(1).includes(STAR)) {
     const written = options(words)
     const short = written.find((option) => !option.startsWith('--'))

@@ -699,6 +699,32 @@
    ]
   },
   {
+   "id": "cp_r_and_cp_capital_r_are_one_option",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "exec", "command": "mkdir -p /data/a && touch /data/a/f", "expect": {"value": {"exit_code": 0}}},
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": ["cp -R"]}}},
+    {"op": "exec", "session": "agent", "command": "cp -r /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["cp"], "flags": ["--recursive"]}}}},
+    {"op": "exec", "session": "agent", "command": "cp --recursive /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cp: Permission denied\n", "decision": "denied by policy", "matched": {"command": ["cp"], "flags": ["--recursive"]}}}},
+    {"op": "exec", "session": "agent", "command": "cp /data/a/f /data/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null, "matched": null}}}
+   ]
+  },
+  {
+   "id": "an_env_filled_option_counts_against_a_flags_entry",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
+   "steps": [
+    {"op": "exec", "command": "cd /data && git init -q .", "expect": {"value": {"exit_code": 0}}},
+    {"op": "session", "id": "plain", "profile": {"cwd": "/data", "commands": {"allow": ["*", {"command": "git", "flags": []}]}}},
+    {"op": "exec", "session": "plain", "command": "git status --porcelain", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": []}}}},
+    {"op": "exec", "session": "plain", "command": "git status", "expect": {"value": {"exit_code": 0, "stderr": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "plain", "command": "GIT_DIR=/data/.git git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": []}}}},
+    {"op": "exec", "session": "plain", "command": "export GIT_DIR=/data/.git; git status", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": []}}}},
+    {"op": "session", "id": "seeded", "profile": {"cwd": "/data", "env": {"GIT_DIR": "/data/.git"}, "commands": {"allow": ["*", {"command": "git", "flags": ["--git-dir"]}]}}},
+    {"op": "exec", "session": "seeded", "command": "git status", "expect": {"value": {"exit_code": 0, "stderr": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "seeded", "command": "git status --short", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git status is not allowed", "matched": {"command": ["git", "status"], "flags": []}}}}
+   ]
+  },
+  {
    "id": "a_cli_rule_reads_flags_groups_and_a_subcommand_star",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"gh": {"cli": "gh", "machine": "in_process", "config": {"token": "t"}}, "git": {"cli": "git", "machine": "in_process"}}},
    "steps": [

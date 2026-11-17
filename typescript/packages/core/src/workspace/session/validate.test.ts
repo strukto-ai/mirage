@@ -26,7 +26,15 @@ import {
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { checkCliPatterns, checkRules, logger, patternWarnings } from './validate.ts'
+import {
+  checkCliPatterns,
+  checkRules,
+  closedCommands,
+  envFilled,
+  logger,
+  patternWarnings,
+  unreadPatterns,
+} from './validate.ts'
 
 function rules(over: Partial<AdmissionRules> = {}): AdmissionRules {
   return { allow: null, ask: [], deny: [], ...over }
@@ -245,16 +253,57 @@ describe('a cobra pattern reads as its run does', () => {
   })
 })
 
+describe('a git pattern naming an option git lacks', () => {
+  const trees = new Map<string, Grammar>([
+    ['git', { spec: cliSpecFor('git').spec, tree: true, passthrough: false }],
+  ])
+
+  it('loads and is warned', () => {
+    const r = deny('git add --frce', 'git add -- --x', 'git rev-parse --zzqq')
+    checkCliPatterns(r, trees)
+    expect(unreadPatterns(r, trees)).toEqual([
+      'commands.deny: git add --frce: git declares no --frce there, so it matches only a line with --frce as an operand',
+      'commands.deny: git rev-parse --zzqq: git declares no --zzqq there, so it matches only a line with --zzqq as an operand',
+    ])
+    const clean = deny('git add --force', 'git log -5', 'git add --help', 'git *')
+    checkCliPatterns(clean, trees)
+    expect(unreadPatterns(clean, trees)).toEqual([])
+  })
+})
+
+describe('a flags entry the profile env closes', () => {
+  const trees = new Map<string, Grammar>([
+    ['git', { spec: cliSpecFor('git').spec, tree: true, passthrough: false }],
+  ])
+
+  it('is warned until its flags list the option', () => {
+    const closed = rules({ allow: ['*', new AllowFlags('git', [])] })
+    expect(envFilled(closed, new Set(['GIT_DIR', 'HOME']), trees)).toEqual([
+      'commands.allow: git: env sets GIT_DIR, which fills --git-dir, so this refuses git until its flags list --git-dir',
+    ])
+    const listed = rules({ allow: [new AllowFlags('git', ['--git-dir'])] })
+    expect(envFilled(listed, new Set(['GIT_DIR']), trees)).toEqual([])
+    expect(envFilled(closed, new Set(['HOME']), trees)).toEqual([])
+  })
+})
+
 describe('the allow list names each command an entry closes', () => {
-  it('lists the entries beside *', () => {
-    const said = patternWarnings(
-      rules({ allow: ['*', 'gh pr {view,diff}', new AllowFlags('rm', ['-f'])] }),
-    )
-    expect(said).toContain('commands.allow closes gh to: gh pr view, gh pr diff')
-    expect(said).toContain('commands.allow closes rm to: rm -f')
-    expect(patternWarnings(rules({ allow: ['ls', 'rm'] })).some((m) => m.includes('closes'))).toBe(
-      false,
-    )
+  it('lists the entries beside * as a note', () => {
+    const r = rules({ allow: ['*', 'gh pr {view,diff}', new AllowFlags('rm', ['-f'])] })
+    expect(closedCommands(r)).toEqual([
+      'commands.allow closes gh to: gh pr view, gh pr diff',
+      'commands.allow closes rm to: rm -f',
+    ])
+    expect(closedCommands(rules({ allow: ['ls', 'rm'] }))).toEqual([])
+    expect(patternWarnings(r).some((m) => m.includes('closes'))).toBe(false)
+    const noted: string[] = []
+    logger.info = (message) => noted.push(message)
+    try {
+      checkRules(r)
+    } finally {
+      delete logger.info
+    }
+    expect(noted).toContain('commands.allow closes gh to: gh pr view, gh pr diff')
   })
 })
 
@@ -263,6 +312,8 @@ describe('checkRules reads a builtin pattern with its spec', () => {
     ['rm --no-such-flag', 'rm has no option --no-such-flag'],
     ['rm --rec', '--rec is a prefix of an option'],
     ['rm -Z', 'rm has no option -Z'],
+    ['rm --help --rec', '--rec is a prefix of an option'],
+    ['rm --help -Z', 'rm has no option -Z'],
   ])('refuses %s', (pattern, says) => {
     expect(() => {
       checkRules(deny(pattern))
@@ -323,5 +374,38 @@ describe('createSession reads the verbs of an installed CLI', () => {
         commands: { deny: [{ reason: 'no', commands: ['prog run'] }] },
       }),
     })
+  })
+})
+
+describe('createSession reads the verbs of a tree a mount serves', () => {
+  it('refuses a verb the tree lacks and loads one it has', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    ws.mount('/data').registerCommands([
+      new CLI({
+        spec: new CommandSpec({
+          name: 'tool',
+          subcommands: [
+            new CommandSpec({
+              name: 'peek',
+              arguments: [new Argument(['--all'], { action: 'store_true' })],
+            }),
+          ],
+        }),
+        handlers: { peek: new CLIHandler({ fn: noopVerb }) },
+      }),
+    ])
+    const deny = (pattern: string) =>
+      SessionProfile({ commands: { deny: [{ reason: 'no', commands: [pattern] }] } })
+    const said: string[] = []
+    logger.warn = (message) => said.push(message)
+    try {
+      expect(() => ws.createSession('bad', { permissions: deny('tool poke') })).toThrow(
+        /has no verb tool poke/,
+      )
+      ws.createSession('good', { permissions: deny('tool peek --all') })
+    } finally {
+      delete logger.warn
+    }
+    expect(said.some((m) => m.includes('tool has no grammar'))).toBe(false)
   })
 })

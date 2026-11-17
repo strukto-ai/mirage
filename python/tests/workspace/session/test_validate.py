@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 
 import pytest
@@ -32,7 +33,10 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.validate import (
     check_cli_patterns,
     check_rules,
+    closed_commands,
+    env_filled,
     pattern_warnings,
+    unread_patterns,
 )
 
 
@@ -277,6 +281,8 @@ def test_a_cli_pattern_its_tree_reads_loads(pattern):
         ("rm --no-such-flag", "rm has no option --no-such-flag"),
         ("rm --rec", "--rec is a prefix of an option"),
         ("rm -Z", "rm has no option -Z"),
+        ("rm --help --rec", "--rec is a prefix of an option"),
+        ("rm --help -Z", "rm has no option -Z"),
     ],
 )
 def test_a_builtin_pattern_its_spec_cannot_read_is_refused(pattern, says):
@@ -308,6 +314,38 @@ def test_a_cobra_pattern_reads_as_its_run_does(pattern, says):
         check_cli_patterns(_deny(pattern), {"gh": GH})
 
 
+GIT_CLI = Grammar(cli_spec_for("git").spec, tree=True)
+
+
+def test_a_git_pattern_naming_an_option_git_lacks_is_warned():
+    # git add takes paths, so an undeclared --frce reads as one, on the
+    # line as in the pattern; rev-parse passes such a word through.
+    rules = _deny("git add --frce", "git add -- --x", "git rev-parse --zzqq")
+    check_cli_patterns(rules, {"git": GIT_CLI})
+    assert unread_patterns(rules, {"git": GIT_CLI}) == [
+        "commands.deny: git add --frce: git declares no --frce there, so it "
+        "matches only a line with --frce as an operand",
+        "commands.deny: git rev-parse --zzqq: git declares no --zzqq there, "
+        "so it matches only a line with --zzqq as an operand",
+    ]
+    clean = _deny("git add --force", "git log -5", "git add --help", "git *")
+    check_cli_patterns(clean, {"git": GIT_CLI})
+    assert unread_patterns(clean, {"git": GIT_CLI}) == []
+
+
+def test_a_flags_entry_the_profile_env_closes_is_warned():
+    # A filled option is carried as a typed one, so GIT_DIR in the
+    # profile's env refuses every git line until --git-dir is listed.
+    closed = _rules(allow=("*", AllowFlags("git", ())))
+    assert env_filled(closed, {"GIT_DIR", "HOME"}, {"git": GIT_CLI}) == [
+        "commands.allow: git: env sets GIT_DIR, which fills --git-dir, so "
+        "this refuses git until its flags list --git-dir",
+    ]
+    listed = _rules(allow=(AllowFlags("git", ("--git-dir",)),))
+    assert env_filled(listed, {"GIT_DIR"}, {"git": GIT_CLI}) == []
+    assert env_filled(closed, {"HOME"}, {"git": GIT_CLI}) == []
+
+
 def test_a_pattern_may_leave_out_an_operand_and_an_options_value():
     check_cli_patterns(
         _deny("gh pr merge --admin", "gh * list --state"), {"gh": GH}
@@ -315,15 +353,18 @@ def test_a_pattern_may_leave_out_an_operand_and_an_options_value():
     check_rules(_deny("cp -r", "mv -f", "head -n"))
 
 
-def test_the_allow_list_names_each_command_an_entry_closes():
-    said = pattern_warnings(
-        _rules(allow=("*", "gh pr {view,diff}", AllowFlags("rm", ("-f",))))
-    )
-    assert "commands.allow closes gh to: gh pr view, gh pr diff" in said
-    assert "commands.allow closes rm to: rm -f" in said
-    assert not any(
-        "closes" in m for m in pattern_warnings(_rules(allow=("ls", "rm")))
-    )
+def test_the_allow_list_names_each_command_an_entry_closes(caplog):
+    rules = _rules(allow=("*", "gh pr {view,diff}", AllowFlags("rm", ("-f",))))
+    assert closed_commands(rules) == [
+        "commands.allow closes gh to: gh pr view, gh pr diff",
+        "commands.allow closes rm to: rm -f",
+    ]
+    assert closed_commands(_rules(allow=("ls", "rm"))) == []
+    assert not any("closes" in m for m in pattern_warnings(rules))
+    caplog.set_level(logging.INFO)
+    check_rules(rules)
+    notes = [r for r in caplog.records if "closes gh" in r.getMessage()]
+    assert [r.levelno for r in notes] == [logging.INFO]
 
 
 def test_a_group_in_the_name_and_a_star_in_allow_are_warned(caplog):
@@ -380,3 +421,35 @@ def test_create_session_reads_the_verbs_of_an_installed_cli():
         ws.create_session("good", permissions=ok)
     finally:
         pass
+
+
+def test_create_session_reads_the_verbs_of_a_tree_a_mount_serves(caplog):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.mount("/data").register_commands(
+        [
+            CLI(
+                spec=CommandSpec(
+                    name="tool",
+                    subcommands=(
+                        CommandSpec(
+                            name="peek",
+                            arguments=(
+                                Argument("--all", action="store_true"),
+                            ),
+                        ),
+                    ),
+                ),
+                handlers={"peek": CLIHandler(fn=_noop)},
+            )
+        ]
+    )
+
+    def deny(pattern: str) -> dict:
+        return {
+            "commands": {"deny": [{"reason": "no", "commands": [pattern]}]}
+        }
+
+    with pytest.raises(PolicyError, match="has no verb tool poke"):
+        ws.create_session("bad", permissions=deny("tool poke"))
+    ws.create_session("good", permissions=deny("tool peek --all"))
+    assert "tool has no grammar" not in caplog.text
