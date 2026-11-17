@@ -28,7 +28,7 @@ END = "{/* END GENERATED CLI COMMANDS */}"
 LICENSE_START = "{/* BEGIN GENERATED CLI LICENSE */}"
 LICENSE_END = "{/* END GENERATED CLI LICENSE */}"
 REPO = "https://github.com/strukto-ai/mirage/blob/main"
-SECTIONS = ["Supported commands", "Usage", "Behavior", "License"]
+SECTIONS = ["Supported commands", "Usage", "Behavior"]
 
 
 @dataclass(frozen=True)
@@ -41,12 +41,15 @@ class Project:
         license (str): Its license, as Markdown.
         notice (str | None): The stem of the copy under licenses/third_party/
             when Mirage adapts its code.
+        internal (bool): Adapted for an internal detail, so the page names it
+            under the table instead of giving it a row.
     """
 
     name: str
     role: str
     license: str
     notice: str | None = None
+    internal: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,30 +104,35 @@ LICENSES = {
                 "`--template` and `--jq` handling adapted",
                 "MIT",
                 "go-gh",
+                internal=True,
             ),
             Project(
                 "[Go](https://github.com/golang/go) 1.25.5",
                 "HTTP reason phrases and template execution adapted",
                 "BSD-3-Clause",
                 "go",
+                internal=True,
             ),
             Project(
                 "[gojq](https://github.com/itchyny/gojq) 0.12.17",
                 "jq builtin errors adapted",
                 "MIT",
                 "gojq",
+                internal=True,
             ),
             Project(
                 "[Cobra](https://github.com/spf13/cobra) 1.10.2",
                 "Unknown-command refusals adapted",
                 "Apache-2.0",
                 "cobra",
+                internal=True,
             ),
             Project(
                 "[pflag](https://github.com/spf13/pflag) 1.0.10",
                 "Option table and option-error wording adapted",
                 "BSD-3-Clause",
                 "pflag",
+                internal=True,
             ),
         ),
     ),
@@ -133,21 +141,19 @@ LICENSES = {
         (
             Project(
                 "[Git](https://github.com/git/git)",
-                "Command behavior and repository-format reference; Mirage's "
-                "CLI does not launch the native Git executable",
-                "[GPL-2.0, with the qualifications in Git's COPYING file]"
-                "(https://github.com/git/git/blob/master/COPYING)",
+                "Behavior reference only; Mirage does not run Git",
+                "[GPL-2.0](https://github.com/git/git/blob/master/COPYING)",
             ),
             Project(
                 "[Dulwich](https://github.com/jelmer/dulwich)",
-                "Python Git implementation dependency, under its Apache-2.0 "
-                "option; TypeScript ports its rename similarity score",
-                "Apache-2.0 OR GPL-2.0-or-later",
+                "Python Git library, used under Apache-2.0; TypeScript ports "
+                "its rename score",
+                "Apache-2.0 or GPL-2.0-or-later",
                 "dulwich",
             ),
             Project(
                 "[isomorphic-git](https://github.com/isomorphic-git/isomorphic-git)",
-                "TypeScript Git implementation dependency",
+                "TypeScript Git library",
                 "[MIT](https://github.com/isomorphic-git/isomorphic-git/blob/main/LICENSE.md)",
             ),
         ),
@@ -203,8 +209,7 @@ LICENSES = {
             Project(
                 "[ntn](https://www.npmjs.com/package/ntn) 0.21.9",
                 "Upstream CLI the conformance suite pins",
-                "MIT, as its [package metadata](https://registry.npmjs.org/ntn/0.21.9) "
-                "declares",
+                "[MIT](https://www.npmjs.com/package/ntn/v/0.21.9)",
             ),
         ),
     ),
@@ -368,10 +373,23 @@ def license_block(name: str) -> str:
         "| Project | Role in Mirage | License |",
         "| --- | --- | --- |",
     ]
+    internal = []
     for project in (*LICENSES[name].projects, MIRAGE):
-        rows.append(
-            f"| {project.name} | {project.role} | {license_cell(project)} |"
-        )
+        cell = license_cell(project)
+        if project.internal:
+            internal.append(
+                re.sub(r"\[([^\]]+)\]\([^)]+\).*", r"\1", project.name)
+            )
+        else:
+            rows.append(f"| {project.name} | {project.role} | {cell} |")
+    if internal:
+        names = ", ".join(internal[:-1]) + f" and {internal[-1]}"
+        rows += [
+            "",
+            f"Adapted code from {names} keeps its license in "
+            f"[`licenses/third_party/`]({REPO.replace('/blob/', '/tree/')}"
+            "/licenses/third_party).",
+        ]
     rows += [
         "",
         "See [compatibility and licenses]"
@@ -461,25 +479,35 @@ def main() -> int:
         (catalog("home/setup"), commands_block)
     ]
     for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
-        missing = [
-            str(page.relative_to(ROOT))
-            for page in (
-                ROOT / "docs/python/cli" / f"{name}.mdx",
-                ROOT / "docs/typescript/cli" / f"{name}.mdx",
-                ROOT / "docs/home/setup/cli" / f"{name}.mdx",
-            )
-            if f"import Reference from '/snippets/cli/{name}.mdx'"
-            not in page.read_text()
-            or "<Reference />" not in page.read_text()
-        ]
-        if missing:
-            raise SystemExit(
-                f"Render /snippets/cli/{name}.mdx with <Reference />: "
-                + ", ".join(missing)
-            )
+        reference_page = (
+            f"import Reference from '/snippets/cli/{name}.mdx'",
+            "<Reference />",
+        )
+        license_page = (
+            f"import License from '/snippets/cli/license/{name}.mdx'",
+            "<License />",
+        )
+        expected = {
+            ROOT / "docs/python/cli" / f"{name}.mdx": (
+                reference_page,
+                license_page,
+            ),
+            ROOT / "docs/typescript/cli" / f"{name}.mdx": (
+                reference_page,
+                license_page,
+            ),
+            ROOT / "docs/home/setup/cli" / f"{name}.mdx": (license_page,),
+        }
+        for page, snippets in expected.items():
+            text = page.read_text()
+            for line in (line for snippet in snippets for line in snippet):
+                if line not in text:
+                    raise SystemExit(f"{page.relative_to(ROOT)} lacks {line}")
         pages[ROOT / "docs/snippets/cli" / f"{name}.mdx"] = [
-            (reference(cli_spec_for(name)), commands_block),
-            (license_block(name), license),
+            (reference(cli_spec_for(name)), commands_block)
+        ]
+        pages[ROOT / "docs/snippets/cli/license" / f"{name}.mdx"] = [
+            (license_block(name), license)
         ]
     stale = []
     for path, blocks in pages.items():

@@ -5,6 +5,7 @@ icon: git-alt
 ---
 
 import Reference from '/snippets/cli/git.mdx'
+import License from '/snippets/cli/license/git.mdx'
 
 Inspect and modify repositories using a subset of the [Git command line](https://git-scm.com/docs/git). Mirage routes repository files through the workspace dispatcher, so the same commands can operate on RAM, disk or another backend with the required filesystem operations.
 
@@ -34,3 +35,5 @@ await ws.shell("git -C /repo init -b main")
 For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 
 <Reference />
+
+<License />
