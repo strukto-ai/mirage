@@ -60,10 +60,11 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      core: ${{ steps.filter.outputs.core }}
       ts: ${{ steps.filter.outputs.ts }}
+      battery: ${{ steps.filter.outputs.battery }}
+      hosting: ${{ steps.filter.outputs.hosting }}
+      cloudflare: ${{ steps.filter.outputs.cloudflare }}
       database: ${{ steps.filter.outputs.database }}
-      data: ${{ steps.filter.outputs.data }}
       fuse: ${{ steps.filter.outputs.fuse }}
       observability: ${{ steps.filter.outputs.observability }}
       runtime: ${{ steps.filter.outputs.runtime }}
@@ -119,22 +120,18 @@ jobs:
             # Rust colrm/envsubst streams, document validation, utils/records and the
             # core Jaeger config use these whole-host filters. The shared
             # policy/documents and fixtures/normalized_records corpora do too.
-            core:
-              - 'integ/**'
-              - 'python/**'
-              - 'rust/**'
-              - '.github/actions/setup-rust/action.yml'
-              - '.github/workflows/test_integ.yml'
-              - '.github/actions/setup-node-pnpm/action.yml'
-              - '.github/actions/setup-uv/action.yml'
-              - '.github/actions/integ-battery-setup/action.yml'
-              # README files under these trees are prose that nothing loads, so a
-              # change to one alone runs nothing. integ/fixtures/** is not listed:
-              # the fake hubs serve the READMEs there as fixture content.
-              - '!integ/README.md'
-              - '!integ/runtime/**/README.md'
-              - '!python/**/README.md'
-              - '!rust/**/README.md'
+            #
+            # ts, battery, hosting and cloudflare each take only the trees
+            # their jobs load. Rust counts by host: rust/python builds only
+            # Python's mirage._rs, rust/wasm only the TypeScript core's module,
+            # and the rest of rust/ goes into both. Unit tests and the agent
+            # adapter packages select none of them. The batteries load neither
+            # mirage.server nor mirage.cli (no library module imports either)
+            # nor the server, cli and cloudflare packages (core, node and
+            # browser do not depend on them), so a change there runs only the
+            # jobs that start a server, the CLI or a worker. A directory of
+            # integ/ that one job owns selects only that job. A push to main
+            # still runs every job.
             ts:
               - 'integ/**'
               - 'typescript/**'
@@ -146,11 +143,91 @@ jobs:
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
               - '.github/workflows/test_nextcloud_full.yml'
+              # README files under these trees are prose that nothing loads, so a
+              # change to one alone runs nothing. integ/fixtures/** is not listed:
+              # the fake hubs serve the READMEs there as fixture content.
               - '!integ/README.md'
               - '!integ/runtime/**/README.md'
               - '!typescript/**/README.md'
               - '!typescript/scripts/**'
               - '!rust/**/README.md'
+              - '!typescript/**/*.test.ts'
+              - '!typescript/packages/{cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
+              - '!rust/python/**'
+              - '!integ/{runtime,cloudflare,hosting,interrupt,fuse,access,wandb}/**'
+              - '!integ/cross.sh'
+            # The shared shards, their parity diff, the gate and fake
+            # selftests, the facets, W&B, shell coverage, Nextcloud, TiDB and
+            # the event batteries: both hosts in-process, no server or CLI.
+            battery:
+              - 'integ/**'
+              - 'python/**'
+              - 'typescript/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
+              - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
+              - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
+              - '.github/actions/nextcloud-tune/action.yml'
+              - '.github/workflows/test_nextcloud_full.yml'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!python/**/README.md'
+              - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
+              - '!rust/**/README.md'
+              - '!python/tests/**'
+              - '!typescript/**/*.test.ts'
+              - '!python/mirage/{server,cli,agents}/**'
+              - '!typescript/packages/{server,cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
+              - '!integ/{runtime,cloudflare,hosting,interrupt,fuse,access,browser}/**'
+              - '!integ/cross.sh'
+            # The real FastAPI and Fastify listeners, plus the python-host
+            # scenarios riding the same job; lifecycle reads the server's
+            # serializers.
+            hosting:
+              - 'integ/**'
+              - 'python/**'
+              - 'typescript/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
+              - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
+              - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!python/**/README.md'
+              - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
+              - '!rust/**/README.md'
+              - '!python/tests/**'
+              - '!typescript/**/*.test.ts'
+              - '!python/mirage/{cli,agents}/**'
+              - '!typescript/packages/{cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
+              - '!integ/{runtime,cloudflare,fuse,access,wandb,browser}/**'
+              - '!integ/cross.sh'
+            # The TypeScript host on a Cloudflare worker, over the server API.
+            cloudflare:
+              - 'integ/**'
+              - 'typescript/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
+              - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
+              - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/integ-battery-setup/action.yml'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
+              - '!rust/**/README.md'
+              - '!typescript/**/*.test.ts'
+              - '!typescript/packages/{cli,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
+              - '!rust/python/**'
+              - '!integ/{runtime,hosting,interrupt,fuse,access,wandb,browser}/**'
+              - '!integ/cross.sh'
             database:
               - 'integ/vfs/mongodb/**'
               - 'integ/vfs/postgres/**'
@@ -187,24 +264,8 @@ jobs:
               - '!typescript/**/README.md'
               - '!typescript/scripts/**'
               - '!rust/**/README.md'
-            data:
-              - 'integ/**'
-              - 'python/**'
-              - 'typescript/**'
-              - 'rust/**'
-              - '.github/actions/setup-rust/action.yml'
-              - '.github/workflows/test_integ.yml'
-              - '.github/actions/setup-node-pnpm/action.yml'
-              - '.github/actions/setup-uv/action.yml'
-              - '.github/actions/integ-battery-setup/action.yml'
-              - '.github/actions/nextcloud-tune/action.yml'
-              - '.github/workflows/test_nextcloud_full.yml'
-              - '!integ/README.md'
-              - '!integ/runtime/**/README.md'
-              - '!python/**/README.md'
-              - '!typescript/**/README.md'
-              - '!typescript/scripts/**'
-              - '!rust/**/README.md'
+              - '!typescript/**/*.test.ts'
+              - '!typescript/packages/{server,cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
             observability:
               - 'integ/server/langfuse_compose.yml'
               - 'integ/server/langfuse_seed.py'
@@ -300,7 +361,7 @@ jobs:
               - '!python/tests/**'
               - '!typescript/**/*.test.ts'
               - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,pydantic_ai}/**'
-              - '!typescript/packages/{browser,dsh,opencode}/**'
+              - '!typescript/packages/{browser,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
               - '!typescript/scripts/**'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcal,gcs}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
@@ -415,10 +476,13 @@ jobs:
               - '!typescript/scripts/**'
               - '!rust/**/README.md'
               - '!integ/server/**/README.md'
+              - '!typescript/**/*.test.ts'
+              - '!python/mirage/{server,cli,agents}/**'
+              - '!typescript/packages/{server,cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
 
   typescript-build:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true' || needs.changes.outputs.database == 'true' || needs.changes.outputs.fuse == 'true' || needs.changes.outputs.observability == 'true' || needs.changes.outputs.runtime == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true' || needs.changes.outputs.hosting == 'true' || needs.changes.outputs.cloudflare == 'true' || needs.changes.outputs.database == 'true' || needs.changes.outputs.fuse == 'true' || needs.changes.outputs.observability == 'true' || needs.changes.outputs.runtime == 'true') }}
     name: TypeScript build bootstrap
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -450,9 +514,12 @@ jobs:
 
   # Both run real HTTP servers of each host against the same install: the
   # interrupt battery (free ports, no services), then the hosted requests.
+  # The python-host scenarios (metadata, lancedb, find arg errors, cross
+  # mounts, root switching, lifecycle and policy) ride along on the same
+  # Redis: they took a minute of a runner that spent another on setup.
   integ-hosting:
     needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hosting == 'true') }}
     name: integ-hosting and integ-interrupt
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -484,7 +551,21 @@ jobs:
       - uses: ./.github/actions/setup-uv
       - name: Install Python dependencies
         working-directory: python
-        run: uv sync --frozen --extra monty --extra s3 --extra redis
+        run: uv sync --all-extras
+      - name: Cache the lifecycle policy engine
+        id: lifecycle-quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-v0.16.2
+      - name: Download the lifecycle policy engine
+        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download v0.16.2 -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
@@ -519,10 +600,47 @@ jobs:
       - name: Run parallel hosted requests over real HTTP (Python and TypeScript)
         working-directory: integ
         run: pnpm exec tsx hosting/run.ts --mounts
+      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
+      # metadata cases live in integ/unix/meta{,_overlay} now. These and the
+      # cross-mount commands use Redis database 1, so nothing the hosted
+      # requests left in database 0 reaches them.
+      - name: Run metadata snapshot/GC scenarios and check against truth
+        if: ${{ !cancelled() }}
+        env:
+          REDIS_URL: redis://127.0.0.1:6379/1
+        run: |
+          ./python/.venv/bin/python integ/metadata.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/truth_metadata.json
+      - name: Run lancedb integ (embedded, JSON harness)
+        if: ${{ !cancelled() }}
+        env:
+          LANCEDB_ENABLED: "1"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb --strict
+      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
+        if: ${{ !cancelled() }}
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr --strict
+      - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
+        if: ${{ !cancelled() }}
+        env:
+          REDIS_URL: redis://127.0.0.1:6379/1
+        run: ./python/.venv/bin/python integ/cross_commands.py
+      - name: Run virtual-root mount switching (ram/disk/yaml)
+        if: ${{ !cancelled() }}
+        run: ./python/.venv/bin/python integ/root.py
+      - name: Run workspace lifecycle JSON scenarios (Python)
+        if: ${{ !cancelled() }}
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: ./python/.venv/bin/python integ/lifecycle/run.py
+      - name: Run the policy corpus (Python)
+        if: ${{ !cancelled() }}
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: ./python/.venv/bin/python integ/lifecycle/run.py integ/policy/cases.json
 
   integ-cloudflare:
     needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.cloudflare == 'true') }}
     name: integ-cloudflare (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -562,87 +680,6 @@ jobs:
         env:
           CLOUDFLARE_GROUP: ${{ matrix.group }}
         run: pnpm exec tsx cloudflare/run.ts --group "$CLOUDFLARE_GROUP"
-
-  integ:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-start-period 60s
-          --health-start-interval 1s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      REDIS_URL: redis://localhost:6379/0
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
-      # metadata cases live in integ/unix/meta{,_overlay} now.
-      - name: Run metadata snapshot/GC scenarios and check against truth
-        run: |
-          ./python/.venv/bin/python integ/metadata.py 2>&1 \
-            | ./python/.venv/bin/python integ/check_json.py integ/truth_metadata.json
-
-      - name: Run lancedb integ (embedded, JSON harness)
-        env:
-          LANCEDB_ENABLED: "1"
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb --strict
-
-      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr --strict
-
-      - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
-        run: ./python/.venv/bin/python integ/cross_commands.py
-
-      - name: Run virtual-root mount switching (ram/disk/yaml)
-        run: ./python/.venv/bin/python integ/root.py
-
-      - name: Cache the lifecycle policy engine
-        id: lifecycle-quickjs-cache
-        uses: actions/cache@v6
-        with:
-          path: /tmp/quickjs
-          key: quickjs-wasi-v0.16.2
-
-      - name: Download the lifecycle policy engine
-        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/quickjs
-          gh release download v0.16.2 -R quickjs-ng/quickjs \
-            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
-
-      - name: Run workspace lifecycle JSON scenarios (Python)
-        env:
-          MIRAGE_QUICKJS_HOME: /tmp/quickjs
-        run: ./python/.venv/bin/python integ/lifecycle/run.py
-
-      - name: Run the policy corpus (Python)
-        env:
-          MIRAGE_QUICKJS_HOME: /tmp/quickjs
-        run: ./python/.venv/bin/python integ/lifecycle/run.py integ/policy/cases.json
 
   integ-ts:
     needs: changes
@@ -909,7 +946,7 @@ jobs:
   # battery, and new core targets automatically run in exactly one shard.
   integ-shared-py:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -1021,7 +1058,7 @@ jobs:
   # checks start their own fakes; they do not need the shared service fleet.
   integ-selftests:
     needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true' || needs.changes.outputs.runtime == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1173,13 +1210,13 @@ jobs:
 
   integ-shared-ts:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1]
     services:
       redis:
         image: redis:7
@@ -1430,7 +1467,7 @@ jobs:
 
   integ-data:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -1483,10 +1520,14 @@ jobs:
   # TiDB Cloud Filesystem runs on the open-source drive9 server, so both
   # hosts' batteries reach the same REST API on a server built here at a
   # pinned commit over a local TiDB, with large files on its local object
-  # store.
+  # store. The event batteries follow on the same runner: they poll and
+  # wait on deliveries, so they stay off integ-data's Nextcloud corpus, and
+  # this job has already set up both hosts and built the packages they
+  # load. The notion battery rides with them for its node fake.
   integ-tidb-filesystem:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
+    name: integ-tidb-filesystem and integ-events
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -1494,9 +1535,25 @@ jobs:
         image: pingcap/tidb:v8.5.6
         ports:
           - 4000:4000
+      nextcloud:
+        image: nextcloud:30-apache
+        ports:
+          - 8080:80
+        # The SQLite database and the files live in the data dir, and every
+        # write fsyncs there. The container dies with the job, so tmpfs loses
+        # nothing; uid 33 is the image's www-data.
+        options: --tmpfs /var/www/html/data:rw,uid=33,gid=33,mode=0770
+        env:
+          SQLITE_DATABASE: nextcloud
+          NEXTCLOUD_ADMIN_USER: admin
+          NEXTCLOUD_ADMIN_PASSWORD: admin123
+          NEXTCLOUD_TRUSTED_DOMAINS: localhost
     env:
       DRIVE9_REF: 1f1ff16fcd4a66142b9d315575650cc4e52978c7
       TIDB_FILESYSTEM_HOST: http://127.0.0.1:9009
+      NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
+      NEXTCLOUD_USERNAME: admin
+      NEXTCLOUD_PASSWORD: admin123
     steps:
       - uses: actions/checkout@v7
 
@@ -1598,69 +1655,18 @@ jobs:
         if: failure()
         run: tail -200 "$RUNNER_TEMP/drive9.log"
 
-  # The event batteries poll and wait on deliveries, so they get a runner of
-  # their own rather than queueing behind the nextcloud corpus battery in
-  # integ-data; the path filter is the same one. The notion battery rides
-  # here because its fake needs the node toolchain this job sets up anyway,
-  # which leaves integ-data a python-only job.
-  integ-events:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      nextcloud:
-        image: nextcloud:30-apache
-        ports:
-          - 8080:80
-        # The SQLite database and the files live in the data dir, and every
-        # write fsyncs there. The container dies with the job, so tmpfs loses
-        # nothing; uid 33 is the image's www-data.
-        options: --tmpfs /var/www/html/data:rw,uid=33,gid=33,mode=0770
-        env:
-          SQLITE_DATABASE: nextcloud
-          NEXTCLOUD_ADMIN_USER: admin
-          NEXTCLOUD_ADMIN_PASSWORD: admin123
-          NEXTCLOUD_TRUSTED_DOMAINS: localhost
-    env:
-      NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
-      NEXTCLOUD_USERNAME: admin
-      NEXTCLOUD_PASSWORD: admin123
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      # Node runs the shared API fakes and the TypeScript event cache cases.
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-
-      - name: Install dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
-
       # integ/generated/ is gitignored, so every kit fake this job starts
       # (notion, dropbox, box, onedrive, airtable) fails to import its client
       # until this runs.
       # The battery jobs get it from the integ-battery-setup action; this job
       # does not use that action and has to ask for it itself.
       - name: Generate integ Prisma clients
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: pnpm run prisma:clients
 
       - name: Start fake Notion API (Prisma)
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: |
           nohup ./node_modules/.bin/tsx server/notion/main.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
@@ -1669,11 +1675,13 @@ jobs:
           echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
 
       - name: Run notion integ (mock server, JSON harness)
+        if: ${{ !cancelled() }}
         env:
           NOTION_ENABLED: "1"
         run: ./python/.venv/bin/python integ/runners/python/main.py --target notion --strict
 
       - name: Wait for Nextcloud and tune it for the battery
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/nextcloud-tune
         # A composite step cannot carry timeout-minutes, so the bound goes on
         # the caller, where it covers the whole action.
@@ -1686,6 +1694,7 @@ jobs:
 
       # The cross-host event cache cases read through an S3 mount.
       - name: Start MinIO for the event cache cases
+        if: ${{ !cancelled() }}
         run: |
           docker run -d --name minio-events -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
@@ -1708,6 +1717,7 @@ jobs:
       # ITSELF when its URL is unset, so a server that is not started here
       # costs coverage in silence rather than failing the job.
       - name: Start the fake Google Workspace server
+        if: ${{ !cancelled() }}
         run: |
           cd integ && nohup pnpm exec tsx server/gws/main.ts --port 19999 \
             > /tmp/gws.log 2>&1 &
@@ -1718,6 +1728,7 @@ jobs:
           cat /tmp/gws.log
 
       - name: Start the fake Dropbox server
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/dropbox/main.ts --port 5088 \
@@ -1733,6 +1744,7 @@ jobs:
           grep -q "DROPBOX_URL=" /tmp/dropbox-events.log
 
       - name: Start the fake Box server
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/box/main.ts --port 5096 \
@@ -1748,6 +1760,7 @@ jobs:
           grep -q "BOX_URL=" /tmp/box-events.log
 
       - name: Start the fake Microsoft Graph server
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/onedrive/main.ts --port 5089 \
@@ -1765,6 +1778,7 @@ jobs:
       # The Airtable ping cases create a webhook on the fake and read its
       # payloads, on both hosts.
       - name: Start the fake Airtable server
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/airtable/main.ts --port 5084 \
@@ -1776,11 +1790,8 @@ jobs:
           cat /tmp/airtable-events.log
           grep -q "AIRTABLE_URL=" /tmp/airtable-events.log
 
-      - name: Build packages for cross-host event cache tests
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node... build
-
       - name: Event cache invalidation (both hosts)
+        if: ${{ !cancelled() }}
         env:
           S3_ENDPOINT: http://localhost:9000
           S3_BUCKET: mirage-events
@@ -1792,6 +1803,7 @@ jobs:
           pnpm -C integ exec tsx events/cache/run.ts
 
       - name: Airtable pings (both hosts)
+        if: ${{ !cancelled() }}
         env:
           AIRTABLE_URL: http://127.0.0.1:5084
         run: |
@@ -1799,6 +1811,7 @@ jobs:
           pnpm -C integ exec tsx events/airtable/run.ts
 
       - name: Run events battery
+        if: ${{ !cancelled() }}
         env:
           NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
           NEXTCLOUD_USERNAME: admin
@@ -2448,22 +2461,27 @@ jobs:
           pnpm -C typescript --filter @struktoai/mirage-core add --save-dev pyodide@0.29.0
           pnpm -C typescript --filter @struktoai/mirage-integ exec tsx runtime/run.ts pyodide/network pyodide/invoke pyodide/containment
 
-  # The sandbox suites run on e2b against E2B Embed, E2B's own stack (API,
-  # orchestrator, Firecracker sandboxes) on this runner: hosted Linux
-  # runners expose /dev/kvm and the nbd module. The stack starts in the
-  # background while the dependencies install; it takes two to three
-  # minutes to come up.
-  integ-e2b:
+  # The shared sandbox cases on three providers: e2b against E2B Embed and
+  # microsandbox on a libkrun guest, both microVMs that need only /dev/kvm,
+  # and kubernetes on a pod in a kind cluster, reached the way a user's is,
+  # through kubectl. INTEG_RUNTIMES names all three, so one pass of each
+  # driver runs every provider's variant; as three jobs, half of each one's
+  # four minutes was setup.
+  integ-sandboxes:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       E2B_RUNTIME_COMMIT: 92197909dce5a1bef33e764ae4af76f0732fd7a8
       HUGEPAGES: "1024"
+      MSB_VERSION: v0.7.14
+      KIND_VERSION: v0.33.0
       INTEG_RUNTIME_STRICT: "1"
-      # The shared sandbox cases, run through the e2b runtime only.
-      INTEG_RUNTIMES: e2b
+      INTEG_RUNTIMES: e2b,microsandbox,kubernetes
+      MIRAGE_INTEG_MICROSANDBOX_SANDBOX: mirage-integ
+      MIRAGE_INTEG_KUBERNETES_POD: mirage-integ
+      MIRAGE_INTEG_BOX_MOUNTS: "1"
       PYTHONFAULTHANDLER: "1"
     steps:
       - uses: actions/checkout@v7
@@ -2485,130 +2503,6 @@ jobs:
             docker compose up -d --wait --wait-timeout 900
             echo $? > up.rc' > up.log 2>&1 &
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        # Reuse dist/generated from this run. Build the native addon explicitly:
-        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
-        run: |
-          pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
-
-      - name: Download TypeScript build outputs
-        uses: actions/download-artifact@v8
-        with:
-          github-token: ${{ github.token }}
-          name: integ-typescript-dist
-          path: typescript/packages
-
-      - name: Wait for E2B Embed
-        timeout-minutes: 15
-        run: |
-          cd "$RUNNER_TEMP/e2b"
-          while [ ! -f up.rc ]; do sleep 5; done
-          [ "$(cat up.rc)" = 0 ] || { cat up.log; exit 1; }
-          docker compose exec -T ready cat /run/e2b/sdk.env | sed 's/^export //' > sdk.env
-          echo "::add-mask::$(grep '^E2B_API_KEY=' sdk.env | cut -d= -f2-)"
-          cat sdk.env >> "$GITHUB_ENV"
-
-      - name: Create a sandbox
-        # Avoid pyqwest async completion callbacks racing interpreter shutdown.
-        run: |
-          ./python/.venv/bin/python - <<'EOF'
-          import os
-
-          from e2b import Sandbox
-
-
-          def main():
-              sandbox = Sandbox.create(timeout=1800)
-              # sshfs, so mount_type can serve the workspace into the
-              # sandbox; /boxdata is a mount of its own, for `both`.
-              setup = sandbox.commands.run(
-                  "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive "
-                  "apt-get install -y -qq sshfs >/dev/null && sudo mkdir -p /boxdata && "
-                  "sudo mount -t tmpfs tmpfs /boxdata && "
-                  "echo box | sudo tee /boxdata/own.txt >/dev/null",
-                  background=True,
-                  timeout=300,
-              )
-              try:
-                  setup.wait()
-              finally:
-                  setup.disconnect()
-              with open(os.environ["GITHUB_ENV"], "a") as env:
-                  env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
-                  env.write("MIRAGE_INTEG_BOX_MOUNTS=1\n")
-
-
-          main()
-          EOF
-
-      - name: Run the sandbox suites on e2b (python)
-        run: ./python/.venv/bin/python integ/runtime/run.py sandbox
-
-      - name: Run the sandbox suites on e2b (typescript)
-        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
-        working-directory: integ
-        run: pnpm exec tsx runtime/run.ts sandbox
-
-      - name: Run the sandbox suites on e2b through the CLI and both daemons
-        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
-        run: |
-          bash integ/runtime/cli.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js" \
-            sandbox
-
-      - name: E2B logs
-        if: ${{ failure() }}
-        run: |
-          cd "$RUNNER_TEMP/e2b" || exit 0
-          cat up.log || true
-          docker compose ps -a || true
-          docker compose logs --no-color --tail 60 || true
-
-  # The sandbox suites run on microsandbox too: its guests are libkrun
-  # microVMs, so this runner needs only /dev/kvm.
-  integ-microsandbox:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      MSB_VERSION: v0.7.14
-      INTEG_RUNTIME_STRICT: "1"
-      # The shared sandbox cases, run through the microsandbox runtime only.
-      INTEG_RUNTIMES: microsandbox
-      MIRAGE_INTEG_MICROSANDBOX_SANDBOX: mirage-integ
-      MIRAGE_INTEG_BOX_MOUNTS: "1"
-      PYTHONFAULTHANDLER: "1"
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Open /dev/kvm to the runner user
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
       - name: Install msb
         run: |
           mkdir -p "$HOME/.microsandbox/bin" "$HOME/.microsandbox/lib" "$RUNNER_TEMP/msb"
@@ -2620,92 +2514,6 @@ jobs:
           ln -sf libkrunfw.so.5 "$HOME/.microsandbox/lib/libkrunfw.so"
           echo "$HOME/.microsandbox/bin" >> "$GITHUB_PATH"
           "$HOME/.microsandbox/bin/msb" --version
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        # Reuse dist/generated from this run. Build the native addon explicitly:
-        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
-        run: |
-          pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
-
-      - name: Download TypeScript build outputs
-        uses: actions/download-artifact@v8
-        with:
-          github-token: ${{ github.token }}
-          name: integ-typescript-dist
-          path: typescript/packages
-
-      - name: Create a guest
-        timeout-minutes: 10
-        # sshfs, so mount_type can serve the workspace into the guest;
-        # /boxdata is a mount of its own, for `both`.
-        run: |
-          msb create python:3.12-slim-bookworm --name "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --memory 1G
-          msb exec "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --quiet -- sh -eu -c '
-            apt-get update -qq
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs procps >/dev/null
-            mkdir -p /boxdata
-            mount -t tmpfs tmpfs /boxdata
-            echo box > /boxdata/own.txt
-          ' </dev/null
-
-      - name: Run the sandbox suites on microsandbox (python)
-        run: ./python/.venv/bin/python integ/runtime/run.py sandbox
-
-      - name: Run the sandbox suites on microsandbox (typescript)
-        if: ${{ !cancelled() }}
-        working-directory: integ
-        run: pnpm exec tsx runtime/run.ts sandbox
-
-      - name: Run the sandbox suites on microsandbox through the CLI and both daemons
-        if: ${{ !cancelled() }}
-        run: |
-          bash integ/runtime/cli.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js" \
-            sandbox
-
-      - name: microsandbox logs
-        if: ${{ failure() }}
-        run: |
-          msb list || true
-          msb logs "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" || true
-
-  # The sandbox suites run on a pod too: kind gives the runner a real
-  # cluster, reached the way a user's is, through kubectl.
-  integ-kubernetes:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      KIND_VERSION: v0.33.0
-      INTEG_RUNTIME_STRICT: "1"
-      # The shared sandbox cases, run through the kubernetes runtime only.
-      INTEG_RUNTIMES: kubernetes
-      MIRAGE_INTEG_KUBERNETES_POD: mirage-integ
-      MIRAGE_INTEG_BOX_MOUNTS: "1"
-      PYTHONFAULTHANDLER: "1"
-    steps:
-      - uses: actions/checkout@v7
 
       - name: Install kind
         run: |
@@ -2777,21 +2585,95 @@ jobs:
             echo box > /boxdata/own.txt
           '
 
-      - name: Run the sandbox suites on kubernetes (python)
+      - name: Create a guest
+        timeout-minutes: 10
+        # sshfs, so mount_type can serve the workspace into the guest;
+        # /boxdata is a mount of its own, for `both`.
+        run: |
+          msb create python:3.12-slim-bookworm --name "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --memory 1G
+          msb exec "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --quiet -- sh -eu -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs procps >/dev/null
+            mkdir -p /boxdata
+            mount -t tmpfs tmpfs /boxdata
+            echo box > /boxdata/own.txt
+          ' </dev/null
+
+      - name: Wait for E2B Embed
+        timeout-minutes: 15
+        run: |
+          cd "$RUNNER_TEMP/e2b"
+          while [ ! -f up.rc ]; do sleep 5; done
+          [ "$(cat up.rc)" = 0 ] || { cat up.log; exit 1; }
+          docker compose exec -T ready cat /run/e2b/sdk.env | sed 's/^export //' > sdk.env
+          echo "::add-mask::$(grep '^E2B_API_KEY=' sdk.env | cut -d= -f2-)"
+          cat sdk.env >> "$GITHUB_ENV"
+
+      - name: Create a sandbox
+        # Avoid pyqwest async completion callbacks racing interpreter shutdown.
+        run: |
+          ./python/.venv/bin/python - <<'EOF'
+          import os
+
+          from e2b import Sandbox
+
+
+          def main():
+              sandbox = Sandbox.create(timeout=1800)
+              # sshfs, so mount_type can serve the workspace into the
+              # sandbox; /boxdata is a mount of its own, for `both`.
+              setup = sandbox.commands.run(
+                  "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive "
+                  "apt-get install -y -qq sshfs >/dev/null && sudo mkdir -p /boxdata && "
+                  "sudo mount -t tmpfs tmpfs /boxdata && "
+                  "echo box | sudo tee /boxdata/own.txt >/dev/null",
+                  background=True,
+                  timeout=300,
+              )
+              try:
+                  setup.wait()
+              finally:
+                  setup.disconnect()
+              with open(os.environ["GITHUB_ENV"], "a") as env:
+                  env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
+                  env.write("MIRAGE_INTEG_BOX_MOUNTS=1\n")
+
+
+          main()
+          EOF
+
+      - name: Run the sandbox suites (python)
+        if: ${{ !cancelled() }}
         run: ./python/.venv/bin/python integ/runtime/run.py sandbox
 
-      - name: Run the sandbox suites on kubernetes (typescript)
+      # E2B's sandbox proxy drops the JS SDK's command streams now and then,
+      # so run.ts lists no e2b variant and runs the other two.
+      - name: Run the sandbox suites (typescript)
         if: ${{ !cancelled() }}
         working-directory: integ
         run: pnpm exec tsx runtime/run.ts sandbox
 
-      - name: Run the sandbox suites on kubernetes through the CLI and both daemons
+      - name: Run the sandbox suites through the CLI and both daemons
         if: ${{ !cancelled() }}
         run: |
           bash integ/runtime/cli.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js" \
             sandbox
+
+      - name: E2B logs
+        if: ${{ failure() }}
+        run: |
+          cd "$RUNNER_TEMP/e2b" || exit 0
+          cat up.log || true
+          docker compose ps -a || true
+          docker compose logs --no-color --tail 60 || true
+
+      - name: microsandbox logs
+        if: ${{ failure() }}
+        run: |
+          msb list || true
+          msb logs "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" || true
 
       - name: kubernetes logs
         if: ${{ failure() }}
@@ -2894,11 +2776,11 @@ jobs:
   # starts only the fake servers that family needs rather than the whole fleet.
   integ-facets:
     needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # One job for the six small facets: each leg of the old matrix spent a
-    # minute or more on setup for under a minute of cases.
+    # One job for the six small facets and W&B: each leg of the old matrix
+    # spent a minute or more on setup for under a minute of cases.
     env:
       FACETS: project email chat dify mem0 cli
     steps:
@@ -2909,8 +2791,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Its own entry: W&B's conformance run installs both SDKs from their
+      # requirements files, which the lock does not hold, so the shared
+      # entry would lack them. This entry holds the full set and both.
       - name: Install uv
         uses: ./.github/actions/setup-uv
+        with:
+          cache-suffix: facets
+          cache-dependency-glob: |
+            python/uv.lock
+            integ/wandb/requirements-*.txt
 
       - name: Install Python dependencies
         working-directory: python
@@ -3135,43 +3025,21 @@ jobs:
           fi
           echo "no unrouted GitHub requests"
 
-  integ-wandb:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      # Its own entry: the conformance run installs both W&B SDKs from
-      # their requirements files, which the lock does not hold.
-      - uses: ./.github/actions/setup-uv
-        with:
-          cache-suffix: wandb
-          cache-dependency-glob: |
-            python/uv.lock
-            integ/wandb/requirements-*.txt
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --locked
-      - uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile
+      # W&B runs on the same install: its official-SDK conformance installs
+      # both SDK releases in an isolated uv environment of its own.
       - name: W&B API mock and Python/TypeScript parity
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: pnpm run wandb:integ
+
       - name: W&B official SDK conformance
+        if: ${{ !cancelled() }}
         working-directory: integ
         run: pnpm run wandb:conformance
 
   integ-shell-coverage:
     needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.battery == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -3201,7 +3069,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ-cloudflare, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, shared-full, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-hosting, integ-cloudflare, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, shared-full, integ-database, integ-data, integ-tidb-filesystem, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-shell-coverage, integ-sandboxes]
     if: always()
     steps:
       - name: Check required jobs
