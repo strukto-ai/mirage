@@ -74,6 +74,8 @@ interface DrawOwner {
 }
 
 const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {
+  'core/machine/write.ts crypto.randomUUID':
+    "a staged or atomic upload's temp name lives on the machine, so a seeded name would collide with an earlier run's leftover",
   'execution/job/table.ts crypto.randomUUID':
     "a job table's lease and its jobs' consoles are named in a store other processes share, so a seeded name would collide with theirs",
   'execution/job/table.ts Math.random':

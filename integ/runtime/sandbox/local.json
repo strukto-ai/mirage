@@ -1,0 +1,460 @@
+{
+  "cases": [
+    {
+      "id": "tmp_is_the_machine_s_own",
+      "note": "A workspace with machines mounts /tmp as the machine's own folder: a heredoc Mirage writes is the file the machine's program runs, a file the program writes is the one Mirage reads and lists, a cwd under it is the machine's, a program file the machine made there runs on the machine, a link made there is the machine's own, a command on its files runs there whole (a hard link counts 2), also under xargs or reading /dev/null, and a command run under piped input leaves what it does not read to the next command. Each run works in a directory of its own, since the drivers share one box.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-local.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "cat > $d/fix.sh << 'EOF'\necho from-script\nEOF",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash $d/fix.sh",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-script\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'printf \"a\\nb\\nc\\n\" > \"$1/out.txt\"' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat $d/out.txt; head -n 1 $d/out.txt; wc -l < $d/out.txt; grep -n b $d/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\nb\nc\na\n3\n2:b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "ls $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "fix.sh\nout.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && dash -c 'cat out.txt' | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "f=$(mktemp $d/job.XXXXXX) && echo seed > $f && dash -c 'cat \"$1\"' dash $f",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cp /bin/true \"$1/t\"' dash $d && $d/t && cd $d && ./t && echo ran",
+          "expect": {
+            "exit": 0,
+            "stdout": "ran\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | while read l; do ls $d > /dev/null; echo $l; done",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\nb\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf hello | { mkdir -p $d/sub && cat > $d/sub/f; }; cat $d/sub/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && ln -s out.txt link && dash -c 'readlink link; head -n 1 link' && readlink link",
+          "expect": {
+            "exit": 0,
+            "stdout": "out.txt\na\nout.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && ln out.txt hard && stat -c %h out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && echo out.txt | xargs stat -c %h && stat -c %h out.txt < /dev/null",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && echo x > nodir/f",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "bash: line 1: nodir/f: No such file or directory\n"
+          }
+        },
+        {
+          "command": "cd / && rm -r $d && test ! -e $d && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_mirage_link_in_the_machine_s_folder",
+      "note": "A link in the machine's own folder to a file only Mirage holds is Mirage's: Mirage reads, lists and removes it, and the machine never sees it.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-link.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "echo kept > /data/x && ln -s /data/x $d/l && cat $d/l && readlink $d/l && ls $d && dash -c 'test -e \"$1/l\" || echo not-on-the-machine' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\n/data/x\nl\nnot-on-the-machine\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && test ! -e $d && dash -c 'test -e \"$1\" || echo gone' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev_shm_is_the_machine_s_own",
+      "note": "/dev/shm, the one folder under /dev that holds files, is the machine's own like /tmp, while /dev itself stays Mirage's.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "f=/dev/shm/mirage-local.$$.$RANDOM && echo shared > $f && dash -c 'cat \"$1\"' dash $f && rm $f",
+          "expect": {
+            "exit": 0,
+            "stdout": "shared\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo dropped > /dev/null && echo kept",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_machine_mount_at_its_own_path",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "A machine mount whose root is its prefix, as \"@<machine>\" spells it, shows the machine's files at the same path, and a cwd there is the machine's.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "world": {
+        "mounts": {
+          "/var/tmp": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /var/tmp/mirage-local.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "dash -c 'echo hi > \"$1/x\"' dash $d && cat $d/x",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd $d && dash -c pwd | sed \"s|^$d\\$|here|\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "here\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd / && rm -r $d && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_machine_tree_at_another_prefix",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "A machine mount rooted at / under another prefix reads and writes the machine's tree there; Mirage runs every command on it itself.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "world": {
+        "mounts": {
+          "/sandbox": {
+            "vfs": "machine",
+            "config": {
+              "root": "/"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-prefix.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "echo via > /sandbox$d/f && dash -c 'cat \"$1/f\"' dash $d && ls /sandbox$d && cat /sandbox$d/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "via\nf\nvia\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r /sandbox$d && test ! -e $d && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "tmp_on_two_machines",
+      "note": "Over two machines /tmp lists both, refuses a name on both as ambiguous, renames on the source's machine, and moves a copy onto the other machine through Mirage. A new name a machine's program writes lands on that machine; one no program decides lands on the first.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "dash"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-two.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"$1\" && echo b > \"$1/b.txt\" && echo s2 > \"$1/same.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo a > \"$1/a.txt\" && echo s1 > \"$1/same.txt\"' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "ls $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "a.txt\nb.txt\nsame.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat $d/same.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "on several machines: docker, second"
+          }
+        },
+        {
+          "command": "mv $d/b.txt $d/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'ls \"$1\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "c.txt\nsame.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cp $d/c.txt $d/d.txt && dash -c 'cat \"$1/d.txt\"' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo made-there' > $d/by.txt && dash -c 'cat \"$1/by.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "made-there\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/by.txt\" || echo not-here' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "not-here\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && dash -c 'test -e \"$1\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -14,18 +14,9 @@
 
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { S_IFDIR, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
 import type { FileEntryWithStats, OpenMode, SFTPWrapper } from 'ssh2'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
-
-export function joinRoot(root: string, rel: string): string {
-  const r = rstripSlash(root)
-  const stripped = lstripSlash(rel)
-  if (stripped === '') return r === '' ? '/' : r
-  if (r === '') return `/${stripped}`
-  return `${r}/${stripped}`
-}
 
 export function isNoSuchFile(err: unknown): boolean {
   if (err === null || err === undefined) return false

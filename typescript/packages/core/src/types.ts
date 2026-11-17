@@ -590,6 +590,7 @@ export const VFSName = Object.freeze({
   LANGFUSE: 'langfuse',
   JAEGER: 'jaeger',
   SSH: 'ssh',
+  MACHINE: 'machine',
   REDIS: 'redis',
   SQL: 'sql',
   GCS: 'gcs',

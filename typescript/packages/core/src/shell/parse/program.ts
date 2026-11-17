@@ -145,8 +145,8 @@ export class ProgramNode implements ShellNode {
   get heredoc() {
     return this.node.heredoc
   }
-  warnings(head: string, first: number): string {
-    return this.node.warnings?.(head, first) ?? ''
+  warnings(head: string, first: number, rows?: number | null): string {
+    return this.node.warnings?.(head, first, rows) ?? ''
   }
   get offsets() {
     this.program.check()

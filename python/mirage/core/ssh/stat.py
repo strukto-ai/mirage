@@ -17,17 +17,15 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.stat import parse_tree, tree_command
+from mirage.core.posix.utils import join_root
 from mirage.errors.fs import eacces, enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
 
-FIND = "env LC_ALL=C find -L"
-TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
 FIND_TYPES = {
     "d": asyncssh.FILEXFER_TYPE_DIRECTORY,
     "f": asyncssh.FILEXFER_TYPE_REGULAR,
@@ -85,16 +83,6 @@ async def stat(
     )
 
 
-def tree_command(scope: str) -> str:
-    """The remote find that lists ``scope`` and everything below it,
-    links followed, one NUL-ended record per entry.
-
-    Args:
-        scope (str): the remote directory.
-    """
-    return f"{FIND} {single_quote(scope)} -printf {single_quote(TREE_FORMAT)}"
-
-
 async def tree(
     accessor: SSHAccessor,
     path_spec: PathSpec,
@@ -120,27 +108,25 @@ async def tree(
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh tree left to the walk: %s", exc)
         return None
-    if status != 0 or err or not out.endswith(b"\0"):
+    found = parse_tree(out) if status == 0 and not err else None
+    if found is None:
         return None
     rows: dict[str, FileStat] = {}
     top = False
-    for record in out.split(b"\0")[:-1]:
-        try:
-            kind, mode, size, mtime, atime, _, _, rel = record.decode().split(
-                " ", 7
-            )
-            attrs = asyncssh.SFTPAttrs(
-                type=FIND_TYPES[kind],
-                size=int(size),
-                permissions=int(mode, 8),
-                atime=int(atime.split(".")[0]),
-                mtime=int(mtime.split(".")[0]),
-            )
-        except (UnicodeDecodeError, ValueError, KeyError) as exc:
-            logger.debug("ssh tree left to the walk: %s", exc)
+    for row in found:
+        if row.kind not in FIND_TYPES:
             return None
-        if not rel:
-            top = kind == "d"
+        if not row.rel:
+            top = row.kind == "d"
             continue
-        rows[rel] = attrs_to_file_stat(rel.rsplit("/", 1)[-1], attrs)
+        rows[row.rel] = attrs_to_file_stat(
+            row.rel.rsplit("/", 1)[-1],
+            asyncssh.SFTPAttrs(
+                type=FIND_TYPES[row.kind],
+                size=row.size,
+                permissions=row.mode,
+                atime=row.atime,
+                mtime=row.mtime,
+            ),
+        )
     return rows if top else None

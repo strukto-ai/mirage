@@ -17,7 +17,8 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isFailure, isNoSuchFile, isPermissionDenied, joinRoot, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isFailure, isNoSuchFile, isPermissionDenied, sftpCall } from './utils.ts'
 
 async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats | null> {
   return new Promise<Stats | null>((resolveFn) => {

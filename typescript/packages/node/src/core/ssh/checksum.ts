@@ -14,18 +14,9 @@
 
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { checksum as posixChecksum } from '@struktoai/mirage-core/core/posix/checksum'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot } from './utils.ts'
-
-export const SUMS: Readonly<Record<string, readonly [string, number]>> = {
-  md5: ['md5sum', 32],
-  sha1: ['sha1sum', 40],
-  sha224: ['sha224sum', 56],
-  sha256: ['sha256sum', 64],
-  sha384: ['sha384sum', 96],
-  sha512: ['sha512sum', 128],
-}
 
 /**
  * A file's digest, by the matching coreutils sum on the server, so the bytes
@@ -41,28 +32,11 @@ export async function checksum(
   p: PathSpec,
   algorithm: string,
 ): Promise<string | null> {
-  const tool = Object.hasOwn(SUMS, algorithm) ? SUMS[algorithm] : undefined
-  if (tool === undefined) return null
-  const [name, width] = tool
   const remote = joinRoot(accessor.config.root ?? '/', rawPathOf(p))
-  let status: number | null
-  let out: Uint8Array
-  let err: Uint8Array
   try {
-    ;[status, out, err] = await accessor.run(`${name} < ${singleQuote(remote)}`)
+    return await posixChecksum((command) => accessor.run(command), remote, algorithm)
   } catch (error) {
     console.debug(`ssh checksum left to the read: ${String(error)}`)
     return null
   }
-  const text = new TextDecoder().decode(out)
-  const digest = text.slice(0, width)
-  if (
-    status !== 0 ||
-    err.length > 0 ||
-    text.slice(width) !== '  -\n' ||
-    !new RegExp(`^[0-9a-f]{${String(width)}}$`).test(digest)
-  ) {
-    return null
-  }
-  return digest
 }

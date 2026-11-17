@@ -20,6 +20,7 @@ import { DifyVFS } from './dify/dify.ts'
 import { DiscordVFS } from './discord/discord.ts'
 import { DropboxVFS } from './dropbox/dropbox.ts'
 import { GoogleDriveVFS } from './gdrive/gdrive.ts'
+import { MachineVFS } from './machine/machine.ts'
 import { NotionVFS } from './notion/notion.ts'
 import { OneDriveVFS } from './onedrive/onedrive.ts'
 import { PostgresVFS } from './postgres/postgres.ts'
@@ -47,6 +48,7 @@ const NATIVE: [string, () => BaseVFS][] = [
   ['discord', () => new DiscordVFS()],
   ['dropbox', () => new DropboxVFS({ clientId: 'i', refreshToken: 'r' })],
   ['gdrive', () => new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' })],
+  ['machine', () => new MachineVFS({})],
   ['onedrive', () => new OneDriveVFS({ accessToken: 'tok' })],
   ['ram', () => new RAMVFS()],
   ['redis', () => new RedisVFS({ url: 'redis://test' } as never)],

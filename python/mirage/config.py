@@ -72,13 +72,16 @@ from mirage.types import (
     MountBackend,
     MountMode,
     ReadPolicy,
+    VFSName,
     WritePolicy,
     parse_mount_mode,
 )
 from mirage.utils.clock import parse_system_time
 from mirage.utils.loader import load_attr, optional_attr
+from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
+from mirage.vfs.machine.constants import MACHINE_MARK
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.mount.read_policy import (
@@ -656,6 +659,40 @@ def _cli_entry(name: str, block: CLIBlock) -> str | CLI:
     return resolved if ":" in block.cli else block.cli
 
 
+def check_mount_machines(
+    mounts: Mapping[str, "MountBlock"],
+    machines: Mapping[str, dict[str, Any]] | None,
+) -> None:
+    """A machine mount names machines the document defines, wherever in
+    it they sit; one without a ``machines:`` block gets its machines from
+    the caller, which checks them when it binds.
+
+    Args:
+        mounts (Mapping[str, MountBlock]): the document's mounts, each
+            ``"@<machine>"`` already a machine block.
+        machines (Mapping[str, dict[str, Any]] | None): its machines.
+
+    Raises:
+        ValueError: a machine mount names a machine the document lacks.
+    """
+    if machines is None:
+        return
+    known = ", ".join(repr(m) for m in machines) or "none"
+    for prefix, block in mounts.items():
+        if block.vfs != VFSName.MACHINE.value:
+            continue
+        chosen = block.config.get("default_machine")
+        for name in [
+            *(block.config.get("machines") or ()),
+            *([chosen] if chosen is not None else []),
+        ]:
+            if name not in machines:
+                raise ValueError(
+                    f"mount {prefix!r}: no machine {name!r} "
+                    f"(machines: {known})"
+                )
+
+
 class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -726,6 +763,27 @@ class WorkspaceConfig(BaseModel):
     # account of it and nothing to configure.
     secrets: dict[str, SecretSource] | None = None
 
+    @field_validator("mounts", mode="before")
+    @classmethod
+    def _v_mounts(cls, v: Any) -> Any:
+        # "@<machine>" is the machine VFS over that machine at the prefix.
+        if not isinstance(v, dict):
+            return v
+        return {
+            prefix: (
+                {
+                    "vfs": VFSName.MACHINE.value,
+                    "config": {
+                        "root": norm(prefix),
+                        "machines": [block.removeprefix(MACHINE_MARK)],
+                    },
+                }
+                if isinstance(block, str) and block.startswith(MACHINE_MARK)
+                else block
+            )
+            for prefix, block in v.items()
+        }
+
     @field_validator("mode", mode="before")
     @classmethod
     def _v_mode(cls, v: Any) -> Any:
@@ -791,6 +849,11 @@ class WorkspaceConfig(BaseModel):
             self.profiles or {}
         ):
             raise ValueError(f"unknown profile {self.profile!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _v_mount_machines(self) -> "WorkspaceConfig":
+        check_mount_machines(self.mounts, self.machines)
         return self
 
     def to_workspace_kwargs(

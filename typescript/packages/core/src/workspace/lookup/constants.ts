@@ -40,6 +40,10 @@ export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set([
   'setfattr',
 ])
 
+// The namespace programs a machine answers for a path that is its own: a
+// link there is the machine's real link, not one in the namespace's table.
+export const MACHINE_ANSWERED: ReadonlySet<string> = new Set(['readlink'])
+
 // Programs the router answers by name from the mount table and the attr
 // overlay (node/command_dispatch), with spec-classified words like a mount
 // command's. No mount registers them, so lookup names them here for `type`,

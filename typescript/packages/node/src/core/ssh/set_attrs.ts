@@ -17,7 +17,8 @@ import type { PathSpec, SetAttrFields } from '@struktoai/mirage-core/types'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isNoSuchFile, sftpCall } from './utils.ts'
 
 // Write metadata fields (the write side of stat), mirroring disk. Applies
 // natively what the remote inode can take and returns the residual: fields

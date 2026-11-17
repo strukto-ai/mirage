@@ -64,9 +64,10 @@ class WorkspaceBinding:
     session by id and ``mount_prefixes`` every prefix a sandbox may be
     told of, whatever the session hides, for an adapter that serves the
     mounts as files (a sandbox's SFTP), ``processes`` the table a
-    program a runtime runs starts its process in, and ``changes`` the
+    program a runtime runs starts its process in, ``changes`` the
     file changes a sandbox's kernel may still hold of what it was
-    served; each is None outside a workspace.
+    served, and ``local_prefixes`` the prefixes a machine holds itself;
+    each is None outside a workspace.
     """
 
     def __init__(
@@ -79,6 +80,7 @@ class WorkspaceBinding:
         mount_prefixes: Callable[[], list[str]] | None = None,
         processes: ProcessTable | None = None,
         changes: RecentChanges | None = None,
+        local_prefixes: Callable[[str], list[str]] | None = None,
     ) -> None:
         self.dispatch = dispatch
         self.resolver = resolver
@@ -88,6 +90,18 @@ class WorkspaceBinding:
         self.mount_prefixes = mount_prefixes
         self.processes = processes
         self.changes = changes
+        self._local_prefixes = local_prefixes
+
+    def machine_prefixes(self, machine: str) -> list[str]:
+        """The prefixes a machine holds itself: a machine mount of its own
+        files at the path they have there, which serving would cover.
+
+        Args:
+            machine (str): the machine's name under ``machines:``.
+        """
+        if self._local_prefixes is None:
+            return []
+        return self._local_prefixes(machine)
 
     def capture(self) -> RuntimeContext:
         return (

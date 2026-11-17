@@ -19,9 +19,9 @@ from functools import partial
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.core.posix.utils import join_root
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.stat import attrs_to_file_stat
-from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import eacces, listing_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import raw_path_of

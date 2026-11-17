@@ -45,6 +45,7 @@ from mirage.context.session_context import (
     syntax_head,
 )
 from mirage.execution.job import JobTable
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.observe.context import command_records
@@ -59,9 +60,10 @@ from mirage.policy import (
 )
 from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
+from mirage.runtime.machine.runtime import RemoteRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -89,8 +91,13 @@ from mirage.shell.variable import ShellVar, VarAttr
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
-from mirage.utils.glob_walk import glob_pattern
-from mirage.utils.path import CycleError, glob_prefix_match
+from mirage.utils.glob_walk import glob_pattern, unmark_globs
+from mirage.utils.path import (
+    CycleError,
+    glob_prefix_match,
+    parent,
+    resolve_path,
+)
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
@@ -117,6 +124,7 @@ from mirage.workspace.executor.builtins.alias import (
 )
 from mirage.workspace.executor.builtins.exec import diverted_file
 from mirage.workspace.executor.builtins.help import flag_help
+from mirage.workspace.executor.builtins.links.ln import LinkPlan, LnFlags
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
@@ -128,18 +136,32 @@ from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.executor.command.handler import argument_list_too_long
 from mirage.workspace.expand import expand_assignment
 from mirage.workspace.expand.argv import Argv, expand_argv
-from mirage.workspace.expand.globs import expand_boundary_globs
+from mirage.workspace.expand.globs import (
+    expand_boundary_globs,
+    glob_options,
+    resolve_globs,
+)
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
     runtime_refused,
 )
-from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
+from mirage.workspace.lookup.constants import (
+    MACHINE_ANSWERED,
+    PROGRAM_WRAPPERS,
+)
 from mirage.workspace.lookup.lookup import (
     lookup,
+    program_runtime,
     routed_consumer,
     runs_wrapper,
+)
+from mirage.workspace.lookup.machine import (
+    link_machine,
+    operand_machine,
+    program_machine,
+    several_machines,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -1103,9 +1125,149 @@ async def _run_argv(
 
         return drained(), io, node
 
-    if runner is not None:
-        return await runner(run_redirected, guard, name, tuple(argv.args))
-    return await run_redirected(stdin, sink, redirects)
+    # A name the command's redirects make lands on the machine its
+    # program runs on (``python gen.py > /tmp/out``), or the machine a
+    # command runs on whole because its files are that machine's
+    # (``/tmp/tool > /tmp/out``), which matters only over several
+    # machines, so only then is it asked before the redirects open, once
+    # the command is admitted: a refused one never reaches a machine.
+    machine = _stage_machine(
+        name, argv.args, session, registry, context.frame.routing
+    )
+    if (runner is not None or redirects) and several_machines(registry):
+        denied = await guard((), stdin)
+        if denied is not None:
+            return denied
+        held, _ = await _held_machine(
+            name,
+            argv,
+            session,
+            registry,
+            namespace,
+            dispatch,
+            stdin,
+            context.frame.routing,
+        )
+        machine = machine if held is None else held.machine
+    staged = (
+        bind_caller(current_caller().changed({"machine": machine}))
+        if machine != current_caller().machine
+        else None
+    )
+    try:
+        if runner is not None:
+            return await runner(run_redirected, guard, name, tuple(argv.args))
+        return await run_redirected(stdin, sink, redirects)
+    finally:
+        if staged is not None:
+            reset_caller(staged)
+
+
+async def _matched(
+    argv: Argv,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace,
+) -> Argv:
+    """``argv`` with each glob pattern its matches, as bash hands a
+    program its words: a mount command keeps patterns for its backend,
+    and a program running it elsewhere gets none.
+
+    Args:
+        argv (Argv): the command.
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        namespace (Namespace): the namespace, for the session's links.
+    """
+    if not any(isinstance(w, PathSpec) and w.pattern for w in argv.operands):
+        return argv
+    words = await resolve_globs(
+        list(argv.operands),
+        registry,
+        links=namespace.session_links(session),
+        options=glob_options(session),
+    )
+    return dataclasses.replace(
+        argv,
+        args=tuple(unmark_globs(word_text(w)) for w in words),
+        operands=tuple(words),
+    )
+
+
+def _stage_machine(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> MachineName | None:
+    """The machine a command's program runs on; None for a command Mirage
+    runs itself.
+
+    Args:
+        name (str): the command's name.
+        args (Sequence[str]): its words.
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if not name or routing is None:
+        return None
+    runtime = program_runtime(registry, [name, *args], session, routing)
+    if getattr(runtime, "reach", "workspace") == "workspace":
+        return None
+    return None if runtime is None else runtime.machine
+
+
+async def _held_machine(
+    name: str,
+    argv: Argv,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace,
+    dispatch: DispatchFn,
+    stdin: ByteSource | None,
+    placed: RouteDecision[RuntimeIdentity] | None,
+) -> tuple[RemoteRuntime | None, Argv]:
+    """The machine a command runs on whole because its files are that
+    machine's own, with the words it runs with there: a program named by
+    a path the machine holds, or a mount command (or a namespace program
+    the machine answers) whose every path, each glob match included, is
+    the machine's. None, with ``argv``, for a command Mirage keeps.
+
+    Args:
+        name (str): the command's name.
+        argv (Argv): the command.
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        namespace (Namespace): the namespace, for the session's links.
+        dispatch (DispatchFn): stats a program named by a path.
+        stdin (ByteSource | None): what is piped into it.
+        placed (RouteDecision | None): the line's placement.
+    """
+    if placed is None:
+        return None, argv
+    links = namespace.session_links(session)
+    if "/" in name:
+        held = await program_machine(
+            name, session, registry, links, dispatch, stdin
+        )
+        return held, argv
+    consumer, _ = routed_consumer(name, argv.args, session, registry, placed)
+    if not (
+        consumer is Consumer.MOUNT
+        or (consumer is Consumer.NAMESPACE and name in MACHINE_ANSWERED)
+    ):
+        return None, argv
+    machine = await operand_machine(argv, session, registry, links, stdin)
+    if machine is None:
+        return None, argv
+    matched = await _matched(argv, session, registry, namespace)
+    if matched is not argv:
+        machine = await operand_machine(
+            matched, session, registry, links, stdin
+        )
+    return machine, matched
 
 
 def unsaid(lines: list[str], said: bytes) -> list[str]:
@@ -1139,6 +1301,10 @@ async def _run_namespace_program(
     session: SessionState,
     operands: list[str | PathSpec],
     stdin: ByteSource | None,
+    links_elsewhere: (
+        Callable[[list[LinkPlan], LnFlags], Awaitable[RedirectResult | None]]
+        | None
+    ) = None,
 ) -> RedirectResult | None:
     """Run a program that lives above the mounts, None for any other.
 
@@ -1150,11 +1316,15 @@ async def _run_namespace_program(
         session (SessionState): the session.
         operands (list[str | PathSpec]): its operands.
         stdin (ByteSource | None): its input.
+        links_elsewhere (Callable | None): runs a whole ``ln`` where its
+            links land, None to keep it here.
     """
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
     if name == "ln":
-        return await handle_ln(namespace, made, session, operands)
+        return await handle_ln(
+            namespace, made, session, operands, links_elsewhere
+        )
 
     if name == "readlink":
         return await handle_readlink(namespace, made, session, operands)
@@ -1481,6 +1651,31 @@ async def _route_argv(
     # the admission gate so a policy sees the line like any other.
     if name and "/" in name:
         placed = context.frame.routing
+        # A program file one machine holds at its own path runs there.
+        held = (
+            None
+            if placed is None
+            else await program_machine(
+                name,
+                session,
+                registry,
+                namespace.session_links(session),
+                dispatch,
+                stdin,
+            )
+        )
+        if held is not None:
+            assert placed is not None
+            return await run_external(
+                argv,
+                stdin,
+                session,
+                registry,
+                dataclasses.replace(
+                    placed, bindings={**placed.bindings, name: held}
+                ),
+                sink,
+            )
 
         async def on_the_runtime() -> RedirectResult:
             assert placed is not None
@@ -1549,6 +1744,35 @@ async def _route_argv(
         return await run_external(
             argv, stdin, session, registry, routing, sink
         )
+    # A mount command whose every path is one machine's own runs there
+    # whole, with the machine's own output, as does a namespace program
+    # asking after the machine's own links. A glob's matches are checked
+    # too, since one may be a link only Mirage holds.
+    if routing is not None and (
+        consumer is Consumer.MOUNT
+        or (consumer is Consumer.NAMESPACE and name in MACHINE_ANSWERED)
+    ):
+        machine, matched = await _held_machine(
+            name,
+            argv,
+            session,
+            registry,
+            namespace,
+            dispatch,
+            stdin,
+            context.frame.routing,
+        )
+        if machine is not None:
+            return await run_external(
+                matched,
+                stdin,
+                session,
+                registry,
+                dataclasses.replace(
+                    routing, bindings={**routing.bindings, name: machine}
+                ),
+                sink,
+            )
 
     # A function of a builtin's or a namespace program's name runs in
     # its place (`timeout() { ...; }`), as bash finds a function first;
@@ -1618,11 +1842,56 @@ async def _route_argv(
     # to it reaches what ``chmod -R`` walks into, not only its operands.
     made = made_by_command(dispatch)
 
+    async def ln_on_machine(
+        plans: list[LinkPlan], flags: LnFlags
+    ) -> RedirectResult | None:
+        # Links landing in one machine's own folder are made there, so
+        # its programs follow them.
+        if routing is None:
+            return None
+        machine = await link_machine(
+            [
+                (
+                    plan.link_abs,
+                    resolve_path(
+                        word_text(plan.source),
+                        parent(plan.link_abs)
+                        if flags.symbolic
+                        else session.cwd,
+                    ),
+                )
+                for plan in plans
+            ],
+            flags.symbolic,
+            session,
+            registry,
+            namespace.session_links(session),
+        )
+        if machine is None:
+            return None
+        return await run_external(
+            argv,
+            None,
+            session,
+            registry,
+            dataclasses.replace(
+                routing, bindings={**routing.bindings, name: machine}
+            ),
+            sink,
+        )
+
     program = (
         None
         if shadowed
         else await _run_namespace_program(
-            name, namespace, made, registry, session, operands, stdin
+            name,
+            namespace,
+            made,
+            registry,
+            session,
+            operands,
+            stdin,
+            ln_on_machine,
         )
     )
     if program is not None:

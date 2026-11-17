@@ -260,7 +260,10 @@ class RemoteRuntime(
         feeds: list[tuple[str, asyncio.Task[RunAnswer]]] = []
         binding = self._binding
         prefixes = (
-            served_prefixes(binding.mount_prefixes())
+            served_prefixes(
+                binding.mount_prefixes(),
+                binding.machine_prefixes(handle.name),
+            )
             if binding is not None and binding.mount_prefixes is not None
             else []
         )

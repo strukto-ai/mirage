@@ -131,17 +131,23 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
     return tops
 
 
-def served_prefixes(prefixes: Iterable[str]) -> list[str]:
-    """The prefixes ssh serves a machine: its top prefixes but ``/tmp``.
+def served_prefixes(
+    prefixes: Iterable[str], local: Iterable[str] = ()
+) -> list[str]:
+    """The prefixes ssh serves a machine: its top prefixes but those it
+    holds itself.
 
-    ``/tmp`` stays the machine's own. The machine keeps its sockets and
-    temporary files there, and a user who is not root cannot mount over
-    it. A mount under ``/tmp`` is still served at its own path.
+    A machine mount of the machine's own files at the path they have
+    there (``/tmp``, ``"@<machine>"``) stays the machine's: serving it would
+    cover the very files it shows. A mount under one is still served at
+    its own path.
 
     Args:
         prefixes (Iterable[str]): the mount prefixes the session sees.
+        local (Iterable[str]): the prefixes the machine holds itself.
     """
-    return top_prefixes(p for p in prefixes if p.rstrip("/") != "/tmp")
+    own = {p.rstrip("/") for p in local}
+    return top_prefixes(p for p in prefixes if p.rstrip("/") not in own)
 
 
 def mount_paths(prefixes: Iterable[str]) -> set[str]:
@@ -398,12 +404,16 @@ class MachineMounts:
         self._lines.append((held, set()))
         begun = binding.changes.now() if binding.changes is not None else 0.0
         seen = cwd.rstrip("/")
+        local = binding.machine_prefixes(self._machine)
         if (
             self._mount_type == "ssh"
             and seen
             and not any(
-                seen == p or seen.startswith(p + "/")
-                for p in served_prefixes(binding.mount_prefixes())
+                seen == p.rstrip("/") or seen.startswith(p.rstrip("/") + "/")
+                for p in [
+                    *served_prefixes(binding.mount_prefixes(), local),
+                    *local,
+                ]
             )
         ):
             await errors(
@@ -455,7 +465,9 @@ class MachineMounts:
                     ).encode()
                 )
                 return RunResult(exit_code=1)
-            every = mount_paths(binding.mount_prefixes())
+            every = mount_paths(binding.mount_prefixes()) - {
+                p.rstrip("/") for p in local
+            }
             ruled = frozenset(
                 p.rstrip("/") or "/"
                 for p in restricted_mounts_for(
@@ -714,7 +726,10 @@ class MachineMounts:
             nothing new served; None once in step, or with a mount of the
             machine's own gone, which ``validate`` refuses.
         """
-        served = served_prefixes(binding.resolver.prefixes())
+        local = [
+            p.rstrip("/") for p in binding.machine_prefixes(self._machine)
+        ]
+        served = served_prefixes(binding.resolver.prefixes(), local)
         visible = frozenset(
             await self._mountable(files, served)
             if self._mount_type != "fuse"
@@ -770,7 +785,7 @@ class MachineMounts:
                 "did not run"
             )
         for prefix in wanted:
-            under = [o for o in own if o.startswith(prefix + "/")]
+            under = [o for o in (*own, *local) if o.startswith(prefix + "/")]
             if under:
                 raise RuntimeError(
                     f"{self._provider}: the machine mounts {under[0]} itself, "

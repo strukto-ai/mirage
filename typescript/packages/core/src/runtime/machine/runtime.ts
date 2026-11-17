@@ -221,8 +221,12 @@ export class RemoteRuntime
     const argv = [...texts]
     const feeds: (readonly [string, Promise<void>])[] = []
     const stop = new AbortController()
-    const mountPrefixes = this.binding?.mountPrefixes ?? null
-    const prefixes = mountPrefixes === null ? [] : servedPrefixes(mountPrefixes())
+    const binding = this.binding
+    const mountPrefixes = binding?.mountPrefixes ?? null
+    const prefixes =
+      binding === null || mountPrefixes === null
+        ? []
+        : servedPrefixes(mountPrefixes(), binding.machinePrefixes(handle.name))
     try {
       for (const [at, text] of texts.entries()) {
         if (ctx.vfs == null || !reads.has(text)) continue

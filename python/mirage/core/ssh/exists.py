@@ -15,7 +15,7 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.utils import join_root
 from mirage.types import PathSpec
 
 

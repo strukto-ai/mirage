@@ -59,6 +59,7 @@ from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.clock import bound_system_clock
+from mirage.utils.quote import shell_quote
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +290,8 @@ class MachineHandle:
         # The runs executing here right now; a scan asks only a machine
         # with one, or with processes an earlier scan found.
         self._executing = 0
+        # Whether the machine has a program, by name, asked once each.
+        self._programs: dict[str, bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -759,6 +762,22 @@ class MachineHandle:
                 ("/bin/sh", "-c", line), stdin, env, cwd, output, errors
             )
         )
+
+    async def has_program(self, name: str) -> bool:
+        """Whether the machine has a program of this name on its PATH,
+        asked once.
+
+        Args:
+            name (str): the program's name.
+        """
+        known = self._programs.get(name)
+        if known is None:
+            await self.ensure_connected()
+            done = await self._setup(
+                f"command -v {shell_quote(name)} >/dev/null 2>&1"
+            )
+            known = self._programs[name] = done.exit_code == 0
+        return known
 
     def _disconnected(self) -> None:
         """Let the next run connect again, and read the machine's mounts

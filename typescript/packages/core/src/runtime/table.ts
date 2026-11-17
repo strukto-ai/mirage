@@ -282,6 +282,25 @@ export function splitMachines(
 }
 
 /**
+ * The machine that runs the programs nothing in Mirage resolves: the first
+ * whose entry captures them, else the first machine; null for a workspace
+ * without machines. Mirrors Python's `program_machine`.
+ *
+ * @param entries the `machines:` entries.
+ * @param handles the machines by name.
+ */
+export function programMachine(
+  entries: readonly Runtime[],
+  handles: Record<string, MachineHandle>,
+): string | null {
+  for (const entry of entries) {
+    if (entry instanceof RemoteRuntime && entry.captures.includes(EXTERNAL_COMMANDS))
+      return entry.defaultMachine
+  }
+  return Object.keys(handles)[0] ?? null
+}
+
+/**
  * The runtime class a name resolves to. Mirrors Python's `runtime_class`.
  *
  * Throws:

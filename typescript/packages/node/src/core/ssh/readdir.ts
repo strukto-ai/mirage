@@ -20,13 +20,8 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { attrsToFileStat, type SshAttrs } from './stat.ts'
-import {
-  isDirectoryAttrs,
-  isFileAttrs,
-  isNoSuchFile,
-  isPermissionDenied,
-  joinRoot,
-} from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isDirectoryAttrs, isFileAttrs, isNoSuchFile, isPermissionDenied } from './utils.ts'
 
 async function attrsOrNull(accessor: SSHAccessor, key: string): Promise<Stats | null> {
   const sftp = await accessor.sftp()

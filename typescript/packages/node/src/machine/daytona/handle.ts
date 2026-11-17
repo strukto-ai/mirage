@@ -45,7 +45,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly provider = 'daytona'
   protected override readonly pauses = true
   override readonly takesInput = false
-  protected override readonly joinsStreams = true
+  override readonly joinsStreams = true
   private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null

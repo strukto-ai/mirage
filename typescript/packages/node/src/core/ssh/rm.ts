@@ -17,14 +17,8 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import {
-  holdsEntries,
-  isDirectoryAttrs,
-  isFailure,
-  isNoSuchFile,
-  joinRoot,
-  sftpCall,
-} from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { holdsEntries, isDirectoryAttrs, isFailure, isNoSuchFile, sftpCall } from './utils.ts'
 
 async function rmRInner(sftp: SFTPWrapper, remote: string, root: PathSpec): Promise<void> {
   const stats = await sftpCall<Stats>((done) => {

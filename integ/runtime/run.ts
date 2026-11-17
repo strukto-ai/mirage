@@ -32,6 +32,7 @@ import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import { MongoClient } from 'mongodb'
 import type { FileEntryWithStats, SFTPWrapper } from 'ssh2'
 import {
+  buildVfs as buildRegistryVfs,
   CLI,
   CommandSpec,
   DiskVFS,
@@ -900,6 +901,7 @@ async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
     await ensureMongo()
     return new MongoDBVFS({ uri: process.env.MONGODB_URI ?? '', databases: [DB] })
   }
+  if (spec.vfs === 'machine') return buildRegistryVfs('machine', { ...(spec.config ?? {}) })
   throw new Error(`unknown VFS kind: ${spec.vfs}`)
 }
 

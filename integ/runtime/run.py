@@ -75,6 +75,7 @@ from mirage.utils.key_prefix import mounted_path  # noqa: E402
 from mirage.utils.path import norm  # noqa: E402
 from mirage.vfs.base import BaseVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
+from mirage.vfs.registry import build_vfs  # noqa: E402
 from mirage.workspace.workspace.lifecycle import (  # noqa: E402
     patch_process,
     unpatch_process,
@@ -895,6 +896,8 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
         return MongoDBVFS(
             config=MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
         )
+    if kind == "machine":
+        return build_vfs("machine", spec.get("config", {}))
     raise ValueError(f"unknown VFS kind: {kind!r}")
 
 

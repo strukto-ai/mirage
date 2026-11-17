@@ -91,8 +91,8 @@ export interface LnFlags {
   readonly suffix: string
 }
 
-/** One link to make: its source operand and where it lands. */
-interface LinkPlan {
+/** One link `ln` plans to make: its source word and where the link lands. */
+export interface LinkPlan {
   readonly source: string | PathSpec
   readonly linkAbs: string
   /** The link name as GNU would spell it in a message (`d/f.txt`). */
@@ -952,11 +952,15 @@ async function attemptLink(
 // here. Every write is a dispatch op, so session grants and admission
 // policies fire at the dispatcher; this handler keeps the operand semantics and
 // renders refusals in ln's own words.
+//
+// `elsewhere` runs the whole ln where its planned links land instead (a
+// machine's own folder), answering null to leave it here.
 export async function handleLn(
   namespace: Namespace,
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
+  elsewhere: ((plans: LinkPlan[], flags: LnFlags) => Promise<RedirectResult | null>) | null = null,
 ): Promise<RedirectResult> {
   const spec = specOf('ln')
   const parsed = parseCommand(
@@ -998,6 +1002,10 @@ export async function handleLn(
     flags,
   )
   if (planRefusal !== null) return fail('ln', planRefusal)
+  if (elsewhere !== null) {
+    const ran = await elsewhere(plans, flags)
+    if (ran !== null) return ran
+  }
   const errors: string[] = []
   const out: string[] = []
   for (const plan of plans) {

@@ -14,6 +14,7 @@
 
 import logging
 import posixpath
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 
@@ -1084,6 +1085,9 @@ async def handle_ln(
     dispatch: DispatchFn,
     session: SessionState,
     args: list[str | PathSpec],
+    elsewhere: (
+        Callable[[list[LinkPlan], LnFlags], Awaitable[Result | None]] | None
+    ) = None,
 ) -> Result:
     """ln [OPTION]... TARGET... : GNU ln over the namespace and the dispatcher.
 
@@ -1108,6 +1112,8 @@ async def handle_ln(
         dispatch (DispatchFn): op dispatcher.
         session (SessionState): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
+        elsewhere (Callable | None): runs the whole ln where its planned
+            links land instead, answering None to leave it here.
     """
     parsed = parse_command(
         SPECS["ln"], [word_text(a) for a in args], session.cwd, "ln"
@@ -1150,6 +1156,10 @@ async def handle_ln(
     )
     if refused is not None:
         return fail("ln", refused)
+    if elsewhere is not None:
+        ran = await elsewhere(plans, flags)
+        if ran is not None:
+            return ran
     errors: list[str] = []
     out: list[str] = []
     for plan in plans:

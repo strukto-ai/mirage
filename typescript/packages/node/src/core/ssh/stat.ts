@@ -16,16 +16,15 @@ import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
+import { parseTree, treeCommand } from '@struktoai/mirage-core/core/posix/stat'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
 import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isDirectoryAttrs, isNoSuchFile, isPermissionDenied, joinRoot } from './utils.ts'
+import { isDirectoryAttrs, isNoSuchFile, isPermissionDenied } from './utils.ts'
 
-export const FIND = 'env LC_ALL=C find -L'
-export const TREE_FORMAT = '%y %m %s %T@ %A@ %U %G %P\\0'
 const FIND_TYPES: Readonly<Record<string, number>> = { d: S_IFDIR, f: S_IFREG }
 
 export interface SshAttrs {
@@ -101,14 +100,6 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
 }
 
 /**
- * The remote find that lists `scope` and everything below it, links
- * followed, one NUL-ended record per entry. Mirrors Python's `tree_command`.
- */
-export function treeCommand(scope: string): string {
-  return `${FIND} ${singleQuote(scope)} -printf ${singleQuote(TREE_FORMAT)}`
-}
-
-/**
  * Every file and directory under a directory, each as `stat` answers it, from
  * one find on the server, where a walk sends a readdir per directory.
  *
@@ -132,39 +123,26 @@ export async function tree(
     console.debug(`ssh tree left to the walk: ${String(error)}`)
     return null
   }
-  if (status !== 0 || err.length > 0 || out[out.length - 1] !== 0) return null
-  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const found = status === 0 && err.length === 0 ? parseTree(out) : null
+  if (found === null) return null
   const rows = new Map<string, FileStat>()
   let top = false
-  let start = 0
-  for (let end = out.indexOf(0); end !== -1; end = out.indexOf(0, start)) {
-    let fields: string[]
-    try {
-      fields = decoder.decode(out.subarray(start, end)).split(' ')
-    } catch (error) {
-      console.debug(`ssh tree left to the walk: ${String(error)}`)
-      return null
-    }
-    start = end + 1
-    const [kind = '', mode = '', size = '', mtime = '', atime = '', uid = '', gid = ''] = fields
-    const type = FIND_TYPES[kind]
-    if (type === undefined || fields.length < 8 || !/^[0-7]+$/.test(mode)) return null
-    if (![size, uid, gid].every((n) => /^\d+$/.test(n))) return null
-    if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
-    const attrs: SshAttrs = {
-      mode: type | Number.parseInt(mode, 8),
-      size: Number(size),
-      mtime: Number(mtime.split('.')[0]),
-      atime: Number(atime.split('.')[0]),
-      uid: Number(uid),
-      gid: Number(gid),
-    }
-    const rel = fields.slice(7).join(' ')
-    if (rel === '') {
-      top = isDirectoryAttrs(attrs)
+  for (const row of found) {
+    const type = FIND_TYPES[row.kind]
+    if (type === undefined) return null
+    if (row.rel === '') {
+      top = type === S_IFDIR
       continue
     }
-    rows.set(rel, attrsToFileStat(rel.split('/').pop() ?? rel, attrs))
+    rows.set(
+      row.rel,
+      attrsToFileStat(row.rel.split('/').pop() ?? row.rel, {
+        mode: type | row.mode,
+        size: row.size,
+        mtime: row.mtime,
+        atime: row.atime,
+      }),
+    )
   }
   return top ? rows : null
 }

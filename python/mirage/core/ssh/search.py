@@ -17,33 +17,12 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.search import (
+    files_containing as posix_files_containing,
+)
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mounted_path
-from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
-
-# The remote search: grep in the C locale, so it compares bytes as mirage
-# reads them; --dereference-recursive, so it reads every file the walk can
-# reach, a link's target included (GNU's spelling of -R: BSD grep's -R
-# follows no link, and refuses this one); --devices=skip, so a FIFO the
-# walk would never read cannot block it; and --null, so a name ends where a
-# NUL does. `env` sets the locale under any login shell.
-GREP = "env LC_ALL=C grep --dereference-recursive --devices=skip -lF --null"
-
-
-def grep_command(text: str, scopes: list[str], ignore_case: bool) -> str:
-    """The remote grep that lists the files under ``scopes`` holding
-    ``text``.
-
-    Args:
-        text (str): the plain text.
-        scopes (list[str]): the remote directories.
-        ignore_case (bool): fold ASCII case.
-    """
-    words = [GREP, *(["-i"] if ignore_case else []), "-e", single_quote(text)]
-    return " ".join([*words, "--", *map(single_quote, scopes)])
 
 
 async def files_containing(
@@ -69,26 +48,10 @@ async def files_containing(
         under (list[PathSpec]): the directories walked.
         ignore_case (bool): fold ASCII case, which is all the text needs.
     """
-    root = accessor.config.root
-    scopes = [join_root(root, p.mount_path) for p in under]
     try:
-        status, out, err = await accessor.run(
-            grep_command(text, scopes, ignore_case)
+        return await posix_files_containing(
+            accessor.run, accessor.config.root, text, under, ignore_case
         )
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh search left to the scan: %s", exc)
         return None
-    if status not in (0, 1) or err or (out and not out.endswith(b"\0")):
-        return None
-    base = root.rstrip("/")
-    hits: list[PathSpec] = []
-    for raw in out.split(b"\0")[:-1]:
-        try:
-            name = raw.decode()
-        except UnicodeDecodeError as exc:
-            logger.debug("ssh search left to the scan: %s", exc)
-            return None
-        if not name.startswith(base + "/"):
-            return None
-        hits.append(mounted_path(under[0], name[len(base) :]))
-    return hits

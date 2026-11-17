@@ -47,6 +47,7 @@ import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import type { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -56,6 +57,7 @@ import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../execution/job/index.ts'
+import type { MachineName } from '../../execution/types.ts'
 import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -66,8 +68,8 @@ import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
-import { globPattern } from '../../utils/glob_walk.ts'
-import { CycleError, globPrefixMatch } from '../../utils/path.ts'
+import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
+import { CycleError, globPrefixMatch, parent, resolvePath } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { guardDispatch } from '../abort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
@@ -92,18 +94,20 @@ import {
   prepareMv,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
+import type { LinkPlan, LnFlags } from '../executor/builtins/links/ln.ts'
 import { BUILTINS } from '../executor/builtins/table.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { argumentListTooLong } from '../executor/command/handler.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
-import { expandBoundaryGlobs } from '../expand/globs.ts'
+import { expandBoundaryGlobs, globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
-import { lookup, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
+import { MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { lookup, programRuntime, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
+import { linkMachine, operandMachine, programMachine, severalMachines } from '../lookup/machine.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -289,12 +293,16 @@ async function runNamespaceProgram(
   session: SessionState,
   operands: (string | PathSpec)[],
   stdin: ByteSource | null,
+  // Runs a whole `ln` where its links land, null to keep it here.
+  linksElsewhere:
+    | ((plans: LinkPlan[], flags: LnFlags) => Promise<RedirectResult | null>)
+    | null = null,
 ): Promise<RedirectResult | null> {
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
   if (name === 'ln') {
-    return await handleLn(namespace, made, session, operands)
+    return await handleLn(namespace, made, session, operands, linksElsewhere)
   }
   if (name === 'readlink') {
     return await handleReadlink(namespace, made, session, operands)
@@ -1155,8 +1163,117 @@ async function runArgv(
     }
     return [drained(), io, node]
   }
-  if (runner !== null) return runner(runRedirected, guard, name, argv.args)
-  return runRedirected(stdin, sink, redirects)
+  const run = (): Promise<RedirectResult> =>
+    runner !== null
+      ? runner(runRedirected, guard, name, argv.args)
+      : runRedirected(stdin, sink, redirects)
+  // A name the command's redirects make lands on the machine its program
+  // runs on (`python gen.py > /tmp/out`), or the machine a command runs on
+  // whole because its files are that machine's (`/tmp/tool > /tmp/out`),
+  // which matters only over several machines, so only then is it asked
+  // before the redirects open, once the command is admitted: a refused one
+  // never reaches a machine.
+  let machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
+  if ((runner !== null || redirects.length > 0) && severalMachines(registry)) {
+    const denied = await guard([], stdin)
+    if (denied !== null) return denied
+    const [held] = await heldMachine(
+      name,
+      argv,
+      session,
+      registry,
+      namespace,
+      dispatch,
+      stdin,
+      context.frame.routing,
+    )
+    if (held !== null) machine = held.machine
+  }
+  const outer = currentCaller()
+  if ((machine?.toString() ?? null) === (outer.machine?.toString() ?? null)) return run()
+  return runWithCaller({ ...outer, machine }, run)
+}
+
+/**
+ * The machine a command's program runs on; null for a command Mirage runs
+ * itself. Mirrors Python's `_stage_machine`.
+ */
+function stageMachine(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): MachineName | null {
+  if (name === '' || routing === undefined) return null
+  const runtime = programRuntime(registry, [name, ...args], session, routing)
+  if (runtime === null || runtime === undefined || runtime.reach === 'workspace') return null
+  return runtime.machine
+}
+
+/**
+ * `argv` with each glob pattern its matches, as bash hands a program its
+ * words: a mount command keeps patterns for its backend, and a program
+ * running it elsewhere gets none. Mirrors Python's `_matched`.
+ */
+async function matched(
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace,
+): Promise<Argv> {
+  if (!argv.operands.some((w) => w instanceof PathSpec && w.pattern !== null)) return argv
+  const words = await resolveGlobs(
+    argv.operands,
+    registry,
+    false,
+    namespace.sessionLinks(session),
+    globOptions(session),
+  )
+  return new Argv(
+    argv.name,
+    words.map((w) => unmarkGlobs(wordText(w))),
+    words,
+    argv.prefix,
+  )
+}
+
+/**
+ * The machine a command runs on whole because its files are that machine's
+ * own, with the words it runs with there: a program named by a path the
+ * machine holds, or a mount command (or a namespace program the machine
+ * answers) whose every path, each glob match included, is the machine's.
+ * Null, with `argv`, for a command Mirage keeps. Mirrors Python's
+ * `_held_machine`.
+ */
+async function heldMachine(
+  name: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  stdin: ByteSource | null,
+  placed: RouteDecision<Runtime> | undefined,
+): Promise<[RemoteRuntime | null, Argv]> {
+  if (placed === undefined) return [null, argv]
+  const links = namespace.sessionLinks(session)
+  if (name.includes('/')) {
+    return [await programMachine(name, session, registry, links, dispatch, stdin), argv]
+  }
+  const [consumer] = routedConsumer(name, argv.args, session, registry, placed)
+  if (
+    !(
+      consumer === Consumer.MOUNT ||
+      (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name))
+    )
+  )
+    return [null, argv]
+  let machine = await operandMachine(argv, session, registry, links, stdin)
+  if (machine === null) return [null, argv]
+  const words = await matched(argv, session, registry, namespace)
+  if (words !== argv) machine = await operandMachine(words, session, registry, links, stdin)
+  return [machine, words]
 }
 
 // Drop the refusal lines the command tier already wrote.
@@ -1326,6 +1443,28 @@ async function routeArgv(
   // any other.
   if (name.includes('/')) {
     const placed = context.frame.routing
+    // A program file one machine holds at its own path runs there.
+    const held =
+      placed === undefined
+        ? null
+        : await programMachine(
+            name,
+            session,
+            registry,
+            namespace.sessionLinks(session),
+            dispatch,
+            stdin,
+          )
+    if (held !== null && placed !== undefined)
+      return runExternal(
+        argv,
+        stdin,
+        session,
+        registry,
+        { ...placed, bindings: { ...placed.bindings, [name]: held } },
+        signal,
+        sink,
+      )
     const onTheRuntime =
       placed !== undefined &&
       name.startsWith('/') &&
@@ -1394,6 +1533,34 @@ async function routeArgv(
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
+  // A mount command whose every path is one machine's own runs there whole,
+  // with the machine's own output. A glob's matches are checked too, since
+  // one may be a link only Mirage holds.
+  if (
+    routing !== undefined &&
+    (consumer === Consumer.MOUNT || (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name)))
+  ) {
+    const [machine, words] = await heldMachine(
+      name,
+      argv,
+      session,
+      registry,
+      namespace,
+      dispatch,
+      stdin,
+      context.frame.routing,
+    )
+    if (machine !== null)
+      return runExternal(
+        words,
+        stdin,
+        session,
+        registry,
+        { ...routing, bindings: { ...routing.bindings, [name]: machine } },
+        signal,
+        sink,
+      )
+  }
 
   // A function of a builtin's or a namespace program's name runs in its
   // place (`timeout() { ...; }`), as bash finds a function first; the
@@ -1461,9 +1628,44 @@ async function routeArgv(
   // reaches what `chmod -R` walks into, not only its operands.
   const made = madeByCommand(dispatch, admission)
 
+  // Links landing in one machine's own folder are made there, so its
+  // programs follow them.
+  const lnOnMachine = async (plans: LinkPlan[], flags: LnFlags): Promise<RedirectResult | null> => {
+    if (routing === undefined) return null
+    const machine = await linkMachine(
+      plans.map((plan) => [
+        plan.linkAbs,
+        resolvePath(wordText(plan.source), flags.symbolic ? parent(plan.linkAbs) : session.cwd),
+      ]),
+      flags.symbolic,
+      session,
+      registry,
+      namespace.sessionLinks(session),
+    )
+    if (machine === null) return null
+    return runExternal(
+      argv,
+      null,
+      session,
+      registry,
+      { ...routing, bindings: { ...routing.bindings, [name]: machine } },
+      signal,
+      sink,
+    )
+  }
+
   const program = shadowed
     ? null
-    : await runNamespaceProgram(name, namespace, made, registry, session, operands, stdin)
+    : await runNamespaceProgram(
+        name,
+        namespace,
+        made,
+        registry,
+        session,
+        operands,
+        stdin,
+        lnOnMachine,
+      )
   if (program !== null) return program
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

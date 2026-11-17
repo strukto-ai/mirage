@@ -82,7 +82,7 @@ fn words(refusal: &Refusal) -> String {
 
 /// A tree's heredoc warnings as `bash -c` prints them.
 fn warned(tree: &Tree) -> String {
-    String::from_utf8_lossy(&tree.warnings(b"bash: ", 1)).into_owned()
+    String::from_utf8_lossy(&tree.warnings(b"bash: ", 1, usize::MAX)).into_owned()
 }
 
 #[test]
@@ -546,7 +546,7 @@ fn refusals_stand_on_the_lines_bash_names() {
         "bash: eval: line 3: syntax error near unexpected token `newline'\nbash: eval: line 3: `echo ('\n"
     );
     assert_eq!(
-        String::from_utf8_lossy(&parse(b"cat <<Q\ny").warnings(b"bash: ", 4)),
+        String::from_utf8_lossy(&parse(b"cat <<Q\ny").warnings(b"bash: ", 4, usize::MAX)),
         "bash: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `Q')\n"
     );
 }
@@ -1183,5 +1183,19 @@ fn composed_heredoc_offsets_keep_unicode_bytes_and_quoted_continuations() {
             0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 27, 27, 27, 28, 29, 29,
             30, 31, 31, 32, 33, 36, 26, 36
         ]
+    );
+}
+
+#[test]
+fn warnings_stop_at_the_rows_a_refused_input_read_first() {
+    let tree = parse(b"x=$(cat <<EOF)\nabc\nEOF\necho ok\ny=$(cat <<Q\nz");
+    assert_eq!(
+        String::from_utf8_lossy(&tree.warnings(b"bash: ", 1, 4)),
+        "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&tree.warnings(b"bash: ", 1, usize::MAX)),
+        "bash: line 1: warning: command substitution: 1 unterminated here-document\n\
+         bash: line 6: warning: here-document at line 5 delimited by end-of-file (wanted `Q')\n"
     );
 }

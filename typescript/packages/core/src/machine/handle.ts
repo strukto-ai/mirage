@@ -27,6 +27,7 @@ import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
+import { shellQuote } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { BASE_CONFIG_FIELDS, checkMountType, type MachineConfig } from './config.ts'
 import {
@@ -246,7 +247,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   readonly takesInput: boolean = true
   // Whether the machine's exec hands stderr back joined into stdout
   // (Daytona), so a run's pid and exit lines arrive on its stdout.
-  protected readonly joinsStreams: boolean = false
+  readonly joinsStreams: boolean = false
   // Set by a provider's connect that reached the machine; close hands it to `pausable` for the pause after.
   protected reached = false
   private pausable = false
@@ -258,6 +259,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The runs executing here right now; a scan asks only a machine with
   // one, or with processes an earlier scan found.
   private runs = 0
+  // Whether the machine has a program, by name, asked once each.
+  private readonly programs = new Map<string, Promise<boolean>>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -702,6 +705,23 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return answerOf((output, errors) =>
       this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
     )
+  }
+
+  /**
+   * Whether the machine has a program of this name on its PATH, asked once.
+   *
+   * @param name the program's name.
+   */
+  hasProgram(name: string): Promise<boolean> {
+    let known = this.programs.get(name)
+    if (known === undefined) {
+      known = this.ensureConnected()
+        .then(() => this.setup(`command -v ${shellQuote(name)} >/dev/null 2>&1`))
+        .then((done) => done.exitCode === 0)
+      known.catch(() => this.programs.delete(name))
+      this.programs.set(name, known)
+    }
+    return known
   }
 
   /**

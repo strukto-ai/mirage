@@ -36,13 +36,12 @@
     {
       "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
-      "note": "/tmp is the box's own, as / and /dev are: a workspace /tmp is not served over it, a file a program writes there stays on the box, and a line run from the workspace's /tmp exits 126.",
+      "note": "/tmp is the box's own, as / and /dev are, and the workspace shows it as a machine mount: sshfs does not serve over it, a file a program writes there is the file Mirage reads, and a line runs from it.",
       "runtimes": ["docker", "e2b", "microsandbox"],
       "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
       "world": {
         "mounts": {
-          "/served": { "vfs": "ram", "files": { "seed.txt": "seed\n" } },
-          "/tmp": { "vfs": "ram", "files": { "note.txt": "workspace\n" } }
+          "/served": { "vfs": "ram", "files": { "seed.txt": "seed\n" } }
         }
       },
       "entry": {
@@ -55,24 +54,16 @@
           "expect": { "exit": 0, "stdout": "seed\n", "stderr": "" }
         },
         {
-          "command": "dash -c 'test -e /tmp/note.txt; echo $?'",
-          "expect": { "exit": 0, "stdout": "1\n" }
+          "command": "f=/tmp/mirage-integ-own-tmp.$$.$RANDOM && dash -c 'echo box > \"$1\"' dash $f && cat $f",
+          "expect": { "exit": 0, "stdout": "box\n", "stderr": "" }
         },
         {
-          "command": "dash -c 'echo box > /tmp/mirage-integ-own-tmp.txt'",
-          "expect": { "exit": 0, "stdout": "", "stderr": "" }
+          "command": "cd /tmp && dash -c 'grep -c \" /tmp fuse.sshfs \" /proc/mounts || true'",
+          "expect": { "exit": 0, "stdout": "0\n", "stderr": "" }
         },
         {
-          "command": "cat /tmp/mirage-integ-own-tmp.txt",
-          "expect": { "exit": 1, "stdout": "", "stderr_contains": "No such file or directory" }
-        },
-        {
-          "command": "cd /tmp && dash -c true",
-          "expect": {
-            "exit": 126,
-            "stdout": "",
-            "stderr_contains": "cannot see the working directory /tmp; cd into a mount first"
-          }
+          "command": "cd / && rm $f && echo gone",
+          "expect": { "exit": 0, "stdout": "gone\n", "stderr": "" }
         }
       ]
     },

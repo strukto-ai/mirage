@@ -13,8 +13,76 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MachineTable } from '../../src/execution/machine/table.ts'
-import type { MachineHandle } from '../../src/machine/handle.ts'
+import { materialize, type ByteSource } from '../../src/io/types.ts'
+import { RUN_PROGRAM_AT, isRun } from '../../src/machine/constants.ts'
+import { MachineHandle } from '../../src/machine/handle.ts'
 import { RemoteRuntime } from '../../src/runtime/machine/runtime.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../../src/runtime/types.ts'
+import { shellJoin } from '../../src/shell/join.ts'
+
+/** The result for one of a scripted machine's lines and what it was fed. */
+export type Answer = (line: string, data: Uint8Array | null) => RunAnswer
+
+/** A line that exited 0 and printed `out`. */
+export function ok(out: Uint8Array | string = new Uint8Array()): RunAnswer {
+  return {
+    stdout: typeof out === 'string' ? new TextEncoder().encode(out) : out,
+    stderr: new Uint8Array(),
+    exitCode: 0,
+  }
+}
+
+/** A line that exited `code` and said `err`. */
+export function failed(err: string, code = 1): RunAnswer {
+  return { stdout: new Uint8Array(), stderr: new TextEncoder().encode(err), exitCode: code }
+}
+
+/**
+ * A machine whose every line `answer` answers, recording each line and what
+ * it was fed. Mirrors Python's `tests/fixtures/machine.ScriptedMachine`.
+ */
+export class ScriptedMachine extends MachineHandle {
+  static override readonly provider = 'scripted'
+  readonly lines: string[] = []
+  readonly fed: (Uint8Array | null)[] = []
+
+  constructor(
+    name: string,
+    private readonly answer: Answer,
+    override readonly takesInput = true,
+    override readonly joinsStreams = false,
+  ) {
+    super(name)
+  }
+
+  connect(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    _env: Record<string, string>,
+    _cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    const run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
+    const line = run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
+    const data = stdin === null ? null : await materialize(stdin)
+    this.lines.push(line)
+    this.fed.push(data)
+    const done = this.answer(line, data)
+    if (done.stdout.length > 0) await output(done.stdout)
+    if (done.stderr.length > 0) await (this.joinsStreams ? output : errors)(done.stderr)
+    return { exitCode: done.exitCode }
+  }
+}
+
+/** A machine table holding `handles`, in order. */
+export function tableOf(...handles: MachineHandle[]): MachineTable {
+  return new MachineTable(Object.fromEntries(handles.map((h) => [h.name, h])))
+}
 
 // One table per handle, as one workspace holds a handle however many
 // runtimes a test binds to it.

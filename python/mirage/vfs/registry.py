@@ -162,6 +162,10 @@ REGISTRY: dict[str, VFSEntry] = {
         "mirage.vfs.jaeger:JaegerVFS", "mirage.vfs.jaeger:JaegerConfig"
     ),
     "ssh": VFSEntry("mirage.vfs.ssh:SSHVFS", "mirage.vfs.ssh:SSHConfig"),
+    "machine": VFSEntry(
+        "mirage.vfs.machine:MachineVFS",
+        "mirage.vfs.machine:MachineVFSConfig",
+    ),
     "email": VFSEntry(
         "mirage.vfs.email:EmailVFS", "mirage.vfs.email:EmailConfig"
     ),

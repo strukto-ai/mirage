@@ -1,0 +1,39 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+/**
+ * Runs one shell line where the files are: its exit status (null when a
+ * signal ended it), its output and its error output.
+ */
+export type RunFn = (command: string) => Promise<[number | null, Uint8Array, Uint8Array]>
+
+/** One entry of a `TREE_FORMAT` listing, as find printed it. */
+export interface TreeRow {
+  /** find's type letter (`f`, `d`, `l`, `p`, ...). */
+  readonly kind: string
+  /** The permission bits. */
+  readonly mode: number
+  /** The size in bytes. */
+  readonly size: number
+  /** The modification time, in whole seconds. */
+  readonly mtime: number
+  /** The access time, in whole seconds. */
+  readonly atime: number
+  /** The owner's name, or its number when it has none. */
+  readonly user: string
+  /** The group's name, or its number. */
+  readonly group: string
+  /** The path under the listed scope, empty for the scope. */
+  readonly rel: string
+}

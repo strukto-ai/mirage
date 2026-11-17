@@ -133,6 +133,7 @@ describe('VFSName', () => {
       'lancedb',
       'langfuse',
       'linear',
+      'machine',
       'mem0',
       'minio',
       'mongodb',

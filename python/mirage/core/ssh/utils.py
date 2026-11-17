@@ -19,20 +19,6 @@ from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
 
 
-def join_root(root: str, rel: str) -> str:
-    """The remote path of a mount-relative path under the configured root.
-
-    Args:
-        root (str): the remote directory the mount is rooted at.
-        rel (str): the mount-relative path; a leading slash is ignored.
-    """
-    base = root.rstrip("/")
-    stripped = rel.lstrip("/")
-    if not stripped:
-        return base or "/"
-    return f"{base}/{stripped}"
-
-
 async def open_for_write(
     sftp: asyncssh.SFTPClient,
     remote: str,

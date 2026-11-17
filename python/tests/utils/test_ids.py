@@ -94,6 +94,10 @@ DRAW_HINT = re.compile(
 )
 
 KEPT_ON_PROCESS_RANDOMNESS = {
+    ("core/machine/write.py", "uuid.uuid4"): (
+        "the staged upload's temp name lives on the machine, so a seeded "
+        "name would collide with an earlier run's leftover"
+    ),
     ("core/ssh/write.py", "uuid.uuid4"): (
         "the atomic upload's temp name lives on the remote host, so a "
         "seeded name would collide with an earlier run's leftover"

@@ -47,7 +47,10 @@ Keys are `snake_case`; TypeScript constructor options use camelCase, such as
 
 ## Mount settings
 
-Each mount key is an absolute prefix, such as `/data`.
+Each mount key is an absolute prefix, such as `/data`. Its value is a block
+of the keys below, or `"@<machine>"`: that machine's own files at the same
+path, as `/tmp: "@gpu"` shows the `gpu` machine's `/tmp`. The name must be one
+under `machines:`. See [Machine files](/home/setup/machine/local).
 
 | Key | Sets |
 | --- | --- |

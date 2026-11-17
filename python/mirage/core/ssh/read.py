@@ -17,15 +17,13 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.read import line_count as posix_line_count
+from mirage.core.posix.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
-
-WC = "env LC_ALL=C wc -l"
 
 
 async def read(
@@ -68,11 +66,7 @@ async def line_count(
     """
     remote = join_root(accessor.config.root, path_spec.mount_path)
     try:
-        status, out, err = await accessor.run(f"{WC} < {single_quote(remote)}")
+        return await posix_line_count(accessor.run, remote)
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh line count left to the read: %s", exc)
         return None
-    count = out.strip()
-    if status != 0 or err or not out.endswith(b"\n") or not count.isdigit():
-        return None
-    return int(count)

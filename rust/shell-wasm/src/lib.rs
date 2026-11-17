@@ -334,7 +334,8 @@ pub extern "C" fn mirage_rs_shell_status() -> u32 {
 /// Word what bash prints of the tree kept under `handle` into the message
 /// buffer, each line led by the args buffer's first `head_len` bytes and
 /// its line, the input's first row being `first`: its refusal for `what`
-/// 0, under a UTF-8 locale when `utf8` is 1, its heredoc warnings for 1.
+/// 0, under a UTF-8 locale when `utf8` is 1, its heredoc warnings for 1,
+/// those whose `<<` stands on the input's first `rows` rows.
 /// Returns the byte length.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_shell_words(
@@ -343,6 +344,7 @@ pub extern "C" fn mirage_rs_shell_words(
     head_len: usize,
     first: usize,
     utf8: u32,
+    rows: usize,
 ) -> usize {
     let args = ARGS.with_borrow_mut(std::mem::take);
     let head = &args[..head_len.min(args.len())];
@@ -354,7 +356,7 @@ pub extern "C" fn mirage_rs_shell_words(
                 .as_ref()
                 .map(|refusal| refusal.worded(head, first, utf8 == 1))
                 .unwrap_or_default(),
-            _ => tree.warnings(head, first),
+            _ => tree.warnings(head, first, rows),
         })
         .unwrap_or_default();
     PARSED.with_borrow_mut(|parsed| {
@@ -440,7 +442,7 @@ mod tests {
         mirage_rs_shell_parse(10, 0, 1);
         mirage_rs_shell_drop_tree(mirage_rs_shell_tree());
         assert!(mirage_rs_shell_reread(older, 0) > 0);
-        mirage_rs_shell_words(older, 1, 0, 1, 1);
+        mirage_rs_shell_words(older, 1, 0, 1, 1, usize::MAX);
         PARSED.with_borrow_mut(|parsed| {
             parsed.reread.reserve(32768);
             parsed.message = vec![b'x'; 131072];

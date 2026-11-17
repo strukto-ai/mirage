@@ -1,0 +1,220 @@
+---
+title: Machine files
+icon: hard-drive
+description: A machine's own files at a prefix, so Mirage and the machine's programs share them.
+---
+
+When your agent's commands run on a machine (a container, a sandbox, a
+server over ssh), the programs there keep scratch files in `/tmp`. Mirage
+shows that same `/tmp` in the workspace, so a file the agent writes from
+Mirage's shell is the file the machine's programs read, and a file a
+program leaves behind is one the agent can open:
+
+```bash
+cat > /tmp/fix.py << 'EOF'
+print("patched")
+EOF
+python3 /tmp/fix.py
+# patched
+```
+
+Mirage's `cat` writes `/tmp/fix.py` on the machine, and the machine's
+`python3` reads it there. Nothing is copied or synced: the file lives on the
+machine. `/dev/shm` works the same way.
+
+## Set up
+
+There is nothing to turn on. Give the workspace a machine and `/tmp` is that
+machine's:
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    machines:
+      sandbox:
+        provider: docker
+        container: my-sandbox
+
+    mounts: {}
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"sandbox": {"provider": "docker", "container": "my-sandbox"}},
+    )
+    await ws.shell("echo hello > /tmp/note.txt")
+    result = await ws.shell("python3 -c 'print(open(\"/tmp/note.txt\").read())'")
+    print(await result.stdout_str())
+    # hello
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { sandbox: { provider: 'docker', container: 'my-sandbox' } },
+      },
+    )
+    await ws.shell('echo hello > /tmp/note.txt')
+    const result = await ws.shell(`python3 -c 'print(open("/tmp/note.txt").read())'`)
+    console.log(result.stdoutText)
+    // hello
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+A workspace without machines has no `/tmp` of its own. A mount you put at
+`/tmp` yourself (`/tmp: {vfs: ram}`) replaces the machine's.
+
+## Pick the machine
+
+With several machines, `/tmp` shows all of their `/tmp` files together (see
+[Several machines](#several-machines)). To show one machine's `/tmp`, name it
+with `@`:
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    machines:
+      cpu:
+        provider: docker
+        container: my-sandbox
+      gpu:
+        provider: ssh
+        host: gpu.example.com
+
+    mounts:
+      /tmp: "@gpu"
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    ws = Workspace(
+        {"/tmp": "@gpu"},
+        mode=MountMode.WRITE,
+        machines={
+            "cpu": {"provider": "docker", "container": "my-sandbox"},
+            "gpu": {"provider": "ssh", "host": "gpu.example.com"},
+        },
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const ws = new Workspace(
+      { '/tmp': '@gpu' },
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          cpu: { provider: 'docker', container: 'my-sandbox' },
+          gpu: { provider: 'ssh', host: 'gpu.example.com' },
+        },
+      },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+The name must be one under `machines:`, wherever that section sits in the
+file. Anything else stops the workspace from starting, with the names it
+knows:
+
+```text
+mount '/tmp': no machine 'gpus' (machines: 'cpu', 'gpu')
+```
+
+`"@gpu"` is short for a `machine` mount block, which also takes these fields:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `machines` | every machine | Whose `/tmp` the mount shows |
+| `root` | `/` | The folder on each machine the mount shows |
+| `default_machine` | the machine running your programs, else the first | Where a new file lands when no program on a machine writes it |
+
+## Where a command runs
+
+A command that only touches `/tmp` runs on the machine itself, in one go,
+and prints exactly what the machine's own tools print. A command that also
+reaches the rest of the workspace runs in Mirage, which still reads and
+writes each `/tmp` file on its machine. With one machine and `/data` in RAM:
+
+```mermaid
+flowchart LR
+    G["grep -rn TODO /tmp/repo"] -- "every path on the machine" --> R
+    X["find . | xargs grep -l x"] -- "xargs feeds no input" --> R
+    V["/tmp/venv/bin/python -V"] -- "a program the machine holds" --> R
+    L["ln -s a.py /tmp/link"] -- "a link in the machine's folder" --> R
+    C["cat /tmp/a.py /data/b"] -- "/data is not the machine's" --> M
+    P["ls | while read f; do grep x $f; done"] -- "input piped in" --> M
+    D["cat /tmp/l, l linked to /data/b"] -- "a link Mirage made" --> M
+    R["runs on the machine: one exec, its own output"]
+    M["Mirage runs it: each file read or written on its machine"]
+```
+
+A restricted or read-only mount, a coded file policy and a program the
+machine lacks keep a command in Mirage too. `/dev` is Mirage's (`/dev/null`,
+`/dev/stdin`); only `/dev/shm` is the machine's.
+
+## Several machines
+
+```mermaid
+flowchart LR
+    subgraph a["machine a"]
+      A1["out.csv"]
+      A2["data.json"]
+    end
+    subgraph b["machine b"]
+      B1["model.bin"]
+    end
+    a --> L["ls /tmp<br/>data.json<br/>model.bin<br/>out.csv"]
+    b --> L
+```
+
+| Operation | Lands on |
+| --- | --- |
+| Read, write, `rm` an existing name | The machine holding it |
+| Write a new name | The machine running the program (`python3 gen.py > /tmp/out`), else `default_machine` |
+| `ls`, `find`, `grep -r` | Every machine, each name once |
+| `mv` | The source's machine |
+| `cp` to another machine | Bytes move through Mirage |
+
+A name on two machines is refused as ambiguous unless the command's program
+runs on one of them.
+
+## Behavior
+
+- **Caching:** none. Programs change these files behind Mirage's back, so
+  every read and listing asks the machine.
+- **Snapshots:** a snapshot keeps the mount's config; the files stay on the
+  machines.
+- **Owners:** `stat` and listings report the machine's own owners and modes;
+  `chmod`, `chown` and `touch` apply on the machine.
+- **Tools:** the machine needs GNU `find` (for `-printf`), `cat`, `head`,
+  `tail`, `dd` and the coreutils sums; a stock Debian or Ubuntu image has them.
+- **Daytona:** its exec takes no input, so a write to its files is refused
+  (`Operation not supported`), and a command that needs piped input stays
+  with Mirage.
+- **Serving:** with `mount_type: ssh`, a path the machine holds itself is
+  never served back to it; any other machine mount is served like any mount.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/machine">
+    Every config field and the VFS.md.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/machine">
+    Every config field and the VFS.md.
+  </Card>
+</CardGroup>

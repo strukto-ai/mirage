@@ -460,6 +460,39 @@
         "stderr": "bash: -c: line 2: syntax error near unexpected token `fi'\nbash: -c: line 2: `echo b; fi'\nbash: -c: line 3: syntax error near unexpected token `)'\nbash: -c: line 3: `echo d; cat <<A; )'\nbash: -c: line 2: syntax error near unexpected token `b'\nbash: -c: line 2: `( (a)b)'\n"
       },
       "flags": []
+    },
+    {
+      "id": "syntax_heredoc_warnings_come_before_the_refusal",
+      "seq": 1338234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "bash -c 'x=$(cat <<EOF\nabc'; echo \"st=$?\"; bash -c 'echo ok\nx=$(cat <<EOF\nabc'; echo \"st=$?\"; bash -c 'x=$(cat <<EOF)\nabc\nEOF\necho \"a'; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=2\nok\nst=2\nst=2\n",
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\nbash: -c: line 3: unexpected EOF while looking for matching `)'\nbash: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `EOF')\nbash: -c: line 4: unexpected EOF while looking for matching `)'\nbash: line 1: warning: command substitution: 1 unterminated here-document\nbash: -c: line 4: unexpected EOF while looking for matching `\"'\n"
+      },
+      "flags": []
     }
   ]
 }

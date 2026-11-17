@@ -13,36 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import { enotsup, fsError } from '@struktoai/mirage-core/errors/fs'
-import { POSIX } from '@struktoai/mirage-core/errors/posix'
-import type { FsCondition } from '@struktoai/mirage-core/errors/types'
+import { COPIED } from '@struktoai/mirage-core/core/posix/constants'
+import { copyTreeCommand } from '@struktoai/mirage-core/core/posix/copy'
+import { refusal } from '@struktoai/mirage-core/core/posix/errors'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { liftLost, lostCount, record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName, type PathSpec } from '@struktoai/mirage-core/types'
-import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { exists } from './exists.ts'
 import { read } from './read.ts'
-import { joinRoot } from './utils.ts'
 import { write } from './write.ts'
-
-export const CP = 'env LC_ALL=C cp -RL --'
-export const COPIED = 'copied\n'
 
 export async function copy(accessor: SSHAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const data = await read(accessor, src)
   await write(accessor, dst, data)
-}
-
-/**
- * The error a remote `cp` that ran and failed reports, by the phrase its
- * first complaint ends with; anything else is EIO.
- */
-function refusal(dst: PathSpec, err: Uint8Array): Error {
-  const first = new TextDecoder().decode(err).trim().split('\n')[0] ?? ''
-  for (const [condition, posix] of Object.entries(POSIX)) {
-    if (first.endsWith(`: ${posix.phrase}`)) return fsError(dst, condition as FsCondition)
-  }
-  return fsError(dst, 'EIO')
 }
 
 /**
@@ -53,9 +38,7 @@ function refusal(dst: PathSpec, err: Uint8Array): Error {
  */
 export async function dirCopy(accessor: SSHAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const root = accessor.config.root ?? '/'
-  const command =
-    `${CP} ${singleQuote(joinRoot(root, rawPathOf(src)))} ` +
-    `${singleQuote(joinRoot(root, rawPathOf(dst)))} && echo ${COPIED.trim()}`
+  const command = copyTreeCommand(joinRoot(root, rawPathOf(src)), joinRoot(root, rawPathOf(dst)))
   const upto = lostCount()
   const timer = startOp()
   let status: number | null

@@ -999,3 +999,13 @@ async def test_close_never_waits_for_a_hung_connect_on_a_machine_that_cannot_pau
             await box.close()
     finally:
         connecting.cancel()
+
+
+@pytest.mark.asyncio
+async def test_has_program_asks_the_machine_once_per_name():
+    box = RecordingMachine()
+    assert await box.has_program("grep") is True
+    assert await box.has_program("grep") is True
+    assert [line for line, _, _ in box.execs] == [
+        "command -v grep >/dev/null 2>&1"
+    ]

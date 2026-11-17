@@ -25,7 +25,7 @@ import type {
 } from '../policy/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import { PLAIN_TRAITS, type ProcessTraits } from '../execution/process/types.ts'
-import type { ProcessId } from '../execution/types.ts'
+import type { MachineName, ProcessId } from '../execution/types.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
 import { useVoice } from '../shell/voice.ts'
@@ -157,6 +157,9 @@ export interface Caller {
   // The regular file the running command's stdout writes, null when it
   // writes anywhere else.
   readonly outputFile: string | null
+  // The machine the running command's program runs on, where a name its
+  // redirects make lands; null for a command Mirage runs itself.
+  readonly machine: MachineName | null
 }
 
 /**
@@ -207,6 +210,7 @@ const UNBOUND: Caller = {
   invocation: null,
   streamed: [],
   outputFile: null,
+  machine: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()

@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root, open_for_write
+from mirage.core.posix.utils import join_root
+from mirage.core.ssh.utils import open_for_write
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 

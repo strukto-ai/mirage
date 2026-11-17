@@ -175,6 +175,20 @@ interface NestedDecision {
 }
 
 /**
+ * What bash warns of while it reads a line's heredocs, each in the session's
+ * voice: of the rows before the one a refusal belongs to, when lines run
+ * before it, since bash reads that row on as a line of its own, which warns
+ * of its own heredocs. Mirrors Python's `_heredoc_warnings`.
+ *
+ * @param ast the line's root node.
+ * @param session the session reading it.
+ * @param firstLine the line the input's first row is.
+ */
+function heredocWarnings(ast: TSNodeLike, session: SessionState, firstLine: number): string {
+  return ast.warnings?.(`${voiceName(session)}: `, firstLine, refusedRow(ast)) ?? ''
+}
+
+/**
  * What a line showed, for its record: what waits on its terminal for it
  * to take, then what it answers with besides. Mirrors Python's `_shown`.
  */
@@ -963,6 +977,15 @@ async function runPreparedLine(
                 )
               : null
           if (io !== null) {
+            // bash warns of each heredoc the input ended inside as it reads
+            // it, before the end of the input refuses the line.
+            const warnings = heredocWarnings(
+              root as unknown as TSNodeLike,
+              effectiveSession,
+              firstLine,
+            )
+            if (warnings !== '')
+              io.stderr = concat([encodeText(warnings), await io.materializeStderr()])
             return await unreadableLine(
               env,
               command,
@@ -1549,6 +1572,7 @@ async function runParsedLine(
     )
   const statusBefore = snapshotStatus(targetSession)
   let held = false
+  let warnings = ''
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   let executionFailure: { error: unknown } | undefined
   try {
@@ -1623,6 +1647,13 @@ async function runParsedLine(
         ),
       )
       if (filled !== null) return filled
+    }
+    // bash warns of a heredoc as it reads it, before the line's commands
+    // run and write where the line writes.
+    warnings = heredocWarnings(rootNode, effectiveSession, firstLine)
+    if (warnings !== '' && options.sink !== undefined) {
+      await options.sink.emit(Channel.STDERR, encodeText(warnings))
+      warnings = ''
     }
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
       // atDeadline, as `timeout` arms its own: a deadline past one timer's
@@ -1765,7 +1796,6 @@ async function runParsedLine(
   // The program loop stamped each statement; the line as a whole is a
   // wrapper around them, like a group.
   // A rejected invocation records its outcome without changing shell status.
-  const warnings = rootNode.warnings?.(`${voiceName(effectiveSession)}: `, firstLine) ?? ''
   if (warnings !== '') io.stderr = concat([encodeText(warnings), await io.materializeStderr()])
   if (!callerError) recordStatus(targetSession, io.exitCode, true)
   try {

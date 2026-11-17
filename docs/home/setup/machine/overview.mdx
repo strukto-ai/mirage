@@ -178,6 +178,23 @@ Monty, WASI, Pyodide and QuickJS access workspace files automatically.
 For a `host` machine, first mount a [FUSE folder](/home/setup/fuse).
 For a provider, finish its page's **Connecting the workspace** steps first.
 
+### The machine's own files
+
+A workspace with machines shows the machines' own `/tmp` and `/dev/shm`, and
+`/tmp: "@gpu"` picks one machine's. A file Mirage writes there is the file
+the machine's programs read:
+
+```bash
+cat > /tmp/fix.py << 'EOF'
+print("patched")
+EOF
+python3 /tmp/fix.py
+# patched
+```
+
+See [Machine files](/home/setup/machine/local) for how Mirage reaches those
+files and what runs where.
+
 ## Providers
 
 A provider reaches a machine you already have: a container, a microVM, a
@@ -238,11 +255,12 @@ there yourself. Once connected, run the shared
   looks done to the program, but its command fails when the program ends:
   stderr names the file, as `docker: /data/big.bin: Disk quota exceeded`,
   and a command that would exit 0 exits 1.
-- The root mount, `/dev` and `/tmp` are not served: they are the machine's
-  own. Pass files to a program through a mounted folder, not `/tmp`.
+- The root mount and `/dev` are not served, nor a path the machine holds
+  itself: `/tmp` and `/dev/shm` show the machine's own
+  files ([Machine files](/home/setup/machine/local)), so they stay its own.
 
 Mirage refuses to run a program when it cannot enforce the session's file
-rules: restrictions on `/`, `/dev` or `/tmp`, hiding a mount when that would expose
+rules: restrictions on `/`, `/dev` or a path the machine holds itself, hiding a mount when that would expose
 the machine's own files underneath, restrictions on mounts a Mirage on the
 machine serves, and rules that depend on which program opens a file.
 

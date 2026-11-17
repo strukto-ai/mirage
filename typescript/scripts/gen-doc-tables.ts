@@ -21,6 +21,7 @@ import ts from 'typescript'
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { cliSpecFor, knownCliNames } from '@struktoai/mirage-core/commands/cli/specs'
+import { LOCAL_PREFIXES } from '@struktoai/mirage-core/vfs/machine/constants'
 import { INTRO } from '@struktoai/mirage-core/workspace/documentation/constants'
 import { MountMode, Workspace, buildVfs, knownVfsNames } from '@struktoai/mirage-node'
 
@@ -99,6 +100,10 @@ const CLI_SAMPLES: Record<string, Record<string, string>> = {
   ntn: { apiKey: 'key' },
   slack: { token: 'token' },
   trello: { apiKey: 'key', apiToken: 'token' },
+}
+// A machine mount needs a workspace with machines; one it never reaches.
+const MACHINES: Record<string, Record<string, Record<string, string>>> = {
+  machine: { sandbox: { provider: 'docker', container: 'sandbox' } },
 }
 
 // Which feature needs each optional peer. Every optional peer of core and
@@ -533,11 +538,17 @@ async function vfsMd(name: string, fields: Record<string, { required: boolean }>
         .map(([field]) => [field, 'value']),
     )
   const vfs = await buildVfs(name, config)
-  const ws = new Workspace({ [PLACEHOLDER]: [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
-  // The scratch root and /dev every workspace adds are no part of this VFS,
-  // and the agent's opening paragraph is no part of a docs page.
-  ws.mount('/').visible = () => false
-  ws.mount('/dev').visible = () => false
+  const machines = MACHINES[name]
+  const ws = new Workspace(
+    { [PLACEHOLDER]: [vfs, MountMode.WRITE] },
+    { mode: MountMode.WRITE, ...(machines !== undefined ? { machines } : {}) },
+  )
+  // The scratch root, /dev and the machines' own folders a workspace adds
+  // are no part of this VFS, and the agent's opening paragraph is no part of
+  // a docs page.
+  for (const prefix of ['/', '/dev', ...(machines !== undefined ? LOCAL_PREFIXES : [])]) {
+    ws.mount(prefix).visible = () => false
+  }
   try {
     const markdown = (await ws.vfsMd()).replace(`${INTRO}\n\n`, '').replace(/\n+$/, '')
     return markdown.replace(MODE_CELL, '$1`<mode>` |')

@@ -19,7 +19,7 @@ from typing import cast
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec

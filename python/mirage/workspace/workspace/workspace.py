@@ -136,6 +136,7 @@ from mirage.runtime.routing import RouteRule
 from mirage.runtime.table import (
     MachineSpec,
     MachineSpecs,
+    program_machine,
     split_machines,
     whole_line_runtime,
 )
@@ -184,6 +185,7 @@ from mirage.utils.size import parse_limit
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
+from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.view.types import SessionView
 from mirage.workspace.cli import CLIInstall
@@ -271,8 +273,10 @@ from mirage.workspace.workspace.lifecycle import (
 )
 from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.mounts import (
+    bind_machine_mounts,
     check_vfs,
     install_mounts,
+    local_mounts,
     normalize_mounts,
     prepare_added_mount,
     unmount_prefix,
@@ -345,7 +349,7 @@ class Workspace:
 
     def __init__(
         self,
-        mounts: dict[str, VFSMount],
+        mounts: Mapping[str, VFSMount | str],
         max_memory: str | int | None = MAX_MEMORY,
         max_body_bytes: str | int | None = None,
         max_env: str | int | None = MAX_ENV,
@@ -591,8 +595,11 @@ class Workspace:
         self._registry.set_dispatch(self._dispatcher.dispatch)
         self._events = EventManager(self._registry)
 
+        # The machines come first: a workspace with machines mounts their
+        # own /tmp and /dev/shm, and "@<machine>" names one's files.
+        handles, entries = split_machines(machines)
         specs = normalize_mounts(
-            mounts,
+            local_mounts(mounts, list(handles)),
             mode,
             self._read_default,
             index,
@@ -678,8 +685,8 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
             self._registry.changes,
+            self._local_prefixes,
         )
-        handles, entries = split_machines(machines)
         self.machine_table = MachineTable(
             handles,
             scan_host,
@@ -689,6 +696,10 @@ class Workspace:
             host=self.process_table.machine,
         )
         self._wire_machines()
+        self._program_machine = program_machine(entries, handles)
+        bind_machine_mounts(
+            self._registry.mounts(), self.machine_table, self._program_machine
+        )
         if route_policy is not None:
             self._registry.policies.place(
                 RoutePolicy(route_policy, self._script_policy)
@@ -1380,6 +1391,13 @@ class Workspace:
             self._cache.cache_limit > 0 and vfs.caches_reads,
         )
         self._registry.check_vfs_available(vfs)
+        if isinstance(vfs, MachineVFS):
+            if self._program_machine is None:
+                raise ValueError(
+                    f"mount {prefix!r}: a machine mount needs a workspace "
+                    "with machines"
+                )
+            vfs.bind_machines(self.machine_table, self._program_machine)
         previous = self._registry.mounts()
         entry = self._registry.mount(
             prefix,
@@ -1495,6 +1513,20 @@ class Workspace:
     def clis(self) -> dict[str, CLIInstall]:
         """Snapshot of the installed CLIs keyed by head word."""
         return self._registry.clis.items()
+
+    def _local_prefixes(self, machine: str) -> list[str]:
+        """The prefixes a machine holds itself: the machine mounts of its
+        own files at the paths they have there.
+
+        Args:
+            machine (str): the machine's name under ``machines:``.
+        """
+        return [
+            entry.prefix
+            for entry in self._registry.mounts()
+            if isinstance(entry.vfs, MachineVFS)
+            and entry.vfs.shows_own(machine, entry.prefix)
+        ]
 
     def _sandbox_mounts(self) -> list[str]:
         """The mount prefixes a sandboxed runtime may be told of, read live.

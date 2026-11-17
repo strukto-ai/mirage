@@ -19,7 +19,8 @@ import {
   makeFakeAccessor,
   type RunAnswer,
 } from '../../../tests/core/ssh/_test_utils.ts'
-import { attrsToFileStat, stat, tree, treeCommand } from './stat.ts'
+import { treeCommand } from '@struktoai/mirage-core/core/posix/stat'
+import { attrsToFileStat, stat, tree } from './stat.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -111,14 +112,6 @@ function scope(vfsPath = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath, rawPath: virtual })
 }
 
-describe('treeCommand', () => {
-  it('quotes the scope and the format', () => {
-    expect(treeCommand('data/a b')).toBe(
-      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
-    )
-  })
-})
-
 describe('tree', () => {
   it('renders each entry as stat does', async () => {
     const out =
@@ -136,8 +129,6 @@ describe('tree', () => {
         size: 5,
         atime: 1700000002,
         mtime: 1700000000,
-        uid: 1000,
-        gid: 1000,
       }),
     )
     expect(rows?.get('sub')?.type).toBe(FileType.DIRECTORY)

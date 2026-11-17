@@ -21,7 +21,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isNoSuchFile } from './utils.ts'
 
 export const FOLLOW =
   'test -f {path} && exec 3< {path} && command -v tail >/dev/null' +

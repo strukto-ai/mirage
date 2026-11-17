@@ -15,7 +15,8 @@
 import asyncssh
 import pytest
 
-from mirage.core.ssh.stat import attrs_to_file_stat, tree, tree_command
+from mirage.core.posix.stat import tree_command
+from mirage.core.ssh.stat import attrs_to_file_stat, tree
 from mirage.types import FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from tests.fixtures.ssh_run import RunAccessor
@@ -27,13 +28,6 @@ def _scope(vfs_path: str = "") -> PathSpec:
     virtual = "/s/" + vfs_path if vfs_path else "/s"
     return PathSpec(
         virtual=virtual, directory=virtual, vfs_path=vfs_path, raw_path=virtual
-    )
-
-
-def test_tree_command_quotes_the_scope_and_the_format():
-    assert tree_command("data/a b") == (
-        "env LC_ALL=C find -L 'data/a b' "
-        "-printf '%y %m %s %T@ %A@ %U %G %P\\0'"
     )
 
 

@@ -37,7 +37,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { DeviceInput, IOResult, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
@@ -1011,7 +1011,7 @@ async function* runLines(
   const stopped = (): boolean => stop !== null
   const forked = procs !== 1 || slotVar !== null
   const taken = new Set<number>()
-  const stdin = opts.stdin == null ? new Uint8Array() : new SharedStdin(opts.stdin)
+  const stdin = opts.stdin == null ? new DeviceInput() : new SharedStdin(opts.stdin)
   // xargs execs its command, so a builtin that is also a program answers
   // as the program.
   const active = new Map<Promise<unknown>, [IOResult, PipeConsole]>()

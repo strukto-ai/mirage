@@ -51,7 +51,7 @@ from mirage.io import IOResult
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import SharedStdin, yield_bytes
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource, DeviceInput, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.pipe import PipeConsole
@@ -1014,7 +1014,8 @@ async def _run_lines(
         registry (MountRegistry | None): where a command name is looked
             up; None runs every name.
         dispatch (DispatchFn | None): stats a command named by a path.
-        stdin (ByteSource | None): input shared by all commands (-a).
+        stdin (ByteSource | None): input shared by all commands (-a);
+            without it each reads /dev/null, as GNU's does.
         torn (list[IOResult]): filled at teardown with the runs still
             going, for the caller to record.
     """
@@ -1023,7 +1024,7 @@ async def _run_lines(
     stopping = asyncio.Event()
     forked = procs != 1 or slot_var is not None
     taken: set[int] = set()
-    feed = SharedStdin(stdin) if stdin is not None else b""
+    feed = SharedStdin(stdin) if stdin is not None else DeviceInput()
 
     active: dict[asyncio.Task[None], tuple[IOResult, PipeConsole]] = {}
 

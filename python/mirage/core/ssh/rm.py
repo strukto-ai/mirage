@@ -17,7 +17,8 @@ from typing import cast
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import holds_entries, join_root
+from mirage.core.posix.utils import join_root
+from mirage.core.ssh.utils import holds_entries
 from mirage.errors.fs import enoent, enotempty
 from mirage.types import PathSpec
 from mirage.vfs.ssh.config import SSHConfig
