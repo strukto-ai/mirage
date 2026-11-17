@@ -107,29 +107,20 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
     engine: MontyExecution,
     program: Program,
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    let notice = unhonoredNotice(ctx.flags, this.name)
-    if (notice.length > 0 && errors !== undefined) {
-      await errors(notice)
-      notice = new Uint8Array()
-    }
+    const notice = unhonoredNotice(ctx.flags, this.name)
+    if (notice.length > 0) await errors(notice)
     // A nested call must not queue behind a parent holding this pool.
     const execution = (ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : engine
     // Every file call is the guest's own: none is left to land at the end.
     const files = RuntimeFiles.of(ctx, this.binding)
     const live = ctx.signal === undefined ? files : (files?.withSignal(ctx.signal) ?? null)
-    const result = await execution
+    return await execution
       .run(program, ctx, live, output, errors, this.externalLookup)
       .finally(async () => {
         if (execution !== engine) await execution.close()
       })
-    if (notice.length === 0) return result
-    const stderr = result.stderr ?? new Uint8Array()
-    const merged = new Uint8Array(notice.length + stderr.length)
-    merged.set(notice, 0)
-    merged.set(stderr, notice.length)
-    return { ...result, stderr: merged }
   }
 }

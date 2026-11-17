@@ -50,8 +50,28 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/machine/constants'
 import { ProcessInput } from '@struktoai/mirage-core/execution/process/stdio'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { RunAnswer } from '@struktoai/mirage-core/runtime/types'
 
 const DEC = new TextDecoder()
+
+type RunOptions = Parameters<typeof runProgram>[4]
+
+/**
+ * One `runProgram`, what it writes to a stream `options` gives no sink for
+ * kept in the answer.
+ */
+function answered(
+  executable: string,
+  hint: string | null,
+  args: string[],
+  stdin: Parameters<typeof runProgram>[3],
+  options: Partial<RunOptions> = {},
+): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    runProgram(executable, hint, args, stdin, { output, errors, ...options }),
+  )
+}
 
 // Whether a process has exited: gone, or a zombie its new parent has not
 // reaped yet. Polled, since a kill lands asynchronously.
@@ -112,7 +132,7 @@ function shRunner(
     },
     run: async () =>
       (
-        await runProgram('sh', null, ['-c', script], stdin, {
+        await answered('sh', null, ['-c', script], stdin, {
           signal: abort.signal,
           direct,
           ...(output === undefined ? {} : { output }),
@@ -157,7 +177,7 @@ describe('runProgram', () => {
       const names = serve(dir)
       const controller = new AbortController()
       try {
-        const running = runProgram(tool, null, [], null, { signal: controller.signal })
+        const running = answered(tool, null, [], null, { signal: controller.signal })
         controller.abort(reason)
         await expect(running).rejects.toMatchObject({ name: 'AbortError' })
         await delay(300)
@@ -173,7 +193,7 @@ describe('runProgram', () => {
     const pwd = async (): Promise<string> =>
       new TextDecoder().decode(
         (
-          await runProgram(
+          await answered(
             process.execPath,
             null,
             ['-e', 'process.stdout.write(process.env.PWD ?? "")'],
@@ -195,12 +215,14 @@ describe('runProgram', () => {
   // it, so how the program in the box ended is unknown; its own exit is the
   // program's.
   it('treats a connection client ended by a signal as a lost connection', async () => {
-    const lost = await runProgram('sh', null, ['-c', 'echo hi; kill -KILL $$'], null, {
+    const said: Uint8Array[] = []
+    const lost = await answered('sh', null, ['-c', 'echo hi; kill -KILL $$'], null, {
       connection: true,
+      output: (chunk) => Promise.resolve(void said.push(chunk)),
     }).catch((error: unknown) => error)
     expect(lost).toBeInstanceOf(ConnectionLostError)
-    expect(new TextDecoder().decode((lost as ConnectionLostError).stdout)).toBe('hi\n')
-    const ran = await runProgram('sh', null, ['-c', 'exit 3'], null, { connection: true })
+    expect(DEC.decode(Buffer.concat(said))).toBe('hi\n')
+    const ran = await answered('sh', null, ['-c', 'exit 3'], null, { connection: true })
     expect(ran.exitCode).toBe(3)
   })
 
@@ -407,24 +429,20 @@ describe('runProgram', () => {
     expect(await ended(child)).toBe(true)
   })
 
-  it('returns both streams and the status', async () => {
-    const r = await runProgram(
+  it('writes both streams through their sinks and returns the status', async () => {
+    const r = await answered(
       'sh',
       'no sh',
       ['-c', 'cat; echo e >&2; exit 3'],
       new TextEncoder().encode('in'),
     )
-    expect([DEC.decode(r.stdout), DEC.decode(r.stderr ?? undefined), r.exitCode]).toEqual([
-      'in',
-      'e\n',
-      3,
-    ])
+    expect([DEC.decode(r.stdout), DEC.decode(r.stderr), r.exitCode]).toEqual(['in', 'e\n', 3])
   })
 
   // stderr goes to its own callback as it arrives, as stdout goes to output.
   it('streams stderr to its callback', async () => {
     const seen: Uint8Array[] = []
-    const r = await runProgram('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
+    const r = await answered('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
       errors: (chunk) => {
         seen.push(chunk)
         return Promise.resolve()
@@ -432,7 +450,7 @@ describe('runProgram', () => {
     })
     expect([
       DEC.decode(r.stdout),
-      DEC.decode(r.stderr ?? undefined),
+      DEC.decode(r.stderr),
       DEC.decode(Buffer.concat(seen)),
       r.exitCode,
     ]).toEqual(['o\n', '', 'e\n', 3])
@@ -451,7 +469,7 @@ describe('runProgram', () => {
         yield await Promise.resolve(new Uint8Array(1024))
       }
     }
-    const result = await runProgram('wc', null, ['-c'], input(), { children })
+    const result = await answered('wc', null, ['-c'], input(), { children })
     expect(result.exitCode).toBe(0)
     expect(Number(DEC.decode(result.stdout).trim())).toBe(5000 * 1024)
     expect(chunks).toBe(5000)
@@ -459,7 +477,7 @@ describe('runProgram', () => {
 
   it('finishes an exited command with an open, idle managed stdin', async () => {
     const input = new ProcessInput()
-    const result = await runProgram('sh', null, ['-c', 'printf done'], input.stream())
+    const result = await answered('sh', null, ['-c', 'printf done'], input.stream())
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('done')
     await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
@@ -475,7 +493,7 @@ describe('runProgram', () => {
       yield new Uint8Array()
     }
     try {
-      const result = await runProgram('sh', null, ['-c', 'printf done'], input())
+      const result = await answered('sh', null, ['-c', 'printf done'], input())
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'done'])
     } finally {
       release()
@@ -485,7 +503,7 @@ describe('runProgram', () => {
   it('aborts a command while its managed input pull is waiting', async () => {
     const input = new ProcessInput()
     const controller = new AbortController()
-    const run = runProgram('sh', null, ['-c', 'exec sleep 30'], input.stream(), {
+    const run = answered('sh', null, ['-c', 'exec sleep 30'], input.stream(), {
       signal: controller.signal,
     })
     controller.abort()
@@ -494,7 +512,7 @@ describe('runProgram', () => {
   })
 
   it('rejects a missing program with its hint', async () => {
-    await expect(runProgram('mirage-no-such-program', 'install it', [], null)).rejects.toThrow(
+    await expect(answered('mirage-no-such-program', 'install it', [], null)).rejects.toThrow(
       'install it',
     )
   })
@@ -502,7 +520,7 @@ describe('runProgram', () => {
   it('kills the child when the call is aborted', async () => {
     const controller = new AbortController()
     const started = Date.now()
-    const run = runProgram('sh', 'no sh', ['-c', 'exec sleep 30'], null, {
+    const run = answered('sh', 'no sh', ['-c', 'exec sleep 30'], null, {
       signal: controller.signal,
     })
     setTimeout(() => {
@@ -516,7 +534,7 @@ describe('runProgram', () => {
     const controller = new AbortController()
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
-    const run = runProgram('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
+    const run = answered('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
       signal: controller.signal,
     })
     while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
@@ -532,7 +550,7 @@ describe('runProgram', () => {
   it('does not wait on a descendant that left the group when aborted', async () => {
     const controller = new AbortController()
     const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
-    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
+    const run = answered(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
       signal: controller.signal,
     })
     const escaped = await escapedPid(pidFile)
@@ -549,7 +567,7 @@ describe('runProgram', () => {
   it('closeChildren does not wait on a descendant that left the group', async () => {
     const children = new Set<ChildProcess>()
     const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
-    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
+    const run = answered(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
     const escaped = await escapedPid(pidFile)
     try {
       const started = Date.now()
@@ -582,7 +600,7 @@ describe('runProgram', () => {
         return { done: true, value: undefined }
       },
     }
-    const run = runProgram('sh', null, ['-c', 'exit 0'], input, { children })
+    const run = answered('sh', null, ['-c', 'exit 0'], input, { children })
     const exited = Promise.all(
       [...children].map(
         (child) =>
@@ -602,7 +620,7 @@ describe('runProgram', () => {
 
   it('closeChildren kills every running tree and waits for it', async () => {
     const children = new Set<ChildProcess>()
-    const run = runProgram('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
+    const run = answered('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
     expect(children.size).toBe(1)
     const started = Date.now()
     await closeChildren(children)
@@ -683,7 +701,7 @@ describe('host runs', () => {
       cancel: () => undefined,
       run: async () =>
         (
-          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
+          await answered('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
             children,
             direct,
           })
@@ -714,7 +732,7 @@ describe('host runs', () => {
       cancel: () => undefined,
       run: async () =>
         (
-          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
+          await answered('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
             children,
             direct: true,
           })
@@ -732,7 +750,7 @@ describe('host runs', () => {
 
   it('gives a slow sink all a direct program wrote', async () => {
     let got = 0
-    const ran = await runProgram('sh', null, ['-c', 'head -c 150000 /dev/zero'], null, {
+    const ran = await answered('sh', null, ['-c', 'head -c 150000 /dev/zero'], null, {
       direct: true,
       output: async (chunk) => {
         await delay(600)
@@ -745,7 +763,7 @@ describe('host runs', () => {
 
   it('ends a direct program though what it left holds its output', async () => {
     const started = Date.now()
-    const ran = await runProgram('sh', null, ['-c', 'sleep 4 & echo out'], null, { direct: true })
+    const ran = await answered('sh', null, ['-c', 'sleep 4 & echo out'], null, { direct: true })
     expect(new TextDecoder().decode(ran.stdout)).toBe('out\n')
     expect(ran.exitCode).toBe(0)
     expect(Date.now() - started).toBeLessThan(3000)

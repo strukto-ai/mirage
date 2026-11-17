@@ -31,7 +31,8 @@ import { MachineHandle, logger } from '../handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
-import type { OutputFn, RunResult } from '../../runtime/types.ts'
+import { answerOf } from '../../runtime/binding.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../../runtime/types.ts'
 import { abortable, makeAbortError, settledWithin, sleep } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
@@ -70,36 +71,30 @@ function piped(proc: ExecProcess): Piped {
 function stopped(error: unknown): ConnectionLostError {
   // shortcut: any exec rejection counts as the container having stopped, which Cloudflare's "not running" does; other rejections are untested
   logger.debug?.(`cloudflare_container: the container stopped: ${String(error)}`)
-  const lost = new ConnectionLostError(
-    STOPPED,
-    new Uint8Array(),
-    ENC.encode(`cloudflare_container: ${STOPPED}\n`),
-  )
+  const lost = new ConnectionLostError(STOPPED)
   lost.cause = error
   return lost
 }
 
 /**
- * Read `reader` to its end: into `sink`, or into the bytes returned when
- * there is none. A read that fails throws what `failed` makes of it.
+ * Read `reader` to its end into `sink`. A read that fails throws what
+ * `failed` makes of it.
  *
  * @param reader the stream's reader, which the caller may cancel.
- * @param sink receives each chunk; null keeps them for the result.
+ * @param sink receives each chunk.
  * @param failed what a failed read throws, given its error.
  */
 async function drain(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  sink: OutputFn | null,
+  sink: OutputFn,
   failed: (error: unknown) => unknown = (error) => error,
-): Promise<Uint8Array> {
-  const kept: Uint8Array[] = []
+): Promise<void> {
   for (;;) {
     const { done, value } = await reader.read().catch((error: unknown) => {
       throw failed(error)
     })
-    if (done) return concat(kept)
-    if (sink === null) kept.push(value)
-    else await sink(value)
+    if (done) return
+    await sink(value)
   }
 }
 
@@ -179,14 +174,16 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
       waited += CHECK_POLL_SECONDS
     ) {
       try {
-        const check = this.exec(
-          ['/bin/sh', '-c', CHECK_LINE],
-          null,
-          { ...this.config.env },
-          '/',
-          null,
-          null,
-          deadline,
+        const check = answerOf((output, errors) =>
+          this.exec(
+            ['/bin/sh', '-c', CHECK_LINE],
+            null,
+            { ...this.config.env },
+            '/',
+            output,
+            errors,
+            deadline,
+          ),
         )
         await abortable(check, deadline)
         // Only now: a container still starting refuses its calls, monitor() among them.
@@ -229,8 +226,8 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     signal?.throwIfAborted()
@@ -298,7 +295,7 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
         signal,
       )
       if (done === null) throw stopped(new Error('the container exited'))
-      return { stdout: done[0], stderr: done[1], exitCode: done[2] }
+      return { exitCode: done[2] }
     } catch (error) {
       if (error instanceof ConnectionLostError) throw error
       try {
@@ -330,14 +327,17 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     try {
       return await this.exec(argv, stdin, env, cwd, output, errors, signal)
     } catch (error) {
-      if (error instanceof ConnectionLostError) this.disconnected()
+      if (error instanceof ConnectionLostError) {
+        this.disconnected()
+        await errors(ENC.encode(`cloudflare_container: ${error.message}\n`))
+      }
       throw error
     }
   }
@@ -359,7 +359,7 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
-  ): Promise<RunResult> {
+  ): Promise<RunAnswer> {
     if (env[PROCESS] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
     const tag = crypto.randomUUID().replaceAll('-', '')
     try {

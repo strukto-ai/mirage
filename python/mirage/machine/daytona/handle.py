@@ -38,9 +38,9 @@ class DaytonaMachine(MachineHandle):
     create`, or the SDK); mirage only connects by ``sandbox_id`` and
     execs lines. ``api_key`` falls back to DAYTONA_API_KEY. Daytona's
     exec takes no stdin and reports combined output once the command
-    ends, so a run given input is refused (126) before it starts,
-    stderr comes back None, and a stream gets its output at the end. The
-    output is
+    ends, so a run given input is refused (126) before it starts, and
+    the joined answer is written once through the run's stdout at the
+    end (``joins_streams``). The output is
     base64-encoded in the sandbox, since the exec returns it as text
     (``encode_output``: the sandbox needs dd and base64). close()
     releases the SDK client and never touches the sandbox. Mirage pauses
@@ -56,6 +56,7 @@ class DaytonaMachine(MachineHandle):
     provider = "daytona"
     pauses = True
     takes_input = False
+    joins_streams = True
     config_cls = DaytonaConfig
     config: DaytonaConfig
 
@@ -112,18 +113,16 @@ class DaytonaMachine(MachineHandle):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         if stdin is not None and stdin != b"":
-            return self.input_refused()
+            return await self.input_refused(errors)
         command = encode_output(wrap_line(argv, env, cwd), combined=True)
         response = await self._sandbox.process.exec(command)
-        return RunResult(
-            stdout=decode_output(str(response.result)),
-            stderr=None,
-            exit_code=int(response.exit_code),
-        )
+        if answer := decode_output(str(response.result)):
+            await output(answer)
+        return RunResult(exit_code=int(response.exit_code))
 
     async def close(self) -> None:
         """Release the SDK client once a connect under way has settled; the

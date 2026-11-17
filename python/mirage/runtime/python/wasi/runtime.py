@@ -149,21 +149,20 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
         engine: WasmExecution,
         program: Program,
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         files = RuntimeFiles.of(ctx, self._binding)
         hiding = _stdlib_mount(files.prefixes()) if files is not None else None
         if hiding is not None:
-            return RunResult(
-                stdout=b"",
-                stderr=(
+            await errors(
+                (
                     f"mirage: the {self.name} runtime cannot run with a mount "
                     f"at '{hiding}', which hides the interpreter's standard "
                     "library at /lib\n"
-                ).encode(),
-                exit_code=CANNOT_EXECUTE_STATUS,
+                ).encode()
             )
+            return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
@@ -191,7 +190,7 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
             "(__import__('sys').excepthook)\n" + preamble + source
         )
         # sys.argv becomes [prog, *program.args], matching the local runtime.
-        stdout, stderr, exit_code = await engine.run(
+        exit_code = await engine.run(
             argv=[
                 "python",
                 *init_argv(ctx.flags),
@@ -212,4 +211,4 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+        return RunResult(exit_code=exit_code)

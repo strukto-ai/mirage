@@ -63,10 +63,16 @@ class Box extends MachineHandle {
     return this.code === null ? Promise.reject(new Error('no such box')) : Promise.resolve()
   }
 
-  protected override execArgv(argv: readonly string[]): Promise<RunResult> {
+  protected override async execArgv(
+    argv: readonly string[],
+    _stdin: unknown,
+    _env: Record<string, string>,
+    _cwd: string,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.lines.push(argv.at(-1) ?? '')
-    const stdout = new TextEncoder().encode(this.ran ? `${CHECK_MARK}\n` : '')
-    return Promise.resolve({ stdout, stderr: null, exitCode: this.code ?? 0 })
+    if (this.ran) await output(new TextEncoder().encode(`${CHECK_MARK}\n`))
+    return { exitCode: this.code ?? 0 }
   }
 }
 
@@ -132,8 +138,8 @@ class Sleeper extends MachineHandle {
     _stdin: unknown,
     _env: Record<string, string>,
     _cwd: string,
-    _output: unknown,
-    errors: OutputFn | null,
+    _output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const tag = tagOf(argv)
@@ -141,7 +147,7 @@ class Sleeper extends MachineHandle {
       { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(RUN_PROGRAM_AT).join(' ') },
       { tag, pid: this.base + 1, ppid: this.base, started: 101, args: 'train 2' },
     ]
-    if (this.reports && errors !== null)
+    if (this.reports)
       await errors(
         new Uint8Array([
           ...RUN_PID_MARK,
@@ -157,7 +163,7 @@ class Sleeper extends MachineHandle {
       }),
     ])
     this.rows = []
-    return { stdout: new Uint8Array(), stderr: null, exitCode: this.code }
+    return { exitCode: this.code }
   }
 
   override status(workspace: string): Promise<MachineProcess[]> {
@@ -182,7 +188,7 @@ class Leaver extends Sleeper {
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
     const tag = tagOf(argv)
     this.rows = [{ tag, pid: this.base + 1, ppid: 1, started: 101, args: 'daemon' }]
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 
@@ -209,7 +215,7 @@ class Quitter extends Sleeper {
     this.rows = [{ tag: tagOf(argv), pid: this.base, ppid: 1, started: 100, args: 'q' }]
     await this.quitted
     this.rows = []
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    return { exitCode: 0 }
   }
 
   override async signal(target: string | MachinePid, signum: number): Promise<boolean> {

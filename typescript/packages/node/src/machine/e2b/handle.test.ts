@@ -28,7 +28,8 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/machine/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   MOUNT_GUARD,
   PROCESS,
@@ -57,7 +58,9 @@ function runLine(
   more: Partial<Context> = {},
 ) {
   const ctx = { stdin, flags: { c }, env: {}, cwd: PathSpec.fromStrPath(cwd), ...more }
-  return machineRuntime(rt).runLine(undefined, [], [], ctx)
+  return answerOf((output, errors) =>
+    machineRuntime(rt).runLine(undefined, [], [], ctx, output, errors),
+  )
 }
 
 class FakeExitError extends Error {
@@ -75,18 +78,23 @@ class FakeSandboxNotFoundError extends FakeNotFoundError {}
 class FakeTimeoutError extends FakeSandboxError {}
 class FakeSandboxNotRunningError extends FakeTimeoutError {}
 
-/** The runtime's transport called directly: a run with no tag but the caller's. */
+/**
+ * The runtime's transport called directly: a run with no tag but the
+ * caller's, its answer kept whole.
+ */
 function execArgv(
   rt: E2BMachine,
   argv: string[],
   stdin: Uint8Array | null,
   env: Record<string, string>,
   signal?: AbortSignal,
-): Promise<RunResult> {
+): Promise<RunAnswer> {
   const direct = rt as unknown as {
     execArgv: (...args: unknown[]) => Promise<RunResult>
   }
-  return direct.execArgv(argv, stdin, env, '/', null, null, signal)
+  return answerOf((output, errors) =>
+    direct.execArgv(argv, stdin, env, '/', output, errors, signal),
+  )
 }
 
 /** The line `wrapLine` dressed, or the one word of its argv, unquoted. */
@@ -134,6 +142,8 @@ class FakeHandle {
     if (this.command === 'exit 3' || this.command === 'exit 0') {
       if (!this.eof) await Promise.race([this.sent.promise, this.closed.promise])
       await new Promise((resolve) => setTimeout(resolve, 0))
+      await this.onStdout?.(b64('partial'))
+      await this.onStderr?.(b64('boom-err'))
       if (this.command === 'exit 0')
         return { stdout: b64('partial'), stderr: b64('boom-err'), exitCode: 0 }
       throw new FakeExitError(3, b64('partial'), b64('boom-err'))
@@ -141,6 +151,7 @@ class FakeHandle {
     const hex = (): string => b64(Buffer.from(this.input).toString('hex'))
     if (this.command === 'head') {
       await this.received.promise
+      await this.onStdout?.(hex())
       return { stdout: hex(), stderr: '', exitCode: 0 }
     }
     if (!this.eof) await this.closed.promise
@@ -704,18 +715,30 @@ class MountingE2BMachine extends FakedE2BMachine {
   readonly table = new Map<string, [string, string]>()
   readonly lines: string[] = []
 
-  protected override execArgv(argv: readonly string[]): Promise<RunResult> {
+  protected override async execArgv(
+    argv: readonly string[],
+    _stdin: unknown,
+    _env: unknown,
+    _cwd: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
     const inner = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     const run = inner[2] === MOUNT_GUARD ? inner.slice(inner.indexOf('--', 5) + 1) : inner
-    return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
+    const done = await this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
+    if (done.stdout.byteLength > 0) await output(done.stdout)
+    return { exitCode: done.exitCode }
   }
 
-  override execLine(line: string): Promise<RunResult> {
+  override execLine(line: string): Promise<RunAnswer> {
     this.lines.push(line)
     const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
     const stdout =
       line === 'cat /proc/mounts' ? rows : line.startsWith('d=$(PATH=') ? '/home/user/.mirage' : ''
-    return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
+    return Promise.resolve({
+      exitCode: 0,
+      stdout: new TextEncoder().encode(stdout),
+      stderr: new Uint8Array(),
+    })
   }
 
   override openPipe(command: string): Promise<MachinePipe> {
@@ -911,31 +934,17 @@ class ShellE2BMachine extends E2BMachine {
 const BYTES_LINE = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; exit 5"
 
 describe('E2BMachine output bytes', () => {
-  // Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
-  // unchanged on stdout and stderr, whole or streamed, with the program's
-  // status.
-  it.each([false, true])(
-    'returns arbitrary bytes and the exit code exactly (streamed: %s)',
-    async (streamed) => {
-      const runtime = new ShellE2BMachine('box', { sandboxId: 'sb-live' })
-      const said = { out: [] as number[], err: [] as number[] }
-      const result = await machineRuntime(runtime).runLine(
-        undefined,
-        [],
-        [],
-        { stdin: null, flags: { c: BYTES_LINE }, env: {}, cwd: PathSpec.fromStrPath('/') },
-        streamed ? (chunk) => Promise.resolve(void said.out.push(...chunk)) : undefined,
-        streamed ? (chunk) => Promise.resolve(void said.err.push(...chunk)) : undefined,
-      )
-      const stdout = streamed ? said.out : [...result.stdout]
-      const stderr = streamed ? said.err : [...(result.stderr ?? [])]
-      expect([result.exitCode, stdout, stderr]).toEqual([
-        5,
-        [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3],
-        [0x65, 0xfe, 0x00, 0x0d, 0x0a],
-      ])
-    },
-  )
+  // Program output is bytes: invalid UTF-8, NUL and CRLF reach the host's
+  // sinks unchanged on stdout and stderr, with the program's status.
+  it('writes arbitrary bytes and returns the exit code exactly', async () => {
+    const runtime = new ShellE2BMachine('box', { sandboxId: 'sb-live' })
+    const result = await runLine(runtime, BYTES_LINE, null)
+    expect([result.exitCode, [...result.stdout], [...result.stderr]]).toEqual([
+      5,
+      [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3],
+      [0x65, 0xfe, 0x00, 0x0d, 0x0a],
+    ])
+  })
   // A program's output reaches the host while it still runs: here it
   // waits for input that is only sent once its first line has arrived.
   it('streams output while the program runs', async () => {
@@ -952,11 +961,18 @@ describe('E2BMachine output bytes', () => {
       env: {},
       cwd: PathSpec.fromStrPath('/'),
     }
-    const result = await machineRuntime(runtime).runLine(undefined, [], [], ctx, (chunk) => {
-      said += DEC.decode(chunk)
-      if (said.includes('one\n')) first.resolve(undefined)
-      return Promise.resolve()
-    })
+    const result = await machineRuntime(runtime).runLine(
+      undefined,
+      [],
+      [],
+      ctx,
+      (chunk) => {
+        said += DEC.decode(chunk)
+        if (said.includes('one\n')) first.resolve(undefined)
+        return Promise.resolve()
+      },
+      () => Promise.resolve(),
+    )
     expect([result.exitCode, said]).toEqual([0, 'one\ntwo\n'])
   }, 10_000)
 })

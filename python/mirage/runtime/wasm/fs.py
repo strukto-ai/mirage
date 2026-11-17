@@ -279,10 +279,9 @@ class WasiFs:
             a pipe does, as it reads it; None gives it none.
         cancelled (threading.Event | None): set once the run is
             cancelled.
-        output (Callable[[bytes], None] | None): takes each stdout write
-            as the guest makes it, the guest waiting until it is taken;
-            None keeps stdout in ``stdout``.
-        errors (Callable[[bytes], None] | None): the same for stderr.
+        output (Callable[[bytes], None]): takes each stdout write as
+            the guest makes it, the guest waiting until it is taken.
+        errors (Callable[[bytes], None]): the same for stderr.
     """
 
     def __init__(
@@ -290,16 +289,15 @@ class WasiFs:
         fs: WasmView,
         stdin: Callable[[int], bytes] | None,
         cancelled: threading.Event | None = None,
-        output: Callable[[bytes], None] | None = None,
-        errors: Callable[[bytes], None] | None = None,
+        *,
+        output: Callable[[bytes], None],
+        errors: Callable[[bytes], None],
     ) -> None:
         self._cancelled = cancelled or threading.Event()
         self._fs = fs
         self._output = output
         self._errors = errors
         self.exit_code: int | None = None
-        self.stdout = bytearray()
-        self.stderr = bytearray()
         self._memory: "wasmtime.Memory | None" = None
         self._fds: FileTable[FdEntry] = FileTable(first_id=4)
         self._fds.set(
@@ -679,14 +677,11 @@ class WasiFs:
             if entry.kind in ("stdout", "stderr"):
                 stdout = entry.kind == "stdout"
                 sink = self._output if stdout else self._errors
-                if sink is None:
-                    (self.stdout if stdout else self.stderr).extend(data)
-                else:
-                    try:
-                        sink(data)
-                    except Exception as exc:
-                        logger.debug("guest %s closed: %r", entry.kind, exc)
-                        return EPIPE
+                try:
+                    sink(data)
+                except Exception as exc:
+                    logger.debug("guest %s closed: %r", entry.kind, exc)
+                    return EPIPE
             elif entry.kind == "file":
                 if entry.file is None or not entry.file.mode.writable:
                     return EBADF

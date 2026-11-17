@@ -60,8 +60,8 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const named = ctx.spec?.name ?? ''
     const label =
@@ -74,6 +74,7 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
       this.argv0Rules,
       (name, shown) => this.moduleCode(name, shown),
       this.name,
+      errors,
     )
     if ('exitCode' in program) return program
     return this.interpret(engine, program, ctx, output, errors)
@@ -90,17 +91,22 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
     return null
   }
 
-  /** Report the bound interpreter's version. */
-  version(
+  /**
+   * Report the bound interpreter's version.
+   *
+   * @param _env the session environment.
+   * @param _output receives the version line.
+   * @param errors receives why there is none.
+   */
+  async version(
     _env: Record<string, string>,
+    _output: OutputFn,
+    errors: OutputFn,
     _signal?: AbortSignal,
     _timeoutSeconds?: number,
   ): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new Uint8Array(),
-      stderr: new TextEncoder().encode(`${this.name}: version information unavailable\n`),
-      exitCode: 1,
-    })
+    await errors(new TextEncoder().encode(`${this.name}: version information unavailable\n`))
+    return { exitCode: 1 }
   }
 
   /**
@@ -116,16 +122,15 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
    * @param program the source and argv to run.
    * @param ctx the run's context: working directory, environment,
    *   switches, files, signal and limit.
-   * @param output receives stdout as the program writes it, which the
-   *   result then leaves out; undefined, or an engine that cannot stream,
-   *   returns it whole.
+   * @param output receives stdout as the program writes it; an engine
+   *   that gets it whole writes it once.
    * @param errors the same for stderr.
    */
   abstract interpret(
     engine: E,
     program: Program,
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult>
 }

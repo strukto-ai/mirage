@@ -175,6 +175,10 @@ class _Asking(MontyFs):
         return super().getenv(key, default)
 
 
+async def _no_errors(data: bytes) -> None:
+    raise AssertionError(data)
+
+
 @pytest.mark.asyncio
 async def test_a_sink_that_waits_holds_the_program_back():
     execution = MontyExecution()
@@ -189,7 +193,7 @@ async def test_a_sink_that_waits_holds_the_program_back():
     code = "import os\nprint(1)\nos.getenv('X')\nprint(2)\n"
     try:
         run = asyncio.ensure_future(
-            execution.run(Program(code=code), None, fs, output)
+            execution.run(Program(code=code), None, fs, output, _no_errors)
         )
         while not taken:
             await asyncio.sleep(0.01)
@@ -223,7 +227,11 @@ async def test_a_cancelled_run_cancels_the_write_its_sink_holds():
     try:
         run = asyncio.ensure_future(
             execution.run(
-                Program(code="print(1)\n"), None, MontyFs(None, {}), output
+                Program(code="print(1)\n"),
+                None,
+                MontyFs(None, {}),
+                output,
+                output,
             )
         )
         await entered.wait()

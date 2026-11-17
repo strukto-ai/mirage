@@ -20,7 +20,7 @@ import { MachineHandle, logger } from '../handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
-import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
+import type { OutputFn, PipeWriter, RunAnswer, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
 import { checkOnPause, requireId } from '../config.ts'
@@ -233,7 +233,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     const hint = this.gone(sdk, error)
     if (hint === null) return null
     this.disconnected()
-    return new ConnectionLostError(hint, new Uint8Array(), ENC.encode(`e2b: ${hint}\n`))
+    return new ConnectionLostError(hint)
   }
 
   protected override async execArgv(
@@ -241,8 +241,8 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     signal?.throwIfAborted()
@@ -264,13 +264,15 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
         background: true,
         stdin: stdin !== null,
         timeoutMs: 0,
-        ...(output !== null ? { onStdout: decoding(output, out) } : {}),
-        ...(errors !== null ? { onStderr: decoding(errors, err) } : {}),
+        onStdout: decoding(output, out),
+        onStderr: decoding(errors, err),
       })
-      .catch((error: unknown) => {
-        throw this.lost(sdk, error) ?? error
+      .catch(async (error: unknown) => {
+        const lost = this.lost(sdk, error)
+        if (lost !== null) await errors(ENC.encode(`e2b: ${lost.message}\n`))
+        throw lost ?? error
       })
-    let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
+    let result: Pick<CommandResult, 'exitCode'>
     const state = { exited: false }
     const write = async (chunk: Uint8Array): Promise<void> => {
       if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
@@ -306,7 +308,10 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       signal?.throwIfAborted()
     } catch (error) {
       const lost = signal?.aborted === true ? null : this.lost(sdk, error)
-      if (lost !== null) throw lost
+      if (lost !== null) {
+        await errors(ENC.encode(`e2b: ${lost.message}\n`))
+        throw lost
+      }
       if (!signal?.aborted && error instanceof sdk.CommandExitError) {
         result = error
       } else {
@@ -328,13 +333,9 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       await handle.disconnect()
     }
     const [outTail, errTail] = [out.flush(), err.flush()]
-    if (output !== null && outTail.byteLength > 0) await output(outTail)
-    if (errors !== null && errTail.byteLength > 0) await errors(errTail)
-    return {
-      stdout: output === null ? decodeOutput(result.stdout) : new Uint8Array(),
-      stderr: errors === null ? decodeOutput(result.stderr) : new Uint8Array(),
-      exitCode: result.exitCode,
-    }
+    if (outTail.byteLength > 0) await output(outTail)
+    if (errTail.byteLength > 0) await errors(errTail)
+    return { exitCode: result.exitCode }
   }
 
   /**
@@ -354,7 +355,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
-  ): Promise<RunResult> {
+  ): Promise<RunAnswer> {
     if (env[PROCESS] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
     const tag = crypto.randomUUID().replaceAll('-', '')
     try {

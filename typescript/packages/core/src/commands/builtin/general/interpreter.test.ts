@@ -24,18 +24,21 @@ import { runInterpreter, runOutput } from './interpreter.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function ran(): Promise<RunResult> {
-  return Promise.resolve({ stdout: ENC.encode('out'), stderr: ENC.encode('err'), exitCode: 3 })
+async function ran(output: OutputFn, errors: OutputFn): Promise<RunResult> {
+  await output(ENC.encode('out'))
+  await errors(ENC.encode('err'))
+  return { exitCode: 3 }
 }
 
 async function outThenErr(output: OutputFn, errors: OutputFn): Promise<RunResult> {
   await output(ENC.encode('a'))
   await errors(ENC.encode('e'))
-  return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+  return { exitCode: 0 }
 }
 
-function saidOnStderr(): Promise<RunResult> {
-  return Promise.resolve({ stdout: new Uint8Array(), stderr: ENC.encode('run\n'), exitCode: 0 })
+async function saidOnStderr(_output: OutputFn, errors: OutputFn): Promise<RunResult> {
+  await errors(ENC.encode('run\n'))
+  return { exitCode: 0 }
 }
 
 /** An input that ends at once and records its close. */
@@ -79,9 +82,15 @@ describe('runInterpreter', () => {
   it('settles the runtime once the run ends', async () => {
     const said: string[] = []
     const runtime = {
-      execute: () => {
+      execute: async (
+        _paths: unknown,
+        _texts: unknown,
+        _ctx: unknown,
+        opts: { output: OutputFn },
+      ): Promise<RunResult> => {
         said.push('ran')
-        return Promise.resolve({ stdout: ENC.encode('x'), stderr: null, exitCode: 0 })
+        await opts.output(ENC.encode('x'))
+        return { exitCode: 0 }
       },
     } as unknown as LanguageRuntime
     const settle = (): Promise<void> => {
@@ -114,7 +123,7 @@ describe('runOutput', () => {
       await output(ENC.encode('first\n'))
       await later
       await output(ENC.encode('second\n'))
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      return { exitCode: 0 }
     })
     expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('first\n')
     release()
@@ -126,7 +135,7 @@ describe('runOutput', () => {
     const [stdout] = runOutput(async (output) => {
       await output(new Uint8Array(1 << 20))
       wrote = true
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      return { exitCode: 0 }
     })
     const first = (await stdout.next()).value as Uint8Array
     for (let i = 0; i < 20; i++) await tick()
@@ -148,7 +157,7 @@ describe('runOutput', () => {
           })
         })
         stopped = true
-        return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+        return { exitCode: 0 }
       },
       null,
       undefined,
@@ -170,7 +179,8 @@ describe('runOutput', () => {
           resolve()
         })
       })
-      return { stdout: new Uint8Array(), stderr: ENC.encode('late\n'), exitCode: 0 }
+      await errors(ENC.encode('late\n'))
+      return { exitCode: 0 }
     })
     expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('a')
     await stdout.return()
@@ -189,7 +199,7 @@ describe('runOutput', () => {
         })
       })
       ended = true
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      return { exitCode: 0 }
     })
     await stdout.next()
     await stdout.return()
@@ -227,7 +237,7 @@ describe('runOutput', () => {
       await errors(scratch)
       scratch.set(ENC.encode('two\n'))
       await errors(scratch)
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      return { exitCode: 0 }
     })
     await materialize(stdout)
     expect(DEC.decode(await materialize(io.stderr))).toBe('one\ntwo\n')

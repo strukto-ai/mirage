@@ -56,26 +56,15 @@ class ExitLineFilter:
     is held; everything else passes as it arrives.
 
     Args:
-        errors (OutputFn | None): receives stderr as it arrives; None
-            keeps it for ``kept``.
+        errors (OutputFn): receives stderr as it arrives.
     """
 
-    def __init__(self, errors: OutputFn | None) -> None:
+    def __init__(self, errors: OutputFn) -> None:
         self._errors = errors
         self._held = bytearray()
-        self._kept = bytearray()
-
-    @property
-    def kept(self) -> bytes | None:
-        """The stderr kept when nothing receives it, None for none."""
-        return bytes(self._kept) or None
 
     async def _emit(self, data: bytes) -> None:
-        if not data:
-            return
-        if self._errors is None:
-            self._kept += data
-        else:
+        if data:
             await self._errors(data)
 
     async def write(self, data: bytes) -> None:
@@ -171,7 +160,7 @@ class KubernetesMachine(ProgramMachine):
 
     async def connect(self) -> None:
         pod = self.config.pod
-        status = await self._exec_program(
+        status = await self._program_answer(
             ["get", "pod", *self._scope(), pod, "--output", "json"]
         )
         phase = reported_state(status, "kubectl get pod", ("status", "phase"))
@@ -184,8 +173,8 @@ class KubernetesMachine(ProgramMachine):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         # A run with no input takes no stdin, so its program's end of input
         # does not ride kubectl's stream.
@@ -202,9 +191,9 @@ class KubernetesMachine(ProgramMachine):
                     "-c",
                     line if given else empty_stdin(line),
                 ],
-                stdin=stdin if given else None,
-                output=output,
-                errors=said.write,
+                stdin if given else None,
+                output,
+                said.write,
             )
         except Exception:
             # A failed kubectl reports nothing, so what is held is the
@@ -214,13 +203,9 @@ class KubernetesMachine(ProgramMachine):
             raise
         if not await said.finish(done.exit_code):
             raise ConnectionLostError(
-                f"kubectl exited {done.exit_code} without the program's status",
-                done.stdout,
-                said.kept,
+                f"kubectl exited {done.exit_code} without the program's status"
             )
-        return RunResult(
-            stdout=done.stdout, stderr=said.kept, exit_code=done.exit_code
-        )
+        return done
 
     async def open_pipe(self, command: str) -> MachinePipe:
         head, tail = self.exec_words()

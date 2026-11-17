@@ -60,7 +60,7 @@ from mirage.policy.types import (
     VfsResultContext,
     WorkspaceContext,
 )
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.monty.execution import compile_error
@@ -699,20 +699,18 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         engine, lock = self._engine(entry)
         try:
             env = await self._env(entry)
+            ctx = Context(
+                flags={"c": source, **PROGRAM_FLAGS.get(entry.runtime, {})},
+                cwd=PathSpec.from_str_path(cwd),
+                env={**env, CTX_ENV: payload},
+                stdin=payload.encode(),
+            )
             async with lock or contextlib.nullcontext():
                 result = await asyncio.wait_for(
-                    engine.execute(
-                        [],
-                        [],
-                        Context(
-                            flags={
-                                "c": source,
-                                **PROGRAM_FLAGS.get(entry.runtime, {}),
-                            },
-                            cwd=PathSpec.from_str_path(cwd),
-                            env={**env, CTX_ENV: payload},
-                            stdin=payload.encode(),
-                        ),
+                    answer_of(
+                        lambda output, errors: engine.execute(
+                            [], [], ctx, output=output, errors=errors
+                        )
                     ),
                     timeout=SCRIPT_EVAL_TIMEOUT,
                 )
@@ -721,7 +719,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                 f"script timed out after {SCRIPT_EVAL_TIMEOUT:g}s"
             ) from exc
         if result.exit_code != 0:
-            stderr = (result.stderr or b"").decode(errors="replace")
+            stderr = result.stderr.decode(errors="replace")
             logger.error(
                 "policy program on %s exited %d\n%s",
                 entry.runtime,

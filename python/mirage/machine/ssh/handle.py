@@ -99,8 +99,8 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         return await self._ssh(
             wrap_line(argv, env, cwd),
@@ -114,15 +114,15 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
         self,
         command: str,
         stdin: ByteSource | None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
         tagged: bool = False,
     ) -> RunResult:
         """One exec channel on the connection; the seam tests override.
 
         Input is written as it is read, and closed at its end, or at once
         when nothing is piped: a finite command waits for that EOF.
-        Output goes to ``output`` as it arrives when one is given. A line
+        Output goes to ``output`` as it arrives. A line
         abandoned to a timeout, or whose reader went away, returns now:
         the command is signalled and its channel closed, with no wait
         for the remote side to finish; any other failure closes the
@@ -131,8 +131,8 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
         Args:
             command (str): the dressed command line.
             stdin (ByteSource | None): the input, or None for none.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
             tagged (bool): whether the command is a program's run, so a
                 cancelled run's stop ends it.
         """
@@ -155,20 +155,10 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 feeding.cancel()
             return result
 
-        # Kept here rather than by read_into, so a drop mid-read keeps them.
-        out: list[bytes] = []
-        err: list[bytes] = []
-
-        async def keep_out(chunk: bytes) -> None:
-            out.append(chunk)
-
-        async def keep_err(chunk: bytes) -> None:
-            err.append(chunk)
-
         try:
             _, _, _, result = await asyncio.gather(
-                read_into(process.stdout, output or keep_out),
-                read_into(process.stderr, errors or keep_err),
+                read_into(process.stdout, output),
+                read_into(process.stderr, errors),
                 feeding,
                 wait_exit(),
             )
@@ -179,28 +169,17 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 process.kill()
             raise
         except sdk.DisconnectError as exc:
-            raise ConnectionLostError(
-                f"the connection closed: {exc}",
-                b"".join(out),
-                b"".join(err) or None,
-            ) from exc
+            raise ConnectionLostError(f"the connection closed: {exc}") from exc
         finally:
             if not feeding.done():
                 feeding.cancel()
             await asyncio.gather(feeding, return_exceptions=True)
             process.close()
         await process.wait_closed()
-        stdout, stderr = b"".join(out), b"".join(err) or None
         if result.returncode is None:
-            raise ConnectionLostError(
-                "the channel closed with no exit status", stdout, stderr
-            )
+            raise ConnectionLostError("the channel closed with no exit status")
         code = result.returncode
-        return RunResult(
-            stdout=stdout,
-            stderr=stderr,
-            exit_code=128 - code if code < 0 else code,
-        )
+        return RunResult(exit_code=128 - code if code < 0 else code)
 
     async def open_pipe(self, command: str) -> MachinePipe:
         process = await self._conn.create_process(

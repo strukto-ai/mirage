@@ -414,7 +414,7 @@ class StoppedBox extends MachineHandle {
   }
 
   protected execArgv(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 
   override stop(tag: string, signum: number): Promise<boolean> {

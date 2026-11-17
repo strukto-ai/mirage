@@ -142,6 +142,8 @@ async function execute(request: ExecuteRequest): Promise<void> {
             ? { timeoutSeconds: request.timeoutSeconds }
             : {}),
         },
+        (bytes) => Promise.resolve(void sync.output?.(1, bytes)),
+        (bytes) => Promise.resolve(void sync.output?.(2, bytes)),
       )
       .finally(() => {
         globalThis.Date = hostDate

@@ -19,7 +19,8 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { Program, RunResult } from '@struktoai/mirage-core/runtime/types'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { OutputFn, Program, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -32,9 +33,15 @@ import { LocalRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
 
-function interpret(rt: LocalRuntime, program: Partial<Program>, fields: Partial<Context> = {}) {
+function interpret(
+  rt: LocalRuntime,
+  program: Partial<Program>,
+  fields: Partial<Context> = {},
+): Promise<RunAnswer> {
   const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), ...fields }
-  return rt.interpret(undefined, { code: '', args: [], stdin: null, ...program }, ctx)
+  return answerOf((output, errors) =>
+    rt.interpret(undefined, { code: '', args: [], stdin: null, ...program }, ctx, output, errors),
+  )
 }
 
 function runProcess(
@@ -42,9 +49,14 @@ function runProcess(
   argv: readonly string[],
   cwd: string,
   stdin: Uint8Array | null = null,
-) {
+): Promise<RunAnswer> {
   const ctx = { stdin, flags: {}, cwd: PathSpec.fromStrPath(cwd) }
-  return rt.runProcess(undefined, [], [...argv], ctx, undefined)
+  return answerOf((output, errors) => rt.runProcess(undefined, [], [...argv], ctx, output, errors))
+}
+
+/** The runtime's version, its answer kept whole. */
+function versionOf(rt: LocalRuntime): Promise<RunAnswer> {
+  return answerOf((output, errors) => rt.version({}, output, errors))
 }
 
 describe('LocalRuntime', () => {
@@ -78,9 +90,9 @@ describe('LocalRuntime', () => {
         'utf8',
       )
       const result = await interpret(rt, { code }, { env: { MIRAGE_TEST_ROOT: dir } })
-      expect(result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())).toBe(0)
+      expect(result.exitCode, DEC.decode(result.stderr)).toBe(0)
       expect(DEC.decode(result.stdout)).toBe(expected)
-      expect(result.stderr).toBeNull()
+      expect(DEC.decode(result.stderr)).toBe('')
     } finally {
       await rt.close()
       await rm(dir, { recursive: true, force: true })
@@ -129,7 +141,7 @@ describe('LocalRuntime', () => {
       )
       await chmod(probe, 0o755)
       const rt = new LocalRuntime({ config: { home: probe } })
-      const baseline = await rt.version({})
+      const baseline = await versionOf(rt)
       const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
       expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: null })
       const ws = new Workspace({ '/': new RAMVFS() }, { mode, machines: [rt] })
@@ -163,7 +175,7 @@ describe('LocalRuntime', () => {
     try {
       const rt = new LocalRuntime({ config: { home: 'mirage-probe' } })
       cwd.mockRestore()
-      const result = await rt.version({})
+      const result = await versionOf(rt)
       expect(DEC.decode(result.stdout)).toBe('probe\n')
       await rt.close()
     } finally {
@@ -307,7 +319,7 @@ describe('LocalRuntime', () => {
       { code: 'import sys; print(sys.flags.optimize, sys.dont_write_bytecode, sys.warnoptions)' },
       { flags: { O: 2, B: true, W: ['ignore'] } },
     )
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(DEC.decode(result.stderr)).toBe('')
     expect(DEC.decode(result.stdout)).toBe("2 True ['ignore']\n")
   })
 
@@ -373,7 +385,7 @@ describe('LocalRuntime', () => {
       { cwd: PathSpec.fromStrPath('/w') },
     )
     expect(DEC.decode(result.stdout)).toBe('./s.py /w/./s.py\n')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('bye\n')
+    expect(DEC.decode(result.stderr)).toBe('bye\n')
     expect(result.exitCode).toBe(1)
   })
 
@@ -432,11 +444,11 @@ describe('LocalRuntime', () => {
       const rt = new LocalRuntime({ captures: ['python3', '@external'] })
       try {
         const result = await runProcess(rt, argv, cwd, new TextEncoder().encode('hi'))
-        expect([
-          result.exitCode,
-          DEC.decode(result.stdout),
-          DEC.decode(result.stderr ?? new Uint8Array()),
-        ]).toEqual([exitCode, stdout, stderr])
+        expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+          exitCode,
+          stdout,
+          stderr,
+        ])
       } finally {
         await rt.close()
       }
@@ -469,10 +481,7 @@ describe('LocalRuntime', () => {
     const rt = new LocalRuntime({ captures: ['@external'] })
     try {
       const result = await runProcess(rt, [name], dir)
-      expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
-        exitCode,
-        stderr,
-      ])
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([exitCode, stderr])
     } finally {
       await rt.close()
       await rm(dir, { recursive: true, force: true })
@@ -509,7 +518,7 @@ describe('LocalRuntime', () => {
       const names = inFolder ? serve(dir) : []
       try {
         const result = await runProcess(rt, ['mirage-broken'], dir)
-        expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
           126,
           'mirage-broken: cannot execute: No such file or directory\n',
         ])
@@ -533,7 +542,7 @@ describe('LocalRuntime', () => {
       const names = inFolder ? serve(dir) : []
       try {
         const result = await runProcess(rt, ['./mirage-fifo'], dir)
-        expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
           126,
           './mirage-fifo: cannot execute: Permission denied\n',
         ])
@@ -640,9 +649,15 @@ it.skipIf(process.platform === 'win32')(
 class RecordingLocalRuntime extends LocalRuntime {
   readonly programs: Program[] = []
 
-  override interpret(_engine: undefined, program: Program): Promise<RunResult> {
+  override async interpret(
+    _engine: undefined,
+    program: Program,
+    _ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.programs.push(program)
-    return Promise.resolve({ stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 })
+    await output(new TextEncoder().encode('ran\n'))
+    return { exitCode: 0 }
   }
 }
 

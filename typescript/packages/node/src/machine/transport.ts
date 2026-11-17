@@ -17,7 +17,8 @@ import type { MachineConfig } from '@struktoai/mirage-core/machine/config'
 import { MachineHandle, logger } from '@struktoai/mirage-core/machine/handle'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { execArgs, openProgramPipe, runProgram } from './program.ts'
 
 /**
@@ -39,17 +40,28 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
   /** Run the program once; the seam tests override. */
   protected execProgram(
     args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
+    stdin: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
-    errors: OutputFn | null = null,
   ): Promise<RunResult> {
     return runProgram(this.program, this.installHint, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
-      ...(output !== null ? { output } : {}),
-      ...(errors !== null ? { errors } : {}),
+      output,
+      errors,
       connection: true,
     })
+  }
+
+  /**
+   * Run the program once for Mirage's own question (a status, a pause), its
+   * answer kept whole. Mirrors Python's `_program_answer`.
+   *
+   * @param args the arguments after the program.
+   * @param signal stops the program.
+   */
+  protected programAnswer(args: string[], signal?: AbortSignal): Promise<RunAnswer> {
+    return answerOf((output, errors) => this.execProgram(args, null, output, errors, signal))
   }
 
   /**
@@ -66,9 +78,9 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
     gone: string | null = null,
     signal?: AbortSignal,
   ): Promise<void> {
-    const result = await this.execProgram(args, null, null, signal)
+    const result = await this.programAnswer(args, signal)
     if (result.exitCode === 0) return
-    const said = new TextDecoder().decode(result.stderr ?? new Uint8Array()).trim()
+    const said = new TextDecoder().decode(result.stderr).trim()
     if (gone !== null && said.includes(gone)) {
       logger.debug?.(`${this.machine.toString()}: already gone: ${said}`)
       return
@@ -81,12 +93,12 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const [head, tail] = this.execWords()
-    return this.execProgram(execArgs(head, tail, env, cwd, argv), stdin, output, signal, errors)
+    return this.execProgram(execArgs(head, tail, env, cwd, argv), stdin, output, errors, signal)
   }
 
   openPipe(command: string): Promise<MachinePipe> {

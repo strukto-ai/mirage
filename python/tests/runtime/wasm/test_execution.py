@@ -21,11 +21,23 @@ from unittest.mock import Mock
 
 import pytest
 
+from mirage.runtime.binding import answer_of
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.types import RunAnswer, RunResult
 from mirage.runtime.wasm.errors import ENOENT
 from mirage.runtime.wasm.execution import WasmExecution
 from mirage.runtime.wasm.fs import WasiFs
 from mirage.runtime.wasm.view import WasmView
+
+
+async def _answer(
+    execution: WasmExecution, fs: WasmView, argv: tuple[str, ...] = ()
+) -> RunAnswer:
+    async def run(output, errors) -> RunResult:
+        code = await execution.run(list(argv), None, [], fs, output, errors)
+        return RunResult(exit_code=code)
+
+    return await answer_of(run)
 
 
 @pytest.mark.asyncio
@@ -52,7 +64,7 @@ async def test_cancel_joins_worker_and_host_operation(monkeypatch):
     def worker(*args):
         try:
             bridge.call("write", "/probe", data=b"x")
-            return b"", None, 0
+            return 0, b""
         finally:
             worker_finished.set()
 
@@ -61,7 +73,7 @@ async def test_cancel_joins_worker_and_host_operation(monkeypatch):
     monkeypatch.setattr(
         "mirage.runtime.wasm.execution.epoch_engine", lambda: engine
     )
-    task = asyncio.create_task(execution.run([], None, [], fs))
+    task = asyncio.create_task(_answer(execution, fs))
     await entered.wait()
     task.cancel()
     await cleanup.wait()
@@ -100,7 +112,7 @@ async def test_cancel_before_wasm_store_is_ready_does_not_miss_epoch(
             finished.set()
 
     monkeypatch.setattr(execution, "_run_sync", worker)
-    task = asyncio.create_task(execution.run([], None, [], WasmView()))
+    task = asyncio.create_task(_answer(execution, WasmView()))
     try:
         assert await asyncio.to_thread(entered.wait, 10)
         task.cancel()
@@ -133,16 +145,8 @@ async def test_guest_exit_status_keeps_output(tmp_path, code, expected):
         (call $exit (i32.const {code}))))""")
     )
     execution = WasmExecution(module, "probe")
-    assert await execution.run([], None, [], WasmView()) == (
-        b"kept",
-        None,
-        expected,
-    )
-    assert await execution.run([], None, [], WasmView()) == (
-        b"kept",
-        None,
-        expected,
-    )
+    assert await _answer(execution, WasmView()) == RunAnswer(expected, b"kept")
+    assert await _answer(execution, WasmView()) == RunAnswer(expected, b"kept")
 
 
 @pytest.mark.asyncio
@@ -184,7 +188,7 @@ async def test_cancel_interrupts_poll_clock_and_reuses_engine(
     execution = WasmExecution(module, "probe")
     for _ in range(2):
         entered.clear()
-        task = asyncio.create_task(execution.run([], None, [], WasmView()))
+        task = asyncio.create_task(_answer(execution, WasmView()))
         assert await asyncio.to_thread(entered.wait, 5)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -198,7 +202,7 @@ async def test_close_releases_pooled_native_modules(tmp_path):
     module = tmp_path / "empty.wasm"
     module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
     execution = WasmExecution(module, "probe")
-    await execution.run([], None, [], WasmView())
+    await _answer(execution, WasmView())
     assert len(execution._idle) == 1
     engine, compiled = execution._idle[0]
     await execution.close()
@@ -215,13 +219,13 @@ async def test_a_torn_cache_is_compiled_again_and_replaced_whole(tmp_path):
     module = tmp_path / "empty.wasm"
     module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
     first = WasmExecution(module, "probe")
-    await first.run([], None, [], WasmView())
+    await _answer(first, WasmView())
     await first.close()
     cache = tmp_path / "empty.cwasm"
     whole = cache.read_bytes()
     cache.write_bytes(whole[: len(whole) // 2])
     again = WasmExecution(module, "probe")
-    assert await again.run([], None, [], WasmView()) == (b"", None, 0)
+    assert await _answer(again, WasmView()) == RunAnswer(0)
     await again.close()
     assert cache.read_bytes() == whole
     assert sorted(p.name for p in tmp_path.iterdir()) == [
@@ -239,7 +243,7 @@ async def test_a_cache_its_digest_does_not_vouch_for_is_compiled_again(
     module = tmp_path / "empty.wasm"
     module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
     first = WasmExecution(module, "probe")
-    await first.run([], None, [], WasmView())
+    await _answer(first, WasmView())
     await first.close()
     cache = tmp_path / "empty.cwasm"
     whole = cache.read_bytes()
@@ -250,7 +254,7 @@ async def test_a_cache_its_digest_does_not_vouch_for_is_compiled_again(
         else whole[: -hashlib.sha256().digest_size]
     )
     again = WasmExecution(module, "probe")
-    assert await again.run([], None, [], WasmView()) == (b"", None, 0)
+    assert await _answer(again, WasmView()) == RunAnswer(0)
     await again.close()
     assert cache.read_bytes() == whole
 
@@ -276,7 +280,7 @@ async def test_a_new_cache_is_synced_before_it_takes_its_name(
     monkeypatch.setattr(os, "fsync", synced)
     monkeypatch.setattr(os, "replace", renamed)
     execution = WasmExecution(module, "probe")
-    await execution.run([], None, [], WasmView())
+    await _answer(execution, WasmView())
     await execution.close()
     assert events == ["fsync", "replace empty.cwasm"]
 
@@ -299,11 +303,11 @@ async def test_close_releases_late_engines(monkeypatch, phase, cancel):
         if phase == "worker":
             entered.set()
             assert release.wait(5)
-        return b"", None, 0
+        return 0, b""
 
     monkeypatch.setattr(execution, "_checkout", checkout)
     monkeypatch.setattr(execution, "_run_sync", worker)
-    task = asyncio.create_task(execution.run([], None, [], WasmView()))
+    task = asyncio.create_task(_answer(execution, WasmView()))
     try:
         assert await asyncio.to_thread(entered.wait, 5)
         if cancel:
@@ -318,7 +322,7 @@ async def test_close_releases_late_engines(monkeypatch, phase, cancel):
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, 5)
     else:
-        assert await asyncio.wait_for(task, 5) == (b"", None, 0)
+        assert await asyncio.wait_for(task, 5) == RunAnswer(0)
     assert execution._idle == []
     module.close.assert_called_once()
     engine.close.assert_called_once()
@@ -326,12 +330,28 @@ async def test_close_releases_late_engines(monkeypatch, phase, cancel):
     module.close.assert_called_once()
 
 
+def _trapped(*args):
+    return 1, b"probe: wasm trap: unreachable\n"
+
+
+# A trap's message reaches the run's stderr last, beside its status.
+@pytest.mark.asyncio
+async def test_a_trap_is_said_on_errors(monkeypatch):
+    execution = WasmExecution(Path("unused.wasm"), "probe")
+    engine, module = Mock(), Mock()
+    monkeypatch.setattr(execution, "_checkout", lambda: (engine, module))
+    monkeypatch.setattr(execution, "_run_sync", _trapped)
+    assert await _answer(execution, WasmView()) == RunAnswer(
+        1, b"", b"probe: wasm trap: unreachable\n"
+    )
+
+
 @pytest.mark.asyncio
 async def test_closed_execution_refuses_new_runs():
     execution = WasmExecution(Path("unused.wasm"), "probe")
     await execution.close()
     with pytest.raises(RuntimeError, match="closed"):
-        await execution.run([], None, [], WasmView())
+        await _answer(execution, WasmView())
 
 
 @pytest.mark.asyncio
@@ -355,12 +375,8 @@ async def test_guest_cannot_open_host_file_above_build_root(tmp_path):
     )
     execution = WasmExecution(module, "probe")
     try:
-        assert await execution.run(
-            ["probe"], None, [], WasmView(str(root))
-        ) == (
-            b"",
-            None,
-            ENOENT,
-        )
+        assert await _answer(
+            execution, WasmView(str(root)), ("probe",)
+        ) == RunAnswer(ENOENT)
     finally:
         await execution.close()

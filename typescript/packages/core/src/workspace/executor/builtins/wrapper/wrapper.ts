@@ -99,13 +99,11 @@ function runProgram(
     if (ran.stdout !== null) {
       for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
     }
-    const said = await ran.materializeStderr()
-    node.exitCode = ran.exitCode
-    return {
-      stdout: new Uint8Array(),
-      stderr: said.byteLength > 0 ? said : null,
-      exitCode: ran.exitCode,
+    if (ran.stderr !== null) {
+      for await (const chunk of ensureStream(ran.stderr)) await errors(chunk)
     }
+    node.exitCode = ran.exitCode
+    return { exitCode: ran.exitCode }
   }
   const [stdout, io] = runOutput(run)
   return [stdout, io, node]

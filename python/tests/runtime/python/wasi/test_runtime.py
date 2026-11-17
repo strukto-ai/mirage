@@ -20,10 +20,11 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.binding import answer_of
 from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV, _stdlib_mount
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -52,12 +53,25 @@ def _args(code: str, env: dict[str, str] | None = None, **fields):
     return Program(code=code, **fields), env
 
 
-async def _run(rt: WasiRuntime, program: Program, **fields) -> RunResult:
-    return await rt.interpret(await rt.engine(), program, Context(**fields))
+async def _run(rt: WasiRuntime, program: Program, **fields) -> RunAnswer:
+    engine = await rt.engine()
+    return await answer_of(
+        lambda output, errors: rt.interpret(
+            engine, program, Context(**fields), output, errors
+        )
+    )
 
 
-async def _execute(runtime: WasiRuntime, code: str, **fields) -> RunResult:
-    return await runtime.execute([], [], Context(flags={"c": code}, **fields))
+async def _execute(runtime: WasiRuntime, code: str, **fields) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [],
+            [],
+            Context(flags={"c": code}, **fields),
+            output=output,
+            errors=errors,
+        )
+    )
 
 
 def test_missing_build_dir_raises_hint(monkeypatch):
@@ -206,7 +220,7 @@ def test_wasi_runs_a_program(args, exit_code, stdout, stderr):
     result = asyncio.run(_run(WasiRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
-        assert result.stderr is None
+        assert result.stderr == b""
     else:
         assert stderr in result.stderr
 
@@ -302,7 +316,7 @@ async def test_max_memory_caps_a_run():
     rt = WasiRuntime(config={"max_memory": "64M"})
     big = await _run(rt, Program(code="x = bytearray(100 * 1024 * 1024)"))
     assert big.exit_code == 1
-    assert big.stderr is not None and b"MemoryError" in big.stderr
+    assert b"MemoryError" in big.stderr
     small = await _run(rt, Program(code="print(1)"))
     assert (small.exit_code, small.stdout) == (0, b"1\n")
 
@@ -313,7 +327,6 @@ async def test_max_memory_below_the_interpreters_start_says_so():
     rt = WasiRuntime(config={"max_memory": "8M"})
     result = await _run(rt, Program(code="print(1)"))
     assert result.exit_code == 1
-    assert result.stderr is not None
     assert b"cannot start within max_memory" in result.stderr
 
 

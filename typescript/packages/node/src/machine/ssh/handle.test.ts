@@ -42,6 +42,7 @@ vi.mock('node:os', async (original) => ({
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
+const ignore: OutputFn = () => Promise.resolve()
 
 class FakeSSHMachine extends SSHMachine {
   readonly calls: [string, Uint8Array | null][] = []
@@ -53,16 +54,13 @@ class FakeSSHMachine extends SSHMachine {
   protected override async ssh(
     command: string,
     stdin: ByteSource | null,
-    output: OutputFn | null = null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     this.calls.push([command, stdin === null ? null : await materialize(stdin)])
-    const stdout = ENC.encode(`out:${command}`)
-    if (output !== null) await output(stdout)
-    return {
-      stdout: output === null ? stdout : new Uint8Array(),
-      stderr: ENC.encode('warn'),
-      exitCode: 0,
-    }
+    await output(ENC.encode(`out:${command}`))
+    await errors(ENC.encode('warn'))
+    return { exitCode: 0 }
   }
 }
 
@@ -103,7 +101,7 @@ class FakeClient {
 
 class SdkFakeRuntime extends SSHMachine {
   protected override ssh(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
   protected override loadSdk(): Promise<Ssh2Sdk> {
     return Promise.resolve({ Client: FakeClient } as unknown as Ssh2Sdk)
@@ -134,7 +132,7 @@ describe('SSHMachine', () => {
     expect(DEC.decode(result.stdout)).toBe(
       `out:${wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/w')}`,
     )
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
+    expect(DEC.decode(result.stderr)).toBe('warn')
     const [, stdin] = runtime.calls[0] ?? ['', null]
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
   })
@@ -306,7 +304,7 @@ class HungRuntime extends SSHMachine {
   }
 
   line(command: string, signal: AbortSignal, tagged = false): Promise<unknown> {
-    return this.ssh(command, null, null, signal, tagged)
+    return this.ssh(command, null, ignore, ignore, signal, tagged)
   }
 }
 
@@ -388,13 +386,13 @@ describe('SSHMachine cancellation', () => {
 it('reconnects after the previous client closes', async () => {
   const runtime = new SdkFakeRuntime('box', { host: 'box' })
   const ctx = { stdin: null, flags: { c: 'true' }, cwd: PathSpec.fromStrPath('/') }
-  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx, ignore, ignore)
   const first = made.at(-1)
   if (first === undefined) throw new Error('no SSH client')
-  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx, ignore, ignore)
   expect(made.at(-1)).toBe(first)
   first.end()
-  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx, ignore, ignore)
   expect(made.at(-1)).not.toBe(first)
   await runtime.close()
 })

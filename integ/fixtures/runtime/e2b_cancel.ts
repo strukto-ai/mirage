@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
@@ -24,7 +25,9 @@ const dec = new TextDecoder()
  */
 export function runLine(machine: MachineHandle, line: string, stdin: Uint8Array | null = null) {
   const ctx = { stdin, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/home/user') }
-  return machine.run(['/bin/sh', '-c', line], ctx, null, null, null)
+  return answerOf((output, errors) =>
+    machine.run(['/bin/sh', '-c', line], ctx, null, output, errors),
+  )
 }
 
 async function waitForRemote(machine: MachineHandle, command: string): Promise<void> {

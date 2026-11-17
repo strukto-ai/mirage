@@ -76,7 +76,7 @@ class SmolvmMachine(ProgramMachine):
         running nor paused is an error rather than a boot.
         """
         machine = self.config.machine
-        status = await self._exec_program(
+        status = await self._program_answer(
             ["machine", "status", "--name", machine, "--json"]
         )
         state = reported_state(status, "smolvm machine status", ("state",))

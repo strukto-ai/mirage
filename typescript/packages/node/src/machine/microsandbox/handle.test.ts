@@ -23,9 +23,25 @@ import { ownSession } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
 import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+type RunOptions = Parameters<typeof program.runProgram>[4]
+
+/** What `msb` says, written through a run's sinks as `runProgram` writes it. */
+async function said(
+  options: RunOptions,
+  stdout: string,
+  stderr = '',
+  exitCode = 0,
+): Promise<RunResult> {
+  if (stdout !== '') await options.output(ENC.encode(stdout))
+  if (stderr !== '') await options.errors(ENC.encode(stderr))
+  return { exitCode }
+}
 
 async function* piped(): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -60,16 +76,16 @@ function fakeMsb(state = 'Running'): {
   }
   vi.spyOn(program, 'runProgram').mockImplementation(async (_exe, _hint, args, _stdin, options) => {
     msb.calls.push(args.slice())
-    msb.signals.push(options?.signal)
+    msb.signals.push(options.signal)
     const verb = args[0] ?? ''
     if (verb === 'resume' && msb.resumed !== null) await msb.resumed
     const refusal = msb.refusals.get(verb)
-    return Promise.resolve({
-      stdout:
-        verb === 'status' ? ENC.encode(JSON.stringify({ status: msb.state })) : new Uint8Array(),
-      stderr: ENC.encode(refusal ?? ''),
-      exitCode: refusal === undefined ? 0 : 1,
-    })
+    return said(
+      options,
+      verb === 'status' ? JSON.stringify({ status: msb.state }) : '',
+      refusal ?? '',
+      refusal === undefined ? 0 : 1,
+    )
   })
   return msb
 }
@@ -181,24 +197,24 @@ describe('MicrosandboxMachine', () => {
     ['[]', 'unreadable json'],
     ['not json', 'unreadable json'],
   ])('refuses unusable status %s before exec', async (status, message) => {
-    const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
-      stdout: ENC.encode(status),
-      stderr: new Uint8Array(),
-      exitCode: 0,
-    })
+    const invoke = vi
+      .spyOn(program, 'runProgram')
+      .mockImplementation((_exe, _hint, _args, _stdin, options) => said(options, status))
     try {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box' })
       await expect(
-        machineRuntime(runtime).execute(
-          [],
-          [],
-          {
-            flags: { c: 'touch /must-not-exist' },
-            cwd: PathSpec.fromStrPath('/'),
-            env: {},
-            stdin: null,
-          },
-          { kind: 'line' },
+        answerOf((output, errors) =>
+          machineRuntime(runtime).execute(
+            [],
+            [],
+            {
+              flags: { c: 'touch /must-not-exist' },
+              cwd: PathSpec.fromStrPath('/'),
+              env: {},
+              stdin: null,
+            },
+            { kind: 'line', output, errors },
+          ),
         ),
       ).rejects.toThrow(message)
       expect(invoke).toHaveBeenCalledOnce()
@@ -209,11 +225,11 @@ describe('MicrosandboxMachine', () => {
   })
 
   it('preserves the status error', async () => {
-    const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
-      stdout: new Uint8Array(),
-      stderr: ENC.encode('sandbox not found'),
-      exitCode: 1,
-    })
+    const invoke = vi
+      .spyOn(program, 'runProgram')
+      .mockImplementation((_exe, _hint, _args, _stdin, options) =>
+        said(options, '', 'sandbox not found', 1),
+      )
     try {
       await expect(
         new MicrosandboxMachine('box', { sandbox: 'missing' }).connect(),
@@ -243,27 +259,23 @@ describe('MicrosandboxMachine', () => {
     ['no stdin', null, ['--stream']],
   ])('maps process requests with %s to the msb contract', async (_label, input, stream) => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
-    const invoke = vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args) => {
-      if (args[0] === 'status')
-        return Promise.resolve({
-          stdout: ENC.encode('{"status":"Running"}'),
-          stderr: new Uint8Array(),
-          exitCode: 0,
-        })
-      return Promise.resolve({
-        stdout: ENC.encode('output'),
-        stderr: ENC.encode('diagnostic'),
-        exitCode: 7,
-      })
-    })
+    const invoke = vi
+      .spyOn(program, 'runProgram')
+      .mockImplementation((_exe, _hint, args, _stdin, options) =>
+        args[0] === 'status'
+          ? said(options, '{"status":"Running"}')
+          : said(options, 'output', 'diagnostic', 7),
+      )
     try {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box', env: { MARK: 'config' } })
       const words = ['python3', 'a b', '$(literal)', '', '--flag'] as const
-      const result = await machineRuntime(runtime).execute(
-        [],
-        words,
-        { flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { MARK: 'request' }, stdin: input },
-        { kind: 'process' },
+      const result = await answerOf((output, errors) =>
+        machineRuntime(runtime).execute(
+          [],
+          words,
+          { flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { MARK: 'request' }, stdin: input },
+          { kind: 'process', output, errors },
+        ),
       )
       expect(
         invoke.mock.calls
@@ -293,7 +305,7 @@ describe('MicrosandboxMachine', () => {
         ],
       ])
       // The msb client is the connection, so its death on a signal is one lost.
-      expect(new Set(invoke.mock.calls.map((call) => call[4]?.connection))).toEqual(new Set([true]))
+      expect(new Set(invoke.mock.calls.map((call) => call[4].connection))).toEqual(new Set([true]))
       expect(DEC.decode(result.stdout)).toBe('output')
       expect(DEC.decode(result.stderr)).toBe('diagnostic')
       expect(result.exitCode).toBe(7)
@@ -311,7 +323,7 @@ describe('MicrosandboxMachine', () => {
     const invoke = vi
       .spyOn(program, 'runProgram')
       .mockImplementation((_exe, _hint, _args, _stdin, options) => {
-        probeSignal = options?.signal
+        probeSignal = options.signal
         started()
         return new Promise((_resolve, reject) => {
           probeSignal?.addEventListener(
@@ -328,17 +340,19 @@ describe('MicrosandboxMachine', () => {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box' })
       const pending =
         phase === 'initial'
-          ? machineRuntime(runtime).execute(
-              [],
-              ['true'],
-              {
-                flags: {},
-                cwd: PathSpec.fromStrPath('/'),
-                env: {},
-                stdin: null,
-                signal: controller.signal,
-              },
-              { kind: 'process' },
+          ? answerOf((output, errors) =>
+              machineRuntime(runtime).execute(
+                [],
+                ['true'],
+                {
+                  flags: {},
+                  cwd: PathSpec.fromStrPath('/'),
+                  env: {},
+                  stdin: null,
+                  signal: controller.signal,
+                },
+                { kind: 'process', output, errors },
+              ),
             )
           : runtime.execLine('true', null, {}, '/', controller.signal)
       const refused = expect(pending).rejects.toThrow()
@@ -416,11 +430,13 @@ describe.skipIf(!MOUNT_SANDBOX)('real guest workspace mounts', () => {
 it.skipIf(!STOPPED_SANDBOX)('does not start a real stopped guest', async () => {
   const runtime = new MicrosandboxMachine('box', { sandbox: STOPPED_SANDBOX })
   await expect(
-    machineRuntime(runtime).execute(
-      [],
-      [],
-      { flags: { c: 'echo must-not-run' }, cwd: PathSpec.fromStrPath('/'), env: {}, stdin: null },
-      { kind: 'line' },
+    answerOf((output, errors) =>
+      machineRuntime(runtime).execute(
+        [],
+        [],
+        { flags: { c: 'echo must-not-run' }, cwd: PathSpec.fromStrPath('/'), env: {}, stdin: null },
+        { kind: 'line', output, errors },
+      ),
     ),
   ).rejects.toThrow('state: Stopped')
   await expect(
@@ -435,44 +451,50 @@ describe.skipIf(!SANDBOX)('MicrosandboxMachine real guest', () => {
     const cwd = PathSpec.fromStrPath('/data')
     const payload = new Uint8Array([105, 110, 112, 117, 116, 0, 255, 13, 10])
     const words = ['a b', '$(echo literal)', '', '--flag']
-    const result = await machineRuntime(runtime).execute(
-      [],
-      [
-        'python3',
-        '-c',
-        'import json,os,sys; sys.stdout.buffer.write(sys.stdin.buffer.read()); ' +
-          "sys.stderr.write(json.dumps([os.getcwd(),os.environ['MARK'],sys.argv[1:]])); sys.exit(7)",
-        ...words,
-      ],
-      { flags: {}, cwd: cwd, env: { MARK: 'request' }, stdin: payload },
-      { kind: 'process' },
+    const result = await answerOf((output, errors) =>
+      machineRuntime(runtime).execute(
+        [],
+        [
+          'python3',
+          '-c',
+          'import json,os,sys; sys.stdout.buffer.write(sys.stdin.buffer.read()); ' +
+            "sys.stderr.write(json.dumps([os.getcwd(),os.environ['MARK'],sys.argv[1:]])); sys.exit(7)",
+          ...words,
+        ],
+        { flags: {}, cwd: cwd, env: { MARK: 'request' }, stdin: payload },
+        { kind: 'process', output, errors },
+      ),
     )
     expect(new Uint8Array(result.stdout)).toEqual(payload)
     expect(JSON.parse(DEC.decode(result.stderr))).toEqual(['/data', 'request', words])
     expect(result.exitCode).toBe(7)
-    const shell = await machineRuntime(runtime).execute(
-      [],
-      [],
-      { flags: { c: 'printf "%s" "$MARK"; pwd' }, cwd: cwd, env: {}, stdin: null },
-      { kind: 'line' },
+    const shell = await answerOf((output, errors) =>
+      machineRuntime(runtime).execute(
+        [],
+        [],
+        { flags: { c: 'printf "%s" "$MARK"; pwd' }, cwd: cwd, env: {}, stdin: null },
+        { kind: 'line', output, errors },
+      ),
     )
     expect(DEC.decode(shell.stdout)).toBe('config/data\n')
     expect(DEC.decode(shell.stderr)).toBe('')
     expect(shell.exitCode).toBe(0)
-    const files = await machineRuntime(runtime).execute(
-      [],
-      [
-        'python3',
-        '-c',
-        'from pathlib import Path; ' +
-          "assert any(' /data fuse ' in line for line in Path('/proc/mounts').read_text().splitlines()); " +
-          "assert Path('hello.txt').read_text() == 'hello from Mirage FUSE\\n'; " +
-          "Path('typescript.txt').write_text('typescript adapter\\n'); " +
-          "assert Path('typescript.txt').read_text() == 'typescript adapter\\n'; " +
-          "print('Mirage FUSE read/write passed')",
-      ],
-      { flags: {}, cwd: cwd, env: {}, stdin: null },
-      { kind: 'process' },
+    const files = await answerOf((output, errors) =>
+      machineRuntime(runtime).execute(
+        [],
+        [
+          'python3',
+          '-c',
+          'from pathlib import Path; ' +
+            "assert any(' /data fuse ' in line for line in Path('/proc/mounts').read_text().splitlines()); " +
+            "assert Path('hello.txt').read_text() == 'hello from Mirage FUSE\\n'; " +
+            "Path('typescript.txt').write_text('typescript adapter\\n'); " +
+            "assert Path('typescript.txt').read_text() == 'typescript adapter\\n'; " +
+            "print('Mirage FUSE read/write passed')",
+        ],
+        { flags: {}, cwd: cwd, env: {}, stdin: null },
+        { kind: 'process', output, errors },
+      ),
     )
     expect(DEC.decode(files.stdout)).toBe('Mirage FUSE read/write passed\n')
     expect(DEC.decode(files.stderr)).toBe('')

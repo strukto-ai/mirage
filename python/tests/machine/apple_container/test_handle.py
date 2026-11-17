@@ -33,7 +33,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.machine import machine_runtime
+from tests.fixtures.machine import machine_answer, machine_runtime
 
 
 class FakeAppleContainerMachine(AppleContainerMachine):
@@ -53,19 +53,17 @@ class FakeAppleContainerMachine(AppleContainerMachine):
         self.inspect_stdout = inspect_stdout
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
             if self.inspect_stdout is not None:
-                return RunResult(self.inspect_stdout, b"", self.inspect_code)
+                await output(self.inspect_stdout)
+                return RunResult(exit_code=self.inspect_code)
             if self.inspect_code != 0:
-                return RunResult(
-                    b"",
-                    f"Error: container not found: {args[1]}".encode(),
-                    self.inspect_code,
-                )
-            return RunResult(
+                await errors(f"Error: container not found: {args[1]}".encode())
+                return RunResult(exit_code=self.inspect_code)
+            await output(
                 json.dumps(
                     [
                         {
@@ -76,15 +74,13 @@ class FakeAppleContainerMachine(AppleContainerMachine):
                             },
                         }
                     ]
-                ).encode(),
-                b"",
-                0,
+                ).encode()
             )
+            return RunResult(exit_code=0)
         script = args[-1]
-        if output is not None:
-            await output(f"out:{script}".encode())
-            return RunResult(b"", b"warn", 0)
-        return RunResult(f"out:{script}".encode(), b"warn", 0)
+        await output(f"out:{script}".encode())
+        await errors(b"warn")
+        return RunResult(exit_code=0)
 
     def inspected(self) -> list[str]:
         return [args[1] for args, _ in self.calls if args[0] == "inspect"]
@@ -234,9 +230,7 @@ async def test_process_preserves_argv_and_probes_the_container_once(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await machine_runtime(runtime).execute(
-        [], list(argv), ctx, kind="process"
-    )
+    result = await machine_answer(runtime, list(argv), ctx)
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -258,7 +252,7 @@ async def test_process_preserves_argv_and_probes_the_container_once(
         b"input",
     )
     line = Context(flags={"c": "pwd"}, cwd=work)
-    await machine_runtime(runtime).execute([], [], line, kind="line")
+    await machine_answer(runtime, [], line, "line")
     assert runtime.inspected() == ["box"]
     assert isinstance(machine_runtime(runtime), ProcessExecutorMixin)
     assert isinstance(machine_runtime(runtime), LineExecutorMixin)
@@ -271,14 +265,10 @@ async def test_process_refuses_empty_argv_and_a_stopped_container():
         states={"box": "stopped"}, config={"container": "box"}
     )
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await machine_runtime(runtime).execute(
-            [], [], Context(), kind="process"
-        )
+        await machine_answer(runtime, [], Context())
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await machine_runtime(runtime).execute(
-            [], ["node"], Context(), kind="process"
-        )
+        await machine_answer(runtime, ["node"], Context())
     assert len(runtime.calls) == 1
 
 

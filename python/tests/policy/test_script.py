@@ -102,17 +102,20 @@ class FakeProgram(LanguageRuntime):
         self.attached = (binding.dispatch, binding.resolver)
 
     async def execute(
-        self, paths, texts, ctx, *, kind="code", output=None
+        self, paths, texts, ctx, *, kind="code", output, errors
     ) -> RunResult:
         assert kind == "code" and not paths and not texts
         self.requests.append(ctx)
         if self.delay:
             await asyncio.sleep(self.delay)
-        return RunResult(
-            stdout=self.stdout, stderr=self.stderr, exit_code=self.exit_code
-        )
+        await output(self.stdout)
+        if self.stderr:
+            await errors(self.stderr)
+        return RunResult(exit_code=self.exit_code)
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -916,11 +919,11 @@ class Waiting(FakeProgram):
         self.started = started
 
     async def execute(
-        self, paths, texts, ctx, *, kind="code", output=None
+        self, paths, texts, ctx, *, kind="code", output, errors
     ) -> RunResult:
         self.requests.append(ctx)
         await asyncio.wait_for(self.started.wait(), 5)
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class Starting(FakeProgram):
@@ -931,11 +934,11 @@ class Starting(FakeProgram):
         self.started = started
 
     async def execute(
-        self, paths, texts, ctx, *, kind="code", output=None
+        self, paths, texts, ctx, *, kind="code", output, errors
     ) -> RunResult:
         self.requests.append(ctx)
         self.started.set()
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class Overlapping(FakeProgram):
@@ -947,14 +950,14 @@ class Overlapping(FakeProgram):
         self.most = 0
 
     async def execute(
-        self, paths, texts, ctx, *, kind="code", output=None
+        self, paths, texts, ctx, *, kind="code", output, errors
     ) -> RunResult:
         self.requests.append(ctx)
         self.running += 1
         self.most = max(self.most, self.running)
         await asyncio.sleep(0.01)
         self.running -= 1
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

@@ -47,9 +47,8 @@ export interface LineExecutorMixin<E = unknown> {
    * @param texts unused.
    * @param ctx the line in `flags.c`, its stdin, the session environment
    *   and working directory, the signal that stops it.
-   * @param output receives stdout as it arrives, each write awaited, which
-   *   the result then leaves out; undefined, or a transport that cannot
-   *   stream, returns it whole.
+   * @param output receives stdout as it arrives, each write awaited; a
+   *   transport that gets it whole writes it once.
    * @param errors the same for stderr.
    */
   runLine(
@@ -57,8 +56,8 @@ export interface LineExecutorMixin<E = unknown> {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult>
 }
 
@@ -86,9 +85,8 @@ export interface ProcessExecutorMixin<E = unknown> {
    * @param paths unused; argv is words.
    * @param texts the argv, program first.
    * @param ctx the run's context; its stdin is read as the program consumes it.
-   * @param output receives stdout as it arrives, each write awaited, which
-   *   the result then leaves out; undefined, or a transport that cannot
-   *   stream, returns it whole.
+   * @param output receives stdout as it arrives, each write awaited; a
+   *   transport that gets it whole writes it once.
    * @param errors the same for stderr.
    */
   runProcess(
@@ -96,8 +94,8 @@ export interface ProcessExecutorMixin<E = unknown> {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult>
 }
 

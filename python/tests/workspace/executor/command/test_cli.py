@@ -35,7 +35,7 @@ from mirage.rs.errors import StreamRefusal
 from mirage.runtime import table
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import Program, RunResult, ScriptSource
+from mirage.runtime.types import Program, RunAnswer, RunResult, ScriptSource
 from mirage.shell.variable import VarAttr
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
@@ -389,13 +389,20 @@ class FakePyRuntime(LanguageRuntime):
     def __init__(self) -> None:
         super().__init__()
         self.seen: list[SimpleNamespace] = []
-        self.result = RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
+        self.result = RunAnswer(0, b"ran\n")
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
         self.seen.append(_seen(program, ctx))
-        return self.result
+        return await self.answer(output, errors)
+
+    async def answer(self, output, errors) -> RunResult:
+        if self.result.stdout:
+            await output(self.result.stdout)
+        if self.result.stderr:
+            await errors(self.result.stderr)
+        return RunResult(exit_code=self.result.exit_code)
 
 
 class OtherPyRuntime(FakePyRuntime):
@@ -411,7 +418,7 @@ class CrashingRuntime(FakePyRuntime):
     name = "crashpy"
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
         raise RuntimeError("engine exploded")
 
@@ -421,14 +428,14 @@ class SleepingRuntime(FakePyRuntime):
     cancelled = False
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
         try:
             await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             self.cancelled = True
             raise
-        return self.result
+        return await self.answer(output, errors)
 
 
 async def drained(*args, **kwargs):
@@ -695,10 +702,11 @@ class TierPyRuntime(PythonRuntime):
         self.seen: list[SimpleNamespace] = []
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
         self.seen.append(_seen(program, ctx))
-        return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
+        await output(b"ran\n")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -798,7 +806,7 @@ async def test_script_crash_reports_prog_prefixed_exit_1():
 @pytest.mark.asyncio
 async def test_script_exit_code_and_stderr_surface():
     py = FakePyRuntime()
-    py.result = RunResult(stdout=b"", stderr=b"boom\n", exit_code=3)
+    py.result = RunAnswer(3, b"", b"boom\n")
     stdout, io, node = await drained(
         script_install(),
         ["pager"],
@@ -1187,10 +1195,12 @@ async def test_invocation_shell_is_revoked_after_handler_settles(fails):
 class ShellingRuntime(FakePyRuntime):
     name = "shellpy"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
         self.shell = ctx.shell
         await ctx.shell("echo nested")
-        return self.result
+        return await self.answer(output, errors)
 
 
 # A script's run starts as its output is read, after the leaf returned,

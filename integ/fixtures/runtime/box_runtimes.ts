@@ -21,6 +21,7 @@ import {
   LINE_EXECUTOR,
   type LineExecutorMixin,
   type PathSpec,
+  type OutputFn,
   type Program,
   type RunResult,
   Runtime,
@@ -36,14 +37,16 @@ export class EchoBox extends Runtime<undefined> implements LineExecutorMixin<und
     super(options, ['nvidia-smi'])
   }
 
-  runLine(
+  async runLine(
     _engine: undefined,
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
+    output: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c as string
-    return Promise.resolve({ stdout: ENC.encode(`box:${line}\n`), stderr: null, exitCode: 0 })
+    await output(ENC.encode(`box:${line}\n`))
+    return { exitCode: 0 }
   }
 }
 
@@ -55,12 +58,14 @@ export class ShoutPython extends LanguageRuntime<undefined> {
     super(options, ['python3', 'python'])
   }
 
-  interpret(_engine: undefined, program: Program, _ctx: Context): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: ENC.encode(`${program.code.toUpperCase()}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  async interpret(
+    _engine: undefined,
+    program: Program,
+    _ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(ENC.encode(`${program.code.toUpperCase()}\n`))
+    return { exitCode: 0 }
   }
 }
 

@@ -21,10 +21,11 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.runtime.binding import answer_of
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.js.quickjs.node import node_preamble
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer, RunResult
 from mirage.runtime.wasm import WasmView
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -50,12 +51,29 @@ def live(test):
     )(test)
 
 
-async def _run(rt: QuickJsRuntime, program: Program, **fields) -> RunResult:
-    return await rt.interpret(await rt.engine(), program, Context(**fields))
+async def _run(rt: QuickJsRuntime, program: Program, **fields) -> RunAnswer:
+    engine = await rt.engine()
+    return await answer_of(
+        lambda output, errors: rt.interpret(
+            engine, program, Context(**fields), output, errors
+        )
+    )
 
 
-async def _execute(rt: QuickJsRuntime, code: str, **fields) -> RunResult:
-    return await rt.execute([], [], Context(flags={"c": code}, **fields))
+async def _execute(rt: QuickJsRuntime, code: str, **fields) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: rt.execute(
+            [],
+            [],
+            Context(flags={"c": code}, **fields),
+            output=output,
+            errors=errors,
+        )
+    )
+
+
+async def _dropped(data: bytes) -> None:
+    pass
 
 
 def test_missing_home_raises_hint(monkeypatch):
@@ -80,12 +98,12 @@ class _ArgvSpy:
         stdin,
         env,
         fs,
-        output=None,
-        errors=None,
+        output,
+        errors,
         max_memory=None,
     ):
         self.argv = list(argv)
-        return b"", b"", 0
+        return 0
 
 
 def _script(code: str, argv: list[str]) -> str:
@@ -104,7 +122,11 @@ async def _spied_argv(program: Program, **fields) -> list[str]:
     rt = object.__new__(QuickJsRuntime)
     rt._binding = None
     spy = _ArgvSpy()
-    await rt.interpret(spy, program, Context(**fields))
+    await answer_of(
+        lambda output, errors: rt.interpret(
+            spy, program, Context(**fields), output, errors
+        )
+    )
     return spy.argv
 
 
@@ -161,10 +183,22 @@ async def test_module_mode_is_still_the_interpreters_own_switch():
 @pytest.mark.asyncio
 async def test_version_commands_report_the_quickjs_engine():
     runtime = QuickJsRuntime()
-    raw, _, code = await (await runtime.engine()).run(
-        argv=["qjs", "--version"], stdin=None, env=[], fs=WasmView()
-    )
-    assert code == 0
+    engine = await runtime.engine()
+
+    async def version(output, errors) -> RunResult:
+        code = await engine.run(
+            argv=["qjs", "--version"],
+            stdin=None,
+            env=[],
+            fs=WasmView(),
+            output=output,
+            errors=errors,
+        )
+        return RunResult(exit_code=code)
+
+    said = await answer_of(version)
+    raw = said.stdout
+    assert said.exit_code == 0
     ws = Workspace({"/": RAMVFS()}, machines=[runtime])
     try:
         for line in ["js --version", "node --version", "js -v", "node -v"]:
@@ -188,7 +222,7 @@ def test_quickjs_runs_modern_js():
     result = asyncio.run(_run(rt, Program(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b'["a0","b1"] 37\n'
-    assert result.stderr is None
+    assert result.stderr == b""
 
 
 @live
@@ -234,7 +268,7 @@ def test_quickjs_exit_code_and_error():
     assert result.exit_code == 7
     result = asyncio.run(_run(rt, Program(code="this is not js")))
     assert result.exit_code == 1
-    assert b"SyntaxError" in (result.stderr or b"")
+    assert b"SyntaxError" in result.stderr
 
 
 @live
@@ -291,7 +325,11 @@ async def test_quickjs_cancelled_run_waits_for_the_write_its_sink_holds():
     rt = QuickJsRuntime()
     run = asyncio.ensure_future(
         rt.execute(
-            [], [], Context(flags={"c": "console.log(1)"}), output=output
+            [],
+            [],
+            Context(flags={"c": "console.log(1)"}),
+            output=output,
+            errors=_dropped,
         )
     )
     try:

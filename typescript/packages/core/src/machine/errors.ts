@@ -14,21 +14,12 @@
 
 /**
  * The connection to a machine went while a run was on it, and how its
- * program ended went with it; what the run read before is kept. Mirrors
- * Python's ConnectionLostError.
+ * program ended went with it; what the run wrote before reached its sinks
+ * already. Mirrors Python's ConnectionLostError.
  */
 export class ConnectionLostError extends Error {
-  readonly stdout: Uint8Array
-  readonly stderr: Uint8Array | null
-
-  constructor(
-    message: string,
-    stdout: Uint8Array = new Uint8Array(),
-    stderr: Uint8Array | null = null,
-  ) {
+  constructor(message: string) {
     super(message)
     this.name = 'ConnectionLostError'
-    this.stdout = stdout
-    this.stderr = stderr
   }
 }

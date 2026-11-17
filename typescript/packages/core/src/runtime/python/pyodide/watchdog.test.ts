@@ -5,6 +5,7 @@ import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PyodideRuntime } from './runtime.ts'
 import { WATCH_INTERVAL_MS, watchMemory } from './watchdog.ts'
+import { answerOf } from '../../binding.ts'
 
 const DEC = new TextDecoder()
 
@@ -79,10 +80,12 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
     const rt = new PyodideRuntime({ config: { maxMemory: 64 * 1024 * 1024 } })
     try {
       const run = (code: string) =>
-        rt.interpret(undefined, { code, args: [], stdin: null }, context())
+        answerOf((output, errors) =>
+          rt.interpret(undefined, { code, args: [], stdin: null }, context(), output, errors),
+        )
       const big = await run('x = bytearray(200 * 1024 * 1024)')
       expect(big.exitCode).toBe(1)
-      expect(DEC.decode(big.stderr ?? new Uint8Array())).toContain(
+      expect(DEC.decode(big.stderr)).toContain(
         `MemoryError: the run passed max_memory (${String(64 * 1024 * 1024)})`,
       )
       const small = await run('print(1 + 1)')

@@ -83,8 +83,8 @@ export class SandlockRuntime
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
     return this.executeProcess(
@@ -100,8 +100,8 @@ export class SandlockRuntime
     _paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output: OutputFn | undefined,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     return this.executeProcess(texts, ctx, output, errors)
   }
@@ -109,10 +109,10 @@ export class SandlockRuntime
   private async executeProcess(
     argv: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    const refusal = await cwdRefusal(argv[0] ?? '', ctx.cwd.virtual)
+    const refusal = await cwdRefusal(argv[0] ?? '', ctx.cwd.virtual, errors)
     if (refusal !== null) return refusal
     ctx.signal?.throwIfAborted()
     // Found from this process's directory and made absolute: the wrapper
@@ -134,8 +134,8 @@ export class SandlockRuntime
       cwd: ctx.cwd.virtual,
       env: { PATH: process.env.PATH ?? '' },
       children: this.children,
-      ...(output !== undefined ? { output } : {}),
-      ...(errors !== undefined ? { errors } : {}),
+      output,
+      errors,
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
     })
   }

@@ -112,7 +112,7 @@ class MicrosandboxMachine(ProgramMachine):
         sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
-                status = await self._exec_program(
+                status = await self._program_answer(
                     ["status", sandbox, "--format", "json"]
                 )
         except TimeoutError as error:
@@ -148,8 +148,8 @@ class MicrosandboxMachine(ProgramMachine):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
@@ -164,9 +164,9 @@ class MicrosandboxMachine(ProgramMachine):
                 None,
                 ("/bin/sh", "-c", EXEC_PRELUDE, "sh", cwd, *own_session(argv)),
             ),
-            stdin=stdin,
-            output=output,
-            errors=errors,
+            stdin,
+            output,
+            errors,
         )
 
     async def open_pipe(self, command: str) -> MachinePipe:

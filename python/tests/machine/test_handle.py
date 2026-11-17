@@ -46,11 +46,12 @@ from mirage.machine.constants import (
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import ExitLineFilter, PidLineFilter
 from mirage.machine.types import RunStatus
+from mirage.runtime.binding import answer_of
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 from tests.fixtures.machine import machine_runtime, on
 
@@ -74,16 +75,27 @@ class RecordingMachine(MachineHandle):
             argv = argv[RUN_PROGRAM_AT:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
-        return await self.exec_line(line, data, env, cwd)
+        done = await self.exec_line(line, data, env, cwd)
+        if done.stdout:
+            await output(done.stdout)
+        if done.stderr:
+            await errors(done.stderr)
+        return RunResult(exit_code=done.exit_code)
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    ) -> RunAnswer:
         self.execs.append((line, stdin, cwd))
         self.exec_envs.append(dict(env))
-        return RunResult(
-            stdout=b"ran:" + line.encode(), stderr=None, exit_code=0
+        return RunAnswer(0, b"ran:" + line.encode())
+
+
+async def _line(box: MachineHandle, ctx: Context) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: machine_runtime(box).run_line(
+            None, [], [], ctx, output, errors
         )
+    )
 
 
 @pytest.mark.asyncio
@@ -258,7 +270,7 @@ async def test_cwd_passes_through_verbatim_and_env_merges():
     box = RecordingMachine(captures=("@line",), config={"env": {"BASE": "1"}})
     cwd = PathSpec.from_str_path("/data/deep")
     ctx = Context(flags={"c": "nvidia-smi"}, env={"LINE": "2"}, cwd=cwd)
-    result = await machine_runtime(box).run_line(None, [], [], ctx)
+    result = await _line(box, ctx)
     assert result.exit_code == 0
     # The sandbox serves the workspace at the same prefixes as the
     # host, so nothing is rewritten.
@@ -291,7 +303,15 @@ async def test_machines_take_lines_not_stages():
     assert isinstance(runtime, LineExecutorMixin)
     assert not isinstance(runtime, LanguageRuntime)
     with pytest.raises(UnsupportedExecutionError, match="code execution"):
-        await runtime.execute([], [], Context(flags={"c": "print(1)"}))
+        await answer_of(
+            lambda output, errors: runtime.execute(
+                [],
+                [],
+                Context(flags={"c": "print(1)"}),
+                output=output,
+                errors=errors,
+            )
+        )
 
 
 def test_config_dict_form_coerces():
@@ -304,7 +324,7 @@ async def test_line_timeout_answers_124():
     class SlowBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
+        ) -> RunAnswer:
             await asyncio.sleep(0.5)
             return await super().exec_line(line, stdin, env, cwd)
 
@@ -333,7 +353,7 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     class StuckBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
+        ) -> RunAnswer:
             result = await super().exec_line(line, stdin, env, cwd)
             if line == "yes":
                 await asyncio.Event().wait()
@@ -341,9 +361,7 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
 
     box = StuckBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(
-        machine_runtime(box).run_line(None, [], [], ctx)
-    )
+    task = asyncio.create_task(_line(box, ctx))
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()
@@ -360,7 +378,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     class StuckBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
+        ) -> RunAnswer:
             result = await super().exec_line(line, stdin, env, cwd)
             if line == "yes":
                 await asyncio.Event().wait()
@@ -370,9 +388,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (
-            await machine_runtime(box).run_line(None, [], [], ctx)
-        ).exit_code
+        return (await _line(box, ctx)).exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -389,34 +405,29 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
 
 
 class DroppedBox(RecordingMachine):
-    error: Exception = ConnectionLostError(
-        "closed by remote host", b"step 0\n", b"warn\n"
-    )
+    """Writes a step and a warning, then loses the connection under a
+    program's run; a transport's own ``hint`` comes before the drop."""
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
-        result = await super().exec_line(line, stdin, env, cwd)
-        if line.startswith("train"):
-            raise self.error
-        return result
-
-
-class StreamingDroppedBox(DroppedBox):
-    error = ConnectionLostError("closed by remote host", b"step 0\n")
+    error: Exception = ConnectionLostError("closed by remote host")
+    hint = b""
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        if errors is not None:
-            await errors(b"warn\n")
-        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        await output(b"step 0\n")
+        await errors(b"warn\n" + self.hint)
+        raise self.error
 
 
-# Errors a transport streamed before the drop stay beside the message.
+# What a run wrote before the drop reached its sinks already and stays,
+# the errors beside the message.
 @pytest.mark.asyncio
-async def test_a_dropped_run_keeps_the_errors_it_streamed():
-    box = StreamingDroppedBox(captures=("train",))
+async def test_a_dropped_run_keeps_what_it_wrote_before_the_drop():
+    box = DroppedBox(captures=("train",))
     ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
-    ran = await machine_runtime(box).run_line(None, [], [], ctx)
+    ran = await _line(box, ctx)
     assert (ran.exit_code, ran.stdout, ran.stderr) == (
         129,
         b"step 0\n",
@@ -424,17 +435,21 @@ async def test_a_dropped_run_keeps_the_errors_it_streamed():
     )
 
 
-# A run whose output was kept rather than streamed keeps what it read
-# before the drop.
+# A transport says its own hint before it raises; the run's message
+# follows it.
 @pytest.mark.asyncio
-async def test_a_dropped_run_keeps_the_output_it_read():
+async def test_a_transports_hint_comes_before_the_runs_message():
     box = DroppedBox(captures=("train",))
+    box.hint = b"recbox: closed by remote host\n"
     ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
-    ran = await machine_runtime(box).run_line(None, [], [], ctx)
+    ran = await _line(box, ctx)
     assert (ran.exit_code, ran.stdout, ran.stderr) == (
         129,
         b"step 0\n",
-        f"warn\nmirage: {box.machine}: connection lost\n".encode(),
+        (
+            "warn\nrecbox: closed by remote host\n"
+            f"mirage: {box.machine}: connection lost\n"
+        ).encode(),
     )
 
 
@@ -503,9 +518,7 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (
-            await machine_runtime(box).run_line(None, [], [], ctx)
-        ).exit_code
+        return (await _line(box, ctx)).exit_code
 
     runner = ProcessTable("w1", bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -522,9 +535,9 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
 @pytest.mark.parametrize("code,held", [(0, True), (NOT_RUNNING_STATUS, False)])
 async def test_a_left_run_is_stopped_by_its_tag(code, held):
     class AnsweringBox(RecordingMachine):
-        async def exec_line(self, line, stdin, env, cwd) -> RunResult:
+        async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
             await super().exec_line(line, stdin, env, cwd)
-            return RunResult(stdout=b"", stderr=None, exit_code=code)
+            return RunAnswer(code)
 
     box = AnsweringBox(captures=("yes",))
     assert await box.stop("t1", 15) is held
@@ -535,8 +548,8 @@ async def test_a_left_run_is_stopped_by_its_tag(code, held):
 @pytest.mark.asyncio
 async def test_a_failed_stop_answers_false():
     class FailingBox(RecordingMachine):
-        async def exec_line(self, line, stdin, env, cwd) -> RunResult:
-            return RunResult(stdout=b"", stderr=None, exit_code=127)
+        async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
+            return RunAnswer(127)
 
     assert await FailingBox(captures=("yes",)).stop("t1", 15) is False
 
@@ -548,7 +561,7 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     class DeadBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
+        ) -> RunAnswer:
             await super().exec_line(line, stdin, env, cwd)
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
@@ -558,9 +571,7 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     )
     box = DeadBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(
-        machine_runtime(box).run_line(None, [], [], ctx)
-    )
+    task = asyncio.create_task(_line(box, ctx))
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()
@@ -569,13 +580,16 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     assert len(box.execs) == 2
 
 
+# An answer the transport got whole streams through the run's stdout like
+# any other, so a cap that stops reading stops the run before it settles,
+# 141 as SIGPIPE leaves a program.
 @pytest.mark.asyncio
 async def test_line_output_caps_truncate_with_notice():
     class ChattyBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
-            return RunResult(stdout=b"a\nb\nc\n", stderr=None, exit_code=0)
+        ) -> RunAnswer:
+            return RunAnswer(0, b"a\nb\nc\n")
 
     guards = {"python3": Limit(max_lines=2)}
     box = ChattyBox(captures=("python3",))
@@ -586,8 +600,8 @@ async def test_line_output_caps_truncate_with_notice():
     )
     try:
         io = await ws.shell("python3 train.py")
-        assert io.exit_code == 0
         assert await materialize(io.stdout) == b"a\nb\n"
+        assert io.exit_code == 141
         assert b"truncated at limit" in await materialize(io.stderr)
     finally:
         await ws.close()
@@ -631,13 +645,13 @@ class FaketimeBox(RecordingMachine):
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    ) -> RunAnswer:
         if line != faketime_probe():
             return await super().exec_line(line, stdin, env, cwd)
         self.execs.append((line, stdin, cwd))
         self.exec_envs.append(dict(env))
         found = f"{self.holds}\n" if self.holds else ""
-        return RunResult(stdout=found.encode(), stderr=None, exit_code=0)
+        return RunAnswer(0, found.encode())
 
 
 @pytest.mark.asyncio
@@ -687,17 +701,13 @@ class CountedBox(RecordingMachine):
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    ) -> RunAnswer:
         if line != faketime_probe():
             return await super().exec_line(line, stdin, env, cwd)
         self.probes += 1
         await asyncio.sleep(0.01)
         exit_code = self.answers.pop(0) if self.answers else 0
-        return RunResult(
-            stdout=b"/usr/lib/faketime/libfaketime.so.1\n",
-            stderr=None,
-            exit_code=exit_code,
-        )
+        return RunAnswer(exit_code, b"/usr/lib/faketime/libfaketime.so.1\n")
 
 
 @pytest.mark.asyncio
@@ -866,9 +876,7 @@ async def test_a_stopped_run_ends_as_stopped_whatever_its_program_said():
     ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (
-            await machine_runtime(box).run_line(None, [], [], ctx)
-        ).exit_code
+        return (await _line(box, ctx)).exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="train", cwd=ctx.cwd, run=run
@@ -881,27 +889,24 @@ async def test_a_stopped_run_ends_as_stopped_whatever_its_program_said():
 
 
 class PidLineBox(RecordingMachine):
-    joined = False
-
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        result = await super()._exec_argv(
-            argv, stdin, env, cwd, output, errors
-        )
-        if self.joined:
-            return RunResult(
-                stdout=RUN_PID_MARK + b"812 99\n" + result.stdout,
-                stderr=None,
-                exit_code=0,
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
             )
+        if self.joins_streams:
+            mark = run_exit_mark(argv[RUN_PROGRAM_AT - 2])
+            await output(RUN_PID_MARK + b"812 99\nran:train" + mark + b"0\n")
+            return RunResult(exit_code=0)
         await errors(RUN_PID_MARK + b"812 99\n")
         await output(RUN_PID_MARK + b"7 1\nmine\n")
-        return RunResult(stdout=b"", stderr=b"", exit_code=0)
+        return RunResult(exit_code=0)
 
 
 # The wrapper's pid line comes on stderr, so a program's own stdout that
-# starts like it is left whole; an exec that returns its streams joined
-# brings the line at the start of stdout. Either way the first line gives
-# the program's pid.
+# starts like it is left whole; an exec that hands its streams back joined
+# (``joins_streams``) brings the line at the start of stdout. Either way
+# the first line gives the program's pid.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("joined", "stdout"),
@@ -909,7 +914,7 @@ class PidLineBox(RecordingMachine):
 )
 async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
     box = PidLineBox(captures=("train",))
-    box.joined = joined
+    box.joins_streams = joined
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
     try:
         io = await ws.shell("train")
@@ -920,6 +925,44 @@ async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
         assert program.machine_instance == "box"
     finally:
         await ws.close()
+
+
+class JoinedBox(RecordingMachine):
+    """Hands a run's streams back joined, once, at its end (Daytona)."""
+
+    joins_streams = True
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if not is_run(argv):
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+        mark = run_exit_mark(argv[RUN_PROGRAM_AT - 2])
+        await output(RUN_PID_MARK + b"812 99\nout\nerr\n" + mark + b"3\n")
+        return RunResult(exit_code=3)
+
+
+# A transport whose answer joins stderr into stdout writes it once through
+# the run's stdout; the wrapper's pid and exit lines come off it there,
+# and the status is the program's.
+@pytest.mark.asyncio
+async def test_a_joined_answer_comes_without_the_runs_own_lines():
+    box = JoinedBox(captures=("train",))
+    ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
+    ran = await _line(box, ctx)
+    assert ran == RunAnswer(3, b"out\nerr\n", b"")
+
+
+# A transport that keeps its streams apart leaves stdout as the program
+# wrote it, the wrapper's lines included.
+@pytest.mark.asyncio
+async def test_a_stdout_kept_apart_is_left_as_the_program_wrote_it():
+    box = JoinedBox(captures=("train",))
+    box.joins_streams = False
+    ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
+    ran = await _line(box, ctx)
+    assert ran.exit_code == 3
+    assert ran.stdout.startswith(RUN_PID_MARK + b"812 99\nout\nerr\n")
 
 
 class HungBox(RecordingMachine):

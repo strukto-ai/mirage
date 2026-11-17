@@ -53,7 +53,7 @@ export { LINE_EXECUTOR, PROCESS_EXECUTOR } from './runtime/mixin.ts'
 export type { LineExecutorMixin, ProcessExecutorMixin } from './runtime/mixin.ts'
 export { buildRuntime } from './runtime/table.ts'
 export { ScriptSource } from './runtime/types.ts'
-export type { FilesystemOperation, RunResult } from './runtime/types.ts'
+export type { FilesystemOperation, OutputFn, RunResult } from './runtime/types.ts'
 export { JobConsole } from './shell/console/index.ts'
 export {
   ContentType,

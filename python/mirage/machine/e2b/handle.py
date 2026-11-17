@@ -44,7 +44,7 @@ from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.types import MachinePipe
 from mirage.runtime.constants import sdk_install_hint
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         if (hint := self._gone(exc)) is None:
             return None
         self._disconnected()
-        return ConnectionLostError(hint, b"", f"e2b: {hint}\n".encode())
+        return ConnectionLostError(hint)
 
     async def _exec_argv(
         self,
@@ -236,18 +236,16 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         out, err = LineDecoder(), LineDecoder()
 
         async def emit(text: str) -> None:
-            assert output is not None
             if data := out.feed(text):
                 await output(data)
 
         async def emit_errors(text: str) -> None:
-            assert errors is not None
             if data := err.feed(text):
                 await errors(data)
 
@@ -256,13 +254,14 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 encode_output(wrap_line(argv, env, cwd)),
                 background=True,
                 stdin=stdin is not None,
-                on_stdout=emit if output is not None else None,
-                on_stderr=emit_errors if errors is not None else None,
+                on_stdout=emit,
+                on_stderr=emit_errors,
                 timeout=0,
             )
         except Exception as exc:
             if (lost := self._lost(exc)) is None:
                 raise
+            await errors(f"e2b: {lost}\n".encode())
             raise lost from exc
         exited = asyncio.Event()
 
@@ -315,6 +314,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             result = exiting.result()
         except BaseException as exc:
             if (lost := self._lost(exc)) is not None:
+                await errors(f"e2b: {lost}\n".encode())
                 raise lost from exc
             # A tagged command a kill stopped with a gentler signal is left
             # to the caller's stop, which sends it that signal first.
@@ -337,19 +337,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     task.cancel()
             await asyncio.gather(feeding, exiting, return_exceptions=True)
             await handle.disconnect()
-        if output is not None and (data := out.flush()):
+        if data := out.flush():
             await output(data)
-        if errors is not None and (data := err.flush()):
+        if data := err.flush():
             await errors(data)
-        return RunResult(
-            stdout=decode_output(str(result.stdout))
-            if output is None
-            else b"",
-            stderr=decode_output(str(result.stderr))
-            if errors is None
-            else b"",
-            exit_code=int(result.exit_code),
-        )
+        return RunResult(exit_code=int(result.exit_code))
 
     async def exec_line(
         self,
@@ -357,7 +349,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-    ) -> RunResult:
+    ) -> RunAnswer:
         """Execute one shell line, under a ``PROCESS`` tag of its own
         when the caller gave none: a cancel kills only the encoding shell,
         so a cancelled line is stopped by that tag.

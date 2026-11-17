@@ -48,7 +48,8 @@ from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.types import MachinePipe
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.binding import answer_of
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +65,25 @@ def stopped(exc: BaseException) -> ConnectionLostError:
     # shortcut: any exec failure counts as the container having stopped,
     # which Cloudflare's "not running" does; other failures are untested.
     logger.debug("cloudflare_container: the container stopped: %s", exc)
-    return ConnectionLostError(
-        STOPPED, b"", f"cloudflare_container: {STOPPED}\n".encode()
-    )
+    return ConnectionLostError(STOPPED)
 
 
-async def drain(reader: asyncio.StreamReader, sink: OutputFn | None) -> bytes:
-    """Read ``reader`` to its end: into ``sink``, or into the bytes
-    returned when there is none. A read that fails is the connection
-    lost.
+async def drain(reader: asyncio.StreamReader, sink: OutputFn) -> None:
+    """Read ``reader`` to its end into ``sink``. A read that fails is the
+    connection lost.
 
     Args:
         reader (asyncio.StreamReader): one of the process's outputs.
-        sink (OutputFn | None): receives each chunk; None keeps them for
-            the result.
+        sink (OutputFn): receives each chunk.
     """
-    kept: list[bytes] = []
     while True:
         try:
             chunk = await reader.read(READ_BYTES)
         except Exception as exc:
             raise stopped(exc) from exc
         if not chunk:
-            return b"".join(kept)
-        if sink is None:
-            kept.append(chunk)
-        else:
-            await sink(chunk)
+            return
+        await sink(chunk)
 
 
 class PipeInput:
@@ -203,13 +196,15 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
             async with asyncio.timeout(START_WAIT_SECONDS):
                 while True:
                     try:
-                        await self._exec(
-                            ("/bin/sh", "-c", CHECK_LINE),
-                            None,
-                            dict(self.config.env),
-                            "/",
-                            None,
-                            None,
+                        await answer_of(
+                            lambda output, errors: self._exec(
+                                ("/bin/sh", "-c", CHECK_LINE),
+                                None,
+                                dict(self.config.env),
+                                "/",
+                                output,
+                                errors,
+                            )
                         )
                         # Only now: a container still starting refuses its
                         # calls, monitor() among them.
@@ -254,8 +249,8 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run one argv in the container. What the container itself
         fails, its exec, its streams or its exit, is the connection lost
@@ -266,8 +261,8 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
             stdin (ByteSource | None): the input; None for none.
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
         """
         if self._container is None:
             raise RuntimeError(NO_CONTAINER)
@@ -296,12 +291,12 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
                 raise stopped(exc) from exc
 
         async def finish() -> RunResult:
-            out, err, code = await asyncio.gather(
+            _, _, code = await asyncio.gather(
                 drain(proc.stdout, output),
                 drain(proc.stderr, errors),
                 status(),
             )
-            return RunResult(stdout=out, stderr=err, exit_code=code)
+            return RunResult(exit_code=code)
 
         # A program may close its input early (head): its exit status ends
         # the line, not a write it refused.
@@ -369,13 +364,14 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         try:
             return await self._exec(argv, stdin, env, cwd, output, errors)
-        except ConnectionLostError:
+        except ConnectionLostError as exc:
             self._disconnected()
+            await errors(f"cloudflare_container: {exc}\n".encode())
             raise
 
     async def exec_line(
@@ -384,7 +380,7 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-    ) -> RunResult:
+    ) -> RunAnswer:
         """Execute one shell line, under a ``PROCESS`` tag of its own
         when the caller gave none: a cancel kills only the shell exec
         started, so a cancelled line is stopped by that tag.

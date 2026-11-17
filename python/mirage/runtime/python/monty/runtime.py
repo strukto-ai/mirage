@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -107,8 +106,8 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         engine: MontyExecution,
         program: Program,
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run one program, reporting any switch this engine cannot honor.
 
@@ -123,19 +122,18 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             engine (MontyExecution): the install's worker pool.
             program (Program): the source and argv to run.
             ctx (Context): the run's context.
-            output (OutputFn | None): receives stdout as it is printed.
-            errors (OutputFn | None): receives stderr as it is printed.
+            output (OutputFn): receives stdout as it is printed.
+            errors (OutputFn): receives stderr as it is printed.
         """
         notice = unhonored_notice(ctx.flags, self.name)
-        if notice and errors is not None:
+        if notice:
             await errors(notice)
-            notice = b""
         # A nested call must not queue behind a parent holding this pool.
         nested = ctx.processes is not None and ctx.processes.depth > 0
         execution = MontyExecution(self._max_memory) if nested else engine
         files = RuntimeFiles.of(ctx, self._binding)
         try:
-            result = await execution.run(
+            return await execution.run(
                 program,
                 ctx.cwd,
                 MontyFs(files, ctx.env or {}),
@@ -150,6 +148,3 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         finally:
             if execution is not engine:
                 await execution.close()
-        if not notice:
-            return result
-        return replace(result, stderr=notice + (result.stderr or b""))

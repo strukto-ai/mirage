@@ -116,23 +116,37 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
     async def close_engine(self, engine: WasmExecution) -> None:
         await engine.close()
 
-    async def version(self, env: dict[str, str]) -> RunResult:
+    async def version(
+        self, env: dict[str, str], output: OutputFn, errors: OutputFn
+    ) -> RunResult:
         engine = await self.engine()
-        stdout, stderr, exit_code = await engine.run(
-            ["qjs", "--version"], None, list(env.items()), WasmView()
+        said = bytearray()
+
+        async def keep(data: bytes) -> None:
+            said.extend(data)
+
+        exit_code = await engine.run(
+            ["qjs", "--version"],
+            None,
+            list(env.items()),
+            WasmView(),
+            keep,
+            errors,
         )
         if exit_code == 0:
-            version = stdout.decode().strip()
-            stdout = f"JavaScript (quickjs-ng {version})\n".encode()
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+            version = said.decode().strip()
+            await output(f"JavaScript (quickjs-ng {version})\n".encode())
+        elif said:
+            await output(bytes(said))
+        return RunResult(exit_code=exit_code)
 
     async def interpret(
         self,
         engine: WasmExecution,
         program: Program,
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
         # ES-module mode for .mjs sources, and --script names classic mode
@@ -181,7 +195,7 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
             source = cwd_preamble(cwd) + source
         argv += ["-e", source, "--", *named, *program.args]
         fs = WasmView(files=RuntimeFiles.of(ctx, self._binding))
-        stdout, stderr, exit_code = await engine.run(
+        exit_code = await engine.run(
             argv=argv,
             stdin=program.stdin,
             env=list((ctx.env or {}).items()),
@@ -190,4 +204,4 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
             errors=errors,
             max_memory=memory_room(),
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+        return RunResult(exit_code=exit_code)

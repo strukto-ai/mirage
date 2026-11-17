@@ -20,7 +20,7 @@ from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import E
 from mirage.runtime.python.execution import PAYLOAD_ARGV0, STDIN_ARGV0
 from mirage.runtime.source import Argv0Rules
-from mirage.runtime.types import Language, Program, RunResult
+from mirage.runtime.types import Language, OutputFn, Program, RunResult
 
 # CPython's own four answers, pinned on 3.12.13/3.13.7.
 CPYTHON_ARGV0 = Argv0Rules(
@@ -94,10 +94,12 @@ class PythonRuntime(LanguageRuntime[E]):
     def module_code(self, name: str, label: str) -> str | None:
         return module_source(name, label) if self.runs_modules else None
 
-    async def version(self, env: dict[str, str]) -> RunResult:
+    async def version(
+        self, env: dict[str, str], output: OutputFn, errors: OutputFn
+    ) -> RunResult:
         # Process runtimes must supply a probe that cannot run startup hooks.
         if self.reach != "workspace":
-            return await super().version(env)
+            return await super().version(env, output, errors)
         return await self.interpret(
             await self.engine(),
             Program(
@@ -108,4 +110,6 @@ class PythonRuntime(LanguageRuntime[E]):
                 )
             ),
             Context(env=env),
+            output,
+            errors,
         )

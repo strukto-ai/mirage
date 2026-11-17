@@ -113,35 +113,36 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.ssh(wrapLine(argv, env, cwd), stdin, output, signal, isRun(argv), errors)
+    return this.ssh(wrapLine(argv, env, cwd), stdin, output, errors, signal, isRun(argv))
   }
 
   /**
    * One exec channel on the shared connection; the seam tests override.
    * Input is written as it is read, waiting out the channel's window, and
    * ended at its end, or at once when nothing is piped: a finite command
-   * waits for that EOF. Output goes to `output` as it arrives when one is
-   * given, the channel paused until each chunk is taken. An abort signals
+   * waits for that EOF. Output goes to `output` as it arrives, the channel
+   * paused until each chunk is taken. An abort signals
    * the command and closes its channel, so a line abandoned to a timeout
    * neither waits for the remote side nor leaves the channel open, which
    * sshd counts against its sessions per connection; any other failure
    * closes the channel.
    *
+   * @param output receives stdout as it arrives.
+   * @param errors receives stderr as it arrives.
    * @param tagged whether the command is a program's run, so a
    *   cancelled run's stop ends it.
-   * @param errors receives stderr as it arrives, as `output` does stdout.
    */
   protected ssh(
     command: string,
     stdin: ByteSource | null,
-    output: OutputFn | null = null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
     tagged = false,
-    errors: OutputFn | null = null,
   ): Promise<RunResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
@@ -172,26 +173,20 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
           return
         }
         signal?.addEventListener('abort', abort, { once: true })
-        const out: Buffer[] = []
-        const errs: Buffer[] = []
         let code: number | null = null
         const pending = [Promise.resolve(), Promise.resolve()]
         // A channel's chunks go to its sink as they arrive, the channel
-        // paused until each is taken, or are kept for the result.
-        const deliver = (source: Readable, sink: OutputFn | null, kept: Buffer[], at: number) => {
+        // paused until each is taken.
+        const deliver = (source: Readable, sink: OutputFn, at: number) => {
           source.on('data', (chunk: Buffer) => {
-            if (sink === null) {
-              kept.push(chunk)
-              return
-            }
             source.pause()
             pending[at] = sink(chunk).then(() => {
               if (!state.done) source.resume()
             }, fail)
           })
         }
-        deliver(stream, output, out, 0)
-        deliver(stream.stderr, errors, errs, 1)
+        deliver(stream, output, 0)
+        deliver(stream.stderr, errors, 1)
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
             c ??
@@ -205,22 +200,11 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)
-            const stderr = Buffer.concat(errs)
             if (code === null) {
-              rejectFn(
-                new ConnectionLostError(
-                  'the channel closed with no exit status',
-                  new Uint8Array(Buffer.concat(out)),
-                  stderr.length > 0 ? new Uint8Array(stderr) : null,
-                ),
-              )
+              rejectFn(new ConnectionLostError('the channel closed with no exit status'))
               return
             }
-            resolveFn({
-              stdout: new Uint8Array(Buffer.concat(out)),
-              stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
-              exitCode: code,
-            })
+            resolveFn({ exitCode: code })
           })
         })
         stream.on('error', fail)

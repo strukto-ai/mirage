@@ -31,7 +31,7 @@ import { SessionProfile } from '../../policy/profile.ts'
 import { DryRun } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
-import { type RunResult, ScriptSource } from '../../runtime/types.ts'
+import { type OutputFn, type RunResult, ScriptSource } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { ConsoleStore } from '../../shell/console/index.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
@@ -180,10 +180,17 @@ class LineBox extends Runtime implements LineExecutorMixin {
     super({ captures: ['@line'] })
   }
 
-  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     const line = ctx.flags.c as string
     this.lines.push(line)
-    return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
+    await output(ENC.encode(`box:${line}`))
+    return { exitCode: 0 }
   }
 }
 

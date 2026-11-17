@@ -22,10 +22,10 @@ import mirage.runtime.python.monty.fs as monty_fs
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunAnswer
 from mirage.types import ContentType, FileStat, FileType
 
 
@@ -145,8 +145,12 @@ class FakeDispatch:
         raise ValueError(f"unexpected op {op}")
 
 
-async def _run(runtime: MontyRuntime, code: str) -> RunResult:
-    return await runtime.execute([], [], Context(flags={"c": code}))
+async def _run(runtime: MontyRuntime, code: str) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [], [], Context(flags={"c": code}), output=output, errors=errors
+        )
+    )
 
 
 def test_monty_host_filesystem_invisible():

@@ -56,7 +56,7 @@ from mirage.machine.resources import (
     parse_resources,
 )
 from mirage.machine.types import MachinePipe
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, SIGNALS
 from mirage.utils.clock import bound_system_clock
 
@@ -121,12 +121,13 @@ async def run_program(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     children: Children | None = None,
-    output: OutputFn | None = None,
-    errors: OutputFn | None = None,
+    output: OutputFn,
+    errors: OutputFn,
     direct: bool = False,
     connection: bool = False,
 ) -> RunResult:
-    """One process run to its end: its output and its exit status.
+    """One process run to its end: its output handed to the sinks as it
+    arrives, and its exit status.
 
     The child leads a process group of its own, and a cancelled call
     kills the whole group and closes our ends of the pipes before it
@@ -152,10 +153,8 @@ async def run_program(
             inherits this process's.
         children (Children | None): where the child is kept while it
             runs, for ``close_children``.
-        output (OutputFn | None): receives stdout as it arrives instead
-            of returning it.
-        errors (OutputFn | None): receives stderr as it arrives instead
-            of returning it.
+        output (OutputFn): receives stdout as it arrives.
+        errors (OutputFn): receives stderr as it arrives.
         direct (bool): the child is the program itself, not a client
             that runs it elsewhere and exits on its own terms (``docker
             exec`` answers a TERM with 0 and leaves the program running).
@@ -208,10 +207,7 @@ async def run_program(
 
     sinking = 0
 
-    def watched(sink: OutputFn | None) -> OutputFn | None:
-        if sink is None:
-            return None
-
+    def watched(sink: OutputFn) -> OutputFn:
         async def write(chunk: bytes) -> None:
             nonlocal sinking
             sinking += 1
@@ -261,9 +257,7 @@ async def run_program(
     reading = asyncio.create_task(read_into(process.stdout, watched(output)))
     erring = asyncio.create_task(read_into(process.stderr, watched(errors)))
     try:
-        stdout, stderr, _, _ = await asyncio.gather(
-            reading, erring, feeding, waiting
-        )
+        await asyncio.gather(reading, erring, feeding, waiting)
     except BaseException:
         signum = stop_signal(runner)
         try:
@@ -304,16 +298,12 @@ async def run_program(
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
     if connection and code < 0:
-        raise ConnectionLostError(
-            f"{executable} ended on signal {-code}", stdout, stderr or None
-        )
+        raise ConnectionLostError(f"{executable} ended on signal {-code}")
     killed_by = mirage_signal(-code) if code < 0 else None
     if direct and runner is not None and killed_by is not None:
         runner.program_signaled(killed_by)
     return RunResult(
-        stdout=stdout,
-        stderr=stderr or None,
-        exit_code=128 + killed_by if killed_by is not None else code,
+        exit_code=128 + killed_by if killed_by is not None else code
     )
 
 
@@ -649,24 +639,16 @@ async def stop_host_run(
     return True
 
 
-async def read_into(
-    stream: asyncio.StreamReader, sink: OutputFn | None
-) -> bytes:
+async def read_into(stream: asyncio.StreamReader, sink: OutputFn) -> None:
     """Read a program's output to its end, handing each chunk to
-    ``sink`` as it arrives, or keeping it all for the caller without one.
+    ``sink`` as it arrives.
 
     Args:
         stream (asyncio.StreamReader): the program's stdout or stderr.
-        sink (OutputFn | None): where each chunk goes; None returns the
-            whole output.
+        sink (OutputFn): where each chunk goes.
     """
-    parts: list[bytes] = []
     while chunk := await stream.read(STREAM_LIMIT):
-        if sink is None:
-            parts.append(chunk)
-        else:
-            await sink(chunk)
-    return b"".join(parts)
+        await sink(chunk)
 
 
 class _ExitWatch(asyncio.subprocess.SubprocessStreamProtocol):
@@ -832,12 +814,12 @@ def _served(path: str) -> bool:
 
 
 def reported_state(
-    result: RunResult, command: str, path: Sequence[str | int]
+    result: RunAnswer, command: str, path: Sequence[str | int]
 ) -> str:
     """The state a machine's status command printed as JSON, at ``path``.
 
     Args:
-        result (RunResult): the status command's run.
+        result (RunAnswer): the status command's answer.
         command (str): the command, for the message (``docker inspect``).
         path (Sequence[str | int]): the keys and indexes down to the state.
 
@@ -845,7 +827,7 @@ def reported_state(
         RuntimeError: the command failed, or its JSON holds no state.
     """
     if result.exit_code != 0:
-        said = (result.stderr or b"").decode().strip()
+        said = result.stderr.decode().strip()
         raise RuntimeError(f"{command} failed: {said}")
     try:
         state = json.loads(result.stdout)
@@ -896,7 +878,9 @@ def exec_args(
     return [*args, *argv]
 
 
-async def cwd_refusal(name: str, cwd: str) -> RunResult | None:
+async def cwd_refusal(
+    name: str, cwd: str, errors: OutputFn
+) -> RunResult | None:
     """Refuse a host program whose working directory this host lacks.
 
     The session cwd is a workspace path; running elsewhere instead would
@@ -905,16 +889,14 @@ async def cwd_refusal(name: str, cwd: str) -> RunResult | None:
     Args:
         name (str): the program, for the message.
         cwd (str): the session's working directory.
+        errors (OutputFn): where the refusal is said.
     """
     if await aiofiles.os.path.isdir(cwd):
         return None
-    return RunResult(
-        stdout=b"",
-        stderr=(
-            f"{name}: the working directory {cwd} is not on this host\n"
-        ).encode(),
-        exit_code=CANNOT_EXECUTE_STATUS,
+    await errors(
+        f"{name}: the working directory {cwd} is not on this host\n".encode()
     )
+    return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
 
 
 def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:

@@ -40,7 +40,12 @@ from mirage.io import IOResult
 from mirage.mount.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Policy
-from mirage.runtime.binding import WorkspaceBinding, capture_binding
+from mirage.runtime.binding import (
+    WorkspaceBinding,
+    answer_of,
+    capture_binding,
+    refused_run,
+)
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.js import QuickJsRuntime
@@ -49,6 +54,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.resolver import PrefixResolver
+from mirage.runtime.types import RunAnswer
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session import SessionState
 
@@ -68,23 +74,56 @@ class Probe(LanguageRuntime):
         super().bind(binding)
         self.bound = binding
 
-    async def interpret(self, engine, program, ctx):
+    async def interpret(self, engine, program, ctx, output, errors):
         self.contexts.append(ctx)
-        return RunResult(
-            stdout=program.code.encode(), stderr=None, exit_code=0
-        )
+        await output(program.code.encode())
+        return RunResult(exit_code=0)
 
 
 class ShellProbe(Runtime, LineExecutorMixin):
     name = "shell-probe"
 
-    async def run_line(self, engine, paths, texts, ctx):
-        return RunResult(
-            stdout=(ctx.flags["c"] + ":" + ctx.cwd.virtual).encode()
-            + (ctx.stdin or b""),
-            stderr=None,
-            exit_code=0,
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
+        await output(
+            (ctx.flags["c"] + ":" + ctx.cwd.virtual).encode()
+            + (ctx.stdin or b"")
         )
+        return RunResult(exit_code=0)
+
+
+async def answered(runtime, texts, ctx, kind="code"):
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [], texts, ctx, kind=kind, output=output, errors=errors
+        )
+    )
+
+
+async def _wrote_both(output, errors):
+    await output(b"one ")
+    await errors(b"warn\n")
+    await output(b"two\n")
+    return RunResult(exit_code=3)
+
+
+async def _silent(output, errors):
+    return RunResult(exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_answer_of_keeps_what_a_run_wrote_whole():
+    assert await answer_of(_wrote_both) == RunAnswer(
+        3, b"one two\n", b"warn\n"
+    )
+    assert await answer_of(_silent) == RunAnswer(0)
+
+
+@pytest.mark.asyncio
+async def test_refused_run_writes_the_refusal_through_errors():
+    answer = await answer_of(
+        lambda output, errors: refused_run("probe", "why", errors)
+    )
+    assert answer == RunAnswer(126, b"", b"probe: Permission denied\n")
 
 
 @pytest.mark.asyncio
@@ -98,8 +137,8 @@ async def test_execute_capabilities_and_refusals():
     assert isinstance(native, LineExecutorMixin)
     assert not isinstance(native, ProcessExecutorMixin)
     assert language.filesystem == native.filesystem == ()
-    assert (await language.execute([], [], code)).stdout == b"hello"
-    line = await native.execute([], [], shell, kind="line")
+    assert (await answered(language, [], code)).stdout == b"hello"
+    line = await answered(native, [], shell, kind="line")
     assert line.stdout == b"echo hello:/work!"
     for runtime, texts, ctx, kind in (
         (language, [], shell, "line"),
@@ -107,7 +146,7 @@ async def test_execute_capabilities_and_refusals():
         (native, ["echo", "hello"], Context(cwd=work), "process"),
     ):
         with pytest.raises(UnsupportedExecutionError):
-            await runtime.execute([], texts, ctx, kind=kind)
+            await answered(runtime, texts, ctx, kind=kind)
 
 
 @pytest.mark.asyncio
@@ -199,7 +238,7 @@ async def test_binding_prevents_cross_workspace_reuse():
         with Workspace({}) as second:
             assert first.engines()[0] is runtime
             assert (
-                await runtime.execute([], [], Context(flags={"c": "ok"}))
+                await answered(runtime, [], Context(flags={"c": "ok"}))
             ).stdout == b"ok"
             with pytest.raises(ValueError, match="another workspace"):
                 second.add_machine(runtime.name, runtime)
@@ -283,7 +322,7 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
                 if runtime.language == "js"
                 else "print(open('/data/link').read(), end='')"
             )
-            return await runtime.execute([], [], Context(flags={"c": code}))
+            return await answered(runtime, [], Context(flags={"c": code}))
 
         results = await asyncio.gather(execute(one), execute(two))
         for result in results:

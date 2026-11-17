@@ -104,17 +104,13 @@ class BoxdMachine(MachineHandle):
             "machine", self.config.machine_id, "deleted", MACHINE_GONE
         )
 
-    def _lost(
-        self, exc: BaseException, stdout: bytes, stderr: bytes
-    ) -> ConnectionLostError | None:
+    def _lost(self, exc: BaseException) -> ConnectionLostError | None:
         """The lost connection ``exc`` is when the machine went or boxd
         could not be reached, which also lets the next line connect again;
-        None otherwise.
+        None otherwise. Its message is the hint the line says.
 
         Args:
             exc (BaseException): what an SDK call raised.
-            stdout (bytes): the output the line kept before the drop.
-            stderr (bytes): the errors the line kept before the drop.
         """
         hint = self._gone(exc)
         if hint is None and isinstance(
@@ -124,9 +120,7 @@ class BoxdMachine(MachineHandle):
         if hint is None:
             return None
         self._connected = False
-        return ConnectionLostError(
-            hint, stdout, stderr + f"boxd: {hint}\n".encode()
-        )
+        return ConnectionLostError(hint)
 
     async def _exec_argv(
         self,
@@ -134,28 +128,19 @@ class BoxdMachine(MachineHandle):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         stream = self._client.machines.stream_exec(
             self.config.machine_id,
             command=wrap_line(argv, env, cwd),
             close_stdin=stdin is None,
         )
-        out, err = bytearray(), bytearray()
         exited = asyncio.Event()
 
         async def read() -> int:
             async for chunk in stream.iter_chunks():
-                if chunk.is_stderr:
-                    if errors is None:
-                        err.extend(chunk.data)
-                    else:
-                        await errors(chunk.data)
-                elif output is None:
-                    out.extend(chunk.data)
-                else:
-                    await output(chunk.data)
+                await (errors if chunk.is_stderr else output)(chunk.data)
             exited.set()
             # As boxd's TypeScript SDK reads a stream that ended with no
             # chunk at all.
@@ -197,7 +182,7 @@ class BoxdMachine(MachineHandle):
             if feeding is not None:
                 feeding.cancel()
                 await asyncio.gather(feeding, return_exceptions=True)
-            lost = self._lost(exc, bytes(out), bytes(err))
+            lost = self._lost(exc)
             # Ending the stream, or the read of it, ends the command with
             # TERM; a run a kill stopped with a gentler signal gets that
             # signal first.
@@ -209,6 +194,7 @@ class BoxdMachine(MachineHandle):
             await asyncio.gather(reading, return_exceptions=True)
             await stream.close()
             if lost is not None:
+                await errors(f"boxd: {lost}\n".encode())
                 raise lost from exc
             if tag is not None and not isinstance(exc, asyncio.CancelledError):
                 await self.stop(tag, 15)
@@ -217,11 +203,7 @@ class BoxdMachine(MachineHandle):
             feeding.cancel()
             await asyncio.gather(feeding, return_exceptions=True)
         await stream.close()
-        return RunResult(
-            stdout=bytes(out) if output is None else b"",
-            stderr=bytes(err) if errors is None else b"",
-            exit_code=exit_code,
-        )
+        return RunResult(exit_code=exit_code)
 
     async def close(self) -> None:
         """Release the SDK client; the machine itself is the user's."""

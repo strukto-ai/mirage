@@ -56,7 +56,8 @@ class _Box(MachineHandle):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         self.lines.append(argv[-1])
         said = f"{CHECK_MARK}\n".encode() if self.ran else b""
-        return RunResult(stdout=said, stderr=None, exit_code=self.code or 0)
+        await output(said)
+        return RunResult(exit_code=self.code or 0)
 
 
 @pytest.mark.asyncio
@@ -115,11 +116,11 @@ class _Sleeper(MachineHandle):
             ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "train 2"),
         ]
-        if self.reports and errors is not None:
+        if self.reports:
             await errors(RUN_PID_MARK + f"{self.base} 100\n".encode())
         await self.ended.wait()
         self.rows = []
-        return RunResult(stdout=b"", stderr=None, exit_code=self.code)
+        return RunResult(exit_code=self.code)
 
     async def status(self, workspace):
         return [r for r in self.rows if r.tag.startswith(f"{workspace}:")]
@@ -384,7 +385,7 @@ class _Leaver(_Sleeper):
         self.rows = [
             MachineProcess(_tag(argv), self.base + 1, 1, 101.0, "daemon")
         ]
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -625,7 +626,7 @@ class _Quitter(_Sleeper):
         self.rows = [MachineProcess(_tag(argv), self.base, 1, 100.0, "q")]
         await self.ended.wait()
         self.rows = []
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     async def signal(self, target, signum):
         self.sent.append((target, signum))
@@ -836,11 +837,10 @@ class _Shared(_Sleeper):
             ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "child"),
         ]
-        if errors is not None:
-            await errors(RUN_PID_MARK + f"{self.base} 100\n".encode())
+        await errors(RUN_PID_MARK + f"{self.base} 100\n".encode())
         await self.ended.wait()
         self.rows_of.pop(self.name, None)
-        return RunResult(stdout=b"", stderr=None, exit_code=143)
+        return RunResult(exit_code=143)
 
     async def status(self, workspace):
         return [

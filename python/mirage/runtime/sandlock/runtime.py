@@ -90,8 +90,8 @@ class SandlockRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         line = ctx.flags.get("c")
         return await self._run_process(
@@ -107,8 +107,8 @@ class SandlockRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         return await self._run_process(texts, ctx, output, errors)
 
@@ -116,10 +116,10 @@ class SandlockRuntime(
         self,
         argv: list[str],
         ctx: Context,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
-        refusal = await cwd_refusal(argv[0], ctx.cwd.virtual)
+        refusal = await cwd_refusal(argv[0], ctx.cwd.virtual, errors)
         if refusal is not None:
             return refusal
         # Found from this process's directory and made absolute: the

@@ -19,9 +19,20 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import type { Context } from '../../../commands/config.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { answerOf } from '../../binding.ts'
+import type { RunAnswer } from '../../types.ts'
 
-function execute(rt: QuickJsRuntime, code: string, extra: Partial<Context> = {}) {
-  return rt.execute([], [], context({ flags: { c: code }, ...extra }))
+function execute(
+  rt: QuickJsRuntime,
+  code: string,
+  extra: Partial<Context> = {},
+): Promise<RunAnswer> {
+  return answered(rt, context({ flags: { c: code }, ...extra }))
+}
+
+/** One run of `rt`, its answer kept whole. */
+function answered(rt: QuickJsRuntime, ctx: Context): Promise<RunAnswer> {
+  return answerOf((output, errors) => rt.execute([], [], ctx, { output, errors }))
 }
 
 describe('QuickJS cwd', () => {
@@ -49,7 +60,7 @@ describe('QuickJS cwd', () => {
       })
       expect(bad.exitCode).toBe(1)
       expect(dec.decode(bad.stdout)).toBe('')
-      expect(dec.decode(bad.stderr ?? new Uint8Array())).toContain('cannot change directory')
+      expect(dec.decode(bad.stderr)).toContain('cannot change directory')
       expect(dec.decode((await execute(rt, code)).stdout)).toBe('/\n')
     } finally {
       await ws.close()
@@ -254,7 +265,7 @@ describe('QuickJS compatibility', () => {
       stdin: new TextEncoder().encode('abcdef'),
     })
     expect(new TextDecoder().decode(result.stdout)).toBe(stdout)
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(stderr)
+    expect(new TextDecoder().decode(result.stderr)).toBe(stderr)
     expect(result.exitCode).toBe(exitCode)
   })
 })
@@ -268,7 +279,7 @@ describe('QuickJS output', () => {
       [],
       [],
       context({ flags: { c: 'console.log(1); console.log(2)' }, timeoutSeconds: 0.3005 }),
-      { output: () => new Promise<void>(() => undefined) },
+      { output: () => new Promise<void>(() => undefined), errors: () => Promise.resolve() },
     )
     await expect(run).rejects.toThrow('timed out')
   }, 10_000)
@@ -282,7 +293,7 @@ describe('QuickJS output', () => {
         flags: { c: 'Promise.resolve().then(() => console.log(1))' },
         timeoutSeconds: 0.3005,
       }),
-      { output: () => new Promise<void>(() => undefined) },
+      { output: () => new Promise<void>(() => undefined), errors: () => Promise.resolve() },
     )
     await expect(run).rejects.toThrow('timed out')
   }, 10_000)
@@ -293,11 +304,7 @@ describe('QuickJS output', () => {
     const open: AsyncIterable<Uint8Array> = {
       [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => undefined) }),
     }
-    const result = await rt.execute(
-      [],
-      [],
-      context({ flags: { c: 'console.log(1)' }, stdin: open }),
-    )
+    const result = await answered(rt, context({ flags: { c: 'console.log(1)' }, stdin: open }))
     expect([new TextDecoder().decode(result.stdout), result.exitCode]).toEqual(['1\n', 0])
   }, 10_000)
 
@@ -307,9 +314,8 @@ describe('QuickJS output', () => {
     const open: AsyncIterable<Uint8Array> = {
       [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => undefined) }),
     }
-    const run = rt.execute(
-      [],
-      [],
+    const run = answered(
+      rt,
       context({
         flags: { c: 'console.log(std.in.getline())' },
         stdin: open,

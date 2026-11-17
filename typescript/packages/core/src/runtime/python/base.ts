@@ -15,7 +15,7 @@
 import { PathSpec } from '../../types.ts'
 import { LanguageRuntime } from '../language.ts'
 import type { Argv0Rules } from '../source.ts'
-import type { RunResult, Language } from '../types.ts'
+import type { Language, OutputFn, RunResult } from '../types.ts'
 import type { ConfigFields, RuntimeOptions } from '../config.ts'
 import { PYTHON_COMMANDS } from '../constants.ts'
 import { PAYLOAD_ARGV0, STDIN_ARGV0 } from './execution.ts'
@@ -96,11 +96,14 @@ export abstract class PythonRuntime<E = unknown> extends LanguageRuntime<E> {
 
   override async version(
     env: Record<string, string>,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
     timeoutSeconds?: number,
   ): Promise<RunResult> {
     // Process runtimes must supply a probe that cannot run startup hooks.
-    if (this.reach !== 'workspace') return super.version(env, signal, timeoutSeconds)
+    if (this.reach !== 'workspace')
+      return super.version(env, output, errors, signal, timeoutSeconds)
     return this.interpret(
       await this.engine(),
       {
@@ -116,6 +119,8 @@ export abstract class PythonRuntime<E = unknown> extends LanguageRuntime<E> {
         ...(signal !== undefined ? { signal } : {}),
         ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
       },
+      output,
+      errors,
     )
   }
 

@@ -229,10 +229,11 @@ class EchoBox(Runtime[None], LineExecutorMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
-        return RunResult(
-            stdout=f"box:{ctx.flags['c']}\n".encode(), stderr=None, exit_code=0
-        )
+        await output(f"box:{ctx.flags['c']}\n".encode())
+        return RunResult(exit_code=0)
 
 
 # Registered the way a host registers its own runtime, so a case names
@@ -254,14 +255,13 @@ class ProcessBox(Runtime[None], ProcessExecutorMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
-        return RunResult(
-            stdout=(json.dumps(texts, separators=(",", ":")) + "\n").encode(),
-            stderr=None,
-            exit_code=0,
+        await output(
+            (json.dumps(texts, separators=(",", ":")) + "\n").encode()
         )
+        return RunResult(exit_code=0)
 
 
 RUNTIME_KINDS: dict[str, type[Runtime]] = {

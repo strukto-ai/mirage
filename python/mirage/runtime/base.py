@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import inspect
 import logging
 from abc import ABC
 from collections.abc import Awaitable, Sequence
@@ -178,8 +177,8 @@ class Runtime(ABC, Generic[E]):
         ctx: Context,
         *,
         kind: ExecutionKind = "code",
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run once, as the session the bound workspace captures.
 
@@ -195,9 +194,9 @@ class Runtime(ABC, Generic[E]):
             kind (ExecutionKind): code in the runtime's language, a
                 whole line (``sh -c`` with ``ctx.flags["c"]``), or a
                 process.
-            output (OutputFn | None): where the run writes its output
-                as it comes; None collects it in the result.
-            errors (OutputFn | None): the same for its stderr.
+            output (OutputFn): where the run writes its output as it
+                comes.
+            errors (OutputFn): the same for its stderr.
         """
         release = self.admit()
         try:
@@ -208,9 +207,10 @@ class Runtime(ABC, Generic[E]):
                 and capture.restricted_mounts
                 and not self._serves_session(capture.restricted_mounts)
             ):
-                return refused_run(
+                return await refused_run(
                     self.refusal_name,
                     "runtime cannot enforce this session's file restrictions",
+                    errors,
                 )
             # A process on this machine opens its connections around the
             # gateway, so a workspace whose network is limited, or whose
@@ -219,9 +219,10 @@ class Runtime(ABC, Generic[E]):
                 egress.rule is not None or egress.hooked
                 for egress in live_egress()
             ):
-                return refused_run(
+                return await refused_run(
                     self.refusal_name,
                     "runtime cannot enforce this workspace's network",
+                    errors,
                 )
             engine = await self.engine()
             if capture is None:
@@ -248,6 +249,7 @@ class Runtime(ABC, Generic[E]):
                     kind,
                     list(texts),
                     run_ctx,
+                    errors,
                     lambda run_ctx: self._run(
                         kind,
                         engine,
@@ -268,6 +270,7 @@ class Runtime(ABC, Generic[E]):
         kind: ExecutionKind,
         texts: list[str],
         ctx: Context,
+        errors: OutputFn,
         run: Callable[[Context], Awaitable[RunResult]],
     ) -> RunResult:
         """Run a program as a process of its own, as bash forks one: the
@@ -292,6 +295,7 @@ class Runtime(ABC, Generic[E]):
             kind (ExecutionKind): what is asked, which names the program.
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
+            errors (OutputFn): where a fork the table refuses says so.
             run (Callable[[Context], Awaitable[RunResult]]): the program,
                 to its end, over the context it runs with.
         """
@@ -397,9 +401,8 @@ class Runtime(ABC, Generic[E]):
                 traits=current_caller().traits,
             )
         except BlockingIOError:
-            return RunResult(
-                stdout=b"", stderr=FORK_FAILED, exit_code=FORK_FAILED_STATUS
-            )
+            await errors(FORK_FAILED)
+            return RunResult(exit_code=FORK_FAILED_STATUS)
         try:
             code = await asyncio.shield(child.task)
         except asyncio.CancelledError:
@@ -407,22 +410,14 @@ class Runtime(ABC, Generic[E]):
             if current is None or not current.cancelling():
                 # The child alone was stopped (``kill`` of its pid); its
                 # shell goes on with its status.
-                return RunResult(
-                    stdout=b"",
-                    stderr=None,
-                    exit_code=128 + (child.signal or 9),
-                )
+                return RunResult(exit_code=128 + (child.signal or 9))
             signal = (
                 shell.signal if shell.signal is not None else shell.interrupted
             )
             child.terminate(signal or 9)
             await child.join()
             raise
-        return (
-            done[0]
-            if done
-            else RunResult(stdout=b"", stderr=None, exit_code=code)
-        )
+        return done[0] if done else RunResult(exit_code=code)
 
     async def _run(
         self,
@@ -431,8 +426,8 @@ class Runtime(ABC, Generic[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Hand the run to the capability its kind asks for.
 
@@ -442,26 +437,16 @@ class Runtime(ABC, Generic[E]):
             paths (list[PathSpec]): the path operands.
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
-            output (OutputFn | None): where the run writes its output.
-            errors (OutputFn | None): where it writes its stderr.
+            output (OutputFn): where the run writes its output.
+            errors (OutputFn): where it writes its stderr.
         """
         if kind == "process" and not texts:
             raise ValueError("process argv must not be empty")
         if kind == "code":
-            return await self.run(
-                engine,
-                paths,
-                texts,
-                ctx,
-                **self._sinks(self.run, output, errors),
-            )
+            return await self.run(engine, paths, texts, ctx, output, errors)
         if kind == "line" and isinstance(self, LineExecutorMixin):
             return await self.run_line(
-                engine,
-                paths,
-                texts,
-                ctx,
-                **self._sinks(self.run_line, output, errors),
+                engine, paths, texts, ctx, output, errors
             )
         if kind == "process" and isinstance(self, ProcessExecutorMixin):
             return await self.run_process(
@@ -477,8 +462,8 @@ class Runtime(ABC, Generic[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run code in this runtime's language; only a language runtime
         has one.
@@ -488,40 +473,12 @@ class Runtime(ABC, Generic[E]):
             paths (list[PathSpec]): the script operand, if any.
             texts (list[str]): the program's argv.
             ctx (Context): the run's context.
-            output (OutputFn | None): receives stdout as it comes; None
-                returns it in the result.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as it comes.
+            errors (OutputFn): the same for stderr.
         """
         raise UnsupportedExecutionError(
             f"{self.name}: code execution is unsupported"
         )
-
-    @staticmethod
-    def _sinks(
-        method: Callable[..., Any],
-        output: OutputFn | None,
-        errors: OutputFn | None,
-    ) -> dict[str, OutputFn | None]:
-        """The sinks ``method`` names, passed by name.
-
-        A runtime written without them returns its output whole in its
-        RunResult, as a TypeScript one ignores the arguments it does not
-        declare.
-
-        Args:
-            method (Callable[..., Any]): the run method about to be called.
-            output (OutputFn | None): where the run writes its output.
-            errors (OutputFn | None): where it writes its stderr.
-        """
-        params = inspect.signature(method).parameters
-        named = any(
-            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
-        )
-        return {
-            name: sink
-            for name, sink in (("output", output), ("errors", errors))
-            if named or name in params
-        }
 
     async def open_engine(self) -> E:
         """Build the engine every run reuses, once; the default is None."""

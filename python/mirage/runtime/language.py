@@ -60,8 +60,8 @@ class LanguageRuntime(Runtime[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Resolve the program from the operands, then interpret it.
 
@@ -70,8 +70,8 @@ class LanguageRuntime(Runtime[E]):
             paths (list[PathSpec]): the script operand, if any.
             texts (list[str]): the program's argv.
             ctx (Context): the run's context.
-            output (OutputFn | None): receives stdout as it comes.
-            errors (OutputFn | None): receives stderr as it comes.
+            output (OutputFn): receives stdout as it comes.
+            errors (OutputFn): receives stderr as it comes.
         """
         label = (ctx.spec.name if ctx.spec is not None else "") or (
             self.commands[0] if self.commands else self.name
@@ -84,15 +84,11 @@ class LanguageRuntime(Runtime[E]):
             self.argv0_rules,
             self.module_code,
             self.name,
+            errors,
         )
         if isinstance(program, RunResult):
             return program
-        return await self.interpret(
-            engine,
-            program,
-            ctx,
-            **self._sinks(self.interpret, output, errors),
-        )
+        return await self.interpret(engine, program, ctx, output, errors)
 
     def module_code(self, name: str, label: str) -> str | None:
         """The program ``-m name`` runs; None where this runtime cannot
@@ -104,17 +100,20 @@ class LanguageRuntime(Runtime[E]):
         """
         return None
 
-    async def version(self, env: dict[str, str]) -> RunResult:
+    async def version(
+        self, env: dict[str, str], output: OutputFn, errors: OutputFn
+    ) -> RunResult:
         """Report the bound interpreter's version.
 
         Args:
             env (dict[str, str]): the session environment.
+            output (OutputFn): receives the version line.
+            errors (OutputFn): receives why there is none.
         """
-        return RunResult(
-            stdout=b"",
-            stderr=f"{self.name}: version information unavailable\n".encode(),
-            exit_code=1,
+        await errors(
+            f"{self.name}: version information unavailable\n".encode()
         )
+        return RunResult(exit_code=1)
 
     @abstractmethod
     async def interpret(
@@ -122,8 +121,8 @@ class LanguageRuntime(Runtime[E]):
         engine: E,
         program: Program,
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Execute one program and return its outcome.
 
@@ -138,10 +137,7 @@ class LanguageRuntime(Runtime[E]):
             program (Program): the source and argv to run.
             ctx (Context): the run's context: working directory,
                 environment, switches, files.
-            output (OutputFn | None): receives stdout as the program
-                writes it, which the result then leaves out; None, or an
-                engine that cannot stream, returns it whole. A runtime
-                that leaves both sinks out of its signature is never
-                handed them.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as the program writes
+                it; an engine that gets it whole writes it once.
+            errors (OutputFn): the same for stderr.
         """

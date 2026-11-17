@@ -972,12 +972,13 @@ class _LineBox(Runtime, LineExecutorMixin):
     def __init__(self) -> None:
         self.lines: list[str] = []
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
         line = ctx.flags["c"]
         self.lines.append(line)
-        return RunResult(
-            stdout=b"box:" + line.encode(), stderr=None, exit_code=0
-        )
+        await output(b"box:" + line.encode())
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

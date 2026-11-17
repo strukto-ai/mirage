@@ -21,10 +21,11 @@ import { Worker } from 'node:worker_threads'
 import { describe, expect, it, vi } from 'vitest'
 import { PrefixResolver } from '../../resolver.ts'
 import { FileStat, FileType } from '../../../types.ts'
-import type { BridgeDispatchFn, RunResult } from '../../types.ts'
+import type { BridgeDispatchFn, RunAnswer } from '../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 import * as sealing from './seal.ts'
+import { answerOf } from '../../binding.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -44,8 +45,10 @@ function unexpected(): never {
 }
 
 /** Run `code` at `/` with no stdin. */
-function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
-  return rt.interpret(undefined, { code, args: [], stdin: null }, runContext(rt))
+function interpret(rt: PyodideRuntime, code: string): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    rt.interpret(undefined, { code, args: [], stdin: null }, runContext(rt), output, errors),
+  )
 }
 
 function bind(rt: PyodideRuntime): PyodideRuntime {
@@ -223,7 +226,7 @@ print(refusal(lambda: pyodide_js._module.FS_createPreloadedFile('/', 'host', ${J
 `,
         )
         expect(result.exitCode).toBe(0)
-        expect(DEC.decode(result.stderr ?? undefined)).toBe('')
+        expect(DEC.decode(result.stderr)).toBe('')
         expect(DEC.decode(result.stdout)).toBe('undefined,undefined\n' + 'refused\n'.repeat(6))
       } finally {
         await rt.close()
@@ -275,7 +278,7 @@ print(base64.b64encode(buffer.getvalue()).decode())
           rt,
           `import mirage_seal_probe; print(mirage_seal_probe.value)\n${GLOBALS}`,
         )
-        expect(DEC.decode(run.stderr ?? undefined)).toBe('')
+        expect(DEC.decode(run.stderr)).toBe('')
         expect(run.exitCode).toBe(0)
         expect(DEC.decode(run.stdout)).toBe('42\nundefined,undefined,undefined,undefined\n')
       } finally {
@@ -338,7 +341,7 @@ print(_imaging.__file__.endswith('.so'))
 ${GLOBALS}
 `,
         )
-        expect(DEC.decode(run.stderr ?? undefined)).toBe('')
+        expect(DEC.decode(run.stderr)).toBe('')
         expect(run.exitCode).toBe(0)
         expect(DEC.decode(run.stdout)).toBe(
           '(2, 3) (12, 34, 56)\nTrue\nundefined,undefined,undefined,undefined\n',
@@ -357,7 +360,7 @@ ${GLOBALS}
             rt,
             `${GLOBALS}\nprint(sum(i*i for i in range(5)))\nprint(open('/data/hello.txt').read())`,
           )
-          expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+          expect(DEC.decode(result.stderr)).toBe('')
           expect(result.exitCode).toBe(0)
           expect(DEC.decode(result.stdout)).toBe(
             'undefined,undefined,undefined,undefined\n30\nworld\n',

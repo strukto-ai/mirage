@@ -15,14 +15,15 @@
 import { spawn } from 'node:child_process'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { DaytonaConfig } from './config.ts'
 import { DaytonaMachine } from './handle.ts'
 import type { DaytonaSdk } from './sdk.ts'
-import { on } from '../../../tests/fixtures/machine.ts'
+import { machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 const DEC = new TextDecoder()
 
@@ -149,9 +150,7 @@ describe('DaytonaMachine', () => {
       '/workspace',
     )
     expect(result.exitCode).toBe(126)
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
-      'mirage: daytona:box: the machine takes no input\n',
-    )
+    expect(DEC.decode(result.stderr)).toBe('mirage: daytona:box: the machine takes no input\n')
     const sandbox = FakeClient.last ?? new FakeMachine('started')
     expect([sandbox.fs.files.size, sandbox.process.calls]).toEqual([0, []])
   })
@@ -245,10 +244,33 @@ describe('DaytonaMachine output bytes', () => {
     Object.assign(FakeClient.last ?? {}, { process: new ShellProcess() })
     const line = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; exit 5"
     const result = await runtime.execLine(line, null, {}, '/')
-    expect([result.exitCode, [...result.stdout], result.stderr]).toEqual([
+    expect([result.exitCode, [...result.stdout], [...result.stderr]]).toEqual([
       5,
       [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3, 0x65, 0xfe, 0x00, 0x0d, 0x0a],
-      null,
+      [],
+    ])
+  })
+
+  // A run's answer arrives joined on stdout (`joinsStreams`), the wrapper's
+  // pid and exit lines with it; they come off it, and what the program
+  // wrote on either stream stays, in the order it wrote it.
+  it("takes the run's own lines off its joined answer", async () => {
+    const runtime = makeRuntime()
+    await runtime.ensureConnected()
+    Object.assign(FakeClient.last ?? {}, { process: new ShellProcess() })
+    const ctx = {
+      stdin: null,
+      flags: { c: "printf 'out\\n'; printf 'err\\n' >&2; exit 3" },
+      env: {},
+      cwd: PathSpec.fromStrPath('/'),
+    }
+    const result = await answerOf((output, errors) =>
+      machineRuntime(runtime).runLine(undefined, [], [], ctx, output, errors),
+    )
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      3,
+      'out\nerr\n',
+      '',
     ])
   })
 })

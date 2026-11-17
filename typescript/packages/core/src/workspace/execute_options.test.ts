@@ -20,7 +20,7 @@ import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../runtime/mixin.ts'
-import type { RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
 import { dispatched } from '../test-utils.ts'
 import { MountMode, VFSName } from '../types.ts'
@@ -691,8 +691,15 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       constructor() {
         super({ captures: ['anscmd'] })
       }
-      runLine(): Promise<RunResult> {
-        return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
+      async runLine(
+        _e: unknown,
+        _p: unknown,
+        _t: unknown,
+        _ctx: unknown,
+        output: OutputFn,
+      ): Promise<RunResult> {
+        await output(ENC.encode('ok\n'))
+        return { exitCode: 0 }
       }
     }
     class Stalled extends RAMObserverStore {

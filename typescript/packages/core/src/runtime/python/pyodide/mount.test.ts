@@ -14,14 +14,23 @@
 
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
-import type { BridgeDispatchFn, RunResult } from '../../types.ts'
+import type { BridgeDispatchFn, RunAnswer } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { answerOf } from '../../binding.ts'
 
 /** Run `code` at `/` with empty stdin. */
-function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
-  return rt.interpret(undefined, { code, args: [], stdin: new Uint8Array() }, runContext(rt))
+function interpret(rt: PyodideRuntime, code: string): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    rt.interpret(
+      undefined,
+      { code, args: [], stdin: new Uint8Array() },
+      runContext(rt),
+      output,
+      errors,
+    ),
+  )
 }
 
 function makeBridge(): {
@@ -156,7 +165,7 @@ describe('PyodideRuntime mount visibility', () => {
         const result = await interpret(rt, 'print(1)')
         expect(result.exitCode).toBe(126)
         expect(result.stdout).toEqual(new Uint8Array())
-        expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(
+        expect(new TextDecoder().decode(result.stderr)).toBe(
           `mirage: the pyodide runtime cannot run with a mount at '${prefix.slice(0, -1)}', ` +
             `which hides the interpreter's standard library at /lib\n`,
         )
@@ -196,7 +205,7 @@ describe('PyodideRuntime mount visibility', () => {
     bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`)
     expect(result.exitCode).toBe(1)
-    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    const stderr = new TextDecoder().decode(result.stderr)
     expect(stderr).toContain("OSError: [Errno 69] Read-only file system: '/ram/out.txt'")
     expect(stderr).not.toContain('failed to create')
     await rt.close()
@@ -237,7 +246,7 @@ describe('PyodideRuntime mount visibility', () => {
     // The rename must not run: its prerequisite create never landed, and
     // the open that asked for it failed, so the program stopped there.
     expect(attempted.filter((c) => c.startsWith('rename'))).toHaveLength(0)
-    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    const stderr = new TextDecoder().decode(result.stderr)
     expect(stderr).toContain("OSError: [Errno 29] I/O error: '/ram/tmp.txt'")
     expect(result.exitCode).toBe(1)
     await rt.close()
@@ -268,7 +277,7 @@ describe('PyodideRuntime mount visibility', () => {
     const rt = new PyodideRuntime()
     bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `open('/ram/log.txt', 'a').write('tail')`)
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(writes).toHaveLength(0)
     expect(appends).toEqual(['tail'])
     expect(result.exitCode).toBe(0)
@@ -311,7 +320,7 @@ describe('PyodideRuntime writes', () => {
     const rt = new PyodideRuntime()
     bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'landed')`)
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     const mutations = calls.filter((c) => c.op === 'create' || c.op === 'pwrite')
     expect(mutations.map((c) => `${c.op} ${c.path}`)).toEqual([
@@ -349,7 +358,7 @@ describe('PyodideRuntime writes', () => {
         "os.rmdir('/ram/box')",
       ].join('\n'),
     )
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     const mutations = calls.filter((c) => c.op !== 'read' && c.op !== 'readdir' && c.op !== 'stat')
     expect(mutations).toEqual([
@@ -412,7 +421,7 @@ describe('PyodideRuntime writes', () => {
       rt,
       `\nfor part in ['b', 'c']:\n    with open('/ram/log.txt', 'a') as f:\n        f.write(part)\n`,
     )
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     expect(new TextDecoder().decode(files.get('/ram/log.txt') ?? new Uint8Array())).toBe('abc')
     await rt.close()

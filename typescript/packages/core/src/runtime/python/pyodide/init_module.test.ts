@@ -4,11 +4,12 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { WorkspaceBinding } from '../../binding.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import type { RunResult } from '../../types.ts'
+import type { RunAnswer } from '../../types.ts'
 import { PyodideExecution } from './execution.ts'
 import { PyodideRuntime } from './runtime.ts'
 import type * as FailingCleanup from '../../../../tests/runtime/python/pyodide/fixtures/failing_cleanup.ts'
 import type * as Capability from '../../../../tests/runtime/python/pyodide/fixtures/capability.ts'
+import { answerOf } from '../../binding.ts'
 
 /** Run `code` at `/`; pyodide has no engine, so the run queues at the call. */
 function interpret(
@@ -16,8 +17,10 @@ function interpret(
   code: string,
   stdin: Uint8Array | null = null,
   extra: Partial<Context> = {},
-): Promise<RunResult> {
-  return rt.interpret(undefined, { code, args: [], stdin }, context(extra))
+): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    rt.interpret(undefined, { code, args: [], stdin }, context(extra), output, errors),
+  )
 }
 
 describe('PyodideRuntime host initializer', () => {

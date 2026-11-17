@@ -20,7 +20,8 @@ from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import exec_args, open_program_pipe, run_program
 from mirage.machine.types import MachinePipe
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.binding import answer_of
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -47,17 +48,17 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
     async def _exec_program(
         self,
         args: list[str],
-        stdin: ByteSource | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        stdin: ByteSource | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run the program once; the seam tests override.
 
         Args:
             args (list[str]): the arguments after the program.
             stdin (ByteSource | None): the input; None for none.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
         """
         return await run_program(
             self.program,
@@ -67,6 +68,19 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
             output=output,
             errors=errors,
             connection=True,
+        )
+
+    async def _program_answer(self, args: list[str]) -> RunAnswer:
+        """Run the program once for Mirage's own question (a status, a
+        pause), its answer kept whole.
+
+        Args:
+            args (list[str]): the arguments after the program.
+        """
+        return await answer_of(
+            lambda output, errors: self._exec_program(
+                args, None, output, errors
+            )
         )
 
     async def _change_state(
@@ -81,10 +95,10 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
                 already gone, which then counts as done; None fails on it
                 too.
         """
-        result = await self._exec_program(args)
+        result = await self._program_answer(args)
         if result.exit_code == 0:
             return
-        said = (result.stderr or b"").decode().strip()
+        said = result.stderr.decode().strip()
         if gone is not None and gone in said:
             logger.debug("%s: already gone: %s", self.machine, said)
             return
@@ -96,15 +110,12 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         head, tail = self.exec_words()
         return await self._exec_program(
-            exec_args(head, tail, env, cwd, argv),
-            stdin=stdin,
-            output=output,
-            errors=errors,
+            exec_args(head, tail, env, cwd, argv), stdin, output, errors
         )
 
     async def open_pipe(self, command: str) -> MachinePipe:

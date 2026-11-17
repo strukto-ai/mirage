@@ -253,12 +253,15 @@ class EchoBox extends Runtime<undefined> implements LineExecutorMixin<undefined>
     super(options, ['nvidia-smi'])
   }
 
-  runLine(_engine: undefined, _paths: PathSpec[], _texts: string[], ctx: Context) {
-    return Promise.resolve({
-      stdout: ENC.encode(`box:${ctx.flags.c as string}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  async runLine(
+    _engine: undefined,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
+    output: (chunk: Uint8Array) => Promise<void>,
+  ) {
+    await output(ENC.encode(`box:${ctx.flags.c as string}\n`))
+    return { exitCode: 0 }
   }
 }
 
@@ -276,12 +279,15 @@ class ProcessBox extends Runtime<undefined> implements ProcessExecutorMixin<unde
     super(options, [EXTERNAL_COMMANDS])
   }
 
-  runProcess(_engine: undefined, _paths: PathSpec[], texts: string[]) {
-    return Promise.resolve({
-      stdout: ENC.encode(`${JSON.stringify(texts)}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  async runProcess(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    _ctx: Context,
+    output: (chunk: Uint8Array) => Promise<void>,
+  ) {
+    await output(ENC.encode(`${JSON.stringify(texts)}\n`))
+    return { exitCode: 0 }
   }
 }
 

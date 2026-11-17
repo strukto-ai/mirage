@@ -21,10 +21,12 @@ import pytest
 
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.binding import answer_of
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandlock import SandlockRuntime
 from mirage.runtime.table import build_runtime
+from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 
 
@@ -46,6 +48,16 @@ def _cwd(path) -> Context:
     return Context(cwd=PathSpec.from_str_path(str(path)))
 
 
+async def _process(
+    runtime: SandlockRuntime, argv: list[str], ctx: Context
+) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [], argv, ctx, kind="process", output=output, errors=errors
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOST_ONLY", "must-not-inherit")
@@ -63,7 +75,7 @@ async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
         stdin=b"input\n",
         env={"E": "request", "LD_PRELOAD": "/guest-only.so"},
     )
-    result = await runtime.execute([], list(argv), ctx, kind="process")
+    result = await _process(runtime, list(argv), ctx)
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     args = data["argv"]
@@ -118,9 +130,7 @@ async def test_a_sandlock_in_the_session_directory_never_runs(
     planted.write_text("#!/bin/sh\necho planted\n")
     planted.chmod(0o755)
     monkeypatch.setenv("PATH", f".{os.pathsep}{cli}")
-    result = await SandlockRuntime().execute(
-        [], ["node"], _cwd(session), kind="process"
-    )
+    result = await _process(SandlockRuntime(), ["node"], _cwd(session))
     assert json.loads(result.stdout)["argv"][-2:] == ["--", "node"]
 
 
@@ -128,33 +138,27 @@ async def test_a_sandlock_in_the_session_directory_never_runs(
 async def test_missing_cli_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(RuntimeError, match="needs `sandlock` on PATH"):
-        await SandlockRuntime().execute(
-            [], ["node"], Context(), kind="process"
-        )
+        await _process(SandlockRuntime(), ["node"], Context())
 
 
 @pytest.mark.asyncio
 async def test_empty_argv_is_refused():
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await SandlockRuntime().execute([], [], Context(), kind="process")
+        await _process(SandlockRuntime(), [], Context())
 
 
 @pytest.mark.asyncio
 async def test_cancellation_reaps_the_cli(cli):
     runtime = SandlockRuntime()
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(
-            runtime.execute([], ["wait"], _cwd(cli), kind="process"), 0.1
-        )
+        await asyncio.wait_for(_process(runtime, ["wait"], _cwd(cli)), 0.1)
     assert not runtime._children
 
 
 @pytest.mark.asyncio
 async def test_close_reaps_an_active_cli(cli):
     runtime = SandlockRuntime()
-    task = asyncio.create_task(
-        runtime.execute([], ["wait"], _cwd(cli), kind="process")
-    )
+    task = asyncio.create_task(_process(runtime, ["wait"], _cwd(cli)))
     async with asyncio.timeout(2):
         while not runtime._children:
             await asyncio.sleep(0.01)
@@ -169,9 +173,7 @@ async def test_close_reaps_an_active_cli(cli):
 @pytest.mark.asyncio
 async def test_a_run_still_finding_sandlock_at_close_never_starts(cli):
     runtime = SandlockRuntime()
-    task = asyncio.create_task(
-        runtime.execute([], ["wait"], _cwd(cli), kind="process")
-    )
+    task = asyncio.create_task(_process(runtime, ["wait"], _cwd(cli)))
     await asyncio.sleep(0)
     await runtime.close()
     with pytest.raises(RuntimeError, match="sandlock: the runtime is closed"):

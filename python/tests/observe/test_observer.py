@@ -740,9 +740,8 @@ class _Box(MachineHandle):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
             await errors(RUN_PID_MARK + b"812 99\n")
-        return RunResult(
-            stdout=f"{CHECK_MARK}\n".encode(), stderr=None, exit_code=0
-        )
+        await output(f"{CHECK_MARK}\n".encode())
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

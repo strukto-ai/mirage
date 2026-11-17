@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
-import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
+import { answerOf, refusedRun, type WorkspaceBinding, type RuntimeContext } from './binding.ts'
 import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import type { DispatchFn, ExecutionKind, Program, RunResult } from './types.ts'
+import type { DispatchFn, ExecutionKind, OutputFn, Program, RunAnswer, RunResult } from './types.ts'
 import { RuntimeFiles } from './files.ts'
 import type { Context } from '../commands/config.ts'
 import {
@@ -56,9 +56,15 @@ class Probe extends LanguageRuntime {
     super.bind(binding)
     this.bound = binding
   }
-  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    program: Program,
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.contexts.push(ctx)
-    return Promise.resolve({ stdout: enc.encode(program.code), stderr: null, exitCode: 0 })
+    await output(enc.encode(program.code))
+    return { exitCode: 0 }
   }
 }
 class ShellProbe extends Runtime {
@@ -69,15 +75,26 @@ class ShellProbe extends Runtime {
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
+    output: OutputFn,
   ): Promise<RunResult> {
     const stdin = ctx.stdin === null ? new Uint8Array() : await materialize(ctx.stdin)
-    return {
-      stdout: enc.encode(`${ctx.flags.c as string}:${ctx.cwd.virtual}${dec.decode(stdin)}`),
-      stderr: null,
-      exitCode: 0,
-    }
+    await output(enc.encode(`${ctx.flags.c as string}:${ctx.cwd.virtual}${dec.decode(stdin)}`))
+    return { exitCode: 0 }
   }
 }
+
+/** One run of `runtime`, its answer kept whole. */
+function answered(
+  runtime: Runtime,
+  texts: string[],
+  ctx: Context,
+  kind?: ExecutionKind,
+): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    runtime.execute([], texts, ctx, { ...(kind === undefined ? {} : { kind }), output, errors }),
+  )
+}
+
 function world(machines?: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
@@ -87,6 +104,34 @@ function world(machines?: Runtime[]): Workspace {
     },
   )
 }
+
+describe('answerOf', () => {
+  it('keeps what a run wrote whole', async () => {
+    const run = async (output: OutputFn, errors: OutputFn): Promise<RunResult> => {
+      await output(enc.encode('one '))
+      await errors(enc.encode('warn\n'))
+      await output(enc.encode('two\n'))
+      return { exitCode: 3 }
+    }
+    const done = await answerOf(run)
+    expect([done.exitCode, dec.decode(done.stdout), dec.decode(done.stderr)]).toEqual([
+      3,
+      'one two\n',
+      'warn\n',
+    ])
+    const silent = await answerOf(() => Promise.resolve({ exitCode: 0 }))
+    expect(silent).toEqual({ exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array() })
+  })
+
+  it('takes a refusal written through errors', async () => {
+    const done = await answerOf((_output, errors) => refusedRun('probe', 'why', errors))
+    expect([done.exitCode, dec.decode(done.stdout), dec.decode(done.stderr)]).toEqual([
+      126,
+      '',
+      'probe: Permission denied\n',
+    ])
+  })
+})
 
 describe('execution bindings', () => {
   it('makes workspace services available during runtime binding', async () => {
@@ -137,7 +182,7 @@ describe('execution bindings', () => {
     expect([isLineExecutor(native), isProcessExecutor(native)]).toEqual([true, false])
     expect([language.filesystem, native.filesystem]).toEqual([[], []])
     const execute = (runtime: Runtime, [texts, ctx, kind]: Request) =>
-      runtime.execute([], texts, ctx, { kind })
+      answered(runtime, texts, ctx, kind)
     expect(dec.decode((await execute(language, code)).stdout)).toBe('hello')
     expect(dec.decode((await execute(native, shell)).stdout)).toBe('echo hello:/work!')
     for (const [runtime, request] of [
@@ -206,7 +251,7 @@ describe('execution bindings', () => {
     const first = world([runtime]),
       second = world()
     try {
-      const ok = await runtime.execute([], [], context({ flags: { c: 'ok' } }))
+      const ok = await answered(runtime, [], context({ flags: { c: 'ok' } }))
       expect(dec.decode(ok.stdout)).toBe('ok')
       expect(() => second.addMachine(runtime.name, runtime)).toThrow('another workspace')
     } finally {
@@ -249,13 +294,13 @@ it.each([
         ['one', 'two'].map((session) =>
           runWithSession(
             ws.getSession(session),
-            () => runtime.execute([], [], context({ flags: { c: code } })),
+            () => answered(runtime, [], context({ flags: { c: code } })),
             { owner: ws.sessionManager },
           ),
         ),
       )
       for (const result of results) {
-        expect(result.exitCode, dec.decode(result.stderr ?? new Uint8Array())).toBe(0)
+        expect(result.exitCode, dec.decode(result.stderr)).toBe(0)
         expect(dec.decode(result.stdout)).toBe('shared\n')
       }
       for (const entries of Object.values(calls))

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
+import { answerOf } from '../../binding.ts'
 
 // The runtime declares reach='workspace', meaning the workspace bridge is the
 // guest's only entry point to the outside. Pyodide's default exposes the host
@@ -33,10 +34,14 @@ flags.append("fetch=" + str(hasattr(js, "fetch")))
 flags.append("require=" + str(hasattr(js, "require")))
 print(",".join(flags))
 `
-    const result = await rt.interpret(
-      undefined,
-      { code: probe, args: [], stdin: new Uint8Array() },
-      { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+    const result = await answerOf((output, errors) =>
+      rt.interpret(
+        undefined,
+        { code: probe, args: [], stdin: new Uint8Array() },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+        output,
+        errors,
+      ),
     )
     const decode = (b: Uint8Array | string | null): string =>
       typeof b === 'string' ? b : new TextDecoder().decode(b ?? new Uint8Array())

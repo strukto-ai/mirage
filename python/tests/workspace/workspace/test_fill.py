@@ -1735,12 +1735,11 @@ class NiceBox(Runtime, LineExecutorMixin):
     name = "nicebox"
     captures = ("nice",)
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(
-            stdout=f"{(ctx.env or {}).get('TOKEN')}\n".encode(),
-            stderr=None,
-            exit_code=0,
-        )
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        await output(f"{(ctx.env or {}).get('TOKEN')}\n".encode())
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -2154,8 +2153,11 @@ class LineBox(Runtime, LineExecutorMixin):
     name = "sandbox"
     captures = ("@line",)
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(stdout=b"box", stderr=None, exit_code=0)
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        await output(b"box")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

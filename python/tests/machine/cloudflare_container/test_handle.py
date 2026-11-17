@@ -27,7 +27,7 @@ from mirage.machine.constants import CHECK_LINE, EXEC_PRELUDE, PROCESS
 from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
 from tests.fixtures.cloudflare_container import FakeContainer, FakeProcess
-from tests.fixtures.machine import machine_runtime
+from tests.fixtures.machine import machine_answer
 
 ODD = bytes([0, 13, 10, 255, 128, 254, 0])
 LOST = (
@@ -39,7 +39,7 @@ LOST = (
 def _line(box: ContainerMachine, line: str, stdin: bytes | None = None):
     cwd = PathSpec.from_str_path("/data")
     ctx = Context(flags={"c": line}, stdin=stdin, env=None, cwd=cwd)
-    return machine_runtime(box).run_line(None, [], [], ctx)
+    return machine_answer(box, [], ctx, "line")
 
 
 async def cat(proc: FakeProcess) -> int:

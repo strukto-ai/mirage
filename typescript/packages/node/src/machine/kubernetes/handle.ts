@@ -59,24 +59,16 @@ export function exitReportStart(stderr: Buffer): number {
  * held; everything else passes as it arrives.
  */
 export class ExitLineFilter {
-  private readonly errors: OutputFn | null
+  private readonly errors: OutputFn
   private held: Buffer = Buffer.alloc(0)
-  private readonly chunks: Uint8Array[] = []
 
-  /** @param errors receives stderr as it arrives; null keeps it for `kept`. */
-  constructor(errors: OutputFn | null) {
+  /** @param errors receives stderr as it arrives. */
+  constructor(errors: OutputFn) {
     this.errors = errors
   }
 
-  /** The stderr kept when nothing receives it, null for none. */
-  get kept(): Uint8Array | null {
-    return this.chunks.length > 0 ? Buffer.concat(this.chunks) : null
-  }
-
   private async emit(data: Uint8Array): Promise<void> {
-    if (data.length === 0) return
-    if (this.errors === null) this.chunks.push(data)
-    else await this.errors(data)
+    if (data.length > 0) await this.errors(data)
   }
 
   /**
@@ -167,7 +159,14 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
 
   async connect(): Promise<void> {
     const { pod } = this.config
-    const status = await this.execProgram(['get', 'pod', ...this.scope(), pod, '--output', 'json'])
+    const status = await this.programAnswer([
+      'get',
+      'pod',
+      ...this.scope(),
+      pod,
+      '--output',
+      'json',
+    ])
     const phase = reportedState(status, 'kubectl get pod', ['status', 'phase'])
     if (phase !== RUNNING_PHASE) throw new Error(notRunningHint('pod', pod, phase, {}))
   }
@@ -177,8 +176,8 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     // A run with no input takes no stdin, so its program's end of input
@@ -193,8 +192,8 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
         [...head, ...tail, '/bin/sh', '-c', given ? line : emptyStdin(line)],
         given ? stdin : null,
         output,
-        signal,
         (data) => said.write(data),
+        signal,
       )
     } catch (error) {
       // A failed kubectl reports nothing, so what is held is the program's.
@@ -206,11 +205,9 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     if (!(await said.finish(done.exitCode))) {
       throw new ConnectionLostError(
         `kubectl exited ${String(done.exitCode)} without the program's status`,
-        done.stdout,
-        said.kept,
       )
     }
-    return { stdout: done.stdout, stderr: said.kept, exitCode: done.exitCode }
+    return done
   }
 
   override openPipe(command: string): Promise<MachinePipe> {

@@ -32,7 +32,7 @@ import type { SessionState } from '../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../runtime/binding.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import type { MachinePipe, MountType } from './types.ts'
-import type { PipeWriter, RunResult } from '../runtime/types.ts'
+import type { OutputFn, PipeWriter, RunAnswer, RunResult } from '../runtime/types.ts'
 import {
   MOUNT_GUARD,
   MOUNT_POLL_SECONDS,
@@ -323,7 +323,7 @@ export class MachineMounts {
     private readonly provider: string,
     private readonly machine: string,
     private readonly mountType: MountType,
-    private readonly run: (line: string, signal?: AbortSignal) => Promise<RunResult>,
+    private readonly run: (line: string, signal?: AbortSignal) => Promise<RunAnswer>,
     private readonly openPipe: (command: string) => Promise<MachinePipe>,
   ) {}
 
@@ -339,13 +339,19 @@ export class MachineMounts {
    * session or another sshfs holds it, or another mount covers it (1), and
    * one over a mount of the machine's own that is gone (126). Null when the
    * line may run, which first waits out what the machine's kernel may still
-   * hold of a change another made under what it is served.
+   * hold of a change another made under what it is served. A refusal says
+   * why on `errors`.
    */
   async validate(
     binding: WorkspaceBinding | null,
     cwd: string,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult | null> {
+    const refuse = async (said: string, exitCode: number): Promise<RunResult> => {
+      await errors(new TextEncoder().encode(said))
+      return { exitCode }
+    }
     const files = binding?.files ?? null
     const getSession = binding?.getSession ?? null
     const mountPrefixes = binding?.mountPrefixes ?? null
@@ -361,13 +367,10 @@ export class MachineMounts {
       seen !== '' &&
       !servedPrefixes(mountPrefixes()).some((p) => seen === p || seen.startsWith(`${p}/`))
     )
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(
-          `${this.provider}: the machine cannot see the working directory ${seen}; cd into a mount first\n`,
-        ),
-        exitCode: CANNOT_EXECUTE_STATUS,
-      }
+      return refuse(
+        `${this.provider}: the machine cannot see the working directory ${seen}; cd into a mount first\n`,
+        CANNOT_EXECUTE_STATUS,
+      )
     const current = getCurrentSession()
     const rules = current?.commands
     if (
@@ -379,6 +382,7 @@ export class MachineMounts {
       return refusedRun(
         this.provider,
         'this file transport cannot enforce program-specific path rules',
+        errors,
       )
     if (current === null) {
       throw new Error(
@@ -392,35 +396,20 @@ export class MachineMounts {
       const session = getSession(current.sessionId)
       if (served !== null && served !== session) {
         const earlier = served.sessionId === current.sessionId ? 'an earlier ' : ''
-        return {
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(
-            `${this.provider}: this machine shows ${earlier}session ${served.sessionId}'s view ` +
-              `of the workspace; give session ${current.sessionId} a machine of its own\n`,
-          ),
-          exitCode: 1,
-        }
+        return refuse(
+          `${this.provider}: this machine shows ${earlier}session ${served.sessionId}'s view ` +
+            `of the workspace; give session ${current.sessionId} a machine of its own\n`,
+          1,
+        )
       }
       const every = mountPaths(mountPrefixes())
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
       const refused = await this.reconcile(binding, files, session, every, ruled, signal)
-      if (refused !== null) {
-        return {
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(`${this.provider}: ${refused}\n`),
-          exitCode: 1,
-        }
-      }
+      if (refused !== null) return refuse(`${this.provider}: ${refused}\n`, 1)
       const lost = this.lost()
-      if (lost !== null) {
-        return {
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(`${unmounted(this.provider, lost)}\n`),
-          exitCode: CANNOT_EXECUTE_STATUS,
-        }
-      }
+      if (lost !== null) return refuse(`${unmounted(this.provider, lost)}\n`, CANNOT_EXECUTE_STATUS)
       const unserved = this.unserved(ruled)
       if (this.mountType !== 'fuse' && (!unserved || this.served.size > 0)) {
         this.session = session
@@ -429,6 +418,7 @@ export class MachineMounts {
         ? refusedRun(
             this.provider,
             'a mount this session restricts is not served through the dispatcher',
+            errors,
           )
         : null
     })

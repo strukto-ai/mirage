@@ -775,11 +775,12 @@ class Box extends MachineHandle {
     _stdin: unknown,
     _env: unknown,
     _cwd: string,
-    _output: unknown,
-    errors: ((data: Uint8Array) => Promise<void>) | null,
+    output: (data: Uint8Array) => Promise<void>,
+    errors: (data: Uint8Array) => Promise<void>,
   ): Promise<RunResult> {
-    if (isRun(argv)) await errors?.(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')]))
-    return { stdout: ENC.encode(`${CHECK_MARK}\n`), stderr: null, exitCode: 0 }
+    if (isRun(argv)) await errors(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')]))
+    await output(ENC.encode(`${CHECK_MARK}\n`))
+    return { exitCode: 0 }
   }
 }
 

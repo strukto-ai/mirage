@@ -146,7 +146,7 @@ async def run_external(
             )
         finally:
             await registry.settle(runtime)
-        node.stderr = b"".join(said) + (result.stderr or b"")
+        node.stderr = b"".join(said)
         return result
 
     def settled() -> None:
@@ -175,8 +175,8 @@ async def _execute_program(
     texts: list[str],
     ctx: Context,
     kind: ExecutionKind,
-    output: OutputFn | None = None,
-    errors: OutputFn | None = None,
+    output: OutputFn,
+    errors: OutputFn,
 ) -> RunResult:
     """Keep an ordinary launch failure within the command that caused it.
 
@@ -186,8 +186,8 @@ async def _execute_program(
         texts (list[str]): the argv, or nothing for a line.
         ctx (Context): the run's context.
         kind (ExecutionKind): a process or a line.
-        output (OutputFn | None): where a streamed process writes.
-        errors (OutputFn | None): where it writes its stderr.
+        output (OutputFn): where the process writes.
+        errors (OutputFn): where it writes its stderr.
     """
     try:
         return await runtime.execute(
@@ -197,6 +197,5 @@ async def _execute_program(
         raise
     except Exception as exc:
         logger.debug("external program failed", exc_info=True)
-        return RunResult(
-            stdout=b"", stderr=encode_text(f"{name}: {exc}\n"), exit_code=1
-        )
+        await errors(encode_text(f"{name}: {exc}\n"))
+        return RunResult(exit_code=1)

@@ -19,12 +19,22 @@ from pathlib import Path
 import pytest
 
 from mirage.commands.config import Context
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.base import Runtime
+from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.table import build_runtime
+from mirage.runtime.types import RunAnswer
 from mirage.types import ContentType, FileStat, FileType
+
+
+async def _execute(runtime: Runtime, code: str) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [], [], Context(flags={"c": code}), output=output, errors=errors
+        )
+    )
 
 
 def _wasi_available() -> bool:
@@ -209,7 +219,7 @@ async def test_append_ships_only_the_deltas(runtime: str):
     rt = build_runtime(runtime)
     rt.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/data/"])))
     code = APPEND_LOOP_JS if runtime == "quickjs" else APPEND_LOOP_PY
-    result = await rt.execute([], [], Context(flags={"c": code}))
+    result = await _execute(rt, code)
     await rt.close()
     assert result.exit_code == 0, result.stderr
     assert dispatch.files["/data/log.txt"] == b"S" * 64 + b"xyz" * 8
@@ -239,9 +249,9 @@ async def test_invocations_start_with_fresh_interpreter_state(runtime, fails):
             else "\nraise ValueError('failed')"
         )
     try:
-        first = await engine.execute([], [], Context(flags={"c": seed}))
+        first = await _execute(engine, seed)
         assert first.exit_code == int(fails), first.stderr
-        second = await engine.execute([], [], Context(flags={"c": probe}))
+        second = await _execute(engine, probe)
         assert second.exit_code == 0, second.stderr
         assert second.stdout == b"fresh\nfresh\n"
     finally:

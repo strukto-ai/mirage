@@ -24,10 +24,11 @@ class PlainRuntime(Runtime):
 class LineRuntime(Runtime, LineExecutorMixin):
     name = "line"
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(
-            stdout=ctx.flags["c"].encode(), stderr=None, exit_code=0
-        )
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        await output(ctx.flags["c"].encode())
+        return RunResult(exit_code=0)
 
 
 def test_line_executor_mixin_is_a_type_level_capability():

@@ -32,7 +32,7 @@ import type { SessionState } from '../workspace/session/session.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import type { MachinePipe, MountType } from './types.ts'
-import type { OutputFn, RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import {
@@ -59,6 +59,11 @@ import { ManualClock } from '../utils/clock.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const LOST = 'fake: /data/a.bin: Disk quota exceeded\nfake: /my notes/b.txt: Disk quota exceeded\n'
+
+// What a fake box answers a line.
+function answer(stdout = '', exitCode = 0, stderr = ''): RunAnswer {
+  return { exitCode, stdout: ENC.encode(stdout), stderr: ENC.encode(stderr) }
+}
 
 // sh -c's own reading of a single-quoted word, enough for these commands.
 function words(command: string): string[] {
@@ -113,18 +118,22 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    _output: OutputFn | null,
-    _errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     let run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
+    let done: RunAnswer | null = null
     if (run[2] === MOUNT_GUARD) {
       const checked = this.runGuard(run)
-      if (checked.exitCode !== 0) return checked
+      if (checked.exitCode !== 0) done = checked
       run = run.slice(run.indexOf('--', 5) + 1)
     }
     const data = stdin === null ? null : await materialize(stdin)
-    return this.execLine(lineOf(run), data, env, cwd, signal)
+    done ??= await this.execLine(lineOf(run), data, env, cwd, signal)
+    if (done.stdout.byteLength > 0) await output(done.stdout)
+    if (done.stderr.byteLength > 0) await errors(done.stderr)
+    return { exitCode: done.exitCode }
   }
 
   rows(): string {
@@ -134,7 +143,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
   }
 
   /** Run a line's mount guard through /bin/sh over this table. */
-  runGuard(argv: readonly string[]): RunResult {
+  runGuard(argv: readonly string[]): RunAnswer {
     const entries = argv.slice(5, argv.indexOf('--', 5))
     this.guards.push(entries)
     const dir = mkdtempSync(join(tmpdir(), 'mirage-guard-'))
@@ -158,7 +167,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     _env?: Record<string, string>,
     _cwd?: string,
     signal?: AbortSignal,
-  ): Promise<RunResult> {
+  ): Promise<RunAnswer> {
     this.commands.push(line)
     if ((line === 'cat /proc/mounts' && this.hang) || line === 'python3 slow.py') {
       return new Promise((_, reject) => {
@@ -168,23 +177,19 @@ class FakeMachine extends MachineHandle implements PipeTransport {
       })
     }
     if (line === 'cat /proc/mounts' && this.failTable) {
-      return Promise.resolve({
-        stdout: new Uint8Array(),
-        stderr: ENC.encode('gone\n'),
-        exitCode: 1,
-      })
+      return Promise.resolve(answer('', 1, 'gone\n'))
     }
     if (line === 'cat /proc/mounts') {
-      return Promise.resolve({ stdout: ENC.encode(this.rows()), stderr: null, exitCode: 0 })
+      return Promise.resolve(answer(this.rows()))
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline') && this.failCheck) {
-      return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 2 })
+      return Promise.resolve(answer('', 2))
     }
     if (line.startsWith('for p in /proc/[0-9]*') && this.killMs > 0) {
       return new Promise((resolve) =>
         setTimeout(() => {
           this.running.delete(/ S='([^']*)' /.exec(line)?.[1] ?? '')
-          resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+          resolve(answer('', 0))
         }, this.killMs),
       )
     }
@@ -204,42 +209,24 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline')) {
       const source = / S='([^']*)' /.exec(line)?.[1] ?? ''
-      return Promise.resolve({
-        stdout: new Uint8Array(),
-        stderr: null,
-        exitCode: this.running.has(source) ? 0 : 1,
-      })
+      return Promise.resolve(answer('', this.running.has(source) ? 0 : 1))
     }
     if (line.startsWith('d=$(PATH=')) {
-      return Promise.resolve({ stdout: ENC.encode('/home/u/.mirage'), stderr: null, exitCode: 0 })
+      return Promise.resolve(answer('/home/u/.mirage'))
     }
     if (line === 'command -v sshfs') {
-      return Promise.resolve({
-        stdout: new Uint8Array(),
-        stderr: null,
-        exitCode: this.sshfs ? 0 : 1,
-      })
+      return Promise.resolve(answer('', this.sshfs ? 0 : 1))
     }
     if (line.startsWith('fusermount3 -uz ')) {
       if (this.failUnmount) return Promise.reject(new Error('the machine went away'))
-      if (this.refuseUnmount)
-        return Promise.resolve({
-          stdout: new Uint8Array(),
-          stderr: ENC.encode('fusermount: busy\n'),
-          exitCode: 1,
-        })
+      if (this.refuseUnmount) return Promise.resolve(answer('', 1, 'fusermount: busy\n'))
       const prefix = words(line)[2] ?? ''
       const [source] = this.table.get(prefix) ?? ['']
       this.table.delete(prefix)
       this.running.delete(source)
     }
-    if (line === 'python3 fails.py')
-      return Promise.resolve({
-        stdout: new Uint8Array(),
-        stderr: ENC.encode('boom\n'),
-        exitCode: 3,
-      })
-    return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
+    if (line === 'python3 fails.py') return Promise.resolve(answer('', 3, 'boom\n'))
+    return Promise.resolve(answer('ran\n'))
   }
 
   openPipe(command: string): Promise<MachinePipe> {

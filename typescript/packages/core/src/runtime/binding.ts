@@ -14,6 +14,7 @@
 
 import type { Context } from '../commands/config.ts'
 import type { ProcessTable } from '../execution/process/table.ts'
+import { concat } from '../utils/bytes.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
   awaitsAs,
@@ -26,7 +27,7 @@ import type { OpKwargs } from '../view/types.ts'
 import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import type { MountResolver } from './resolver.ts'
-import type { BridgeDispatchFn, DispatchFn, RunResult } from './types.ts'
+import type { BridgeDispatchFn, DispatchFn, OutputFn, RunAnswer, RunResult } from './types.ts'
 import { Files } from '../workspace/files.ts'
 import type { RecentChanges } from '../mount/changes.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -103,13 +104,33 @@ export class WorkspaceBinding {
  * on the line's decision record and never on stderr. `name` is the runtime,
  * which names the refusal. Mirrors Python's `refused_run`.
  */
-export function refusedRun(name: string, reason: string): RunResult {
+export async function refusedRun(
+  name: string,
+  reason: string,
+  errors: OutputFn,
+): Promise<RunResult> {
   noteDecision({ kind: 'deny', reason, policy: '', askId: null })
-  return {
-    stdout: new Uint8Array(),
-    stderr: new TextEncoder().encode(`${name}: Permission denied\n`),
-    exitCode: CANNOT_EXECUTE_STATUS,
-  }
+  await errors(new TextEncoder().encode(`${name}: Permission denied\n`))
+  return { exitCode: CANNOT_EXECUTE_STATUS }
+}
+
+/**
+ * What one of Mirage's own lines answered, kept whole: a probe's few lines,
+ * read once the line ends. A program's run never comes here; it streams.
+ * Mirrors Python's `answer_of`.
+ *
+ * @param run runs the line, given where it writes stdout and stderr.
+ */
+export async function answerOf(
+  run: (output: OutputFn, errors: OutputFn) => Promise<RunResult>,
+): Promise<RunAnswer> {
+  const out: Uint8Array[] = []
+  const err: Uint8Array[] = []
+  const done = await run(
+    (data) => Promise.resolve(void out.push(data)),
+    (data) => Promise.resolve(void err.push(data)),
+  )
+  return { exitCode: done.exitCode, stdout: concat(out), stderr: concat(err) }
 }
 
 /** Map restrictions to owning mounts, not ancestors whose trees contain another mount. */

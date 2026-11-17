@@ -122,7 +122,7 @@ export async function runExternal(
         { ...ctx, signal: stop },
         { kind, output, errors: told },
       )
-      node.stderr = concat([...said, result.stderr ?? new Uint8Array()])
+      node.stderr = concat(said)
       return result
     } finally {
       await registry.settle(runtime)
@@ -163,7 +163,7 @@ async function executeProgram(
   name: string,
   texts: readonly string[],
   ctx: Context,
-  opts: { kind: ExecutionKind; output?: OutputFn; errors?: OutputFn },
+  opts: { kind: ExecutionKind; output: OutputFn; errors: OutputFn },
 ): Promise<RunResult> {
   try {
     return await runtime.execute([], texts, ctx, opts)
@@ -174,10 +174,9 @@ async function executeProgram(
       hasAborted(ctx.signal)
     )
       throw error
-    return {
-      stdout: new Uint8Array(),
-      stderr: encodeText(`${name}: ${error instanceof Error ? error.message : String(error)}\n`),
-      exitCode: 1,
-    }
+    await opts.errors(
+      encodeText(`${name}: ${error instanceof Error ? error.message : String(error)}\n`),
+    )
+    return { exitCode: 1 }
   }
 }

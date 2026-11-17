@@ -48,17 +48,17 @@ def run_output(
 ) -> CommandOutput:
     """A runtime run as a command's output, handed over as it runs.
 
-    The one mapping from a run to a command's output shape: the
-    interpreter commands, a script CLI, a program a runtime captured and
-    a whole line all answer through here. The run starts when its output
-    is first read and writes stdout into a bounded pipe, so a reader that
-    falls behind holds the program back and the output is never held
-    whole; what a transport could not stream lands at the end. The
-    status, and the stderr the run returned, settle on the result as the
-    output ends (``IOResult.output``), stderr after what the result
-    already held. A reader that stops early stops the run, which then
-    exits 141, as SIGPIPE leaves a program, and keeps the stderr it had
-    written.
+    The one push-to-pull bridge from a run to a command's output shape:
+    the interpreter commands, a script CLI, a program a runtime captured
+    and a whole line all answer through here. The run starts when its
+    output is first read and writes stdout into a bounded pipe, so a
+    reader that falls behind holds the program back and the output is
+    never held whole; a transport that gets its answer whole wrote it
+    through the same sink. The status settles on the result as the
+    output ends (``IOResult.output``), and so does the stderr the run
+    wrote when no ``errors`` takes it, after what the result already
+    held. A reader that stops early stops the run, which then exits 141,
+    as SIGPIPE leaves a program, and keeps the stderr it had written.
 
     Args:
         run (Callable[[OutputFn, OutputFn], Awaitable[RunResult]]):
@@ -97,10 +97,6 @@ def run_output(
             result = await run(
                 pipe.write, ordered if errors is not None else keep
             )
-            if result.stderr:
-                kept.append(result.stderr)
-            if result.stdout:
-                await pipe.write(result.stdout)
             io.exit_code = result.exit_code
             pipe.end()
         except BaseException as exc:
@@ -201,7 +197,7 @@ async def runtime_version(
     runtime: LanguageRuntime[Any], env: dict[str, str] | None
 ) -> CommandOutput:
     async def run(output: OutputFn, errors: OutputFn) -> RunResult:
-        return await runtime.version(env or {})
+        return await runtime.version(env or {}, output, errors)
 
     return run_output(run)
 

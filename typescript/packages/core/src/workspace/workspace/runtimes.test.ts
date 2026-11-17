@@ -17,7 +17,7 @@ import type { Context } from '../../commands/config.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
-import type { Program, RunResult } from '../../runtime/types.ts'
+import type { OutputFn, Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { logger } from './runtimes.ts'
@@ -48,7 +48,12 @@ class Engine extends PythonRuntime {
     super()
   }
 
-  async interpret(_engine: unknown, _program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    _program: Program,
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.entered.open()
     await new Promise<void>((resolve) => {
       void this.release.then(resolve)
@@ -56,7 +61,8 @@ class Engine extends PythonRuntime {
         resolve()
       })
     })
-    return { stdout: ENC.encode(`${this.name}\n`), stderr: null, exitCode: 0 }
+    await output(ENC.encode(`${this.name}\n`))
+    return { exitCode: 0 }
   }
 
   override close(): Promise<void> {
@@ -78,7 +84,7 @@ class Gate extends Runtime implements LineExecutorMixin {
   async runLine(): Promise<RunResult> {
     this.entered.open()
     await this.release.promise
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    return { exitCode: 0 }
   }
 }
 
@@ -218,8 +224,15 @@ class Box extends Runtime implements LineExecutorMixin {
     super({ captures: captures.length > 0 ? captures : ['@external'] })
   }
 
-  runLine(): Promise<RunResult> {
-    return Promise.resolve({ stdout: ENC.encode(`${this.name}\n`), stderr: null, exitCode: 0 })
+  async runLine(
+    _e: unknown,
+    _p: unknown,
+    _t: unknown,
+    _ctx: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(ENC.encode(`${this.name}\n`))
+    return { exitCode: 0 }
   }
 }
 

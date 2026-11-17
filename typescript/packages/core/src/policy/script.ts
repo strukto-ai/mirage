@@ -14,14 +14,14 @@
 
 import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../errors/types.ts'
-import { WorkspaceBinding } from '../runtime/binding.ts'
+import { answerOf, WorkspaceBinding } from '../runtime/binding.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
 import { compileError } from '../runtime/python/monty/execution.ts'
 import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
-import type { DispatchFn, RunResult } from '../runtime/types.ts'
+import type { DispatchFn, RunAnswer } from '../runtime/types.ts'
 import { SecretsError } from '../secrets/errors.ts'
 import { resolveConfigSecrets } from '../secrets/sources.ts'
 import type { ResolvedSource } from '../secrets/types.ts'
@@ -607,28 +607,26 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
     cwd: string,
   ): Promise<Deny | Ask | Route | null> {
     const source = programSource(entry.script.source, method)
-    let result: RunResult
+    let result: RunAnswer
     try {
       const engine = this.engine(entry)
       const env = await this.env(entry)
-      const run = async (): Promise<RunResult> => {
+      const run = async (): Promise<RunAnswer> => {
         // The runtime stops itself at the deadline; the signal stops it
         // when the wait gives up first, before the next run takes the
         // runtime.
         const cancel = new AbortController()
         try {
+          const ctx = {
+            flags: { c: source, ...PROGRAM_FLAGS.get(entry.runtime) },
+            cwd: PathSpec.fromStrPath(cwd),
+            env: { ...env, [CTX_ENV]: payload },
+            stdin: ENCODER.encode(payload),
+            signal: cancel.signal,
+            timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
+          }
           return await runWithTimeout(
-            engine.execute([], [], {
-              flags: {
-                c: source,
-                ...PROGRAM_FLAGS.get(entry.runtime),
-              },
-              cwd: PathSpec.fromStrPath(cwd),
-              env: { ...env, [CTX_ENV]: payload },
-              stdin: ENCODER.encode(payload),
-              signal: cancel.signal,
-              timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
-            }),
+            answerOf((output, errors) => engine.execute([], [], ctx, { output, errors })),
             SCRIPT_EVAL_TIMEOUT.seconds,
             'policy program',
           )
@@ -645,7 +643,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
       throw err
     }
     if (result.exitCode !== 0) {
-      const stderr = DECODER.decode(result.stderr ?? new Uint8Array())
+      const stderr = DECODER.decode(result.stderr)
       console.error(
         `policy program on ${entry.runtime} exited ${String(result.exitCode)}\n${stderr.slice(-2000)}`,
       )

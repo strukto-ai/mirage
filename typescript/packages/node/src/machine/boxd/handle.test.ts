@@ -23,7 +23,9 @@ import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -242,14 +244,23 @@ function lastStream(): LocalStream {
 function execArgv(
   machine: BoxdMachine,
   argv: string[],
-  output: ((data: Uint8Array) => Promise<void>) | null,
-  errors: ((data: Uint8Array) => Promise<void>) | null,
+  output: OutputFn,
+  errors: OutputFn,
   signal?: AbortSignal,
 ): Promise<RunResult> {
   const direct = machine as unknown as {
     execArgv: (...args: unknown[]) => Promise<RunResult>
   }
   return direct.execArgv(argv, null, {}, '/', output, errors, signal)
+}
+
+const ignore: OutputFn = () => Promise.resolve()
+
+/** A line run on the machine's remote runtime, its answer kept whole. */
+function lineOn(machine: BoxdMachine, ctx: Context): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    machineRuntime(machine).runLine(undefined, [], [], ctx, output, errors),
+  )
 }
 
 beforeEach(() => {
@@ -312,11 +323,11 @@ describe('BoxdMachine', () => {
     const machine = makeMachine()
     await machine.connect()
     const result = await machine.execLine('echo hi', null, { E: '1' }, '/tmp')
-    expect([
-      result.exitCode,
-      DEC.decode(result.stdout),
-      DEC.decode(result.stderr ?? new Uint8Array()),
-    ]).toEqual([0, 'hi\n', ''])
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      0,
+      'hi\n',
+      '',
+    ])
     const [only] = FakeClient.streams
     expect(only?.machineId).toBe('m-live')
     expect(only?.stream.command).toBe(wrapLine(['/bin/sh', '-c', 'echo hi'], { E: '1' }, '/tmp'))
@@ -332,7 +343,7 @@ describe('BoxdMachine', () => {
         "printf 'a\\377\\000b\\r\\n'; printf 'e\\376\\000' >&2; " +
         (stdin === null ? 'exit 5' : 'cat; exit 5')
       const result = await machine.execLine(line, stdin, {}, '/')
-      expect([result.exitCode, [...result.stdout], [...(result.stderr ?? [])]]).toEqual([
+      expect([result.exitCode, [...result.stdout], [...result.stderr]]).toEqual([
         5,
         [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, ...(stdin ?? [])],
         [0x65, 0xfe, 0x00],
@@ -416,19 +427,14 @@ describe('BoxdMachine', () => {
         return Promise.resolve()
       },
     )
-    expect([
-      result.stdout.byteLength,
-      result.stderr?.byteLength,
-      out.join(''),
-      err.join(''),
-    ]).toEqual([0, 0, 'out\n', 'err\n'])
+    expect([result.exitCode, out.join(''), err.join('')]).toEqual([0, 'out\n', 'err\n'])
   })
 
   it('an aborted line ends its stream', async () => {
     const machine = makeMachine()
     await machine.connect()
     const abort = new AbortController()
-    const line = execArgv(machine, ['/bin/sh', '-c', 'sleep 30'], null, null, abort.signal)
+    const line = execArgv(machine, ['/bin/sh', '-c', 'sleep 30'], ignore, ignore, abort.signal)
     while (FakeClient.streams.length === 0) await new Promise((r) => setTimeout(r, 10))
     abort.abort()
     await expect(line).rejects.toThrow('aborted')
@@ -463,7 +469,7 @@ describe('BoxdMachine', () => {
       cancel: () => {
         abort.abort()
       },
-      run: async () => (await machineRuntime(machine).runLine(undefined, [], [], ctx)).exitCode,
+      run: async () => (await lineOn(machine, ctx)).exitCode,
     })
     await vi.waitFor(
       () => {
@@ -476,18 +482,22 @@ describe('BoxdMachine', () => {
     expect(readFileSync(seen, 'utf8')).toBe('INT\n')
   })
 
-  // What a line with no sinks read before the drop comes back with the error.
+  // What a line read before the drop reached its sinks as it came; the
+  // transport's hint follows on stderr before the error.
   it('a dropped connection keeps what the line read', async () => {
     const machine = makeMachine()
     await machine.connect()
     FakeClient.streamError = new FakeAPIConnectionError('connection reset')
     FakeClient.streamErrorAfter = 2
-    const lost = await machine
-      .execLine('echo out; echo err >&2; sleep 0.3; echo more', null, {}, '/')
-      .catch((error: unknown) => error)
+    const [out, err]: [Uint8Array[], Uint8Array[]] = [[], []]
+    const lost = await execArgv(
+      machine,
+      ['/bin/sh', '-c', 'echo out; echo err >&2; sleep 0.3; echo more'],
+      (data) => Promise.resolve(void out.push(data)),
+      (data) => Promise.resolve(void err.push(data)),
+    ).catch((error: unknown) => error)
     expect(lost).toBeInstanceOf(ConnectionLostError)
-    const { stdout, stderr } = lost as ConnectionLostError
-    expect([DEC.decode(stdout), DEC.decode(stderr ?? new Uint8Array())]).toEqual([
+    expect([DEC.decode(Buffer.concat(out)), DEC.decode(Buffer.concat(err))]).toEqual([
       'out\n',
       'err\nboxd: connection reset\n',
     ])
@@ -497,13 +507,13 @@ describe('BoxdMachine', () => {
     FakeClient.streamError = new FakeAPIConnectionError('connection reset')
     const machine = makeMachine()
     const ctx = { stdin: null, flags: { c: 'echo hi' }, env: {}, cwd: PathSpec.fromStrPath('/') }
-    const result = await machineRuntime(machine).runLine(undefined, [], [], ctx)
-    expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+    const result = await lineOn(machine, ctx)
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
       129,
       'boxd: connection reset\nmirage: boxd:box: connection lost\n',
     ])
     FakeClient.streamError = null
-    const again = await machineRuntime(machine).runLine(undefined, [], [], ctx)
+    const again = await lineOn(machine, ctx)
     expect(again.exitCode).toBe(0)
     expect(FakeClient.fetched).toEqual(['m-live', 'm-live'])
   })
@@ -512,16 +522,14 @@ describe('BoxdMachine', () => {
     const machine = makeMachine()
     const ctx = { stdin: null, flags: { c: 'echo hi' }, env: {}, cwd: PathSpec.fromStrPath('/') }
     FakeClient.streamError = new FakeConflictError('machine is not running')
-    const result = await machineRuntime(machine).runLine(undefined, [], [], ctx)
-    expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+    const result = await lineOn(machine, ctx)
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
       129,
       'boxd: machine is not running\nmirage: boxd:box: connection lost\n',
     ])
     FakeClient.streamError = null
     FakeClient.status = 'stopped'
-    await expect(machineRuntime(machine).runLine(undefined, [], [], ctx)).rejects.toThrow(
-      'boxd machine start',
-    )
+    await expect(lineOn(machine, ctx)).rejects.toThrow('boxd machine start')
     expect(FakeClient.fetched).toEqual(['m-live', 'm-live'])
   })
 
@@ -537,9 +545,7 @@ describe('BoxdMachine', () => {
   it('refuses a mountType', async () => {
     const machine = makeMachine({ mountType: 'ssh' })
     const ctx = { stdin: null, flags: { c: 'echo hi' }, env: {}, cwd: PathSpec.fromStrPath('/') }
-    await expect(machineRuntime(machine).runLine(undefined, [], [], ctx)).rejects.toThrow(
-      'boxd: mountType needs a pipe transport',
-    )
+    await expect(lineOn(machine, ctx)).rejects.toThrow('boxd: mountType needs a pipe transport')
     expect(FakeClient.streams).toEqual([])
   })
 

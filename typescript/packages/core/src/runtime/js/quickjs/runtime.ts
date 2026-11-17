@@ -25,6 +25,7 @@ import {
 import { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { WasmExecution, workerUnavailable } from '../../wasm/execution.ts'
 import { loadWasm } from '../../wasm/loader.ts'
 import { WasmView } from '../../wasm/view.ts'
@@ -96,25 +97,28 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     return engine.close()
   }
 
-  override async version(env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
+  override async version(
+    env: Record<string, string>,
+    output: OutputFn,
+    errors: OutputFn,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
     const engine = await this.engine()
-    const [stdout, stderr, exitCode] = await engine.run(
+    const said: Uint8Array[] = []
+    const exitCode = await engine.run(
       ['qjs', '--version'],
       null,
       Object.entries(env),
       new WasmView(),
-      undefined,
-      undefined,
+      (data) => Promise.resolve(void said.push(data)),
+      errors,
       signal,
     )
-    return {
-      stdout:
-        exitCode === 0
-          ? ENC.encode(`JavaScript (quickjs-ng ${DEC.decode(stdout).trim()})\n`)
-          : stdout,
-      stderr,
-      exitCode,
-    }
+    const version = concat(said)
+    if (exitCode === 0)
+      await output(ENC.encode(`JavaScript (quickjs-ng ${DEC.decode(version).trim()})\n`))
+    else if (version.byteLength > 0) await output(version)
+    return { exitCode }
   }
 
   /**
@@ -130,8 +134,8 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     engine: WasmExecution,
     program: Program,
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const module = ctx.flags.module === true
     // --std exposes the std/os globals (stdin via std.in); -m selects
@@ -174,7 +178,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     const stop = mergeSignals(ctx.signal, deadline)
     const files = RuntimeFiles.of(ctx, this.binding)
     try {
-      const [stdout, stderr, exitCode] = await engine.run(
+      const exitCode = await engine.run(
         argv,
         program.stdin,
         Object.entries(ctx.env ?? {}),
@@ -184,12 +188,12 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
         stop,
         memoryRoom(),
       )
-      return { stdout, stderr, exitCode }
+      return { exitCode }
     } catch (err) {
       if (ctx.signal?.aborted === true) {
         // A cancelled run's stop is no error of the program's: it ends as a
         // killed one does, saying nothing, as Monty's does.
-        return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
+        return { exitCode: 1 }
       }
       if (deadline?.aborted === true && ctx.timeoutSeconds !== undefined)
         throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)

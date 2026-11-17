@@ -46,7 +46,7 @@ from mirage.types import PathSpec
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-def _unrunnable(name: str, path: str) -> RunResult | None:
+def _unrunnable(name: str, path: str) -> tuple[str, int] | None:
     """Why a program named by a path cannot run, in the shell's words and
     exit code; None when it can.
 
@@ -55,27 +55,27 @@ def _unrunnable(name: str, path: str) -> RunResult | None:
         path (str): that path joined to the cwd.
     """
     if not os.path.exists(path):
-        return _not_run(
-            f"{name}: No such file or directory\n", NOT_FOUND_STATUS
-        )
+        return f"{name}: No such file or directory\n", NOT_FOUND_STATUS
     if os.path.isdir(path):
-        return _not_run(f"{name}: Is a directory\n", CANNOT_EXECUTE_STATUS)
+        return f"{name}: Is a directory\n", CANNOT_EXECUTE_STATUS
     if not os.access(path, os.X_OK):
-        return _not_run(f"{name}: Permission denied\n", CANNOT_EXECUTE_STATUS)
+        return f"{name}: Permission denied\n", CANNOT_EXECUTE_STATUS
     return None
 
 
-def _not_run(message: str, exit_code: int) -> RunResult:
+async def _not_run(
+    errors: OutputFn, message: str, exit_code: int
+) -> RunResult:
     """A program that never started: its message and exit code.
 
     Args:
+        errors (OutputFn): where the message goes.
         message (str): what the program would have said on stderr.
         exit_code (int): 127 when it was not found, 126 when it could
             not run.
     """
-    return RunResult(
-        stdout=b"", stderr=encode_text(message), exit_code=exit_code
-    )
+    await errors(encode_text(message))
+    return RunResult(exit_code=exit_code)
 
 
 class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
@@ -134,17 +134,21 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         """The host, under the name of the machine entry that runs it."""
         return MachineName(HOST, self.name)
 
-    async def version(self, env: dict[str, str]) -> RunResult:
+    async def version(
+        self, env: dict[str, str], output: OutputFn, errors: OutputFn
+    ) -> RunResult:
         # Session loader variables can execute code before --version is read.
-        return await self._spawn(self._python, ["--version"], {})
+        return await self._spawn(
+            self._python, ["--version"], {}, None, None, output, errors
+        )
 
     async def interpret(
         self,
         engine: None,
         program: Program,
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
@@ -159,8 +163,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             ],
             ctx.env or {},
             program.stdin,
-            output=output,
-            errors=errors,
+            None,
+            output,
+            errors,
         )
 
     async def run_process(
@@ -169,12 +174,12 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         name = texts[0]
         cwd = ctx.cwd.virtual
-        refusal = await cwd_refusal(name, cwd)
+        refusal = await cwd_refusal(name, cwd, errors)
         if refusal is not None:
             return refusal
         if os.path.dirname(name):
@@ -183,16 +188,16 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             # `..` past a symlink as written.
             program = os.path.join(cwd, name)
             # Off the loop too: the path may be in a folder it serves.
-            refusal = await asyncio.to_thread(_unrunnable, name, program)
-            if refusal is not None:
-                return refusal
+            unrunnable = await asyncio.to_thread(_unrunnable, name, program)
+            if unrunnable is not None:
+                return await _not_run(errors, *unrunnable)
         else:
             # Off the loop, which a PATH entry on a mount this process
             # serves needs.
             found = await asyncio.to_thread(shutil.which, name)
             if found is None:
-                return _not_run(
-                    f"{name}: command not found\n", NOT_FOUND_STATUS
+                return await _not_run(
+                    errors, f"{name}: command not found\n", NOT_FOUND_STATUS
                 )
             # Absolute: a relative PATH entry names a file here, and the
             # program starts in the session's cwd.
@@ -217,8 +222,10 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             reason = fs_strerror(exc) or errno.errorcode.get(
                 exc.errno or 0, str(exc)
             )
-            return _not_run(
-                f"{name}: cannot execute: {reason}\n", CANNOT_EXECUTE_STATUS
+            return await _not_run(
+                errors,
+                f"{name}: cannot execute: {reason}\n",
+                CANNOT_EXECUTE_STATUS,
             )
 
     async def _spawn(
@@ -226,10 +233,10 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         program: str,
         argv: list[str],
         env: dict[str, str],
-        stdin: ByteSource | None = None,
-        cwd: str | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        stdin: ByteSource | None,
+        cwd: str | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         given = {**self.config.env, **env}
         clock = await system_time_env(given)

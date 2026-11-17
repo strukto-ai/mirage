@@ -155,15 +155,21 @@ def test_the_workspace_runtime_is_not_a_machine():
 class AlphaRuntime(PythonRuntime):
     name = "alpha"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"ran-alpha\n", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        await output(b"ran-alpha\n")
+        return RunResult(exit_code=0)
 
 
 class BetaRuntime(PythonRuntime):
     name = "beta"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"ran-beta\n", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        await output(b"ran-beta\n")
+        return RunResult(exit_code=0)
 
 
 @pytest_asyncio.fixture
@@ -591,20 +597,24 @@ class LineBox(Runtime, LineExecutorMixin):
     def __init__(self) -> None:
         self.lines: list[tuple[str, bytes | None, str]] = []
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
         line = ctx.flags["c"]
         self.lines.append((line, ctx.stdin, ctx.cwd.virtual))
-        return RunResult(
-            stdout=b"box:" + line.encode(), stderr=None, exit_code=0
-        )
+        await output(b"box:" + line.encode())
+        return RunResult(exit_code=0)
 
 
 class ReadingBox(LineBox):
     """A whole-line runtime that reads a workspace file for its line."""
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
         data = await ctx.vfs.read("/ram/f.txt")
-        return RunResult(stdout=data, stderr=None, exit_code=0)
+        await output(data)
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -646,7 +656,9 @@ class StallingBox(LineBox):
         super().__init__()
         self.read = asyncio.Event()
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
         await ctx.vfs.read("/ram/f.txt")
         self.read.set()
         await asyncio.Event().wait()
@@ -779,8 +791,10 @@ class ResolverProbe(PythonRuntime):
         super().bind(binding)
         self.resolver = binding.resolver
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import type { Context } from '../../../commands/config.ts'
-import type { Program, RunResult } from '../../types.ts'
+import type { Program, RunAnswer } from '../../types.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -30,14 +30,23 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { answerOf } from '../../binding.ts'
 
 /** Run a resolved program; pyodide has no engine, so the run queues at the call. */
 function interpret(
   rt: PyodideRuntime,
   program: Partial<Program> & { code: string },
   extra: Partial<Context> = {},
-): Promise<RunResult> {
-  return rt.interpret(undefined, { args: [], stdin: null, ...program }, runContext(rt, extra))
+): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    rt.interpret(
+      undefined,
+      { args: [], stdin: null, ...program },
+      runContext(rt, extra),
+      output,
+      errors,
+    ),
+  )
 }
 
 /** An empty cwd: the interpreter stays in the directory it started in. */
@@ -163,9 +172,7 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
         expect(results.map((result) => result.exitCode)).toEqual([0, 0, 0])
         const failure = await second
         expect(failure.exitCode).toBe(1)
-        expect(new TextDecoder().decode(failure.stderr ?? new Uint8Array())).toContain(
-          'expected failure',
-        )
+        expect(new TextDecoder().decode(failure.stderr)).toContain('expected failure')
         await closeAgain
       } finally {
         for (const read of reads.values()) read.release.resolve()
@@ -1151,12 +1158,17 @@ describe('Pyodide run cwd', { timeout: 120_000 }, () => {
         (await ws.shell('mkdir /data/sub; echo child > /data/sub/item; cd /data')).exitCode,
       ).toBe(0)
       const code = 'import os; print(os.getcwd())'
-      const run = await rt.execute([], [], context({ flags: { c: code } }))
+      const run = await answerOf((output, errors) =>
+        rt.execute([], [], context({ flags: { c: code } }), { output, errors }),
+      )
       expect(dec.decode(run.stdout)).toBe('/\n')
-      const explicit = await rt.execute(
-        [],
-        [],
-        context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+      const explicit = await answerOf((output, errors) =>
+        rt.execute(
+          [],
+          [],
+          context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+          { output, errors },
+        ),
       )
       expect(dec.decode(explicit.stdout)).toBe('/data/sub\n')
     } finally {

@@ -1068,7 +1068,7 @@ class ResolverProbe extends LanguageRuntime {
     this.resolver = binding.resolver
   }
   interpret(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 

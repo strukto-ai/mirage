@@ -30,7 +30,7 @@ import { mcpCli } from '../commands/cli/mcp/index.ts'
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
 import { PythonRuntime } from '../runtime/python/base.ts'
 import { registerRuntime } from '../runtime/table.ts'
-import type { RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
@@ -337,12 +337,14 @@ it('a copy rebuilds the machines built from an entry', async () => {
 it('a copy rebuilds a runtime by the key it was named by', async () => {
   class Aliased extends PythonRuntime {
     readonly name: string = 'aliased-python'
-    interpret(): Promise<RunResult> {
-      return Promise.resolve({
-        stdout: new TextEncoder().encode('ran\n'),
-        stderr: null,
-        exitCode: 0,
-      })
+    async interpret(
+      _engine: unknown,
+      _program: unknown,
+      _ctx: unknown,
+      output: OutputFn,
+    ): Promise<RunResult> {
+      await output(new TextEncoder().encode('ran\n'))
+      return { exitCode: 0 }
     }
   }
   registerRuntime('py-engine', Aliased)

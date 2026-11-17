@@ -1690,7 +1690,7 @@ class _Napper(MachineHandle):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     async def close(self) -> None:
         await super().close()

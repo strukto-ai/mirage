@@ -15,17 +15,5 @@
 
 class ConnectionLostError(ConnectionError):
     """The connection to a machine went while a run was on it, and how
-    its program ended went with it; what the run read before is kept.
-
-    Args:
-        message (str): what went.
-        stdout (bytes): the output read before the drop.
-        stderr (bytes | None): the errors read before the drop.
-    """
-
-    def __init__(
-        self, message: str, stdout: bytes = b"", stderr: bytes | None = None
-    ) -> None:
-        super().__init__(message)
-        self.stdout = stdout
-        self.stderr = stderr
+    its program ended went with it; what the run wrote before reached its
+    sinks already."""

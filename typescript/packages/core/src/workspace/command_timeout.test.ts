@@ -43,7 +43,7 @@ class SignalProbeRuntime extends LanguageRuntime {
     return new Promise((resolve) => {
       ctx.signal?.addEventListener('abort', () => {
         this.aborted = true
-        resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 1 })
+        resolve({ exitCode: 1 })
       })
     })
   }

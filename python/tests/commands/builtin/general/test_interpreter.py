@@ -35,11 +35,10 @@ class EchoRuntime(LanguageRuntime):
     language = "python"
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
-        return RunResult(
-            stdout=program.code.encode(), stderr=None, exit_code=0
-        )
+        await output(program.code.encode())
+        return RunResult(exit_code=0)
 
 
 def spec(path: str) -> PathSpec:
@@ -88,17 +87,20 @@ def test_not_bound_answers_command_not_found():
 
 
 async def _ran(output, errors) -> RunResult:
-    return RunResult(stdout=b"out", stderr=b"err", exit_code=3)
+    await output(b"out")
+    await errors(b"err")
+    return RunResult(exit_code=3)
 
 
 async def _out_then_err(output, errors) -> RunResult:
     await output(b"a")
     await errors(b"e")
-    return RunResult(stdout=b"", stderr=None, exit_code=0)
+    return RunResult(exit_code=0)
 
 
 async def _said_on_stderr(output, errors) -> RunResult:
-    return RunResult(stdout=b"", stderr=b"run\n", exit_code=0)
+    await errors(b"run\n")
+    return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -118,7 +120,7 @@ async def test_run_output_hands_each_write_over_as_the_run_makes_it():
         await output(b"first\n")
         await later.wait()
         await output(b"second\n")
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     stdout, _ = run_output(run)
     assert await anext(stdout) == b"first\n"
@@ -133,7 +135,7 @@ async def test_run_output_holds_the_run_back_while_its_reader_is_behind():
     async def run(output, errors):
         await output(b"x" * (1 << 20))
         wrote.set()
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     stdout, _ = run_output(run)
     first = await anext(stdout)
@@ -167,7 +169,7 @@ async def test_run_output_stops_the_run_when_its_reader_goes_away():
             await asyncio.Event().wait()
         finally:
             stopped.set()
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     source = Input()
     stdout, io = run_output(run, stdin=source)
@@ -184,7 +186,7 @@ async def test_run_output_keeps_the_stderr_a_stopped_run_had_written():
         await errors(b"warn\n")
         await output(b"a")
         await asyncio.Event().wait()
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
     stdout, io = run_output(run)
     assert await anext(stdout) == b"a"
@@ -222,10 +224,12 @@ async def test_run_interpreter_settles_the_runtime_once_the_run_ends():
 
     class Recorded(EchoRuntime):
         async def interpret(
-            self, engine, program: Program, ctx, output=None, errors=None
+            self, engine, program: Program, ctx, output, errors
         ) -> RunResult:
             said.append("ran")
-            return await super().interpret(engine, program, ctx)
+            return await super().interpret(
+                engine, program, ctx, output, errors
+            )
 
     async def settle() -> None:
         said.append("settled")

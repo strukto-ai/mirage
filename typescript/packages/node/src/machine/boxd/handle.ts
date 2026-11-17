@@ -31,7 +31,6 @@ import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { abortable } from '@struktoai/mirage-core/utils/abort'
-import { concat } from '@struktoai/mirage-core/utils/bytes'
 import type { Boxd, ExecStream } from '@boxd-sh/sdk'
 import { BOXD_CONFIG_FIELDS, type BoxdConfig } from './config.ts'
 import { MACHINE_GONE } from './constants.ts'
@@ -113,14 +112,9 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
   /**
    * The lost connection `error` is when the machine went or boxd could not
    * be reached, which also lets the next line connect again; null otherwise.
-   * `stdout` and `stderr` are what the line kept before the drop.
+   * Its message is the hint the line says.
    */
-  private lost(
-    sdk: BoxdSdk,
-    error: unknown,
-    stdout: Uint8Array,
-    stderr: Uint8Array,
-  ): ConnectionLostError | null {
+  private lost(sdk: BoxdSdk, error: unknown): ConnectionLostError | null {
     let hint = this.gone(sdk, error)
     if (
       hint === null &&
@@ -129,7 +123,7 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
       hint = error.message
     if (hint === null) return null
     this.disconnected()
-    return new ConnectionLostError(hint, stdout, concat([stderr, ENC.encode(`boxd: ${hint}\n`)]))
+    return new ConnectionLostError(hint)
   }
 
   private stream(command: string, closeStdin: boolean): ExecStream {
@@ -142,8 +136,8 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     signal?.throwIfAborted()
@@ -151,8 +145,6 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
     if (sdk === null) throw new Error('boxd machine not connected')
     const runner = currentCaller().process
     const stream = this.stream(wrapLine(argv, env, cwd), stdin === null)
-    const out: Uint8Array[] = []
-    const err: Uint8Array[] = []
     const state = { exited: false }
     const budget = new YieldBudget()
     // The command may end without reading all its input (head), so its
@@ -181,11 +173,7 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
     try {
       const [, , code] = await abortable(
         Promise.race([
-          Promise.all([
-            drain(stream.stdout, (data) => (output === null ? void out.push(data) : output(data))),
-            drain(stream.stderr, (data) => (errors === null ? void err.push(data) : errors(data))),
-            stream.wait(),
-          ]),
+          Promise.all([drain(stream.stdout, output), drain(stream.stderr, errors), stream.wait()]),
           failedInput,
         ]),
         signal,
@@ -202,8 +190,9 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
     } catch (error) {
       state.exited = true
       void closeQuietly(stdin)
-      const lost = signal?.aborted === true ? null : this.lost(sdk, error, concat(out), concat(err))
+      const lost = signal?.aborted === true ? null : this.lost(sdk, error)
       if (lost !== null) {
+        await errors(ENC.encode(`boxd: ${lost.message}\n`))
         stream.close()
         throw lost
       }
@@ -217,11 +206,7 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
       if (tag !== undefined) await this.stop(tag, 15)
       throw error
     }
-    return {
-      stdout: output === null ? concat(out) : new Uint8Array(),
-      stderr: errors === null ? concat(err) : new Uint8Array(),
-      exitCode,
-    }
+    return { exitCode }
   }
 
   /** Release the SDK client; the machine itself is the user's. */

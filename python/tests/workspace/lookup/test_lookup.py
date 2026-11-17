@@ -56,21 +56,23 @@ class _Sandbox(Runtime, ProcessExecutorMixin):
     captures = ("gcc", EXTERNAL_COMMANDS)
 
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class _HostPython(PythonRuntime, ProcessExecutorMixin):
     name = "host-python"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class _HostTools(_HostPython):
@@ -431,17 +433,19 @@ class _Box(Runtime, LineExecutorMixin):
     def machine(self) -> MachineName:
         return MachineName("ssh", self.name)
 
-    async def run_line(self, engine, paths, texts, ctx):
-        return RunResult(
-            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
-        )
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
+        await output(f"{self.name}\n".encode())
+        return RunResult(exit_code=0)
 
 
 class _Monty(PythonRuntime):
     name = "monty"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"monty\n", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        await output(b"monty\n")
+        return RunResult(exit_code=0)
 
 
 def _commands(node) -> list[str]:
@@ -539,10 +543,9 @@ async def test_a_wrapper_a_runtime_captures_runs_there():
 class _Echo(_Box):
     """A line runtime that answers the line it was handed."""
 
-    async def run_line(self, engine, paths, texts, ctx):
-        return RunResult(
-            stdout=f"{ctx.flags['c']}\n".encode(), stderr=None, exit_code=0
-        )
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
+        await output(f"{ctx.flags['c']}\n".encode())
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

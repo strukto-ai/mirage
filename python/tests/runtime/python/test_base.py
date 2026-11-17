@@ -23,11 +23,12 @@ class ProcessRuntime(PythonRuntime):
     name = "custom-process"
     runs = 0
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
         self.runs += 1
-        return RunResult(
-            stdout=b"unexpected execution", stderr=None, exit_code=0
-        )
+        await output(b"unexpected execution")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

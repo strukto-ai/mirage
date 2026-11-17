@@ -17,9 +17,12 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
+from mirage.commands.config import Context
 from mirage.execution.machine.table import MachineTable
 from mirage.machine.handle import MachineHandle
+from mirage.runtime.binding import answer_of
 from mirage.runtime.machine import RemoteRuntime
+from mirage.runtime.types import ExecutionKind, RunAnswer
 
 # One table per handle, as one workspace holds a handle however many
 # runtimes a test binds to it.
@@ -41,6 +44,28 @@ def machine_runtime(handle: MachineHandle) -> RemoteRuntime:
         table = _TABLES[handle] = MachineTable({handle.name: handle})
     runtime.bind_machines(table)
     return runtime
+
+
+async def machine_answer(
+    handle: MachineHandle,
+    texts: Sequence[str],
+    ctx: Context,
+    kind: ExecutionKind = "process",
+) -> RunAnswer:
+    """What one run on a machine's runtime answered, kept whole.
+
+    Args:
+        handle (MachineHandle): the machine.
+        texts (Sequence[str]): the argv, or nothing for a line.
+        ctx (Context): the run's context.
+        kind (ExecutionKind): a process or a whole line.
+    """
+    runtime = machine_runtime(handle)
+    return await answer_of(
+        lambda output, errors: runtime.execute(
+            [], list(texts), ctx, kind=kind, output=output, errors=errors
+        )
+    )
 
 
 def on(handle: MachineHandle) -> dict[str, Any]:

@@ -118,14 +118,14 @@ def _run_program(
             if ran.stdout is not None:
                 async for chunk in ensure_stream(ran.stdout):
                     await output(chunk)
-            said = await ran.materialize_stderr()
+            if ran.stderr is not None:
+                async for chunk in ensure_stream(ran.stderr):
+                    await errors(chunk)
         finally:
             reset_caller(worn)
             reset_caller(token)
         node.exit_code = ran.exit_code
-        return RunResult(
-            stdout=b"", stderr=said or None, exit_code=ran.exit_code
-        )
+        return RunResult(exit_code=ran.exit_code)
 
     stdout, io = run_output(run)
     return stdout, io, node

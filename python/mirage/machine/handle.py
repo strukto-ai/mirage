@@ -16,7 +16,6 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -56,8 +55,8 @@ from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
 from mirage.machine.resources import parse_resources
 from mirage.machine.types import RunStatus, ScanFacts
-from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.binding import WorkspaceBinding, answer_of
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.clock import bound_system_clock
 
@@ -216,40 +215,6 @@ class ExitLineFilter:
         return bytes(out + held[: len(held) - keep])
 
 
-async def _without_run_lines(
-    data: bytes,
-    found: Callable[[RunStatus], None] | None,
-    search: bool,
-    mark: bytes,
-) -> bytes:
-    """``data``, a stream an exec returned whole, with its exit line
-    taken out (``ExitLineFilter``), and its pid line too when ``found``
-    still waits for it (``PidLineFilter``).
-
-    Args:
-        data (bytes): the stream.
-        found (Callable[[RunStatus], None] | None): told what the pid
-            line says; None once it is known.
-        search (bool): look for the pid line past the stream's start.
-        mark (bytes): what the run's exit line starts with.
-    """
-    out = bytearray()
-
-    async def keep(chunk: bytes) -> None:
-        out.extend(chunk)
-
-    sink: OutputFn = keep
-    pid_line = PidLineFilter(keep, found, search) if found else None
-    if pid_line is not None:
-        sink = pid_line.write
-    exit_line = ExitLineFilter(sink, lambda _: None, mark)
-    await exit_line.write(data)
-    await exit_line.finish()
-    if pid_line is not None:
-        await pid_line.finish()
-    return bytes(out)
-
-
 class MachineHandle:
     """One machine a workspace runs programs on, reached through its
     provider: the live connection, held once per workspace.
@@ -282,6 +247,9 @@ class MachineHandle:
     # (Daytona) refuses a line given any before it runs, and a program
     # that reads a process substitution, which would need feeding.
     takes_input: ClassVar[bool] = True
+    # Whether the machine's exec hands stderr back joined into stdout
+    # (Daytona), so a run's pid and exit lines arrive on its stdout.
+    joins_streams: ClassVar[bool] = False
     config: MachineConfig
 
     def __init__(
@@ -382,8 +350,8 @@ class MachineHandle:
         argv: tuple[str, ...],
         ctx: Context,
         binding: WorkspaceBinding | None,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Connect once, validate the line, run it, then land what sshfs
         acknowledged, failing the run with a landing that failed.
@@ -393,13 +361,15 @@ class MachineHandle:
             ctx (Context): the run's stdin, environment and cwd.
             binding (WorkspaceBinding | None): the workspace the run
                 serves, whose mounts the machine is served.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
         """
         await self.ensure_connected()
         run = argv
         if self._mounts is not None:
-            refusal = await self._mounts.validate(binding, ctx.cwd.virtual)
+            refusal = await self._mounts.validate(
+                binding, ctx.cwd.virtual, errors
+            )
             if refusal is not None:
                 return refusal
             run = self._mounts.guarded(argv)
@@ -411,14 +381,6 @@ class MachineHandle:
         tag = str(runner.record.id) if runner is not None else uuid.uuid4().hex
         nonce = uuid.uuid4().hex
         mark = run_exit_mark(nonce)
-        kept: tuple[bytearray, bytearray] = (bytearray(), bytearray())
-
-        async def keep_output(data: bytes) -> None:
-            kept[0].extend(data)
-
-        async def keep_errors(data: bytes) -> None:
-            kept[1].extend(data)
-
         reported: list[RunStatus] = []
 
         def found(report: RunStatus) -> None:
@@ -434,8 +396,15 @@ class MachineHandle:
             if not ended.done():
                 ended.set_result(code)
 
-        pid_line = PidLineFilter(errors or keep_errors, found, search=True)
+        pid_line = PidLineFilter(errors, found, search=True)
         exit_line = ExitLineFilter(pid_line.write, exited, mark)
+        filters: list[ExitLineFilter | PidLineFilter] = [exit_line, pid_line]
+        sink = output
+        if self.joins_streams:
+            out_pid = PidLineFilter(output, found, search=False)
+            out_exit = ExitLineFilter(out_pid.write, exited, mark)
+            filters += [out_exit, out_pid]
+            sink = out_exit.write
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
@@ -443,30 +412,14 @@ class MachineHandle:
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
-                output or keep_output,
+                sink,
                 exit_line.write,
             )
         )
         try:
             done = await self._outcome(execution, ended)
-            await exit_line.finish()
-            await pid_line.finish()
-            # An exec that returns its streams whole, or joined into
-            # stdout, brings the lines back with them.
-            if done.stderr:
-                done = replace(
-                    done,
-                    stderr=await _without_run_lines(
-                        done.stderr, None if reported else found, True, mark
-                    ),
-                )
-            if done.stdout:
-                done = replace(
-                    done,
-                    stdout=await _without_run_lines(
-                        done.stdout, None if reported else found, False, mark
-                    ),
-                )
+            for line_filter in filters:
+                await line_filter.finish()
         except asyncio.CancelledError:
             execution.cancel()
             await asyncio.gather(execution, return_exceptions=True)
@@ -479,25 +432,16 @@ class MachineHandle:
                 )
             await asyncio.shield(self.stop(tag, signum or 15))
             raise
-        except ConnectionLostError as exc:
+        except ConnectionLostError:
             logger.debug("%s: connection lost", self.machine, exc_info=True)
             if runner is not None:
                 runner.program_signaled(HANGUP_EXIT_CODE - 128)
-            await exit_line.finish()
-            await pid_line.finish()
-            said = f"mirage: {self.machine}: connection lost\n".encode()
-            done = RunResult(
-                stdout=exc.stdout,
-                stderr=(exc.stderr or b"") + bytes(kept[1]) + said,
-                exit_code=HANGUP_EXIT_CODE,
-            )
+            for line_filter in filters:
+                await line_filter.finish()
+            await errors(f"mirage: {self.machine}: connection lost\n".encode())
+            done = RunResult(exit_code=HANGUP_EXIT_CODE)
         finally:
             self._executing -= 1
-        done = RunResult(
-            stdout=done.stdout or bytes(kept[0]),
-            stderr=done.stderr or (bytes(kept[1]) or None),
-            exit_code=done.exit_code,
-        )
         if self._mounts is None:
             return done
         if done.exit_code == CANNOT_EXECUTE_STATUS:
@@ -506,12 +450,8 @@ class MachineHandle:
         lost = await self._mounts.land()
         if not lost:
             return done
-        said = "".join(f"{line}\n" for line in lost).encode()
-        return RunResult(
-            stdout=done.stdout,
-            stderr=(done.stderr or b"") + said,
-            exit_code=done.exit_code or 1,
-        )
+        await errors("".join(f"{line}\n" for line in lost).encode())
+        return RunResult(exit_code=done.exit_code or 1)
 
     async def _outcome(
         self, execution: asyncio.Future[RunResult], ended: asyncio.Future[int]
@@ -534,16 +474,19 @@ class MachineHandle:
             return execution.result()
         execution.cancel()
         await asyncio.gather(execution, return_exceptions=True)
-        return RunResult(stdout=b"", stderr=None, exit_code=ended.result())
+        return RunResult(exit_code=ended.result())
 
-    def input_refused(self) -> RunResult:
+    async def input_refused(self, errors: OutputFn) -> RunResult:
         """What a line that needs input answers on a machine that takes
-        none (``takes_input``): 126, with why."""
-        return RunResult(
-            stdout=b"",
-            stderr=f"mirage: {self.machine}: the machine takes no input\n".encode(),
-            exit_code=CANNOT_EXECUTE_STATUS,
+        none (``takes_input``): 126, with why.
+
+        Args:
+            errors (OutputFn): where why is said.
+        """
+        await errors(
+            f"mirage: {self.machine}: the machine takes no input\n".encode()
         )
+        return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
 
     async def check(self) -> bool:
         """Reach the machine and run the check line (``CHECK_LINE``),
@@ -558,7 +501,7 @@ class MachineHandle:
                 shell there ran the line (a stopped container).
         """
         ran = await self._connected_line(CHECK_LINE, CHECK_WAIT_SECONDS)
-        if CHECK_MARK.encode() not in (ran.stdout or b""):
+        if CHECK_MARK.encode() not in ran.stdout:
             raise RuntimeError(
                 f"{self.machine}: check did not run: exit {ran.exit_code}"
             )
@@ -606,7 +549,7 @@ class MachineHandle:
         if done.exit_code != 0:
             raise RuntimeError(f"{self.machine}: read exited {done.exit_code}")
         return parse_resources(
-            (done.stdout or b"").decode(errors="replace"), str(self.machine)
+            done.stdout.decode(errors="replace"), str(self.machine)
         )
 
     async def signal(self, target: str | MachinePid, signum: int) -> bool:
@@ -655,13 +598,15 @@ class MachineHandle:
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
                 await self.ensure_connected()
-                done = await self._exec_argv(
-                    ("/bin/sh", "-c", stop_line(tag, signum)),
-                    None,
-                    dict(self.config.env),
-                    "/",
-                    None,
-                    None,
+                done = await answer_of(
+                    lambda output, errors: self._exec_argv(
+                        ("/bin/sh", "-c", stop_line(tag, signum)),
+                        None,
+                        dict(self.config.env),
+                        "/",
+                        output,
+                        errors,
+                    )
                 )
         except Exception:
             logger.debug(
@@ -727,7 +672,7 @@ class MachineHandle:
                     self.machine,
                 )
 
-    async def _setup(self, line: str) -> RunResult:
+    async def _setup(self, line: str) -> RunAnswer:
         """Run one of Mirage's own lines on the machine: its environment,
         at ``/``.
 
@@ -736,7 +681,7 @@ class MachineHandle:
         """
         return await self.exec_line(line, None, dict(self.config.env), "/")
 
-    async def _connected_line(self, line: str, wait: float) -> RunResult:
+    async def _connected_line(self, line: str, wait: float) -> RunAnswer:
         """Connect, then run one of Mirage's own lines, within ``wait``
         seconds in all.
 
@@ -766,8 +711,8 @@ class MachineHandle:
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Execute one argv on the machine: the provider's transport.
 
@@ -777,9 +722,9 @@ class MachineHandle:
                 consumes it; None for none.
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
-            output (OutputFn | None): receives stdout as it arrives,
-                which the result then leaves out; None, or a transport
-                that cannot stream, returns it whole.
+            output (OutputFn): receives stdout as it arrives; a
+                transport that gets it whole writes it once.
+            errors (OutputFn): the same for stderr.
         """
         raise NotImplementedError
 
@@ -789,8 +734,9 @@ class MachineHandle:
         stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
-    ) -> RunResult:
-        """Execute one shell line on the machine, as ``/bin/sh -c``.
+    ) -> RunAnswer:
+        """Execute one of Mirage's own shell lines on the machine, as
+        ``/bin/sh -c``, and keep its answer whole for the caller.
 
         Args:
             line (str): the raw shell line.
@@ -798,8 +744,10 @@ class MachineHandle:
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        return await self._exec_argv(
-            ("/bin/sh", "-c", line), stdin, env, cwd, None, None
+        return await answer_of(
+            lambda output, errors: self._exec_argv(
+                ("/bin/sh", "-c", line), stdin, env, cwd, output, errors
+            )
         )
 
     def _disconnected(self) -> None:

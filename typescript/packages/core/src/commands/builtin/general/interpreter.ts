@@ -39,14 +39,15 @@ import {
 /**
  * A runtime run as a command's output, handed over as it runs.
  *
- * The one mapping from a run to a command's output shape: the interpreter
- * commands, a script CLI, a program a runtime captured and a whole line all
- * answer through here. The run starts when its output is first read and
- * writes stdout into a bounded pipe, so a reader that falls behind holds the
- * program back and the output is never held whole; what a transport could
- * not stream lands at the end. The status, and the stderr the run returned,
- * settle on the result as the output ends (`IOResult.output`), stderr after
- * what the result already held. A reader that stops early stops the run,
+ * The one push-to-pull bridge from a run to a command's output shape: the
+ * interpreter commands, a script CLI, a program a runtime captured and a
+ * whole line all answer through here. The run starts when its output is
+ * first read and writes stdout into a bounded pipe, so a reader that falls
+ * behind holds the program back and the output is never held whole; a
+ * transport that gets its answer whole wrote it through the same sink. The
+ * status settles on the result as the output ends (`IOResult.output`), and
+ * so does the stderr the run wrote when no `errors` takes it, after what the
+ * result already held. A reader that stops early stops the run,
  * which then exits 141, as SIGPIPE leaves a program, and keeps the stderr it
  * had written. A stopped run that does not end within the stop bound is left
  * running, as a stopped handler is (`runCancellable`). Mirrors Python's
@@ -104,9 +105,7 @@ export function runOutput(
         errors === undefined ? keep : ordered,
         runSignal,
       )
-      if (result.stderr !== null && result.stderr.length > 0) kept.push(result.stderr)
       if (stopped) return
-      if (result.stdout.length > 0) await pipe.write(result.stdout)
       io.exitCode = result.exitCode
       pipe.end()
     } catch (error) {
@@ -171,21 +170,14 @@ export function runtimeVersion(
   signal?: AbortSignal,
   timeoutSeconds?: number,
 ): CommandFnResult {
-  const run = async (
-    _output: OutputFn,
-    _errors: OutputFn,
-    stop: AbortSignal,
-  ): Promise<RunResult> => {
+  const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     try {
-      return await runtime.version(env, stop, timeoutSeconds)
+      return await runtime.version(env, output, errors, stop, timeoutSeconds)
     } catch (err) {
       if (err instanceof CommandTimeoutError) throw err
       const message = err instanceof Error ? err.message : String(err)
-      return {
-        stdout: new Uint8Array(),
-        stderr: encodeText(`${label}: ${message}\n`),
-        exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1,
-      }
+      await errors(encodeText(`${label}: ${message}\n`))
+      return { exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1 }
     }
   }
   return runOutput(run, null, undefined, null, signal)
@@ -275,11 +267,8 @@ export function runInterpreter(
       if ((err instanceof Error && err.name === 'AbortError') || hasAborted(signal)) throw err
       if (script !== null && isFsError(err) && errorVirtualPath(err) === script.virtual) throw err
       const message = err instanceof Error ? err.message : String(err)
-      return {
-        stdout: new Uint8Array(),
-        stderr: encodeText(`${label}: ${message}\n`),
-        exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1,
-      }
+      await errors(encodeText(`${label}: ${message}\n`))
+      return { exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1 }
     } finally {
       // The program may have written past the dispatcher.
       await ctx.runtime?.settle?.()

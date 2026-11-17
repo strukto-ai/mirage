@@ -18,7 +18,7 @@ import { isMissingPath } from '../errors/fs.ts'
 import { type ByteSource, materialize } from '../io/types.ts'
 import { PathSpec } from '../types.ts'
 import { mountKey, mountPrefixOf } from '../utils/key_prefix.ts'
-import type { Program, RunResult } from './types.ts'
+import type { OutputFn, Program, RunResult } from './types.ts'
 
 export const STDIN_OPERAND = '-'
 
@@ -83,10 +83,12 @@ export function scriptOperand(
 /**
  * An interpreter that ran nothing: its message and exit 1.
  *
+ * @param errors where the message goes.
  * @param message what it says on stderr, newline included.
  */
-function failed(message: string): RunResult {
-  return { stdout: new Uint8Array(), stderr: new TextEncoder().encode(message), exitCode: 1 }
+async function failed(errors: OutputFn, message: string): Promise<RunResult> {
+  await errors(new TextEncoder().encode(message))
+  return { exitCode: 1 }
 }
 
 /**
@@ -107,6 +109,7 @@ function failed(message: string): RunResult {
  * @param moduleCode the program a `-m` runs, given the module and the
  *   label; null when this runtime cannot run a module.
  * @param runtimeName the runtime's name, for the `-m` refusal.
+ * @param errors where why nothing ran goes.
  * @returns the program, or why nothing ran.
  */
 export async function resolveProgram(
@@ -117,6 +120,7 @@ export async function resolveProgram(
   rules: Argv0Rules,
   moduleCode: (name: string, label: string) => string | null,
   runtimeName: string,
+  errors: OutputFn,
 ): Promise<Program | RunResult> {
   const decoder = new TextDecoder('utf-8', { fatal: false })
   const flags = ctx.flags
@@ -135,7 +139,7 @@ export async function resolveProgram(
       // Exit 1, CPython's code for a `-m` that could not run, but not its
       // "No module named" wording: nothing was searched for, so naming the
       // runtime is the honest report.
-      return failed(`${label}: -m is not supported by the '${runtimeName}' runtime\n`)
+      return failed(errors, `${label}: -m is not supported by the '${runtimeName}' runtime\n`)
     }
     args = [...paths.map((p) => p.virtual), ...texts]
     argv0 = module
@@ -162,7 +166,8 @@ export async function resolveProgram(
     argv0 = rules.bareStdin
   }
   if (code === null && script !== null) {
-    if (ctx.vfs === undefined) return failed(`${label}: no dispatch available to read script\n`)
+    if (ctx.vfs === undefined)
+      return failed(errors, `${label}: no dispatch available to read script\n`)
     // Read by the key its mount gives it, which the dispatcher reads by.
     const keyed = new PathSpec({
       virtual: script.virtual,
@@ -176,7 +181,7 @@ export async function resolveProgram(
       ;[data] = await ctx.vfs.dispatch('read', keyed)
     } catch (err) {
       if (!isMissingPath(err)) throw err
-      return failed(`${label}: ${script.virtual}: No such file\n`)
+      return failed(errors, `${label}: ${script.virtual}: No such file\n`)
     }
     const bytes =
       data instanceof Uint8Array
@@ -190,7 +195,7 @@ export async function resolveProgram(
   let stdin = ctx.stdin
   if (code === null) {
     const source = stdin === null ? null : await materialize(stdin)
-    if (source === null || source.length === 0) return failed(`${label}: no input\n`)
+    if (source === null || source.length === 0) return failed(errors, `${label}: no input\n`)
     code = decoder.decode(source)
     stdin = null
   }

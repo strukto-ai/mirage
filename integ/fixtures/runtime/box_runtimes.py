@@ -24,6 +24,7 @@
 
 from mirage import (Context, LanguageRuntime, LineExecutorMixin, PathSpec,
                     Program, RunResult, Runtime)
+from mirage.runtime.types import OutputFn
 
 
 class EchoBox(Runtime[None], LineExecutorMixin[None]):
@@ -31,10 +32,10 @@ class EchoBox(Runtime[None], LineExecutorMixin[None]):
     captures = ("nvidia-smi", )
 
     async def run_line(self, engine: None, paths: list[PathSpec],
-                       texts: list[str], ctx: Context) -> RunResult:
-        return RunResult(stdout=f"box:{ctx.flags['c']}\n".encode(),
-                         stderr=None,
-                         exit_code=0)
+                       texts: list[str], ctx: Context, output: OutputFn,
+                       errors: OutputFn) -> RunResult:
+        await output(f"box:{ctx.flags['c']}\n".encode())
+        return RunResult(exit_code=0)
 
 
 class ShoutPython(LanguageRuntime[None]):
@@ -42,11 +43,10 @@ class ShoutPython(LanguageRuntime[None]):
     language = "python"
     captures = ("python3", "python")
 
-    async def interpret(self, engine: None, program: Program,
-                        ctx: Context) -> RunResult:
-        return RunResult(stdout=f"{program.code.upper()}\n".encode(),
-                         stderr=None,
-                         exit_code=0)
+    async def interpret(self, engine: None, program: Program, ctx: Context,
+                        output: OutputFn, errors: OutputFn) -> RunResult:
+        await output(f"{program.code.upper()}\n".encode())
+        return RunResult(exit_code=0)
 
 
 # Loadable, but not a runtime: the reference form must refuse it by name.

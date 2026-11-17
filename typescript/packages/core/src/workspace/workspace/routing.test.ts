@@ -25,7 +25,7 @@ import {
 } from '../../policy/types.ts'
 import { MontyRuntime } from '../../runtime/python/monty/index.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from './workspace.ts'
@@ -40,8 +40,15 @@ class Box extends MachineHandle {
     return Promise.resolve()
   }
 
-  protected override execArgv(): Promise<RunResult> {
-    return Promise.resolve({ stdout: ENC.encode(`${this.name}\n`), stderr: null, exitCode: 0 })
+  protected override async execArgv(
+    _argv: unknown,
+    _stdin: unknown,
+    _env: unknown,
+    _cwd: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(ENC.encode(`${this.name}\n`))
+    return { exitCode: 0 }
   }
 }
 
