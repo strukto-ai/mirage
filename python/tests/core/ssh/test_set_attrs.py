@@ -76,6 +76,14 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
+async def _gone(
+    path: str,
+    mode: int | None = None,
+    times: tuple[float, float] | None = None,
+) -> None:
+    raise asyncssh.SFTPNoSuchFile("no such file")
+
+
 @pytest.mark.asyncio
 async def test_mtime_applies_natively_with_empty_residual():
     accessor = _accessor({"/a.txt"}, {"/"})
@@ -129,15 +137,7 @@ async def test_missing_file_raises_enoent():
 @pytest.mark.asyncio
 async def test_a_file_removed_after_its_stat_is_enoent(fields):
     accessor = _accessor({"/a.txt"}, {"/"})
-
-    async def gone(
-        path: str,
-        mode: int | None = None,
-        times: tuple[float, float] | None = None,
-    ) -> None:
-        raise asyncssh.SFTPNoSuchFile("no such file")
-
-    accessor._sftp.chmod = gone
-    accessor._sftp.utime = gone
+    accessor._sftp.chmod = _gone
+    accessor._sftp.utime = _gone
     with pytest.raises(FileNotFoundError):
         await set_attrs(accessor, _spec("/a.txt"), **fields)
