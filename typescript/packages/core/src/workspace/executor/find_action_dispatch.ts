@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
+import { lineOutput } from '../../commands/builtin/general/interpreter.ts'
 import {
   compilePrintf,
   renderPrintf,
@@ -41,9 +42,7 @@ import type { FindExpr } from '../../rs/find.ts'
 import type { OpenStream } from '../../rs/stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
-import { SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
@@ -141,75 +140,8 @@ export function execDir(path: string): [string, string] {
 }
 
 /**
- * A nested line run into a pipe, its output a stream read as the line
- * writes it, the way `xargs` runs its commands. The line starts when the
- * stream is first read and writes into a bounded pipe, so a reader that
- * falls behind holds it back; what the line returned rather than wrote
- * follows what it wrote. A reader that stops early stops the line, which
- * then ends 141, as SIGPIPE leaves a program. Its stderr, what it wrote and
- * then what it returned, and its status, at least `least`, settle on the
- * result as the stream ends (`IOResult.output`), stderr after what the
- * result already held. Mirrors Python's `_piped_line`.
- */
-function pipedLine(
-  run: (sink: PipeConsole, signal: AbortSignal) => Promise<IOResult>,
-  least = 0,
-): IOResult {
-  const pipe = new PipeConsole()
-  const stop = new AbortController()
-  const caller = currentCaller()
-  const io = new IOResult()
-  const state = new OutputState()
-  io.output = state
-  let task: Promise<void> | undefined
-  let settled = false
-  let closing: Promise<void> | undefined
-  const execute = async (): Promise<void> => {
-    let ran: IOResult | undefined
-    try {
-      ran = await run(pipe, stop.signal)
-      for await (const chunk of chunks(ran.stdout ?? new Uint8Array()))
-        await pipe.emit(Channel.STDOUT, chunk)
-    } catch (error) {
-      pipe.end(error)
-      throw error
-    } finally {
-      const said = await pipe.snapshot(Channel.STDERR)
-      io.addStderr(ran === undefined ? said : concat([said, await materialize(ran.stderr)]))
-      io.exitCode = ran === undefined ? SIGPIPE_STATUS : Math.max(ran.exitCode, least)
-      settled = true
-      pipe.end()
-    }
-  }
-  const close = (): Promise<void> => {
-    closing ??= (async () => {
-      pipe.closeReader()
-      if (task !== undefined) {
-        if (!settled) stop.abort()
-        await task.catch((error: unknown) => {
-          console.debug(`find: a nested line ended: ${String(error)}`)
-        })
-      }
-      state.finish()
-    })()
-    return closing
-  }
-  async function* output(): AsyncGenerator<Uint8Array> {
-    task = execute()
-    void task.catch(() => undefined)
-    try {
-      yield* pipe.stream()
-    } finally {
-      await close()
-    }
-  }
-  io.stdout = new OutputStream(withCaller(output(), caller), close)
-  return io
-}
-
-/**
  * Start one `-exec` invocation, its output passed on as the child writes it
- * (`pipedLine`). A command that cannot be found is GNU's `find: 'cmd': No
+ * (`lineOutput`). A command that cannot be found is GNU's `find: 'cmd': No
  * such file or directory` rather than the shell's `command not found`, and
  * counts as a failed run. That is decided by looking the head word up
  * before the line runs (GNU fails in `execvp`), never from the exit status:
@@ -253,7 +185,7 @@ async function runExec(
   // find stays its process and forks each program as a child of it.
   const process = currentCaller().process
   if (process != null) process.oneCommand = false
-  return pipedLine((sink, stop) => {
+  const [stdout, io] = lineOutput((sink, stop) => {
     const merged = mergeSignals(signal, stop)
     const run = (): Promise<IOResult> =>
       executeFn(`( ${line} )`, {
@@ -264,6 +196,8 @@ async function runExec(
       })
     return session === null ? run() : runAsProgram(session, run)
   })
+  io.stdout = stdout
+  return io
 }
 
 /** Remove a matched entry through the dispatcher, which owns admission,
@@ -539,10 +473,11 @@ export async function runListedFind(
   const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
   const given = source === '-' ? null : stdin
   const execute = executeFn
-  const io = pipedLine(
+  const [stdout, io] = lineOutput(
     (sink, signal) => execute(line, { sessionId, stdin: given, sink, signal }),
     refused !== '' ? 1 : 0,
   )
+  io.stdout = stdout
   if (refused !== '') io.stderr = encodeText(refused)
   return io
 }

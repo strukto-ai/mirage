@@ -15,10 +15,12 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from typing import Any
 
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller, with_caller
+from mirage.io.cooperative import chunks
 from mirage.io.pipe import BytePipe
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import (
@@ -30,6 +32,7 @@ from mirage.io.types import (
 )
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import CommandRuntime, OutputFn, RunResult
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import (
     CANNOT_EXECUTE_STATUS,
     NOT_FOUND_STATUS,
@@ -140,6 +143,54 @@ def run_output(
             await close()
 
     return OutputStream(with_caller(output(), caller), close), io
+
+
+class Relay(JobConsole):
+    """A console that hands each chunk a line writes on as it comes.
+
+    Args:
+        output (OutputFn): takes stdout.
+        errors (OutputFn): takes stderr.
+    """
+
+    def __init__(self, output: OutputFn, errors: OutputFn) -> None:
+        super().__init__()
+        self._output = output
+        self._errors = errors
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        await (self._output if channel == Channel.STDOUT else self._errors)(
+            data
+        )
+
+
+def line_output(
+    run: Callable[[JobConsole], Awaitable[IOResult]], least: int = 0
+) -> CommandOutput:
+    """A nested line run as a command's output, through ``run_output``:
+    the line writes into a ``Relay`` as it runs, what it returned rather
+    than wrote follows, and its status, at least ``least``, and its
+    stderr settle on the result as the output ends. A reader that stops
+    early stops the line, which then exits 141. The way ``find -exec``,
+    ``find -files0-from`` and a wrapper builtin run their program.
+
+    Args:
+        run (Callable[[JobConsole], Awaitable[IOResult]]): runs the line,
+            given the console it writes into.
+        least (int): the lowest status the line ends with.
+    """
+
+    async def program(output: OutputFn, errors: OutputFn) -> RunResult:
+        ran = await run(Relay(output, errors))
+        async with aclosing(chunks(ran.stdout or b"")) as returned:
+            async for chunk in returned:
+                await output(chunk)
+        async with aclosing(chunks(ran.stderr or b"")) as said:
+            async for chunk in said:
+                await errors(chunk)
+        return RunResult(exit_code=max(ran.exit_code, least))
+
+    return run_output(program)
 
 
 def run_interpreter(

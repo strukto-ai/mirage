@@ -14,8 +14,9 @@
 
 import dataclasses
 from collections.abc import Sequence
+from contextlib import aclosing
 
-from mirage.commands.builtin.general.interpreter import run_output
+from mirage.commands.builtin.general.interpreter import line_output
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.standard import version_line
@@ -28,14 +29,9 @@ from mirage.context import (
 )
 from mirage.execution.process.types import ProcessTraits
 from mirage.io import IOResult
-from mirage.io.stream import ensure_stream
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
-from mirage.runtime.types import (
-    OutputFn,
-    RouteDecision,
-    RunResult,
-    RuntimeIdentity,
-)
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import SIGHUP
@@ -58,25 +54,6 @@ from mirage.workspace.lookup.types import Consumer, WrapperAnswer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
-
-
-class _Relay(JobConsole):
-    """A console that hands each chunk a line writes on as it comes.
-
-    Args:
-        output (OutputFn): takes stdout.
-        errors (OutputFn): takes stderr.
-    """
-
-    def __init__(self, output: OutputFn, errors: OutputFn) -> None:
-        super().__init__()
-        self._output = output
-        self._errors = errors
-
-    async def emit(self, channel: Channel, data: bytes) -> None:
-        await (self._output if channel == Channel.STDOUT else self._errors)(
-            data
-        )
 
 
 def _run_program(
@@ -103,31 +80,28 @@ def _run_program(
     """
     node = ExecutionNode(command=name)
 
-    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+    async def run(sink: JobConsole) -> IOResult:
         if warned:
-            await errors(encode_text(warned))
+            await sink.emit(Channel.STDERR, encode_text(warned))
         token = set_program_invocation(session)
         worn = set_traits(traits)
         try:
             ran = await execute_fn(
-                line,
-                session_id=session.session_id,
-                stdin=stdin,
-                sink=_Relay(output, errors),
+                line, session_id=session.session_id, stdin=stdin, sink=sink
             )
-            if ran.stdout is not None:
-                async for chunk in ensure_stream(ran.stdout):
-                    await output(chunk)
-            if ran.stderr is not None:
-                async for chunk in ensure_stream(ran.stderr):
-                    await errors(chunk)
+            async with aclosing(chunks(ran.stdout or b"")) as returned:
+                async for chunk in returned:
+                    await sink.emit(Channel.STDOUT, chunk)
+            async with aclosing(chunks(ran.stderr or b"")) as said:
+                async for chunk in said:
+                    await sink.emit(Channel.STDERR, chunk)
         finally:
             reset_caller(worn)
             reset_caller(token)
         node.exit_code = ran.exit_code
-        return RunResult(exit_code=ran.exit_code)
+        return IOResult(exit_code=ran.exit_code)
 
-    stdout, io = run_output(run)
+    stdout, io = line_output(run)
     return stdout, io, node
 
 

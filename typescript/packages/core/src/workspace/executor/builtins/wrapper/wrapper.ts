@@ -16,7 +16,7 @@ import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
-import { runOutput } from '../../../../commands/builtin/general/interpreter.ts'
+import { lineOutput } from '../../../../commands/builtin/general/interpreter.ts'
 import {
   currentCaller,
   runAsProgram,
@@ -25,11 +25,11 @@ import {
 } from '../../../../context/session_context.ts'
 import type { ProcessTraits } from '../../../../execution/process/types.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import { ensureStream } from '../../../../io/stream.ts'
+import { chunks } from '../../../../io/cooperative.ts'
 import type { Runtime } from '../../../../runtime/base.ts'
-import type { OutputFn, RouteDecision, RunResult } from '../../../../runtime/types.ts'
+import type { RouteDecision } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { Channel, JobConsole } from '../../../../shell/console/index.ts'
+import { Channel } from '../../../../shell/console/index.ts'
 import { SIGHUP } from '../../../../shell/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
@@ -45,20 +45,6 @@ import { Consumer, WrapperAnswer } from '../../../lookup/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-
-/** A console that hands each chunk a line writes on as it comes. */
-class Relay extends JobConsole {
-  constructor(
-    private readonly output: OutputFn,
-    private readonly errors: OutputFn,
-  ) {
-    super()
-  }
-
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    await (channel === Channel.STDOUT ? this.output : this.errors)(data)
-  }
-}
 
 /**
  * Run the program a wrapper runs, as a program, its output handed over as it
@@ -80,32 +66,25 @@ function runProgram(
   warned = '',
 ): RedirectResult {
   const node = new ExecutionNode({ command: name })
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn,
-    signal: AbortSignal,
-  ): Promise<RunResult> => {
-    if (warned !== '') await errors(encodeText(warned))
-    const ran = await runAsProgram(session, () =>
-      setTraits(traits, () =>
-        executeFn(line, {
+  const [stdout, io] = lineOutput(async (sink, signal) => {
+    if (warned !== '') await sink.emit(Channel.STDERR, encodeText(warned))
+    return runAsProgram(session, () =>
+      setTraits(traits, async () => {
+        const ran = await executeFn(line, {
           sessionId: session.sessionId,
           signal,
-          sink: new Relay(output, errors),
+          sink,
           ...(stdin !== null ? { stdin } : {}),
-        }),
-      ),
+        })
+        for await (const chunk of chunks(ran.stdout ?? new Uint8Array()))
+          await sink.emit(Channel.STDOUT, chunk)
+        for await (const chunk of chunks(ran.stderr ?? new Uint8Array()))
+          await sink.emit(Channel.STDERR, chunk)
+        node.exitCode = ran.exitCode
+        return new IOResult({ exitCode: ran.exitCode })
+      }),
     )
-    if (ran.stdout !== null) {
-      for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
-    }
-    if (ran.stderr !== null) {
-      for await (const chunk of ensureStream(ran.stderr)) await errors(chunk)
-    }
-    node.exitCode = ran.exitCode
-    return { exitCode: ran.exitCode }
-  }
-  const [stdout, io] = runOutput(run)
+  })
   return [stdout, io, node]
 }
 

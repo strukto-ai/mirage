@@ -17,14 +17,13 @@ import logging
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
-    Awaitable,
-    Callable,
 )
 from contextlib import aclosing
 from dataclasses import replace
 
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
 from mirage.commands.builtin.find_printf import compile_printf, render_printf
+from mirage.commands.builtin.general.interpreter import line_output
 from mirage.commands.builtin.types import (
     ExecAction,
     FindAction,
@@ -61,9 +60,8 @@ from mirage.rs.find import FindExpr
 from mirage.rs.stream import OpenStream, close_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.shell.console.pipe import PipeConsole
+from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
-from mirage.shell.constants import SIGPIPE_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
@@ -175,90 +173,6 @@ def exec_dir(path: str) -> tuple[str, str]:
     return head or "/", "./" + name
 
 
-def _piped_line(
-    run: Callable[[PipeConsole], Awaitable[IOResult]], least: int = 0
-) -> IOResult:
-    """A nested line run into a pipe, its output a stream read as the line
-    writes it, the way ``xargs`` runs its commands.
-
-    The line starts when the stream is first read and writes into a
-    bounded pipe, so a reader that falls behind holds it back; what the
-    line returned rather than wrote follows what it wrote. A reader that
-    stops early stops the line, which then ends 141, as SIGPIPE leaves a
-    program. Its stderr, what it wrote and then what it returned, and its
-    status settle on the result as the stream ends (``IOResult.output``),
-    stderr after what the result already held.
-
-    Args:
-        run (Callable[[PipeConsole], Awaitable[IOResult]]): runs the
-            line, given the console it writes into.
-        least (int): the lowest status the line ends with.
-    """
-    pipe = PipeConsole()
-    caller = current_caller()
-    io = IOResult()
-    io.output = state = OutputState()
-    task: asyncio.Task[None] | None = None
-    closing: asyncio.Task[None] | None = None
-    settled = False
-
-    async def execute() -> None:
-        nonlocal settled
-        ran: IOResult | None = None
-        try:
-            ran = await run(pipe)
-            async with aclosing(chunks(ran.stdout or b"")) as returned:
-                async for chunk in returned:
-                    await pipe.emit(Channel.STDOUT, chunk)
-        except BaseException as exc:
-            pipe.end(exc)
-            raise
-        finally:
-            said = await pipe.snapshot(Channel.STDERR)
-            if ran is not None:
-                said += await materialize(ran.stderr)
-            io.add_stderr(said)
-            io.exit_code = (
-                SIGPIPE_STATUS if ran is None else max(ran.exit_code, least)
-            )
-            settled = True
-            pipe.end()
-
-    async def finalize() -> None:
-        pipe.close_reader()
-        if task is not None:
-            if not task.done() and not settled:
-                task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError as exc:
-                current = asyncio.current_task()
-                if current is not None and current.cancelling():
-                    raise
-                logger.debug("find: a nested line was stopped: %r", exc)
-            except Exception as exc:
-                logger.debug("find: a nested line ended: %s", exc)
-        state.finish()
-
-    async def close() -> None:
-        nonlocal closing
-        if closing is None:
-            closing = asyncio.create_task(finalize())
-        await closing
-
-    async def output() -> AsyncIterator[bytes]:
-        nonlocal task
-        task = asyncio.create_task(execute())
-        try:
-            async for chunk in pipe.stream():
-                yield chunk
-        finally:
-            await close()
-
-    io.stdout = OutputStream(with_caller(output(), caller), close)
-    return io
-
-
 async def _run_exec(
     execute_fn: ExecuteFn,
     session: SessionState | None,
@@ -272,7 +186,7 @@ async def _run_exec(
     where: str | None = None,
 ) -> IOResult:
     """Start one ``-exec`` invocation, its output passed on as the child
-    writes it (``_piped_line``).
+    writes it (``line_output``).
 
     A command that cannot be found is GNU's ``find: 'cmd': No such file
     or directory`` rather than the shell's ``command not found``, and
@@ -323,7 +237,7 @@ async def _run_exec(
     if process is not None:
         process.one_command = False
 
-    async def run(sink: PipeConsole) -> IOResult:
+    async def run(sink: JobConsole) -> IOResult:
         token = (
             set_program_invocation(session) if session is not None else None
         )
@@ -335,7 +249,9 @@ async def _run_exec(
             if token is not None:
                 reset_caller(token)
 
-    return _piped_line(run)
+    stdout, io = line_output(run)
+    io.stdout = stdout
+    return io
 
 
 async def _delete_row(
@@ -690,13 +606,14 @@ async def run_listed_find(
     line = shell_join(["find", *words[: expr.start], *starts, *rest])
     given = None if source == "-" else stdin
 
-    async def run(sink: PipeConsole) -> IOResult:
+    async def run(sink: JobConsole) -> IOResult:
         assert execute_fn is not None
         return await execute_fn(
             line, session_id=session_id, stdin=given, sink=sink
         )
 
-    io = _piped_line(run, 1 if refused else 0)
+    stdout, io = line_output(run, 1 if refused else 0)
+    io.stdout = stdout
     io.stderr = encode_text(refused) or None
     return io
 

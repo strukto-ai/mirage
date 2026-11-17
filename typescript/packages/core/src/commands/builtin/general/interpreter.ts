@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { currentCaller, withCaller } from '../../../context/session_context.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { BytePipe } from '../../../io/pipe.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
@@ -23,6 +24,7 @@ import { MontyUnavailableError } from '../../../runtime/python/monty/errors.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
 import type { CommandRuntime, OutputFn, RunResult } from '../../../runtime/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { Channel, JobConsole } from '../../../shell/console/index.ts'
 import { STOP_WAIT_SECONDS } from '../../../execution/job/constants.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
@@ -146,6 +148,44 @@ export function runOutput(
     }
   }
   return [new OutputStream(withCaller(output(), caller), close), io]
+}
+
+/** A console that hands each chunk a line writes on as it comes. */
+export class Relay extends JobConsole {
+  constructor(
+    private readonly output: OutputFn,
+    private readonly errors: OutputFn,
+  ) {
+    super()
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    await (channel === Channel.STDOUT ? this.output : this.errors)(data)
+  }
+}
+
+/**
+ * A nested line run as a command's output, through `runOutput`: the line
+ * writes into a `Relay` as it runs, what it returned rather than wrote
+ * follows, and its status, at least `least`, and its stderr settle on the
+ * result as the output ends. A reader that stops early stops the line,
+ * which then exits 141. The way `find -exec`, `find -files0-from` and a
+ * wrapper builtin run their program. Mirrors Python's `line_output`.
+ *
+ * @param run runs the line, given the console it writes into and the
+ *   signal that stops it.
+ * @param least the lowest status the line ends with.
+ */
+export function lineOutput(
+  run: (sink: JobConsole, signal: AbortSignal) => Promise<IOResult>,
+  least = 0,
+): [OutputStream, IOResult] {
+  return runOutput(async (output, errors, signal) => {
+    const ran = await run(new Relay(output, errors), signal)
+    for await (const chunk of chunks(ran.stdout ?? new Uint8Array())) await output(chunk)
+    for await (const chunk of chunks(ran.stderr ?? new Uint8Array())) await errors(chunk)
+    return { exitCode: Math.max(ran.exitCode, least) }
+  })
 }
 
 /**
