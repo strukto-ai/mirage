@@ -216,6 +216,44 @@ async def test_real_ssh_stdin_always_reaches_eof(data):
 
 
 @pytest.mark.asyncio
+async def test_ssh_delivers_buffered_stderr_before_returning():
+    payload = bytes(range(256)) * 512
+    closed = asyncio.Event()
+    seen = bytearray()
+
+    async def produce(process):
+        process.stderr.write(payload)
+        process.exit(5)
+        await process.wait_closed()
+        closed.set()
+
+    async def consume(chunk: bytes) -> None:
+        await closed.wait()
+        seen.extend(chunk)
+
+    async with asyncssh.listen(
+        "127.0.0.1",
+        0,
+        server_factory=NoAuthServer,
+        server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")],
+        process_factory=produce,
+        encoding=None,
+    ) as server:
+        runtime = SSHMachine(
+            "box", config={"host": "127.0.0.1", "port": server.get_port()}
+        )
+        try:
+            await runtime.connect()
+            result = await asyncio.wait_for(
+                runtime._ssh("tool", None, _dropped, consume), 5
+            )
+            assert result.exit_code == 5
+            assert seen == payload
+        finally:
+            await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_real_ssh_logs_in_with_a_private_key_given_as_its_text(
     monkeypatch, tmp_path
 ):
@@ -289,9 +327,6 @@ class HungProcess:
 
     def write_eof(self) -> None:
         self.calls.append("eof")
-
-    async def wait(self, check: bool = False) -> None:
-        await self.done.wait()
 
     def kill(self) -> None:
         self.calls.append("kill")
@@ -381,7 +416,7 @@ class LostProcess(HungProcess):
         super().__init__()
         self.done.set()
 
-    async def wait(self, check: bool = False) -> None:
+    async def wait_closed(self) -> None:
         raise ConnectionResetError("connection lost")
 
 
@@ -414,10 +449,9 @@ class EndedProcess(HungProcess):
         self.error = error
         self.stdout = PartialOutput(b"before\n", error)
 
-    async def wait(self, check: bool = False) -> "EndedProcess":
+    async def wait_closed(self) -> None:
         if self.error is not None:
             raise self.error
-        return self
 
 
 # A channel that closed with no exit status, or a connection asyncssh saw
