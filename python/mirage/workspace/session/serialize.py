@@ -15,12 +15,12 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from mirage.policy.match import Outcome
 from mirage.policy.types import (
     AdmissionRules,
     AllowFlags,
     CommandRule,
     Decision,
+    Outcome,
     ProfileScript,
     ProfileScripts,
     Scope,
