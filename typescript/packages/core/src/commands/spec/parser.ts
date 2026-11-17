@@ -175,6 +175,10 @@ export class ParsedArgs {
   readonly missingRequiredOptions: string[]
   readonly missingRequiredOperands: string[]
   readonly typedDests: string[]
+  // Dests the session environment filled (`Argument.env`) because the
+  // line typed none of them, in declaration order: on the line as far as
+  // a rule reads it, which a declared default is not.
+  readonly envDests: string[]
   // The old-style cluster letter whose argument ran off the end of the
   // line (`tar xzf` with no archive). Its own report because GNU tar
   // words it differently and exits differently from every getopt refusal
@@ -216,6 +220,7 @@ export class ParsedArgs {
           | 'missingRequiredOptions'
           | 'missingRequiredOperands'
           | 'typedDests'
+          | 'envDests'
           | 'oldOptionNeedsValue'
           | 'builtin'
         >
@@ -244,6 +249,7 @@ export class ParsedArgs {
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
     this.missingRequiredOperands = init.missingRequiredOperands ?? []
     this.typedDests = init.typedDests ?? []
+    this.envDests = init.envDests ?? []
     this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
     this.builtin = init.builtin ?? false
     Object.defineProperty(this, 'facts', { value: new Map<string, LineFacts>() })
@@ -1165,10 +1171,12 @@ export function parseCommand(
   // defaults because it outranks one, it yields to anything the line typed,
   // and it lands below the snapshot because clap's usage line distinguishes
   // an option the line carried from one the environment supplied.
+  const envDests: string[] = []
   for (const [destName, variable] of cs.envByDest) {
     if (destName in flags) continue
     const supplied = env?.[variable]
     if (supplied === undefined || supplied === '') continue
+    envDests.push(destName)
     flags[destName] = cs.multipleDests.has(destName) ? [supplied] : supplied
   }
 
@@ -1370,6 +1378,7 @@ export function parseCommand(
     missingRequiredOptions,
     missingRequiredOperands,
     typedDests,
+    envDests,
     oldOptionNeedsValue: old !== null ? old.needsValue : null,
     builtin,
     wordKinds,

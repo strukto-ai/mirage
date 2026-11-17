@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.cli.cobra import COBRA_EXIT, cobra_refusal, leaf_message
-from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
+from mirage.commands.cli.constants import CLI_CONFIG_ENV
 from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
     CLAP_EXIT,
@@ -29,12 +29,11 @@ from mirage.commands.cli.refusal import (
     leaf_refusal,
 )
 from mirage.commands.cli.types import CLI, CLIHandler
-from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
+from mirage.commands.cli.walk import leaf_parse, node_help, owns_argv, walk
 from mirage.commands.config import CommandFnResult, Context
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import (
-    Argument,
     CommandSpec,
     FlagValue,
     UsageStyle,
@@ -64,93 +63,11 @@ from mirage.workspace.executor.command.handler import (
     run_handler,
 )
 from mirage.workspace.executor.command.run import exec_node
-from mirage.workspace.executor.command.types import LeafParse
 from mirage.workspace.files import Files
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace.probe import miss_condition, path_stat
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
-
-# A textual rest operand is a CLI node's pass-through form: parsed under
-# unknown_is_operand, it takes the undeclared dashed tokens the node does
-# not refuse, which is what a program parsing its own argv needs. "str",
-# not "path", so nothing is cwd-resolved or routed. Only that parse
-# reads the rest kind this way: a GNU command's textual rest is a list
-# of operands, which is why basename has one and still refuses an option
-# it does not know.
-PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
-
-
-def parse_spec_for(
-    leaf: CommandSpec,
-    style: UsageStyle = UsageStyle.ARGPARSE,
-    passthrough: bool = False,
-) -> tuple[CommandSpec, bool]:
-    """Add help or the script's pass-through grammar before parsing.
-
-    The grammar rides on the leaf, as its compiled tables do, so each
-    parse of the leaf reuses one spec object and hits the parse cache.
-
-    Args:
-        leaf (CommandSpec): selected grammar.
-        style (UsageStyle): root help dialect.
-        passthrough (bool): whether a script owns raw argv.
-    """
-    stored = leaf.__dict__.get("_parse_specs")
-    kept: dict[tuple[UsageStyle, bool], tuple[CommandSpec, bool]] = (
-        stored if isinstance(stored, dict) else {}
-    )
-    if kept is not stored:
-        object.__setattr__(leaf, "_parse_specs", kept)
-    found = kept.get((style, passthrough))
-    if found is not None:
-        return found
-    grammar = leaf
-    if passthrough:
-        found = (
-            replace(leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)),
-            False,
-        )
-    else:
-        if style is UsageStyle.COBRA:
-            grammar = replace(leaf, allow_abbrev=False)
-        found = (
-            (grammar, False)
-            if not grammar.add_help
-            or any("--help" in arg.names for arg in grammar.arguments)
-            else (listed_node(grammar, style), True)
-        )
-    kept[(style, passthrough)] = found
-    return found
-
-
-def leaf_parse(cli: CLI, leaf: CommandSpec, path: Sequence[str]) -> LeafParse:
-    """How the run parses a CLI leaf's words, which a policy's reading
-    of the line parses with too, so both see the same options.
-
-    The dialect is the root's: under cobra an undeclared dashed word is
-    an error and no long option abbreviates. git resolves an abbreviated
-    long option against the verb's own full table (parse-options), and
-    its revision walkers take whole words only.
-
-    Args:
-        cli (CLI): the installed CLI.
-        leaf (CommandSpec): the leaf its walk resolved.
-        path (Sequence[str]): the canonical verb path to the leaf.
-    """
-    spec, mirage_help = parse_spec_for(
-        leaf, cli.spec.usage_style, owns_argv(cli)
-    )
-    return LeafParse(
-        spec,
-        mirage_help,
-        cli.spec.usage_style is not UsageStyle.COBRA,
-        (
-            GIT_LONG_OPTIONS.get(" ".join(path), ())
-            if cli.spec.name == "git"
-            else None
-        ),
-    )
 
 
 def _select_runtime(
@@ -395,6 +312,9 @@ class LeafCall:
         texts (list[str]): the text operands.
         warnings (list[str]): what the parse warned about, said ahead of
             the leaf's own stderr.
+        options (tuple[str, ...]): the options the line carries at every
+            level, by canonical spelling, typed or filled from the
+            environment, which the handler's ``write_when`` reads.
     """
 
     cmd_str: str
@@ -407,6 +327,7 @@ class LeafCall:
     paths: list[PathSpec]
     texts: list[str]
     warnings: list[str]
+    options: tuple[str, ...] = ()
 
 
 async def walk_leaf(
@@ -490,7 +411,7 @@ async def walk_leaf(
     # argparse add_help, minus the two nodes that answer for themselves
     # (parse_spec_for). No injected --version: that is a GNU coreutils
     # convention, not an argparse one.
-    grammar = leaf_parse(cli, leaf, result.path)
+    grammar = leaf_parse(cli.spec, leaf, result.path, owns_argv(cli))
     parse_spec, mirage_help = grammar.spec, grammar.mirage_help
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
@@ -589,6 +510,7 @@ async def walk_leaf(
         paths=list(parsed.paths),
         texts=list(parsed.texts),
         warnings=list(parsed.warnings),
+        options=(*result.present, *parsed.typed_dests, *parsed.env_dests),
     )
 
 
@@ -679,6 +601,7 @@ async def handle_mount_cli(
             paths,
             walked.texts,
             ctx,
+            walked.handler.writes(walked.options),
         )
 
     return await run_walked(walked, session, stdin, context, limit, run)
@@ -769,7 +692,7 @@ async def _run_cli(
             prog,
             Producer(command=prog, declared=binding.limit),
             cli_voice(prog),
-            drop=drop_caches if binding.writes(walked.argv) else None,
+            drop=drop_caches if binding.writes(walked.options) else None,
             vfs=ctx.vfs,
         )
 

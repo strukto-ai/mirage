@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.types import CLI
+from mirage.commands.cli.walk import leaf_options, walk
 from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
@@ -293,6 +294,25 @@ def unlisted_service(
     )
 
 
+def _tree_writes(
+    name: str, tree: CLI, args: list[str], session: SessionState
+) -> bool:
+    """Whether a command tree's leaf the line reaches may change state,
+    read off the options the line carries by canonical spelling.
+
+    Args:
+        name (str): command name, expanded.
+        tree (CLI): the command tree.
+        args (list[str]): the words after the name.
+        session (SessionState): the session running the line.
+    """
+    env = env_snapshot(session)
+    result = walk(name, tree.spec, args, session.cwd, env)
+    return result.leaf is not None and tree.handlers[
+        " ".join(result.path)
+    ].writes(leaf_options(tree, result, session.cwd, env))
+
+
 def _writes(
     name: str,
     args: list[str],
@@ -358,19 +378,7 @@ def _writes(
                     trees.append(candidate_tree)
                 elif mount.may_write(name):
                     return True
-        for candidate_tree in trees:
-            result = walk(
-                name,
-                candidate_tree.spec,
-                args,
-                session.cwd,
-                env_snapshot(session),
-            )
-            if result.leaf is not None and candidate_tree.handlers[
-                " ".join(result.path)
-            ].writes(args):
-                return True
-        return False
+        return any(_tree_writes(name, t, args, session) for t in trees)
     runs = runs_as(name, registry)
     # The words that route the run, picked as execution picks them: a
     # stdin `-` and an assignment route nowhere, and a path-valued option,
@@ -420,16 +428,7 @@ def _writes(
     for mount in reached:
         candidate_tree = mount.cli_for(runs)
         if candidate_tree is not None:
-            result = walk(
-                runs,
-                candidate_tree.spec,
-                args,
-                session.cwd,
-                env_snapshot(session),
-            )
-            if result.leaf is not None and candidate_tree.handlers[
-                " ".join(result.path)
-            ].writes(args):
+            if _tree_writes(runs, candidate_tree, args, session):
                 return True
         elif any(
             mount.may_write(runs, extension, facts.writes)

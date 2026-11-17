@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { walk } from '../../../commands/cli/walk.ts'
+import { parseLeaf, walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { type ParsedArgs, parseCommand, wordPaths } from '../../../commands/spec/parser.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
@@ -24,7 +24,6 @@ import { followPaths } from '../builtins/links/links.ts'
 import { toScope } from '../builtins/scope.ts'
 import { SLASH_KEEPS_LAST } from '../../lookup/index.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import { leafParse } from './cli.ts'
 import { commandTree } from './routing.ts'
 import type { LineReading } from './types.ts'
 
@@ -78,16 +77,7 @@ export function readLine(
   let program: string[]
   let tokens: string[]
   if (tree !== null && result !== null && result.leaf !== null) {
-    const rules = leafParse(tree, result.leaf, result.path)
-    const leaf = parseCommand(
-      rules.spec,
-      [...result.argv],
-      cwd,
-      name,
-      env,
-      rules.unknownIsOperand,
-      rules.abbreviations,
-    )
+    const leaf = parseLeaf(tree, result, cwd, name, env ?? null)
     grammar = [
       ...result.words.map((w): Grammar => [w.kind, w.option, w.path]),
       ...leafGrammar(leaf, result.argv, cwd, true),

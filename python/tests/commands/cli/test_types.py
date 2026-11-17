@@ -267,6 +267,6 @@ def test_registration_copies_its_handler_mapping():
 
 def test_a_flag_can_make_a_read_only_leaf_write():
     handler = CLIHandler(write_when=("--seen",))
-    assert not handler.writes(["7"])
-    assert handler.writes(["7", "--seen"])
-    assert CLIHandler(write=True).writes([])
+    assert not handler.writes(("--page",))
+    assert handler.writes(("--page", "--seen"))
+    assert CLIHandler(write=True).writes(())

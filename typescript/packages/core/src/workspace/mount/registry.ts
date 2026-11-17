@@ -21,7 +21,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
-import { walk } from '../../commands/cli/walk.ts'
+import { leafOptions, walk } from '../../commands/cli/walk.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import {
   effectivePathMode,
@@ -947,7 +947,8 @@ export class MountRegistry {
         const result = walk(cmdName, tree.spec, argv, cwd, undefined, true)
         if (result.leaf === null) continue
         if (result.path.length > 0) subcommands.add(mount)
-        writes = tree.handlers[result.path.join(' ')]?.writes(argv) === true
+        writes =
+          tree.handlers[result.path.join(' ')]?.writes(leafOptions(tree, result, cwd)) === true
       }
       if (!writes) readers.push(mount)
       else if (strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ)

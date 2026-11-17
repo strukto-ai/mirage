@@ -1501,6 +1501,7 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        writes: bool,
     ) -> CommandFnResult:
         """Run one leaf of a command tree this mount serves.
 
@@ -1518,6 +1519,8 @@ class MountEntry:
             paths (list[PathSpec]): the leaf's path operands.
             texts (list[str]): the leaf's text operands.
             ctx (Context): the leaf's context.
+            writes (bool): whether this invocation may change state
+                (``CLIHandler.writes`` over the options the line carries).
         """
         root = self.resolve_command(cli.spec.name)
         fn = handler.fn
@@ -1529,7 +1532,7 @@ class MountEntry:
             vfs=None,
             filetype=None,
             fn=fn,
-            write=handler.writes(ctx.argv),
+            write=writes,
             limit=handler.limit,
         )
         async with self.use():
@@ -1566,8 +1569,7 @@ class MountEntry:
                             cli_voice(prog),
                             drop=(
                                 self.drop_caches
-                                if handler.writes(ctx.argv)
-                                and self._is_user_command(root)
+                                if writes and self._is_user_command(root)
                                 else None
                             ),
                             scope=lambda result: _wrap_mount_streams(

@@ -25,10 +25,10 @@ import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { SessionProcesses } from '../../../execution/process/session.ts'
 import { COBRA_EXIT, cobraRefusal, leafMessage } from '../../../commands/cli/cobra.ts'
-import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
+import { CLAP_EXIT, CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
 import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import type { CommandFnResult, Context } from '../../../commands/config.ts'
-import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
+import { leafParse, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import {
   type OutputFn,
   type RunResult,
@@ -38,7 +38,7 @@ import {
 import type { FollowOperands, SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
-import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
+import { UsageStyle, type FlagValue } from '../../../commands/spec/types.ts'
 import { IOResult, materialize, type ByteSource, type CommandOutput } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import type { CLIInstall } from '../../cli/types.ts'
@@ -46,7 +46,6 @@ import type { MountEntry } from '../../mount/mount.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
-import type { LeafParse } from './types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForScript } from '../../../runtime/routing/decide.ts'
 import { execNode } from './run.ts'
@@ -60,84 +59,6 @@ import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { IdSource } from '../../../utils/ids.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
-
-// A textual rest operand is a CLI node's pass-through form: parsed under
-// unknownIsOperand, it takes the undeclared dashed tokens the node does not
-// refuse, which is what a program parsing its own argv needs. 'str', not
-// 'path', so nothing is cwd-resolved or routed. Only that parse reads the
-// rest kind this way: a GNU command's textual rest is a list of operands,
-// which is why basename has one and still refuses an option it does not know.
-const PASSTHROUGH_REST = new Argument('args', { metavar: '', nargs: '*' })
-
-// Each leaf's parse grammar, kept so every parse of the leaf reuses one
-// spec object and hits the parse cache, as compileSpec keeps its tables.
-const GRAMMARS = new WeakMap<CommandSpec, Map<string, [CommandSpec, boolean]>>()
-
-/**
- * The spec a leaf's argv parses against, and who answers `--help`.
- *
- * Usually mirage: a leaf declares its grammar, the parser enforces it,
- * and `--help` is injected the way argparse's add_help does. Two nodes
- * answer for themselves instead. A leaf that declares `--help` asked for
- * the flag, so it is delivered rather than intercepted. And a script root
- * that declares no grammar (ownsArgv) has the whole line forwarded:
- * refusing `--width` on behalf of a program that accepts it would make
- * the tier unusable, since a YAML `clis:` entry cannot declare options at
- * all. Returns the spec to parse with and whether the injected `--help`
- * is mirage's to answer. CLI init accepts instance fields, so each
- * spread is a plain init bag (the withHelpSupport pattern). The grammar is
- * kept per leaf, so each parse of the leaf reuses one spec object.
- */
-function parseSpecFor(
-  leaf: CommandSpec,
-  style: UsageStyle = UsageStyle.ARGPARSE,
-  passthrough = false,
-): [CommandSpec, boolean] {
-  let kept = GRAMMARS.get(leaf)
-  if (kept === undefined) {
-    kept = new Map()
-    GRAMMARS.set(leaf, kept)
-  }
-  const key = `${style}:${String(passthrough)}`
-  const cached = kept.get(key)
-  if (cached !== undefined) return cached
-  let found: [CommandSpec, boolean]
-  if (passthrough) {
-    const spec: CommandSpecInit = leaf
-    found = [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
-  } else {
-    const grammar =
-      style === UsageStyle.COBRA
-        ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
-        : leaf
-    found =
-      !grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help'))
-        ? [grammar, false]
-        : [listedNode(grammar, style), true]
-  }
-  kept.set(key, found)
-  return found
-}
-
-/**
- * How the run parses a CLI leaf's words, which a policy's reading of the
- * line parses with too, so both see the same options.
- *
- * The dialect is the root's: under cobra an undeclared dashed word is an
- * error and no long option abbreviates. git resolves an abbreviated long
- * option against the verb's own full table (parse-options), and its
- * revision walkers take whole words only.
- */
-export function leafParse(cli: CLI, leaf: CommandSpec, path: readonly string[]): LeafParse {
-  const [spec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
-  return {
-    spec,
-    mirageHelp,
-    unknownIsOperand: cli.spec.usageStyle !== UsageStyle.COBRA,
-    abbreviations:
-      cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(path.join(' ')) ?? []) : undefined,
-  }
-}
 
 /**
  * Pick the workspace entry that runs a script leaf.
@@ -348,6 +269,12 @@ export interface LeafCall {
   texts: string[]
   /** What the parse warned about, said ahead of the leaf's own stderr. */
   warnings: readonly string[]
+  /**
+   * The options the line carries at every level, by canonical spelling,
+   * typed or filled from the environment, which the handler's `writeWhen`
+   * reads.
+   */
+  options: readonly string[]
 }
 
 /**
@@ -406,7 +333,7 @@ export async function walkLeaf(
   if (handler === undefined) throw new Error(`cli '${prog}': missing handler`)
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const grammar = leafParse(cli, leaf, result.path)
+  const grammar = leafParse(cli.spec, leaf, result.path, ownsArgv(cli))
   const { spec: parseSpec, mirageHelp } = grammar
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
@@ -491,6 +418,7 @@ export async function walkLeaf(
     paths,
     texts,
     warnings,
+    options: [...result.present, ...parsed.typedDests, ...parsed.envDests],
   }
 }
 
@@ -548,7 +476,15 @@ export async function handleMountCli(
     ]
   }
   const run = (ctx: Context): Promise<CommandFnResult> =>
-    mount.runLeaf(walked.prog, cli, walked.handler, paths, walked.texts, ctx)
+    mount.runLeaf(
+      walked.prog,
+      cli,
+      walked.handler,
+      paths,
+      walked.texts,
+      ctx,
+      walked.handler.writes(walked.options),
+    )
   return runWalked(walked, session, stdin, context, limit, run)
 }
 
@@ -621,7 +557,7 @@ async function runCli(
       cliVoice(prog),
       {
         settle: settled,
-        ...(binding.writes(walked.argv) && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(binding.writes(walked.options) && dropCaches !== null ? { drop: dropCaches } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },

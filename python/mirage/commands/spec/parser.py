@@ -185,6 +185,10 @@ class ParsedArgs:
     # what was supplied (clap's) needs exactly this distinction: a
     # defaulted option is invisible there, a typed one is not.
     typed_dests: list[str] = field(default_factory=list)
+    # Dests the session environment filled (``Argument.env``) because the
+    # line typed none of them, in declaration order: on the line as far
+    # as a rule reads it, which a declared default is not.
+    env_dests: list[str] = field(default_factory=list)
     # The old-style cluster letter whose argument ran off the end of the
     # line (`tar xzf` with no archive). Its own report because GNU tar
     # words it differently and exits differently from every getopt
@@ -1283,12 +1287,14 @@ def parse_command(
     # it yields to anything the line typed, and it lands below the
     # snapshot because clap's usage line distinguishes an option the
     # line carried from one the environment supplied.
+    env_dests: list[str] = []
     for dest_name, variable in cs.env_by_dest.items():
         if dest_name in flags:
             continue
         supplied = env.get(variable) if env else None
         if not supplied:
             continue
+        env_dests.append(dest_name)
         if dest_name in cs.multiple_dests:
             flags[dest_name] = [supplied]
         else:
@@ -1535,6 +1541,7 @@ def parse_command(
         missing_required_options=missing_required_options,
         missing_required_operands=missing_required_operands,
         typed_dests=typed_dests,
+        env_dests=env_dests,
         old_option_needs_value=old.needs_value if old is not None else None,
         builtin=builtin,
     )

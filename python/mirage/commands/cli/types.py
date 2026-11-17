@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, NamedTuple
 
 from pydantic import BaseModel
 
@@ -47,8 +47,9 @@ class CLIHandler:
             texts, ctx)``, the same ``Context`` a command gets; None only
             for a script installation.
         write (bool): whether invoking the command may mutate state.
-        write_when (tuple[str, ...]): option spellings that make a leaf
-            otherwise read-only a writer on the line that carries them.
+        write_when (tuple[str, ...]): options, by canonical spelling,
+            that make a leaf otherwise read-only a writer on the line
+            that carries them.
         limit (Limit | None): default execution and output limits.
     """
 
@@ -57,13 +58,14 @@ class CLIHandler:
     limit: Limit | None = None
     write_when: tuple[str, ...] = ()
 
-    def writes(self, argv: Sequence[str]) -> bool:
+    def writes(self, options: Collection[str]) -> bool:
         """Whether this invocation may mutate state.
 
         Args:
-            argv (Sequence[str]): the words after the head, as typed.
+            options (Collection[str]): the options the line carries, by
+                canonical spelling (``leaf_options``).
         """
-        return self.write or any(word in self.write_when for word in argv)
+        return self.write or any(o in options for o in self.write_when)
 
 
 @dataclass(frozen=True)
@@ -265,6 +267,8 @@ class WalkResult:
         words (tuple[WalkWord, ...]): what each word the walk consumed
             before the leaf's is, in argv order.
         group_flags (WalkFlagBag): group flags keyed by canonical spelling.
+        present (tuple[str, ...]): the group flags the line carries, typed
+            or filled from the environment, never a declared default.
         operand_bases (tuple[PathSpec, ...]): ordered directory changes.
         argv (tuple[str, ...]): remaining words for the leaf parser.
         output (bytes): rendered help or refusal when leaf is None.
@@ -276,8 +280,31 @@ class WalkResult:
     path: tuple[str, ...] = ()
     words: tuple["WalkWord", ...] = ()
     group_flags: WalkFlagBag = field(default_factory=FlagBag)
+    present: tuple[str, ...] = ()
     operand_bases: tuple[PathSpec, ...] = ()
     argv: tuple[str, ...] = ()
     output: bytes = b""
     stream: Literal["stdout", "stderr"] = "stdout"
     exit_code: int = 0
+
+
+class LeafParse(NamedTuple):
+    """How a CLI leaf's words are parsed, the one setting the run and a
+    policy's reading of the line share.
+
+    Args:
+        spec (CommandSpec): the grammar to parse with: the leaf, with
+            the injected ``--help`` or a script's pass-through rest.
+        mirage_help (bool): whether the injected ``--help`` is
+            mirage's to answer.
+        unknown_is_operand (bool): whether an undeclared dashed word is
+            an operand; under the cobra dialect it is an error.
+        abbreviations (tuple[str, ...] | None): git's full long-option
+            table for the verb, which resolves an abbreviated long
+            option; None for any other program.
+    """
+
+    spec: CommandSpec
+    mirage_help: bool
+    unknown_is_operand: bool
+    abbreviations: tuple[str, ...] | None

@@ -16,11 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/types.ts'
 import { CLI, CLIHandler } from './types.ts'
 import { Argument, CommandSpec, UsageStyle } from '../spec/types.ts'
+import { parseCommand } from '../spec/parser.ts'
+import { cliSpecFor } from './specs.ts'
 import {
   envNames,
   findChild,
   findNode,
   invokedEnvNames,
+  leafParse,
   nodeHelp,
   ownsArgv,
   suppliedEnvNames,
@@ -992,5 +995,24 @@ describe('walk value paths', () => {
       '/w/a/b',
       null,
     ])
+  })
+})
+
+describe('leafParse', () => {
+  it('refuses an abbreviation under cobra', () => {
+    const gh = cliSpecFor('gh')
+    const result = walk('gh', gh.spec, ['auth', 'token', '--ho', 'x'], '/', null)
+    if (result.leaf === null) throw new Error('no leaf')
+    const rules = leafParse(gh.spec, result.leaf, result.path)
+    const parsed = parseCommand(
+      rules.spec,
+      [...result.argv],
+      '/',
+      'gh',
+      undefined,
+      rules.unknownIsOperand,
+      rules.abbreviations,
+    )
+    expect(parsed.invalidOptions).toEqual(['--ho'])
   })
 })

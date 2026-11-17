@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { walk } from '../../commands/cli/walk.ts'
+import type { CLI } from '../../commands/cli/types.ts'
+import { leafOptions, walk } from '../../commands/cli/walk.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -309,6 +310,25 @@ export function unlistedService(
 }
 
 /**
+ * Whether a command tree's leaf the line reaches may change state, read off
+ * the options the line carries by canonical spelling. Mirrors Python's
+ * `_tree_writes`.
+ */
+function treeWrites(
+  name: string,
+  cli: CLI,
+  args: readonly string[],
+  session: SessionState,
+): boolean {
+  const env = envSnapshot(session)
+  const result = walk(name, cli.spec, [...args], session.cwd, env)
+  return (
+    result.leaf !== null &&
+    cli.handlers[result.path.join(' ')]?.writes(leafOptions(cli, result, session.cwd, env)) === true
+  )
+}
+
+/**
  * Whether the handler a command resolves to declares that it may change
  * state. A command tree's leaf (an installed CLI's, or a tree a mount
  * serves) as its walk names it, under the session environment its run walks
@@ -345,8 +365,7 @@ function writes(
   if (consumer !== Consumer.CLI && consumer !== Consumer.MOUNT) return false
   const tree = registry.clis.get(name)?.cli ?? null
   if (tree !== null) {
-    const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
-    return result.leaf !== null && tree.handlers[result.path.join(' ')]?.writes(args) === true
+    return treeWrites(name, tree, args, session)
   }
   const candidates = registry.invocationCandidates(
     name,
@@ -359,8 +378,7 @@ function writes(
     return candidates.some((mount) => {
       const cli = mount.cliFor(name)
       if (cli === null) return mount.mayWrite(name)
-      const result = walk(name, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
+      return treeWrites(name, cli, args, session)
     })
   }
   const runs = runsAs(name, registry)
@@ -412,8 +430,7 @@ function writes(
   return reached.some((mount) => {
     const cli = mount.cliFor(runs)
     if (cli !== null) {
-      const result = walk(runs, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
+      return treeWrites(runs, cli, args, session)
     }
     return [...extensions].some((extension) => mount.mayWrite(runs, extension, facts.writes))
   })

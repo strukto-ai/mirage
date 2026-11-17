@@ -15,7 +15,7 @@
 
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.walk import parse_leaf, walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.parser import ParsedArgs, word_paths
 from mirage.commands.spec.types import WordKind
@@ -25,7 +25,6 @@ from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.executor.command.cli import leaf_parse
 from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.lookup import SLASH_KEEPS_LAST
@@ -97,16 +96,7 @@ def read_line(
     supplied: list[PathSpec] = []
     grammar: list[Grammar]
     if tree is not None and result is not None and result.leaf is not None:
-        rules = leaf_parse(tree, result.leaf, result.path)
-        leaf = parse_command(
-            rules.spec,
-            list(result.argv),
-            cwd,
-            name,
-            env,
-            unknown_is_operand=rules.unknown_is_operand,
-            abbreviations=rules.abbreviations,
-        )
+        leaf = parse_leaf(tree, result, cwd, name, env)
         grammar = [
             *((w.kind, w.option, w.path) for w in result.words),
             *_leaf_grammar(leaf, result.argv, cwd, operands=True),

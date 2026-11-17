@@ -2161,8 +2161,9 @@ export class MountEntry {
    * installed CLI's; the leaf runs here as a command does: on this mount's
    * accessor, in its scope, under the read-only refusal for its own `write`
    * and, being a user command that holds the raw handle, the refusal a
-   * restricting session gets. Its failures speak in a CLI's voice. Mirrors
-   * Python's `MountEntry.run_leaf`.
+   * restricting session gets. Its failures speak in a CLI's voice. `writes`
+   * says whether this invocation may change state (`CLIHandler.writes` over
+   * the options the line carries). Mirrors Python's `MountEntry.run_leaf`.
    */
   async runLeaf(
     prog: string,
@@ -2171,6 +2172,7 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
+    writes: boolean,
   ): Promise<CommandFnResult> {
     const root = this.resolveCommand(cli.spec.name)
     const fn = handler.fn
@@ -2181,7 +2183,7 @@ export class MountEntry {
       vfs: null,
       filetype: null,
       fn,
-      write: handler.writes(ctx.argv ?? []),
+      write: writes,
       limit: handler.limit,
     })
     return this.use(async (): Promise<CommandFnResult> => {
@@ -2200,7 +2202,7 @@ export class MountEntry {
           runCtx,
           cliVoice(prog),
           { command: prog, prefixes: [this.prefix], declared: handler.limit },
-          handler.writes(ctx.argv ?? []) && this.isUserCommand(root),
+          writes && this.isUserCommand(root),
           (leafCtx) =>
             answered(Promise.resolve().then(() => fn(accessor, keyedPaths, texts, leafCtx))),
         )
