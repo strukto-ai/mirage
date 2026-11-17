@@ -98,6 +98,8 @@ own profile.
 - `allow: []` allows no command. No `allow` key means no allow list.
 - `[` and `[[` are commands too, and an allow list must name them.
 - Shell functions are exempt; each line inside one is checked.
+- `commands.allow` does not cover executed paths, direct VFS calls or MCP file
+  tools. Limit file access with `mounts` and `paths`.
 
 ### Ask and deny
 
@@ -118,7 +120,8 @@ commands:
 ### Hide and show
 
 - `paths.hide` makes a path look absent. `paths.show` reopens a deeper path.
-- Rules take absolute paths or name patterns such as `*.pem`. `*` can cross `/`.
+- `paths.hide` takes absolute paths or name patterns such as `*.pem`;
+  `paths.show` takes absolute paths only. `*` can cross `/`.
 - A hidden path is gone everywhere: from command output and counts, from
   links into it, from git history, and from what a checkout touches.
 - Moving a folder that holds a hidden path is refused.

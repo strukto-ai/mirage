@@ -6,7 +6,9 @@ icon: sliders
 
 Mirage's configuration is plain data. Write it as YAML and hand it to the
 `mirage` CLI, or send the same fields as JSON to the [server API](/api/reference).
-Both take one schema, so a `workspace.yaml` and an API body are interchangeable.
+Both take one schema. The CLI fills in `${NAME}` and resolves script paths
+before it sends a config; the API takes it as written. See
+[Values and paths](/home/configuration/workspace#values-and-paths).
 
 <CodeGroup>
 ```yaml workspace.yaml

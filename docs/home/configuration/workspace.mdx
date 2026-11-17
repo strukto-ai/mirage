@@ -62,7 +62,7 @@ Each mount key is an absolute prefix, such as `/data`.
 | `workspace` | Inside Mirage only. The default. |
 | `fuse` | As a local folder, through [FUSE](/home/setup/fuse). |
 | `fskit` | As a local folder, through FSKit on macOS 15.4 or later. |
-| `nfs` | As a read-only local folder, through the system's NFS client. Linux needs root. |
+| `nfs` | As a read-only local folder, through the system's NFS client. Linux needs root. A file whose size is unknown until read shows up empty; use `fuse` for that VFS. |
 
 ## Network
 
@@ -98,7 +98,8 @@ network:
 - Programs on a [machine](/home/setup/machine/overview) connect under the
   machine's own network. A `host` machine refuses to run while `network`
   limits anything.
-- In a browser or on an edge runtime, only host names are checked.
+- In a browser or on an edge runtime, only host names are checked, and a
+  `denied_domains` address or range is refused. Deny host names there.
 
 ## System time
 
@@ -109,7 +110,8 @@ env:
 ```
 
 The clock starts at that time and runs forward. `date`, file times, `find
--mtime`, git commits and the language runtimes all see it. `TZ` picks the zone,
+-mtime`, git commits and the Monty, WASI, Pyodide and QuickJS runtimes see it. Programs on a `host`
+machine see it only through [libfaketime](/home/setup/machine/host). `TZ` picks the zone,
 UTC by default. Without `system_time`, the workspace uses the server's clock.
 
 ## CLI entries
@@ -127,13 +129,17 @@ clis:
   pager:
     script: pager.py
     machine: in_process
+machines:
+  py:
+    provider: in_process
+    runtime: monty
 ```
 
 | Key | Sets |
 | --- | --- |
 | `cli` | A registered [CLI](/home/setup/clis). |
 | `script` | A `.py`, `.js` or `.mjs` program, as a custom CLI in [Python](/python/cli/custom) or [TypeScript](/typescript/cli/custom). |
-| `machine` | Required. `in_process`, or `host` for a script. |
+| `machine` | Required. `in_process`, or `host` for a script. A script needs a `machines` entry that runs its language. |
 | `runtime` | The runtime for a script on `in_process`, such as `monty`. |
 | `config` | The CLI's fields. A script's `config` takes no credential pointer. |
 
@@ -145,8 +151,9 @@ clis:
 | `cache` | File content | [File Cache](/home/infrastructure/file-cache) |
 | `index` | Directory listings and metadata | [File Index](/home/infrastructure/file-index) |
 
-A `cache` or `index` block needs a `type`. A `store` without one keeps its
-parts in memory.
+A `cache` or `index` block needs a `type`. A `store` without one keeps in
+memory each part (`namespace`, `sessions`, `logs`, `execution`) that names no
+store of its own.
 
 ## Values and paths
 
