@@ -239,14 +239,20 @@ function echoContainer(): RelayedContainer {
   }
 }
 
-/** What adding a remote Monty to a built workspace answers: its refusal, or `added`. */
+/**
+ * Whether adding a remote Monty to a built workspace is refused for Workers:
+ * `refused`, `added`, or `failed` for any other error.
+ */
 async function addRemoteMonty(): Promise<Response> {
   const ws = new Workspace({ '/': new RAMVFS() })
   try {
     ws.addMachine('py', { provider: 'monty_remote', url: 'https://m' })
     return new Response('added')
   } catch (err) {
-    return new Response(err instanceof Error ? err.message : String(err))
+    const refused =
+      err instanceof Error &&
+      err.message.startsWith("provider 'monty_remote' does not run on Cloudflare Workers")
+    return new Response(refused ? 'refused' : 'failed')
   } finally {
     await ws.close()
   }

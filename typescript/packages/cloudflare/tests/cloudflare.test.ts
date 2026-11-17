@@ -98,9 +98,7 @@ describe('mirage in workerd', () => {
 
   it('refuses a remote Monty added after the workspace is built', async () => {
     const response = await worker.fetch('http://localhost/add-machine')
-    expect(await response.text()).toContain(
-      "provider 'monty_remote' does not run on Cloudflare Workers",
-    )
+    expect(await response.text()).toBe('refused')
   })
 
   it('runs pipes, awk and jq', async () => {
