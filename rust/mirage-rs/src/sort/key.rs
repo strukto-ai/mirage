@@ -6,7 +6,7 @@ use blake2::digest::consts::U16;
 use serde::{Deserialize, Serialize};
 
 use super::number::{NumberScan, general_order, human_order, leading_number};
-use super::version::version_cmp;
+use super::version::{VersionScan, version_cmp};
 use crate::number::is_blank;
 
 /// One key's ordering options.
@@ -210,7 +210,7 @@ impl Compare {
 
 /// The bytes `-d` keeps (alphanumerics and blanks) and `-i` keeps
 /// (printable ASCII) in the C locale.
-fn kept(byte: u8, mods: &Mods) -> bool {
+pub(super) fn kept(byte: u8, mods: &Mods) -> bool {
     if mods.dictionary {
         byte.is_ascii_alphanumeric() || is_blank(byte)
     } else if mods.ignore_nonprinting {
@@ -260,6 +260,13 @@ fn translated_pair<R>(a: &[u8], b: &[u8], mods: &Mods, f: impl FnOnce(&[u8], &[u
 fn compare_keys(a: &[u8], b: &[u8], mods: &Mods) -> Ordering {
     let translates = mods.fold || mods.dictionary || mods.ignore_nonprinting;
     // -V reads the key as -d, -i and -f leave it.
+    if mods.version
+        && (translates || !mods.month && !mods.human)
+        && (a.len() > super::COST_BYTES || b.len() > super::COST_BYTES)
+    {
+        let mut bytes = usize::MAX;
+        return VersionScan::default().step(a, b, mods, &mut bytes).unwrap();
+    }
     if mods.version && translates {
         return translated_pair(a, b, mods, version_cmp);
     }
@@ -444,6 +451,7 @@ enum ComparisonPhase {
     ParseRight,
     Integer,
     Fraction,
+    Version,
     Fallback,
 }
 
@@ -454,6 +462,7 @@ pub(super) struct Comparison {
     extract: KeyScan,
     ranges: [(usize, usize); 2],
     numbers: [NumberScan; 2],
+    version: VersionScan,
     offset: usize,
 }
 
@@ -523,11 +532,17 @@ impl Comparison {
                         self.phase = ComparisonPhase::Fallback;
                         continue;
                     };
-                    if key.mods.numeric
-                        && !key.mods.random
-                        && !key.mods.month
-                        && !key.mods.human
-                        && !key.mods.version
+                    let version = key.mods.version
+                        && (key.mods.fold
+                            || key.mods.dictionary
+                            || key.mods.ignore_nonprinting
+                            || !key.mods.month && !key.mods.human);
+                    if !key.mods.random
+                        && (version
+                            || key.mods.numeric
+                                && !key.mods.month
+                                && !key.mods.human
+                                && !key.mods.version)
                     {
                         self.phase = ComparisonPhase::ExtractLeft;
                         continue;
@@ -564,9 +579,23 @@ impl Comparison {
                     self.extract = KeyScan::default();
                     self.phase = if side == 0 {
                         ComparisonPhase::ExtractRight
+                    } else if compare.keys[self.key].mods.version {
+                        ComparisonPhase::Version
                     } else {
                         ComparisonPhase::ParseLeft
                     };
+                }
+                ComparisonPhase::Version => {
+                    let (a0, a1) = self.ranges[0];
+                    let (b0, b1) = self.ranges[1];
+                    let mods = &compare.keys[self.key].mods;
+                    let order = self.version.step(&a[a0..a1], &b[b0..b1], mods, bytes)?;
+                    if order != Ordering::Equal {
+                        return Some(if mods.reverse { order.reverse() } else { order });
+                    }
+                    self.version = VersionScan::default();
+                    self.key += 1;
+                    self.phase = ComparisonPhase::Key;
                 }
                 ComparisonPhase::ParseLeft | ComparisonPhase::ParseRight => {
                     let side = usize::from(matches!(self.phase, ComparisonPhase::ParseRight));

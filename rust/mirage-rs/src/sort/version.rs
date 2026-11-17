@@ -10,6 +10,7 @@
 //
 // `-V`: the order GNU sort documents for version numbers inside text.
 
+use super::key::{Mods, kept};
 use std::cmp::Ordering;
 
 /// Compares the non-digit parts of a version.
@@ -159,4 +160,255 @@ fn compare_parts(mut a: &[u8], mut b: &[u8]) -> Ordering {
     }
 
     Ordering::Equal
+}
+
+#[derive(Default)]
+struct Cursor {
+    at: usize,
+    next: Option<u8>,
+    ready: bool,
+}
+
+impl Cursor {
+    #[inline(always)]
+    fn peek(&mut self, source: &[u8], mods: &Mods, bytes: &mut usize) -> Option<Option<u8>> {
+        if !self.ready {
+            while self.at < source.len() {
+                if *bytes == 0 {
+                    return None;
+                }
+                let byte = source[self.at];
+                self.at += 1;
+                *bytes -= 1;
+                if kept(byte, mods) {
+                    self.next = Some(if mods.fold {
+                        byte.to_ascii_uppercase()
+                    } else {
+                        byte
+                    });
+                    self.ready = true;
+                    break;
+                }
+            }
+            if self.at == source.len() {
+                self.ready = true;
+            }
+        }
+        Some(self.next)
+    }
+
+    fn advance(&mut self) {
+        self.ready = false;
+        self.next = None;
+    }
+}
+
+#[derive(Default)]
+struct Ending {
+    length: usize,
+    dots: usize,
+    start: usize,
+    suffix: Option<usize>,
+    dot: bool,
+}
+
+impl Ending {
+    fn scan(
+        &mut self,
+        cursor: &mut Cursor,
+        source: &[u8],
+        mods: &Mods,
+        bytes: &mut usize,
+    ) -> Option<()> {
+        let start = cursor.at;
+        let end = source.len().min(start.saturating_add(*bytes));
+        *bytes -= end - start;
+        for (offset, &byte) in source[start..end].iter().enumerate() {
+            if !kept(byte, mods) {
+                continue;
+            }
+            self.length += 1;
+            if byte == b'.' && self.dots + 1 == self.length {
+                self.dots += 1;
+            }
+            if self.length == 1 && byte == b'.' {
+                self.start = start + offset + 1;
+            } else if byte == b'.' {
+                if self.suffix.is_none() || self.dot {
+                    self.suffix = Some(start + offset);
+                }
+                self.dot = true;
+            } else if self.dot {
+                self.dot = false;
+                if !byte.is_ascii_alphabetic() && byte != b'~' {
+                    self.suffix = None;
+                }
+            } else if !byte.is_ascii_alphanumeric() && byte != b'~' {
+                self.suffix = None;
+            }
+        }
+        cursor.at = end;
+        if end < source.len() {
+            return None;
+        }
+        if self.dot {
+            self.suffix = None;
+        }
+        Some(())
+    }
+
+    fn rank(&self) -> u8 {
+        match (self.length, self.dots, self.start != 0) {
+            (0, _, _) => 0,
+            (1, 1, _) => 1,
+            (2, 2, _) => 2,
+            (_, _, true) => 3,
+            _ => 4,
+        }
+    }
+}
+
+#[derive(Default)]
+enum Phase {
+    #[default]
+    LeftEnding,
+    RightEnding,
+    NonDigit,
+    LeftZeros,
+    RightZeros,
+    Digits,
+}
+
+#[derive(Default)]
+pub(super) struct VersionScan {
+    phase: Phase,
+    cursors: [Cursor; 2],
+    endings: [Ending; 2],
+    ends: [usize; 2],
+    full: bool,
+    digits: [usize; 2],
+    difference: Option<Ordering>,
+}
+
+impl VersionScan {
+    pub(super) fn step(
+        &mut self,
+        a: &[u8],
+        b: &[u8],
+        mods: &Mods,
+        bytes: &mut usize,
+    ) -> Option<Ordering> {
+        loop {
+            match self.phase {
+                Phase::LeftEnding | Phase::RightEnding => {
+                    let side = usize::from(matches!(self.phase, Phase::RightEnding));
+                    self.endings[side].scan(
+                        &mut self.cursors[side],
+                        if side == 0 { a } else { b },
+                        mods,
+                        bytes,
+                    )?;
+                    if side == 0 {
+                        self.phase = Phase::RightEnding;
+                        continue;
+                    }
+                    let order = self.endings[0].rank().cmp(&self.endings[1].rank());
+                    if order != Ordering::Equal || self.endings[0].rank() < 3 {
+                        return Some(order);
+                    }
+                    self.ends = [
+                        self.endings[0].suffix.unwrap_or(a.len()),
+                        self.endings[1].suffix.unwrap_or(b.len()),
+                    ];
+                    self.restart();
+                }
+                Phase::NonDigit => {
+                    let left = self.cursors[0].peek(&a[..self.ends[0]], mods, bytes)?;
+                    let right = self.cursors[1].peek(&b[..self.ends[1]], mods, bytes)?;
+                    if left.is_none() && right.is_none() {
+                        if self.full {
+                            return Some(Ordering::Equal);
+                        }
+                        self.full = true;
+                        self.ends = [a.len(), b.len()];
+                        self.restart();
+                        continue;
+                    }
+                    let x = left.filter(|byte| !byte.is_ascii_digit());
+                    let y = right.filter(|byte| !byte.is_ascii_digit());
+                    if x.is_none() && y.is_none() {
+                        self.phase = Phase::LeftZeros;
+                        continue;
+                    }
+                    let rank = |byte: Option<u8>| match byte {
+                        Some(b'~') => 0,
+                        None => 1,
+                        Some(byte) if byte.is_ascii_alphabetic() => 2,
+                        Some(_) => 3,
+                    };
+                    let order = rank(x).cmp(&rank(y)).then_with(|| x.cmp(&y));
+                    if order != Ordering::Equal {
+                        return Some(order);
+                    }
+                    self.cursors[0].advance();
+                    self.cursors[1].advance();
+                }
+                Phase::LeftZeros | Phase::RightZeros => {
+                    let side = usize::from(matches!(self.phase, Phase::RightZeros));
+                    let source = if side == 0 {
+                        &a[..self.ends[0]]
+                    } else {
+                        &b[..self.ends[1]]
+                    };
+                    while self.cursors[side].peek(source, mods, bytes)? == Some(b'0') {
+                        self.cursors[side].advance();
+                    }
+                    self.phase = if side == 0 {
+                        Phase::RightZeros
+                    } else {
+                        Phase::Digits
+                    };
+                }
+                Phase::Digits => {
+                    let x = self.cursors[0]
+                        .peek(&a[..self.ends[0]], mods, bytes)?
+                        .filter(u8::is_ascii_digit);
+                    let y = self.cursors[1]
+                        .peek(&b[..self.ends[1]], mods, bytes)?
+                        .filter(u8::is_ascii_digit);
+                    if x.is_none() && y.is_none() {
+                        let order = self.digits[0]
+                            .cmp(&self.digits[1])
+                            .then(self.difference.unwrap_or(Ordering::Equal));
+                        if order != Ordering::Equal {
+                            return Some(order);
+                        }
+                        self.digits = [0; 2];
+                        self.difference = None;
+                        self.phase = Phase::NonDigit;
+                        continue;
+                    }
+                    if let (Some(x), Some(y)) = (x, y) {
+                        if x != y && self.difference.is_none() {
+                            self.difference = Some(x.cmp(&y));
+                        }
+                    }
+                    for (side, digit) in [x, y].into_iter().enumerate() {
+                        if digit.is_some() {
+                            self.digits[side] += 1;
+                            self.cursors[side].advance();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn restart(&mut self) {
+        self.cursors = std::array::from_fn(|side| Cursor {
+            at: self.endings[side].start,
+            ..Cursor::default()
+        });
+        self.phase = Phase::NonDigit;
+    }
 }
