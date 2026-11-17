@@ -205,8 +205,7 @@ export async function carried(
     return sig
   }
   sig.stderr = concat([await materialize(io.stderr), sig.stderr])
-  if (sig instanceof ReturnSignal) sig.stdout = chainStreams([stdout, sig.stdout])
-  else sig.stdout = concat([await materialize(stdout), sig.stdout ?? new Uint8Array()])
+  sig.stdout = chainStreams([stdout, sig.stdout])
   return sig
 }
 
@@ -272,18 +271,22 @@ export function ended(sig: Unwinding, simple = false): IOResult {
 
 /**
  * Take what a nested line wrote before it left (an `exec`'d command, an ERR
- * or RETURN action), for the redirects it ran under to route. An EXIT
- * action's output, the `cleanup` at its end, goes around them, and what the
- * other unwinding signals carry went through them already. Mirrors Python's
- * take_stdout.
+ * or RETURN action), for the redirects it ran under to route, handed on as
+ * it is read. An EXIT action's output, the `cleanup` at its end, goes around
+ * them, and what the other unwinding signals carry went through them
+ * already. Mirrors Python's take_stdout.
  */
-export async function takeStdout(sig: Unwinding): Promise<Uint8Array> {
-  if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal) || !sig.unrouted)
-    return new Uint8Array()
-  const written = await materialize(sig.stdout)
-  const cut = written.byteLength - (sig instanceof ExitSignal ? sig.cleanup.byteLength : 0)
-  sig.stdout = cut < written.byteLength ? written.subarray(cut) : null
-  return written.subarray(0, cut)
+export async function takeStdout(sig: Unwinding): Promise<ByteSource | null> {
+  if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal) || !sig.unrouted) return null
+  if (!(sig instanceof ExitSignal) || sig.cleanup.byteLength === 0) {
+    const written = sig.stdout
+    sig.stdout = null
+    return written
+  }
+  const held = await materialize(sig.stdout)
+  const cut = held.byteLength - sig.cleanup.byteLength
+  sig.stdout = cut < held.byteLength ? held.subarray(cut) : null
+  return held.subarray(0, cut)
 }
 
 /**

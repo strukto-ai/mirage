@@ -229,11 +229,7 @@ async def carried(
         return sig
     if isinstance(sig, (ReturnSignal, ExitSignal)):
         sig.stderr = (await materialize(io.stderr)) + sig.stderr
-        sig.stdout = (
-            (await materialize(stdout)) + (sig.stdout or b"")
-            if isinstance(sig, ExitSignal)
-            else _chain_streams([stdout, sig.stdout])
-        )
+        sig.stdout = _chain_streams([stdout, sig.stdout])
     return sig
 
 
@@ -315,24 +311,25 @@ def ended(sig: Exception, simple: bool = False) -> IOResult:
     )
 
 
-async def take_stdout(sig: Exception) -> bytes:
+async def take_stdout(sig: Exception) -> ByteSource | None:
     """Take what a nested line wrote before it left (an ``exec``'d
     command, an ERR or RETURN action), for the redirects it ran under to
-    route. An EXIT action's output, the ``cleanup`` at its end, goes
-    around them, and what the other unwinding signals carry went through
-    them already.
+    route, handed on as it is read. An EXIT action's output, the
+    ``cleanup`` at its end, goes around them, and what the other
+    unwinding signals carry went through them already.
 
     Args:
         sig (Exception): one of ``Unwinding``.
     """
     if not isinstance(sig, (ExitSignal, ReturnSignal)) or not sig.unrouted:
-        return b""
-    written = await materialize(sig.stdout)
-    cut = len(written) - (
-        len(sig.cleanup) if isinstance(sig, ExitSignal) else 0
-    )
-    sig.stdout = written[cut:] or None
-    return written[:cut]
+        return None
+    if not isinstance(sig, ExitSignal) or not sig.cleanup:
+        written, sig.stdout = sig.stdout, None
+        return written
+    held = await materialize(sig.stdout)
+    cut = len(held) - len(sig.cleanup)
+    sig.stdout = held[cut:] or None
+    return held[:cut]
 
 
 async def take_stderr(sig: Exception) -> bytes:

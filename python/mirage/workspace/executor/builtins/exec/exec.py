@@ -98,6 +98,7 @@ async def handle_exec_command(
     execute_fn: Callable[..., Any] | None = None,
     registry: MountRegistry | None = None,
     stdin: ByteSource | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """The `exec` builtin without redirects.
 
@@ -114,6 +115,12 @@ async def handle_exec_command(
     never reaches here: it is a redirected statement, handled where
     redirects are applied.
 
+    CMD writes where the statement writes, as it runs, the way `eval`'s
+    line does: `exec yes | head -n1` ends once head has read its line,
+    and `exec cat big` never holds the file. What it returns instead (a
+    statement with nowhere to write) rides the signal as it is, read by
+    whichever boundary the signal reaches.
+
     Args:
         args (list[str]): the words after `exec`.
         session (SessionState): shell session state.
@@ -121,6 +128,8 @@ async def handle_exec_command(
             the shell; None where nothing can run one.
         registry (MountRegistry | None): where the head is looked up.
         stdin (ByteSource | None): the shell's standard input, CMD's.
+        sink (JobConsole | None): where the statement writes, and so
+            CMD; None returns its output on the signal.
     """
     scan = scan_options(args, "acl")
     refused = next((f for f in scan.letters if f in "al"), None)
@@ -156,12 +165,13 @@ async def handle_exec_command(
             ("env -i " if "c" in scan.letters else "") + line,
             session_id=session.session_id,
             stdin=stdin,
+            sink=sink,
         )
     finally:
         reset_caller(token)
-    stdout = await materialize(io.stdout)
-    stderr = await materialize(io.stderr)
-    replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
+    replaced = ExitSignal(
+        io.exit_code, stderr=await io.materialize_stderr(), stdout=io.stdout
+    )
     replaced.replaced, replaced.unrouted = head, True
     raise replaced
 
@@ -939,4 +949,5 @@ async def exec_builtin(call: BuiltinCall) -> Result:
         call.execute_fn,
         call.registry,
         call.stdin,
+        call.sink,
     )

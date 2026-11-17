@@ -1643,9 +1643,7 @@ async def _handle_redirect(
                 await recorder.finish_writer()
     except Unwinding as sig:
         unwound, io = sig, IOResult()
-        output = await take_stdout(sig)
-        if output:
-            await recorder.emit(Channel.STDOUT, output)
+        await pump(recorder, Channel.STDOUT, await take_stdout(sig))
         if not (
             isinstance(sig, ExitSignal)
             and command is not None

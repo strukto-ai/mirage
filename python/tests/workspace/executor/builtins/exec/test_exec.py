@@ -19,11 +19,22 @@ no OS-process referent and is refused loudly. Output is read back from a
 second session, since the first has its own output diverted.
 """
 
+import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
+
 import pytest
 
+from mirage.io import IOResult
+from mirage.io.types import materialize
+from mirage.shell.console import JobConsole
+from mirage.shell.errors import ExitSignal
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.executor.builtins.exec import handle_exec_command
+from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session import SessionState
 
 
 def _ws() -> Workspace:
@@ -467,3 +478,62 @@ async def test_descriptor_identities_survive_dups(
         assert io.exit_code == code
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command, stdout",
+    [
+        ('exec yes | head -n1; echo "${PIPESTATUS[@]}"', "y\n141 0\n"),
+        ('( exec yes ) | head -n1; echo "${PIPESTATUS[@]}"', "y\n141 0\n"),
+        ('{ exec yes; } | head -n1; echo "${PIPESTATUS[@]}"', "y\n141 0\n"),
+        ("f() { exec yes; }; f | head -n2", "y\ny\n"),
+        (
+            "exec sh -c 'echo a >> /data/ran; yes' | head -n1; cat /data/ran",
+            "y\na\n",
+        ),
+    ],
+)
+async def test_exec_streams_to_a_reader_that_stops(
+    command: str, stdout: str
+) -> None:
+    # The program writes where the statement writes as it runs, so a
+    # reader that stops early stops it (bash 5.2 on debian:stable-slim:
+    # `exec yes | head -n1` is `y` and `141 0`).
+    ws = _ws()
+    try:
+        io = await asyncio.wait_for(ws.shell(command), 30)
+        assert (await io.stdout_str(), io.exit_code) == (stdout, 0)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_hands_on_returned_output_unread() -> None:
+    # With nowhere to write, what the program returned rides the signal
+    # as it is, for the boundary the signal reaches to read.
+    registry = MountRegistry()
+    session = SessionState(session_id="s")
+    seen: list[JobConsole | None] = []
+
+    async def returned() -> AsyncIterator[bytes]:
+        yield b"out\n"
+
+    stream = returned()
+
+    async def execute_fn(line: str, **kwargs: Any) -> IOResult:
+        seen.append(kwargs.get("sink"))
+        return IOResult(stdout=stream, stderr=b"err\n", exit_code=3)
+
+    with pytest.raises(ExitSignal) as raised:
+        await handle_exec_command(["echo", "x"], session, execute_fn, registry)
+    assert seen == [None]
+    assert raised.value.stdout is stream
+    assert (raised.value.exit_code, raised.value.stderr) == (3, b"err\n")
+    assert await materialize(raised.value.stdout) == b"out\n"
+    sink = JobConsole()
+    with pytest.raises(ExitSignal):
+        await handle_exec_command(
+            ["echo", "x"], session, execute_fn, registry, sink=sink
+        )
+    assert seen[-1] is sink

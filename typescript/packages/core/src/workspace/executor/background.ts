@@ -539,7 +539,7 @@ function jobLeft(
       ? sig.containedCode
       : sig.exitCode
   return [
-    exited ? (sig.stdout ?? new Uint8Array()) : sig.stdout,
+    sig.stdout,
     new IOResult({ exitCode: status, stderr: sig.stderr }),
     new ExecutionNode({ command, stderr: sig.stderr, exitCode: status }),
   ]

@@ -544,12 +544,14 @@ def assignment_status(frame: ExecutionFrame, seq_before: int) -> int:
 Written = tuple[Channel, ByteSource, bool]
 
 
-def as_written(stdout: bytes | None, stderr: bytes | None) -> list[Written]:
+def as_written(
+    stdout: ByteSource | None, stderr: bytes | None
+) -> list[Written]:
     """Output written as it is, stdout then stderr, none of it through a
     copy of the terminal.
 
     Args:
-        stdout (bytes | None): what went to standard output.
+        stdout (ByteSource | None): what went to standard output.
         stderr (bytes | None): what went to standard error.
     """
     return [

@@ -674,9 +674,8 @@ def _job_left(
         or (call_stack is not None and call_stack.subshell)
     ):
         status = sig.contained_code
-    stdout = (sig.stdout or b"") if isinstance(sig, ExitSignal) else sig.stdout
     return (
-        stdout,
+        sig.stdout,
         IOResult(exit_code=status, stderr=sig.stderr or None),
         ExecutionNode(command=command, stderr=sig.stderr, exit_code=status),
     )

@@ -112,12 +112,13 @@ export async function handleExit(
   }
   const cleanup = await runExitTrap(executeFn, session, code, stdin, callStack)
   if (cleanup === null) throw new ExitSignal(code, err)
+  const written = await cleanup.materializeStdout()
   const leaving = new ExitSignal(
     cleanup.exitCode,
     concat([err, await cleanup.materializeStderr()]),
-    await cleanup.materializeStdout(),
+    written,
   )
-  leaving.cleanup = leaving.stdout ?? new Uint8Array()
+  leaving.cleanup = written
   throw leaving
 }
 
