@@ -81,7 +81,7 @@ class Growing {
   ) {}
   wholeReads = 0
   ranged = 0
-  asked: (number | null)[] = []
+  windows: (number | null)[] = []
   stat = (p: PathSpec): Promise<FileStat> => {
     const data = this.data.get(p.virtual)
     if (data === undefined) {
@@ -114,7 +114,7 @@ class Growing {
     size: number | null,
   ): AsyncIterable<Uint8Array> {
     await Promise.resolve()
-    this.asked.push(size)
+    this.windows.push(size)
     const window = bytesOf(this.data.get(p.virtual)).slice(
       offset,
       size === null ? undefined : offset + size,
@@ -415,7 +415,7 @@ describe('tail -f', () => {
     const text = await drainFor(stream, 300, abort)
     await grower
     expect(text).toBe('a\n' + big)
-    expect(fs.asked.every((size) => size !== null && size <= 1 << 20)).toBe(true)
+    expect(fs.windows.every((size) => size !== null && size <= 1 << 20)).toBe(true)
   })
 
   it('reads only the end of a file for its first print', async () => {

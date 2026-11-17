@@ -379,7 +379,7 @@ class _Growing:
         self.sized = sized
         self.whole_reads = 0
         self.ranged = 0
-        self.asked: list[int | None] = []
+        self.windows: list[int | None] = []
 
     async def stat(self, p: PathSpec) -> FileStat:
         if p.virtual not in self.data:
@@ -402,7 +402,7 @@ class _Growing:
     async def read_range(
         self, p: PathSpec, offset: int, size: int | None
     ) -> AsyncIterator[bytes]:
-        self.asked.append(size)
+        self.windows.append(size)
         end = None if size is None else offset + size
         window = self.data[p.virtual][offset:end]
         self.ranged += len(window)
@@ -635,7 +635,7 @@ async def test_follow_reads_a_large_gain_a_window_at_a_time(sized):
     chunks = await _drain_for(stream, 0.3)
     await grower
     assert b"".join(chunks) == b"a\n" + big
-    assert all(size is not None and size <= 1 << 20 for size in fs.asked)
+    assert all(size is not None and size <= 1 << 20 for size in fs.windows)
 
 
 @pytest.mark.asyncio
