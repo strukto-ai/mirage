@@ -7,9 +7,104 @@ use crate::number::is_blank;
 /// never negative and leading and trailing zeroes do not count.
 #[derive(PartialEq, Eq)]
 pub(crate) struct Number<'a> {
+    pub(super) negative: bool,
+    pub(super) integer: &'a [u8],
+    pub(super) fraction: &'a [u8],
+}
+
+#[derive(Default)]
+enum NumberPhase {
+    #[default]
+    Blanks,
+    Zeroes,
+    Integer,
+    Fraction,
+    Trim,
+    Done,
+}
+
+/// Offsets into a borrowed key, retained while the caller yields.
+#[derive(Default)]
+pub(super) struct NumberScan {
+    phase: NumberPhase,
+    at: usize,
     negative: bool,
-    integer: &'a [u8],
-    fraction: &'a [u8],
+    integer: (usize, usize),
+    fraction: (usize, usize),
+}
+
+impl NumberScan {
+    pub(super) fn step(&mut self, field: &[u8], bytes: &mut usize) -> bool {
+        loop {
+            if matches!(self.phase, NumberPhase::Done) {
+                return true;
+            }
+            if *bytes == 0 {
+                return false;
+            }
+            if matches!(self.phase, NumberPhase::Trim) {
+                let (start, end) = self.fraction;
+                let from = start.max(end.saturating_sub(*bytes));
+                let part = &field[from..end];
+                let last = part.iter().rposition(|&byte| byte != b'0');
+                *bytes -= last.map_or(part.len(), |at| part.len() - at);
+                self.fraction.1 = last.map_or(from, |at| from + at + 1);
+                if last.is_some() || from == start {
+                    self.negative &=
+                        self.integer.0 != self.integer.1 || self.fraction.0 != self.fraction.1;
+                    self.phase = NumberPhase::Done;
+                }
+                continue;
+            }
+            let end = field.len().min(self.at.saturating_add(*bytes));
+            let part = &field[self.at..end];
+            let stop = part.iter().position(|&byte| match self.phase {
+                NumberPhase::Blanks => !is_blank(byte),
+                NumberPhase::Zeroes => byte != b'0',
+                _ => !byte.is_ascii_digit(),
+            });
+            let count = stop.unwrap_or(part.len());
+            self.at += count;
+            *bytes -= count;
+            if stop.is_none() && end < field.len() {
+                continue;
+            }
+            match self.phase {
+                NumberPhase::Blanks => {
+                    self.negative = field.get(self.at) == Some(&b'-');
+                    self.at += usize::from(self.negative);
+                    self.phase = NumberPhase::Zeroes;
+                }
+                NumberPhase::Zeroes => {
+                    self.integer.0 = self.at;
+                    self.phase = NumberPhase::Integer;
+                }
+                NumberPhase::Integer => {
+                    self.integer.1 = self.at;
+                    if field.get(self.at) == Some(&b'.') {
+                        self.at += 1;
+                        self.fraction.0 = self.at;
+                        self.phase = NumberPhase::Fraction;
+                    } else {
+                        self.phase = NumberPhase::Trim;
+                    }
+                }
+                NumberPhase::Fraction => {
+                    self.fraction.1 = self.at;
+                    self.phase = NumberPhase::Trim;
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    pub(super) fn number<'a>(&self, field: &'a [u8]) -> Number<'a> {
+        Number {
+            negative: self.negative,
+            integer: &field[self.integer.0..self.integer.1],
+            fraction: &field[self.fraction.0..self.fraction.1],
+        }
+    }
 }
 
 impl Ord for Number<'_> {
@@ -366,5 +461,54 @@ mod tests {
             human_order(b"1K").0.cmp(&human_order(b"1500").0),
             Ordering::Greater
         );
+    }
+
+    #[test]
+    fn numeric_scans_preserve_signs_and_zeroes_across_slices() {
+        let mut fields: Vec<Vec<u8>> = [
+            "",
+            "-",
+            "+7",
+            "  -0",
+            "-.000",
+            "000.00100x",
+            "-00070.05000",
+            "1.2.3",
+            ".",
+        ]
+        .iter()
+        .map(|field| field.as_bytes().to_vec())
+        .collect();
+        fields.push(
+            format!(
+                "{}-{}7.{}4{}x",
+                " ".repeat(2000),
+                "0".repeat(2000),
+                "0".repeat(2000),
+                "0".repeat(2000)
+            )
+            .into_bytes(),
+        );
+        fields.push(vec![b'0'; 9000]);
+        fields.push(vec![b'9'; 9000]);
+        for field in &fields {
+            let expected = leading_number(field);
+            for size in [1, 7, 256, 1024] {
+                let mut scan = NumberScan::default();
+                let mut calls = 0;
+                loop {
+                    let mut bytes = size;
+                    if scan.step(field, &mut bytes) {
+                        break;
+                    }
+                    calls += 1;
+                    assert!(calls <= field.len() * 2 + 1);
+                }
+                let actual = scan.number(field);
+                assert_eq!(actual.negative, expected.negative);
+                assert_eq!(actual.integer, expected.integer);
+                assert_eq!(actual.fraction, expected.fraction);
+            }
+        }
     }
 }

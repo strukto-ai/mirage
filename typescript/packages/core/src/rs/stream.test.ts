@@ -17,7 +17,13 @@ import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 import { GlobMatcher } from './glob.ts'
 import { PosixRegex } from './regex.ts'
-import { compiledModule, mergeOutput, openStream, serveRequests } from './stream.ts'
+import {
+  compiledModule,
+  mergeOutput,
+  openStream,
+  serveRequests,
+  StreamModule as Streams,
+} from './stream.ts'
 import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
@@ -26,6 +32,84 @@ const DECODE = { mode: 'decode', ignore_garbage: false }
 function instance(stream: unknown): unknown {
   return (stream as { exports: unknown }).exports
 }
+
+function memory(stream: unknown): WebAssembly.Memory {
+  return (instance(stream) as { memory: WebAssembly.Memory }).memory
+}
+
+describe('stream lifetime', () => {
+  it('detaches a retained closed wrapper and keeps a concurrent stream usable', async () => {
+    const module = new Streams(compiledModule())
+    const closed = await module.open('base64', DECODE)
+    const live = await module.open('base64', DECODE)
+    const grown = instance(closed)
+    memory(closed).grow(513)
+    closed.close()
+    closed.close()
+    expect(closed.live).toBe(false)
+    expect(() => closed.finish()).toThrow('stream is closed')
+    const same = await module.open('base64', DECODE)
+    expect(instance(same)).toBe(grown)
+    same.close()
+    expect(new TextDecoder().decode(live.feed(new TextEncoder().encode('aGk=')))).toBe('hi')
+    expect(live.finish().length).toBe(0)
+    live.close()
+    const fresh = await module.open('base64', DECODE)
+    expect(instance(fresh)).not.toBe(grown)
+    fresh.close()
+  })
+
+  it('respects each module recycling threshold after asynchronous readiness', async () => {
+    for (const recycle of [1, 128 * 1024 * 1024]) {
+      const module = new Streams(compiledModule(), recycle)
+      const stream = module.openSync('base64', DECODE, false)
+      const original = instance(stream)
+      memory(stream).grow(513)
+      stream.close()
+      await module.ready()
+      const next = module.openSync('base64', DECODE, false)
+      expect(instance(next) === original).toBe(recycle > 64 * 1024 * 1024)
+      next.close()
+    }
+  })
+
+  it('rechecks live handles before completing deferred retirement', async () => {
+    const module = new Streams(compiledModule())
+    const stream = module.openSync('base64', DECODE, false)
+    const grown = instance(stream)
+    memory(stream).grow(513)
+    stream.close()
+    const pin = module.openSync('base64', DECODE, false)
+    await module.ready()
+    expect(instance(pin)).toBe(grown)
+    expect(new TextDecoder().decode(pin.feed(new TextEncoder().encode('aGk=')))).toBe('hi')
+    pin.close()
+    const fresh = await module.open('base64', DECODE)
+    expect(instance(fresh)).not.toBe(grown)
+    fresh.close()
+  })
+
+  it('detaches a trapped wrapper and replaces the poisoned instance', async () => {
+    const module = new Streams(compiledModule())
+    const stream = await module.open('base64', DECODE)
+    const sibling = await module.open('base64', DECODE)
+    const poisoned = instance(stream) as {
+      mirage_rs_args(len: number): number
+    }
+    expect(() => poisoned.mirage_rs_args(0xffffffff)).toThrow(WebAssembly.RuntimeError)
+    expect(() => {
+      sibling.close()
+    }).toThrow(WebAssembly.RuntimeError)
+    expect(sibling.live).toBe(false)
+    const fresh = await module.open('base64', DECODE)
+    expect(() => stream.feed(new Uint8Array())).toThrow(WebAssembly.RuntimeError)
+    expect(stream.live).toBe(false)
+    stream.close()
+    expect(instance(fresh)).not.toBe(poisoned)
+    expect(new TextDecoder().decode(fresh.feed(new TextEncoder().encode('aGk=')))).toBe('hi')
+    fresh.close()
+  })
+})
 
 describe('openStream', () => {
   it('refuses a bad config with no output', async () => {

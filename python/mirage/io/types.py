@@ -21,6 +21,7 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
@@ -125,14 +126,12 @@ async def materialize(stream: ByteSource | None) -> bytes:
         return b""
     if isinstance(stream, bytes):
         return stream
-    held: list[bytes] = []
-    size = 0
-    async with aclosing(chunks(stream)) as source:
-        async for chunk in source:
-            size += len(chunk)
-            check_memory(size)
-            held.append(chunk)
-    return b"".join(held)
+    with BytesIO() as output:
+        async with aclosing(chunks(stream)) as source:
+            async for chunk in source:
+                check_memory(output.tell() + len(chunk))
+                output.write(chunk)
+        return output.getvalue()
 
 
 @dataclass(frozen=True, slots=True)

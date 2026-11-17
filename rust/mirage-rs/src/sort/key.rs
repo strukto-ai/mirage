@@ -5,12 +5,12 @@ use blake2::digest::Digest;
 use blake2::digest::consts::U16;
 use serde::{Deserialize, Serialize};
 
-use super::number::{general_order, human_order, leading_number};
+use super::number::{NumberScan, general_order, human_order, leading_number};
 use super::version::version_cmp;
 use crate::number::is_blank;
 
 /// One key's ordering options.
-#[derive(Deserialize, Serialize, Clone, Copy, Default)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Mods {
     pub numeric: bool,
@@ -306,4 +306,360 @@ fn month(field: &[u8]) -> usize {
         .iter()
         .position(|month| **month == upper)
         .map_or(0, |index| index + 1)
+}
+
+#[derive(Default)]
+struct FieldScan {
+    at: usize,
+    number: usize,
+    lead: usize,
+    content: Option<usize>,
+}
+
+impl FieldScan {
+    fn seek(
+        &mut self,
+        record: &[u8],
+        separator: Option<u8>,
+        target: usize,
+        start_only: bool,
+        bytes: &mut usize,
+    ) -> Option<(usize, usize, usize)> {
+        let n = record.len();
+        if target == 0 {
+            return Some((n, n, n));
+        }
+        self.number = self.number.max(1);
+        loop {
+            if let Some(sep) = separator {
+                if start_only && self.number == target {
+                    return Some((self.at, self.at, self.at));
+                }
+                if *bytes == 0 {
+                    return None;
+                }
+                let end = n.min(self.at.saturating_add(*bytes));
+                let next = memchr::memchr(sep, &record[self.at..end]);
+                let stop = next.map_or(end, |gap| self.at + gap);
+                *bytes -= stop - self.at + usize::from(next.is_some());
+                self.at = stop;
+                if next.is_none() && end < n {
+                    continue;
+                }
+                if self.number == target {
+                    return Some((self.lead, self.lead, stop));
+                }
+                if next.is_none() {
+                    return Some((n, n, n));
+                }
+                self.at += 1;
+                self.lead = self.at;
+                self.number += 1;
+            } else {
+                if self.at == n && self.content.is_none() {
+                    return Some((n, n, n));
+                }
+                if *bytes == 0 {
+                    return None;
+                }
+                let end = n.min(self.at.saturating_add(*bytes));
+                let next = record[self.at..end]
+                    .iter()
+                    .position(|&byte| is_blank(byte) == self.content.is_some());
+                let stop = next.map_or(end, |gap| self.at + gap);
+                *bytes -= stop - self.at;
+                self.at = stop;
+                if next.is_none() && end < n {
+                    continue;
+                }
+                if self.content.is_none() {
+                    self.content = Some(stop);
+                    if start_only && self.number == target {
+                        return Some((self.lead, stop, stop));
+                    }
+                } else if self.number == target {
+                    return Some((self.lead, self.content.unwrap(), stop));
+                } else if stop == n {
+                    return Some((n, n, n));
+                } else {
+                    self.number += 1;
+                    self.lead = stop;
+                    self.content = None;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct KeyScan {
+    start: Option<usize>,
+    field: FieldScan,
+}
+
+impl KeyScan {
+    fn step(
+        &mut self,
+        record: &[u8],
+        key: &Key,
+        separator: Option<u8>,
+        bytes: &mut usize,
+    ) -> Option<(usize, usize)> {
+        let n = record.len();
+        if self.start.is_none() {
+            let (lead, content, _) =
+                self.field
+                    .seek(record, separator, key.start_field, true, bytes)?;
+            let base = if key.start_skip { content } else { lead };
+            self.start = Some(base.saturating_add(key.start_char.saturating_sub(1)).min(n));
+            self.field = FieldScan::default();
+        }
+        let start = self.start.unwrap();
+        let end = if let Some(number) = key.end_field {
+            let chars = key.end_char.unwrap_or(0);
+            let (lead, content, end) =
+                self.field
+                    .seek(record, separator, number, chars != 0, bytes)?;
+            if chars == 0 {
+                end
+            } else {
+                (if key.end_skip { content } else { lead })
+                    .saturating_add(chars)
+                    .min(n)
+            }
+        } else {
+            n
+        };
+        Some((start, end.max(start)))
+    }
+}
+
+#[derive(Default)]
+enum ComparisonPhase {
+    #[default]
+    Key,
+    ExtractLeft,
+    ExtractRight,
+    ParseLeft,
+    ParseRight,
+    Integer,
+    Fraction,
+    Fallback,
+}
+
+#[derive(Default)]
+pub(super) struct Comparison {
+    phase: ComparisonPhase,
+    key: usize,
+    extract: KeyScan,
+    ranges: [(usize, usize); 2],
+    numbers: [NumberScan; 2],
+    offset: usize,
+}
+
+impl Comparison {
+    pub(super) fn step(
+        &mut self,
+        compare: &Compare,
+        a: &[u8],
+        b: &[u8],
+        work: &mut usize,
+        budget: usize,
+    ) -> Option<Ordering> {
+        if matches!(self.phase, ComparisonPhase::Key)
+            && self.key == 0
+            && self.offset == 0
+            && a.len() <= super::COST_BYTES
+            && b.len() <= super::COST_BYTES
+        {
+            *work += super::cost(a, b);
+            return Some(compare.records(a, b));
+        }
+        let available = (budget - *work) * super::COST_BYTES;
+        let mut bytes = available;
+        let whole = match compare.keys.as_slice() {
+            [] if !compare.stable && !compare.unique => Some(compare.reverse),
+            [key]
+                if key.start_field == 1
+                    && key.start_char == 1
+                    && !key.start_skip
+                    && key.end_field.is_none()
+                    && (Mods {
+                        reverse: false,
+                        ..key.mods
+                    }) == Mods::default() =>
+            {
+                Some(key.mods.reverse)
+            }
+            _ => None,
+        };
+        let result = if let Some(reverse) = whole {
+            self.lexical(a, b, &mut bytes)
+                .map(|order| if reverse { order.reverse() } else { order })
+        } else {
+            self.resume(compare, a, b, &mut bytes)
+        };
+        *work += 1 + (available - bytes) / super::COST_BYTES;
+        if result.is_some() {
+            *self = Self::default();
+        }
+        result
+    }
+
+    fn resume(
+        &mut self,
+        compare: &Compare,
+        a: &[u8],
+        b: &[u8],
+        bytes: &mut usize,
+    ) -> Option<Ordering> {
+        loop {
+            match self.phase {
+                ComparisonPhase::Key => {
+                    let Some(key) = compare.keys.get(self.key) else {
+                        if compare.stable || compare.unique {
+                            return Some(Ordering::Equal);
+                        }
+                        self.phase = ComparisonPhase::Fallback;
+                        continue;
+                    };
+                    if key.mods.numeric
+                        && !key.mods.random
+                        && !key.mods.month
+                        && !key.mods.human
+                        && !key.mods.version
+                    {
+                        self.phase = ComparisonPhase::ExtractLeft;
+                        continue;
+                    }
+                    if *bytes == 0 {
+                        return None;
+                    }
+                    *bytes = bytes.saturating_sub(super::cost(a, b) * super::COST_BYTES);
+                    let ka = compare.extract(a, key);
+                    let kb = compare.extract(b, key);
+                    let order = if key.mods.random {
+                        compare.random(ka, kb, &key.mods)
+                    } else {
+                        compare_keys(ka, kb, &key.mods)
+                    };
+                    let order = if key.mods.reverse {
+                        order.reverse()
+                    } else {
+                        order
+                    };
+                    if order != Ordering::Equal {
+                        return Some(order);
+                    }
+                    self.key += 1;
+                }
+                ComparisonPhase::ExtractLeft | ComparisonPhase::ExtractRight => {
+                    let side = usize::from(matches!(self.phase, ComparisonPhase::ExtractRight));
+                    self.ranges[side] = self.extract.step(
+                        if side == 0 { a } else { b },
+                        &compare.keys[self.key],
+                        compare.field_sep,
+                        bytes,
+                    )?;
+                    self.extract = KeyScan::default();
+                    self.phase = if side == 0 {
+                        ComparisonPhase::ExtractRight
+                    } else {
+                        ComparisonPhase::ParseLeft
+                    };
+                }
+                ComparisonPhase::ParseLeft | ComparisonPhase::ParseRight => {
+                    let side = usize::from(matches!(self.phase, ComparisonPhase::ParseRight));
+                    let (start, end) = self.ranges[side];
+                    let field = &(if side == 0 { a } else { b })[start..end];
+                    if !self.numbers[side].step(field, bytes) {
+                        return None;
+                    }
+                    self.phase = if side == 0 {
+                        ComparisonPhase::ParseRight
+                    } else {
+                        ComparisonPhase::Integer
+                    };
+                }
+                ComparisonPhase::Integer | ComparisonPhase::Fraction => {
+                    let (a0, a1) = self.ranges[0];
+                    let (b0, b1) = self.ranges[1];
+                    let left = self.numbers[0].number(&a[a0..a1]);
+                    let right = self.numbers[1].number(&b[b0..b1]);
+                    let integer = matches!(self.phase, ComparisonPhase::Integer);
+                    let order = if left.negative != right.negative {
+                        if left.negative {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        }
+                    } else {
+                        let order = if integer {
+                            let length = left.integer.len().cmp(&right.integer.len());
+                            if length == Ordering::Equal {
+                                self.lexical(left.integer, right.integer, bytes)?
+                            } else {
+                                length
+                            }
+                        } else {
+                            self.lexical(left.fraction, right.fraction, bytes)?
+                        };
+                        if left.negative {
+                            order.reverse()
+                        } else {
+                            order
+                        }
+                    };
+                    if order != Ordering::Equal {
+                        return Some(if compare.keys[self.key].mods.reverse {
+                            order.reverse()
+                        } else {
+                            order
+                        });
+                    }
+                    if integer {
+                        self.phase = ComparisonPhase::Fraction;
+                    } else {
+                        self.key += 1;
+                        self.numbers = [NumberScan::default(), NumberScan::default()];
+                        self.phase = ComparisonPhase::Key;
+                    }
+                }
+                ComparisonPhase::Fallback => {
+                    let order = self.lexical(a, b, bytes)?;
+                    return Some(if compare.reverse {
+                        order.reverse()
+                    } else {
+                        order
+                    });
+                }
+            }
+        }
+    }
+
+    fn lexical(&mut self, a: &[u8], b: &[u8], bytes: &mut usize) -> Option<Ordering> {
+        let end = a.len().min(b.len()).min(self.offset.saturating_add(*bytes));
+        let order = lexical(&a[self.offset..end], &b[self.offset..end]);
+        *bytes -= end - self.offset;
+        if order != Ordering::Equal || end == a.len().min(b.len()) {
+            self.offset = 0;
+            Some(order.then_with(|| a.len().cmp(&b.len())))
+        } else {
+            self.offset = end;
+            None
+        }
+    }
+}
+
+fn lexical(a: &[u8], b: &[u8]) -> Ordering {
+    let mut left = a.chunks_exact(8);
+    let mut right = b.chunks_exact(8);
+    for (a, b) in left.by_ref().zip(right.by_ref()) {
+        let a = u64::from_be_bytes(a.try_into().unwrap());
+        let b = u64::from_be_bytes(b.try_into().unwrap());
+        if a != b {
+            return a.cmp(&b);
+        }
+    }
+    left.remainder().cmp(right.remainder())
 }

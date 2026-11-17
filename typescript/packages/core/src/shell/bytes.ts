@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../utils/bytes.ts'
-
 const ENC = new TextEncoder()
 const DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
@@ -23,8 +21,10 @@ const SURROGATE_HIGH = 0xdcff
 const ASCII_MAX = 0x80
 const BYTE_MASK = 0xff
 const VIEW_CHUNK = 8192
+const ENCODE_CHUNK = 16 * 1024
 const LOCALE_VARS = ['LC_ALL', 'LC_CTYPE', 'LANG'] as const
 const UTF8_CODESET = 'utf8'
+const BYTE_SENTINEL = /[\udc80-\udcff]/u
 
 /**
  * Stand in for one raw output byte inside a text string.
@@ -45,21 +45,6 @@ export function byteChar(value: number): string {
 }
 
 /**
- * Whether the code unit at `i` is a byte this module smuggled in.
- *
- * The sentinels are lone low surrogates, and a low surrogate that follows
- * a high one is half of an ordinary non-BMP character (`𐂀` is
- * U+D800 U+DC80) that must be encoded as itself.
- */
-function isByteSentinel(text: string, i: number): boolean {
-  const code = text.charCodeAt(i)
-  if (code < SURROGATE_LOW || code > SURROGATE_HIGH) return false
-  if (i === 0) return true
-  const before = text.charCodeAt(i - 1)
-  return before < 0xd800 || before > 0xdbff
-}
-
-/**
  * Encode shell text for output, byte escapes included.
  *
  * Every place the shell turns its own text into bytes goes through here,
@@ -67,29 +52,52 @@ function isByteSentinel(text: string, i: number): boolean {
  * that `TextEncoder` would write as U+FFFD.
  */
 export function encodeText(text: string): Uint8Array {
-  let first = -1
-  for (let i = 0; i < text.length; i++) {
-    if (isByteSentinel(text, i)) {
-      first = i
-      break
-    }
-  }
+  // Unicode matching excludes the low half of an ordinary non-BMP pair.
+  const first = text.search(BYTE_SENTINEL)
   if (first === -1) return ENC.encode(text)
-  const parts: Uint8Array[] = []
-  let run = ''
-  for (let i = 0; i < text.length; i++) {
-    if (isByteSentinel(text, i)) {
-      if (run !== '') {
-        parts.push(ENC.encode(run))
-        run = ''
-      }
-      parts.push(new Uint8Array([text.charCodeAt(i) - SURROGATE_BASE]))
+  const out = new Uint8Array(3 * text.length)
+  let used = ENC.encodeInto(text.slice(0, first), out).written
+  for (let i = first; i < text.length; i++) {
+    let code = text.charCodeAt(i)
+    if (code >= SURROGATE_LOW && code <= SURROGATE_HIGH) {
+      out[used++] = code - SURROGATE_BASE
+      continue
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = text.charCodeAt(i + 1)
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + low - 0xdc00
+        i += 1
+      } else code = 0xfffd
+    } else if (code >= 0xdc00 && code <= 0xdfff) code = 0xfffd
+    if (code < 0x80) out[used++] = code
+    else if (code < 0x800) {
+      out[used++] = 0xc0 | (code >> 6)
+      out[used++] = 0x80 | (code & 0x3f)
+    } else if (code < 0x10000) {
+      out[used++] = 0xe0 | (code >> 12)
+      out[used++] = 0x80 | ((code >> 6) & 0x3f)
+      out[used++] = 0x80 | (code & 0x3f)
     } else {
-      run += text.charAt(i)
+      out[used++] = 0xf0 | (code >> 18)
+      out[used++] = 0x80 | ((code >> 12) & 0x3f)
+      out[used++] = 0x80 | ((code >> 6) & 0x3f)
+      out[used++] = 0x80 | (code & 0x3f)
     }
   }
-  if (run !== '') parts.push(ENC.encode(run))
-  return concat(parts)
+  return out.slice(0, used)
+}
+
+/** Encode bounded text windows for a cooperative stream consumer. */
+// eslint-disable-next-line @typescript-eslint/require-await -- The consumer requires an async iterator and owns event-loop yielding.
+export async function* encodeTextChunks(text: string): AsyncGenerator<Uint8Array> {
+  for (let at = 0; at < text.length;) {
+    let end = Math.min(at + ENCODE_CHUNK, text.length)
+    const last = text.charCodeAt(end - 1)
+    if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1
+    yield encodeText(text.slice(at, end))
+    at = end
+  }
 }
 
 /**
@@ -173,10 +181,7 @@ export function decodeText(raw: Uint8Array): string {
  * Python's `join_bytes`.
  */
 export function joinBytes(text: string): string {
-  for (let i = 0; i < text.length; i++) {
-    if (isByteSentinel(text, i)) return decodeText(encodeText(text))
-  }
-  return text
+  return BYTE_SENTINEL.test(text) ? decodeText(encodeText(text)) : text
 }
 
 /**

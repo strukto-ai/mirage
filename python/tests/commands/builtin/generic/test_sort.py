@@ -1,3 +1,5 @@
+import asyncio
+import weakref
 from collections.abc import Awaitable, Callable
 
 import pytest
@@ -8,6 +10,7 @@ from mirage.commands.builtin.generic.sort import (
     parse_flags,
     sort_generic,
 )
+from mirage.io.stream import OutputStream
 from mirage.io.types import IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream
@@ -17,6 +20,10 @@ from mirage.types import PathSpec
 
 async def _unused_read_bytes(_path: PathSpec) -> bytes:
     raise AssertionError("read_bytes should not be called")
+
+
+async def _failed_spool_read(_spool, _offset, _size):
+    raise OSError("scratch read failed")
 
 
 def _parsed(flags: dict) -> SortFlags:
@@ -409,9 +416,9 @@ async def test_merge_retires_groups_before_reading_all_operands(monkeypatch):
     spool = sort_module.ByteSpool
 
     class TrackingSpool(spool):
-        def __init__(self):
+        def __init__(self, **kwargs):
             nonlocal peak
-            super().__init__()
+            super().__init__(**kwargs)
             live.add(self)
             peak = max(peak, len(live))
 
@@ -430,3 +437,75 @@ async def test_merge_retires_groups_before_reading_all_operands(monkeypatch):
     assert result.exit_code == 0
     assert peak < 32
     assert not live
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["unstarted", "cancel"])
+async def test_final_merge_owns_runs_until_the_consumer_closes(
+    monkeypatch, stop
+):
+    stores = []
+    engines = []
+    opening = sort_module.open_stream
+    spool = sort_module.ByteSpool
+
+    def opened(*args, **kwargs):
+        stream = opening(*args, **kwargs)
+        engines.append(weakref.ref(stream))
+        return stream
+
+    class TrackingSpool(spool):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            stores.append(self)
+
+    monkeypatch.setattr(sort_module, "ByteSpool", TrackingSpool)
+    monkeypatch.setattr(sort_module, "open_stream", opened)
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 128)
+    stdout, result = await sort_generic(
+        [],
+        read=_unused_read_bytes,
+        stdin=b"z" * 90 + b"\n" + b"a" * 90,
+        flags={},
+    )
+    assert result.exit_code == 0
+    assert isinstance(stdout, OutputStream)
+    assert len(stores) == 2 and all(not store.closed for store in stores)
+    if stop == "cancel":
+        entered = asyncio.Event()
+
+        async def blocked(self, offset, size):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(TrackingSpool, "read", blocked)
+        task = asyncio.create_task(anext(stdout))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    await stdout.aclose()
+    assert all(store.closed for store in stores)
+    if stop == "unstarted":
+        assert all(engine() is None for engine in engines)
+
+
+@pytest.mark.asyncio
+async def test_output_file_waits_for_final_merge_read_errors(monkeypatch):
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 128)
+    written = []
+
+    async def write(path, source):
+        written.append(path)
+        await materialize(source)
+
+    monkeypatch.setattr(sort_module.ByteSpool, "read", _failed_spool_read)
+    with pytest.raises(OSError, match="scratch read failed"):
+        await sort_generic(
+            [],
+            read=_unused_read_bytes,
+            write_bytes=write,
+            stdin=b"z" * 90 + b"\n" + b"a" * 90,
+            flags={"output": [_spec("/out")]},
+        )
+    assert not written

@@ -16,7 +16,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mirage.commands.builtin.utils.strftime import gnu_strftime
+from mirage.commands.builtin.utils.strftime import (
+    gnu_strftime,
+    strftime_stream,
+)
 
 MOMENT = datetime(2026, 1, 1, 0, 0, 1, 123456)
 ZONED = datetime(1970, 1, 1, tzinfo=timezone(timedelta(hours=5, minutes=30)))
@@ -401,3 +404,11 @@ def test_directives_and_calendar_are_independent_of_the_host(
 def test_format_preserves_raw_bytes_bom_and_large_input():
     fmt = "\udcff\ufeff" + "😀%Y" * 30000
     assert gnu_strftime(MOMENT, fmt) == "\udcff\ufeff" + "😀2026" * 30000
+
+
+@pytest.mark.asyncio
+async def test_streams_formats_across_character_and_directive_boundaries():
+    fmt = "x" * 16383 + "𐂀\udcff%Y" + "é" * 20000 + "%:z"
+    parts = [part async for part in strftime_stream(MOMENT, fmt)]
+    expected = "x" * 16383 + "𐂀\udcff2026" + "é" * 20000 + "+00:00"
+    assert b"".join(parts) == expected.encode("utf-8", "surrogateescape")

@@ -1,5 +1,5 @@
 use super::heredoc::Body;
-use super::tree::Tree;
+use super::tree::{SourceMap, Tree};
 
 /// How deep the expansions a heredoc body holds may nest before the
 /// rest of it is read as text.
@@ -53,13 +53,13 @@ pub struct Deferred {
 
 /// A span of the line, the text that takes its place with where each of
 /// its bytes came from, and the heredoc whose `<` the text starts with.
-type Edit = (usize, usize, Vec<u8>, Vec<usize>, Option<Heredoc>);
+type Edit = (usize, usize, Vec<u8>, SourceMap, Option<Heredoc>);
 
 /// A line with its heredoc bodies folded in.
 pub(super) struct Lowered {
     pub source: Vec<u8>,
     /// Where each byte of `source` came from, one more for its end.
-    pub offsets: Vec<usize>,
+    pub offsets: SourceMap,
     pub heredocs: Vec<Heredoc>,
 }
 
@@ -103,7 +103,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
                 heredoc.body_start,
                 heredoc.end,
                 Vec::new(),
-                Vec::new(),
+                SourceMap::Identity(0),
                 None,
             ));
         }
@@ -113,10 +113,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
         {
             continue;
         }
-        let (word, mut places, deferred) = quoted_body(data, heredoc, offsets);
-        let mut replacement = vec![b'<'];
-        replacement.extend(word);
-        places.insert(0, heredoc.operator);
+        let (replacement, places, deferred) = quoted_body(data, heredoc, offsets);
         edits.push((
             heredoc.operator,
             heredoc.word_end,
@@ -129,8 +126,18 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
         ));
     }
     edits.sort_by_key(|edit| edit.0);
-    let mut source = Vec::with_capacity(data.len());
-    let mut offsets = Vec::with_capacity(data.len() + 1);
+    let (end, length) = edits.iter().fold(
+        (0, 0),
+        |(cursor, length), (start, end, replacement, _, _)| {
+            (
+                *end,
+                length + start.saturating_sub(cursor) + replacement.len(),
+            )
+        },
+    );
+    let length = length + data.len().saturating_sub(end);
+    let mut source = Vec::with_capacity(length);
+    let mut offsets = SourceMap::Packed(Vec::with_capacity(length + 1));
     let mut heredocs = Vec::new();
     let mut cursor = 0;
     for (start, end, replacement, places, heredoc) in edits {
@@ -143,7 +150,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
             heredocs.push(heredoc);
         }
         source.extend(replacement);
-        offsets.extend(places);
+        offsets.append(places);
         cursor = end;
     }
     if cursor < data.len() {
@@ -162,7 +169,7 @@ pub(super) fn newlines(text: &[u8]) -> usize {
     memchr::memchr_iter(b'\n', text).count()
 }
 
-/// A body as one double-quoted word: the expansions an unquoted body
+/// A redirect from one double-quoted word: the expansions an unquoted body
 /// holds kept whole, every other `"` and `\`, and in a quoted body every
 /// `$` and backtick too, escaped. With where each byte came from in
 /// `data`, and where expanding the body fails, the rest of it escaped.
@@ -170,10 +177,11 @@ fn quoted_body(
     data: &[u8],
     heredoc: &Heredoc,
     offsets: &[usize],
-) -> (Vec<u8>, Vec<usize>, Option<Deferred>) {
+) -> (Vec<u8>, SourceMap, Option<Deferred>) {
     let body = &heredoc.body;
-    let mut out = vec![b'"'];
-    let mut places = vec![heredoc.body_start];
+    let mut out = vec![b'<', b'"'];
+    let mut places = SourceMap::Packed(Vec::with_capacity(body.len() + 3));
+    places.extend([heredoc.operator, heredoc.body_start]);
     let mut deferred = None;
     let mut index = 0;
     while index < body.len() {
@@ -202,7 +210,7 @@ fn quoted_body(
         }
         if let Some(end) = end {
             out.extend_from_slice(&body[index..end]);
-            places.extend_from_slice(&offsets[index..end]);
+            places.extend(offsets[index..end].iter().copied());
             index = end;
             continue;
         }

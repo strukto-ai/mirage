@@ -1116,3 +1116,72 @@ fn transformed_offsets_keep_checked_width() {
         assert_eq!(map.iter().collect::<Vec<_>>(), [0, large, 2]);
     }
 }
+
+#[test]
+fn transformed_map_building_and_composition_keep_checked_width() {
+    use super::SourceMap;
+    let mut map = SourceMap::Packed(Vec::new());
+    map.extend([0, 2, u32::MAX as usize]);
+    assert!(matches!(map, SourceMap::Packed(_)));
+    assert_eq!(map.iter().collect::<Vec<_>>(), [0, 2, u32::MAX as usize]);
+    let places: SourceMap = [2, 0, 1, 1].into_iter().collect();
+    let mapped = places.remap(&map);
+    assert_eq!(
+        mapped.iter().collect::<Vec<_>>(),
+        [u32::MAX as usize, 0, 2, 2]
+    );
+    let mut joined = SourceMap::Packed(vec![0]);
+    joined.append(map.clone());
+    assert_eq!(
+        joined.iter().collect::<Vec<_>>(),
+        [0, 0, 2, u32::MAX as usize]
+    );
+    if let Some(large) = (u32::MAX as usize).checked_add(1) {
+        map.push(large);
+        assert!(matches!(map, SourceMap::Wide(_)));
+        assert_eq!(
+            map.iter().collect::<Vec<_>>(),
+            [0, 2, u32::MAX as usize, large]
+        );
+        let places: SourceMap = [3, 1, 3, 0].into_iter().collect();
+        let mapped = places.remap(&map);
+        assert!(matches!(mapped, SourceMap::Wide(_)));
+        assert_eq!(mapped.iter().collect::<Vec<_>>(), [large, 2, large, 0]);
+        joined.append(map);
+        assert!(matches!(joined, SourceMap::Wide(_)));
+        joined.append(SourceMap::Packed(vec![1, 0]));
+        assert_eq!(
+            joined.iter().collect::<Vec<_>>(),
+            [
+                0,
+                0,
+                2,
+                u32::MAX as usize,
+                0,
+                2,
+                u32::MAX as usize,
+                large,
+                1,
+                0
+            ]
+        );
+    }
+}
+
+#[test]
+fn composed_heredoc_offsets_keep_unicode_bytes_and_quoted_continuations() {
+    let source = b"echo \xc3\xa9\\\n\xf0\x9f\x98\x80; cat <\\\n<'E'\n$\xff\\\n\"E\nE\n";
+    let tree = parse(source);
+    assert_eq!(tree.error, None);
+    assert_eq!(
+        *tree.source,
+        b"echo \xc3\xa9\xf0\x9f\x98\x80; cat <\"\\$\xff\\\\\n\\\"E\n\"\n"
+    );
+    assert_eq!(
+        tree.offsets.iter().collect::<Vec<_>>(),
+        [
+            0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 27, 27, 27, 28, 29, 29,
+            30, 31, 31, 32, 33, 36, 26, 36
+        ]
+    );
+}

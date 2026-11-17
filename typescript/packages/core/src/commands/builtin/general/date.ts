@@ -299,7 +299,7 @@ async function date(
   const fmt = formats[0] ?? DEFAULT_FORMAT
   // --resolution names one nanosecond past the epoch.
   const out = asyncChain([
-    await strftimeStream(dt, fmt, zone, resolution ? 1 : undefined),
+    await strftimeStream(dt, fmt, zone, resolution ? 1 : undefined, ctx.signal),
     ENC.encode('\n'),
   ])
   if (setting !== null) return [out, new IOResult({ exitCode: 1, stderr: ENC.encode(CANNOT_SET) })]

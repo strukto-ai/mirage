@@ -14,7 +14,7 @@
 
 import type { util } from 'zod'
 import { openStream, openStreamSync } from '../../../rs/stream.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { decodeText, encodeText, encodeTextChunks } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { Zone } from '../../../utils/timezone.ts'
 import { streamOutput } from './stream.ts'
@@ -70,7 +70,9 @@ export async function strftimeStream(
   fmt: string,
   zone: Zone,
   nanosecond?: number,
+  signal?: AbortSignal,
 ): Promise<AsyncIterableIterator<Uint8Array>> {
+  signal?.throwIfAborted()
   const stream = await openStream('strftime', config(dt, zone, nanosecond))
-  return streamOutput(stream, encodeText(fmt))
+  return streamOutput(stream, fmt.length <= 16384 ? encodeText(fmt) : encodeTextChunks(fmt), signal)
 }

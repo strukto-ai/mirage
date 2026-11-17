@@ -51,6 +51,32 @@ async def test_fill_closes_source_when_spill_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_spilled_writes_batch_at_the_requested_buffer_size(monkeypatch):
+    async with ByteSpool(0, buffer_size=8) as spool:
+        writes = []
+        write = spool._write
+
+        def record(data, offset):
+            writes.append((offset, bytes(data)))
+            write(data, offset)
+
+        monkeypatch.setattr(spool, "_write", record)
+        await spool.append(b"abcd")
+        assert not writes
+        await spool.append(b"efgh")
+        assert writes == [(0, b"abcdefgh")]
+        await spool.append(b"ij")
+        assert await spool.read(0, 10) == b"abcdefghij"
+        assert writes[-1] == (8, b"ij")
+
+
+@pytest.mark.parametrize("size", [-1, 0])
+def test_spool_requires_a_positive_buffer_size(size):
+    with pytest.raises(ValueError, match="buffer size"):
+        ByteSpool(buffer_size=size)
+
+
+@pytest.mark.asyncio
 async def test_a_spool_that_lost_a_write_fails_every_call_after(monkeypatch):
     def fail(**kwargs):
         raise OSError("scratch full")

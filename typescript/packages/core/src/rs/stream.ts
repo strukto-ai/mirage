@@ -99,6 +99,7 @@ export class StreamModule {
   // has to.
   private next: Exports | undefined
   private making: Promise<void> | undefined
+  private retiring: Exports | undefined
 
   /**
    * `recycle`: the size past which an instance a stream grew is dropped
@@ -136,7 +137,22 @@ export class StreamModule {
       const made = instance.exports as unknown as Exports
       if (this.exports === undefined) this.exports = made
       else this.next ??= made
+      if (this.retiring !== undefined && this.next !== undefined) {
+        const retiring = this.retiring
+        this.retiring = undefined
+        this.retireIfIdle(retiring)
+      }
     }
+  }
+
+  retireIfIdle(exports: Exports): void {
+    const held = movables.get(exports)
+    if (
+      exports.mirage_rs_open_count() === (held?.size ?? 0) &&
+      exports.memory.buffer.byteLength > this.recycle &&
+      ![...(held ?? [])].some((stream) => stream.busy())
+    )
+      this.retire(exports, false)
   }
 
   // The next stream gets the instance made ahead, and another is made behind
@@ -147,9 +163,11 @@ export class StreamModule {
   retire(exports: Exports, trapped: boolean): void {
     if (this.exports === exports) {
       if (this.next === undefined && !trapped) {
+        this.retiring = exports
         this.refill()
         return
       }
+      this.retiring = undefined
       this.exports = this.next
       this.next = undefined
       this.refill()
@@ -223,18 +241,18 @@ function bytesAt(exports: Exports, ptr: number, len: number): Uint8Array {
 
 /** One mirage-rs stream: chunks go in, the bytes they produce come out. Mirrors Python's OpenStream. */
 export class OpenStream {
-  private readonly exports: Exports
-  private handle: number
+  private active:
+    | { readonly exports: Exports; readonly module: StreamModule; readonly handle: number }
+    | undefined
   private readonly capacity: number
 
   constructor(
     exports: Exports,
-    private readonly module: StreamModule,
+    module: StreamModule,
     handle: number,
     readonly movable = false,
   ) {
-    this.exports = exports
-    this.handle = handle
+    this.active = { exports, module, handle }
     this.capacity = exports.mirage_rs_input_capacity()
     if (movable) {
       const held = movables.get(exports) ?? new Set()
@@ -245,7 +263,17 @@ export class OpenStream {
 
   /** Whether the stream is still open; a movable one closes when its instance retires. */
   get live(): boolean {
-    return this.handle !== 0
+    return this.active !== undefined
+  }
+
+  private get exports(): Exports {
+    if (this.active === undefined) throw new Error('stream is closed')
+    return this.active.exports
+  }
+
+  private get handle(): number {
+    if (this.active === undefined) throw new Error('stream is closed')
+    return this.active.handle
   }
 
   /** Push one chunk and return what it produced. */
@@ -379,35 +407,34 @@ export class OpenStream {
   }
 
   close(): void {
-    if (this.handle === 0) return
-    this.drop(true)
-    const held = movables.get(this.exports)
-    if (
-      this.exports.mirage_rs_open_count() === (held?.size ?? 0) &&
-      this.exports.memory.buffer.byteLength > this.module.recycle &&
-      ![...(held ?? [])].some((stream) => stream.busy())
-    )
-      this.module.retire(this.exports, false)
+    const active = this.active
+    if (active === undefined) return
+    this.guard(() => {
+      this.drop(true)
+      active.module.retireIfIdle(active.exports)
+    })
   }
 
   /** Close the handle, on the instance itself unless it trapped. */
   drop(release: boolean): void {
-    if (this.handle === 0) return
-    if (release) this.exports.mirage_rs_close(this.handle)
-    this.handle = 0
-    movables.get(this.exports)?.delete(this)
+    const active = this.active
+    if (active === undefined) return
+    this.active = undefined
+    movables.get(active.exports)?.delete(this)
+    if (release) active.exports.mirage_rs_close(active.handle)
   }
 
   // A trap (a Rust panic) stops the instance mid-call with its state still
   // borrowed, so every later call on it would trap too: this stream is
   // done, and the next stream gets a fresh instance.
   private guard<T>(call: () => T): T {
+    const active = this.active
     try {
       return call()
     } catch (err) {
-      if (err instanceof WebAssembly.RuntimeError) {
+      if (err instanceof WebAssembly.RuntimeError && active !== undefined) {
         this.drop(false)
-        this.module.retire(this.exports, true)
+        active.module.retire(active.exports, true)
       }
       throw err
     }

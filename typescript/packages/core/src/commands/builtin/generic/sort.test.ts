@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { ByteSpool } from '../../../io/spool.ts'
+import { OutputStream } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { OpenStream } from '../../../rs/stream.ts'
@@ -24,6 +25,10 @@ import type { Context } from '../../config.ts'
 import { parseFlags, SORT_RUN_BYTES, sortGeneric, type SortFlags } from './sort.ts'
 
 const DEC = new TextDecoder()
+
+async function* mergeInput(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(bytes('a\n'))
+}
 
 /** What sort's options decide, which these flags must not refuse. */
 function parsed(flags: Context['flags']): SortFlags {
@@ -443,5 +448,94 @@ it('merge retires groups before reading all operands', async () => {
   } finally {
     appendSpy.mockRestore()
     closeSpy.mockRestore()
+  }
+})
+
+it.each(['unstarted', 'cancel'])(
+  'final merge owns its runs until the consumer closes: %s',
+  async (stop) => {
+    const stores = new Set<ByteSpool>()
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- invoked with each tracked spool
+    const append = ByteSpool.prototype.append
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- invoked with each tracked spool
+    const read = ByteSpool.prototype.read
+    const appendSpy = vi.spyOn(ByteSpool.prototype, 'append').mockImplementation(async function (
+      this: ByteSpool,
+      data,
+    ) {
+      stores.add(this)
+      await append.call(this, data)
+    })
+    let restoreRead: (() => void) | undefined
+    const controller = new AbortController()
+    try {
+      const context = {
+        stdin: null,
+        flags: { merge: true },
+        cwd: PathSpec.fromStrPath('/'),
+        signal: controller.signal,
+      } as Context
+      const paths = Array.from({ length: 17 }, (_, i) => spec(`/input${String(i)}`))
+      const result = await sortGeneric(paths, context, mergeInput)
+      if (result === null || !(result[0] instanceof OutputStream))
+        throw new Error('expected merged output')
+      const output = result[0]
+      expect(result[1].exitCode).toBe(0)
+      expect(stores.size).toBe(2)
+      expect([...stores].every((s) => !s.closed)).toBe(true)
+      if (stop === 'cancel') {
+        let entered!: () => void
+        let release!: () => void
+        const ready = new Promise<void>((r) => {
+          entered = r
+        })
+        const pending = new Promise<void>((r) => {
+          release = r
+        })
+        const readSpy = vi.spyOn(ByteSpool.prototype, 'read').mockImplementation(async function (
+          this: ByteSpool,
+          at,
+          size,
+        ) {
+          entered()
+          await pending
+          return read.call(this, at, size)
+        })
+        restoreRead = () => {
+          readSpy.mockRestore()
+        }
+        const pulling = output.next()
+        await ready
+        controller.abort()
+        release()
+        await expect(pulling).rejects.toThrow()
+      }
+      await output.return()
+      expect([...stores].every((s) => s.closed)).toBe(true)
+    } finally {
+      restoreRead?.()
+      appendSpy.mockRestore()
+    }
+  },
+)
+
+it('waits for final merge read errors before writing the output file', async () => {
+  const readSpy = vi
+    .spyOn(ByteSpool.prototype, 'read')
+    .mockRejectedValue(new Error('scratch read failed'))
+  const write = vi.fn(() => Promise.resolve())
+  try {
+    const context = {
+      stdin: null,
+      flags: { merge: true, output: [spec('/out')] },
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context
+    const paths = Array.from({ length: 17 }, (_, i) => spec(`/input${String(i)}`))
+    await expect(sortGeneric(paths, context, mergeInput, write)).rejects.toThrow(
+      'scratch read failed',
+    )
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    readSpy.mockRestore()
   }
 })

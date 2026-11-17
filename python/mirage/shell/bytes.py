@@ -13,13 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
+
+from mirage.io.yield_budget import YieldBudget
 
 SURROGATE_BASE = 0xDC00
 SURROGATE_LOW = 0xDC80
 SURROGATE_HIGH = 0xDCFF
 ASCII_MAX = 0x80
 BYTE_MASK = 0xFF
+ENCODE_CHUNK = 16 * 1024
 LOCALE_VARS = ("LC_ALL", "LC_CTYPE", "LANG")
 UTF8_CODESET = "utf8"
 
@@ -56,6 +59,32 @@ def encode_text(text: str) -> bytes:
         text (str): the text to write.
     """
     return text.encode("utf-8", "surrogateescape")
+
+
+async def encode_text_chunks(text: str) -> AsyncGenerator[bytes, None]:
+    """Encode bounded text windows for a cooperative stream consumer.
+
+    Args:
+        text (str): the text to encode, with raw byte escapes preserved.
+    """
+    for at in range(0, len(text), ENCODE_CHUNK):
+        try:
+            data = encode_text(text[at : at + ENCODE_CHUNK])
+        except UnicodeEncodeError as error:
+            end = at + error.end
+            budget = YieldBudget()
+            while end < len(text):
+                run = re.match(
+                    r"[\ud800-\udfff]+", text[end : end + ENCODE_CHUNK]
+                )
+                if run is None:
+                    break
+                end += run.end()
+                await budget.run()
+            raise UnicodeEncodeError(
+                error.encoding, text, at + error.start, end, error.reason
+            ) from None
+        yield data
 
 
 def decode_text(data: bytes) -> str:

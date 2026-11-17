@@ -7,14 +7,19 @@ use std::cmp::Ordering;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
-use key::Compare;
+use crate::{
+    Stream, StreamError,
+    constants::{MAX_HELD, OUTPUT},
+    parse_config,
+};
+use key::{Compare, Comparison};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", tag = "mode")]
 enum Config {
     /// Sort records into runs: once the buffered records reach `run_bytes`
-    /// (each counting its length plus `RECORD_OVERHEAD`) the stream is busy
+    /// (including the open record and `RECORD_OVERHEAD` per completed
+    /// record) the stream is busy
     /// with that run, and every piece `drain` writes while it stays busy is
     /// one sorted run.
     Sort {
@@ -30,11 +35,13 @@ enum Config {
         zero_terminated: bool,
         inputs: usize,
     },
-    /// `-c`: the first disorder refuses with its 1-based record number as
-    /// the message and the record as the output.
+    /// The first disorder refuses with its 1-based record number as the
+    /// message, and the record as output unless checking quietly.
     Check {
         compare: Compare,
         zero_terminated: bool,
+        #[serde(default)]
+        quiet: bool,
     },
 }
 
@@ -57,6 +64,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             size: 0,
             phase: Phase::Idle,
             ended: false,
+            comparison: Comparison::default(),
         }),
         Config::Merge {
             compare,
@@ -68,16 +76,24 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             inputs: (0..inputs).map(|_| Input::default()).collect(),
             previous: None,
             paused: false,
+            selection: Selection::default(),
+            writing: None,
+            comparison: Comparison::default(),
         }),
         Config::Check {
             compare,
             zero_terminated,
+            quiet,
         } => Box::new(Checker {
             compare,
+            quiet,
             separator: separator(zero_terminated),
             records: crate::records::Records::default(),
-            previous: None,
+            previous: Vec::new(),
             index: 0,
+            comparison: Comparison::default(),
+            paused: false,
+            copying: false,
         }),
     })
 }
@@ -88,9 +104,42 @@ fn separator(zero_terminated: bool) -> u8 {
 
 const RECORD_OVERHEAD: usize = 64;
 
-/// About how much work one `drain` or merge call does: a few milliseconds
-/// even for keyed comparisons, so a host's loop is never held for a whole
-/// run. A comparison counts by `cost`, so long records spend it sooner.
+fn append(buffer: &mut Vec<u8>, input: &[u8]) -> Result<(), StreamError> {
+    let needed = buffer.len().saturating_add(input.len());
+    if needed > buffer.capacity() {
+        let grown = buffer
+            .capacity()
+            .saturating_mul(2)
+            .min(MAX_HELD + MAX_HELD / 2);
+        buffer
+            .try_reserve_exact(needed.max(grown) - buffer.len())
+            .map_err(|_| StreamError::refusal(b"sort: memory exhausted", 2))?;
+    }
+    buffer.extend_from_slice(input);
+    Ok(())
+}
+
+fn write_record(
+    data: &[u8],
+    pos: &mut usize,
+    end: usize,
+    separator: u8,
+    out: &mut Vec<u8>,
+) -> bool {
+    let full = out.len() + OUTPUT - out.len() % OUTPUT;
+    let stop = end.min(*pos + full - out.len());
+    out.extend_from_slice(&data[*pos..stop]);
+    *pos = stop;
+    if stop == end && out.len() < full {
+        out.push(separator);
+        true
+    } else {
+        false
+    }
+}
+
+/// Work charged per call. Exact numeric and whole-record lexical
+/// comparisons resume after this byte allowance.
 const STEP: usize = 4 * 1024;
 
 /// A record's bytes that count as one more comparison's work, about what a
@@ -131,6 +180,7 @@ enum Phase {
     Write {
         next: usize,
         kept: Option<(usize, usize)>,
+        offset: Option<usize>,
     },
 }
 
@@ -153,6 +203,7 @@ struct Sorter {
     size: usize,
     phase: Phase,
     ended: bool,
+    comparison: Comparison,
 }
 
 impl Sorter {
@@ -170,7 +221,8 @@ impl Sorter {
             }
         }
         self.scanned = self.data.len();
-        false
+        !self.spans.is_empty()
+            && self.size.saturating_add(self.data.len() - self.start) >= self.run_bytes
     }
 
     /// Start a run from the buffered records: a full one, or once input
@@ -243,6 +295,7 @@ impl Sorter {
                 Phase::Write {
                     next: 0,
                     kept: None,
+                    offset: None,
                 }
             };
             return 0;
@@ -250,7 +303,11 @@ impl Sorter {
         let mut end = next;
         let mut load = 0;
         while end < count && end - next < BLOCK && load < BLOCK {
-            load += weight(self.record(self.spans[end]));
+            let weight = weight(self.record(self.spans[end]));
+            if end > next && load + weight > BLOCK {
+                break;
+            }
+            load += weight;
             end += 1;
         }
         let data = &self.data;
@@ -302,6 +359,7 @@ impl Sorter {
                     Phase::Write {
                         next: 0,
                         kept: None,
+                        offset: None,
                     }
                 };
                 return work;
@@ -319,12 +377,18 @@ impl Sorter {
             } else if right >= hi {
                 true
             } else {
-                let (a, b) = (
-                    self.record(self.spans[right]),
-                    self.record(self.spans[left]),
-                );
-                work += cost(a, b) - 1;
-                self.compare.records(a, b) != Ordering::Less
+                let (a0, a1) = self.spans[right];
+                let (b0, b1) = self.spans[left];
+                let Some(order) = self.comparison.step(
+                    &self.compare,
+                    &self.data[a0..a1],
+                    &self.data[b0..b1],
+                    &mut work,
+                    budget,
+                ) else {
+                    break;
+                };
+                order != Ordering::Less
             };
             self.scratch[out] = if take_left {
                 left += 1;
@@ -346,31 +410,49 @@ impl Sorter {
     }
 
     fn write(&mut self, out: &mut Vec<u8>) {
-        let Phase::Write { mut next, mut kept } = self.phase else {
+        let Phase::Write {
+            mut next,
+            mut kept,
+            mut offset,
+        } = self.phase
+        else {
             return;
         };
-        let data = &self.data;
-        let compare = &self.compare;
         let mut work = 0;
-        let full = out.len() + OUTPUT;
+        let full = out.len() + OUTPUT - out.len() % OUTPUT;
         while next < self.spans.len() && out.len() < full && work < STEP {
             let (lo, hi) = self.spans[next];
-            next += 1;
-            if compare.unique
-                && kept.is_some_and(|(k0, k1)| {
-                    let (last, record) = (&data[k0..k1], &data[lo..hi]);
-                    work += cost(last, record);
-                    compare.records(last, record) == Ordering::Equal
-                })
-            {
-                continue;
+            if offset.is_none() && self.compare.unique {
+                if let Some((k0, k1)) = kept {
+                    let Some(order) = self.comparison.step(
+                        &self.compare,
+                        &self.data[k0..k1],
+                        &self.data[lo..hi],
+                        &mut work,
+                        STEP,
+                    ) else {
+                        break;
+                    };
+                    if order == Ordering::Equal {
+                        next += 1;
+                        continue;
+                    }
+                }
             }
-            out.extend_from_slice(&data[lo..hi]);
-            out.push(self.separator);
-            kept = Some((lo, hi));
+            if write_record(
+                &self.data,
+                offset.get_or_insert(lo),
+                hi,
+                self.separator,
+                out,
+            ) {
+                kept = Some((lo, hi));
+                offset = None;
+                next += 1;
+            }
         }
         if next < self.spans.len() {
-            self.phase = Phase::Write { next, kept };
+            self.phase = Phase::Write { next, kept, offset };
             return;
         }
         self.phase = Phase::Idle;
@@ -383,6 +465,7 @@ impl Sorter {
             return;
         }
         self.data.drain(..self.start);
+        crate::release_capacity(&mut self.data);
         self.scanned -= self.start;
         self.start = 0;
     }
@@ -398,7 +481,7 @@ impl Sorter {
 impl Stream for Sorter {
     fn feed(&mut self, input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.idle()?;
-        self.data.extend_from_slice(input);
+        append(&mut self.data, input)?;
         self.advance();
         Ok(())
     }
@@ -457,6 +540,7 @@ impl Input {
         self.searched = self.pos;
         if self.pos * 2 > self.buf.len() {
             self.buf.drain(..self.pos);
+            crate::release_capacity(&mut self.buf);
             self.searched -= self.pos;
             self.pos = 0;
         }
@@ -474,55 +558,112 @@ struct Merger {
     inputs: Vec<Input>,
     previous: Option<Vec<u8>>,
     paused: bool,
+    selection: Selection,
+    writing: Option<(usize, usize, usize)>,
+    comparison: Comparison,
+}
+
+#[derive(Default)]
+struct Selection {
+    next: usize,
+    chosen: Option<(usize, usize, usize)>,
 }
 
 impl Merger {
     fn pump(&mut self, out: &mut Vec<u8>) {
         self.paused = false;
         let mut work = 0;
-        while self.wanted().is_none() {
-            if work >= STEP {
+        let full = out.len() + OUTPUT - out.len() % OUTPUT;
+        loop {
+            if let Some((index, mut pos, hi)) = self.writing {
+                let start = pos;
+                let done = write_record(&self.inputs[index].buf, &mut pos, hi, self.separator, out);
+                if self.compare.unique {
+                    self.previous
+                        .get_or_insert_with(Vec::new)
+                        .extend_from_slice(&self.inputs[index].buf[start..pos]);
+                }
+                self.writing = Some((index, pos, hi));
+                if done {
+                    if let Some(previous) = &mut self.previous {
+                        crate::release_capacity(previous);
+                    }
+                    self.inputs[index].consume(hi, self.separator);
+                    self.writing = None;
+                    work += 1;
+                }
+            }
+            if out.len() == full || work >= STEP {
                 self.paused = true;
                 return;
             }
-            let mut chosen: Option<(usize, usize, usize)> = None;
-            for index in 0..self.inputs.len() {
+            if self.writing.is_some() {
+                continue;
+            }
+            if self.wanted().is_some() {
+                return;
+            }
+            while self.selection.next < self.inputs.len() {
+                let index = self.selection.next;
                 let Some((lo, hi)) = self.inputs[index].head() else {
+                    self.selection.next += 1;
                     continue;
                 };
-                let better = match chosen {
+                let better = match self.selection.chosen {
                     None => true,
                     Some((best, b0, b1)) => {
-                        let (a, b) = (
+                        let Some(order) = self.comparison.step(
+                            &self.compare,
                             &self.inputs[index].buf[lo..hi],
                             &self.inputs[best].buf[b0..b1],
-                        );
-                        work += cost(a, b);
-                        self.compare.records(a, b) == Ordering::Less
+                            &mut work,
+                            STEP,
+                        ) else {
+                            self.paused = true;
+                            return;
+                        };
+                        order == Ordering::Less
                     }
                 };
                 if better {
-                    chosen = Some((index, lo, hi));
+                    self.selection.chosen = Some((index, lo, hi));
+                }
+                self.selection.next += 1;
+                if work >= STEP {
+                    self.paused = true;
+                    return;
                 }
             }
-            let Some((index, lo, hi)) = chosen else {
+            let Some((index, lo, hi)) = self.selection.chosen else {
                 return;
             };
-            let record = &self.inputs[index].buf[lo..hi];
-            work += weight(record);
-            let duplicate = self.compare.unique
-                && self.previous.as_deref().is_some_and(|last| {
-                    work += cost(last, record);
-                    self.compare.records(last, record) == Ordering::Equal
-                });
-            if !duplicate {
-                out.extend_from_slice(record);
-                out.push(self.separator);
-                if self.compare.unique {
-                    self.previous = Some(record.to_vec());
+            if self.compare.unique {
+                if let Some(previous) = &self.previous {
+                    let Some(order) = self.comparison.step(
+                        &self.compare,
+                        previous,
+                        &self.inputs[index].buf[lo..hi],
+                        &mut work,
+                        STEP,
+                    ) else {
+                        self.paused = true;
+                        return;
+                    };
+                    if order == Ordering::Equal {
+                        self.inputs[index].consume(hi, self.separator);
+                        self.selection = Selection::default();
+                        continue;
+                    }
+                }
+                let previous = self.previous.get_or_insert_with(Vec::new);
+                previous.clear();
+                if previous.capacity() < hi - lo {
+                    *previous = Vec::new();
+                    previous.reserve_exact(hi - lo);
                 }
             }
-            self.inputs[index].consume(hi, self.separator);
+            self.selection = Selection::default();
+            self.writing = Some((index, lo, hi));
         }
     }
 
@@ -579,7 +720,7 @@ impl Stream for Merger {
             .inputs
             .get_mut(index)
             .ok_or_else(|| StreamError::new("no such merge input"))?;
-        slot.buf.extend_from_slice(input);
+        append(&mut slot.buf, input)?;
         slot.locate(self.separator);
         self.pump(out);
         Ok(())
@@ -599,53 +740,98 @@ impl Stream for Merger {
 
 struct Checker {
     compare: Compare,
+    quiet: bool,
     separator: u8,
     records: crate::records::Records,
-    previous: Option<Vec<u8>>,
+    previous: Vec<u8>,
     index: u64,
-}
-
-impl Checker {
-    fn record(&mut self, record: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.index += 1;
-        if let Some(previous) = &self.previous {
-            let order = self.compare.records(previous, record);
-            if order == Ordering::Greater || (self.compare.unique && order == Ordering::Equal) {
-                out.extend_from_slice(record);
-                return Err(StreamError::new(self.index.to_string()));
-            }
-        }
-        let previous = self.previous.get_or_insert_with(Vec::new);
-        previous.clear();
-        previous.extend_from_slice(record);
-        Ok(())
-    }
+    comparison: Comparison,
+    paused: bool,
+    copying: bool,
 }
 
 impl Checker {
     fn pump(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut records = std::mem::take(&mut self.records);
-        let mut result = Ok(());
-        while let crate::records::Take::Record(line) = records.next_span(self.separator) {
-            result = self.record(line, out);
-            if result.is_err() {
+        self.paused = false;
+        let mut work = 0;
+        while work < STEP {
+            let crate::records::Take::Record((record, _)) = self.records.peek_span(self.separator)
+            else {
+                return Ok(());
+            };
+            if !self.copying {
+                if self.index > 0 {
+                    let Some(order) = self.comparison.step(
+                        &self.compare,
+                        &self.previous,
+                        record,
+                        &mut work,
+                        STEP,
+                    ) else {
+                        break;
+                    };
+                    if order == Ordering::Greater
+                        || (self.compare.unique && order == Ordering::Equal)
+                    {
+                        if !self.quiet {
+                            out.extend_from_slice(record);
+                        }
+                        return Err(StreamError::new((self.index + 1).to_string()));
+                    }
+                }
+                self.previous.clear();
+                if self.previous.capacity() < record.len() {
+                    self.previous = Vec::with_capacity(record.len());
+                }
+                self.copying = true;
+            }
+            if work >= STEP {
                 break;
             }
+            let copy = &mut self.previous;
+            let end = record.len().min(copy.len() + (STEP - work) * COST_BYTES);
+            work += 1 + (end - copy.len()) / COST_BYTES;
+            copy.extend_from_slice(&record[copy.len()..end]);
+            if end == record.len() {
+                self.copying = false;
+                self.index += 1;
+                self.records.advance();
+            }
         }
-        self.records = records;
-        result
+        self.paused = true;
+        Ok(())
+    }
+
+    fn idle(&self) -> Result<(), StreamError> {
+        if self.paused {
+            Err(StreamError::new("sort: a check is still running"))
+        } else {
+            Ok(())
+        }
     }
 }
+
 impl Stream for Checker {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.idle()?;
         self.records
             .push(input)
             .map_err(|_| StreamError::refusal(b"sort: memory exhausted", 2))?;
         self.pump(out)
     }
+
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.idle()?;
         self.records.end();
         self.pump(out)
+    }
+
+    fn busy(&self) -> bool {
+        self.paused
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if self.paused { self.pump(out) } else { Ok(()) }
     }
 }
 

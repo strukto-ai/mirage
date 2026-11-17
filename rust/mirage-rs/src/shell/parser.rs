@@ -261,7 +261,7 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
         pass,
         options,
         ended,
-        lowered.offsets.into_iter().collect(),
+        lowered.offsets,
         lowered.heredocs,
         closes,
         source,
@@ -299,7 +299,12 @@ fn joined(
                 .bodies
                 .iter()
                 .filter(|body| body.heredoc.raw)
-                .map(|body| (places[body.start], places[body.end.min(logical.len())]))
+                .map(|body| {
+                    (
+                        places.at(body.start),
+                        places.at(body.end.min(logical.len())),
+                    )
+                })
                 .collect();
             let before = dropped.len();
             dropped.retain(|at| !quoted.iter().any(|(from, to)| from <= at && at < to));
@@ -309,7 +314,7 @@ fn joined(
             (logical, places) = without(&text, &dropped);
             pass = parse_pass(&logical, options, ended);
         }
-        offsets = places.iter().map(|at| offsets.at(*at)).collect();
+        offsets = places.remap(&offsets);
         for heredoc in &mut heredocs {
             heredoc.at -= dropped.partition_point(|&at| at < heredoc.at);
         }
@@ -326,7 +331,7 @@ fn joined(
             };
             let lines = super::lower::newlines(source) + usize::from(!source.ends_with(b"\n"));
             for heredoc in &mut heredocs {
-                if let Some(at) = lowered.offsets.iter().position(|at| *at == heredoc.at) {
+                if let Some(at) = lowered.offsets.iter().position(|at| at == heredoc.at) {
                     heredoc.at = at;
                 }
             }
@@ -348,7 +353,7 @@ fn joined(
                 (start(*close), opened.iter().map(|at| start(*at)).collect())
             }));
             heredocs.sort_by_key(|heredoc| heredoc.at);
-            offsets = lowered.offsets.iter().map(|at| offsets.at(*at)).collect();
+            offsets = lowered.offsets.remap(&offsets);
             text = lowered.source;
             pass = parse_pass(&text, options, ended);
         }
@@ -415,9 +420,10 @@ fn resumed(source: &[u8], heredocs: &[super::lower::Heredoc], at: usize) -> Opti
 
 /// `text` less the bytes at `dropped` (sorted), and where each byte left
 /// stood in it, then its end.
-fn without(text: &[u8], dropped: &[usize]) -> (Vec<u8>, Vec<usize>) {
-    let mut kept = Vec::with_capacity(text.len());
-    let mut places = Vec::with_capacity(text.len() + 1);
+fn without(text: &[u8], dropped: &[usize]) -> (Vec<u8>, super::tree::SourceMap) {
+    let length = text.len() - dropped.len();
+    let mut kept = Vec::with_capacity(length);
+    let mut places = super::tree::SourceMap::Packed(Vec::with_capacity(length + 1));
     let mut next = dropped.iter().peekable();
     for (at, byte) in text.iter().enumerate() {
         if next.next_if(|drop| **drop == at).is_some() {

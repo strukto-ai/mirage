@@ -5,6 +5,7 @@ from mirage.shell.bytes import (
     byte_view,
     decode_text,
     encode_text,
+    encode_text_chunks,
     from_byte_view,
     text_view,
     utf8_locale,
@@ -136,3 +137,31 @@ def test_a_utf8_view_is_the_text_itself():
     assert from_byte_view(view, True) == raw
     assert text_view(view, True) == view
     assert len(byte_view(raw)) == len(raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("offset", [16383, 16384])
+async def test_chunked_encoding_preserves_unicode_and_raw_bytes(offset):
+    text = "x" * offset + "𐂀\udcffé\ufeff"
+    parts = [part async for part in encode_text_chunks(text)]
+    assert len(parts) > 1
+    assert b"".join(parts) == encode_text(text)
+    assert all(len(part) <= 4 * 16384 for part in parts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prefix,invalid",
+    [
+        (16383, "\ud800\udcff" * 20000),
+        (16380, "\udcff" * 10 + "\ud800" * 20000),
+    ],
+)
+async def test_chunked_encoding_preserves_full_error_spans(prefix, invalid):
+    text = "x" * prefix + invalid + "z"
+    with pytest.raises(UnicodeEncodeError) as expected:
+        encode_text(text)
+    with pytest.raises(UnicodeEncodeError) as actual:
+        _ = [part async for part in encode_text_chunks(text)]
+    assert actual.value.object is text
+    assert actual.value.args == expected.value.args

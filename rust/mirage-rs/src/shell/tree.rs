@@ -699,6 +699,61 @@ impl SourceMap {
     pub fn iter(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         (0..self.len()).map(|index| self.at(index))
     }
+
+    #[inline(always)]
+    pub(super) fn push(&mut self, value: usize) {
+        match self {
+            Self::Packed(values) => match u32::try_from(value) {
+                Ok(value) => values.push(value),
+                Err(_) => {
+                    let mut wide: Vec<usize> = std::mem::take(values)
+                        .into_iter()
+                        .map(|n| n as usize)
+                        .collect();
+                    wide.push(value);
+                    *self = Self::Wide(wide);
+                }
+            },
+            Self::Wide(values) => values.push(value),
+            Self::Identity(_) => *self = self.iter().chain(std::iter::once(value)).collect(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn extend(&mut self, values: impl IntoIterator<Item = usize>) {
+        for value in values {
+            self.push(value);
+        }
+    }
+
+    pub(super) fn append(&mut self, values: Self) {
+        match (self, values) {
+            (Self::Packed(to), Self::Packed(from)) => to.extend(from),
+            (Self::Wide(to), Self::Wide(from)) => to.extend(from),
+            (to, from) => to.extend(from.iter()),
+        }
+    }
+
+    pub(super) fn remap(self, original: &Self) -> Self {
+        if original.is_identity() {
+            return self;
+        }
+        match (self, original) {
+            (Self::Packed(mut values), Self::Packed(typed)) => {
+                for value in &mut values {
+                    *value = typed[*value as usize];
+                }
+                Self::Packed(values)
+            }
+            (Self::Wide(mut values), original) => {
+                for value in &mut values {
+                    *value = original.at(*value);
+                }
+                Self::Wide(values)
+            }
+            (places, original) => places.iter().map(|at| original.at(at)).collect(),
+        }
+    }
 }
 
 impl FromIterator<usize> for SourceMap {

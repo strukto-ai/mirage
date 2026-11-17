@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../../io/cooperative.ts'
-import { ByteSpool, IO_BUFFER_SIZE } from '../../../io/spool.ts'
-import { drain } from '../../../io/stream.ts'
+import { ByteSpool, IO_BUFFER_SIZE, MEMORY_LIMIT } from '../../../io/spool.ts'
+import { drain, OutputStream, rechunk } from '../../../io/stream.ts'
 import { listedNames } from '../utils/files0.ts'
 import { RandomSource, RandomSourceError } from '../utils/random_source.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
@@ -323,7 +323,7 @@ async function checkStream(
   parsed: SortFlags,
   signal?: AbortSignal,
 ): Promise<IOResult> {
-  const config = { ...parsed.config, mode: 'check' }
+  const config = { ...parsed.config, mode: 'check', quiet: parsed.checkQuiet }
   try {
     await drain(runStream('sort', config, source, signal))
   } catch (error) {
@@ -360,38 +360,57 @@ function label(path: PathSpec | null): string {
   return path === null ? '-' : path.rawPath
 }
 
-// A run is sorted once its records reach SORT_RUN_BYTES, each counting its
-// length plus 64, and spooled; MERGE_FAN_IN runs merge into one at a time,
-// so a sort of any size holds one run and one chunk per merged input.
+// Completed records spill when their bytes, overhead and the open record
+// reach SORT_RUN_BYTES. A single record may exceed that target. Merging
+// retains one complete head per input and, with -u, the previous record.
+// Spooling bounds completed output, not these record buffers.
 export const SORT_RUN_BYTES = 8 * 1024 * 1024
 const MIN_BATCH_SIZE = 2
 const MERGE_FAN_IN = 16
 
-// A k-way merge of sorted spools, each read as the merge asks; the runs
-// are closed once merged. Mirrors _merge_spools in sort.py.
+// Own the sorted runs even before the first pull. Mirrors _merged_output.
+async function mergedOutput(
+  runs: ByteSpool[],
+  config: Readonly<Record<string, JsonValue>>,
+  signal?: AbortSignal,
+): Promise<OutputStream> {
+  const engine = await openStream('sort', { ...config, mode: 'merge', inputs: runs.length })
+  return new OutputStream(
+    rechunk(
+      chainOutput(
+        engine,
+        runs.map((run) => run.stream(0, undefined, MEMORY_LIMIT)),
+        signal,
+      ),
+      MEMORY_LIMIT,
+    ),
+    async () => {
+      try {
+        await closeStream(engine)
+      } finally {
+        for (const run of runs) await run.close()
+      }
+    },
+  )
+}
+
+async function spoolRecords(source: OutputStream): Promise<ByteSpool> {
+  const output = new ByteSpool(MEMORY_LIMIT, MEMORY_LIMIT)
+  try {
+    await output.fill(source)
+    return output
+  } catch (error) {
+    await output.close()
+    throw error
+  }
+}
+
 async function mergeSpools(
   runs: ByteSpool[],
   config: Readonly<Record<string, JsonValue>>,
   signal?: AbortSignal,
 ): Promise<ByteSpool> {
-  const output = new ByteSpool()
-  const engine = await openStream('sort', { ...config, mode: 'merge', inputs: runs.length })
-  try {
-    await output.fill(
-      chainOutput(
-        engine,
-        runs.map((run) => run.stream(0, undefined, IO_BUFFER_SIZE)),
-        signal,
-      ),
-    )
-    return output
-  } catch (error) {
-    await output.close()
-    throw error
-  } finally {
-    await closeStream(engine)
-    for (const run of runs) await run.close()
-  }
+  return spoolRecords(await mergedOutput(runs, config, signal))
 }
 
 async function addRun(
@@ -416,7 +435,7 @@ async function mergeOperands(
   stdin: ByteSource | null,
   config: Readonly<Record<string, JsonValue>>,
   signal?: AbortSignal,
-): Promise<ByteSpool | Uint8Array> {
+): Promise<ByteSpool | OutputStream | Uint8Array> {
   const stream = stdinStream(read, stdin)
   const state: { firstFailure: [InputStage, Uint8Array] | null } = { firstFailure: null }
   const levels: ByteSpool[][] = [[]]
@@ -439,7 +458,7 @@ async function mergeOperands(
     for (let start = 0; start < operands.length; start += MERGE_FAN_IN) {
       const group = operands.slice(start, start + MERGE_FAN_IN)
       const engine = await openStream('sort', { ...config, mode: 'merge', inputs: group.length })
-      const output = new ByteSpool()
+      const output = new ByteSpool(MEMORY_LIMIT, MEMORY_LIMIT)
       try {
         await output.fill(
           chainOutput(
@@ -458,14 +477,14 @@ async function mergeOperands(
     }
     if (state.firstFailure !== null) return state.firstFailure[1]
     const runs = [...levels].reverse().flat()
-    while (runs.length > 1) {
+    while (runs.length > MERGE_FAN_IN) {
       const group = runs.slice(0, MERGE_FAN_IN)
       const merged = await mergeSpools(group, config, signal)
       levels.push([merged])
       runs.splice(0, group.length, merged)
     }
-    const output = runs.pop() ?? new ByteSpool()
-    for (const level of levels) for (const run of level) if (run !== output) await run.close()
+    const output =
+      runs.length > 1 ? await mergedOutput(runs, config, signal) : (runs[0] ?? new ByteSpool())
     levels.length = 0
     return output
   } finally {
@@ -479,7 +498,7 @@ async function externalRecords(
   stdin: ByteSource | null,
   parsed: SortFlags,
   signal?: AbortSignal,
-): Promise<ByteSpool | Uint8Array> {
+): Promise<ByteSpool | OutputStream | Uint8Array> {
   const separator = recordSeparator(parsed.zeroTerminated)
   const config = parsed.config
   if (parsed.merge) return mergeOperands(paths, stream, stdin, config, signal)
@@ -492,7 +511,7 @@ async function externalRecords(
   // feed of no bytes then starts a run already buffered.
   async function addSorted(stream: OpenStream): Promise<void> {
     while (stream.busy()) {
-      const run = new ByteSpool()
+      const run = new ByteSpool(MEMORY_LIMIT, MEMORY_LIMIT)
       try {
         while (stream.busy()) {
           const piece = stream.drain()
@@ -540,7 +559,7 @@ async function externalRecords(
     sorter.finish()
     await addSorted(sorter)
     let runs = [...levels].reverse().flat()
-    while (runs.length > 1) {
+    while (runs.length > MERGE_FAN_IN) {
       const next: ByteSpool[] = []
       for (let start = 0; start < runs.length; start += MERGE_FAN_IN) {
         const mergedRun = await mergeSpools(runs.slice(start, start + MERGE_FAN_IN), config, signal)
@@ -549,8 +568,8 @@ async function externalRecords(
       }
       runs = next
     }
-    const output = runs[0] ?? new ByteSpool()
-    for (const level of levels) for (const run of level) if (run !== output) await run.close()
+    const output =
+      runs.length > 1 ? await mergedOutput(runs, config, signal) : (runs[0] ?? new ByteSpool())
     levels.length = 0
     return output
   } finally {
@@ -607,9 +626,21 @@ export async function sortGeneric(
       ),
     ]
   }
-  const ordered = await externalRecords(paths, stream, ctx.stdin, parsed, ctx.signal)
+  let ordered: ByteSpool | OutputStream | Uint8Array
+  try {
+    ordered = await externalRecords(paths, stream, ctx.stdin, parsed, ctx.signal)
+    if (parsed.output !== null && ordered instanceof OutputStream)
+      ordered = await spoolRecords(ordered)
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return [
+      new Uint8Array(),
+      new IOResult({ exitCode: error.status, stderr: ENC.encode(`${error.message}\n`) }),
+    ]
+  }
   if (ordered instanceof Uint8Array)
     return [new Uint8Array(), new IOResult({ exitCode: 2, stderr: ordered })]
+  if (ordered instanceof OutputStream) return [ordered, new IOResult()]
   if (parsed.output !== null) {
     if (write === undefined) {
       await ordered.close()

@@ -47,9 +47,15 @@ export class ByteSpool {
   private cacheOffset = 0
   private turn: Promise<unknown> = Promise.resolve()
 
-  constructor(readonly memoryLimit = MEMORY_LIMIT) {
+  constructor(
+    readonly memoryLimit = MEMORY_LIMIT,
+    readonly bufferSize = IO_BUFFER_SIZE,
+  ) {
     if (!Number.isSafeInteger(memoryLimit) || memoryLimit < 0) {
       throw new RangeError('spool memory limit must be nonnegative')
+    }
+    if (!Number.isSafeInteger(bufferSize) || bufferSize <= 0) {
+      throw new RangeError('spool buffer size must be positive')
     }
   }
 
@@ -145,7 +151,7 @@ export class ByteSpool {
     }
     this.pendingSize += data.length
     this.size += data.length
-    if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
+    if (this.store !== null && this.pendingSize >= this.bufferSize) await this.flush()
   }
 
   private async flush(): Promise<void> {
