@@ -33,6 +33,7 @@ ws = Workspace({"/nc": NextcloudVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /nc && find /nc -name '*.md'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `url` is the WebDAV URL of the user's files, such as

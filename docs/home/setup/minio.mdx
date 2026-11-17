@@ -78,6 +78,7 @@ export MINIO_SECRET_KEY=...
     ws = Workspace({"/minio": MinIOVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /minio")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -97,6 +98,7 @@ export MINIO_SECRET_KEY=...
     )
     const result = await ws.shell('ls /minio')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -199,6 +199,7 @@ export GOOGLE_REFRESH_TOKEN=1//0...
     )
     result = await ws.shell("ls /gdocs/owned")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -230,6 +231,7 @@ export GOOGLE_REFRESH_TOKEN=1//0...
     )
     const result = await ws.shell('ls /gdocs/owned')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

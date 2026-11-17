@@ -28,6 +28,7 @@ ws = Workspace({"/onedrive": OneDriveVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /onedrive && find /onedrive -name '*.xlsx'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 With no drive named, the mount is the signed-in user's own drive. Set one of

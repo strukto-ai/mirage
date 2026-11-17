@@ -32,6 +32,7 @@ ws = Workspace({"/gsheets": GSheetsVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /gsheets/owned && jq -r '.properties.title' /gsheets/owned/2026-*.gsheet.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `access_token` replaces the client and refresh token with a token or a

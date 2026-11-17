@@ -80,6 +80,7 @@ dependency (`pnpm add @struktoai/mirage-node pg`).
     ws = Workspace({"/pg": PostgresVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /pg/public/tables")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -97,6 +98,7 @@ dependency (`pnpm add @struktoai/mirage-node pg`).
     )
     const result = await ws.shell('ls /pg/public/tables')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

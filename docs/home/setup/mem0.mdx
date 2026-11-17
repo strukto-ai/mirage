@@ -66,6 +66,7 @@ export MEM0_USER_ID=alex
     ws = Workspace({"/memory": Mem0VFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /memory")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -83,6 +84,7 @@ export MEM0_USER_ID=alex
     )
     const result = await ws.shell('ls /memory')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

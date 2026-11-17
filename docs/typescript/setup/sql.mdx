@@ -27,6 +27,7 @@ const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('echo hello > /sql/note.txt && ls /sql')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 Leave out `path` to keep the database in memory. `capacity: '100MB'` caps the

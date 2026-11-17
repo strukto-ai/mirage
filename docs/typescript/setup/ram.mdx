@@ -23,6 +23,7 @@ const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `new RAMVFS()` takes no config. `new RAMVFS({ capacity: '100MB' })` caps the

@@ -79,6 +79,7 @@ export GITHUB_TOKEN=github_pat_...
     ws = Workspace({"/github": GitHubVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /github")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -94,6 +95,7 @@ export GITHUB_TOKEN=github_pat_...
     const ws = new Workspace({ '/github': github }, { mode: MountMode.READ })
     const result = await ws.shell('ls /github')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -28,6 +28,7 @@ const ws = new Workspace({ '/knowledge': knowledge }, { mode: MountMode.READ })
 
 const result = await ws.shell('tree /knowledge && grep -rn refund /knowledge')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `ssl: true` reaches the server over HTTPS. A collection whose chunks name their

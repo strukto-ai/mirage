@@ -60,6 +60,7 @@ export HF_TOKEN=hf_...
     ws = Workspace({"/hf": HfBucketsVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /hf")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -77,6 +78,7 @@ export HF_TOKEN=hf_...
     )
     const result = await ws.shell('ls /hf')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -99,6 +99,7 @@ callable as `access_token`: it is called for each request and again after a
     ws = Workspace({"/sharepoint": SharePointVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /sharepoint")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -115,6 +116,7 @@ callable as `access_token`: it is called for each request and again after a
     )
     const result = await ws.shell('ls /sharepoint')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

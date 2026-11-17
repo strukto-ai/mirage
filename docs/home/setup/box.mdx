@@ -149,6 +149,7 @@ origin must match exactly: no trailing slash, and the protocol counts.
     ws = Workspace({"/box": BoxVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /box")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -161,6 +162,7 @@ origin must match exactly: no trailing slash, and the protocol counts.
     )
     const result = await ws.shell('ls /box')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -74,6 +74,7 @@ fields first or use a key that manages the collection.
     ws = Workspace({"/fashion": QdrantVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /fashion")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -94,6 +95,7 @@ fields first or use a key that manages the collection.
     )
     const result = await ws.shell('ls /fashion')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

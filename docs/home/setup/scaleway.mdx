@@ -82,6 +82,7 @@ export SCW_SECRET_KEY=...
     ws = Workspace({"/scw": ScalewayVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /scw")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -101,6 +102,7 @@ export SCW_SECRET_KEY=...
     )
     const result = await ws.shell('ls /scw')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

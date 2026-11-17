@@ -24,6 +24,7 @@ const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /linear/teams && tree -L 2 /linear/teams')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `teamIds` limits the mount to some teams. `baseUrl` points at another GraphQL

@@ -32,6 +32,7 @@ const ws = new Workspace({ '/dbx': dbx }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /dbx && find /dbx -name '*.md'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `rootPath`, such as `/reports`, mounts one folder of the volume. Use
@@ -58,7 +59,7 @@ console.log(result.stdoutText)
 <ResponseField name="host" type={"string"} required>
   Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials.
 </ResponseField>
-<ResponseField name="token" type={"string | object"} required post={["secret"]}>
+<ResponseField name="token" type={"string | function"} required post={["secret"]}>
   Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request.
 </ResponseField>
 

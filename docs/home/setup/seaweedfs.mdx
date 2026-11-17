@@ -94,6 +94,7 @@ export SEAWEEDFS_SECRET_KEY=mirage-secret
     ws = Workspace({"/seaweedfs": SeaweedFSVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /seaweedfs")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -113,6 +114,7 @@ export SEAWEEDFS_SECRET_KEY=mirage-secret
     )
     const result = await ws.shell('ls /seaweedfs')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -32,6 +32,7 @@ const ws = new Workspace({ '/nc': nc }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /nc && find /nc -name '*.md'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `url` is the WebDAV URL of the user's files, such as

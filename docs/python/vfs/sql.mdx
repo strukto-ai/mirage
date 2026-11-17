@@ -27,6 +27,7 @@ ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
 
 result = await ws.shell("echo hello > /sql/note.txt && ls /sql")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 Leave out the path to keep the database in memory. `capacity="100MB"` caps the

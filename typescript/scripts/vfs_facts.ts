@@ -1075,7 +1075,6 @@ const ZOD_KINDS: Record<string, string> = {
   record: 'object',
   map: 'object',
   function: 'function',
-  custom: 'object',
   any: 'any',
   unknown: 'any',
   date: 'Date',
@@ -1142,7 +1141,14 @@ function typeOf(
       }
       if (method === 'enum' && args[0] !== undefined && ts.isArrayLiteralExpression(args[0]))
         return args[0].elements.map((e) => e.getText(source)).join(' | ')
-      if (method === 'literal' && args[0] !== undefined) return args[0].getText(source)
+      if (method === 'literal' && args[0] !== undefined)
+        return ts.isArrayLiteralExpression(args[0])
+          ? args[0].elements.map((e) => e.getText(source)).join(' | ')
+          : args[0].getText(source)
+      if (method === 'custom') {
+        const kind = args[0]?.getText(source).match(/typeof \w+ === '(\w+)'/)?.[1]
+        return kind === undefined ? '' : (ZOD_KINDS[kind] ?? '')
+      }
       if (method === 'union' && args[0] !== undefined && ts.isArrayLiteralExpression(args[0])) {
         const parts = args[0].elements.map((e) => typeOf(e, source, env, packagesRoot, depth + 1))
         return [...new Set(parts.filter((p) => p !== ''))].join(' | ')

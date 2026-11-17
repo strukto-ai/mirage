@@ -33,6 +33,7 @@ const ws = new Workspace({ '/fashion': fashion }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.md')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `idColumn` (default `id`) names each row's files. Without `table`, every table

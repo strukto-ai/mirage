@@ -79,6 +79,7 @@ export SUPABASE_SECRET_ACCESS_KEY=...
     ws = Workspace({"/supabase": SupabaseVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /supabase")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -99,6 +100,7 @@ export SUPABASE_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /supabase')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

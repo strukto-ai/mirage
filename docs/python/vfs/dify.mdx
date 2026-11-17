@@ -31,6 +31,7 @@ ws = Workspace({"/knowledge": DifyVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("find /knowledge -type f && grep -rn billing /knowledge")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `slug_metadata_name` picks the document metadata field that holds each path

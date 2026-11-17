@@ -27,6 +27,7 @@ const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /slack/channels && grep -rlw refund /slack/channels')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `searchToken` is optional: without it, `grep` reads the files. `startTime` and
@@ -204,7 +205,7 @@ createServer(async (req, res) => {
 <ResponseField name="proxyUrl" type={"string"} required>
   URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment.
 </ResponseField>
-<ResponseField name="getHeaders" type={"object"} post={["secret"]}>
+<ResponseField name="getHeaders" type={"function"} post={["secret"]}>
   Function returning extra headers sent with every request to the proxy, such as your own session credential.
 </ResponseField>
 

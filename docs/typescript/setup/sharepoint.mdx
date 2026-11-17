@@ -29,6 +29,7 @@ const ws = new Workspace({ '/sharepoint': sharepoint }, { mode: MountMode.WRITE 
 
 const result = await ws.shell('ls /sharepoint && ls /sharepoint/Engineering')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `tenantHost` and `siteFilter` narrow the sites listed. `site` and `drive`
@@ -37,7 +38,7 @@ together mount one library as the root, and `keyPrefix` one folder inside it.
 ### Fields
 
 {/* generated: config-table sharepoint start */}
-<ResponseField name="accessToken" type={"string | object"} required post={["secret"]}>
+<ResponseField name="accessToken" type={"string | function"} required post={["secret"]}>
   Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`.
 </ResponseField>
 <ResponseField name="tenantHost" type={"string"}>

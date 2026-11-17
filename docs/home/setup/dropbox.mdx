@@ -137,6 +137,7 @@ export DROPBOX_REFRESH_TOKEN=ghi789refresh
     ws = Workspace({"/dropbox": DropboxVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /dropbox")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -155,6 +156,7 @@ export DROPBOX_REFRESH_TOKEN=ghi789refresh
     )
     const result = await ws.shell('ls /dropbox')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

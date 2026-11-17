@@ -33,6 +33,7 @@ ws = Workspace({"/cos": TencentVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /cos && find /cos -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://cos.<region>.myqcloud.com`;

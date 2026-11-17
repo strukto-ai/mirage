@@ -29,6 +29,7 @@ const ws = new Workspace({ '/github': github }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /github && rg -w "def build_vfs" /github/python')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `GitHubVFS.create` is awaited: it fetches the repository tree before it

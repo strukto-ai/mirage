@@ -29,6 +29,7 @@ const ws = new Workspace({ '/model': model }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls -lh /model && jq .architectures /model/config.json')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `revision` pins a branch, tag or commit (default `main`), and `keyPrefix`

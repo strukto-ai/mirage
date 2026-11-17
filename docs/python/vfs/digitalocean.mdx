@@ -33,6 +33,7 @@ ws = Workspace({"/spaces": DigitalOceanVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /spaces && find /spaces -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://<region>.digitaloceanspaces.com`;

@@ -30,6 +30,7 @@ ws = Workspace({"/remote": SSHVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /remote && tail -n 20 /remote/logs/app.log")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `host` also matches a `~/.ssh/config` alias, and that entry's settings apply.

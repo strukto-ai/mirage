@@ -25,6 +25,7 @@ ws = Workspace({"/knowledge": ChromaVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("tree /knowledge && grep -rn refund /knowledge")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `ssl=True` reaches the server over HTTPS. A collection whose chunks name their

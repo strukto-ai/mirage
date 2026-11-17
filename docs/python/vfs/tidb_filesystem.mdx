@@ -34,6 +34,7 @@ ws = Workspace({"/fs": TiDBFilesystemVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("mkdir -p /fs/notes && echo hello > /fs/notes/a.txt && ls /fs/notes")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `root_path`, such as `/workspace`, mounts one directory. Use

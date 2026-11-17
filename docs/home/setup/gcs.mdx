@@ -69,6 +69,7 @@ export GCS_SECRET_ACCESS_KEY=...
     ws = Workspace({"/gcs": GCSVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /gcs")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -87,6 +88,7 @@ export GCS_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /gcs')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

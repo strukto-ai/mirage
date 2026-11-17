@@ -65,6 +65,7 @@ sftp -i ~/.ssh/id_ed25519 deploy@server.example.com
     ws = Workspace({"/remote": SSHVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /remote")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -84,6 +85,7 @@ sftp -i ~/.ssh/id_ed25519 deploy@server.example.com
     )
     const result = await ws.shell('ls /remote')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

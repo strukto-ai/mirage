@@ -28,6 +28,7 @@ ws = Workspace({"/gridfs": GridFSVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("echo hello > /gridfs/notes/a.txt && find /gridfs -name '*.txt'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `bucket` names a bucket other than `fs`, `key_prefix` scopes the mount to part

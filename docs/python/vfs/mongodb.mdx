@@ -27,6 +27,7 @@ ws = Workspace({"/mongodb": MongoDBVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("head -n 3 /mongodb/sample_mflix/collections/movies/documents.jsonl")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `databases` limits the tree to those databases.

@@ -28,6 +28,7 @@ const ws = new Workspace({ '/box': box }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('ls /box && grep -rlw report /box/Contracts')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `rootFolderId` mounts one folder instead of the whole account. To try the
@@ -61,10 +62,10 @@ mount quickly, pass only `accessToken` with a
 <ResponseField name="accessToken" type={"string"} post={["secret"]}>
   Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`.
 </ResponseField>
-<ResponseField name="refreshFn" type={"object"} post={["secret"]}>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
   Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`.
 </ResponseField>
-<ResponseField name="onRefreshTokenRotated" type={"object"} post={["secret"]}>
+<ResponseField name="onRefreshTokenRotated" type={"function"} post={["secret"]}>
   Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use.
 </ResponseField>
 

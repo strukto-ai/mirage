@@ -75,6 +75,7 @@ export CEPH_SECRET_ACCESS_KEY=...
     ws = Workspace({"/ceph": CephVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /ceph")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -94,6 +95,7 @@ export CEPH_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /ceph')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

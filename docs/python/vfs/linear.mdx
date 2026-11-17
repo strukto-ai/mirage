@@ -27,6 +27,7 @@ ws = Workspace({"/linear": LinearVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /linear/teams && tree -L 2 /linear/teams")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `team_ids` limits the mount to some teams. `base_url` points at another

@@ -33,6 +33,7 @@ ws = Workspace({"/r2": R2VFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /r2 && find /r2 -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 A bucket in a jurisdiction has its own endpoint, such as

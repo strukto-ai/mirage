@@ -27,6 +27,7 @@ ws = Workspace({"/discord": DiscordVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /discord && tree -L 2 /discord")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `start_time` and `end_time` bound the mount to a time range.

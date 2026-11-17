@@ -78,6 +78,7 @@ export NOTION_API_KEY=ntn_...
     ws = Workspace({"/notion": NotionVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /notion/pages")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -90,6 +91,7 @@ export NOTION_API_KEY=ntn_...
     )
     const result = await ws.shell('ls /notion/pages')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

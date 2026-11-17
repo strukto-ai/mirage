@@ -32,6 +32,7 @@ ws = Workspace({"/sharepoint": SharePointVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /sharepoint && ls /sharepoint/Engineering")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `tenant_host` and `site_filter` narrow the sites listed. `site` and `drive`

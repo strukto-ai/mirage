@@ -30,6 +30,7 @@ const ws = new Workspace({ '/spaces': spaces }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /spaces && find /spaces -name '*.csv'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://<region>.digitaloceanspaces.com`;
@@ -228,7 +229,7 @@ aws s3api put-bucket-cors --bucket "$DO_SPACE" \
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
-<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+<ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
 </ResponseField>
 <ResponseField name="region" type={"string"}>

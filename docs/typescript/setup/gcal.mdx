@@ -29,9 +29,10 @@ const ws = new Workspace({ '/gcal': gcal }, { mode: MountMode.READ })
 
 const result = await ws.shell("ls /gcal && grep -lw standup /gcal/primary/2026-11-*/*.gcal.json")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
-`bucketDays: 7` or `30` makes each folder a week or a month, `timeZone` sets
+`bucketDays: 7` or `30` makes each folder 7 or 30 days, `timeZone` sets
 the zone days are cut in, and `startTime` and `endTime` limit the mount to a
 time range. A `MountMode.WRITE` mount also allows `rm`.
 
@@ -41,7 +42,7 @@ time range. A `MountMode.WRITE` mount also allows `rm`.
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
-<ResponseField name="accessToken" type={"string | object"} post={["secret"]}>
+<ResponseField name="accessToken" type={"string | function"} post={["secret"]}>
   OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`.
 </ResponseField>
 <ResponseField name="clientId" type={"string"}>
@@ -53,7 +54,7 @@ time range. A `MountMode.WRITE` mount also allows `rm`.
 <ResponseField name="refreshToken" type={"string"} post={["secret"]}>
   User's OAuth refresh token. Required with `clientId` when `accessToken` is unset.
 </ResponseField>
-<ResponseField name="refreshFn" type={"object"} post={["secret"]}>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
   Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.
 </ResponseField>
 <ResponseField name="apiBase" type={"string"}>
@@ -68,7 +69,7 @@ time range. A `MountMode.WRITE` mount also allows `rm`.
 <ResponseField name="timeZone" type={"string"}>
   IANA time zone the mount buckets every calendar's days in. Unset uses the primary calendar's zone.
 </ResponseField>
-<ResponseField name="bucketDays" type={"[1, 7, 30]"} default={"1"}>
+<ResponseField name="bucketDays" type={"1 | 7 | 30"} default={"1"}>
   Days each date directory under a calendar holds: `1` names it by its day, `7` and `30` by its first and last day (`<first>--<last>`).
 </ResponseField>
 <ResponseField name="minAccessRole" type={"string"}>

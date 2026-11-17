@@ -32,6 +32,7 @@ ws = Workspace({"/model": HfModelsVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls -lh /model && jq .architectures /model/config.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `revision` pins a branch, tag or commit (default `main`), and `key_prefix`

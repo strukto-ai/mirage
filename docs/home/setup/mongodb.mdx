@@ -74,6 +74,7 @@ dependency (`pnpm add @struktoai/mirage-node mongodb`).
     ws = Workspace({"/mongodb": MongoDBVFS(config=config)}, mode=MountMode.READ)
     result = await ws.shell("ls /mongodb/shop/collections")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -91,6 +92,7 @@ dependency (`pnpm add @struktoai/mirage-node mongodb`).
     )
     const result = await ws.shell('ls /mongodb/shop/collections')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

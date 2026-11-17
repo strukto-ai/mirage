@@ -33,6 +33,7 @@ ws = Workspace({"/scw": ScalewayVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /scw && find /scw -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://s3.<region>.scw.cloud`;

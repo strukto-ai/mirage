@@ -32,6 +32,7 @@ ws = Workspace({"/gslides": GSlidesVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /gslides/owned && jq '.slides | length' /gslides/owned/2026-*.gslide.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `access_token` replaces the client and refresh token with a token or a

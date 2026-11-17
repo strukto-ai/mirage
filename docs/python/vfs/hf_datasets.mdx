@@ -31,6 +31,7 @@ ws = Workspace({"/data": HfDatasetsVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /data && find /data -name '*.parquet' | head -n 5")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `revision` pins a branch, tag or commit (default `main`), and `key_prefix`

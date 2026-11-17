@@ -32,6 +32,7 @@ ws = Workspace({"/minio": MinIOVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /minio && find /minio -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `endpoint_url` is required, since the server is self-hosted. `region` defaults

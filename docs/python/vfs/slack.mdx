@@ -30,6 +30,7 @@ ws = Workspace({"/slack": SlackVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /slack/channels && grep -rlw refund /slack/channels")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `search_token` is optional: without it, `grep` reads the files. `start_time`

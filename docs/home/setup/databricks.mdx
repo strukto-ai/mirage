@@ -92,6 +92,7 @@ export DATABRICKS_TOKEN=dapi...
     ws = Workspace({"/dbx": DatabricksVolumeVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /dbx")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -108,6 +109,7 @@ export DATABRICKS_TOKEN=dapi...
     const ws = new Workspace({ '/dbx': dbx }, { mode: MountMode.READ })
     const result = await ws.shell('ls /dbx')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

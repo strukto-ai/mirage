@@ -30,6 +30,7 @@ ws = Workspace({"/wandb": WandbVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("find /wandb/my-team -maxdepth 3 -name run.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `page_size` and `max_pages` bound each listing, and `base_url` points at

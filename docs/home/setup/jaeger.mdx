@@ -41,6 +41,7 @@ URL, such as `http://localhost:16686`; it needs no credentials.
     ws = Workspace({"/jaeger": JaegerVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /jaeger/services")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -53,6 +54,7 @@ URL, such as `http://localhost:16686`; it needs no credentials.
     )
     const result = await ws.shell('ls /jaeger/services')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -26,6 +26,7 @@ const ws = new Workspace({ '/airtable': airtable }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /airtable/bases')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `baseIds` limits the mount to those bases, and `maxReadRecords` bounds a full read

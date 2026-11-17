@@ -31,6 +31,7 @@ const ws = new Workspace({ '/fashion': fashion }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.json')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 A self-hosted Qdrant sets `host` and `port` (default `localhost:6333`) instead
@@ -97,7 +98,7 @@ bytes as a file, such as `3.jpg`.
 <ResponseField name="cloudInference" type={"boolean"} default={"false"}>
   Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query.
 </ResponseField>
-<ResponseField name="embed" type={"object"} post={["secret"]}>
+<ResponseField name="embed" type={"function"} post={["secret"]}>
   Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.
 </ResponseField>
 

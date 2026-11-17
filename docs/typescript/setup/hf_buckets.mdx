@@ -31,6 +31,7 @@ const ws = new Workspace({ '/hf': hf }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /hf && find /hf -name '*.json'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `bucket` is the bucket's id, `<owner>/<name>`. `endpoint` points the mount at

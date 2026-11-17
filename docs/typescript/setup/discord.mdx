@@ -24,6 +24,7 @@ const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /discord && tree -L 2 /discord')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `startTime` and `endTime` bound the mount to a time range.
@@ -200,7 +201,7 @@ createServer(async (req, res) => {
 <ResponseField name="proxyUrl" type={"string"} required>
   URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.
 </ResponseField>
-<ResponseField name="getHeaders" type={"object"} post={["secret"]}>
+<ResponseField name="getHeaders" type={"function"} post={["secret"]}>
   Function returning extra headers sent with every request to the proxy, such as your own session credential.
 </ResponseField>
 

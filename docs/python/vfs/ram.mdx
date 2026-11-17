@@ -24,6 +24,7 @@ ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 result = await ws.shell("echo hello > /data/note.txt && cat /data/note.txt")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `RAMVFS()` takes no config object. `RAMVFS(capacity="100MB")` caps the bytes

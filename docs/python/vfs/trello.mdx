@@ -30,6 +30,7 @@ ws = Workspace({"/trello": TrelloVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("tree -L 4 /trello/workspaces")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `workspace_id` or `board_ids` limits the mount to one workspace or some

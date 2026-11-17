@@ -27,6 +27,7 @@ const ws = new Workspace({ '/wandb': wandb }, { mode: MountMode.READ })
 
 const result = await ws.shell('find /wandb/my-team -maxdepth 3 -name run.json')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `page_size` and `max_pages` bound each listing, and `base_url` points at

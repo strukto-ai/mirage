@@ -34,6 +34,7 @@ ws = Workspace({"/oci": OCIVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /oci && find /oci -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `namespace` and `region` build the endpoint

@@ -33,6 +33,7 @@ ws = Workspace({"/supabase": SupabaseVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /supabase && find /supabase -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `project_ref` builds the endpoint

@@ -27,6 +27,7 @@ const ws = new Workspace({ '/mongodb': mongo }, { mode: MountMode.READ })
 
 const result = await ws.shell('head -n 3 /mongodb/sample_mflix/collections/movies/documents.jsonl')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `databases` limits the tree to those databases.

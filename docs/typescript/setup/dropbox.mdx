@@ -28,6 +28,7 @@ const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('ls /dropbox && grep -rl report /dropbox/Projects')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `rootPath`, such as `/Team/data`, mounts one folder instead of the whole
@@ -54,7 +55,7 @@ account.
 <ResponseField name="endpoint" type={"string"}>
   Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts.
 </ResponseField>
-<ResponseField name="refreshFn" type={"object"} post={["secret"]}>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
   Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend.
 </ResponseField>
 

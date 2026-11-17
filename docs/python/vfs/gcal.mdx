@@ -32,9 +32,10 @@ ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /gcal && grep -lw standup /gcal/primary/2026-11-*/*.gcal.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
-`bucket_days=7` or `30` makes each folder a week or a month, `time_zone` sets
+`bucket_days=7` or `30` makes each folder 7 or 30 days, `time_zone` sets
 the zone days are cut in, and `start_time` and `end_time` limit the mount to a
 time range. A `MountMode.WRITE` mount also allows `rm`.
 

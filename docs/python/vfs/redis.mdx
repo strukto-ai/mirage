@@ -28,6 +28,7 @@ ws = Workspace({"/redis": vfs}, mode=MountMode.WRITE)
 
 result = await ws.shell("echo hello > /redis/note.txt && ls /redis")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `capacity="100MB"` caps the bytes the files hold; see

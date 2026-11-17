@@ -28,6 +28,7 @@ const ws = new Workspace({ '/gridfs': gridfs }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("echo hello > /gridfs/notes/a.txt && find /gridfs -name '*.txt'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 The `mongodb` peer package loads only when a `GridFSVFS` is built. `bucket`

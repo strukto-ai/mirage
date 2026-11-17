@@ -70,6 +70,7 @@ export DISCORD_BOT_TOKEN=MTIx...
     ws = Workspace({"/discord": DiscordVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /discord")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -82,6 +83,7 @@ export DISCORD_BOT_TOKEN=MTIx...
     )
     const result = await ws.shell('ls /discord')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -33,6 +33,7 @@ ws = Workspace({"/qingstor": QingStorVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /qingstor && find /qingstor -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` takes the bucket's zone and picks the endpoint,

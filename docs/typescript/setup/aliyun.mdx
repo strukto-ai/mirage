@@ -30,6 +30,7 @@ const ws = new Workspace({ '/oss': oss }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /oss && find /oss -name '*.csv'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://s3.oss-<region>.aliyuncs.com`,
@@ -223,7 +224,7 @@ Allow the page's origins, the methods `GET`, `PUT`, `HEAD`, `DELETE` and
 <ResponseField name="bucket" type={"string"} required>
   Name of the bucket to mount.
 </ResponseField>
-<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+<ResponseField name="presignedUrlProvider" type={"function"} required post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
 </ResponseField>
 <ResponseField name="region" type={"string"}>

@@ -27,6 +27,7 @@ const ws = new Workspace({ '/onedrive': drive }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /onedrive && find /onedrive -name '*.xlsx'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 With no drive named, the mount is the signed-in user's own drive. Set one of
@@ -36,7 +37,7 @@ With no drive named, the mount is the signed-in user's own drive. Set one of
 ### Fields
 
 {/* generated: config-table onedrive omit=tenantHost start */}
-<ResponseField name="accessToken" type={"string | object"} required post={["secret"]}>
+<ResponseField name="accessToken" type={"string | function"} required post={["secret"]}>
   Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`.
 </ResponseField>
 <ResponseField name="graphBaseUrl" type={"string"}>

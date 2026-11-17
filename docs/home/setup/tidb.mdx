@@ -81,6 +81,7 @@ it issued.
     ws = Workspace({"/fs": TiDBFilesystemVFS(config)}, mode=MountMode.WRITE)
     result = await ws.shell("ls /fs")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -94,6 +95,7 @@ it issued.
     const ws = new Workspace({ '/fs': fs }, { mode: MountMode.WRITE })
     const result = await ws.shell('ls /fs')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

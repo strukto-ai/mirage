@@ -24,6 +24,7 @@ stay scoped to the page's origin and survive page reloads.
     )
     const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

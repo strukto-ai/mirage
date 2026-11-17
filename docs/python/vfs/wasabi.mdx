@@ -33,6 +33,7 @@ ws = Workspace({"/wasabi": WasabiVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /wasabi && find /wasabi -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://s3.<region>.wasabisys.com`,

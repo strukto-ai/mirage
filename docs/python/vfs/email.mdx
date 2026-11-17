@@ -35,6 +35,7 @@ ws = Workspace({"/email": EmailVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell('ls /email && rg -l quarterly /email/INBOX')
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `imap_port` (993) and `smtp_port` (587) change the ports, and `max_messages`

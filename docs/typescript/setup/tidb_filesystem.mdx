@@ -28,6 +28,7 @@ const ws = new Workspace({ '/fs': tidb }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('mkdir -p /fs/notes && echo hello > /fs/notes/a.txt && ls /fs/notes')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `rootPath`, such as `/workspace`, mounts one directory. Use

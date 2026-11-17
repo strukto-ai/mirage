@@ -29,6 +29,7 @@ const ws = new Workspace({ '/s3': s3 }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /s3 && find /s3 -name '*.csv'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 For MinIO or another S3-compatible server, add `endpoint` and, if the server
@@ -62,10 +63,10 @@ needs it, `forcePathStyle: true`. A mount takes `MountMode.READ`, `WRITE` or
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
-<ResponseField name="presignedUrlProvider" type={"object"} post={["secret"]}>
+<ResponseField name="presignedUrlProvider" type={"function"} post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.
 </ResponseField>
-<ResponseField name="httpAgentProvider" type={"object"} post={["secret"]}>
+<ResponseField name="httpAgentProvider" type={"function"} post={["secret"]}>
   Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set.
 </ResponseField>
 <ResponseField name="defaultContentType" type={"string"}>
@@ -241,7 +242,7 @@ aws s3api put-bucket-cors --bucket $AWS_S3_BUCKET --cors-configuration file://co
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
-<ResponseField name="presignedUrlProvider" type={"object"} post={["secret"]}>
+<ResponseField name="presignedUrlProvider" type={"function"} post={["secret"]}>
   Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.
 </ResponseField>
 <ResponseField name="defaultContentType" type={"string"}>

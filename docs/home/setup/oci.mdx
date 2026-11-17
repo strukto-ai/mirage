@@ -95,6 +95,7 @@ export OCI_SECRET_ACCESS_KEY=...
     ws = Workspace({"/oci": OCIVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /oci")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -115,6 +116,7 @@ export OCI_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /oci')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

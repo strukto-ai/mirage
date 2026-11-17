@@ -28,6 +28,7 @@ const ws = new Workspace({ '/redis': redis }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('echo hello > /redis/note.txt && ls /redis')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 Node speaks the Redis protocol over a socket and needs the `redis@^5` peer

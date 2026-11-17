@@ -24,6 +24,7 @@ ws = Workspace({"/data": DiskVFS(root="/srv/files")}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /data && find /data -name '*.json'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `capacity="1GB"` caps the bytes the root may hold; see

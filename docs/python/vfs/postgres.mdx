@@ -28,6 +28,7 @@ ws = Workspace({"/pg": PostgresVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("head -n 3 /pg/public/tables/customers/rows.jsonl")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `schemas` limits the tree to those schemas. `max_read_rows` and

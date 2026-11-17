@@ -33,6 +33,7 @@ ws = Workspace({"/oss": AliyunVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /oss && find /oss -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://s3.oss-<region>.aliyuncs.com`,

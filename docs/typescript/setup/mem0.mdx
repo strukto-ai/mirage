@@ -27,6 +27,7 @@ const ws = new Workspace({ '/memory': memory }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /memory && grep -rl allergic /memory')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 An agent or run scope sets `agentId` or `runId` instead of `userId`. `host`

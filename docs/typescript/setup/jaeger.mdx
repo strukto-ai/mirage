@@ -24,6 +24,7 @@ const ws = new Workspace({ '/jaeger': jaeger }, { mode: MountMode.READ })
 
 const result = await ws.shell("jq -r '.[].name' /jaeger/services/frontend/operations.json")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `host` is the query service's base URL; it needs no credentials.

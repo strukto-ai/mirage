@@ -36,6 +36,7 @@ ws = Workspace({"/dbx": DatabricksVolumeVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /dbx && find /dbx -name '*.md'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `root_path`, such as `/reports`, mounts one folder of the volume. Use

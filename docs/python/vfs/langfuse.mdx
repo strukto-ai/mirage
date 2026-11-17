@@ -31,6 +31,7 @@ ws = Workspace({"/langfuse": LangfuseVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /langfuse/traces && ls /langfuse/prompts")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `default_trace_limit` sets how many traces a listing shows, and

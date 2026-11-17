@@ -30,6 +30,7 @@ ws = Workspace({"/memory": Mem0VFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /memory && grep -rl allergic /memory")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 An agent or run scope sets `agent_id` or `run_id` instead of `user_id`. `host`

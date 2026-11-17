@@ -32,6 +32,7 @@ ws = Workspace({"/s3": S3VFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /s3 && find /s3 -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 For MinIO or another S3-compatible server, add `endpoint_url` and, if the

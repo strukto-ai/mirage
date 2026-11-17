@@ -63,6 +63,7 @@ export GOOGLE_REFRESH_TOKEN=...
     ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /gcal")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -81,6 +82,7 @@ export GOOGLE_REFRESH_TOKEN=...
     )
     const result = await ws.shell('ls /gcal')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>
@@ -100,7 +102,7 @@ export GOOGLE_REFRESH_TOKEN=...
 
 - The primary calendar is `primary`; every other one ends in `__<calendar-id>`.
 - One folder per day, back through history and 90 days ahead. `bucket_days: 7`
-  or `30` makes weeks or months.
+  or `30` makes 7- or 30-day folders.
 - An event file holds the Calendar API's payload.
 
 ## Sample runs

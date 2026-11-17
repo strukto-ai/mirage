@@ -73,6 +73,7 @@ export QINGSTOR_SECRET_ACCESS_KEY=...
     ws = Workspace({"/qingstor": QingStorVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /qingstor")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -92,6 +93,7 @@ export QINGSTOR_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /qingstor')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -63,6 +63,7 @@ of its access list is invisible to it.
     ws = Workspace({"/airtable": AirtableVFS(config=config)}, mode=MountMode.READ)
     result = await ws.shell("ls /airtable/bases")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -75,6 +76,7 @@ of its access list is invisible to it.
     )
     const result = await ws.shell('ls /airtable/bases')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

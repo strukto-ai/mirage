@@ -32,6 +32,7 @@ ws = Workspace({"/gcs": GCSVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /gcs && find /gcs -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `endpoint_url` defaults to `https://storage.googleapis.com` and `region` to

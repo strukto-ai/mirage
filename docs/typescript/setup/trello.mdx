@@ -27,6 +27,7 @@ const ws = new Workspace({ '/trello': trello }, { mode: MountMode.READ })
 
 const result = await ws.shell('tree -L 4 /trello/workspaces')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `workspaceId` or `boardIds` limits the mount to one workspace or some boards.

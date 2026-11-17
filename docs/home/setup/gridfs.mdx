@@ -57,6 +57,7 @@ dependency (`pnpm add @struktoai/mirage-node mongodb`).
     ws = Workspace({"/gridfs": GridFSVFS(config)}, mode=MountMode.WRITE)
     result = await ws.shell("ls /gridfs")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -74,6 +75,7 @@ dependency (`pnpm add @struktoai/mirage-node mongodb`).
     )
     const result = await ws.shell('ls /gridfs')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -29,6 +29,7 @@ const ws = new Workspace({ '/gdrive': drive }, { mode: MountMode.WRITE })
 
 const result = await ws.shell("ls /gdrive && find /gdrive -maxdepth 2 -name '*.gsheet.json'")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `folderId` mounts one folder instead of the whole Drive. A mount takes
@@ -41,7 +42,7 @@ scripts from the mount.
 <ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
   Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
 </ResponseField>
-<ResponseField name="accessToken" type={"string | object"} post={["secret"]}>
+<ResponseField name="accessToken" type={"string | function"} post={["secret"]}>
   OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`.
 </ResponseField>
 <ResponseField name="clientId" type={"string"}>
@@ -53,7 +54,7 @@ scripts from the mount.
 <ResponseField name="refreshToken" type={"string"} post={["secret"]}>
   User's OAuth refresh token. Required with `clientId` when `accessToken` is unset.
 </ResponseField>
-<ResponseField name="refreshFn" type={"object"} post={["secret"]}>
+<ResponseField name="refreshFn" type={"function"} post={["secret"]}>
   Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.
 </ResponseField>
 <ResponseField name="apiBase" type={"string"}>

@@ -28,6 +28,7 @@ const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
 
 const result = await ws.shell('head -n 3 /pg/public/tables/customers/rows.jsonl')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `schemas` limits the tree to those schemas. `maxReadRows` and `maxReadBytes`

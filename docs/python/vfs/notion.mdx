@@ -28,6 +28,7 @@ ws = Workspace({"/notion": NotionVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("tree -L 3 /notion && grep -r deadline /notion/pages")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `base_url` points at a proxy. `api_version` sets the `Notion-Version` header,

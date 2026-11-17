@@ -32,6 +32,7 @@ ws = Workspace({"/github": GitHubVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell('ls /github && rg -w "def build_vfs" /github/python')
 print(await result.stdout_str())
+await ws.close()
 ```
 
 Unset `ref` follows the repository's default branch. Set `base_url` for GitHub

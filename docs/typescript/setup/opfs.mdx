@@ -30,6 +30,7 @@ const ws = new Workspace({ '/data': opfs }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `capacity: '100MB'` caps the bytes the folder holds; a write past it fails with

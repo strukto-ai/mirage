@@ -34,6 +34,7 @@ ws = Workspace({"/fashion": LanceDBVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.md")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `id_column` (default `id`) names each row's files. Without `table`, every table

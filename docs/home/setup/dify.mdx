@@ -99,6 +99,7 @@ export DIFY_DATASET_ID=...
     ws = Workspace({"/knowledge": DifyVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /knowledge")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -117,6 +118,7 @@ export DIFY_DATASET_ID=...
     )
     const result = await ws.shell('ls /knowledge')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

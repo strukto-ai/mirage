@@ -122,6 +122,7 @@ export MS_GRAPH_DRIVE_TOKEN=eyJ0eXAi...
     ws = Workspace({"/onedrive": OneDriveVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /onedrive")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -138,6 +139,7 @@ export MS_GRAPH_DRIVE_TOKEN=eyJ0eXAi...
     )
     const result = await ws.shell('ls /onedrive')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

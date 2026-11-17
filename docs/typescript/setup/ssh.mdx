@@ -32,6 +32,7 @@ const ws = new Workspace({ '/remote': ssh }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('ls /remote && tail -n 20 /remote/logs/app.log')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `hostname` connects to another address than `host`, and `port` to another

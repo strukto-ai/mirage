@@ -34,6 +34,7 @@ const ws = new Workspace({ '/email': email }, { mode: MountMode.READ })
 
 const result = await ws.shell('ls /email && rg -l quarterly /email/INBOX')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `imapPort` (993) and `smtpPort` (587) change the ports, and `maxMessages` how

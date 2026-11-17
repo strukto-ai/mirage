@@ -60,6 +60,7 @@ export WANDB_API_KEY=...
     ws = Workspace({"/wandb": WandbVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /wandb/my-team")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -77,6 +78,7 @@ export WANDB_API_KEY=...
     )
     const result = await ws.shell('ls /wandb/my-team')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

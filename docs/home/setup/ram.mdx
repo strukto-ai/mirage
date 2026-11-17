@@ -38,6 +38,7 @@ The mount starts empty and its files are gone when the process exits.
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     result = await ws.shell("echo hello > /data/note.txt && cat /data/note.txt")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -47,6 +48,7 @@ The mount starts empty and its files are gone when the process exits.
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

@@ -35,6 +35,7 @@ const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
 
 const result = await ws.shell('echo hello > /r/greet && cat /r/greet')
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 Python reaches the same database with the same URL through its

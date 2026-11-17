@@ -40,6 +40,7 @@ as the database does.
     ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
     result = await ws.shell("ls /sql")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -52,6 +53,7 @@ as the database does.
     )
     const result = await ws.shell('ls /sql')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

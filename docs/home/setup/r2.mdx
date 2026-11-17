@@ -74,6 +74,7 @@ export R2_SECRET_ACCESS_KEY=...
     ws = Workspace({"/r2": R2VFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /r2")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -93,6 +94,7 @@ export R2_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /r2')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

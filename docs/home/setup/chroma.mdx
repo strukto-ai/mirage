@@ -96,6 +96,7 @@ documents that name their file.
     ws = Workspace({"/knowledge": ChromaVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /knowledge")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -114,6 +115,7 @@ documents that name their file.
     )
     const result = await ws.shell('ls /knowledge')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

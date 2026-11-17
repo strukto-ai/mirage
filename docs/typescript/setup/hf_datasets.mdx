@@ -28,6 +28,7 @@ const ws = new Workspace({ '/data': dataset }, { mode: MountMode.READ })
 
 const result = await ws.shell("ls /data && find /data -name '*.parquet' | head -n 5")
 console.log(result.stdoutText)
+await ws.close()
 ```
 
 `revision` pins a branch, tag or commit (default `main`), and `keyPrefix`

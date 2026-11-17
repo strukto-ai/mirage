@@ -33,6 +33,7 @@ ws = Workspace({"/b2": BackblazeVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /b2 && find /b2 -name '*.csv'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `region` also picks the endpoint, `https://s3.<region>.backblazeb2.com`,

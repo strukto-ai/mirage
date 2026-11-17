@@ -34,6 +34,7 @@ ws = Workspace({"/fashion": QdrantVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 A self-hosted Qdrant sets `host` and `port` (default `localhost:6333`) instead

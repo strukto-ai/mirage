@@ -32,6 +32,7 @@ ws = Workspace({"/gdrive": GoogleDriveVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /gdrive && find /gdrive -maxdepth 2 -name '*.gsheet.json'")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `folder_id` mounts one folder instead of the whole Drive. A mount takes

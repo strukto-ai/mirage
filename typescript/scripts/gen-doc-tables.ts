@@ -617,6 +617,22 @@ function selftest(): void {
   assert.deepEqual(Object.keys(facts.fields), ['a'])
   assert.equal(facts.fields.a?.required, true)
   assert.deepEqual(facts.rename, { b: 'a' })
+  const kinds = ts.createSourceFile(
+    'kinds.ts',
+    `z.literal([1, 7, 30]);
+    z.union([z.string(), z.custom<() => string>((value) => typeof value === 'function')]);
+    z.custom<Bytes>((value) => value instanceof Uint8Array)`,
+    ts.ScriptTarget.ESNext,
+    true,
+  )
+  assert.deepEqual(
+    kinds.statements.map((s) =>
+      ts.isExpressionStatement(s)
+        ? fieldType({ required: true, expr: s.expression, source: kinds, env: new Map() }, PACKAGES)
+        : undefined,
+    ),
+    ['1 | 7 | 30', 'string | function', ''],
+  )
   console.log('gen-doc-tables selftest: ok')
 }
 

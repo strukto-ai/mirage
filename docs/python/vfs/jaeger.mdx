@@ -25,6 +25,7 @@ ws = Workspace({"/jaeger": JaegerVFS(config)}, mode=MountMode.READ)
 
 result = await ws.shell("jq -r '.[].name' /jaeger/services/frontend/operations.json")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `host` is the query service's base URL; it needs no credentials.

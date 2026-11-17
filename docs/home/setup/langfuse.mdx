@@ -65,6 +65,7 @@ export LANGFUSE_HOST=https://cloud.langfuse.com
     ws = Workspace({"/langfuse": LangfuseVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /langfuse/traces")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -83,6 +84,7 @@ export LANGFUSE_HOST=https://cloud.langfuse.com
     )
     const result = await ws.shell('ls /langfuse/traces')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>

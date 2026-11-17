@@ -31,6 +31,7 @@ ws = Workspace({"/box": BoxVFS(config)}, mode=MountMode.WRITE)
 
 result = await ws.shell("ls /box && grep -rlw report /box/Contracts")
 print(await result.stdout_str())
+await ws.close()
 ```
 
 `root_folder_id` mounts one folder instead of the whole account. To try the

@@ -78,6 +78,7 @@ export WASABI_SECRET_ACCESS_KEY=...
     ws = Workspace({"/wasabi": WasabiVFS(config)}, mode=MountMode.READ)
     result = await ws.shell("ls /wasabi")
     print(await result.stdout_str())
+    await ws.close()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -97,6 +98,7 @@ export WASABI_SECRET_ACCESS_KEY=...
     )
     const result = await ws.shell('ls /wasabi')
     console.log(result.stdoutText)
+    await ws.close()
     ```
   </Tab>
 </Tabs>
