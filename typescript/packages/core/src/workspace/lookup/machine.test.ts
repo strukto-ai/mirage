@@ -223,4 +223,25 @@ describe('operand routing', () => {
     expect(files.ran).toEqual([])
     await ws.close()
   })
+
+  it('reads a machine link to a hidden name as missing', async () => {
+    const files = new FakeFiles({ '/tmp/secret': 's', '/tmp/a.py': 'x' }, TOOLS)
+    files.links.set('/tmp/public', '/tmp/secret')
+    const ws = one(files, {}, { profiles: { agent: { paths: { hide: ['/tmp/secret'] } } } })
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const done = await agent.shell('cat /tmp/public')
+    expect([done.exitCode, DEC.decode(done.stdout)]).toEqual([1, ''])
+    expect(DEC.decode((await agent.shell('cat /tmp/a.py')).stdout)).toBe('x')
+    expect(await out(ws, 'cat /tmp/public')).toBe('ran\n')
+    await ws.close()
+  })
+
+  it("keeps a find -exec naming another mount's file with Mirage", async () => {
+    const files = new FakeFiles({ '/tmp/d/f': 'x' }, [...TOOLS, 'find'])
+    const ws = one(files, { '/data': new RAMVFS() })
+    await ws.shell('echo y > /data/x')
+    expect(await out(ws, 'find /tmp/d -maxdepth 0 -exec cat /data/x \\;')).toBe('y\n')
+    expect(files.ran).toEqual([])
+    await ws.close()
+  })
 })

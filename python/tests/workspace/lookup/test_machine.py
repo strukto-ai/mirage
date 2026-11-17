@@ -254,3 +254,27 @@ async def test_a_refused_command_never_reaches_a_machine():
     assert done.exit_code == 126
     assert (len(a.lines), len(b.lines)) == before
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_link_to_a_hidden_name_reads_as_missing():
+    files = FakeFiles({"/tmp/secret": b"s", "/tmp/a.py": b"x"}, programs=TOOLS)
+    files.links["/tmp/public"] = "/tmp/secret"
+    ws = one(files, profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}})
+    agent = await ws.session("agent", profile="agent")
+    done = await agent.shell("cat /tmp/public")
+    assert (done.exit_code, await done.stdout_str()) == (1, "")
+    assert await (await agent.shell("cat /tmp/a.py")).stdout_str() == "x"
+    assert await out(ws, "cat /tmp/public") == "ran\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_find_exec_naming_another_mount_s_file_stays_with_mirage():
+    files = FakeFiles({"/tmp/d/f": b"x"}, programs=(*TOOLS, "find"))
+    ws = one(files, {"/data": RAMVFS()})
+    await ws.shell("echo y > /data/x")
+    line = r"find /tmp/d -maxdepth 0 -exec cat /data/x \;"
+    assert await out(ws, line) == "y\n"
+    assert files.ran == []
+    await ws.close()

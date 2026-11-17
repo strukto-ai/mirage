@@ -116,6 +116,19 @@ async def test_lists_a_folder_under_another_machine_s_file():
 
 
 @pytest.mark.asyncio
+async def test_mv_into_a_folder_no_machine_holds_fails():
+    a, b = FakeFiles({"/tmp/src": b"x"}), FakeFiles()
+    ws = two(a, b)
+    code, _, err = await run(ws, "mv /tmp/src /tmp/missing/dst")
+    assert (code, "No such file or directory" in err) == (1, True)
+    assert (a.files, "/tmp/missing" in a.dirs | b.dirs) == (
+        {"/tmp/src": b"x"},
+        False,
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_program_s_output_lands_on_the_machine_running_it():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)

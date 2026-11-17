@@ -76,6 +76,13 @@ class FakeFiles:
                 self.dirs.add(path)
         self.programs = set(programs)
         self.ran: list[str] = []
+        self.links: dict[str, str] = {}
+
+    def _real(self, path: str) -> str:
+        for link, target in self.links.items():
+            if path == link or path.startswith(link + "/"):
+                return target + path[len(link) :]
+        return path
 
     def answer(self, line: str, data: bytes | None) -> RunAnswer:
         result = ok()
@@ -99,8 +106,13 @@ class FakeFiles:
     def _one(self, words: list[str], data: bytes | None) -> RunAnswer:
         if words[:2] == ["command", "-v"]:
             return ok() if words[2] in self.programs else failed(b"")
+        if words[:3] == ["readlink", "-f", "--"]:
+            real = self._real(words[3])
+            if posixpath.dirname(real) not in self.dirs:
+                return failed(b"")
+            return ok(f"{real}\n".encode())
         if words[:4] == ["env", "LC_ALL=C", "find", "-L"]:
-            path = words[4]
+            path = self._real(words[4])
             depth = int(words[6]) if words[5] == "-maxdepth" else None
             if any(path.startswith(f + "/") for f in self.files):
                 return failed(f"find: '{path}': Not a directory\n".encode())
@@ -115,9 +127,10 @@ class FakeFiles:
                         out += self._row(child, rel)
             return ok(out)
         if words[:2] == ["cat", "--"]:
-            if words[2] not in self.files:
+            real = self._real(words[2])
+            if real not in self.files:
                 return self._missing("cat", words[2])
-            return ok(self.files[words[2]])
+            return ok(self.files[real])
         if words[0] in ("cat", ":") and words[1] in (">", ">>"):
             path = words[2]
             if posixpath.dirname(path) not in self.dirs:
@@ -161,6 +174,8 @@ class FakeFiles:
             src, dst = words[-2], words[-1]
             if src not in self.files:
                 return self._missing(words[0], src)
+            if posixpath.dirname(dst) not in self.dirs:
+                return self._missing(words[0], dst)
             self.files[dst] = self.files[src]
             if words[0] == "mv":
                 del self.files[src]

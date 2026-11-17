@@ -79,6 +79,7 @@ export class FakeFiles {
   readonly dirs = new Set(['/', '/tmp', '/dev', '/dev/shm'])
   readonly programs: Set<string>
   readonly ran: string[] = []
+  readonly links = new Map<string, string>()
 
   constructor(files: Record<string, string> = {}, programs: readonly string[] = []) {
     this.files = new Map(Object.entries(files).map(([path, text]) => [path, ENC.encode(text)]))
@@ -86,6 +87,12 @@ export class FakeFiles {
       while (!this.dirs.has((path = dirname(path)))) this.dirs.add(path)
     }
     this.programs = new Set(programs)
+  }
+
+  private real(path: string): string {
+    for (const [link, target] of this.links)
+      if (path === link || path.startsWith(`${link}/`)) return target + path.slice(link.length)
+    return path
   }
 
   readonly answer: Answer = (line, data) => {
@@ -110,8 +117,12 @@ export class FakeFiles {
     const [head = '', second = ''] = w
     if (head === 'command' && second === '-v')
       return this.programs.has(w[2] ?? '') ? ok() : failed('')
+    if (w.slice(0, 3).join(' ') === 'readlink -f --') {
+      const real = this.real(w[3] ?? '')
+      return this.dirs.has(dirname(real)) ? ok(`${real}\n`) : failed('')
+    }
     if (w.slice(0, 4).join(' ') === 'env LC_ALL=C find -L') {
-      const path = w[4] ?? ''
+      const path = this.real(w[4] ?? '')
       const depth = w[5] === '-maxdepth' ? Number(w[6]) : null
       if ([...this.files.keys()].some((f) => path.startsWith(`${f}/`)))
         return failed(`find: '${path}': Not a directory\n`)
@@ -126,7 +137,7 @@ export class FakeFiles {
       return ok(out)
     }
     if (head === 'cat' && second === '--') {
-      const found = this.files.get(w[2] ?? '')
+      const found = this.files.get(this.real(w[2] ?? ''))
       return found === undefined ? this.missing('cat', w[2] ?? '') : ok(found)
     }
     if ((head === 'cat' || head === ':') && (second === '>' || second === '>>')) {
@@ -175,6 +186,7 @@ export class FakeFiles {
       const dst = w.at(-1) ?? ''
       const found = this.files.get(src)
       if (found === undefined) return this.missing(head, src)
+      if (!this.dirs.has(dirname(dst))) return this.missing(head, dst)
       this.files.set(dst, found)
       if (head === 'mv') this.files.delete(src)
       return ok()

@@ -107,6 +107,19 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('fails a mv into a folder no machine holds', async () => {
+    const a = new FakeFiles({ '/tmp/src': 'x' })
+    const b = new FakeFiles()
+    const ws = two(a, b)
+    const [code, , err] = await run(ws, 'mv /tmp/src /tmp/missing/dst')
+    expect([code, err.includes('No such file or directory')]).toEqual([1, true])
+    expect([texts(a), a.dirs.has('/tmp/missing') || b.dirs.has('/tmp/missing')]).toEqual([
+      { '/tmp/src': 'x' },
+      false,
+    ])
+    await ws.close()
+  })
+
   it("lands a program's output on the machine running it", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })

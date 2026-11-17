@@ -17,6 +17,7 @@ from mirage.core.posix.errors import refusal
 from mirage.core.posix.utils import join_root
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.utils.path import norm
 
 
 def remote(accessor: MachineAccessor, path: PathSpec) -> str:
@@ -27,6 +28,33 @@ def remote(accessor: MachineAccessor, path: PathSpec) -> str:
         path (PathSpec): the path on the mount.
     """
     return join_root(accessor.root, path.mount_path)
+
+
+def mount_base(path: PathSpec) -> str:
+    """The virtual path of the mount root ``path`` is under.
+
+    Args:
+        path (PathSpec): a path on the mount.
+    """
+    virtual = path.virtual.rstrip("/")
+    return norm(virtual[: len(virtual) - len(path.vfs_path)] or "/")
+
+
+def virtual_of(
+    accessor: MachineAccessor, path: PathSpec, real: str
+) -> str | None:
+    """The virtual name a path on the machines has on the mount ``path``
+    is on; None for one outside the mount's root.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): a path on the mount.
+        real (str): an absolute path on the machines.
+    """
+    root = accessor.root.rstrip("/")
+    if root and real != root and not real.startswith(root + "/"):
+        return None
+    return norm(f"{mount_base(path)}/{real[len(root) :].lstrip('/')}")
 
 
 async def checked(

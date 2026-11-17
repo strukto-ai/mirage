@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+import posixpath
 from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS, parse_command
 from mirage.core.machine.place import holders
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
+from mirage.rs.find import find_layout
 from mirage.runtime.binding import restricted_mounts_for
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import DispatchFn
@@ -183,6 +185,27 @@ def _option_paths(argv: Argv, cwd: str) -> list[str]:
     return [p for p in parsed.path_flag_values if p != "-"]
 
 
+def _child_paths(argv: Argv, cwd: str) -> list[str]:
+    """The paths a ``find -exec`` command names, which the machine must
+    hold as well, since the classifier keeps its words as text: an
+    absolute word, or one that climbs with ``..``. A word that is no path
+    at all keeps the command in Mirage, which is always right.
+
+    Args:
+        argv (Argv): the command.
+        cwd (str): the directory a relative word resolves against.
+    """
+    if argv.name != "find":
+        return []
+    words = list(argv.args)
+    return [
+        norm(posixpath.join(cwd, word))
+        for start, end in find_layout(words).spans
+        for word in words[start + 1 : end]
+        if word.startswith("/") or ".." in word.split("/")
+    ]
+
+
 async def operand_machine(
     argv: Argv,
     session: SessionState,
@@ -204,8 +227,8 @@ async def operand_machine(
     places by its own rules); when the session's rules restrict its
     mount, a coded file policy speaks for the session, or the mount is
     read-only; when the cwd is not on the machine;
-    when a path, an option's included, walks through a link of Mirage's
-    own; or when the machine
+    when a path, an option's or a ``find -exec`` command's included,
+    walks through a link of Mirage's own; or when the machine
     lacks the program. A command naming no path runs
     there from a cwd on the machine (``ls``, ``find``).
 
@@ -225,6 +248,7 @@ async def operand_machine(
     ]
     cwd = norm(session.cwd)
     paths += _option_paths(argv, session.cwd)
+    paths += _child_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
     if cwd != "/":
         scopes.append((cwd, False))

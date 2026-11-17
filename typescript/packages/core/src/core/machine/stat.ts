@@ -20,7 +20,11 @@ import { refusal } from '../posix/errors.ts'
 import { parseTree, treeCommand } from '../posix/stat.ts'
 import type { TreeRow } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
-import { checked, remote } from './utils.ts'
+import { checked, mountBase, remote, virtualOf } from './utils.ts'
+import { currentCaller } from '../../context/session_context.ts'
+import { hiddenUnder, pathVisible } from '../../utils/hidden.ts'
+import { norm } from '../../utils/path.ts'
+import { singleQuote } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -123,6 +127,7 @@ export async function tree(
   for (const listed of found) {
     if (listed.status === 'rejected') {
       if (!(listed.reason instanceof Error) || !('code' in listed.reason)) throw listed.reason
+      console.debug(`${path.virtual}: one find failed; walking it instead:`, listed.reason)
       return null
     }
     const [top, ...below] = listed.value
@@ -133,4 +138,39 @@ export async function tree(
     }
   }
   return merged
+}
+
+/**
+ * Whether the running session hides anything in the mount `path` is on,
+ * where a machine's own links may lead to a hidden name. Mirrors Python's
+ * `restricted`.
+ *
+ * @param path a path on the mount.
+ */
+export function restricted(path: PathSpec): boolean {
+  return hiddenUnder(currentCaller().session?.visibility ?? null, mountBase(path))
+}
+
+/**
+ * Whether `path` resolves on a machine, through the machine's own links, to
+ * a name the running session hides: `/tmp/public` linked to a hidden
+ * `/tmp/secret` reads the secret on the machine, where Mirage checks only
+ * its own link table. Asked only of a session that hides something in the
+ * mount. Mirrors Python's `leads_to_hidden`.
+ *
+ * @param accessor the mount's machines.
+ * @param path the path an op names.
+ */
+export async function leadsToHidden(accessor: MachineAccessor, path: PathSpec): Promise<boolean> {
+  const vis = currentCaller().session?.visibility ?? null
+  if (!hiddenUnder(vis, mountBase(path))) return false
+  const q = singleQuote(remote(accessor, path))
+  for (const machine of accessor.names()) {
+    const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
+    if (status !== 0) continue
+    const real = new TextDecoder().decode(out).replace(/\n$/, '')
+    const seen = virtualOf(accessor, path, real)
+    if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen)) return true
+  }
+  return false
 }

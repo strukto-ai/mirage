@@ -14,6 +14,7 @@
 
 import { SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { holders } from '../../core/machine/place.ts'
+import { findLayout } from '../../rs/find.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { restrictedMountsFor } from '../../runtime/binding.ts'
@@ -152,6 +153,26 @@ function optionPaths(argv: Argv, cwd: string): string[] {
 }
 
 /**
+ * The paths a `find -exec` command names, which the machine must hold as
+ * well, since the classifier keeps its words as text: an absolute word, or
+ * one that climbs with `..`. A word that is no path at all keeps the command
+ * in Mirage, which is always right. Mirrors Python's `_child_paths`.
+ *
+ * @param argv the command.
+ * @param cwd the directory a relative word resolves against.
+ */
+function childPaths(argv: Argv, cwd: string): string[] {
+  if (argv.name !== 'find') return []
+  const words = [...argv.args]
+  return findLayout(words).spans.flatMap(([start, end]) =>
+    words
+      .slice(start + 1, end)
+      .filter((word) => word.startsWith('/') || word.split('/').includes('..'))
+      .map((word) => norm(word.startsWith('/') ? word : `${cwd}/${word}`)),
+  )
+}
+
+/**
  * The machine a mount command runs on whole, when every path it names is one
  * machine's own at the same path: `grep -rn x /testbed` is one exec there,
  * with the machine's own output, where Mirage's implementation would read
@@ -165,8 +186,8 @@ function optionPaths(argv: Argv, cwd: string): string[] {
  * name on several machines, which Mirage places by its own rules); when the
  * session's rules restrict its mount, a coded file policy speaks for the
  * session, or the mount is read-only; when the cwd
- * is not on the machine; when a path, an option's included, walks through a
- * link of Mirage's own; or
+ * is not on the machine; when a path, an option's or a `find -exec`
+ * command's included, walks through a link of Mirage's own; or
  * when the machine lacks the program. A command
  * naming no path runs there from a cwd on the machine (`ls`, `find`).
  * Mirrors Python's `operand_machine`.
@@ -190,6 +211,7 @@ export async function operandMachine(
   )
   const cwd = norm(session.cwd)
   paths.push(...optionPaths(argv, session.cwd))
+  paths.push(...childPaths(argv, session.cwd))
   const scopes: [string, boolean][] = paths.map((path) => [path, true])
   if (cwd !== '/') scopes.push([cwd, false])
   const runtime = await machineHolding(scopes, session, registry, links, null)

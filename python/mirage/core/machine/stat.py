@@ -13,16 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 from mirage.accessor.machine import MachineAccessor
+from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import (
+    checked,
+    mount_base,
+    remote,
+    virtual_of,
+)
 from mirage.core.posix.errors import refusal
 from mirage.core.posix.stat import parse_tree, tree_command
 from mirage.core.posix.types import TreeRow
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_path
+from mirage.utils.hidden import hidden_under, path_visible
+from mirage.utils.path import norm
+from mirage.utils.quote import single_quote
+
+logger = logging.getLogger(__name__)
 
 
 def row_stat(name: str, row: TreeRow) -> FileStat:
@@ -117,6 +129,11 @@ async def tree(
         if isinstance(listed, BaseException):
             if not isinstance(listed, OSError):
                 raise listed
+            logger.debug(
+                "%s: one find failed; walking it instead",
+                path.virtual,
+                exc_info=listed,
+            )
             return None
         if listed[0].kind != "d":
             return None
@@ -125,3 +142,43 @@ async def tree(
                 row.rel, row_stat(row.rel.rsplit("/", 1)[-1], row)
             )
     return merged
+
+
+def restricted(path: PathSpec) -> bool:
+    """Whether the running session hides anything in the mount ``path``
+    is on, where a machine's own links may lead to a hidden name.
+
+    Args:
+        path (PathSpec): a path on the mount.
+    """
+    return hidden_under(current_caller().visibility, mount_base(path))
+
+
+async def leads_to_hidden(accessor: MachineAccessor, path: PathSpec) -> bool:
+    """Whether ``path`` resolves on a machine, through the machine's own
+    links, to a name the running session hides: ``/tmp/public`` linked to
+    a hidden ``/tmp/secret`` reads the secret on the machine, where
+    Mirage checks only its own link table. Asked only of a session that
+    hides something in the mount.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): the path an op names.
+    """
+    vis = current_caller().visibility
+    if not hidden_under(vis, mount_base(path)):
+        return False
+    q = single_quote(remote(accessor, path))
+    for machine in accessor.names():
+        status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
+        if status != 0:
+            continue
+        real = out.decode(errors="surrogateescape").rstrip("\n")
+        seen = virtual_of(accessor, path, real)
+        if (
+            seen is not None
+            and seen != norm(path.virtual)
+            and not path_visible(vis, seen)
+        ):
+            return True
+    return False

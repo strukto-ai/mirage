@@ -17,6 +17,33 @@ import type { ByteSource } from '../../io/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { refusal } from '../posix/errors.ts'
 import { joinRoot } from '../posix/utils.ts'
+import { norm } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+
+/**
+ * The virtual path of the mount root `path` is under. Mirrors Python's
+ * `mount_base`.
+ *
+ * @param path a path on the mount.
+ */
+export function mountBase(path: PathSpec): string {
+  const virtual = rstripSlash(path.virtual)
+  return norm(virtual.slice(0, virtual.length - path.vfsPath.length) || '/')
+}
+
+/**
+ * The virtual name a path on the machines has on the mount `path` is on;
+ * null for one outside the mount's root. Mirrors Python's `virtual_of`.
+ *
+ * @param accessor the mount's machines.
+ * @param path a path on the mount.
+ * @param real an absolute path on the machines.
+ */
+export function virtualOf(accessor: MachineAccessor, path: PathSpec, real: string): string | null {
+  const root = rstripSlash(accessor.root)
+  if (root !== '' && real !== root && !real.startsWith(`${root}/`)) return null
+  return norm(`${mountBase(path)}/${real.slice(root.length).replace(/^\/+/, '')}`)
+}
 
 /**
  * A mount path's path on the machines.
