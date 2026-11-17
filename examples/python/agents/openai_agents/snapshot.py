@@ -39,7 +39,7 @@ async def main():
 
     agent = Agent(
         name="Snapshot Demo",
-        model="gpt-5.5-mini",
+        model="gpt-6.1-sol",
         instructions=await build_system_prompt(
             workspace=ws,
             extra_instructions=(

@@ -185,7 +185,7 @@ need their client packages installed.
 | <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Notion](/home/setup/notion) | ✓ | ✓ | ✓ | ✓ |
 | <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Trello](/home/setup/trello) | ✓ | ✓ | ✓ | ✓ |
 
-To virtualize anything else, see [Adding a New VFS](/home/setup/custom-vfs).
+To virtualize anything else, see [Adding a New VFS](/home/setup/vfs/new).
 
 ## Mount capacity
 
@@ -206,7 +206,7 @@ mounts:
 - Stored files stay readable and removable, and `df` shows the capacity.
 - Disk, Redis and OPFS count only the mount's own writes. SQL counts every
   file in the database, and SQL mounts on one driver with the same `capacity`
-  share one count. RAM also counts against [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory).
+  share one count. RAM also counts against [`max_memory`](/home/limits#memory).
 
 ## Read and write behavior
 

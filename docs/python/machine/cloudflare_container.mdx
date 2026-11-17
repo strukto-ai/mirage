@@ -1,0 +1,34 @@
+---
+title: Cloudflare Container
+icon: /images/cloudflare-logo.svg
+description: Run captured programs in a Cloudflare Container, from its Durable Object or from anywhere through a relay.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Cloudflare Container](/home/setup/machine/cloudflare_container), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[ssh]'
+```
+
+## Usage through a relay
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "box": {
+            "provider": "cloudflare_container",
+            "url": "https://mirage-relay.example.workers.dev/box",
+            "token": "relay-token",
+            "mount_type": "ssh",
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

@@ -14,6 +14,9 @@ SOURCE_SUFFIXES = {".ts", ".tsx", ".mts", ".mjs", ".js", ".md", ".mdx"}
 
 CLAUSE = r"\s+(type\s+)?\{([^{}]*)\}\s*from\s*['\"]([^'\"]+)['\"]"
 BLOCK_RE = re.compile(r"^(?:import|export)" + CLAUSE, re.M | re.S)
+# A docs page nests its code in components (Tabs, Accordions), which indent
+# it, so a consumer's import may start after whitespace.
+CONSUMER_RE = re.compile(r"^[ \t]*(?:import|export)" + CLAUSE, re.M | re.S)
 DYNAMIC_RE = re.compile(r"import\(\s*['\"]([^'\"]+)['\"]\s*\)")
 NAMESPACE_RE = re.compile(
     r"^(?:import|export)\s+\*\s+as\s+(\w+)\s+from\s*['\"]([^'\"]+)['\"]", re.M
@@ -150,7 +153,7 @@ def names_consumers_import() -> set[str]:
     for root in CONSUMER_ROOTS:
         for path in source_files(REPO / root):
             src = path.read_text(errors="ignore")
-            for m in BLOCK_RE.finditer(src):
+            for m in CONSUMER_RE.finditer(src):
                 module = m.group(3)
                 if module == CORE_PKG:
                     used |= set(specifier_names(m.group(2), "local"))

@@ -1,19 +1,35 @@
 ---
 title: Trello
 icon: /images/trello-logo.svg
-description: Set up the Trello CLI with Python or TypeScript.
+description: Set up the Trello CLI.
 ---
 
 import License from '/snippets/cli/license/trello.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Mirage defines this command tree over the [Trello REST API](https://developer.atlassian.com/cloud/trello/rest/).
 
 Create an API key and token in [Trello setup](/home/setup/trello), then
 register them on an existing `ws`.
 
-Commands: [Python](/python/cli/trello) · [TypeScript](/typescript/cli/trello).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      trello:
+        cli: trello
+        machine: in_process
+        config:
+          api_key: ${TRELLO_API_KEY}
+          api_token: ${TRELLO_API_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.trello import TRELLO
@@ -32,5 +48,16 @@ Commands: [Python](/python/cli/trello) · [TypeScript](/typescript/cli/trello).
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/trello">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/trello">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

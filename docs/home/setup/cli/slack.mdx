@@ -1,10 +1,17 @@
 ---
 title: Slack
 icon: /images/slack-logo.svg
-description: Set up the Slack CLI with Python or TypeScript.
+description: Set up the Slack CLI.
 ---
 
 import License from '/snippets/cli/license/slack.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Create tokens in [Slack setup](/home/setup/slack), then register them on an
 existing `ws`.
@@ -13,9 +20,18 @@ Reaction commands need `reactions:read`/`reactions:write`, pin commands need
 `pins:read`/`pins:write`, and `emoji-list` needs `emoji:read`. Reinstall the app
 after changing scopes.
 
-Commands: [Python](/python/cli/slack) · [TypeScript](/typescript/cli/slack).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      slack:
+        cli: slack
+        machine: in_process
+        config:
+          token: ${SLACK_BOT_TOKEN}
+          search_token: ${SLACK_USER_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.slack import SLACK
@@ -34,5 +50,16 @@ Commands: [Python](/python/cli/slack) · [TypeScript](/typescript/cli/slack).
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/slack">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/slack">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

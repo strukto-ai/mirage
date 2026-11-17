@@ -21,7 +21,7 @@ python -m pip install mirage-ai
 
 ## Create a Workspace
 
-Start with the RAM VFS so you can try Mirage without credentials.
+Start with the RAM VFS, which needs no credentials.
 
 ```python quickstart.py
 import asyncio
@@ -49,16 +49,32 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-For a uv project, run `uv run python quickstart.py`. If you installed Mirage in
-another activated environment, run `python quickstart.py`. It lists `user.json`,
+Run it with `uv run python quickstart.py`, or `python quickstart.py` in another
+activated environment. It lists `user.json`,
 prints `alice`, then prints the matching JSON document.
 
 Shell failures are returned in the result; check `exit_code` and `stderr_str()`
 when needed. See the [in-app API reference](/python/access/in-app#session-shell).
 
-## Next Steps
+## Next steps
 
-- See [Python Installation](/python/install) for VFS extras and the `uv` workflow.
-- Configure [command output limits](/home/core/output-limits) for large files and long-running commands.
-- Browse [Python Agents](/python/agents/index) to wire Mirage into the OpenAI Agents SDK, LangChain, and Pydantic AI.
-- Pick a real backend from [VFS Docs](/python/vfs/index), such as [S3](/python/vfs/s3), [Slack](/python/vfs/slack), or [GitHub](/python/vfs/github).
+<CardGroup cols={2}>
+  <Card title="Virtualize data storage" icon="database" href="/python/vfs/index">
+    S3, Slack, Google Drive, Postgres and 60 more, as files.
+  </Card>
+  <Card title="Install CLIs" icon="wrench" href="/python/cli/index">
+    `gh`, `git`, Linear, Office and PDF tools in the same shell.
+  </Card>
+  <Card title="Run programs on a machine" icon="server" href="/python/machine/overview">
+    `python3` and `node` in Mirage, on the host or in a sandbox.
+  </Card>
+  <Card title="Connect an agent" icon="robot" href="/python/agents/index">
+    The Python agent SDKs, wired to one workspace.
+  </Card>
+  <Card title="Set what an agent may do" icon="shield-halved" href="/home/policy/overview">
+    Profiles, allow lists, asks and hidden paths.
+  </Card>
+  <Card title="In-App API" icon="cube" href="/python/access/in-app">
+    Every workspace and session call, with an example.
+  </Card>
+</CardGroup>

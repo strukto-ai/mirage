@@ -1,111 +1,1803 @@
 ---
 title: Core Tools
 description: Inspect, edit, search, and transform files with familiar command-line tools.
-icon: wrench
+icon: /images/mirage-icon-light.svg
 ---
 
-Mirage provides familiar Unix-style commands over virtual paths, with availability determined by the mount's capabilities and your session's permissions.
+Unix commands over every mount. A mount's capabilities and the session's
+permissions decide which ones run there.
 
-Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for the full command reference. Compatibility varies by command, so a familiar name does not imply every option from the original program.
+Expand a command to see every flag it takes, read from the same grammar the
+shell parses with; `man COMMAND` prints its manual. A familiar name does not
+promise every option of the original program.
 
 ## Files and directories
 
-| Command | Purpose | Common flags |
-| --- | --- | --- |
-| `ls` | List entries | `-l`, `-a`, `-A`, `-h`, `-R`, `-d`, `-t`, `-S`, `-r`, `-F`, `-L`, `--sort`, `--zero`, `--author`, `-D` |
-| `dir`, `vdir` | `ls` in columns or in long format, with names escaped | The options of `ls` |
-| `stat` | Show metadata | `-c FORMAT`, `-f`, `-L` |
-| `tree` | Show a directory tree | `-a`, `-d`, `-l`, `-L DEPTH`, `-I PATTERN`, `-P PATTERN`, `-x`, `-Q`, `-N`, `-q`, `-A`, `-u`, `-g`, `-c`, `-o FILE`, `--si`, `--timefmt`, `--filesfirst`, `--ignore-case`, `--matchdirs`, `--inodes` |
-| `du` | Count file and directory bytes | `-h`, `-s`, `-a`, `-d DEPTH`, `-c`, `-L`, `-S`, `-x`, `--files0-from FILE` |
-| `df` | Show mount capacity, when available | `-h`, `-H`, `-k`, `-i`, `-a`, `-T`, `-P`, `-B SIZE` |
-| `mount` | List configured mounts | `-l`, `-t TYPES` |
-| `file` | Identify content type | `-b`, `-i`, `-L`, `-h` |
-| `mkdir` | Create directories | `-p`, `-v`, `-m MODE` |
-| `touch` | Create files or update timestamps | `-a`, `-m`, `-c`, `-d DATE`, `-r FILE`, `-t TIME`, `-h` |
-| `cp` | Copy files or directories, including across mounts | `-r`, `-R`, `-a`, `-L`, `-P`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `-x`, `--debug` |
-| `mv` | Move or rename entries | `-f`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `--no-copy`, `--exchange` |
-| `rm` | Remove entries | `-r`, `-R`, `-f`, `-v`, `-d`, `--one-file-system` |
-| `rmdir` | Remove empty directories | `-p`, `-v`, `--ignore-fail-on-non-empty` |
-| `unlink` | Remove one entry | No command-specific flags |
-| `truncate` | Resize a file | `-s SIZE`, `-c`, `-o` |
-| `mktemp` | Create a temporary file or directory | `-d`, `-p DIR`, `--tmpdir`, `--suffix`, `-u`, `-q` |
-| `ln` | Create a symbolic link or copy a file's bytes | `-s`, `-r`, `-f`, `-n`, `-t DIR`, `-T`, `-b` |
-| `link` | Copy a file's bytes to a new name | No command-specific flags |
-| `pathchk` | Check that names are valid or portable | `-p`, `-P`, `--portability` |
-| `readlink` | Read a link or resolve its target | `-f`, `-e`, `-m`, `-n`, `-z` |
-| `realpath` | Resolve a path | `-e`, `-m`, `-L`, `-P`, `-s`, `--relative-to`, `--relative-base`, `-z` |
-| `basename` | Remove a directory prefix or suffix | `-a`, `-s SUFFIX`, `-z` |
-| `dirname` | Print the parent path | `-z` |
-| `chmod` | Set permission metadata | `-R`, `-c`, `-f`, `-v` |
-| `chown`, `chgrp` | Set owner or group metadata | `-R`, `-c`, `-f`, `-v`, `-h`, `--dereference` |
-| `getfattr` | Read extended attributes | `-n NAME`, `-d`, `-m PATTERN`, `-e ENCODING`, `--only-values`, `-R` |
-| `setfattr` | Set or remove an extended attribute | `-n NAME`, `-v VALUE`, `-x NAME`, `-h` |
+{/* BEGIN GENERATED COMMANDS: Files and directories */}
+<ResponseField name="ls">
+  List entries.
+  <Expandable title="58 flags">
+    <ResponseField name="-l" />
+    <ResponseField name="-b, --escape" />
+    <ResponseField name="-a, --all" />
+    <ResponseField name="-A, --almost-all" />
+    <ResponseField name="-h, --human-readable" />
+    <ResponseField name="-t" />
+    <ResponseField name="-S" />
+    <ResponseField name="-X" />
+    <ResponseField name="-v" />
+    <ResponseField name="-U" />
+    <ResponseField name="--sort <text>" />
+    <ResponseField name="-c" />
+    <ResponseField name="-u" />
+    <ResponseField name="--time <text>" />
+    <ResponseField name="--time-style <text>" />
+    <ResponseField name="-r, --reverse" />
+    <ResponseField name="-1" />
+    <ResponseField name="-C" />
+    <ResponseField name="-x" />
+    <ResponseField name="-m" />
+    <ResponseField name="--format <text>" />
+    <ResponseField name="-w, --width <text>" />
+    <ResponseField name="-T, --tabsize <text>" />
+    <ResponseField name="-s, --size" />
+    <ResponseField name="-k, --kibibytes" />
+    <ResponseField name="--si" />
+    <ResponseField name="-f" />
+    <ResponseField name="-I, --ignore <text>" />
+    <ResponseField name="--hide <text>" />
+    <ResponseField name="-B, --ignore-backups" />
+    <ResponseField name="-Q, --quote-name" />
+    <ResponseField name="-N, --literal" />
+    <ResponseField name="--quoting-style <text>" />
+    <ResponseField name="-q, --hide-control-chars" />
+    <ResponseField name="--show-control-chars" />
+    <ResponseField name="--full-time" />
+    <ResponseField name="-G, --no-group" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="-d, --directory" />
+    <ResponseField name="-F, --classify[=<text>]" />
+    <ResponseField name="-p" />
+    <ResponseField name="--file-type" />
+    <ResponseField name="--indicator-style <text>" />
+    <ResponseField name="-L, --dereference" />
+    <ResponseField name="-H, --dereference-command-line" />
+    <ResponseField name="--dereference-command-line-symlink-to-dir" />
+    <ResponseField name="-g" />
+    <ResponseField name="-o" />
+    <ResponseField name="-n, --numeric-uid-gid" />
+    <ResponseField name="-i, --inode" />
+    <ResponseField name="--color[=<text>]" />
+    <ResponseField name="--group-directories-first" />
+    <ResponseField name="--block-size <text>" />
+    <ResponseField name="--hyperlink[=<text>]" />
+    <ResponseField name="-Z, --context" />
+    <ResponseField name="--zero" />
+    <ResponseField name="--author" />
+    <ResponseField name="-D, --dired" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="dir, vdir">
+  `ls` in columns or in long format, with names escaped.
+  <Expandable title="58 flags">
+    <ResponseField name="-l" />
+    <ResponseField name="-b, --escape" />
+    <ResponseField name="-a, --all" />
+    <ResponseField name="-A, --almost-all" />
+    <ResponseField name="-h, --human-readable" />
+    <ResponseField name="-t" />
+    <ResponseField name="-S" />
+    <ResponseField name="-X" />
+    <ResponseField name="-v" />
+    <ResponseField name="-U" />
+    <ResponseField name="--sort <text>" />
+    <ResponseField name="-c" />
+    <ResponseField name="-u" />
+    <ResponseField name="--time <text>" />
+    <ResponseField name="--time-style <text>" />
+    <ResponseField name="-r, --reverse" />
+    <ResponseField name="-1" />
+    <ResponseField name="-C" />
+    <ResponseField name="-x" />
+    <ResponseField name="-m" />
+    <ResponseField name="--format <text>" />
+    <ResponseField name="-w, --width <text>" />
+    <ResponseField name="-T, --tabsize <text>" />
+    <ResponseField name="-s, --size" />
+    <ResponseField name="-k, --kibibytes" />
+    <ResponseField name="--si" />
+    <ResponseField name="-f" />
+    <ResponseField name="-I, --ignore <text>" />
+    <ResponseField name="--hide <text>" />
+    <ResponseField name="-B, --ignore-backups" />
+    <ResponseField name="-Q, --quote-name" />
+    <ResponseField name="-N, --literal" />
+    <ResponseField name="--quoting-style <text>" />
+    <ResponseField name="-q, --hide-control-chars" />
+    <ResponseField name="--show-control-chars" />
+    <ResponseField name="--full-time" />
+    <ResponseField name="-G, --no-group" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="-d, --directory" />
+    <ResponseField name="-F, --classify[=<text>]" />
+    <ResponseField name="-p" />
+    <ResponseField name="--file-type" />
+    <ResponseField name="--indicator-style <text>" />
+    <ResponseField name="-L, --dereference" />
+    <ResponseField name="-H, --dereference-command-line" />
+    <ResponseField name="--dereference-command-line-symlink-to-dir" />
+    <ResponseField name="-g" />
+    <ResponseField name="-o" />
+    <ResponseField name="-n, --numeric-uid-gid" />
+    <ResponseField name="-i, --inode" />
+    <ResponseField name="--color[=<text>]" />
+    <ResponseField name="--group-directories-first" />
+    <ResponseField name="--block-size <text>" />
+    <ResponseField name="--hyperlink[=<text>]" />
+    <ResponseField name="-Z, --context" />
+    <ResponseField name="--zero" />
+    <ResponseField name="--author" />
+    <ResponseField name="-D, --dired" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="stat">
+  Show metadata.
+  <Expandable title="6 flags">
+    <ResponseField name="-c, --format <text>" />
+    <ResponseField name="--printf <text>" />
+    <ResponseField name="-f, --file-system" />
+    <ResponseField name="-L, --dereference" />
+    <ResponseField name="-t, --terse" />
+    <ResponseField name="--cached <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tree">
+  Show a directory tree.
+  <Expandable title="43 flags">
+    <ResponseField name="-a" />
+    <ResponseField name="-L <text>" />
+    <ResponseField name="-I <text>" />
+    <ResponseField name="-d" />
+    <ResponseField name="-P <text>" />
+    <ResponseField name="-x" />
+    <ResponseField name="-f" />
+    <ResponseField name="-i" />
+    <ResponseField name="-s" />
+    <ResponseField name="-D" />
+    <ResponseField name="-p" />
+    <ResponseField name="-F" />
+    <ResponseField name="-t" />
+    <ResponseField name="-v" />
+    <ResponseField name="-U" />
+    <ResponseField name="-r" />
+    <ResponseField name="-J" />
+    <ResponseField name="--dirsfirst" />
+    <ResponseField name="--noreport" />
+    <ResponseField name="--du" />
+    <ResponseField name="--prune" />
+    <ResponseField name="--gitignore" />
+    <ResponseField name="--filelimit <text>" />
+    <ResponseField name="--sort <text>" />
+    <ResponseField name="-C" />
+    <ResponseField name="-l" />
+    <ResponseField name="-n" />
+    <ResponseField name="-A" />
+    <ResponseField name="-Q" />
+    <ResponseField name="-N" />
+    <ResponseField name="-u" />
+    <ResponseField name="-g" />
+    <ResponseField name="-c" />
+    <ResponseField name="-o <path>" />
+    <ResponseField name="-q" />
+    <ResponseField name="--filesfirst" />
+    <ResponseField name="--ignore-case" />
+    <ResponseField name="--matchdirs" />
+    <ResponseField name="--si" />
+    <ResponseField name="--timefmt <text>" />
+    <ResponseField name="--charset <text>" />
+    <ResponseField name="--inodes" />
+    <ResponseField name="--nolinks" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="du">
+  Count file and directory bytes.
+  <Expandable title="27 flags">
+    <ResponseField name="-h, --human-readable" />
+    <ResponseField name="-s, --summarize" />
+    <ResponseField name="-a, --all" />
+    <ResponseField name="-d, --max-depth <text>" />
+    <ResponseField name="-c, --total" />
+    <ResponseField name="-L, --dereference" />
+    <ResponseField name="-P, --no-dereference" />
+    <ResponseField name="-S, --separate-dirs" />
+    <ResponseField name="-x, --one-file-system" />
+    <ResponseField name="-b, --bytes" />
+    <ResponseField name="--apparent-size" />
+    <ResponseField name="-k" />
+    <ResponseField name="-m" />
+    <ResponseField name="-B, --block-size <text>" />
+    <ResponseField name="--si" />
+    <ResponseField name="--inodes" />
+    <ResponseField name="-l, --count-links" />
+    <ResponseField name="-D, --dereference-args" />
+    <ResponseField name="-H" />
+    <ResponseField name="-0, --null" />
+    <ResponseField name="--exclude <text>" />
+    <ResponseField name="-X, --exclude-from <path>" />
+    <ResponseField name="--files0-from <path>" />
+    <ResponseField name="-t <text>" />
+    <ResponseField name="--threshold <text>" />
+    <ResponseField name="--time[=<text>]" />
+    <ResponseField name="--time-style <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="df">
+  Show mount capacity, when available.
+  <Expandable title="8 flags">
+    <ResponseField name="-h, --human-readable" />
+    <ResponseField name="-H, --si" />
+    <ResponseField name="-k" />
+    <ResponseField name="-i, --inodes" />
+    <ResponseField name="-a, --all" />
+    <ResponseField name="-T, --print-type" />
+    <ResponseField name="-P, --portability" />
+    <ResponseField name="-B, --block-size <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="mount">
+  List configured mounts. Mounting is refused, as for an unprivileged user: mounts come from the configuration. `-t` filters the list.
+  <Expandable title="12 flags">
+    <ResponseField name="-a, --all">
+      Mount all filesystems mentioned in fstab.
+    </ResponseField>
+    <ResponseField name="-f, --fake">
+      Dry run; skip the mount(2) syscall.
+    </ResponseField>
+    <ResponseField name="-l, --show-labels">
+      Show also filesystem labels.
+    </ResponseField>
+    <ResponseField name="-n, --no-mtab">
+      Don't write to /etc/mtab.
+    </ResponseField>
+    <ResponseField name="-o, --options <text>">
+      Comma-separated list of mount options.
+    </ResponseField>
+    <ResponseField name="-r, --read-only">
+      Mount the filesystem read-only.
+    </ResponseField>
+    <ResponseField name="-t, --types <text>">
+      Limit the set of filesystem types.
+    </ResponseField>
+    <ResponseField name="-v, --verbose">
+      Say what is being done.
+    </ResponseField>
+    <ResponseField name="-w, --rw">
+      Mount the filesystem read-write (default).
+    </ResponseField>
+    <ResponseField name="-B, --bind">
+      Mount a subtree somewhere else.
+    </ResponseField>
+    <ResponseField name="-M, --move">
+      Move a subtree to some other place.
+    </ResponseField>
+    <ResponseField name="-R, --rbind">
+      Mount a subtree and all submounts somewhere else.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="file">
+  Identify content type.
+  <Expandable title="4 flags">
+    <ResponseField name="-b" />
+    <ResponseField name="-i" />
+    <ResponseField name="-L" />
+    <ResponseField name="-h" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="mkdir">
+  Create directories.
+  <Expandable title="4 flags">
+    <ResponseField name="-p, --parents" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-m, --mode <text>" />
+    <ResponseField name="-Z, --context[=<text>]" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="touch">
+  Create files or update timestamps.
+  <Expandable title="9 flags">
+    <ResponseField name="-a" />
+    <ResponseField name="-c, --no-create" />
+    <ResponseField name="-d, --date <text>" />
+    <ResponseField name="-f" />
+    <ResponseField name="-h, --no-dereference" />
+    <ResponseField name="-m" />
+    <ResponseField name="-r, --reference <path>" />
+    <ResponseField name="-t <text>" />
+    <ResponseField name="--time <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="cp">
+  Copy files or directories, including across mounts.
+  <Expandable title="27 flags">
+    <ResponseField name="--debug" />
+    <ResponseField name="-r" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="-a, --archive" />
+    <ResponseField name="-L, --dereference" />
+    <ResponseField name="-P, --no-dereference" />
+    <ResponseField name="-H" />
+    <ResponseField name="-d" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-i, --interactive" />
+    <ResponseField name="-n, --no-clobber" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-u, --update[=<text>]" />
+    <ResponseField name="-b, --backup[=<text>]" />
+    <ResponseField name="--strip-trailing-slashes" />
+    <ResponseField name="-t, --target-directory <path>" />
+    <ResponseField name="-T, --no-target-directory" />
+    <ResponseField name="-S, --suffix <text>" />
+    <ResponseField name="-x, --one-file-system" />
+    <ResponseField name="-p" />
+    <ResponseField name="--preserve[=<text>]" />
+    <ResponseField name="--no-preserve <text>" />
+    <ResponseField name="--parents" />
+    <ResponseField name="-l, --link" />
+    <ResponseField name="-s, --symbolic-link" />
+    <ResponseField name="--remove-destination" />
+    <ResponseField name="--attributes-only" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="mv">
+  Move or rename entries.
+  <Expandable title="12 flags">
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-i, --interactive" />
+    <ResponseField name="-n, --no-clobber" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-u, --update[=<text>]" />
+    <ResponseField name="-b, --backup[=<text>]" />
+    <ResponseField name="--strip-trailing-slashes" />
+    <ResponseField name="-t, --target-directory <path>" />
+    <ResponseField name="--no-copy" />
+    <ResponseField name="--exchange" />
+    <ResponseField name="-T, --no-target-directory" />
+    <ResponseField name="-S, --suffix <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="rm">
+  Remove entries.
+  <Expandable title="9 flags">
+    <ResponseField name="-r, -R, --recursive" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-d, --dir" />
+    <ResponseField name="-i" />
+    <ResponseField name="-I" />
+    <ResponseField name="--preserve-root" />
+    <ResponseField name="--no-preserve-root" />
+    <ResponseField name="--one-file-system" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="rmdir">
+  Remove empty directories.
+  <Expandable title="3 flags">
+    <ResponseField name="--ignore-fail-on-non-empty" />
+    <ResponseField name="-p, --parents" />
+    <ResponseField name="-v, --verbose" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="unlink">
+  Remove one entry.
+</ResponseField>
+<ResponseField name="truncate">
+  Resize a file.
+  <Expandable title="4 flags">
+    <ResponseField name="-c, --no-create" />
+    <ResponseField name="-s, --size <text>" />
+    <ResponseField name="-o, --io-blocks" />
+    <ResponseField name="-r, --reference <path>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="mktemp">
+  Create a temporary file or directory.
+  <Expandable title="7 flags">
+    <ResponseField name="-d, --directory" />
+    <ResponseField name="-p <path>" />
+    <ResponseField name="--tmpdir[=<path>]" />
+    <ResponseField name="-t" />
+    <ResponseField name="-u, --dry-run" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="--suffix <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="ln">
+  Create a symbolic link or copy a file's bytes.
+  <Expandable title="13 flags">
+    <ResponseField name="-S, --suffix <text>" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-n, --no-dereference" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-r, --relative" />
+    <ResponseField name="-L, --logical" />
+    <ResponseField name="-P, --physical" />
+    <ResponseField name="-d, --directory" />
+    <ResponseField name="-F" />
+    <ResponseField name="-b, --backup[=<text>]" />
+    <ResponseField name="-s, --symbolic" />
+    <ResponseField name="-t, --target-directory <path>" />
+    <ResponseField name="-T, --no-target-directory" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="link">
+  Copy a file's bytes to a new name.
+</ResponseField>
+<ResponseField name="pathchk">
+  Check that names are valid or portable.
+  <Expandable title="3 flags">
+    <ResponseField name="-p" />
+    <ResponseField name="-P" />
+    <ResponseField name="--portability" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="readlink">
+  Read a link or resolve its target.
+  <Expandable title="8 flags">
+    <ResponseField name="-f, --canonicalize" />
+    <ResponseField name="-e, --canonicalize-existing" />
+    <ResponseField name="-m, --canonicalize-missing" />
+    <ResponseField name="-n, --no-newline" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-s, --silent" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-z, --zero" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="realpath">
+  Resolve a path.
+  <Expandable title="10 flags">
+    <ResponseField name="-e, --canonicalize-existing" />
+    <ResponseField name="-m, --canonicalize-missing" />
+    <ResponseField name="-L, --logical" />
+    <ResponseField name="-P, --physical" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="--relative-to <text>" />
+    <ResponseField name="--relative-base <text>" />
+    <ResponseField name="-s, --strip" />
+    <ResponseField name="--no-symlinks" />
+    <ResponseField name="-z, --zero" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="basename">
+  Remove a directory prefix or suffix.
+  <Expandable title="3 flags">
+    <ResponseField name="-a, --multiple" />
+    <ResponseField name="-s, --suffix <text>" />
+    <ResponseField name="-z, --zero" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="dirname">
+  Print the parent path.
+  <Expandable title="1 flag">
+    <ResponseField name="-z, --zero" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="chmod">
+  Set permission metadata.
+  <Expandable title="11 flags">
+    <ResponseField name="-c, --changes" />
+    <ResponseField name="-f, --silent" />
+    <ResponseField name="--quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="--reference <path>" />
+    <ResponseField name="--preserve-root" />
+    <ResponseField name="--no-preserve-root" />
+    <ResponseField name="-H" />
+    <ResponseField name="-L" />
+    <ResponseField name="-P" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="chown">
+  Set owner or group metadata.
+  <Expandable title="14 flags">
+    <ResponseField name="-c, --changes" />
+    <ResponseField name="-f, --silent" />
+    <ResponseField name="--quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="--dereference" />
+    <ResponseField name="-h, --no-dereference" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="--reference <path>" />
+    <ResponseField name="--preserve-root" />
+    <ResponseField name="--no-preserve-root" />
+    <ResponseField name="-H" />
+    <ResponseField name="-L" />
+    <ResponseField name="-P" />
+    <ResponseField name="--from <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="chgrp">
+  Set owner or group metadata.
+  <Expandable title="13 flags">
+    <ResponseField name="-c, --changes" />
+    <ResponseField name="-f, --silent" />
+    <ResponseField name="--quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="--dereference" />
+    <ResponseField name="-h, --no-dereference" />
+    <ResponseField name="-R, --recursive" />
+    <ResponseField name="--reference <path>" />
+    <ResponseField name="--preserve-root" />
+    <ResponseField name="--no-preserve-root" />
+    <ResponseField name="-H" />
+    <ResponseField name="-L" />
+    <ResponseField name="-P" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="getfattr">
+  Read extended attributes.
+  <Expandable title="11 flags">
+    <ResponseField name="-n, --name <text>">
+      Get the named extended attribute value.
+    </ResponseField>
+    <ResponseField name="-d, --dump">
+      Get all extended attribute values.
+    </ResponseField>
+    <ResponseField name="-e, --encoding <text>">
+      Encode values (as 'text', 'hex' or 'base64').
+    </ResponseField>
+    <ResponseField name="-m, --match <text>">
+      Only get attributes with names matching pattern.
+    </ResponseField>
+    <ResponseField name="--only-values">
+      Print the bare values only.
+    </ResponseField>
+    <ResponseField name="-h, --no-dereference">
+      Do not dereference symbolic links.
+    </ResponseField>
+    <ResponseField name="--absolute-names">
+      Don't strip leading '/' in pathnames.
+    </ResponseField>
+    <ResponseField name="-R, --recursive">
+      Recurse into subdirectories.
+    </ResponseField>
+    <ResponseField name="-L, --logical">
+      Logical walk, follow symbolic links.
+    </ResponseField>
+    <ResponseField name="-P, --physical">
+      Physical walk, do not follow symbolic links.
+    </ResponseField>
+    <ResponseField name="--one-file-system">
+      Stay on the mount each path starts on.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="setfattr">
+  Set or remove an extended attribute.
+  <Expandable title="6 flags">
+    <ResponseField name="-n, --name <text>">
+      Set the value of the named extended attribute.
+    </ResponseField>
+    <ResponseField name="-x, --remove <text>">
+      Remove the named extended attribute.
+    </ResponseField>
+    <ResponseField name="-v, --value <text>">
+      Use value as the attribute value.
+    </ResponseField>
+    <ResponseField name="-h, --no-dereference">
+      Do not dereference symbolic links.
+    </ResponseField>
+    <ResponseField name="--raw">
+      Store each value exactly as typed, undecoded.
+    </ResponseField>
+    <ResponseField name="--restore <text>">
+      Set the attributes a getfattr --dump listing names.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Files and directories */}
 
 ## Search and compare
 
-| Command | Purpose | Common flags |
-| --- | --- | --- |
-| `find` | Select paths and run actions | `-name`, `-iname`, `-path`, `-type`, `-size`, `-mtime`, `-newer`, `-anewer`, `-cnewer`, `-newermt`, `-used`, `-inum`, `-fstype`, `-fls`, `-empty`, `-mindepth`, `-maxdepth`, `-print0`, `-printf`, `-delete`, `-exec`, `-prune`, `-ls`, `-L`, `-xdev` |
-| `grep` | Search lines | `-E`, `-F`, `-G`, `-P`, `-i`, `-v`, `-n`, `-r`, `-R`, `-l`, `-c`, `-o`, `-q`, `-e`, `-f`, `-A`, `-B`, `-C`, `--include`, `--exclude` |
-| `rg` | Search recursively with path filters | `-i`, `-S`, `-F`, `-n`, `-l`, `-c`, `-g`, `-t`, `-T`, `--hidden`, `--files`, `--json`, `-U`, `-P`, `-z`, `--pre` |
-| `search` | Search through a backend's search capability | `--method`, `--top-k`, `--threshold` |
-| `diff` | Compare text files or directory trees | `-u`, `-U N`, `-q`, `-r`, `-N`, `-i`, `-w`, `-b`, `-x`, `-X` |
-| `cmp` | Compare bytes | `-s`, `-l`, `-b`, `-n N`, `-i SKIP` |
-| `patch` | Apply a patch | `-p N`, `-R`, `-i FILE`, `-N` |
-| `look` | Find lines with a prefix | `-f` |
+{/* BEGIN GENERATED COMMANDS: Search and compare */}
+<ResponseField name="find">
+  Select paths and run actions.
+  <Expandable title="77 flags">
+    <ResponseField name="-name <text>" />
+    <ResponseField name="-type <text>" />
+    <ResponseField name="-maxdepth <text>" />
+    <ResponseField name="-size <text>" />
+    <ResponseField name="-mtime <text>" />
+    <ResponseField name="-iname <text>" />
+    <ResponseField name="-path <text>" />
+    <ResponseField name="-mindepth <text>" />
+    <ResponseField name="-printf <text>" />
+    <ResponseField name="-newer <text>" />
+    <ResponseField name="-newermt <text>" />
+    <ResponseField name="-anewer <text>" />
+    <ResponseField name="-cnewer <text>" />
+    <ResponseField name="-inum <text>" />
+    <ResponseField name="-used <text>" />
+    <ResponseField name="-fstype <text>" />
+    <ResponseField name="-fls <text>" />
+    <ResponseField name="-ipath <text>" />
+    <ResponseField name="-wholename <text>" />
+    <ResponseField name="-iwholename <text>" />
+    <ResponseField name="-regex <text>" />
+    <ResponseField name="-iregex <text>" />
+    <ResponseField name="-regextype <text>" />
+    <ResponseField name="-lname <text>" />
+    <ResponseField name="-ilname <text>" />
+    <ResponseField name="-xtype <text>" />
+    <ResponseField name="-perm <text>" />
+    <ResponseField name="-links <text>" />
+    <ResponseField name="-atime <text>" />
+    <ResponseField name="-ctime <text>" />
+    <ResponseField name="-mmin <text>" />
+    <ResponseField name="-amin <text>" />
+    <ResponseField name="-cmin <text>" />
+    <ResponseField name="-user <text>" />
+    <ResponseField name="-group <text>" />
+    <ResponseField name="-uid <text>" />
+    <ResponseField name="-gid <text>" />
+    <ResponseField name="-fprint <text>" />
+    <ResponseField name="-fprint0 <text>" />
+    <ResponseField name="-fprintf <text> <text>" />
+    <ResponseField name="-files0-from <text>" />
+    <ResponseField name="-P" />
+    <ResponseField name="-H" />
+    <ResponseField name="-L" />
+    <ResponseField name="-print" />
+    <ResponseField name="-print0" />
+    <ResponseField name="-delete" />
+    <ResponseField name="-depth" />
+    <ResponseField name="-xdev" />
+    <ResponseField name="-noleaf" />
+    <ResponseField name="-warn" />
+    <ResponseField name="-nowarn" />
+    <ResponseField name="-ignore_readdir_race" />
+    <ResponseField name="-noignore_readdir_race" />
+    <ResponseField name="-mount" />
+    <ResponseField name="-prune" />
+    <ResponseField name="-ls" />
+    <ResponseField name="-empty" />
+    <ResponseField name="-quit" />
+    <ResponseField name="-true" />
+    <ResponseField name="-false" />
+    <ResponseField name="-readable" />
+    <ResponseField name="-writable" />
+    <ResponseField name="-executable" />
+    <ResponseField name="-nouser" />
+    <ResponseField name="-nogroup" />
+    <ResponseField name="-daystart" />
+    <ResponseField name="-follow" />
+    <ResponseField name="-o" />
+    <ResponseField name="-or" />
+    <ResponseField name="-a" />
+    <ResponseField name="-and" />
+    <ResponseField name="-not" />
+    <ResponseField name="-exec <command> ;">
+      Run a command on each path, `&#123;&#125;` standing for it.
+    </ResponseField>
+    <ResponseField name="-exec <command> {} +">
+      Run a command once on many paths.
+    </ResponseField>
+    <ResponseField name="-execdir <command> ;">
+      Run a command from each path's directory.
+    </ResponseField>
+    <ResponseField name="-execdir <command> {} +">
+      Run a command once per directory.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="grep">
+  Search lines.
+  <Expandable title="48 flags">
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-R, --dereference-recursive" />
+    <ResponseField name="-d, --directories <text>" />
+    <ResponseField name="-D, --devices <text>" />
+    <ResponseField name="-i, -y, --ignore-case" />
+    <ResponseField name="--no-ignore-case" />
+    <ResponseField name="-I" />
+    <ResponseField name="-v, --invert-match" />
+    <ResponseField name="-n, --line-number" />
+    <ResponseField name="--binary-files <text>" />
+    <ResponseField name="-c, --count" />
+    <ResponseField name="-l, --files-with-matches" />
+    <ResponseField name="-L, --files-without-match" />
+    <ResponseField name="-w, --word-regexp" />
+    <ResponseField name="-x, --line-regexp" />
+    <ResponseField name="-F, --fixed-strings, --fixed-regexp" />
+    <ResponseField name="-E, --extended-regexp" />
+    <ResponseField name="-G, --basic-regexp" />
+    <ResponseField name="-P, --perl-regexp" />
+    <ResponseField name="-z, --null-data" />
+    <ResponseField name="-o, --only-matching" />
+    <ResponseField name="-q, --quiet, --silent" />
+    <ResponseField name="-s, --no-messages" />
+    <ResponseField name="-H, --with-filename" />
+    <ResponseField name="-h, --no-filename" />
+    <ResponseField name="--label <text>" />
+    <ResponseField name="-Z, --null" />
+    <ResponseField name="-T, --initial-tab" />
+    <ResponseField name="-m, --max-count <text>" />
+    <ResponseField name="-A, --after-context <text>" />
+    <ResponseField name="-B, --before-context <text>" />
+    <ResponseField name="-C, --context <text>" />
+    <ResponseField name="--group-separator <text>" />
+    <ResponseField name="--no-group-separator" />
+    <ResponseField name="-e, --regexp <text>" />
+    <ResponseField name="-f, --file <path>" />
+    <ResponseField name="-a, --text" />
+    <ResponseField name="-b, --byte-offset" />
+    <ResponseField name="--include <text>" />
+    <ResponseField name="--exclude <text>" />
+    <ResponseField name="--exclude-from <path>" />
+    <ResponseField name="--exclude-dir <text>" />
+    <ResponseField name="-V" />
+    <ResponseField name="--color[=<text>]" />
+    <ResponseField name="--colour[=<text>]" />
+    <ResponseField name="--line-buffered" />
+    <ResponseField name="-U, --binary" />
+    <ResponseField name="-u, --unix-byte-offsets" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="rg">
+  Search recursively with path filters.
+  <Expandable title="146 flags">
+    <ResponseField name="-e, --regexp <text>" />
+    <ResponseField name="-f, --file <path>" />
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-s, --case-sensitive" />
+    <ResponseField name="-S, --smart-case" />
+    <ResponseField name="-v, --invert-match" />
+    <ResponseField name="--no-invert-match" />
+    <ResponseField name="-w, --word-regexp" />
+    <ResponseField name="-x, --line-regexp" />
+    <ResponseField name="-F, --fixed-strings" />
+    <ResponseField name="--no-fixed-strings" />
+    <ResponseField name="-m, --max-count <text>" />
+    <ResponseField name="--stop-on-nonmatch" />
+    <ResponseField name="-n, --line-number" />
+    <ResponseField name="-N, --no-line-number" />
+    <ResponseField name="-b, --byte-offset" />
+    <ResponseField name="--no-byte-offset" />
+    <ResponseField name="--column" />
+    <ResponseField name="--no-column" />
+    <ResponseField name="--vimgrep" />
+    <ResponseField name="-o, --only-matching" />
+    <ResponseField name="-r, --replace <text>" />
+    <ResponseField name="--trim" />
+    <ResponseField name="--no-trim" />
+    <ResponseField name="-M, --max-columns <text>" />
+    <ResponseField name="--max-columns-preview" />
+    <ResponseField name="--no-max-columns-preview" />
+    <ResponseField name="-0, --null" />
+    <ResponseField name="--null-data" />
+    <ResponseField name="--path-separator <text>" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-c, --count" />
+    <ResponseField name="--count-matches" />
+    <ResponseField name="--include-zero" />
+    <ResponseField name="--no-include-zero" />
+    <ResponseField name="-l, --files-with-matches" />
+    <ResponseField name="--files-without-match" />
+    <ResponseField name="--files" />
+    <ResponseField name="--type-list" />
+    <ResponseField name="-H, --with-filename" />
+    <ResponseField name="-I, --no-filename" />
+    <ResponseField name="--heading" />
+    <ResponseField name="--no-heading" />
+    <ResponseField name="-A, --after-context <text>" />
+    <ResponseField name="-B, --before-context <text>" />
+    <ResponseField name="-C, --context <text>" />
+    <ResponseField name="--passthru" />
+    <ResponseField name="--passthrough" />
+    <ResponseField name="--context-separator <text>" />
+    <ResponseField name="--no-context-separator" />
+    <ResponseField name="--field-match-separator <text>" />
+    <ResponseField name="--field-context-separator <text>" />
+    <ResponseField name="-g, --glob <text>" />
+    <ResponseField name="--iglob <text>" />
+    <ResponseField name="--glob-case-insensitive" />
+    <ResponseField name="--no-glob-case-insensitive" />
+    <ResponseField name="-t, --type <text>" />
+    <ResponseField name="-T, --type-not <text>" />
+    <ResponseField name="--type-add <text>" />
+    <ResponseField name="--type-clear <text>" />
+    <ResponseField name="-., --hidden" />
+    <ResponseField name="--no-hidden" />
+    <ResponseField name="-u, --unrestricted" />
+    <ResponseField name="-d, --max-depth, --maxdepth <text>" />
+    <ResponseField name="--max-filesize <text>" />
+    <ResponseField name="-L, --follow" />
+    <ResponseField name="--one-file-system" />
+    <ResponseField name="--no-one-file-system" />
+    <ResponseField name="-a, --text" />
+    <ResponseField name="--no-text" />
+    <ResponseField name="--binary" />
+    <ResponseField name="--no-binary" />
+    <ResponseField name="--sort <text>" />
+    <ResponseField name="--sortr <text>" />
+    <ResponseField name="--sort-files" />
+    <ResponseField name="--no-sort-files" />
+    <ResponseField name="--no-messages" />
+    <ResponseField name="--messages" />
+    <ResponseField name="--no-ignore" />
+    <ResponseField name="--ignore" />
+    <ResponseField name="--no-ignore-dot" />
+    <ResponseField name="--ignore-dot" />
+    <ResponseField name="--no-ignore-exclude" />
+    <ResponseField name="--ignore-exclude" />
+    <ResponseField name="--ignore-file <path>" />
+    <ResponseField name="--no-ignore-files" />
+    <ResponseField name="--ignore-files" />
+    <ResponseField name="--no-ignore-global" />
+    <ResponseField name="--ignore-global" />
+    <ResponseField name="--no-ignore-messages" />
+    <ResponseField name="--ignore-messages" />
+    <ResponseField name="--no-ignore-parent" />
+    <ResponseField name="--ignore-parent" />
+    <ResponseField name="--no-ignore-vcs" />
+    <ResponseField name="--ignore-vcs" />
+    <ResponseField name="--no-require-git" />
+    <ResponseField name="--require-git" />
+    <ResponseField name="--ignore-file-case-insensitive" />
+    <ResponseField name="--no-ignore-file-case-insensitive" />
+    <ResponseField name="--no-config" />
+    <ResponseField name="-j, --threads <text>" />
+    <ResponseField name="--line-buffered" />
+    <ResponseField name="--no-line-buffered" />
+    <ResponseField name="--block-buffered" />
+    <ResponseField name="--no-block-buffered" />
+    <ResponseField name="--mmap" />
+    <ResponseField name="--no-mmap" />
+    <ResponseField name="--no-follow" />
+    <ResponseField name="--stats" />
+    <ResponseField name="--no-stats" />
+    <ResponseField name="--json" />
+    <ResponseField name="--crlf" />
+    <ResponseField name="--no-crlf" />
+    <ResponseField name="-U, --multiline" />
+    <ResponseField name="--no-multiline" />
+    <ResponseField name="--multiline-dotall" />
+    <ResponseField name="--no-multiline-dotall" />
+    <ResponseField name="-P, --pcre2" />
+    <ResponseField name="--no-pcre2" />
+    <ResponseField name="--engine <text>" />
+    <ResponseField name="--no-json" />
+    <ResponseField name="-z, --search-zip" />
+    <ResponseField name="--no-search-zip" />
+    <ResponseField name="-E, --encoding <text>" />
+    <ResponseField name="--no-encoding" />
+    <ResponseField name="--pre <text>" />
+    <ResponseField name="--pre-glob <text>" />
+    <ResponseField name="--no-pre" />
+    <ResponseField name="--unicode" />
+    <ResponseField name="--no-unicode" />
+    <ResponseField name="--pcre2-unicode" />
+    <ResponseField name="--no-pcre2-unicode" />
+    <ResponseField name="--auto-hybrid-regex" />
+    <ResponseField name="--no-auto-hybrid-regex" />
+    <ResponseField name="--color <text>" />
+    <ResponseField name="-p, --pretty" />
+    <ResponseField name="--colors <text>" />
+    <ResponseField name="--hyperlink-format <text>" />
+    <ResponseField name="--hostname-bin <text>" />
+    <ResponseField name="--dfa-size-limit <text>" />
+    <ResponseField name="--regex-size-limit <text>" />
+    <ResponseField name="--debug" />
+    <ResponseField name="--trace" />
+    <ResponseField name="-h" />
+    <ResponseField name="-V" />
+    <ResponseField name="--pcre2-version" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="search">
+  Search through a backend's search capability.
+  <Expandable title="3 flags">
+    <ResponseField name="--method <text>">
+      Ranking method: semantic (default); Dify also takes fulltext, hybrid and keyword.
+    </ResponseField>
+    <ResponseField name="--top-k <text>">
+      Most hits to print; the mount's default when absent.
+    </ResponseField>
+    <ResponseField name="--threshold <text>">
+      Lowest score a hit needs, or on LanceDB the largest distance it may have; 0 keeps every hit.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="diff">
+  Compare text files or directory trees.
+  <Expandable title="37 flags">
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-w, --ignore-all-space" />
+    <ResponseField name="-b, --ignore-space-change" />
+    <ResponseField name="-E, --ignore-tab-expansion" />
+    <ResponseField name="-Z, --ignore-trailing-space" />
+    <ResponseField name="-B, --ignore-blank-lines" />
+    <ResponseField name="-I, --ignore-matching-lines <text>" />
+    <ResponseField name="--strip-trailing-cr" />
+    <ResponseField name="--speed-large-files" />
+    <ResponseField name="--horizon-lines <text>" />
+    <ResponseField name="-a, --text" />
+    <ResponseField name="--normal" />
+    <ResponseField name="-e, --ed" />
+    <ResponseField name="-n, --rcs" />
+    <ResponseField name="-c" />
+    <ResponseField name="-C <text>" />
+    <ResponseField name="--context[=<text>]" />
+    <ResponseField name="-u" />
+    <ResponseField name="-U <text>" />
+    <ResponseField name="--unified[=<text>]" />
+    <ResponseField name="-y, --side-by-side" />
+    <ResponseField name="-W, --width <text>" />
+    <ResponseField name="--left-column" />
+    <ResponseField name="--suppress-common-lines" />
+    <ResponseField name="-p, --show-c-function" />
+    <ResponseField name="-F, --show-function-line <text>" />
+    <ResponseField name="-t, --expand-tabs" />
+    <ResponseField name="-T, --initial-tab" />
+    <ResponseField name="-L, --label <text>" />
+    <ResponseField name="--color[=<text>]" />
+    <ResponseField name="-q, --brief" />
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-N, --new-file" />
+    <ResponseField name="--unidirectional-new-file" />
+    <ResponseField name="-x, --exclude <text>" />
+    <ResponseField name="-X, --exclude-from <path>" />
+    <ResponseField name="-s, --report-identical-files" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="cmp">
+  Compare bytes.
+  <Expandable title="6 flags">
+    <ResponseField name="-l, --verbose" />
+    <ResponseField name="-s, --quiet" />
+    <ResponseField name="--silent" />
+    <ResponseField name="-n, --bytes <text>" />
+    <ResponseField name="-b, --print-bytes" />
+    <ResponseField name="-i, --ignore-initial <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="patch">
+  Apply a patch.
+  <Expandable title="20 flags">
+    <ResponseField name="-p <text>" />
+    <ResponseField name="-R" />
+    <ResponseField name="-i <path>" />
+    <ResponseField name="-N" />
+    <ResponseField name="-d, --directory <text>" />
+    <ResponseField name="--dry-run" />
+    <ResponseField name="-b, --backup" />
+    <ResponseField name="-z, --suffix <text>" />
+    <ResponseField name="-B, --prefix <text>" />
+    <ResponseField name="-V, --version-control <text>" />
+    <ResponseField name="-o, --output <text>" />
+    <ResponseField name="-r, --reject-file <text>" />
+    <ResponseField name="-s, --silent, --quiet" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-t, --batch" />
+    <ResponseField name="-l, --ignore-whitespace" />
+    <ResponseField name="-F, --fuzz <text>" />
+    <ResponseField name="-E, --remove-empty-files" />
+    <ResponseField name="-u, --unified" />
+    <ResponseField name="--verbose" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="look">
+  Find lines with a prefix.
+  <Expandable title="3 flags">
+    <ResponseField name="-f, --ignore-case" />
+    <ResponseField name="-d, --alphanum" />
+    <ResponseField name="-t, --terminate <text>" />
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Search and compare */}
 
-`egrep`, `fgrep` and `rgrep` invoke `grep` with `-E`, `-F` and `-r` respectively. `zcmp` and `zdiff` compare gzip files with `cmp` and `diff`. Compressed-file search is covered under [Data & Network](/home/core/data-network#archives-and-compression).
+`egrep`, `fgrep` and `rgrep` invoke `grep` with `-E`, `-F` and `-r` respectively. `zcmp` and `zdiff` compare gzip files with `cmp` and `diff`. Compressed-file search is covered under [Data & Network](/home/core/data#archives-and-compression).
 
 ## Text processing
 
-| Command | Purpose | Common flags |
-| --- | --- | --- |
-| `cat` | Read and concatenate files | `-n`, `-b`, `-s`, `-v`, `-E`, `-T`, `-A` |
-| `head` | Read the beginning | `-n N`, `-c N`, `-q`, `-v`, `-z` |
-| `tail` | Read the end or follow changes | `-n N`, `-c N`, `-q`, `-v`, `-f`, `-F`, `--retry`, `-s SECONDS` |
-| `wc` | Count lines, words, bytes, or characters | `-l`, `-w`, `-c`, `-m`, `-L`, `--total` |
-| `sort` | Order lines | `-n`, `-r`, `-u`, `-k KEY`, `-t CHAR`, `-h`, `-V`, `-s`, `-f`, `-c`, `-m`, `-o FILE`, `-z` |
-| `uniq` | Filter adjacent repeated lines | `-c`, `-d`, `-u`, `-i`, `-f N`, `-s N`, `-w N`, `-z` |
-| `cut` | Select fields, bytes, or characters | `-f LIST`, `-d CHAR`, `-b LIST`, `-c LIST`, `--complement`, `--output-delimiter`, `-s`, `-z` |
-| `tr` | Translate, delete, or squeeze characters | `-d`, `-s`, `-c`, `-C`, `-t` |
-| `sed` | Edit a text stream | `-e SCRIPT`, `-f FILE`, `-n`, `-E`, `-r`, `-i`, `-s`, `-l WIDTH` |
-| `awk` | Process records and fields | `-F SEPARATOR`, `-v NAME=VALUE`, `-f FILE` |
-| `tee` | Copy stdin to stdout and files | `-a`, `-i`, `-p`, `--output-error` |
-| `paste` | Combine lines into columns | `-d DELIMITERS`, `-s`, `-z` |
-| `join` | Join sorted files on a field | `-1 FIELD`, `-2 FIELD`, `-t CHAR`, `-a`, `-v`, `-e`, `-o`, `-i`, `--header`, `-z` |
-| `comm` | Compare sorted lines | `-1`, `-2`, `-3`, `--check-order`, `--total`, `-z` |
-| `split` | Split input into files | `-l N`, `-b SIZE`, `-n CHUNKS`, `-d`, `-x`, `-a N`, `--additional-suffix` |
-| `csplit` | Split at line numbers or patterns | `-f PREFIX`, `-n DIGITS`, `-b FORMAT`, `-k`, `-s`, `-z` |
-| `nl` | Number lines | `-b STYLE`, `-n FORMAT`, `-s STRING`, `-w WIDTH`, `-v START`, `-i STEP` |
-| `tac` | Reverse record order | `-b`, `-r`, `-s SEPARATOR` |
-| `rev` | Reverse characters in each line | No command-specific flags |
-| `column` | Arrange text into columns | `-t`, `-s SEPARATORS`, `-o SEPARATOR` |
-| `fold` | Wrap long lines | `-w WIDTH`, `-s`, `-b`, `-c` |
-| `fmt` | Reflow paragraphs | `-w WIDTH`, `-g GOAL`, `-c`, `-p PREFIX`, `-s`, `-t`, `-u` |
-| `expand`, `unexpand` | Convert tabs and spaces | `-t TABS`; `expand -i`; `unexpand -a`, `--first-only` |
-| `strings` | Extract printable strings | `-n LENGTH` |
-| `seq` | Generate a number sequence | `-s SEPARATOR`, `-w`, `-f FORMAT` |
-| `shuf` | Shuffle or sample lines | `-n N`, `-e`, `-r`, `-i RANGE`, `-o FILE`, `-z` |
-| `tsort` | Sort dependency pairs | No command-specific flags |
-| `colrm` | Remove columns from each line | `START`, `STOP` |
-| `envsubst` | Fill environment variables into text | `-v`, `SHELL-FORMAT` |
-| `yes` | Repeat a line until the reader stops | `STRING` |
-| `numfmt` | Convert numeric units | `--from`, `--to`, `--suffix`, `--grouping` |
+{/* BEGIN GENERATED COMMANDS: Text processing */}
+<ResponseField name="cat">
+  Read and concatenate files.
+  <Expandable title="10 flags">
+    <ResponseField name="-b, --number-nonblank" />
+    <ResponseField name="-n, --number" />
+    <ResponseField name="-s, --squeeze-blank" />
+    <ResponseField name="-v, --show-nonprinting" />
+    <ResponseField name="-E, --show-ends" />
+    <ResponseField name="-e" />
+    <ResponseField name="-t" />
+    <ResponseField name="-T, --show-tabs" />
+    <ResponseField name="-A, --show-all" />
+    <ResponseField name="-u" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="head">
+  Read the beginning.
+  <Expandable title="6 flags">
+    <ResponseField name="-n, --lines <text>" />
+    <ResponseField name="-c, --bytes <text>" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="--silent" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tail">
+  Read the end or follow changes.
+  <Expandable title="12 flags">
+    <ResponseField name="-n, --lines <text>" />
+    <ResponseField name="-c, --bytes <text>" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="--silent" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-z, --zero-terminated" />
+    <ResponseField name="-f, --follow[=<text>]" />
+    <ResponseField name="-F" />
+    <ResponseField name="--retry" />
+    <ResponseField name="-s, --sleep-interval <text>" />
+    <ResponseField name="--pid <text>" />
+    <ResponseField name="--max-unchanged-stats <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="wc">
+  Count lines, words, bytes, or characters.
+  <Expandable title="7 flags">
+    <ResponseField name="-l, --lines" />
+    <ResponseField name="-w, --words" />
+    <ResponseField name="-c, --bytes" />
+    <ResponseField name="-m, --chars" />
+    <ResponseField name="-L, --max-line-length" />
+    <ResponseField name="--total <text>" />
+    <ResponseField name="--files0-from <path>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="sort">
+  Order lines.
+  <Expandable title="25 flags">
+    <ResponseField name="-r, --reverse" />
+    <ResponseField name="-n, --numeric-sort" />
+    <ResponseField name="-u, --unique" />
+    <ResponseField name="-b, --ignore-leading-blanks" />
+    <ResponseField name="-k, --key <text>" />
+    <ResponseField name="-t, --field-separator <text>" />
+    <ResponseField name="-h, --human-numeric-sort" />
+    <ResponseField name="-V, --version-sort" />
+    <ResponseField name="-s, --stable" />
+    <ResponseField name="-m, --merge" />
+    <ResponseField name="-f, --ignore-case" />
+    <ResponseField name="-c" />
+    <ResponseField name="-C" />
+    <ResponseField name="--check[=<text>]" />
+    <ResponseField name="-d, --dictionary-order" />
+    <ResponseField name="-g, --general-numeric-sort" />
+    <ResponseField name="-i, --ignore-nonprinting" />
+    <ResponseField name="-M, --month-sort" />
+    <ResponseField name="-o, --output <path>" />
+    <ResponseField name="-z, --zero-terminated" />
+    <ResponseField name="-R, --random-sort" />
+    <ResponseField name="--random-source <path>" />
+    <ResponseField name="--files0-from <path>" />
+    <ResponseField name="--batch-size <text>" />
+    <ResponseField name="--compress-program <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="uniq">
+  Filter adjacent repeated lines.
+  <Expandable title="11 flags">
+    <ResponseField name="-c, --count" />
+    <ResponseField name="-d, --repeated" />
+    <ResponseField name="-D" />
+    <ResponseField name="--all-repeated[=<text>]" />
+    <ResponseField name="--group[=<text>]" />
+    <ResponseField name="-u, --unique" />
+    <ResponseField name="-f, --skip-fields <text>" />
+    <ResponseField name="-s, --skip-chars <text>" />
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-w, --check-chars <text>" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="cut">
+  Select fields, bytes, or characters.
+  <Expandable title="13 flags">
+    <ResponseField name="-f, --fields <text>" />
+    <ResponseField name="-F <text>" />
+    <ResponseField name="-d, --delimiter <text>" />
+    <ResponseField name="-c, --characters <text>" />
+    <ResponseField name="-b, --bytes <text>" />
+    <ResponseField name="-n, --no-partial" />
+    <ResponseField name="--complement" />
+    <ResponseField name="-s, --only-delimited" />
+    <ResponseField name="-O <text>" />
+    <ResponseField name="--output-delimiter <text>" />
+    <ResponseField name="-w" />
+    <ResponseField name="--whitespace-delimited[=<text>]" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tr">
+  Translate, delete, or squeeze characters.
+  <Expandable title="5 flags">
+    <ResponseField name="-d, --delete" />
+    <ResponseField name="-s, --squeeze-repeats" />
+    <ResponseField name="-c, --complement" />
+    <ResponseField name="-C" />
+    <ResponseField name="-t, --truncate-set1" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="sed">
+  Edit a text stream.
+  <Expandable title="14 flags">
+    <ResponseField name="-i[<SUFFIX>], --in-place[=<SUFFIX>]">
+      Rewrite each file; -iSUFFIX keeps a backup.
+    </ResponseField>
+    <ResponseField name="-e, --expression <SCRIPT>">
+      One piece of the script, joined in order.
+    </ResponseField>
+    <ResponseField name="-f, --file <FILE>">
+      Read a piece of the script from FILE.
+    </ResponseField>
+    <ResponseField name="--follow-symlinks">
+      With -i, rewrite what a link points to.
+    </ResponseField>
+    <ResponseField name="-n, --quiet, --silent">
+      Print only what the script prints.
+    </ResponseField>
+    <ResponseField name="--debug">
+      Show the program and trace each command.
+    </ResponseField>
+    <ResponseField name="-E, -r, --regexp-extended">
+      Read regular expressions as ERE.
+    </ResponseField>
+    <ResponseField name="-l, --line-length <N>">
+      Wrap l output at N chars; 0 never wraps.
+    </ResponseField>
+    <ResponseField name="--posix">
+      Refuse what POSIX sed does not have.
+    </ResponseField>
+    <ResponseField name="--sandbox">
+      Refuse running programs and opening files.
+    </ResponseField>
+    <ResponseField name="-s, --separate">
+      Number lines and match $ per file.
+    </ResponseField>
+    <ResponseField name="-u, --unbuffered">
+      Read only as far as each line needs.
+    </ResponseField>
+    <ResponseField name="-z, --null-data, --zero-terminated">
+      Lines end at NUL, not newline.
+    </ResponseField>
+    <ResponseField name="-b, --binary">
+      Accepted; input is always raw bytes.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="awk">
+  Process records and fields.
+  <Expandable title="3 flags">
+    <ResponseField name="-F <text>" />
+    <ResponseField name="-v <text>" />
+    <ResponseField name="-f <path>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tee">
+  Copy stdin to stdout and files.
+  <Expandable title="4 flags">
+    <ResponseField name="-a, --append" />
+    <ResponseField name="-i, --ignore-interrupts" />
+    <ResponseField name="-p" />
+    <ResponseField name="--output-error[=<text>]" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="paste">
+  Combine lines into columns.
+  <Expandable title="3 flags">
+    <ResponseField name="-d, --delimiters <text>" />
+    <ResponseField name="-s, --serial" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="join">
+  Join sorted files on a field.
+  <Expandable title="13 flags">
+    <ResponseField name="-t <text>" />
+    <ResponseField name="-1 <text>" />
+    <ResponseField name="-2 <text>" />
+    <ResponseField name="-a <text>" />
+    <ResponseField name="-v <text>" />
+    <ResponseField name="-e <text>" />
+    <ResponseField name="-o <text>" />
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-j <text>" />
+    <ResponseField name="-z, --zero-terminated" />
+    <ResponseField name="--check-order" />
+    <ResponseField name="--nocheck-order" />
+    <ResponseField name="--header" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="comm">
+  Compare sorted lines.
+  <Expandable title="8 flags">
+    <ResponseField name="-1" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="--check-order" />
+    <ResponseField name="--nocheck-order" />
+    <ResponseField name="--output-delimiter <text>" />
+    <ResponseField name="--total" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="split">
+  Split input into files.
+  <Expandable title="12 flags">
+    <ResponseField name="-l, --lines <text>" />
+    <ResponseField name="-b, --bytes <text>" />
+    <ResponseField name="-C, --line-bytes <text>" />
+    <ResponseField name="-n, --number <text>" />
+    <ResponseField name="-e, --elide-empty-files" />
+    <ResponseField name="-u, --unbuffered" />
+    <ResponseField name="--verbose" />
+    <ResponseField name="-d, --numeric-suffixes[=<text>]" />
+    <ResponseField name="-x, --hex-suffixes[=<text>]" />
+    <ResponseField name="-a, --suffix-length <text>" />
+    <ResponseField name="--additional-suffix <text>" />
+    <ResponseField name="-t, --separator <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="csplit">
+  Split at line numbers or patterns.
+  <Expandable title="8 flags">
+    <ResponseField name="-f, --prefix <path>" />
+    <ResponseField name="-n, --digits <text>" />
+    <ResponseField name="--silent" />
+    <ResponseField name="-k, --keep-files" />
+    <ResponseField name="-s, --quiet" />
+    <ResponseField name="-b, --suffix-format <text>" />
+    <ResponseField name="--suppress-matched" />
+    <ResponseField name="-z, --elide-empty-files" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="nl">
+  Number lines.
+  <Expandable title="11 flags">
+    <ResponseField name="-b, --body-numbering <text>" />
+    <ResponseField name="-v, --starting-line-number <text>" />
+    <ResponseField name="-f, --footer-numbering <text>" />
+    <ResponseField name="-h, --header-numbering <text>" />
+    <ResponseField name="-l, --join-blank-lines <text>" />
+    <ResponseField name="-p, --no-renumber" />
+    <ResponseField name="-s, --number-separator <text>" />
+    <ResponseField name="-d, --section-delimiter <text>" />
+    <ResponseField name="-i, --line-increment <text>" />
+    <ResponseField name="-w, --number-width <text>" />
+    <ResponseField name="-n, --number-format <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tac">
+  Reverse record order.
+  <Expandable title="3 flags">
+    <ResponseField name="-b, --before" />
+    <ResponseField name="-r, --regex" />
+    <ResponseField name="-s, --separator <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="rev">
+  Reverse characters in each line.
+  <Expandable title="1 flag">
+    <ResponseField name="-0, --zero" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="column">
+  Arrange text into columns.
+  <Expandable title="19 flags">
+    <ResponseField name="-t, --table" />
+    <ResponseField name="-s, --separator <text>" />
+    <ResponseField name="-o, --output-separator <text>" />
+    <ResponseField name="-c, --output-width <text>" />
+    <ResponseField name="-x, --fillrows" />
+    <ResponseField name="-J, --json" />
+    <ResponseField name="-n, --table-name <text>" />
+    <ResponseField name="-N, --table-columns <text>" />
+    <ResponseField name="-C, --table-column <text>" />
+    <ResponseField name="-O, --table-order <text>" />
+    <ResponseField name="-l, --table-columns-limit <text>" />
+    <ResponseField name="-R, --table-right <text>" />
+    <ResponseField name="-H, --table-hide <text>" />
+    <ResponseField name="-T, --table-truncate <text>" />
+    <ResponseField name="-W, --table-wrap <text>" />
+    <ResponseField name="-E, --table-noextreme <text>" />
+    <ResponseField name="-d, --table-noheadings" />
+    <ResponseField name="-m, --table-maxout" />
+    <ResponseField name="-e, --table-header-repeat" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="fold">
+  Wrap long lines.
+  <Expandable title="4 flags">
+    <ResponseField name="-w, --width <text>" />
+    <ResponseField name="-s, --spaces" />
+    <ResponseField name="-b, --bytes" />
+    <ResponseField name="-c, --characters" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="fmt">
+  Reflow paragraphs.
+  <Expandable title="7 flags">
+    <ResponseField name="-w, --width <text>" />
+    <ResponseField name="-g, --goal <text>" />
+    <ResponseField name="-c, --crown-margin" />
+    <ResponseField name="-p, --prefix <text>" />
+    <ResponseField name="-s, --split-only" />
+    <ResponseField name="-t, --tagged-paragraph" />
+    <ResponseField name="-u, --uniform-spacing" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="expand">
+  Convert tabs and spaces.
+  <Expandable title="2 flags">
+    <ResponseField name="-t, --tabs <text>" />
+    <ResponseField name="-i, --initial" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="unexpand">
+  Convert tabs and spaces.
+  <Expandable title="3 flags">
+    <ResponseField name="-t, --tabs <text>" />
+    <ResponseField name="-a, --all" />
+    <ResponseField name="--first-only" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="strings">
+  Extract printable strings.
+  <Expandable title="10 flags">
+    <ResponseField name="-a, --all">
+      Read the whole file (always so).
+    </ResponseField>
+    <ResponseField name="-d, --data">
+      Read the data sections (the whole file here).
+    </ResponseField>
+    <ResponseField name="-f, --print-file-name">
+      Name the file before each string.
+    </ResponseField>
+    <ResponseField name="-n, --bytes <text>">
+      The fewest characters a string has (4).
+    </ResponseField>
+    <ResponseField name="-t, --radix <text>">
+      Print each offset in base o, d or x.
+    </ResponseField>
+    <ResponseField name="-o">
+      The same as -t o.
+    </ResponseField>
+    <ResponseField name="-w, --include-all-whitespace">
+      Let any whitespace belong to a string.
+    </ResponseField>
+    <ResponseField name="-T, --target <text>">
+      The object format (ignored: every file is bytes).
+    </ResponseField>
+    <ResponseField name="-e, --encoding <text>">
+      Character width and order: s, S, b, l, B or L.
+    </ResponseField>
+    <ResponseField name="-s, --output-separator <text>">
+      What follows each string instead of a newline.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="seq">
+  Generate a number sequence.
+  <Expandable title="3 flags">
+    <ResponseField name="-s, --separator <text>">
+      Use the given string as separator between numbers.
+    </ResponseField>
+    <ResponseField name="-w, --equal-width">
+      Pad numbers with zeros to equal width.
+    </ResponseField>
+    <ResponseField name="-f, --format <text>">
+      Format each number with a printf-style format string.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="shuf">
+  Shuffle or sample lines.
+  <Expandable title="7 flags">
+    <ResponseField name="-n, --head-count <text>" />
+    <ResponseField name="-e, --echo" />
+    <ResponseField name="-z, --zero-terminated" />
+    <ResponseField name="-r, --repeat" />
+    <ResponseField name="-i, --input-range <text>" />
+    <ResponseField name="-o, --output <path>" />
+    <ResponseField name="--random-source <path>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tsort">
+  Sort dependency pairs.
+</ResponseField>
+<ResponseField name="colrm">
+  Remove columns from each line.
+</ResponseField>
+<ResponseField name="envsubst">
+  Fill environment variables into text.
+  <Expandable title="1 flag">
+    <ResponseField name="-v, --variables" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="yes">
+  Repeat a line until the reader stops.
+</ResponseField>
+<ResponseField name="numfmt">
+  Convert numeric units.
+  <Expandable title="14 flags">
+    <ResponseField name="--to <text>" />
+    <ResponseField name="--from <text>" />
+    <ResponseField name="--from-unit <text>" />
+    <ResponseField name="--to-unit <text>" />
+    <ResponseField name="--round <text>" />
+    <ResponseField name="--suffix <text>" />
+    <ResponseField name="--padding <text>" />
+    <ResponseField name="--format <text>" />
+    <ResponseField name="--invalid <text>" />
+    <ResponseField name="--grouping" />
+    <ResponseField name="-d, --delimiter <text>" />
+    <ResponseField name="--field <text>" />
+    <ResponseField name="--header[=<text>]" />
+    <ResponseField name="-z, --zero-terminated" />
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Text processing */}
 
 ## Running commands and inspecting the environment
 
-| Command | Purpose | Common options |
-| --- | --- | --- |
-| `xargs` | Build commands from input | `-0`, `-d CHAR`, `-I STRING`, `-n N`, `-L N`, `-s BYTES`, `-P N`, `-r`, `-a FILE`, `-t`, `--process-slot-var` |
-| `timeout` | Limit a command's running time | `-s SIGNAL`, `-k DURATION`, `-p`, `-f`, `-v` |
-| `nohup`, `nice`, `stdbuf`, `setsid` | Run a command with no change to how it runs here | `nice -n N`, `stdbuf -i/-o/-e MODE`, `setsid -w/-f` |
-| `sleep` | Wait for a duration | Numbers with `s`, `m`, `h`, or `d` suffixes |
-| `env`, `printenv` | Run with environment changes or print exported variables | `env -i`, `-u NAME`, `NAME=VALUE`; `printenv NAME` |
-| `date` | Format a date or time | `-d DATE`, `-u`, `-I`, `-R`, `--rfc-3339`, `+FORMAT` |
-| `uname`, `hostname`, `arch`, `hostid`, `nproc` | Report system or host information | `uname -a/-s/-r/-m`; `hostname -s/-f/-d/-i`; `nproc --all`, `--ignore=N` |
-| `id`, `whoami`, `groups`, `logname`, `users`, `who` | Report identity: the session's profile is its user and group, and nobody logs in | `id -u/-g/-G/-n/-r/-z`; `whoami`; `who -q`, `-H` |
-| `tty`, `sync` | Report that there is no terminal, or check that files exist | `tty -s`; `sync -d`, `-f` |
-| `getconf` | Query configuration values | `-a`, `-v SPECIFICATION` |
+{/* BEGIN GENERATED COMMANDS: Running commands and inspecting the environment */}
+<ResponseField name="xargs">
+  Build commands from input.
+  <Expandable title="21 flags">
+    <ResponseField name="-0, --null">
+      Input items are terminated by NUL.
+    </ResponseField>
+    <ResponseField name="-a, --arg-file <text>">
+      Read items from this file, not standard input.
+    </ResponseField>
+    <ResponseField name="-d, --delimiter <text>">
+      Input items are separated by this character.
+    </ResponseField>
+    <ResponseField name="-E <text>">
+      Stop reading at this logical end-of-file string.
+    </ResponseField>
+    <ResponseField name="-e[<text>], --eof[=<text>]">
+      Same as -E; no string turns it off.
+    </ResponseField>
+    <ResponseField name="-I <text>">
+      Replace this string in the initial arguments with each input line.
+    </ResponseField>
+    <ResponseField name="-i[<text>], --replace[=<text>]">
+      Same as -I, with &#123;&#125; when no string is attached.
+    </ResponseField>
+    <ResponseField name="-L <text>">
+      Use at most N non-blank input lines per command line.
+    </ResponseField>
+    <ResponseField name="-l[<text>], --max-lines[=<text>]">
+      Same as -L, with 1 when no count is attached.
+    </ResponseField>
+    <ResponseField name="-n, --max-args <text>">
+      Use at most N arguments per command line.
+    </ResponseField>
+    <ResponseField name="-o, --open-tty">
+      Reopen stdin as the terminal in each command (there is no terminal, so this fails).
+    </ResponseField>
+    <ResponseField name="-p, --interactive">
+      Prompt before running each command (there is no terminal, so this fails).
+    </ResponseField>
+    <ResponseField name="-r, --no-run-if-empty">
+      Do not run the command on empty input.
+    </ResponseField>
+    <ResponseField name="-s, --max-chars <text>">
+      Limit a command line to N bytes.
+    </ResponseField>
+    <ResponseField name="-t, --verbose">
+      Print each command on stderr before running it.
+    </ResponseField>
+    <ResponseField name="--show-limits">
+      Show the command-line length limits.
+    </ResponseField>
+    <ResponseField name="-x, --exit">
+      Exit if a command line exceeds the size limit.
+    </ResponseField>
+    <ResponseField name="-P, --max-procs <text>">
+      Run up to N commands at a time; 0 runs them all at once.
+    </ResponseField>
+    <ResponseField name="--process-slot-var <text>">
+      Set this variable to each command's slot number.
+    </ResponseField>
+    <ResponseField name="--version">
+      Show version information and exit.
+    </ResponseField>
+    <ResponseField name="--help">
+      Show this help and exit.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="timeout">
+  Limit a command's running time.
+  <Expandable title="7 flags">
+    <ResponseField name="-f, --foreground">
+      Signal only the command, not its process group.
+    </ResponseField>
+    <ResponseField name="-k, --kill-after <text>">
+      Also send KILL this long after the first signal.
+    </ResponseField>
+    <ResponseField name="-p, --preserve-status">
+      Exit with the command's status even when it times out.
+    </ResponseField>
+    <ResponseField name="-s, --signal <text>">
+      Signal to send on timeout (default TERM).
+    </ResponseField>
+    <ResponseField name="-v, --verbose">
+      Report each signal sent on stderr.
+    </ResponseField>
+    <ResponseField name="--help">
+      Show this help and exit.
+    </ResponseField>
+    <ResponseField name="--version">
+      Show version information and exit.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="nohup">
+  Run a command with no change to how it runs here.
+</ResponseField>
+<ResponseField name="nice">
+  Run a command with no change to how it runs here.
+  <Expandable title="1 flag">
+    <ResponseField name="-n, --adjustment <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="stdbuf">
+  Run a command with no change to how it runs here.
+  <Expandable title="3 flags">
+    <ResponseField name="-i, --input <text>" />
+    <ResponseField name="-o, --output <text>" />
+    <ResponseField name="-e, --error <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="setsid">
+  Run a command with no change to how it runs here.
+  <Expandable title="3 flags">
+    <ResponseField name="-c, --ctty" />
+    <ResponseField name="-f, --fork" />
+    <ResponseField name="-w, --wait" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="sleep">
+  Wait for a duration.
+</ResponseField>
+<ResponseField name="env">
+  Run with environment changes or print exported variables.
+  Options: `-i`, `-u NAME`, `NAME=VALUE`.
+</ResponseField>
+<ResponseField name="printenv">
+  Run with environment changes or print exported variables.
+  Options: `NAME`.
+</ResponseField>
+<ResponseField name="date">
+  Format a date or time.
+  <Expandable title="9 flags">
+    <ResponseField name="-d, --date <text>">
+      Display the time described by the given date string.
+    </ResponseField>
+    <ResponseField name="-I[<text>], --iso-8601[=<text>]">
+      Output date/time in ISO 8601 format, to the given precision (default date).
+    </ResponseField>
+    <ResponseField name="-R, --rfc-email">
+      Output date in RFC 5322 email format.
+    </ResponseField>
+    <ResponseField name="--rfc-3339 <text>">
+      Output date/time in RFC 3339 format, to the given precision.
+    </ResponseField>
+    <ResponseField name="-u, --utc">
+      Use Coordinated Universal Time (UTC).
+    </ResponseField>
+    <ResponseField name="--universal">
+      Use Coordinated Universal Time (UTC).
+    </ResponseField>
+    <ResponseField name="-r, --reference <path>">
+      Display the time the given file was last modified.
+    </ResponseField>
+    <ResponseField name="-f, --file <path>">
+      Display the time each line of the given file describes, as -d would.
+    </ResponseField>
+    <ResponseField name="--resolution">
+      Display the resolution of the times shown.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="uname">
+  Report system or host information.
+  <Expandable title="9 flags">
+    <ResponseField name="-a, --all">
+      Print all information, omitting -p and -i if unknown.
+    </ResponseField>
+    <ResponseField name="-s, --kernel-name">
+      Print the kernel name.
+    </ResponseField>
+    <ResponseField name="-n, --nodename">
+      Print the network node hostname.
+    </ResponseField>
+    <ResponseField name="-r, --kernel-release">
+      Print the kernel release.
+    </ResponseField>
+    <ResponseField name="-v, --kernel-version">
+      Print the kernel version.
+    </ResponseField>
+    <ResponseField name="-m, --machine">
+      Print the machine hardware name.
+    </ResponseField>
+    <ResponseField name="-p, --processor">
+      Print the processor type.
+    </ResponseField>
+    <ResponseField name="-i, --hardware-platform">
+      Print the hardware platform.
+    </ResponseField>
+    <ResponseField name="-o, --operating-system">
+      Print the operating system.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="hostname">
+  Report system or host information.
+  <Expandable title="13 flags">
+    <ResponseField name="-a, --alias">
+      Alias names.
+    </ResponseField>
+    <ResponseField name="-A, --all-fqdns">
+      All long host names (FQDNs).
+    </ResponseField>
+    <ResponseField name="-b, --boot">
+      Set default hostname if none available.
+    </ResponseField>
+    <ResponseField name="-d, --domain">
+      DNS domain name.
+    </ResponseField>
+    <ResponseField name="-f, --fqdn">
+      Long host name (FQDN).
+    </ResponseField>
+    <ResponseField name="--long">
+      Long host name (FQDN).
+    </ResponseField>
+    <ResponseField name="-F, --file <text>">
+      Read host name or NIS domain name from given file.
+    </ResponseField>
+    <ResponseField name="-i, --ip-address">
+      Addresses for the host name.
+    </ResponseField>
+    <ResponseField name="-I, --all-ip-addresses">
+      All addresses for the host.
+    </ResponseField>
+    <ResponseField name="-s, --short">
+      Short host name.
+    </ResponseField>
+    <ResponseField name="-y, --yp">
+      NIS/YP domain name.
+    </ResponseField>
+    <ResponseField name="--nis">
+      NIS/YP domain name.
+    </ResponseField>
+    <ResponseField name="--machine <text>">
+      Answer for this machine only.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="arch">
+  Report system or host information.
+</ResponseField>
+<ResponseField name="hostid">
+  Report system or host information.
+</ResponseField>
+<ResponseField name="nproc">
+  Report system or host information.
+  <Expandable title="3 flags">
+    <ResponseField name="--all" />
+    <ResponseField name="--ignore <text>" />
+    <ResponseField name="--machine <text>">
+      Answer for this machine only.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="id">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+  <Expandable title="8 flags">
+    <ResponseField name="-a">
+      Ignore, for compatibility with other versions.
+    </ResponseField>
+    <ResponseField name="-Z, --context">
+      Print only the security context of the process.
+    </ResponseField>
+    <ResponseField name="-g, --group">
+      Print only the effective group ID.
+    </ResponseField>
+    <ResponseField name="-G, --groups">
+      Print all group IDs.
+    </ResponseField>
+    <ResponseField name="-n, --name">
+      Print a name instead of a number, for -u,-g,-G.
+    </ResponseField>
+    <ResponseField name="-r, --real">
+      Print the real ID instead of the effective ID, with -u,-g,-G.
+    </ResponseField>
+    <ResponseField name="-u, --user">
+      Print only the effective user ID.
+    </ResponseField>
+    <ResponseField name="-z, --zero">
+      Delimit entries with NUL characters, not whitespace; not permitted in default format.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="whoami">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+  Options: No options.
+</ResponseField>
+<ResponseField name="groups">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+</ResponseField>
+<ResponseField name="logname">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+</ResponseField>
+<ResponseField name="users">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+</ResponseField>
+<ResponseField name="who">
+  Report identity: the session's profile is its user and group, and nobody logs in.
+  <Expandable title="14 flags">
+    <ResponseField name="-a, --all" />
+    <ResponseField name="-b, --boot" />
+    <ResponseField name="-d, --dead" />
+    <ResponseField name="-H, --heading" />
+    <ResponseField name="-l, --login" />
+    <ResponseField name="--lookup" />
+    <ResponseField name="-m" />
+    <ResponseField name="-p, --process" />
+    <ResponseField name="-q, --count" />
+    <ResponseField name="-r, --runlevel" />
+    <ResponseField name="-s, --short" />
+    <ResponseField name="-t, --time" />
+    <ResponseField name="-T, -w, --mesg, --message, --writable" />
+    <ResponseField name="-u, --users" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="tty">
+  Report that there is no terminal, or check that files exist.
+  <Expandable title="1 flag">
+    <ResponseField name="-s, --silent, --quiet" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="sync">
+  Report that there is no terminal, or check that files exist.
+  <Expandable title="2 flags">
+    <ResponseField name="-d, --data" />
+    <ResponseField name="-f, --file-system" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="getconf">
+  Query configuration values.
+  <Expandable title="2 flags">
+    <ResponseField name="-a">
+      Print every variable and its value.
+    </ResponseField>
+    <ResponseField name="-v <text>">
+      Give values for compilation environment SPEC.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Running commands and inspecting the environment */}
+
+`python3`, `node` and `js` run on a [machine](/home/setup/machine/overview),
+through a [runtime](/home/setup/runtime/overview) or a program installed there.
 
 ## Limits
 
@@ -113,7 +1805,7 @@ Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for th
 - File operations depend on the backend; a read-only mount cannot accept writes. Permission and owner metadata may live in Mirage's overlay rather than the remote service.
 - Mount roots are protected from removal, renaming, and use as copy sources. `mount` lists configured mounts; it does not attach new backends.
 - `ln -s` creates a virtual symlink. Without `-s`, a regular file is copied; there is no shared hard-link inode.
-- `find` supports `-a`, `-o`, `!`, parentheses, and both `-exec ... \;` and `-exec ... {} +`. Tests must precede actions in each AND chain, and OR branches must use the same action. `-newer` and `-newermt` must be in a top-level AND chain. `-execdir` and `-ok` are unsupported.
+- `find` supports `-a`, `-o`, `!`, parentheses, and both `-exec ... \;` and `-exec ... {} +`. Tests must precede actions in each AND chain, and OR branches must use the same action. `-newer` and `-newermt` must be in a top-level AND chain. `-ok` and `-okdir` are unsupported.
 - `rg` cannot sort by creation time. `ls --color` and `grep --color` are accepted without colored output.
 - Under a UTF-8 locale, `sed`, `grep`, `expr`, `nl`, `[[ =~ ]]` and `git`'s filters match whole characters. A pattern byte that is only part of one, such as `\xa9` against `é` (bytes `C3 A9`), matches nothing there, where Linux's `sed` can match it inside the character.
 - In rare patterns, `sed`, `expr` and `[[ =~ ]]` capture different text in a group than Linux does, or find a match where Linux finds none. Such a pattern repeats a group that holds an anchor (`^`, `$`, `\b`, `\<`, `\>`) or can match nothing, or refers back to one. For example, `[[ ab =~ (a|b|$){1,3} ]]` leaves `BASH_REMATCH[1]` empty where Linux sets it to `b`, and `echo babc | sed 's/\(\<[a-][ab]\|[a-c]\)\{2\}/<&>/'` prints `<ba>bc` where Linux prints `babc`.

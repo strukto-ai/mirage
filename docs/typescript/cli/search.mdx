@@ -33,6 +33,70 @@ clis:
     machine: in_process
 ```
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `search` installed.
+
+{/* generated: skill-md search start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`search`**
+
+    ```text
+    usage: search [--method METHOD] [--top-k TOP_K] [--threshold THRESHOLD] [-h] [query] [paths ...]
+
+    Rank the records of a search mount for a query
+
+    positional arguments:
+      query  Text to rank records by
+      paths  Folders or files to search; the working directory when none is given
+
+    options:
+      --method METHOD        Ranking method: semantic (default); Dify also takes fulltext, hybrid and keyword
+      --top-k TOP_K          Most hits to print; the mount's default when absent
+      --threshold THRESHOLD  Lowest score a hit needs, or on LanceDB the largest distance it may have; 0 keeps every hit
+      -h, --help             Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `search`
+
+    ```text
+    usage: search [--method METHOD] [--top-k TOP_K] [--threshold THRESHOLD] [-h] [query] [paths ...]
+
+    Rank the records of a search mount for a query
+
+    positional arguments:
+      query  Text to rank records by
+      paths  Folders or files to search; the working directory when none is given
+
+    options:
+      --method METHOD        Ranking method: semantic (default); Dify also takes fulltext, hybrid and keyword
+      --top-k TOP_K          Most hits to print; the mount's default when absent
+      --threshold THRESHOLD  Lowest score a hit needs, or on LanceDB the largest distance it may have; 0 keeps every hit
+      -h, --help             Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md search end */}
+
 {/* BEGIN GENERATED CLI COMMANDS */}
 ## Supported commands
 

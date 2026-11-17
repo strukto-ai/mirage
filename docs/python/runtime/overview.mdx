@@ -1,0 +1,33 @@
+---
+title: Runtimes
+sidebarTitle: Overview
+icon: microchip
+description: The interpreters the Python SDK runs inside Mirage, and how they differ from the TypeScript SDK's.
+---
+
+A runtime is the interpreter that runs `python3` and `node` on the
+`in_process` machine, where a line runs inside the Mirage process and there is
+no installed interpreter to call. On a host, container or sandbox, the
+`python3` installed there runs instead. [Runtimes](/home/setup/runtime/overview)
+explains the split; each page here has the Python install and a runnable
+example.
+
+| Runtime | Runs | |
+| --- | --- | --- |
+| <img noZoom src="/images/pydantic-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Monty](/python/runtime/monty) | Python | |
+| <img noZoom src="/images/webassembly-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[WASI](/python/runtime/wasi) | Python, on CPython built for WASI | Python SDK only |
+| <Icon icon="js" size={14} /> [QuickJS](/python/runtime/quickjs) | JavaScript | |
+
+## Differences from the TypeScript SDK
+
+- **Monty:** `os.chdir()` works and lasts for the run, and `os.stat()`
+  returns a real named tuple, so `st[6]` and `len(st)` work. Runs execute on
+  Monty's worker pool, so the event loop stays free and cancelling a run halts
+  the interpreter. Every workspace in the process shares one pool of four
+  workers; a run waiting on workspace I/O holds one, and a run past the four
+  waits for one to free up.
+- **QuickJS:** the real quickjs-ng `std` and `os`. The first run compiles
+  `qjs-wasi.wasm` and caches `qjs-wasi.cwasm` beside it. A write shows to
+  other commands once the file is closed or the run ends, and a timeout
+  stops the run.
+- **WASI** is in the Python SDK only; Pyodide is in the TypeScript SDK only.

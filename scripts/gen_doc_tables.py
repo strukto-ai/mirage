@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import textwrap
+import tomllib
 import types
 import typing
 from collections.abc import Callable
@@ -34,6 +35,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from typing_extensions import TypeForm
 
+from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.types import JsonValue, MountMode
 from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
 from mirage.vfs.secrets import secret_field_names
@@ -45,6 +47,66 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs" / "python"
 AGENTS = ROOT / "python" / "mirage" / "agents"
 SECRET_NOTE = "Fields marked secret are redacted in snapshots."
+PYPROJECT = ROOT / "python" / "pyproject.toml"
+EXTRA_FEATURES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    (
+        "Object stores",
+        ("s3", "r2", "gcs", "oci"),
+        "S3 and the S3-compatible VFS, such as R2, GCS, OCI and MinIO.",
+    ),
+    ("SSH", ("ssh",), "`SSHVFS` and the `ssh` machine."),
+    (
+        "OpenDAL",
+        ("nextcloud", "hf-buckets"),
+        "`NextcloudVFS` and `HfBucketsVFS`.",
+    ),
+    (
+        "FUSE",
+        ("fuse",),
+        "Mounting a workspace as an OS filesystem; see the "
+        "[FUSE setup](/python/setup/fuse).",
+    ),
+    ("MongoDB", ("mongodb", "gridfs"), "`MongoDBVFS` and `GridFSVFS`."),
+    ("Postgres", ("postgres",), "`PostgresVFS`."),
+    (
+        "Redis",
+        ("redis",),
+        "`RedisVFS`, the Redis file and index cache stores, and the Redis "
+        "session store.",
+    ),
+    ("Email", ("email",), "Sending mail with `himalaya` (SMTP)."),
+    ("LanceDB", ("lancedb",), "`LanceDBVFS`."),
+    ("Qdrant", ("qdrant",), "`QdrantVFS`."),
+    ("Chroma", ("chroma",), "`ChromaVFS`."),
+    ("Mem0", ("mem0",), "`Mem0VFS`."),
+    ("Langfuse", ("langfuse",), "`LangfuseVFS`."),
+    (
+        "Runtimes",
+        ("monty", "wasi", "quickjs"),
+        "The [Monty](/python/runtime/monty), [WASI](/python/runtime/wasi) and "
+        "[QuickJS](/python/runtime/quickjs) runtimes.",
+    ),
+    (
+        "Cloud machines",
+        ("e2b", "daytona", "boxd"),
+        "The `e2b`, `daytona` and `boxd` machines.",
+    ),
+    ("AWS Secrets Manager", ("aws-sm",), "The `aws-sm` secret source."),
+    ("1Password", ("1password",), "The `1password` secret source."),
+    ("dotenv", ("dotenv",), "The `dotenv` secret source."),
+    (
+        "Agent SDKs",
+        (
+            "claude-agent-sdk",
+            "claude-managed-agents",
+            "openai",
+            "agno",
+            "deepagents",
+            "pydantic-ai",
+        ),
+        "The adapters on the [agents pages](/python/agents/index).",
+    ),
+)
 MIB = 1024 * 1024
 MARKER = re.compile(
     r"^\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+)"
@@ -603,6 +665,98 @@ def vfs_md(
     return Rendered(tabs(markdown.rstrip("\n")), [], sorted(omit))
 
 
+# A config each account CLI installs with. Nothing is reached: installing
+# a CLI opens no connection.
+CLI_SAMPLES: dict[str, dict[str, JsonValue]] = {
+    "airtable": {"token": "token"},
+    "discord": {"token": "token"},
+    "gh": {"token": "token"},
+    "gws": {
+        "client_id": "id",
+        "client_secret": "secret",
+        "refresh_token": "token",
+    },
+    "hf": {"token": "token"},
+    "himalaya": {
+        "imap_host": "imap.example.com",
+        "smtp_host": "smtp.example.com",
+        "username": "agent@example.com",
+        "password": "password",
+    },
+    "linear": {"api_key": "key"},
+    "ntn": {"api_key": "key"},
+    "slack": {"token": "token"},
+    "trello": {"api_key": "key", "api_token": "token"},
+}
+
+
+async def _skill_md(name: str) -> str:
+    ws = Workspace({})
+    ws.register_cli(name, cli_spec_for(name), CLI_SAMPLES.get(name))
+    try:
+        return await ws.skill_md()
+    finally:
+        await ws.close()
+
+
+def skill_md(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
+    """Render the SKILL.md a workspace with only ``name`` installed
+    answers, rendered and raw, one tab each.
+
+    Args:
+        name (str): The bundled CLI.
+        omit (frozenset[str]): Nothing can be left out of a document.
+    """
+    markdown = asyncio.run(_skill_md(name))
+    return Rendered(tabs(markdown.rstrip("\n")), [], sorted(omit))
+
+
+def extras_table(omit: frozenset[str] = frozenset()) -> Rendered:
+    """Render the ``mirage-ai`` extras by feature, from pyproject.toml.
+
+    Every extra is either mapped in ``EXTRA_FEATURES`` or a meta extra
+    made only of other extras, so a new one fails the check until it is
+    described here.
+
+    Args:
+        omit (frozenset[str]): Nothing can be left out of this table.
+    """
+    extras = tomllib.loads(PYPROJECT.read_text())["project"][
+        "optional-dependencies"
+    ]
+    meta = {
+        name: [dep[len("mirage-ai[") : -1] for dep in deps]
+        for name, deps in extras.items()
+        if deps and all(dep.startswith("mirage-ai[") for dep in deps)
+    }
+    mapped = [name for _, names, _ in EXTRA_FEATURES for name in names]
+    unmapped = sorted(set(extras) - set(mapped) - set(meta))
+    unknown = sorted(set(mapped) - set(extras))
+    if unmapped or unknown or len(mapped) != len(set(mapped)):
+        raise ValueError(
+            f"EXTRA_FEATURES disagrees with pyproject.toml: unmapped "
+            f"{unmapped or '-'}; not an extra {unknown or '-'}"
+        )
+    rows = ["| Feature | Extras | Needed for |", "| --- | --- | --- |"]
+    for feature, names, needs in EXTRA_FEATURES:
+        cell = ", ".join(f"`{name}`" for name in names)
+        rows.append(f"| {feature} | {cell} | {needs} |")
+    for name, members in sorted(meta.items()):
+        left = [extra for extra in mapped if extra not in members]
+        if len(left) < len(members):
+            needs = "Every extra above" + (
+                " except " + ", ".join(f"`{extra}`" for extra in left)
+                if left
+                else ""
+            )
+        else:
+            needs = "The extras " + ", ".join(
+                f"`{extra}`" for extra in members
+            )
+        rows.append(f"| Bundle | `{name}` | {needs}. |")
+    return Rendered("\n".join(rows), [], sorted(omit))
+
+
 def renderers() -> dict[str, dict[str, Renderer]]:
     """Each marker kind's keys, mapped to the function rendering one."""
     models = config_models()
@@ -612,9 +766,13 @@ def renderers() -> dict[str, dict[str, Renderer]]:
             for name, model in models.items()
         },
         "exports": {name: partial(exports_table, name) for name in adapters()},
+        "extras": {"optional": extras_table},
         "vfs-md": {
             name: partial(vfs_md, name, models.get(name))
             for name in sorted(REGISTRY)
+        },
+        "skill-md": {
+            name: partial(skill_md, name) for name in sorted(BUILTIN_CLI_SPECS)
         },
     }
 

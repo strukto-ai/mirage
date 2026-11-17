@@ -5,20 +5,28 @@ description: The interpreters that run Python and JavaScript inside Mirage.
 icon: microchip
 ---
 
-A runtime is an interpreter that runs inside Mirage, on an
-[`in_process`](/home/setup/machine/in_process) machine. It gives a program a
-process: its arguments, stdin, environment and working directory, and file
-calls that reach the workspace's mounts directly, under the same mount modes,
-permissions and policies as `cat`. The machine is where the program runs; the
-runtime is what runs it there.
+A runtime is the interpreter that runs `python3` and `node` when a line has no
+installed one to call. Every line runs on a [machine](/home/setup/machine/overview),
+and who answers `python3 app.py` depends on which:
+
+| Machine | What runs `python3 app.py` |
+| --- | --- |
+| [`host`](/home/setup/machine/host) | the host's own `python3` |
+| a [container or sandbox](/home/setup/machine/overview#providers), such as Docker or E2B | the `python3` installed in it |
+| [`in_process`](/home/setup/machine/in_process), the Mirage process itself | a runtime, an interpreter Mirage embeds |
+
+The machine is where a program runs; the runtime is what runs it when that
+place is Mirage. Its file calls reach the workspace's mounts directly, under
+the same mount modes, permissions and policies as `cat`.
+
+Mirage ships these:
 
 | Runtime | Runs | SDK |
 | --- | --- | --- |
-| [Monty](/home/setup/runtime/monty) | `python3`, a Python subset | both |
-| [WASI](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Python |
-| [Pyodide](/home/setup/runtime/pyodide) | `python3`, CPython with packages such as numpy | TypeScript |
-| [QuickJS](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | both, not on Cloudflare Workers |
-| [Custom](/home/setup/runtime/custom) | what you write | both |
+| <img noZoom src="/images/pydantic-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Monty](/home/setup/runtime/monty) | `python3`, a Python subset | both |
+| <img noZoom src="/images/webassembly-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[WASI](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Python |
+| <Icon icon="python" size={14} /> [Pyodide](/home/setup/runtime/pyodide) | `python3`, CPython with packages such as numpy | TypeScript |
+| <Icon icon="js" size={14} /> [QuickJS](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | both, not on Cloudflare Workers |
 
 Name the runtime on an `in_process` entry:
 

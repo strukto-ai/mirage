@@ -26,6 +26,74 @@ ws.register_cli("hf", HF, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `hf` installed.
+
+{/* generated: skill-md hf start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`hf`**
+
+    ```text
+    usage: hf [-h] {auth,repo,repo-files,download,upload,env,version} ...
+
+    hf command helpers
+
+    commands:
+      auth        Manage authentication (login, logout, etc.).
+      repo        Manage repos on the Hub.
+      repo-files  Manage files in a repo on the Hub.
+      download    Download files from the Hub
+      upload      Upload a file or a folder to the Hub. Recommended for single-commit uploads.
+      env         Print information about the environment.
+      version     Print information about the hf version.
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `hf`
+
+    ```text
+    usage: hf [-h] {auth,repo,repo-files,download,upload,env,version} ...
+
+    hf command helpers
+
+    commands:
+      auth        Manage authentication (login, logout, etc.).
+      repo        Manage repos on the Hub.
+      repo-files  Manage files in a repo on the Hub.
+      download    Download files from the Hub
+      upload      Upload a file or a folder to the Hub. Recommended for single-commit uploads.
+      env         Print information about the environment.
+      version     Print information about the hf version.
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md hf end */}
+
 <Reference />
 
 <License />

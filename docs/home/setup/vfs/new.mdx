@@ -1,0 +1,309 @@
+---
+title: Adding a New VFS
+icon: plus
+description: Virtualize a service Mirage does not ship by writing one class in Python or TypeScript.
+---
+
+A VFS is a class that extends `BaseVFS`. Define `readdir`, `read` and `stat`,
+and `ls`, `cat`, `grep`, `find`, `head`, `wc` and the other read commands work
+on the service. TypeScript names every method in camelCase (`rm_r` is `rmR`).
+
+## Write one
+
+This VFS serves pages from a dictionary, which stands in for the service:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python notes.py
+    from mirage import BaseVFS, FileStat, FileType, PathSpec
+
+
+    class NotesVFS(BaseVFS):
+        def __init__(self, pages: dict[str, str]) -> None:
+            super().__init__(name="notes")
+            self.pages = pages
+
+        def page(self, path: PathSpec) -> str:
+            if path.vfs_path not in self.pages:
+                raise FileNotFoundError(path.virtual)
+            return self.pages[path.vfs_path]
+
+        async def readdir(self, path: PathSpec) -> list[FileStat]:
+            if path.vfs_path:
+                self.page(path)
+                raise NotADirectoryError(path.virtual)
+            return [FileStat(name=name, type=FileType.FILE) for name in self.pages]
+
+        async def stat(self, path: PathSpec) -> FileStat:
+            if not path.vfs_path:
+                return FileStat(name="/", type=FileType.DIRECTORY)
+            self.page(path)
+            return FileStat(name=path.vfs_path, type=FileType.FILE)
+
+        async def read(self, path: PathSpec) -> bytes:
+            return self.page(path).encode()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript notes.ts
+    import { BaseVFS, enoent, enotdir, FileStat, FileType, type PathSpec } from '@struktoai/mirage-node'
+
+    export class NotesVFS extends BaseVFS {
+      readonly pages: Record<string, string>
+
+      constructor(config: { pages: Record<string, string> }) {
+        super({ name: 'notes' })
+        this.pages = config.pages
+      }
+
+      page(path: PathSpec): string {
+        if (!Object.hasOwn(this.pages, path.vfsPath)) throw enoent(path)
+        return this.pages[path.vfsPath]!
+      }
+
+      override async readdir(path: PathSpec): Promise<FileStat[]> {
+        if (path.vfsPath !== '') {
+          this.page(path)
+          throw enotdir(path)
+        }
+        return Object.keys(this.pages).map((name) => new FileStat({ name, type: FileType.FILE }))
+      }
+
+      override async stat(path: PathSpec): Promise<FileStat> {
+        if (path.vfsPath === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
+        this.page(path)
+        return new FileStat({ name: path.vfsPath, type: FileType.FILE })
+      }
+
+      override async read(path: PathSpec): Promise<Uint8Array> {
+        return new TextEncoder().encode(this.page(path))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Mount it like any other VFS:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+
+    from notes import NotesVFS
+
+    ws = Workspace({"/notes": NotesVFS({"hello.txt": "hello mirage\n"})})
+    result = await ws.shell("grep -rn mirage /notes")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Workspace } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    const ws = new Workspace({ '/notes': new NotesVFS({ pages: { 'hello.txt': 'hello mirage\n' } }) })
+    const result = await ws.shell('grep -rn mirage /notes')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+```text
+/notes/hello.txt:1:hello mirage
+```
+
+- `readdir` returns each child's `FileStat` with `name` set to the base name.
+  The mount keeps the listing and answers a later `stat` from it, so `ls -l`
+  costs one request.
+- `path.vfs_path` (`vfsPath`) addresses the service and `path.virtual` the
+  workspace path.
+- Set `FileStat.size` to the length of the bytes `read` returns, or leave it
+  unset when it is unknown.
+- Pass `name` and `vfs_md` (`vfsMd`) to the base constructor. `vfs_md` is the
+  mount's layout in its [VFS.md](/home/setup/vfs-md): a `text` tree, then a
+  few notes, with `{prefix}` for the mount's folder.
+
+## Add functions as the service grows
+
+Every other function is optional. Define one, and the commands that need it
+start working; leave it out, and those commands answer
+`Operation not supported`.
+
+| Functions | Enables |
+| --- | --- |
+| `write`, `append`, `create`, `truncate` | `>`, `>>`, `touch`, `truncate`, `sed -i` |
+| `mkdir`, `rmdir`, `unlink`, `rm_r`, `rename`, `copy`, `dir_copy`, `setattr` | `mkdir`, `rm`, `mv`, `cp`, `chmod`, `touch -d` |
+| `files_containing`, `lines_containing` | [Search](/home/integration/search) for `grep` and `rg` from the service's own index |
+| `first_lines`, `last_lines`, `line_count`, `follow` | Fast `head`, `tail`, `wc -l` and `tail -f` ([Lines](/home/integration/lines)) |
+| `checksum`, `read_tree` | Fast `md5sum` and `sha256sum` ([Checksums](/home/integration/checksums)), and `find`, `du`, `ls -R` and `tree` ([Walks](/home/integration/walks)) |
+| `delta_hook` | [Notifications](/home/notifications/support) from the service's change feed |
+
+Some commands fall back to simpler functions: `>>` without `append` reads the
+file and calls `write`, `cp` without `copy` reads and writes, `rm -r` without
+`rm_r` removes entry by entry, and `chmod` without `setattr` keeps the mode in
+Mirage. The mount mode still decides whether a write may run.
+
+For example, `write` and `unlink` make the notes writable:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+    from mirage.io.types import ByteSource, materialize
+
+    from notes import NotesVFS
+
+
+    class WritableNotesVFS(NotesVFS):
+        async def write(self, path: PathSpec, data: ByteSource) -> None:
+            self.pages[path.vfs_path] = (await materialize(data)).decode()
+
+        async def unlink(self, path: PathSpec) -> None:
+            del self.pages[path.vfs_path]
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { type ByteSource, materialize } from '@struktoai/mirage-core/io/types'
+    import { NotesVFS } from './notes.ts'
+
+    export class WritableNotesVFS extends NotesVFS {
+      override async write(path: PathSpec, data: ByteSource): Promise<void> {
+        this.pages[path.vfsPath] = new TextDecoder().decode(await materialize(data))
+      }
+
+      override async unlink(path: PathSpec): Promise<void> {
+        delete this.pages[path.vfsPath]
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+On a writable mount, `echo hi > /notes/new.txt`, `sed -i` and `rm` now work,
+and `>>` reads the page and writes it back. `mv` still answers
+`Operation not supported` until `rename` is defined.
+
+## Plug in the service's search
+
+`files_containing` and `lines_containing` hand Mirage the service's own search.
+`grep` and `rg` ask them which files or lines can hold the text and read only
+those; they still match every line themselves, so the output is the same as a
+full read. Returning `None` (`null`) reads every file.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+    from mirage.utils.key_prefix import mounted_path
+
+    from notes import NotesVFS
+
+
+    class SearchableNotesVFS(NotesVFS):
+        async def files_containing(
+            self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+        ) -> list[PathSpec] | None:
+            if ignore_case:
+                return None
+            return [
+                mounted_path(path, "/" + name)
+                for name, page in self.pages.items()
+                if text in page
+            ]
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+    import { NotesVFS } from './notes.ts'
+
+    export class SearchableNotesVFS extends NotesVFS {
+      override async filesContaining(
+        path: PathSpec,
+        text: string,
+        opts: { wholeWord: boolean; ignoreCase: boolean },
+      ): Promise<PathSpec[] | null> {
+        if (opts.ignoreCase) return null
+        return Object.entries(this.pages)
+          .filter(([, page]) => page.includes(text))
+          .map(([name]) => mountedPath(path, `/${name}`))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`grep -rn mirage /notes` now reads only the pages this returns. `mounted_path`
+(`mountedPath`) turns a name inside the mount into a path. `grep -ri` gets
+`None` here, so it reads every page.
+
+- Answer more files than needed, never fewer: an extra file costs one read,
+  a missing one is a wrong answer. Return `None` whenever the answer may be
+  incomplete, such as a truncated result or an index that lags writes.
+- A search that matches only whole words returns `None` unless `whole_word`
+  is set, and sets `whole_word_search` so the mount's VFS.md tells the agent
+  to use `grep -w`.
+
+[Chroma](/home/setup/chroma) is a real one: its `files_containing` asks Chroma
+for the chunks whose text contains the word and returns their pages.
+[Search](/home/integration/search) lists which patterns and flags reach these
+functions.
+
+A service action that is not a file, such as a search query or adding a
+comment, belongs in a [CLI](/home/setup/cli/new), next to the mount.
+
+## Use it in YAML
+
+A workspace YAML mounts the class by its file and name, relative to the YAML
+file; `config` is what its constructor gets:
+
+```yaml workspace.yaml
+mounts:
+  /notes:
+    vfs: ./notes.py:NotesVFS
+    config:
+      pages:
+        hello.txt: "hello mirage\n"
+```
+
+The TypeScript server takes `./notes.ts:NotesVFS`. To write `vfs: notes`
+instead, register the class once:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import register_vfs
+
+    from notes import NotesVFS
+
+    register_vfs("notes", NotesVFS)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { registerVfs } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    registerVfs('notes', (config) =>
+      Promise.resolve(new NotesVFS(config as { pages: Record<string, string> })),
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/new">
+    Accessors, config, an Elasticsearch-backed S3 and runnable examples.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/vfs/new">
+    Accessors, config, an Elasticsearch-backed S3 and runnable examples.
+  </Card>
+</CardGroup>

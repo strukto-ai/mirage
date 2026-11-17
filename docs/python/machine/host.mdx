@@ -1,0 +1,25 @@
+---
+title: Host
+icon: laptop
+description: Run programs installed on the host, optionally confined by a sandbox.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Host](/home/setup/machine/host), shared by both SDKs.
+
+## Usage
+
+`captures` defaults to `@python` (`python3` and `python`). Add names such as `node` or `tsx`, or
+[`@external`](/home/setup/machine/overview#captures) for every program
+Mirage does not have itself. Mirage's own commands, pipes and redirects stay
+in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={"host": {"provider": "host", "captures": ["@python", "@external"]}},
+)
+await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
+```

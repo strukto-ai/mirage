@@ -1,0 +1,68 @@
+---
+title: E2B
+icon: /images/e2b-logo.svg
+description: Run captured programs in an E2B cloud sandbox.
+---
+
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [E2B](/home/setup/machine/e2b), shared by both SDKs.
+
+## Install
+
+```bash
+pnpm add e2b ssh2
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: { box: { provider: 'e2b', sandboxId: 'sandbox-id', mountType: 'ssh', captures: ['@python', '@external'] } },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```
+
+In a browser, import `@struktoai/mirage-core/machine/e2b/handle` once
+to register the provider (`pnpm add @struktoai/mirage-core`), pass
+`apiKey`, and use `mountType: 'fuse'` or leave it unset.
+
+## Connecting the workspace
+
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
+each file call is about 150 ms for a small file from a laptop. With `fuse`,
+base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
+and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
+
+### A template for ssh
+
+Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
+
+```typescript
+import { Sandbox, Template } from 'e2b'
+
+await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
+const sandbox = await Sandbox.create('mirage-sshfs', { timeoutMs: 3_600_000 })
+console.log(sandbox.sandboxId)
+```
+
+## In a browser
+
+Import the E2B machine from core (`pnpm add @struktoai/mirage-core`), which
+also registers the `e2b` provider for `machines:`, and pass `apiKey`:
+
+```ts
+import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+```
+
+Keep account keys out of shared frontend bundles; have your backend
+authenticate the app. `mountType` `ssh` and `both` need Node, so a browser
+uses `fuse` or none.

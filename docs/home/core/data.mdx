@@ -1,0 +1,625 @@
+---
+title: Data
+description: Query JSON, calculate, encode, checksum and work with archives.
+icon: /images/mirage-icon-light.svg
+---
+
+Commands for structured data, encodings, checksums and archives, beside the
+[Core Tools](/home/core/tools). Expand a command to see every flag it takes;
+`man COMMAND` prints its manual.
+
+## JSON and calculations
+
+{/* BEGIN GENERATED COMMANDS: JSON and calculations */}
+<ResponseField name="jq">
+  Query and transform a stream of JSON values.
+  <Expandable title="28 flags">
+    <ResponseField name="-n, --null-input">
+      Use null as the single input value.
+    </ResponseField>
+    <ResponseField name="-R, --raw-input">
+      Read each line as a string instead of JSON.
+    </ResponseField>
+    <ResponseField name="-s, --slurp">
+      Read all inputs into one array.
+    </ResponseField>
+    <ResponseField name="-c, --compact-output">
+      Compact instead of pretty-printed output.
+    </ResponseField>
+    <ResponseField name="-r, --raw-output">
+      Output strings without quotes or escapes.
+    </ResponseField>
+    <ResponseField name="--raw-output0">
+      Implies -r and writes NUL after each output.
+    </ResponseField>
+    <ResponseField name="-j, --join-output">
+      Implies -r and writes no trailing newline.
+    </ResponseField>
+    <ResponseField name="-a, --ascii-output">
+      Escape non-ASCII characters in output.
+    </ResponseField>
+    <ResponseField name="-S, --sort-keys">
+      Sort object keys on output.
+    </ResponseField>
+    <ResponseField name="-e, --exit-status">
+      Set the exit status from the last output.
+    </ResponseField>
+    <ResponseField name="--tab">
+      Indent with tabs.
+    </ResponseField>
+    <ResponseField name="--indent <text>">
+      Indent with n spaces (max 7).
+    </ResponseField>
+    <ResponseField name="--stream-errors">
+      Read as --stream does, a parse error as one more event.
+    </ResponseField>
+    <ResponseField name="-L, --library-path <text>">
+      Add a directory to the module search list.
+    </ResponseField>
+    <ResponseField name="-C, --color-output">
+      Accepted; output stays plain.
+    </ResponseField>
+    <ResponseField name="-M, --monochrome-output">
+      Disable colored output (already the default).
+    </ResponseField>
+    <ResponseField name="--unbuffered">
+      Accepted for compatibility; output is one buffer.
+    </ResponseField>
+    <ResponseField name="-f, --from-file <path>">
+      Read the filter from a file.
+    </ResponseField>
+    <ResponseField name="--stream">
+      Read each input as its [path, leaf] events.
+    </ResponseField>
+    <ResponseField name="--seq">
+      Read and write RS-delimited JSON text sequences.
+    </ResponseField>
+    <ResponseField name="--arg <name> <text>">
+      Set $name to a string value.
+    </ResponseField>
+    <ResponseField name="--argjson <name> <text>">
+      Set $name to a JSON value.
+    </ResponseField>
+    <ResponseField name="--rawfile <name> <path>">
+      Set $name to a file's contents.
+    </ResponseField>
+    <ResponseField name="--slurpfile <name> <path>">
+      Set $name to a file's documents, as an array.
+    </ResponseField>
+    <ResponseField name="--args">
+      Read the remaining operands as positional string values.
+    </ResponseField>
+    <ResponseField name="--jsonargs">
+      Read the remaining operands as positional JSON values.
+    </ResponseField>
+    <ResponseField name="-h, --help">
+      Show this help and exit.
+    </ResponseField>
+    <ResponseField name="-V, --version">
+      Show version information and exit.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="bc">
+  Evaluate numeric expressions.
+  <Expandable title="2 flags">
+    <ResponseField name="-l, --mathlib">
+      Load the standard math library.
+    </ResponseField>
+    <ResponseField name="-q, --quiet">
+      Suppress the welcome banner.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="expr">
+  Evaluate integer and string expressions.
+</ResponseField>
+{/* END GENERATED COMMANDS: JSON and calculations */}
+
+`jq` runs once per JSON value, whether input is JSONL, concatenated documents, or piped output. Use `-s` to collect the stream into an array, and `--arg` / `--argjson` to pass values safely.
+
+**Limits:** `jq -C`, `-L`, `--stream-errors`, and `--build-configuration` are unsupported. Input-consuming programs follow the common `input` / `inputs` patterns; partial drains or multiple conditional reads can differ from jq. Halts inside error handling can also differ.
+
+## Encoding and checksums
+
+{/* BEGIN GENERATED COMMANDS: Encoding and checksums */}
+<ResponseField name="base64">
+  Encode or decode Base64.
+  <Expandable title="4 flags">
+    <ResponseField name="-d, --decode" />
+    <ResponseField name="-D" />
+    <ResponseField name="-w, --wrap <text>" />
+    <ResponseField name="-i, --ignore-garbage" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="iconv">
+  Convert character encodings.
+  <Expandable title="6 flags">
+    <ResponseField name="-f, --from-code <text>" />
+    <ResponseField name="-t, --to-code <text>" />
+    <ResponseField name="-c" />
+    <ResponseField name="-o, --output <path>" />
+    <ResponseField name="-l, --list" />
+    <ResponseField name="-s, --silent" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="xxd">
+  Create or reverse a hex dump.
+  <Expandable title="16 flags">
+    <ResponseField name="-r, -revert" />
+    <ResponseField name="-p, -ps, -postscript, -plain" />
+    <ResponseField name="-l, -len <text>" />
+    <ResponseField name="-c, -cols <text>" />
+    <ResponseField name="-s, -seek <text>" />
+    <ResponseField name="-g, -groupsize <text>" />
+    <ResponseField name="-u, -uppercase" />
+    <ResponseField name="-a, -autoskip" />
+    <ResponseField name="-b, -bits" />
+    <ResponseField name="-C" />
+    <ResponseField name="-d, -decimal" />
+    <ResponseField name="-E, -EBCDIC" />
+    <ResponseField name="-e" />
+    <ResponseField name="-i, -include" />
+    <ResponseField name="-n, -name <text>" />
+    <ResponseField name="-o, -offset <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="od">
+  Dump bytes in a chosen format.
+  <Expandable title="33 flags">
+    <ResponseField name="-A, --address-radix <text>" />
+    <ResponseField name="-j <text>" />
+    <ResponseField name="--skip-bytes <text>" />
+    <ResponseField name="-N <text>" />
+    <ResponseField name="--read-bytes <text>" />
+    <ResponseField name="-S <text>" />
+    <ResponseField name="--strings[=<text>]" />
+    <ResponseField name="-t, --format <text>" />
+    <ResponseField name="-v, --output-duplicates" />
+    <ResponseField name="-w[<text>]" />
+    <ResponseField name="--width[=<text>]" />
+    <ResponseField name="--endian <text>" />
+    <ResponseField name="--traditional" />
+    <ResponseField name="-a" />
+    <ResponseField name="-b" />
+    <ResponseField name="-c" />
+    <ResponseField name="-d" />
+    <ResponseField name="-f" />
+    <ResponseField name="-h" />
+    <ResponseField name="-i" />
+    <ResponseField name="-l" />
+    <ResponseField name="-o" />
+    <ResponseField name="-s" />
+    <ResponseField name="-x" />
+    <ResponseField name="-B" />
+    <ResponseField name="-D" />
+    <ResponseField name="-e" />
+    <ResponseField name="-F" />
+    <ResponseField name="-H" />
+    <ResponseField name="-I" />
+    <ResponseField name="-L" />
+    <ResponseField name="-O" />
+    <ResponseField name="-X" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="md5">
+  Print an MD5 digest.
+</ResponseField>
+<ResponseField name="md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum">
+  Generate or verify checksums.
+  <Expandable title="10 flags">
+    <ResponseField name="-c, --check" />
+    <ResponseField name="-b, --binary" />
+    <ResponseField name="--tag" />
+    <ResponseField name="-t, --text" />
+    <ResponseField name="-w, --warn" />
+    <ResponseField name="-z, --zero" />
+    <ResponseField name="--status" />
+    <ResponseField name="--ignore-missing" />
+    <ResponseField name="--strict" />
+    <ResponseField name="--quiet" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="b2sum">
+  Generate or verify checksums.
+  <Expandable title="11 flags">
+    <ResponseField name="-l, --length <text>" />
+    <ResponseField name="-c, --check" />
+    <ResponseField name="-b, --binary" />
+    <ResponseField name="--tag" />
+    <ResponseField name="-t, --text" />
+    <ResponseField name="-w, --warn" />
+    <ResponseField name="-z, --zero" />
+    <ResponseField name="--status" />
+    <ResponseField name="--ignore-missing" />
+    <ResponseField name="--strict" />
+    <ResponseField name="--quiet" />
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Encoding and checksums */}
+
+## Archives and compression
+
+{/* BEGIN GENERATED COMMANDS: Archives and compression */}
+<ResponseField name="tar">
+  Create, extract, or list archives.
+  <Expandable title="38 flags">
+    <ResponseField name="-c, --create" />
+    <ResponseField name="-x, --extract" />
+    <ResponseField name="-t, --list" />
+    <ResponseField name="-r, --append" />
+    <ResponseField name="-u, --update" />
+    <ResponseField name="--delete" />
+    <ResponseField name="-z, --gzip" />
+    <ResponseField name="-j, --bzip2" />
+    <ResponseField name="-J, --xz" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-h, --dereference" />
+    <ResponseField name="-O, --to-stdout" />
+    <ResponseField name="-a, --auto-compress" />
+    <ResponseField name="-k, --keep-old-files" />
+    <ResponseField name="--overwrite" />
+    <ResponseField name="--skip-old-files" />
+    <ResponseField name="-p, --preserve-permissions" />
+    <ResponseField name="-P, --absolute-names" />
+    <ResponseField name="-m, --touch" />
+    <ResponseField name="--numeric-owner" />
+    <ResponseField name="--owner <text>" />
+    <ResponseField name="--group <text>" />
+    <ResponseField name="--mtime <text>" />
+    <ResponseField name="--sort <text>" />
+    <ResponseField name="--transform <text>" />
+    <ResponseField name="-T, --files-from <path>" />
+    <ResponseField name="--null" />
+    <ResponseField name="-X, --exclude-from <path>" />
+    <ResponseField name="--exclude-vcs" />
+    <ResponseField name="--wildcards" />
+    <ResponseField name="--no-wildcards" />
+    <ResponseField name="--anchored" />
+    <ResponseField name="--no-anchored" />
+    <ResponseField name="-f, --file <path>" />
+    <ResponseField name="-C, --directory <path>" />
+    <ResponseField name="--strip-components <text>" />
+    <ResponseField name="--exclude <text>" />
+    <ResponseField name="--one-file-system" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="zip">
+  Create ZIP archives.
+  <Expandable title="29 flags">
+    <ResponseField name="-r" />
+    <ResponseField name="-j" />
+    <ResponseField name="-q" />
+    <ResponseField name="-X, --no-extra" />
+    <ResponseField name="-y" />
+    <ResponseField name="-x <text>" />
+    <ResponseField name="-i <text>" />
+    <ResponseField name="-u" />
+    <ResponseField name="-f" />
+    <ResponseField name="-d" />
+    <ResponseField name="-m" />
+    <ResponseField name="-T" />
+    <ResponseField name="-v" />
+    <ResponseField name="-l" />
+    <ResponseField name="-D" />
+    <ResponseField name="-b <path>" />
+    <ResponseField name="-c" />
+    <ResponseField name="-z" />
+    <ResponseField name="-@" />
+    <ResponseField name="-0" />
+    <ResponseField name="-1" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="unzip">
+  Extract, inspect, or test ZIP archives.
+  <Expandable title="24 flags">
+    <ResponseField name="-o" />
+    <ResponseField name="-n" />
+    <ResponseField name="-l" />
+    <ResponseField name="-d <path>" />
+    <ResponseField name="-q" />
+    <ResponseField name="-p" />
+    <ResponseField name="-t" />
+    <ResponseField name="-v" />
+    <ResponseField name="-x <text>" />
+    <ResponseField name="-Z" />
+    <ResponseField name="-1" />
+    <ResponseField name="-2" />
+    <ResponseField name="-s" />
+    <ResponseField name="-m" />
+    <ResponseField name="-h" />
+    <ResponseField name="-j" />
+    <ResponseField name="-u" />
+    <ResponseField name="-f" />
+    <ResponseField name="-z" />
+    <ResponseField name="-C" />
+    <ResponseField name="-a" />
+    <ResponseField name="-L" />
+    <ResponseField name="-X" />
+    <ResponseField name="-U" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="gzip">
+  Compress or decompress gzip data.
+  <Expandable title="23 flags">
+    <ResponseField name="-c, --stdout, --to-stdout" />
+    <ResponseField name="-d, --decompress, --uncompress" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-l, --list" />
+    <ResponseField name="-n, --no-name" />
+    <ResponseField name="-N, --name" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-S, --suffix <text>" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="--rsyncable" />
+    <ResponseField name="--synchronous" />
+    <ResponseField name="-1, --fast" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="gunzip">
+  Decompress or test gzip data.
+  <Expandable title="23 flags">
+    <ResponseField name="-c, --stdout, --to-stdout" />
+    <ResponseField name="-d, --decompress, --uncompress" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-l, --list" />
+    <ResponseField name="-n, --no-name" />
+    <ResponseField name="-N, --name" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-S, --suffix <text>" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="--rsyncable" />
+    <ResponseField name="--synchronous" />
+    <ResponseField name="-1, --fast" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="zcat">
+  Read compressed content to stdout.
+  <Expandable title="23 flags">
+    <ResponseField name="-c, --stdout, --to-stdout" />
+    <ResponseField name="-d, --decompress, --uncompress" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-l, --list" />
+    <ResponseField name="-n, --no-name" />
+    <ResponseField name="-N, --name" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-S, --suffix <text>" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="--rsyncable" />
+    <ResponseField name="--synchronous" />
+    <ResponseField name="-1, --fast" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="zcmp">
+  Compare compressed files.
+  <Expandable title="6 flags">
+    <ResponseField name="-l, --verbose" />
+    <ResponseField name="-s, --quiet" />
+    <ResponseField name="--silent" />
+    <ResponseField name="-n, --bytes <text>" />
+    <ResponseField name="-b, --print-bytes" />
+    <ResponseField name="-i, --ignore-initial <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="zdiff">
+  Compare compressed files.
+  <Expandable title="37 flags">
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-w, --ignore-all-space" />
+    <ResponseField name="-b, --ignore-space-change" />
+    <ResponseField name="-E, --ignore-tab-expansion" />
+    <ResponseField name="-Z, --ignore-trailing-space" />
+    <ResponseField name="-B, --ignore-blank-lines" />
+    <ResponseField name="-I, --ignore-matching-lines <text>" />
+    <ResponseField name="--strip-trailing-cr" />
+    <ResponseField name="--speed-large-files" />
+    <ResponseField name="--horizon-lines <text>" />
+    <ResponseField name="-a, --text" />
+    <ResponseField name="--normal" />
+    <ResponseField name="-e, --ed" />
+    <ResponseField name="-n, --rcs" />
+    <ResponseField name="-c" />
+    <ResponseField name="-C <text>" />
+    <ResponseField name="--context[=<text>]" />
+    <ResponseField name="-u" />
+    <ResponseField name="-U <text>" />
+    <ResponseField name="--unified[=<text>]" />
+    <ResponseField name="-y, --side-by-side" />
+    <ResponseField name="-W, --width <text>" />
+    <ResponseField name="--left-column" />
+    <ResponseField name="--suppress-common-lines" />
+    <ResponseField name="-p, --show-c-function" />
+    <ResponseField name="-F, --show-function-line <text>" />
+    <ResponseField name="-t, --expand-tabs" />
+    <ResponseField name="-T, --initial-tab" />
+    <ResponseField name="-L, --label <text>" />
+    <ResponseField name="--color[=<text>]" />
+    <ResponseField name="-q, --brief" />
+    <ResponseField name="-r, --recursive" />
+    <ResponseField name="-N, --new-file" />
+    <ResponseField name="--unidirectional-new-file" />
+    <ResponseField name="-x, --exclude <text>" />
+    <ResponseField name="-X, --exclude-from <path>" />
+    <ResponseField name="-s, --report-identical-files" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="xz">
+  Compress, decompress, or test `.xz` data.
+  <Expandable title="23 flags">
+    <ResponseField name="-z, --compress" />
+    <ResponseField name="-d, --decompress, --uncompress" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-c, --stdout, --to-stdout" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-e, --extreme" />
+    <ResponseField name="-0, --fast" />
+    <ResponseField name="-1" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+    <ResponseField name="-T, --threads <text>" />
+    <ResponseField name="-C, --check <text>" />
+    <ResponseField name="-F, --format <text>" />
+    <ResponseField name="-S, --suffix <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="unxz">
+  Compress, decompress, or test `.xz` data.
+  <Expandable title="23 flags">
+    <ResponseField name="-z, --compress" />
+    <ResponseField name="-d, --decompress, --uncompress" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-c, --stdout, --to-stdout" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-e, --extreme" />
+    <ResponseField name="-0, --fast" />
+    <ResponseField name="-1" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+    <ResponseField name="-T, --threads <text>" />
+    <ResponseField name="-C, --check <text>" />
+    <ResponseField name="-F, --format <text>" />
+    <ResponseField name="-S, --suffix <text>" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="bzip2">
+  Compress, decompress, or test `.bz2` data.
+  <Expandable title="21 flags">
+    <ResponseField name="-z, --compress" />
+    <ResponseField name="-d, --decompress" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-c, --stdout" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-s, --small" />
+    <ResponseField name="-1, --fast" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+    <ResponseField name="--repetitive-fast" />
+    <ResponseField name="--repetitive-best" />
+    <ResponseField name="--exponential" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="bunzip2">
+  Compress, decompress, or test `.bz2` data.
+  <Expandable title="21 flags">
+    <ResponseField name="-z, --compress" />
+    <ResponseField name="-d, --decompress" />
+    <ResponseField name="-t, --test" />
+    <ResponseField name="-k, --keep" />
+    <ResponseField name="-f, --force" />
+    <ResponseField name="-c, --stdout" />
+    <ResponseField name="-q, --quiet" />
+    <ResponseField name="-v, --verbose" />
+    <ResponseField name="-s, --small" />
+    <ResponseField name="-1, --fast" />
+    <ResponseField name="-2" />
+    <ResponseField name="-3" />
+    <ResponseField name="-4" />
+    <ResponseField name="-5" />
+    <ResponseField name="-6" />
+    <ResponseField name="-7" />
+    <ResponseField name="-8" />
+    <ResponseField name="-9, --best" />
+    <ResponseField name="--repetitive-fast" />
+    <ResponseField name="--repetitive-best" />
+    <ResponseField name="--exponential" />
+  </Expandable>
+</ResponseField>
+<ResponseField name="zgrep">
+  Search compressed content.
+  <Expandable title="21 flags">
+    <ResponseField name="-i, --ignore-case" />
+    <ResponseField name="-b, --byte-offset" />
+    <ResponseField name="-c, --count" />
+    <ResponseField name="-l, --files-with-matches" />
+    <ResponseField name="-L, --files-without-match" />
+    <ResponseField name="-n, --line-number" />
+    <ResponseField name="-v, --invert-match" />
+    <ResponseField name="-e, --regexp <text>" />
+    <ResponseField name="-f, --file <path>" />
+    <ResponseField name="-E, --extended-regexp" />
+    <ResponseField name="-G, --basic-regexp" />
+    <ResponseField name="-F, --fixed-strings, --fixed-regexp" />
+    <ResponseField name="-P, --perl-regexp" />
+    <ResponseField name="-H, --with-filename" />
+    <ResponseField name="-h, --no-filename" />
+    <ResponseField name="-m, --max-count <text>" />
+    <ResponseField name="-o, --only-matching" />
+    <ResponseField name="-q, --quiet, --silent" />
+    <ResponseField name="-s, --no-messages" />
+    <ResponseField name="-w, --word-regexp" />
+    <ResponseField name="-x, --line-regexp" />
+  </Expandable>
+</ResponseField>
+{/* END GENERATED COMMANDS: Archives and compression */}
+
+`zegrep` and `zfgrep` invoke `zgrep` with `-E` and `-F` respectively. `uncompress` is `gzip -d`.
+
+**Limits:** Archive creation does not traverse descendant mounts, and a mount root cannot be a source for `tar -c` or `zip`. Extracting or writing an archive requires a writable destination.

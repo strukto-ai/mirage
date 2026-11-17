@@ -1,0 +1,46 @@
+---
+title: boxd
+icon: /images/boxd-logo.svg
+description: Run captured programs on a boxd machine.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [boxd](/home/setup/machine/boxd), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[boxd]'
+```
+
+```python
+from boxd import AsyncBoxd
+
+boxd = AsyncBoxd(region="fra")
+machine = await boxd.machines.create("mirage-box", isolated=True)
+await boxd.machines.wait_until_ready(machine.id)
+print(machine.id)
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python on the machine too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "box": {
+            "provider": "boxd",
+            "machine_id": "machine-id",
+            "region": "fra",
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

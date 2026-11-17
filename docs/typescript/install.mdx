@@ -56,7 +56,7 @@ follow the [browser quickstart](/typescript/browser-quickstart).
 
 ## Install From Source
 
-Contributing to Mirage or exploring the examples directly:
+To contribute to Mirage or run the examples:
 
 ```bash
 git clone https://github.com/strukto-ai/mirage.git
@@ -66,3 +66,20 @@ pnpm -r build
 ```
 
 The examples in `examples/typescript/` link to the workspace packages via pnpm's workspace protocol, so changes in `packages/core` or `packages/node` are picked up on the next `pnpm build`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/typescript/quickstart">
+    A workspace, a shell line and its result, in a few lines.
+  </Card>
+  <Card title="Virtualize data storage" icon="database" href="/typescript/setup/vfs">
+    S3, Slack, Google Drive, Postgres and 60 more, as files.
+  </Card>
+  <Card title="Mount as a folder" icon="hard-drive" href="/typescript/setup/fuse">
+    Expose mounts to other programs through FUSE.
+  </Card>
+  <Card title="Connect an agent" icon="robot" href="/typescript/agents/index">
+    The TypeScript agent SDKs, wired to one workspace.
+  </Card>
+</CardGroup>

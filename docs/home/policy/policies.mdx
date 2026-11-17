@@ -536,7 +536,7 @@ Ledger answers apply as follows:
   that session.
 - `deny`: the retry is refused; running it again asks again.
 
-A host answers through [`ws.decisions`](/python/access/in-app#ws-decisions),
+A host answers through [`ws.decisions`](/python/access/in-app#workspace-methods),
 [`mirage workspace allow`](/home/access/cli#asks) or
 [`POST /asks/{ask_id}`](/api/operations/asks/respond-to-ask). An Ask from a `post_`
 method comes after the action ran, so nothing is undone: what came back is

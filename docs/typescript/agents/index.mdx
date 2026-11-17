@@ -4,46 +4,61 @@ description: Connect a coding agent or an agent framework to a Mirage workspace.
 icon: robot
 ---
 
-## Coding Agents
+An agent reaches a workspace in one of three ways: a coding agent runs as it
+is on a workspace or loads Mirage as a plugin, an app hands the workspace to an
+agent SDK, or a provider runs the agent with the workspace as its environment.
+In each, the agent's file and shell calls go through Mirage's mounts, modes and
+policy.
 
-Claude Code, Codex and Grok Build run as they are, on a workspace the `mirage` CLI creates, whatever language you build in. Their guides are under [Agents](/home/agents#coding-agents).
+## Coding agents
 
-To replace an agent's own file and shell tools instead, load Mirage into it as a plugin:
+These run as they are, on a workspace the `mirage` CLI creates, whatever
+language the app is in.
+
+| Agent | Connects through |
+| --- | --- |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | `mirage-bash` as its shell, MCP, or a FUSE folder |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | SSH, MCP, a FUSE folder, or exec-server forward |
+| <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Grok Build](/home/agents/grok-build) | MCP or a FUSE folder |
+
+These load Mirage as a plugin in place of their own file and shell tools:
 
 | Agent | Plugin |
 | --- | --- |
-| [Pi Coding Agent](/typescript/agents/pi) | `mirageExtension(ws)` |
-| [Pi Durable](/typescript/agents/pi-durable) | `new MirageExecutionEnv(ws)` |
-| [OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` in `opencode.json` |
-| [DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
+| <img noZoom src="/images/pi-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Pi Coding Agent](/typescript/agents/pi) | `mirageExtension(ws)` |
+| <img noZoom src="/images/pi-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Pi Durable](/typescript/agents/pi-durable) | `new MirageExecutionEnv(ws)` |
+| <img noZoom src="/images/opencode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` in `opencode.json` |
+| <img noZoom src="/images/deepseek-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
 
 ## Agent SDKs
 
-Your program holds the workspace and hands it to the framework.
+The app holds the workspace and hands it to the framework.
 
-| Framework | Hand it | The agent gets |
-| --- | --- | --- |
-| [Vercel AI SDK](/typescript/agents/vercel) | `mirageTools(ws)` | Mirage's seven tools |
-| [Mastra](/typescript/agents/mastra) | `mirageTools(ws)` | Mirage's seven tools |
-| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | `MirageServer(ws)` | Mirage's seven tools |
-| [OpenAI Agents](/typescript/agents/openai) | `mirageTools(ws)`, or `MirageShellExecutor`, `MirageEditor` and `MirageSandboxClient` | Mirage's seven tools, or its shell, patch and sandbox tools run in Mirage |
-| [LangChain Deep Agents](/typescript/agents/langchain) | `new LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
+| Framework | Install | Hand it | The agent gets |
+| --- | --- | --- | --- |
+| <Icon icon="triangle" size={14} /> [Vercel AI SDK](/typescript/agents/vercel) | `@struktoai/mirage-vercel` | `mirageTools(ws)` | Mirage's seven tools |
+| <img noZoom src="/images/mastra-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Mastra](/typescript/agents/mastra) | `@struktoai/mirage-mastra` | `mirageTools(ws)` | Mirage's seven tools |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Agent SDK](/typescript/agents/claude-agent-sdk) | `@struktoai/mirage-claude-agent-sdk` | `MirageServer(ws)` | Mirage's seven tools |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenAI Agents](/typescript/agents/openai) | `@struktoai/mirage-openai-agents` | `mirageTools(ws)`, or `MirageShellExecutor`, `MirageEditor` and `MirageSandboxClient` | Mirage's seven tools, or its shell, patch and sandbox tools run in Mirage |
+| <img noZoom src="/images/langchain-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[LangChain Deep Agents](/typescript/agents/langchain) | `@struktoai/mirage-langchain` | `new LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
 
-Mirage's seven tools are the session's [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. A session gets the ones its [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it (`session.tools.names()`), so an agent is never offered a tool every call of which would be refused.
+Install the adapter next to the host package, for example
+`pnpm add @struktoai/mirage-vercel @struktoai/mirage-node`. When the framework
+runs in a browser, use `@struktoai/mirage-browser` in place of
+`@struktoai/mirage-node`.
 
-Each framework is its own package: `@struktoai/mirage-vercel`, `@struktoai/mirage-mastra`, `@struktoai/mirage-claude-agent-sdk`, `@struktoai/mirage-openai-agents` or `@struktoai/mirage-langchain`.
-
-```bash
-pnpm add @struktoai/mirage-vercel @struktoai/mirage-node
-```
-
-When the framework supports browsers, use `@struktoai/mirage-browser` in place of `@struktoai/mirage-node`.
+Mirage's seven tools are the session's
+[`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`,
+`write`, `edit`, `ls`, `grep` and `glob`. A session gets only the ones its
+[profile](/home/policy/explain#which-tools-the-agent-gets) leaves it, so an
+agent is never offered a tool whose every call would be refused.
 
 ## API & Environment
 
-The provider runs the agent, and the workspace is its environment: its own shell and file tools run in Mirage.
+The provider runs the agent, and the workspace is its environment: its own
+shell and file tools run in Mirage.
 
 | API | Hand it | The agent gets |
 | --- | --- | --- |
-| [OpenAI Agents API](/typescript/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/home/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
-| [Claude Managed Agents](/typescript/agents/claude-managed-agents) | `mirageTools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenAI Agents API](/typescript/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/home/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Managed Agents](/typescript/agents/claude-managed-agents) | `mirageTools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |

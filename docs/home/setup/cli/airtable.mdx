@@ -1,19 +1,34 @@
 ---
 title: Airtable
 icon: /images/airtable-logo.svg
-description: Set up the Airtable CLI with Python or TypeScript.
+description: Set up the Airtable CLI.
 ---
 
 import License from '/snippets/cli/license/airtable.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
 Mirage defines this command tree over the [Airtable Web API](https://airtable.com/developers/web/api/introduction).
 
 Create a token in [Airtable setup](/home/setup/airtable), with the write scopes
 the CLI needs, then register it on an existing `ws`.
 
-Commands: [Python](/python/cli/airtable) · [TypeScript](/typescript/cli/airtable).
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      airtable:
+        cli: airtable
+        machine: in_process
+        config:
+          token: ${AIRTABLE_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage.commands.cli.builtin.airtable import AIRTABLE
@@ -32,5 +47,16 @@ Commands: [Python](/python/cli/airtable) · [TypeScript](/typescript/cli/airtabl
     ```
   </Tab>
 </Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/airtable">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/airtable">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
 
 <License />

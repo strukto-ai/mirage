@@ -1,0 +1,28 @@
+---
+title: Apple Container
+icon: apple
+description: Run captured programs in containers under Apple's container tool on macOS.
+---
+
+What to install and a runnable TypeScript example. The settings, how the workspace connects and the notes are on [Apple Container](/home/setup/machine/apple_container), shared by both SDKs.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the container too. For one container per agent, make each
+container a machine of its own and send each session to its machine with a
+[route](/home/policy/route-machine#one-machine-per-session).
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: { box: { provider: 'apple_container', container: 'my-sandbox', captures: ['@python', '@external'] } },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

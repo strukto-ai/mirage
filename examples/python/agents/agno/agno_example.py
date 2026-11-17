@@ -15,7 +15,7 @@
 import asyncio
 
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from agno.models.openai import OpenAIResponses
 from dotenv import load_dotenv
 
 from mirage import RAMVFS, MountMode, Workspace
@@ -26,7 +26,7 @@ load_dotenv(".env.development")
 ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
+    model=OpenAIResponses(id="gpt-6.1-sol"),
     tools=[MirageToolkit(ws)],
     instructions=(
         "You have access to a virtual filesystem via shell "

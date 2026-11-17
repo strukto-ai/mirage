@@ -263,7 +263,7 @@
                   "home/integration/walks"
                 ]
               },
-              "home/setup/custom-vfs",
+              "home/setup/vfs/new",
               "home/setup/vfs-md"
             ]
           },
@@ -271,37 +271,47 @@
             "group": "CLIs",
             "pages": [
               "home/setup/clis",
-              "home/setup/cli/custom",
-              "home/setup/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "home/setup/cli/himalaya",
-                  "home/setup/cli/gws",
-                  "home/setup/cli/slack",
-                  "home/setup/cli/discord",
-                  "home/setup/cli/ntn",
-                  "home/setup/cli/linear",
-                  "home/setup/cli/trello",
-                  "home/setup/cli/airtable",
-                  "home/setup/cli/gh",
-                  "home/setup/cli/hf",
-                  "home/setup/cli/git",
                   "home/setup/cli/office",
                   "home/setup/cli/pdftotext",
                   "home/setup/cli/pdfinfo"
                 ]
-              }
-            ]
-          },
-          {
-            "group": "Mirage Shell",
-            "pages": [
-              "home/core/shell",
-              "home/core/output-limits",
-              "home/core/tools",
-              "home/core/data-network"
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "home/setup/cli/gh",
+                  "home/setup/cli/git",
+                  "home/setup/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "home/setup/cli/slack",
+                  "home/setup/cli/discord",
+                  "home/setup/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "home/setup/cli/gws",
+                  "home/setup/cli/ntn",
+                  "home/setup/cli/linear",
+                  "home/setup/cli/trello",
+                  "home/setup/cli/airtable"
+                ]
+              },
+              "home/setup/cli/new",
+              "home/setup/cli/mcp",
+              "home/setup/cli/skill-md"
             ]
           },
           {
@@ -348,21 +358,47 @@
                     "pages": [
                       "home/setup/runtime/quickjs"
                     ]
-                  },
-                  "home/setup/runtime/custom"
+                  }
                 ]
               },
               "home/setup/machine/host",
-              "home/setup/machine/docker",
-              "home/setup/machine/kubernetes",
-              "home/setup/machine/apple_container",
-              "home/setup/machine/smolvm",
-              "home/setup/machine/microsandbox",
-              "home/setup/machine/daytona",
-              "home/setup/machine/e2b",
-              "home/setup/machine/cloudflare_container",
-              "home/setup/machine/boxd",
-              "home/setup/machine/ssh"
+              "home/setup/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "home/setup/machine/docker",
+                  "home/setup/machine/kubernetes",
+                  "home/setup/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "home/setup/machine/microsandbox",
+                  "home/setup/machine/smolvm",
+                  "home/setup/machine/e2b",
+                  "home/setup/machine/daytona",
+                  "home/setup/machine/boxd",
+                  "home/setup/machine/cloudflare_container"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Mirage Shell",
+            "pages": [
+              "home/core/shell",
+              {
+                "group": "Commands",
+                "icon": "/images/mirage-icon-light.svg",
+                "pages": [
+                  "home/core/tools",
+                  "home/core/data",
+                  "home/core/network"
+                ]
+              }
             ]
           },
           {
@@ -552,34 +588,97 @@
             "group": "CLIs",
             "pages": [
               "python/cli/index",
-              "python/cli/custom",
-              "python/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "python/cli/himalaya",
-                  "python/cli/gws",
-                  "python/cli/slack",
-                  "python/cli/discord",
-                  "python/cli/ntn",
-                  "python/cli/linear",
-                  "python/cli/trello",
-                  "python/cli/airtable",
-                  "python/cli/gh",
-                  "python/cli/hf",
-                  "python/cli/git",
                   "python/cli/office",
                   "python/cli/pdftotext",
                   "python/cli/pdfinfo"
                 ]
-              }
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "python/cli/gh",
+                  "python/cli/git",
+                  "python/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "python/cli/slack",
+                  "python/cli/discord",
+                  "python/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "python/cli/gws",
+                  "python/cli/ntn",
+                  "python/cli/linear",
+                  "python/cli/trello",
+                  "python/cli/airtable"
+                ]
+              },
+              "python/cli/new",
+              "python/cli/mcp"
             ]
           },
           {
-            "group": "Runtimes",
+            "group": "Machines",
             "pages": [
-              "python/runtime/python"
+              "python/machine/overview",
+              {
+                "group": "Runtimes",
+                "icon": "microchip",
+                "pages": [
+                  "python/runtime/overview",
+                  {
+                    "group": "Python",
+                    "icon": "python",
+                    "pages": [
+                      "python/runtime/monty",
+                      "python/runtime/wasi"
+                    ]
+                  },
+                  {
+                    "group": "JavaScript",
+                    "icon": "js",
+                    "pages": [
+                      "python/runtime/quickjs"
+                    ]
+                  }
+                ]
+              },
+              "python/machine/host",
+              "python/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "python/machine/docker",
+                  "python/machine/kubernetes",
+                  "python/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "python/machine/microsandbox",
+                  "python/machine/smolvm",
+                  "python/machine/e2b",
+                  "python/machine/daytona",
+                  "python/machine/boxd",
+                  "python/machine/cloudflare_container"
+                ]
+              }
             ]
           }
         ]
@@ -758,34 +857,97 @@
             "group": "CLIs",
             "pages": [
               "typescript/cli/index",
-              "typescript/cli/custom",
-              "typescript/cli/mcp",
               {
-                "group": "CLIs",
-                "icon": "wrench",
+                "group": "Files",
+                "icon": "folder-open",
                 "pages": [
-                  "typescript/cli/himalaya",
-                  "typescript/cli/gws",
-                  "typescript/cli/slack",
-                  "typescript/cli/discord",
-                  "typescript/cli/ntn",
-                  "typescript/cli/linear",
-                  "typescript/cli/trello",
-                  "typescript/cli/airtable",
-                  "typescript/cli/gh",
-                  "typescript/cli/hf",
-                  "typescript/cli/git",
                   "typescript/cli/office",
                   "typescript/cli/pdftotext",
                   "typescript/cli/pdfinfo"
                 ]
-              }
+              },
+              {
+                "group": "Developer",
+                "icon": "code",
+                "pages": [
+                  "typescript/cli/gh",
+                  "typescript/cli/git",
+                  "typescript/cli/hf"
+                ]
+              },
+              {
+                "group": "Chat",
+                "icon": "comments",
+                "pages": [
+                  "typescript/cli/slack",
+                  "typescript/cli/discord",
+                  "typescript/cli/himalaya"
+                ]
+              },
+              {
+                "group": "Productivity",
+                "icon": "list-check",
+                "pages": [
+                  "typescript/cli/gws",
+                  "typescript/cli/ntn",
+                  "typescript/cli/linear",
+                  "typescript/cli/trello",
+                  "typescript/cli/airtable"
+                ]
+              },
+              "typescript/cli/new",
+              "typescript/cli/mcp"
             ]
           },
           {
-            "group": "Runtimes",
+            "group": "Machines",
             "pages": [
-              "typescript/runtime/python"
+              "typescript/machine/overview",
+              {
+                "group": "Runtimes",
+                "icon": "microchip",
+                "pages": [
+                  "typescript/runtime/overview",
+                  {
+                    "group": "Python",
+                    "icon": "python",
+                    "pages": [
+                      "typescript/runtime/monty",
+                      "typescript/runtime/pyodide"
+                    ]
+                  },
+                  {
+                    "group": "JavaScript",
+                    "icon": "js",
+                    "pages": [
+                      "typescript/runtime/quickjs"
+                    ]
+                  }
+                ]
+              },
+              "typescript/machine/host",
+              "typescript/machine/ssh",
+              {
+                "group": "Containers",
+                "icon": "boxes-stacked",
+                "pages": [
+                  "typescript/machine/docker",
+                  "typescript/machine/kubernetes",
+                  "typescript/machine/apple_container"
+                ]
+              },
+              {
+                "group": "Sandboxes",
+                "icon": "box-open",
+                "pages": [
+                  "typescript/machine/microsandbox",
+                  "typescript/machine/smolvm",
+                  "typescript/machine/e2b",
+                  "typescript/machine/daytona",
+                  "typescript/machine/boxd",
+                  "typescript/machine/cloudflare_container"
+                ]
+              }
             ]
           }
         ]
@@ -1007,6 +1169,50 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/home/setup/cli/custom",
+      "destination": "/home/setup/cli/new"
+    },
+    {
+      "source": "/python/cli/custom",
+      "destination": "/python/cli/new"
+    },
+    {
+      "source": "/typescript/cli/custom",
+      "destination": "/typescript/cli/new"
+    },
+    {
+      "source": "/home/setup/custom-vfs",
+      "destination": "/home/setup/vfs/new"
+    },
+    {
+      "source": "/python/runtime/custom",
+      "destination": "/python/machine/overview"
+    },
+    {
+      "source": "/typescript/runtime/custom",
+      "destination": "/typescript/machine/overview"
+    },
+    {
+      "source": "/home/setup/runtime/custom",
+      "destination": "/home/setup/machine/overview"
+    },
+    {
+      "source": "/python/runtime/python",
+      "destination": "/python/runtime/overview"
+    },
+    {
+      "source": "/typescript/runtime/python",
+      "destination": "/typescript/runtime/overview"
+    },
+    {
+      "source": "/home/core/data-network",
+      "destination": "/home/core/data"
+    },
+    {
+      "source": "/home/core/output-limits",
+      "destination": "/home/limits"
+    },
     {
       "source": "/home/examples/lightweight-terminal",
       "destination": "/home/examples/in-process-terminal"

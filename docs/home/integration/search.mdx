@@ -61,7 +61,7 @@ These VFSs answer `grep -r` and `rg` with their service's search.
 
 `walk_limit` caps how many files one command walks under a folder
 (TypeScript: `walkLimit`). It is a field of
-[`command_limits`](/home/core/output-limits). A mount's `"@all"` entry, else
+[`command_limits`](/home/limits#command-output). A mount's `"@all"` entry, else
 the workspace's, sets the mount's own `walk_limit`. An entry named for one
 command, such as `find`, changes only how far that command walks.
 
@@ -187,7 +187,7 @@ A custom VFS overrides the methods its service can answer. A method returns
 TypeScript names methods and arguments in camelCase (`files_containing` is
 `filesContaining`) and passes keyword arguments in an `opts` object. The
 examples extend `NotesVFS` from
-[Adding a New VFS](/home/setup/custom-vfs#example-a-read-only-vfs).
+[Adding a New VFS](/home/setup/vfs/new#write-one).
 
 ### `files_containing`
 

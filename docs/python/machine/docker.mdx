@@ -1,0 +1,37 @@
+---
+title: Docker
+icon: /images/docker-logo.svg
+description: Run captured programs in a Docker container.
+---
+
+What to install and a runnable Python example. The settings, how the workspace connects and the notes are on [Docker](/home/setup/machine/docker), shared by both SDKs.
+
+## Install
+
+```bash
+pip install 'mirage-ai[ssh]'
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the container too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "box": {
+            "provider": "docker",
+            "container": "my-sandbox",
+            "mount_type": "ssh",
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

@@ -4,9 +4,7 @@ description: Run Anthropic's Claude Agent SDK against a Mirage workspace through
 icon: /images/claude-logo.svg
 ---
 
-The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/) builds agents on Claude. Mirage exposes any `Workspace` to the SDK as an in-process MCP server, so every file and shell operation the agent runs is routed through Mirage instead of the host filesystem.
-
-This is distinct from [Claude Code](/home/agents/claude-code), the `claude` CLI run as it is on a workspace. Use this SDK integration when you build your own agent with `claude_agent_sdk.query()` and want Mirage tools rather than the built-in file tools.
+The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) builds agents on the same loop as Claude Code. Mirage hands it a `Workspace` as an in-process MCP server, so every file and shell call the agent makes runs in the workspace, not on the host. To run the `claude` CLI itself on a workspace, see [Claude Code](/home/agents/claude-code).
 
 ## Install
 
@@ -16,12 +14,12 @@ uv add 'mirage-ai[claude-agent-sdk]'
 
 ## Usage
 
-`build_options` wires a workspace into a ready-to-use `ClaudeAgentOptions`: it registers the Mirage MCP server, restricts the agent to Mirage's tools, and injects a system prompt describing the mounted paths.
+`build_options` returns a `ClaudeAgentOptions` that registers the Mirage server, turns off Claude's built-in tools, allows Mirage's and sets a system prompt describing the mounts:
 
 ```python
 import asyncio
 
-from claude_agent_sdk import query
+from claude_agent_sdk import ResultMessage, query
 
 from mirage import MountMode, RAMVFS, Workspace
 from mirage.agents.claude_agent_sdk import build_options
@@ -30,11 +28,14 @@ from mirage.agents.claude_agent_sdk import build_options
 async def main() -> None:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
+        options = await build_options(ws)
+        options.model = "claude-sonnet-5-5"
         async for msg in query(
             prompt="Write 'hi from mirage' to /hello.txt, then cat it.",
-            options=await build_options(ws),
+            options=options,
         ):
-            print(msg)
+            if isinstance(msg, ResultMessage):
+                print(msg.result)
     finally:
         await ws.close()
 
@@ -42,9 +43,15 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Composing with other MCP servers
+`build_options(ws, session_id="agent")` runs the tools as that session, under its profile. `system_prompt=` replaces the default prompt.
 
-Inside `main`, use `MirageServer` directly to combine Mirage with other servers:
+## Tools
+
+The server serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, named `mcp__mirage__<tool>` in the SDK. It carries only the ones the session's profile leaves it, so a read-only workspace gets no `write` or `edit`.
+
+## Other MCP servers
+
+`MirageServer` is the server alone. Put it next to other servers in a `ClaudeAgentOptions` of its own:
 
 ```python
 from claude_agent_sdk import ClaudeAgentOptions
@@ -59,9 +66,11 @@ options = ClaudeAgentOptions(
 )
 ```
 
-## Shell
+`tools=[]` keeps Claude's built-in tools out, and `allowed_tools` lets the listed servers run without a permission prompt.
 
-To keep Claude's own Bash tool and run it in a workspace, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell), and give it Mirage's other tools over [`mirage mcp`](/home/access/mcp) in place of Claude's file tools. Both reach one workspace that the Mirage daemon serves:
+## Keep Claude's Bash
+
+To keep Claude's own Bash tool and run it in a workspace, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell). Mirage's other tools come over [`mirage mcp`](/home/access/mcp) in place of Claude's file tools. Both reach one workspace that the Mirage daemon serves:
 
 ```bash
 mirage workspace create workspace.yaml --id demo
@@ -86,13 +95,9 @@ options = ClaudeAgentOptions(
 )
 ```
 
-- Bash runs in the workspace, and Mirage's `read`, `write`, `edit`, `ls`, `grep` and `glob` take the place of Claude's Read, Edit, Write, Glob and Grep, so every file the agent touches goes through Mirage.
+- Bash runs in the workspace. Mirage's `read`, `write`, `edit`, `ls`, `grep` and `glob` replace Claude's Read, Edit, Write, Glob and Grep, so every file the agent touches goes through Mirage.
 - Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#workspace) shows, so `cd` carries over.
-- To run under a [profile](/home/configuration/session), create a session with `mirage workspace session create -w demo -s agent -p reviewer`, then set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
-
-## Tools
-
-The server serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, named `mcp__mirage__<tool>` in the SDK. It carries the ones the session's profile leaves it (`session.tools.names()`).
+- To run under a [profile](/home/configuration/session), create a session with `mirage workspace session create -w demo -s agent -p reviewer`, set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
 
 ## Exports
 
@@ -104,3 +109,7 @@ The server serves the session's seven tools, [`session.tools`](/python/access/in
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | <code style={{ whiteSpace: 'nowrap' }}>build_system_prompt</code> | Build a system prompt with optional mount info and extra instructions. |
 {/* generated: exports claude_agent_sdk end */}
+
+## Examples
+
+- [`all_tools.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/claude_agent_sdk/all_tools.py) has a Sonnet agent call each of the seven tools on a RAM workspace and checks the file it leaves.

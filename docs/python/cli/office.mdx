@@ -28,6 +28,78 @@ ws.register_cli("office", OFFICE)
 
 For YAML registration, see the [CLI overview](/python/cli/index#register-a-cli).
 
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `office` installed.
+
+{/* generated: skill-md office start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`office`**
+
+    ```text
+    usage: office [-h] {create,get,query,set,add,remove,move,swap,batch} ...
+
+    office: AI-friendly CLI for Office documents (.docx, .xlsx, .pptx)
+
+    commands:
+      create  Create a blank Office document
+      get     Get a document node by path
+      query   Query document elements with CSS-like selectors
+      set     Modify a document node's properties
+      add     Add a new element to the document
+      remove  Remove an element from the document
+      move    Move an element to a new position or parent
+      swap    Swap two elements in the document
+      batch   Execute multiple commands from a JSON array in a single pass
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `office`
+
+    ```text
+    usage: office [-h] {create,get,query,set,add,remove,move,swap,batch} ...
+
+    office: AI-friendly CLI for Office documents (.docx, .xlsx, .pptx)
+
+    commands:
+      create  Create a blank Office document
+      get     Get a document node by path
+      query   Query document elements with CSS-like selectors
+      set     Modify a document node's properties
+      add     Add a new element to the document
+      remove  Remove an element from the document
+      move    Move an element to a new position or parent
+      swap    Swap two elements in the document
+      batch   Execute multiple commands from a JSON array in a single pass
+
+    options:
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md office end */}
+
 <Reference />
 
 <License />

@@ -1,51 +1,118 @@
 ---
-title: Overview
+title: CLIs
+sidebarTitle: Overview
 icon: wrench
-description: Set up Mirage CLIs with Python or TypeScript.
+description: Run gh, git, Slack, Linear, Office, PDF and other command-line programs inside the Mirage shell.
 ---
 
-Mirage bundles command-line programs for its workspace shell. The
-[host `mirage` CLI](/home/access/cli) connects to a workspace; these programs
-run inside it. Each setup page includes Python and TypeScript registration.
+A CLI is a program an agent runs in the workspace shell, such as
+`gh issue list` or `pdftotext report.pdf -`. Account CLIs carry their own
+credentials and need no mount; `git`, `office`, `pdfinfo` and `pdftotext`
+work on the files in the workspace's mounts. The
+[host `mirage` CLI](/home/access/cli) is a different program: it connects to
+a workspace from outside.
+
+## Example: gh
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /:
+        vfs: ram
+    clis:
+      gh:
+        cli: gh
+        machine: in_process
+        config:
+          token: ${GITHUB_TOKEN}
+          repo: acme/tools
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id dev
+    mirage shell -w dev -c 'gh issue list --limit 5'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import Workspace
+    from mirage.commands.cli.builtin.gh import GH
+    from mirage.core.github.config import GhConfig
+
+    ws = Workspace({})
+    ws.register_cli(
+        "gh", GH, GhConfig(token=os.environ["GITHUB_TOKEN"], repo="acme/tools")
+    )
+    result = await ws.shell("gh issue list --limit 5")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { GH, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({})
+    ws.registerCli('gh', GH, { token: process.env.GITHUB_TOKEN!, repo: 'acme/tools' })
+    const result = await ws.shell('gh issue list --limit 5')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+- A CLI never reads a mount's credentials, and mounting a service does not
+  install its CLI. One token can serve both.
+- `gh --help` lists a program's groups, `gh issue list --help` its flags and
+  `man gh` its manual.
+
+## Supported CLIs
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-| Program | Supported operations | Commands | Upstream license |
-| --- | --- | --- | --- |
-| [airtable](/home/setup/cli/airtable) | Query bases and tables; read, create, update and delete records; add comments | 10 | None; calls the service API |
-| [discord](/home/setup/cli/discord) | Read and send messages; edit, react, create threads and polls; inspect guilds | 14 | MIT (OpenClaw) |
-| [gh](/home/setup/cli/gh) | Manage repositories, issues, pull requests, releases and Actions; call GitHub APIs | 104 | MIT |
-| [git](/home/setup/cli/git) | Inspect history, stage and commit files, manage branches and tags, clone and fetch | 44 | GPL, behavior reference only |
-| [gws](/home/setup/cli/gws) | Call Drive, Sheets, Docs, Slides, Calendar, Forms and Gmail APIs | 54 | Apache-2.0 |
-| [hf](/home/setup/cli/hf) | Download and upload Hub files; create repositories; manage tags and delete files | 11 | Apache-2.0 |
-| [himalaya](/home/setup/cli/himalaya) | List and search mail; read, compose, reply, forward and send messages | 17 | MIT or Apache-2.0 |
-| [linear](/home/setup/cli/linear) | Query teams, issues, projects and documents; update issues and comments | 30 | ISC |
-| [ntn](/home/setup/cli/ntn) | Read and edit Markdown pages, query data sources and call Notion APIs | 12 | MIT |
-| [office](/home/setup/cli/office) | Create and edit Excel workbooks, Word documents and PowerPoint decks with OfficeCLI paths | 9 | Apache-2.0 |
-| [pdfinfo](/home/setup/cli/pdfinfo) | Print a PDF's metadata, page count, page sizes, encryption and version | 1 | GPL, behavior reference only |
-| [pdftotext](/home/setup/cli/pdftotext) | Extract a PDF's text in reading order, by layout or in drawing order, page by page | 1 | GPL, behavior reference only |
-| [slack](/home/setup/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 14 | MIT (OpenClaw) |
-| [trello](/home/setup/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 | None; calls the service API |
+### Files
+
+| CLI | Supported operations | Commands | Python | Node.js | Browser | Cloudflare |
+| --- | --- | :-: | :-: | :-: | :-: | :-: |
+| <Icon icon="file-lines" size={14} /> [office](/home/setup/cli/office) | Create and edit Excel workbooks, Word documents and PowerPoint decks with OfficeCLI paths | 9 | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="file-pdf" size={14} /> [pdftotext](/home/setup/cli/pdftotext) | Extract a PDF's text in reading order, by layout or in drawing order, page by page | 1 | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="file-pdf" size={14} /> [pdfinfo](/home/setup/cli/pdfinfo) | Print a PDF's metadata, page count, page sizes, encryption and version | 1 | ✓ | ✓ | ✓ | ✓ |
+
+### Developer
+
+| CLI | Supported operations | Commands | Python | Node.js | Browser | Cloudflare |
+| --- | --- | :-: | :-: | :-: | :-: | :-: |
+| <Icon icon="github" size={14} /> [gh](/home/setup/cli/gh) | Manage repositories, issues, pull requests, releases and Actions; call GitHub APIs | 104 | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="git-alt" size={14} /> [git](/home/setup/cli/git) | Inspect history, stage and commit files, manage branches and tags, clone and fetch | 44 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[hf](/home/setup/cli/hf) | Download and upload Hub files; create repositories; manage tags and delete files | 11 | ✓ | ✓ |  | ✓ |
+
+### Chat
+
+| CLI | Supported operations | Commands | Python | Node.js | Browser | Cloudflare |
+| --- | --- | :-: | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[slack](/home/setup/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 14 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/discord-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[discord](/home/setup/cli/discord) | Read and send messages; edit, react, create threads and polls; inspect guilds | 14 | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="envelope" size={14} /> [himalaya](/home/setup/cli/himalaya) | List and search mail; read, compose, reply, forward and send messages | 17 | ✓ | ✓ |  | ✓ |
+
+### Productivity
+
+| CLI | Supported operations | Commands | Python | Node.js | Browser | Cloudflare |
+| --- | --- | :-: | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[gws](/home/setup/cli/gws) | Call Drive, Sheets, Docs, Slides, Calendar, Forms and Gmail APIs | 54 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[ntn](/home/setup/cli/ntn) | Read and edit Markdown pages, query data sources and call Notion APIs | 12 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/linear-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[linear](/home/setup/cli/linear) | Query teams, issues, projects and documents; update issues and comments | 30 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[trello](/home/setup/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[airtable](/home/setup/cli/airtable) | Query bases and tables; read, create, update and delete records; add comments | 10 | ✓ | ✓ | ✓ | ✓ |
 {/* END GENERATED CLI COMMANDS */}
 
-Account CLIs use their own validated config and can run without a service
-mount. Credentials can be reused with the corresponding VFS; mounting a
-service does not register its CLI. `git`, `office`, `pdfinfo` and `pdftotext`
-need no account config: they work on files in workspace mounts, and `git` on
-the repositories there.
-
-All of them are available in Python and TypeScript on Node. TypeScript exports
-`hf` and `himalaya` from `@struktoai/mirage-node`, and the others from
-`@struktoai/mirage-core`.
-
-Use `<program> --help` for its groups, `<program> <command> --help` for flags,
-and `man <program>` for its manual. The [Python](/python/cli/index) and
-[TypeScript](/typescript/cli/index) references list the implemented commands
-and explain how CLI file arguments use the VFS.
+Every command of every CLI is listed in the [Python](/python/cli/index) and
+[TypeScript](/typescript/cli/index) references.
 
 ## Add your own
 
-- [Customize CLI](/home/setup/cli/custom): your own command, as a typed CLI
-  or a script.
+- [Adding a New CLI](/home/setup/cli/new): a typed CLI or a script.
 - [From MCP](/home/setup/cli/mcp): an MCP server's tools as one CLI.
 
 ## Compatibility and licenses

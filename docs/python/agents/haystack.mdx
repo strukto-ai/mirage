@@ -1,10 +1,10 @@
 ---
 title: Haystack
-description: Give a Haystack Agent a bash tool over a Mirage workspace via MirageShellTool.
+description: Give a Haystack Agent a bash tool over a Mirage workspace with MirageShellTool.
 icon: /images/haystack-logo.svg
 ---
 
-[Haystack](https://haystack.deepset.ai) is deepset's framework for building LLM applications and agents. The integration is maintained by deepset and lives in their [haystack-core-integrations](https://github.com/deepset-ai/haystack-core-integrations/tree/main/integrations/mirage) repository, so it installs as its own package rather than as a `mirage-ai` extra.
+[Haystack](https://haystack.deepset.ai) is deepset's framework for LLM applications and agents. deepset maintains the Mirage integration in [haystack-core-integrations](https://github.com/deepset-ai/haystack-core-integrations/tree/main/integrations/mirage). It describes a mount tree, builds a Mirage workspace from it, and hands an `Agent` one bash tool over that workspace.
 
 ## Install
 
@@ -13,12 +13,12 @@ uv add mirage-haystack
 ```
 
 <Note>
-  `mirage-haystack` pins an exact `mirage-ai` version rather than tracking the latest, because Mirage is pre-1.0. Check the [integration's `pyproject.toml`](https://github.com/deepset-ai/haystack-core-integrations/blob/main/integrations/mirage/pyproject.toml) for which one, since installing it may move an existing `mirage-ai` in your environment.
+  `mirage-haystack` 0.0.1 pins `mirage-ai==0.0.3`, because Mirage is pre-1.0, so installing it moves `mirage-ai` to that release. It builds mounts through `mirage.resource.registry`, which `mirage-ai` 0.0.7 replaced with `mirage.vfs.registry`, so it cannot share an environment with a current `mirage-ai`. Check the [integration's `pyproject.toml`](https://github.com/deepset-ai/haystack-core-integrations/blob/main/integrations/mirage/pyproject.toml) for the current pin.
 </Note>
 
 ## Usage
 
-Describe the mounts, wrap the workspace in a tool, hand the tool to an `Agent`.
+Describe the mounts, wrap the workspace in a tool, and hand the tool to an `Agent`:
 
 ```python
 from haystack.components.agents import Agent
@@ -31,8 +31,8 @@ from haystack_integrations.tools.mirage import (
 )
 
 workspace = MirageWorkspace([
-    MirageMount(path="/data", vfs="ram"),
-    MirageMount(path="/s3", vfs="s3", config={"bucket": "my-bucket"},
+    MirageMount(path="/data", resource="ram"),
+    MirageMount(path="/s3", resource="s3", config={"bucket": "my-bucket"},
                 read_only=True),
 ])
 
@@ -41,32 +41,37 @@ tool = MirageShellTool(
     allowed_commands=["ls", "cat", "grep", "head", "wc", "cp"],
 )
 
-agent = Agent(chat_generator=OpenAIChatGenerator(model="gpt-4o-mini"),
+agent = Agent(chat_generator=OpenAIChatGenerator(model="gpt-6.1-sol"),
               tools=[tool])
 result = agent.run(messages=[
     ChatMessage.from_user("How many lines in /s3/log.txt mention 'alert'?"),
 ])
 print(result["messages"][-1].text)
+workspace.close()
 ```
 
-The tool exposes a single `command` parameter, so the model writes ordinary bash and pipes across mounts. Its description is generated from the mount tree, so the model is told which paths exist without you writing a prompt for it.
+`resource` is a Mirage backend name (`MirageMount.available_resources()` lists them) and `config` takes that backend's config keys. A config value may be a Haystack `Secret`, resolved only when the workspace is built.
 
-## Guarding what the agent can do
+## Tools
 
-Two controls, and they are not interchangeable.
+The agent gets one tool, `mirage_shell`, with a single `command` parameter, so the model writes ordinary bash and pipes across mounts. Its description is generated from the mount tree, so the model learns which paths exist and which are read-only.
 
-`read_only=True` on a mount is the write boundary. Mirage refuses every write to that mount whatever command is used, so this is what prevents modification and deletion.
+## Guarding the agent
 
-`allowed_commands` restricts which command names may run. It is checked against every command Mirage would execute, including ones nested in `$(...)`, backticks and subshells, so `ls "$(rm x)"` is rejected unless `rm` is allowed too. Treat it as steering, not a sandbox: allowing a command that runs other commands (`eval`, `bash`, `sh`, `source`, `xargs`) effectively allows anything.
+Three controls, and they are not interchangeable:
 
-Commands never reach the host shell either way. Mirage interprets them itself, so the blast radius is the mounts you attached.
+- `read_only=True` on a mount is the write boundary. Mirage refuses every write to that mount whatever command runs, so this is what prevents modification and deletion.
+- `allowed_commands` limits which command names may run. It is checked against every command Mirage would execute, including ones nested in `$(...)`, backticks, `<(...)` and subshells, so `ls "$(rm x)"` is refused unless `rm` is allowed too. Treat it as steering, not a sandbox: allowing a command that runs other commands (`eval`, `bash`, `sh`, `source`, `xargs`, `timeout`) allows anything.
+- `denied_paths` refuses any command whose text contains one of the given path substrings.
+
+Commands never reach the host shell. Mirage interprets them itself, so the reach is the attached mounts.
 
 ## Exports
 
 | Symbol | Purpose |
 | --- | --- |
-| `MirageWorkspace` | Declares the mount tree, and runs commands against it with `run` / `run_async`. Serializable with `to_dict` / `from_dict`. |
-| `MirageMount` | One mount: `path`, `vfs`, `config`, `read_only`. |
+| `MirageWorkspace` | Declares the mount tree and runs commands against it with `run` / `run_async`. Serializable with `to_dict` / `from_dict`. |
+| `MirageMount` | One mount: `path`, `resource`, `config`, `read_only`. |
 | `MirageShellTool` | The Haystack `Tool` that gives an `Agent` the bash surface. |
 | `MirageError` | Base error, with `MirageConfigError` and `MirageCommandNotAllowedError`. |
 
