@@ -406,6 +406,16 @@ describe('-exec streams its children output', () => {
     ).toEqual(['/d/a\n0 0\n/d/a\n', '', 0])
   })
 
+  it('keeps the stderr of a child a reader stopped', async () => {
+    // A child the reader stopped still says what it wrote to stderr, as GNU's
+    // child writes it straight to find's stderr.
+    expect(await lines(`find /d/a -exec sh -c 'echo warning >&2; yes' \\; | head -n1`)).toEqual([
+      'y\n',
+      'warning\n',
+      0,
+    ])
+  })
+
   it('fails find on a batch cut short', async () => {
     // A batch the reader cut short died of SIGPIPE, which fails find as
     // GNU's does (findutils 4.10 exits 1).

@@ -35,7 +35,7 @@ import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.t
 import { ebusy, enoent, enotempty, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
-import { ensureStream, OutputStream, SharedStdin } from '../../io/stream.ts'
+import { closeQuietly, ensureStream, OutputStream, SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize, OutputState } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { FindExpr } from '../../rs/find.ts'
@@ -708,9 +708,13 @@ export async function applyFindActions(
     }
   }
   async function* ran(run: IOResult): AsyncGenerator<Uint8Array> {
-    if (held.length > 0) yield* flushed()
-    if (run.stdout !== null) yield* ensureStream(run.stdout)
-    put(Channel.STDERR, await materialize(run.stderr))
+    try {
+      if (held.length > 0) yield* flushed()
+      if (run.stdout !== null) yield* ensureStream(run.stdout)
+    } finally {
+      await closeQuietly(run.stdout)
+      put(Channel.STDERR, await materialize(run.stderr))
+    }
   }
   async function* walk(): AsyncGenerator<Uint8Array> {
     walked = true

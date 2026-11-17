@@ -900,18 +900,17 @@ async def _apply_find_actions(
                 yield b"".join(parts)
 
     async def ran(run: IOResult) -> AsyncGenerator[bytes, None]:
-        if held:
-            async with aclosing(flushed()) as rows:
-                async for chunk in rows:
+        try:
+            if held:
+                async with aclosing(flushed()) as rows:
+                    async for chunk in rows:
+                        yield chunk
+            if run.stdout is not None:
+                async for chunk in ensure_stream(run.stdout):
                     yield chunk
-        if run.stdout is not None:
-            output = ensure_stream(run.stdout)
-            try:
-                async for chunk in output:
-                    yield chunk
-            finally:
-                await close_quietly(output)
-        put(Channel.STDERR, await materialize(run.stderr))
+        finally:
+            await close_quietly(run.stdout)
+            put(Channel.STDERR, await materialize(run.stderr))
 
     async def walk() -> AsyncGenerator[bytes, None]:
         nonlocal failed, walked

@@ -1242,6 +1242,15 @@ async def test_exec_stops_at_a_reader_that_stops() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exec_child_stderr_survives_a_reader_that_stops() -> None:
+    # A child the reader stopped still says what it wrote to stderr, as
+    # GNU's child writes it straight to find's stderr.
+    ws = await _stream_ws()
+    line = r"find /d/a -exec sh -c 'echo warning >&2; yes' \; | head -n1"
+    assert await _lines(ws, line) == ("y\n", "warning\n", 0)
+
+
+@pytest.mark.asyncio
 async def test_exec_batch_cut_short_fails_find() -> None:
     # A batch the reader cut short died of SIGPIPE, which fails find as
     # GNU's does (findutils 4.10 exits 1).
