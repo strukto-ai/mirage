@@ -352,7 +352,6 @@ async def test_a_cli_connection_names_its_program_and_words(port):
     assert [w.text for w in asked.words] == ["acme", "deploy"]
 
 
-
 @pytest.mark.asyncio
 async def test_a_bound_socket_is_refused_while_a_policy_listens(port):
     async def bound(accessor, paths, texts, ctx):

@@ -49,7 +49,7 @@ import urllib.request
 from mirage.policy import Deny, NetworkContext, Policy
 
 CAP = 96 * 1024 * 1024
-REPO = re.compile(r"https://github\.com/([^/]+/[^/.]+)")
+REPO = re.compile(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$")
 
 
 def repo_bytes(name: str) -> int:
@@ -72,11 +72,16 @@ class CloneSize(Policy):
 import type { Policy } from '@struktoai/mirage-node'
 
 const CAP = 96 * 1024 * 1024
-const REPO = /^https:\/\/github\.com\/([^/]+\/[^/.]+)/
+const REPO = /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/
 
 async function repoBytes(name: string): Promise<number> {
   const r = await fetch(`https://api.github.com/repos/${name}`)
-  return ((await r.json()) as { size: number }).size * 1024
+  if (!r.ok) throw new Error(`repository lookup failed: ${String(r.status)}`)
+  const { size } = (await r.json()) as { size?: unknown }
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
+    throw new Error('repository lookup returned no size')
+  }
+  return size * 1024
 }
 
 const cloneSize: Policy = {
@@ -107,6 +112,9 @@ $ echo $?
 ```
 
 The reason is on the result's `decision`: `strukto-ai/mirage is over 96 MB`.
+
+A lookup that fails raises, and a policy that raises refuses, so a
+rate-limited lookup never lets a clone through.
 
 ## Example: a byte budget
 

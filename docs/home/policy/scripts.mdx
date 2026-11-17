@@ -336,7 +336,7 @@ GitHub's API.
 
 ```python github_only.py
 def pre_network(ctx):
-    if not ctx["host"].endswith("github.com"):
+    if ctx["host"] != "github.com" and not ctx["host"].endswith(".github.com"):
         return {"kind": "deny", "reason": f"{ctx['host'] or ctx['address']} is not allowed"}
 ```
 
