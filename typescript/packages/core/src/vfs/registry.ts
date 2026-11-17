@@ -48,6 +48,11 @@ export const REGISTRY: Readonly<Record<string, VFSFactory>> = {
     const { RAMVFS } = await import('./ram/ram.ts')
     return new RAMVFS(normalizeFields(config) as RAMVFSOptions)
   },
+  machine: async (config) => {
+    const { MachineVFS } = await import('./machine/machine.ts')
+    const { MachineVFSConfig } = await import('./machine/config.ts')
+    return new MachineVFS(parseConfigWithSchema(MachineVFSConfig, config))
+  },
   chroma: async (config) => {
     const { ChromaVFS } = await import('./chroma/chroma.ts')
     const { ChromaConfig } = await import('./chroma/config.ts')
@@ -301,6 +306,7 @@ export type ConfigSchemaLoader = () => Promise<z.ZodType>
  * parses a config to an entry here.
  */
 export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {
+  machine: async () => (await import('./machine/config.ts')).MachineVFSConfig,
   chroma: async () => (await import('./chroma/config.ts')).ChromaConfig,
   dify: async () => (await import('./dify/config.ts')).DifyConfig,
   qdrant: async () => (await import('./qdrant/config.ts')).QdrantConfig,

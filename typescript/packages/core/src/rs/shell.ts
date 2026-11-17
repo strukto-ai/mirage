@@ -30,6 +30,7 @@ interface Exports {
     headLen: number,
     first: number,
     utf8: number,
+    rows: number,
   ): number
   mirage_rs_shell_message(): number
   mirage_rs_shell_message_len(): number
@@ -165,10 +166,11 @@ export class ShellTree {
 
   /**
    * What bash warns of while it reads the tree's heredocs, each line led by
-   * `head` and its line, the input's first row being `first`.
+   * `head` and its line, the input's first row being `first`: those whose
+   * `<<` stands on the input's first `rows` rows, or all.
    */
-  warnings(head: string, first: number): string {
-    return this.words(1, head, first, false)
+  warnings(head: string, first: number, rows?: number | null): string {
+    return this.words(1, head, first, false, rows ?? NONE)
   }
 
   /**
@@ -178,15 +180,22 @@ export class ShellTree {
    */
   refusal(head: string, first: number, utf8: boolean): string {
     this.check()
-    return this.error === null ? '' : this.words(0, head, first, utf8)
+    return this.error === null ? '' : this.words(0, head, first, utf8, NONE)
   }
 
-  private words(what: number, head: string, first: number, utf8: boolean): string {
+  private words(what: number, head: string, first: number, utf8: boolean, rows: number): string {
     this.check()
     const wasm = instance()
     const bytes = encodeText(head)
     bytesAt(wasm, wasm.mirage_rs_args(bytes.byteLength), bytes.byteLength).set(bytes)
-    const len = wasm.mirage_rs_shell_words(this.handle, what, bytes.byteLength, first, utf8 ? 1 : 0)
+    const len = wasm.mirage_rs_shell_words(
+      this.handle,
+      what,
+      bytes.byteLength,
+      first,
+      utf8 ? 1 : 0,
+      rows,
+    )
     return decodeText(bytesAt(wasm, wasm.mirage_rs_shell_message(), len))
   }
 
@@ -396,8 +405,8 @@ export class ShellTreeNode implements ShellNode {
   }
 
   /** What bash warns of while it reads the tree's heredocs, as `ShellTree.warnings` words it. */
-  warnings(head: string, first: number): string {
-    return this.tree.warnings(head, first)
+  warnings(head: string, first: number, rows?: number | null): string {
+    return this.tree.warnings(head, first, rows)
   }
 
   /** The tree's refusal, as `ShellTree.error` gives it. */

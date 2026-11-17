@@ -37,6 +37,7 @@ from typing_extensions import TypeForm
 
 from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.types import JsonValue, MountMode
+from mirage.vfs.machine.constants import LOCAL_PREFIXES
 from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
 from mirage.vfs.secrets import secret_field_names
 from mirage.workspace import Workspace
@@ -133,6 +134,10 @@ PLACEHOLDER = "/<path>"
 # A config each VFS builds from where a placeholder per required field is
 # not one it accepts. Nothing is reached: building a VFS opens no
 # connection.
+# A machine mount needs a workspace with machines; one it never reaches.
+MACHINES: dict[str, dict[str, JsonValue]] = {
+    "machine": {"sandbox": {"provider": "docker", "container": "sandbox"}}
+}
 SAMPLES: dict[str, dict[str, JsonValue]] = {
     "box": {"access_token": "token"},
     "databricks_volume": {
@@ -596,11 +601,17 @@ def hidden(session_id: str | None) -> bool:
 
 async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
     vfs = build_vfs(name, dict(config))
-    ws = Workspace({PLACEHOLDER: (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
-    # The scratch root and /dev every workspace adds are no part of this
-    # VFS, and the agent's opening paragraph is no part of a docs page.
-    ws.mount("/").visible = hidden
-    ws.mount("/dev").visible = hidden
+    machines = MACHINES.get(name)
+    ws = Workspace(
+        {PLACEHOLDER: (vfs, MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        machines=machines,
+    )
+    # The scratch root, /dev and the machines' own folders a workspace
+    # adds are no part of this VFS, and the agent's opening paragraph is
+    # no part of a docs page.
+    for prefix in ("/", "/dev", *(LOCAL_PREFIXES if machines else ())):
+        ws.mount(prefix).visible = hidden
     try:
         markdown = (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
     finally:

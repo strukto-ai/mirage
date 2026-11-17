@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { MachineHandle } from '../machine/handle.ts'
 import { Runtime } from './base.ts'
 import { JsRuntime } from './js/base.ts'
 import { LanguageRuntime } from './language.ts'
@@ -27,6 +28,7 @@ import {
   knownRuntimes,
   machineBindingsFor,
   placement,
+  programMachine,
   registerRuntime,
   shadowedCaptures,
 } from './table.ts'
@@ -412,5 +414,22 @@ describe('shadowedCaptures', () => {
       ['@line', 'box', 'other'],
     ])
     expect(shadowedCaptures([new Named('a', 'x'), new Named('b', 'y')])).toEqual([])
+  })
+})
+
+function named(...names: string[]): Record<string, MachineHandle> {
+  return Object.fromEntries(names.map((name) => [name, null])) as unknown as Record<
+    string,
+    MachineHandle
+  >
+}
+
+describe('programMachine', () => {
+  it('is the one running external programs', () => {
+    const a = new RemoteRuntime('a', { captures: ['python3'] })
+    const b = new RemoteRuntime('b', { captures: ['@external'] })
+    expect(programMachine([a, b], named('a', 'b'))).toBe('b')
+    expect(programMachine([a], named('a', 'c'))).toBe('a')
+    expect(programMachine([], {})).toBeNull()
   })
 })

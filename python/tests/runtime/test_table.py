@@ -36,6 +36,7 @@ from mirage.runtime.table import (
     known_runtimes,
     machine_bindings_for,
     placement,
+    program_machine,
     register_runtime,
     shadowed_captures,
     whole_line_runtime,
@@ -424,3 +425,11 @@ def test_a_runtime_built_from_an_entry_need_not_be_hashable():
         assert built_from(_Unhashable()) is None
     finally:
         NAMED.pop("unhashable", None)
+
+
+def test_program_machine_is_the_one_running_external_programs():
+    a = RemoteRuntime("a", ["python3"])
+    b = RemoteRuntime("b", ["@external"])
+    assert program_machine([a, b], {"a": None, "b": None}) == "b"
+    assert program_machine([a], {"a": None, "c": None}) == "a"
+    assert program_machine([], {}) is None

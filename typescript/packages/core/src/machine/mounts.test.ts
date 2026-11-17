@@ -17,6 +17,7 @@ import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { FIND } from '../core/posix/constants.ts'
 import {
   currentCaller,
   getAdmission,
@@ -169,6 +170,12 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     signal?: AbortSignal,
   ): Promise<RunAnswer> {
     this.commands.push(line)
+    if (line.startsWith(`${FIND} `))
+      return Promise.resolve({
+        stdout: ENC.encode('d 1777 4096 0 0 root root \0'),
+        stderr: new Uint8Array(),
+        exitCode: 0,
+      })
     if ((line === 'cat /proc/mounts' && this.hang) || line === 'python3 slow.py') {
       return new Promise((_, reject) => {
         signal?.addEventListener('abort', () => {
@@ -457,9 +464,10 @@ describe('topPrefixes', () => {
 })
 
 describe('servedPrefixes', () => {
-  it('leaves out /tmp, and serves a mount under it at its own path', () => {
+  it('leaves out what the machine holds itself, and serves a mount under it', () => {
     const prefixes = ['/', '/dev/', '/tmp/', '/tmp/cache/', '/data/', '/data/sub/']
-    expect(servedPrefixes(prefixes)).toEqual(['/data', '/tmp/cache'])
+    expect(servedPrefixes(prefixes, ['/tmp/'])).toEqual(['/data', '/tmp/cache'])
+    expect(servedPrefixes(prefixes)).toEqual(['/data', '/tmp'])
   })
 })
 
@@ -487,19 +495,27 @@ describe('MachineMounts', () => {
     expect(sandbox.table.size).toBe(0)
   })
 
-  it('leaves the machine its own /tmp, and refuses a line from the workspace /tmp', async () => {
+  it('leaves the machine its own /tmp', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, ...on(sandbox) },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
+    const fromTmp = await ws.shell('cd /tmp && python3 job.py')
+    expect([fromTmp.exitCode, DEC.decode(fromTmp.stdout)]).toEqual([0, 'ran\n'])
+    await ws.close()
+  })
+
+  it('serves a /tmp the workspace mounts itself', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
       { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
       { mode: MountMode.WRITE, ...on(sandbox) },
     )
     expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
-    const fromTmp = await ws.shell('cd /tmp && python3 job.py')
-    expect([fromTmp.exitCode, DEC.decode(fromTmp.stderr)]).toEqual([
-      126,
-      'fake: the machine cannot see the working directory /tmp; cd into a mount first\n',
-    ])
+    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data', '/tmp'])
     await ws.close()
   })
 
@@ -545,7 +561,7 @@ describe('MachineMounts', () => {
   it('refuses a line while the session restricts /tmp', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
-      { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
+      { '/': new RAMVFS(), '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },

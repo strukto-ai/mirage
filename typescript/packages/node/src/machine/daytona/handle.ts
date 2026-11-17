@@ -18,7 +18,7 @@ import { ON_PAUSE, PAUSED_STATE } from './constants.ts'
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { DaytonaSdk } from './sdk.ts'
@@ -45,7 +45,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly provider = 'daytona'
   protected override readonly pauses = true
   override readonly takesInput = false
-  protected override readonly joinsStreams = true
+  override readonly joinsStreams = true
   private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
@@ -122,6 +122,19 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     const answer = decodeOutput(response.result)
     if (answer.byteLength > 0) await output(answer)
     return { exitCode: response.exitCode }
+  }
+
+  /**
+   * Write a file through Daytona's file API, since its exec takes no input.
+   *
+   * @param path the file's path in the sandbox.
+   * @param data its new bytes.
+   */
+  override async putFile(path: string, data: Uint8Array): Promise<RunAnswer> {
+    await this.ensureConnected()
+    if (this.sandbox === null) throw new Error('daytona sandbox not connected')
+    await this.sandbox.fs.uploadFile(Buffer.from(data), path)
+    return { exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array() }
   }
 
   /** Release the SDK client once a connect under way has settled; the machine itself is the user's. */

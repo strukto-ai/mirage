@@ -17,7 +17,7 @@ import posixpath
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.utils import join_root
 from mirage.errors.fs import eacces, eexist, enoent, enotdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path

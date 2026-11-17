@@ -93,7 +93,12 @@ import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineProcess } from '../../execution/machine/types.ts'
 import type { Machine } from '../../execution/machine/types.ts'
-import { splitMachines, wholeLineRuntime, type MachineSpec } from '../../runtime/table.ts'
+import {
+  programMachine,
+  splitMachines,
+  wholeLineRuntime,
+  type MachineSpec,
+} from '../../runtime/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -138,6 +143,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
+import { MachineVFS } from '../../vfs/machine/machine.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import type { OpKwargs, SessionView } from '../../view/types.ts'
@@ -203,7 +209,13 @@ import { placementRefused } from './failure.ts'
 import { fillEnv } from './fill.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
-import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
+import {
+  bindMachineMounts,
+  localMounts,
+  normalizeMounts,
+  prepareAddedMount,
+  unmountPrefix,
+} from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import type {
@@ -331,6 +343,9 @@ export class Workspace {
   private readonly runtimeWorld: Runtimes
   /** The machines its programs run on, by name. */
   readonly machineTable: MachineTable
+  // The machine that runs the programs nothing in Mirage resolves, where a
+  // machine mount's new names land by default; null without machines.
+  private readonly programMachine: string | null
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
   private keptView: { session: SessionState; policies: Policies; view: SessionView } | null = null
@@ -356,7 +371,7 @@ export class Workspace {
   // FUSE lives entirely in the node Workspace (FUSE needs the OS; the browser
   // can't mount), so the core Workspace carries no FUSE state.
 
-  constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
+  constructor(mounts: Record<string, MountSpec | string>, options: WorkspaceOptions = {}) {
     // A JavaScript caller is not held to the type, so a key outside it is
     // refused here rather than ignored.
     const known: Record<keyof WorkspaceOptions, true> = {
@@ -428,11 +443,19 @@ export class Workspace {
       },
     )
     this.cache = buildFileCache(options.cache, this.clock, this.wsId)
-    const normalized = normalizeMounts(mounts, this.readDefault, index, {
-      mode: options.mode ?? MountMode.READ,
-      write: this.writeDefault,
-      caching: this.cache.cacheLimit > 0,
-    })
+    // The machines come first: a workspace with machines mounts their own
+    // /tmp and /dev/shm, and "@local" names their files.
+    const [handles, entries] = splitMachines(options.machines)
+    const normalized = normalizeMounts(
+      localMounts(mounts, Object.keys(handles).length > 0),
+      this.readDefault,
+      index,
+      {
+        mode: options.mode ?? MountMode.READ,
+        write: this.writeDefault,
+        caching: this.cache.cacheLimit > 0,
+      },
+    )
     this.indexConfig = index
     this.registry = new MountRegistry(
       normalized.bare,
@@ -674,8 +697,8 @@ export class Workspace {
       null,
       this.processTable,
       this.registry.changes,
+      (machine) => this.localPrefixes(machine),
     )
-    const [handles, entries] = splitMachines(options.machines)
     this.machineTable = new MachineTable(
       handles,
       (groups) => this.scanHost(groups),
@@ -685,6 +708,8 @@ export class Workspace {
       this.processTable.machine,
     )
     this.wireMachines()
+    this.programMachine = programMachine(entries, handles)
+    bindMachineMounts(this.registry.allMounts(), this.machineTable, this.programMachine)
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
@@ -846,6 +871,21 @@ export class Workspace {
     ]
     this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
     this.processTable.machineInstance = (machine) => this.machineTable.instance(machine)
+  }
+
+  /**
+   * The prefixes a machine holds itself: the machine mounts of its own files
+   * at the paths they have there.
+   *
+   * @param machine the machine's name under `machines:`.
+   */
+  private localPrefixes(machine: string): string[] {
+    return this.registry
+      .allMounts()
+      .filter(
+        (entry) => entry.vfs instanceof MachineVFS && entry.vfs.showsOwn(machine, entry.prefix),
+      )
+      .map((entry) => entry.prefix)
   }
 
   /**
@@ -1932,6 +1972,11 @@ export class Workspace {
       mode,
       this.cache.cacheLimit > 0 && vfs.cachesReads,
     )
+    if (vfs instanceof MachineVFS) {
+      if (this.programMachine === null)
+        throw new Error(`mount '${prefix}': a machine mount needs a workspace with machines`)
+      vfs.bindMachines(this.machineTable, this.programMachine)
+    }
     const previous = this.registry.allMounts()
     const m = this.registry.mount(prefix, vfs, mode, resolvedRead, {
       ...(own !== undefined ? { index: own } : {}),

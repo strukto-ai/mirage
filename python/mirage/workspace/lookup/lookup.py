@@ -207,10 +207,29 @@ def runs_on_machine(
     routing: RouteDecision[RuntimeIdentity],
 ) -> bool:
     """Whether a job's one program runs past the workspace, with a pid
-    of its own there: what the executor answers when it runs the word,
-    a wrapper's program for a wrapper Mirage runs (it execs its program
-    in place), and any program no layer of the workspace holds as one a
-    name captures.
+    of its own there.
+
+    Args:
+        registry (MountRegistry): mount registry (command registration).
+        words (Sequence[str | None]): the program's words, None for one
+            only known when it runs.
+        session (SessionState): shell session (function table).
+        routing (RouteDecision): the line's placement.
+    """
+    runtime = program_runtime(registry, words, session, routing)
+    return getattr(runtime, "reach", "workspace") != "workspace"
+
+
+def program_runtime(
+    registry: MountRegistry,
+    words: Sequence[str | None],
+    session: SessionState,
+    routing: RouteDecision[RuntimeIdentity],
+) -> RuntimeIdentity | None:
+    """The runtime a command's program runs on: what the executor answers
+    when it runs the word, a wrapper's program for a wrapper Mirage runs
+    (it execs its program in place), and any program no layer of the
+    workspace holds as one a name captures.
 
     Args:
         registry (MountRegistry): mount registry (command registration).
@@ -224,12 +243,10 @@ def runs_on_machine(
     if len(args) == len(words) - 1:
         head, args = _unwrapped(head, args, session, registry, routing)
     if head in routing.bindings:
-        runtime = routing.bindings[head]
-    elif lookup(head, session, registry, routing) is Consumer.EXTERNAL:
-        runtime = routing.bindings.get(EXTERNAL_COMMANDS)
-    else:
-        runtime = routing.fallback
-    return getattr(runtime, "reach", "workspace") != "workspace"
+        return routing.bindings[head]
+    if lookup(head, session, registry, routing) is Consumer.EXTERNAL:
+        return routing.bindings.get(EXTERNAL_COMMANDS)
+    return routing.fallback
 
 
 def _unwrapped(

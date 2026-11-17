@@ -814,6 +814,28 @@ async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
     )
 
 
+def _heredoc_warnings(
+    ast: TSNodeLike, session: SessionState, first_line: int
+) -> bytes:
+    """What bash warns of while it reads a line's heredocs, each in the
+    session's voice: of the rows before the one a refusal belongs to,
+    when lines run before it, since bash reads that row on as a line of
+    its own, which warns of its own heredocs.
+
+    Args:
+        ast (TSNodeLike): the line's root node.
+        session (SessionState): the session reading it.
+        first_line (int): the line the input's first row is.
+    """
+    worded = getattr(ast, "warnings", None)
+    if worded is None:
+        return b""
+    said: bytes = worded(
+        encode_text(f"{voice_name(session)}: "), first_line, refused_row(ast)
+    )
+    return said
+
+
 async def _unreadable_line(
     unreadable: IOResult,
     session: SessionState,
@@ -1420,6 +1442,13 @@ async def run_prepared_line(
             else None
         )
         if unreadable is not None:
+            # bash warns of each heredoc the input ended inside as it
+            # reads it, before the end of the input refuses the line.
+            warnings = _heredoc_warnings(ast, effective_session, first_line)
+            if warnings:
+                unreadable.stderr = (
+                    warnings + await unreadable.materialize_stderr()
+                )
             return await _unreadable_line(
                 unreadable, session, effective_session, call_stack
             )
@@ -1579,6 +1608,12 @@ async def run_prepared_line(
                 await _fill_managed(
                     ws, ast, effective_session, decision, handed, cancel
                 )
+            # bash warns of a heredoc as it reads it, before the line's
+            # commands run and write where the line writes.
+            warnings = _heredoc_warnings(ast, effective_session, first_line)
+            if warnings and sink is not None:
+                await sink.emit(Channel.STDERR, warnings)
+                warnings = b""
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
             # the tree is in. A top-level line runs under its ``@line``
@@ -1619,14 +1654,6 @@ async def run_prepared_line(
             )
         # The program loop stamped each statement; the line as a whole
         # is a wrapper around them, like a group.
-        worded = getattr(ast, "warnings", None)
-        warnings = (
-            b""
-            if worded is None
-            else worded(
-                encode_text(f"{voice_name(effective_session)}: "), first_line
-            )
-        )
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)

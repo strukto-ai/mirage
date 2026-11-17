@@ -1,0 +1,173 @@
+---
+title: Machine files
+icon: hard-drive
+description: A machine's own files at a prefix, so Mirage and the machine's programs share them.
+---
+
+A machine keeps files of its own: scratch files in `/tmp`, a repository its
+image holds, a model a program downloaded. The `machine` VFS shows them at a
+prefix, reached through the exec Mirage already holds for the machine. Nothing
+is copied, served or installed.
+
+```bash
+cat > /tmp/fix.py << 'EOF'
+print("patched")
+EOF
+python3 /tmp/fix.py
+# patched
+```
+
+Mirage's `cat` writes `/tmp/fix.py` on the machine, and the machine's `python3`
+reads it there.
+
+## Connect
+
+A workspace with machines mounts `/tmp` and `/dev/shm` this way unless a
+mount claims them. Mark any other path with `"@local"`: the machines' own
+files at that same path.
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    machines:
+      sandbox:
+        provider: docker
+        container: task-001499
+        captures: [python, git, pip, bash]
+
+    mounts:
+      /testbed: "@local"
+      /gpu:
+        vfs: machine
+        config:
+          machines: [sandbox]
+          root: /
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+
+    ws = Workspace(
+        {"/testbed": "@local"},
+        mode=MountMode.WRITE,
+        machines={
+            "sandbox": {
+                "provider": "docker",
+                "container": "task-001499",
+                "captures": ["python", "git", "pip", "bash"],
+            }
+        },
+    )
+    result = await ws.shell("cd /testbed && git status --short")
+    print(await result.stdout_str())
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/testbed': '@local' },
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          sandbox: {
+            provider: 'docker',
+            container: 'task-001499',
+            captures: ['python', 'git', 'pip', 'bash'],
+          },
+        },
+      },
+    )
+    const result = await ws.shell('cd /testbed && git status --short')
+    console.log(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+</Tabs>
+
+`"@local"` needs a workspace with machines. A workspace without machines keeps
+no `/tmp` mount of its own.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `machines` | every machine | Whose files the mount shows |
+| `root` | `/` | The path on each machine that becomes the mount root |
+| `default_machine` | the machine running programs nothing in Mirage resolves, else the first | Where a new name lands when the command writing it runs no program on a machine |
+
+## Several machines
+
+On a mount over more than one machine, each operation picks where it acts:
+
+| Operation | Machine |
+| --- | --- |
+| A write to an existing name (`>`, `>>`, `tee`, `cp` into it) | The one holding it |
+| A write to a new name | The machine running the command's program (`python3 gen.py > /tmp/out`), else `default_machine` |
+| A read, `rm`, `chmod` | The one holding the name; with several, the machine running the program, else the name is refused as on several machines |
+| `ls` and other listings | Every machine, each name once |
+| `rmdir`, `rm -r` | Every machine holding the directory |
+| `mv` | The source's machine, making the new name's parent there when only another machine has it |
+| `cp` onto another machine | The bytes move through Mirage, as between two mounts |
+
+```text
+machine a: out.csv data.json      ls /tmp  ->  data.json
+machine b: model.bin                           model.bin
+                                               out.csv
+```
+
+## What runs on the machine
+
+A command whose every path is one machine's own runs there whole, as one
+exec, with that machine's own output: `grep -rn`, `find`, `ls -la`, `sed -i`
+and `du` on a repository cost one exec and print what bash prints there,
+owners and link counts included. A command naming no path runs there from a
+working directory on the machine (`cd /testbed && ls`). Glob patterns are
+matched first, so the program gets the matches. A program named by a path the
+machine holds runs there too: after `python3 -m venv /tmp/venv`,
+`/tmp/venv/bin/python` runs as it does in bash. `ln` making links in the
+machine's folder runs there, so its programs follow them and a hard link is a
+real one, and `readlink` asks the machine about its links. A link to a path
+only Mirage holds, such as another mount, stays Mirage's, and a command whose
+path passes through or holds such a link runs in Mirage.
+
+Mirage runs the command itself, reading each file through an exec, when
+anything is piped into it, since its own command leaves what it does not read
+to the next command, as bash's does (`... | while read f; do grep -n x "$f";
+done`). Reading `/dev/null` is no input, so `find . -name '*.py' | xargs grep
+-l x` and `cmd < /dev/null` still run there. It also keeps the command when a path is anywhere else (another
+mount, a machine mount at another root, a mount nested under the path), when
+the session's rules restrict the mount or it is read-only, when the working
+directory is not on the machine, or when the machine has no program of that
+name. Redirects stay Mirage's and land through the mount.
+
+`/dev` stays Mirage's: `/dev/null`, `/dev/stdin` and `/dev/fd/N` are the
+line's own plumbing. Only `/dev/shm`, the folder under it that holds files,
+is the machine's.
+
+## Behavior
+
+- **Caching:** none. Programs change these files behind Mirage's back, so
+  every read and listing asks the machine.
+- **Snapshots:** a snapshot keeps the mount's config; the files stay on the
+  machines.
+- **Owners:** `stat` and listings report the machine's own owners and modes;
+  `chmod`, `chown` and `touch` apply on the machine.
+- **Tools:** the machine needs GNU `find` (for `-printf`), `cat`, `head`,
+  `tail`, `dd` and the coreutils sums; a stock Debian or Ubuntu image has them.
+- **Daytona:** its exec takes no input, so writes go through Daytona's file
+  API, and a command that needs piped input stays with Mirage.
+- **Serving:** with `mount_type: ssh`, a path the machine holds itself is
+  never served back to it; any other machine mount is served like any mount.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/machine">
+    Every config field and the VFS.md.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/machine">
+    Every config field and the VFS.md.
+  </Card>
+</CardGroup>

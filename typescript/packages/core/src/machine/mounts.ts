@@ -126,13 +126,17 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
 }
 
 /**
- * The prefixes ssh serves a machine: its top prefixes but `/tmp`, which
- * stays the machine's own. The machine keeps its sockets and temporary
- * files there, and a user who is not root cannot mount over it. A mount
- * under `/tmp` is still served at its own path.
+ * The prefixes ssh serves a machine: its top prefixes but those it holds
+ * itself. A machine mount of the machine's own files at the path they have
+ * there (`/tmp`, `"@local"`) stays the machine's: serving it would cover the
+ * very files it shows. A mount under one is still served at its own path.
+ *
+ * @param prefixes the mount prefixes the session sees.
+ * @param local the prefixes the machine holds itself.
  */
-export function servedPrefixes(prefixes: Iterable<string>): string[] {
-  return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
+export function servedPrefixes(prefixes: Iterable<string>, local: Iterable<string> = []): string[] {
+  const own = new Set([...local].map((p) => rstripSlash(p)))
+  return topPrefixes([...prefixes].filter((p) => !own.has(rstripSlash(p))))
 }
 
 /** `text` with each byte of a character outside `[A-Za-z0-9-]` written `_xx`. */
@@ -362,10 +366,13 @@ export class MachineMounts {
     this.lines.push({ stop, writeHeld, lent: new Set() })
     const begun = binding.changes?.now() ?? 0
     const seen = rstripSlash(cwd)
+    const local = binding.machinePrefixes(this.machine)
     if (
       this.mountType === 'ssh' &&
       seen !== '' &&
-      !servedPrefixes(mountPrefixes()).some((p) => seen === p || seen.startsWith(`${p}/`))
+      ![...servedPrefixes(mountPrefixes(), local), ...local]
+        .map((p) => rstripSlash(p))
+        .some((p) => seen === p || seen.startsWith(`${p}/`))
     )
       return refuse(
         `${this.provider}: the machine cannot see the working directory ${seen}; cd into a mount first\n`,
@@ -402,7 +409,8 @@ export class MachineMounts {
           1,
         )
       }
-      const every = mountPaths(mountPrefixes())
+      const own = new Set(local.map((p) => rstripSlash(p)))
+      const every = new Set([...mountPaths(mountPrefixes())].filter((p) => !own.has(p)))
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
@@ -622,7 +630,10 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const served = servedPrefixes(binding.resolver.prefixes())
+    const served = servedPrefixes(
+      binding.resolver.prefixes(),
+      binding.machinePrefixes(this.machine),
+    )
     const visible = this.mountType === 'fuse' ? [] : await this.mountable(files, served)
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)

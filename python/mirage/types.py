@@ -1003,6 +1003,7 @@ class VFSName(StrEnum):
     LANGFUSE = "langfuse"
     JAEGER = "jaeger"
     SSH = "ssh"
+    MACHINE = "machine"
     REDIS = "redis"
     SQL = "sql"
     GCS = "gcs"

@@ -10,10 +10,11 @@ over a served mount the box lost since the mounts were last read, its
 sshfs still running as a restart between check and run leaves it, exits
 126 without running and the next line serves it again. A write sshfs
 acknowledged and could not land (a capped mount) fails its line with the
-error, though the program saw it succeed. The box keeps its own `/tmp`: a
-workspace `/tmp` is not served over it, and a line run from it exits 126.
-Mirage leaves no files of its own there (`captures.json`): its named pipes
-go in the machine user's `~/.mirage`.
+error, though the program saw it succeed. The box keeps its own `/tmp`, and
+the workspace shows it as a machine mount (`local.json`): sshfs does not
+serve over it, a file a program writes there is the file Mirage reads, and a
+line runs from it. Mirage leaves no files of its own there
+(`captures.json`): its named pipes go in the machine user's `~/.mirage`.
 A file mounted at a path of its own, such as `VFS.md`, stays in the
 workspace: sshfs mounts only a directory.
 
@@ -29,6 +30,7 @@ workspace: sshfs mounts only a directory.
 | `kernel.json`     | the box runs its own Linux kernel                                                                                       | smolvm, microsandbox, apple_container                                       |
 | `resources.json`  | `nproc`, `free`, `uptime` and `top` read the box; `$!`, a `kill` of `timeout` and `pkill -f` reach the program          | docker, ssh, e2b, microsandbox, apple_container, kubernetes                 |
 | `mounts.json`     | `mount_type` serves the session's view into the box                                                                     | docker, e2b, microsandbox, kubernetes                                       |
+| `local.json`      | `/tmp`, `/dev/shm` and a machine mount at its own path are the box's own files; a machine tree at another prefix; two machines merge, refuse an ambiguous name, rename in place and copy across | docker, e2b, microsandbox, kubernetes; two machines on docker               |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox, apple_container and kubernetes. CI runs docker
 and ssh in `integ-runtime` against containers it starts, and the rest in

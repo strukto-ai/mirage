@@ -14,7 +14,8 @@
 
 import { CapacityState, type CapacityResult } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { sftpCall } from './utils.ts'
 
 /**
  * The space of the filesystem the mount's root sits on, for df, from the

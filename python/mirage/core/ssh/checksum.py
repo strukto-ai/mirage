@@ -17,20 +17,11 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.posix.checksum import checksum as posix_checksum
+from mirage.core.posix.utils import join_root
 from mirage.types import PathSpec
-from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
-
-SUMS = {
-    "md5": ("md5sum", 32),
-    "sha1": ("sha1sum", 40),
-    "sha224": ("sha224sum", 56),
-    "sha256": ("sha256sum", 64),
-    "sha384": ("sha384sum", 96),
-    "sha512": ("sha512sum", 128),
-}
 
 
 async def checksum(
@@ -51,25 +42,9 @@ async def checksum(
         path_spec (PathSpec): the file.
         algorithm (str): the hashlib name asked for.
     """
-    tool = SUMS.get(algorithm)
-    if tool is None:
-        return None
-    name, width = tool
     remote = join_root(accessor.config.root, path_spec.mount_path)
     try:
-        status, out, err = await accessor.run(
-            f"{name} < {single_quote(remote)}"
-        )
+        return await posix_checksum(accessor.run, remote, algorithm)
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh checksum left to the read: %s", exc)
         return None
-    digest = out[:width].decode("ascii", "replace")
-    if (
-        status != 0
-        or err
-        or out[width:] != b"  -\n"
-        or len(digest) != width
-        or digest.strip("0123456789abcdef")
-    ):
-        return None
-    return digest

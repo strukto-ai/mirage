@@ -16,7 +16,8 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { holdsEntries, isFailure, isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { holdsEntries, isFailure, isNoSuchFile, sftpCall } from './utils.ts'
 
 // SFTP 3 has one generic code for a not-empty refusal (SSH_FX_FAILURE),
 // which is what ssh2 always speaks, so one listing probe decides

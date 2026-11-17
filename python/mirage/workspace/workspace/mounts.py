@@ -14,23 +14,28 @@
 
 import asyncio
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 
 from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
+from mirage.execution.machine.table import MachineTable
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
     MountMode,
     ReadSpec,
+    VFSName,
     WritePolicy,
 )
-from mirage.utils.path import norm_dir
+from mirage.utils.path import norm, norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
+from mirage.vfs.machine.config import MachineVFSConfig
+from mirage.vfs.machine.constants import LOCAL, LOCAL_PREFIXES
+from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
@@ -74,6 +79,83 @@ def check_vfs(prefix: str, vfs: BaseVFS) -> None:
         raise TypeError(
             f"mount {prefix!r}: expected a BaseVFS, got {type(vfs).__name__}"
         )
+
+
+def local_mounts(
+    mounts: Mapping[str, VFSMount | str], machines: bool
+) -> dict[str, VFSMount]:
+    """The mount table with each ``"@local"`` entry a machine mount over
+    every machine at that prefix, and, in a workspace with machines,
+    ``/tmp`` and ``/dev/shm`` so too unless a mount claims them.
+
+    Args:
+        mounts (Mapping[str, VFSMount | str]): the constructor mapping.
+        machines (bool): whether the workspace has machines.
+
+    Raises:
+        ValueError: an ``"@local"`` entry in a workspace without machines,
+            or a string that is not ``"@local"``.
+    """
+    table: dict[str, VFSMount] = {}
+    for prefix, value in mounts.items():
+        if isinstance(value, str):
+            if value != LOCAL:
+                raise ValueError(
+                    f"mount {prefix!r}: {value!r} is not a VFS; "
+                    f"the one string a mount takes is {LOCAL!r}"
+                )
+            if not machines:
+                raise ValueError(
+                    f"mount {prefix!r}: {LOCAL} needs a workspace with "
+                    "machines"
+                )
+            value = machine_mount(norm(prefix))
+        table[prefix] = value
+    if machines:
+        claimed = {norm(prefix) for prefix in table}
+        for prefix in LOCAL_PREFIXES:
+            if prefix not in claimed:
+                table[prefix] = machine_mount(prefix)
+    return table
+
+
+def machine_mount(root: str) -> Mount:
+    """The machines' own files at ``root``, recorded as the registry's
+    ``machine`` VFS, so a snapshot rebuilds the mount from its config.
+
+    Args:
+        root (str): the path on each machine, the same as the prefix.
+    """
+    return Mount(
+        vfs=MachineVFS(MachineVFSConfig(root=root)), vfs_ref=VFSName.MACHINE
+    )
+
+
+def bind_machine_mounts(
+    mounts: Iterable[MountEntry], machines: MachineTable, default: str | None
+) -> None:
+    """Hand every machine mount the workspace's machines.
+
+    Args:
+        mounts (Iterable[MountEntry]): the workspace's mounts.
+        machines (MachineTable): its machines.
+        default (str | None): where a new name lands when a mount's
+            config names no ``default_machine``; None for a workspace
+            without machines.
+
+    Raises:
+        ValueError: a machine mount names a machine the workspace lacks,
+            or the workspace has none.
+    """
+    for entry in mounts:
+        if not isinstance(entry.vfs, MachineVFS):
+            continue
+        if default is None:
+            raise ValueError(
+                f"mount {entry.prefix!r}: a machine mount needs a workspace "
+                "with machines"
+            )
+        entry.vfs.bind_machines(machines, default)
 
 
 def normalize_mounts(

@@ -13,31 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { isDirectoryAttrs, isFileAttrs, isNoSuchFile, joinRoot } from './utils.ts'
-
-describe('joinRoot', () => {
-  it('joins root "/" with rel "/" -> "/"', () => {
-    expect(joinRoot('/', '/')).toBe('/')
-  })
-  it('joins root "/" with rel "/foo" -> "/foo"', () => {
-    expect(joinRoot('/', '/foo')).toBe('/foo')
-  })
-  it('joins root "/data" with rel "/" -> "/data"', () => {
-    expect(joinRoot('/data', '/')).toBe('/data')
-  })
-  it('joins root "/data" with rel "/foo" -> "/data/foo"', () => {
-    expect(joinRoot('/data', '/foo')).toBe('/data/foo')
-  })
-  it('joins root "/data" with rel "/foo/bar" -> "/data/foo/bar"', () => {
-    expect(joinRoot('/data', '/foo/bar')).toBe('/data/foo/bar')
-  })
-  it('strips trailing slash from root: "/data/" + "/" -> "/data"', () => {
-    expect(joinRoot('/data/', '/')).toBe('/data')
-  })
-  it('strips trailing slash from root: "/data/" + "/foo" -> "/data/foo"', () => {
-    expect(joinRoot('/data/', '/foo')).toBe('/data/foo')
-  })
-})
+import { isDirectoryAttrs, isFileAttrs, isNoSuchFile } from './utils.ts'
 
 describe('isNoSuchFile', () => {
   it('returns true for { code: 2 }', () => {

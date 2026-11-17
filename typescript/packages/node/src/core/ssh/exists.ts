@@ -15,7 +15,7 @@
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
 
 export async function exists(accessor: SSHAccessor, p: PathSpec): Promise<boolean> {
   const sftp = await accessor.sftp()

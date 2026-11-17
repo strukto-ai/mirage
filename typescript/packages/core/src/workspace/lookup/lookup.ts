@@ -94,10 +94,7 @@ export function isTool(name: string, session: SessionState, registry: MountRegis
 
 /**
  * Whether a job's one program runs past the workspace, with a pid of its own
- * there: what the executor answers when it runs the word, a wrapper's program
- * for a wrapper Mirage runs (it execs its program in place), and any program
- * no layer of the workspace holds as one a name captures. Mirrors Python's
- * `runs_on_machine`.
+ * there. Mirrors Python's `runs_on_machine`.
  */
 export function runsOnMachine(
   registry: MountRegistry,
@@ -105,20 +102,30 @@ export function runsOnMachine(
   session: SessionState,
   routing: RouteDecision<Runtime>,
 ): boolean {
+  const runtime = programRuntime(registry, words, session, routing)
+  return runtime !== null && runtime !== undefined && runtime.reach !== 'workspace'
+}
+
+/**
+ * The runtime a command's program runs on: what the executor answers when it
+ * runs the word, a wrapper's program for a wrapper Mirage runs (it execs its
+ * program in place), and any program no layer of the workspace holds as one
+ * a name captures. Mirrors Python's `program_runtime`.
+ */
+export function programRuntime(
+  registry: MountRegistry,
+  words: readonly (string | null)[],
+  session: SessionState,
+  routing: RouteDecision<Runtime>,
+): Runtime | null | undefined {
   let head = words[0] ?? ''
   let args: readonly string[] = words.slice(1).filter((word) => word !== null)
   if (args.length === words.length - 1)
     [head, args] = unwrapped(head, args, session, registry, routing)
-  let runtime: unknown
-  if (Object.hasOwn(routing.bindings, head)) runtime = routing.bindings[head]
-  else if (lookup(head, session, registry, routing) === Consumer.EXTERNAL)
-    runtime = routing.bindings[EXTERNAL_COMMANDS]
-  else runtime = routing.fallback
-  return (
-    runtime !== null &&
-    runtime !== undefined &&
-    (runtime as { reach?: string }).reach !== 'workspace'
-  )
+  if (Object.hasOwn(routing.bindings, head)) return routing.bindings[head]
+  if (lookup(head, session, registry, routing) === Consumer.EXTERNAL)
+    return routing.bindings[EXTERNAL_COMMANDS]
+  return routing.fallback
 }
 
 /**

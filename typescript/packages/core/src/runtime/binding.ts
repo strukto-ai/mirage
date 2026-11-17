@@ -66,6 +66,8 @@ export class WorkspaceBinding {
    *   process in; null outside a workspace.
    * @param changes the file changes a sandbox's kernel may still hold of
    *   what it was served; null outside a workspace.
+   * @param localPrefixes the prefixes a machine holds itself, by its name;
+   *   null outside a workspace.
    */
   constructor(
     readonly dispatch: DispatchFn | null,
@@ -77,7 +79,18 @@ export class WorkspaceBinding {
     readonly bridge: BridgeDispatchFn | null = null,
     readonly processes: ProcessTable | null = null,
     readonly changes: RecentChanges | null = null,
+    private readonly localPrefixes: ((machine: string) => string[]) | null = null,
   ) {}
+
+  /**
+   * The prefixes a machine holds itself: a machine mount of its own files
+   * at the path they have there, which serving would cover.
+   *
+   * @param machine the machine's name under `machines:`.
+   */
+  machinePrefixes(machine: string): string[] {
+    return this.localPrefixes === null ? [] : this.localPrefixes(machine)
+  }
 
   /**
    * A binding whose file calls ride a guest bridge (the Pyodide worker's,

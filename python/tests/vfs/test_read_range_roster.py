@@ -43,6 +43,7 @@ NATIVE_RANGE = {
     "hf_datasets",
     "hf_models",
     "hf_spaces",
+    "machine",
     "nextcloud",
     "onedrive",
     "ram",

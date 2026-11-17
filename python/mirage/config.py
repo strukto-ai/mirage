@@ -72,13 +72,16 @@ from mirage.types import (
     MountBackend,
     MountMode,
     ReadPolicy,
+    VFSName,
     WritePolicy,
     parse_mount_mode,
 )
 from mirage.utils.clock import parse_system_time
 from mirage.utils.loader import load_attr, optional_attr
+from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
+from mirage.vfs.machine.constants import LOCAL
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.mount.read_policy import (
@@ -725,6 +728,24 @@ class WorkspaceConfig(BaseModel):
     # instance here, or a source directly when the deployment has one
     # account of it and nothing to configure.
     secrets: dict[str, SecretSource] | None = None
+
+    @field_validator("mounts", mode="before")
+    @classmethod
+    def _v_mounts(cls, v: Any) -> Any:
+        # "@local" is the machine VFS over every machine at the prefix.
+        if not isinstance(v, dict):
+            return v
+        return {
+            prefix: (
+                {
+                    "vfs": VFSName.MACHINE.value,
+                    "config": {"root": norm(prefix)},
+                }
+                if block == LOCAL
+                else block
+            )
+            for prefix, block in v.items()
+        }
 
     @field_validator("mode", mode="before")
     @classmethod

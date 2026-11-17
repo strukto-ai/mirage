@@ -19,7 +19,8 @@ from uuid import uuid4
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root, open_for_write
+from mirage.core.posix.utils import join_root
+from mirage.core.ssh.utils import open_for_write
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource

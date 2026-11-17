@@ -300,6 +300,25 @@ def split_machines(
     return handles, entries
 
 
+def program_machine(
+    entries: Sequence[Runtime[Any]], handles: Mapping[str, MachineHandle]
+) -> str | None:
+    """The machine that runs the programs nothing in Mirage resolves: the
+    first whose entry captures them, else the first machine; None for a
+    workspace without machines.
+
+    Args:
+        entries (Sequence[Runtime[Any]]): the ``machines:`` entries.
+        handles (Mapping[str, MachineHandle]): the machines by name.
+    """
+    for entry in entries:
+        if isinstance(entry, RemoteRuntime) and EXTERNAL_COMMANDS in (
+            entry.captures
+        ):
+            return entry.default_machine
+    return next(iter(handles), None)
+
+
 # By identity, the ``machines:`` entry each engine provider's engine was
 # built from, which a copy of the workspace builds again.
 _BUILT_FROM: dict[int, tuple[weakref.ref[Runtime[Any]], dict[str, Any]]] = {}

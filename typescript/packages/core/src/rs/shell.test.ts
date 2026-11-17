@@ -118,6 +118,17 @@ describe('parseShell', () => {
     expect(() => tree.rootNode).toThrow('released')
   })
 
+  it('warns only of the heredocs on the rows a refused input read first', () => {
+    const tree = parseShell('x=$(cat <<EOF)\nabc\nEOF\necho ok\ny=$(cat <<Q\nz')
+    const first = 'bash: line 1: warning: command substitution: 1 unterminated here-document\n'
+    expect(tree.rootNode.warnings('bash: ', 1, 4)).toBe(first)
+    expect(tree.rootNode.warnings('bash: ', 1)).toBe(
+      first +
+        "bash: line 6: warning: here-document at line 5 delimited by end-of-file (wanted `Q')\n",
+    )
+    tree.dispose()
+  })
+
   it('counts offsets and columns in UTF-16 units', () => {
     const line = 'echo é💡 x'
     const word = parseShell(line).rootNode.child(0)?.child(2)

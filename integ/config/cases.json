@@ -579,6 +579,38 @@
           "exit_code": 1
         }
       }
+    },
+    {
+      "id": "machine_keeps_its_machines_root_and_default",
+      "vfs": "machine",
+      "config": {
+        "machines": [
+          "gpu",
+          "cpu"
+        ],
+        "root": "/srv",
+        "default_machine": "cpu"
+      },
+      "expect": {
+        "state": {
+          "machines": [
+            "gpu",
+            "cpu"
+          ],
+          "root": "/srv",
+          "default_machine": "cpu"
+        }
+      }
+    },
+    {
+      "id": "machine_root_must_be_text",
+      "vfs": "machine",
+      "config": {
+        "root": 7
+      },
+      "expect": {
+        "refused": "machine: root"
+      }
     }
   ]
 }

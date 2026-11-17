@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { loadWorkspaceConfig } from './config.ts'
+import type { MachineVFS } from './vfs/machine/machine.ts'
+import { buildVfs } from './vfs/registry.ts'
 import { Workspace } from './workspace/workspace/workspace.ts'
 
 describe('workspace max_body_bytes', () => {
@@ -25,5 +27,17 @@ describe('workspace max_body_bytes', () => {
     expect(() =>
       loadWorkspaceConfig({ mounts: {}, max_body_bytes: 10, max_body_byte: 10 }),
     ).toThrow(/max_body_byte/)
+  })
+})
+
+describe('@local', () => {
+  it('is the machine VFS at its own path', async () => {
+    const config = loadWorkspaceConfig({
+      mounts: { '/testbed/': '@local', '/data': { vfs: 'ram' } },
+    })
+    const block = config.mounts['/testbed/']
+    expect([block?.vfs, block?.config]).toEqual(['machine', { root: '/testbed' }])
+    const vfs = await buildVfs(block?.vfs ?? '', block?.config ?? {})
+    expect([vfs.name, (vfs as MachineVFS).config.root]).toEqual(['machine', '/testbed'])
   })
 })

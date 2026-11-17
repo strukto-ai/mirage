@@ -47,7 +47,11 @@ Keys are `snake_case`; TypeScript constructor options use camelCase, such as
 
 ## Mount settings
 
-Each mount key is an absolute prefix, such as `/data`.
+Each mount key is an absolute prefix, such as `/data`. Its value is a block
+of the keys below, or the string `"@local"`: the machines' own files at that
+same path, so Mirage and the machines' programs name a file the same way.
+`/testbed: "@local"` is `{vfs: machine, config: {root: /testbed}}`. See
+[Machine files](/home/setup/machine/local).
 
 | Key | Sets |
 | --- | --- |

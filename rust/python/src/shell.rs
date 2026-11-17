@@ -324,9 +324,20 @@ impl ShellNode {
     }
 
     /// What bash warns of while it reads the tree's heredocs, each line
-    /// led by `head` and its line, the input's first row being `first`.
-    fn warnings<'py>(&self, py: Python<'py>, head: &[u8], first: usize) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.tree.warnings(head, first))
+    /// led by `head` and its line, the input's first row being `first`;
+    /// with `rows`, only those whose `<<` stands on the first `rows` rows.
+    #[pyo3(signature = (head, first, rows = None))]
+    fn warnings<'py>(
+        &self,
+        py: Python<'py>,
+        head: &[u8],
+        first: usize,
+        rows: Option<usize>,
+    ) -> Bound<'py, PyBytes> {
+        PyBytes::new(
+            py,
+            &self.tree.warnings(head, first, rows.unwrap_or(usize::MAX)),
+        )
     }
 
     /// The tree's refusal, as `ShellTree.error` gives it.

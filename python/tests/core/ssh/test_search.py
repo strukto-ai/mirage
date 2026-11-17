@@ -15,7 +15,8 @@
 import asyncssh
 import pytest
 
-from mirage.core.ssh.search import files_containing, grep_command
+from mirage.core.posix.search import grep_command
+from mirage.core.ssh.search import files_containing
 from mirage.types import PathSpec
 from tests.fixtures.ssh_run import RunAccessor
 
@@ -24,13 +25,6 @@ def _scope(vfs_path: str = "") -> PathSpec:
     virtual = "/s/" + vfs_path if vfs_path else "/s"
     return PathSpec(
         virtual=virtual, directory=virtual, vfs_path=vfs_path, raw_path=virtual
-    )
-
-
-def test_grep_command_quotes_the_text_and_every_scope():
-    assert grep_command("it's", ["data/a b"], True) == (
-        "env LC_ALL=C grep --dereference-recursive --devices=skip -lF "
-        "--null -i -e 'it'\\''s' -- 'data/a b'"
     )
 
 

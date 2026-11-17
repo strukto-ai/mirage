@@ -16,7 +16,8 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isDirectoryAttrs, isFailure, isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isDirectoryAttrs, isFailure, isNoSuchFile, sftpCall } from './utils.ts'
 
 export async function unlink(accessor: SSHAccessor, p: PathSpec): Promise<void> {
   const sftp = await accessor.sftp()

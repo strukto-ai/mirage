@@ -18,10 +18,13 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
-import { MountMode, WritePolicy, type Limit, type ReadSpec } from '../../types.ts'
-import { normDir } from '../../utils/path.ts'
+import type { MachineTable } from '../../execution/machine/table.ts'
+import { MountMode, VFSName, WritePolicy, type Limit, type ReadSpec } from '../../types.ts'
+import { norm, normDir } from '../../utils/path.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
+import { LOCAL, LOCAL_PREFIXES } from '../../vfs/machine/constants.ts'
+import { MachineVFS } from '../../vfs/machine/machine.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -37,6 +40,78 @@ export interface WriteDefaults {
   write: WritePolicy
   /** Whether the workspace's file cache keeps anything. */
   caching: boolean
+}
+
+/**
+ * The mount table with each `"@local"` entry a machine mount over every
+ * machine at that prefix, and, in a workspace with machines, `/tmp` and
+ * `/dev/shm` so too unless a mount claims them. Mirrors Python's
+ * `local_mounts`.
+ *
+ * @param mounts the constructor mapping.
+ * @param machines whether the workspace has machines.
+ * @throws an `"@local"` entry in a workspace without machines, or a string
+ *   that is not `"@local"`.
+ */
+export function localMounts(
+  mounts: Record<string, MountSpec | string>,
+  machines: boolean,
+): Record<string, MountSpec> {
+  const table: Record<string, MountSpec> = {}
+  for (const [prefix, value] of Object.entries(mounts)) {
+    if (typeof value !== 'string') {
+      table[prefix] = value
+      continue
+    }
+    if (value !== LOCAL)
+      throw new Error(
+        `mount '${prefix}': '${value}' is not a VFS; the one string a mount takes is '${LOCAL}'`,
+      )
+    if (!machines) throw new Error(`mount '${prefix}': ${LOCAL} needs a workspace with machines`)
+    table[prefix] = machineMount(norm(prefix))
+  }
+  if (machines) {
+    const claimed = new Set(Object.keys(table).map((prefix) => norm(prefix)))
+    for (const prefix of LOCAL_PREFIXES) {
+      if (!claimed.has(prefix)) table[prefix] = machineMount(prefix)
+    }
+  }
+  return table
+}
+
+/**
+ * The machines' own files at `root`, recorded as the registry's `machine`
+ * VFS, so a snapshot rebuilds the mount from its config. Mirrors Python's
+ * `machine_mount`.
+ *
+ * @param root the path on each machine, the same as the prefix.
+ */
+export function machineMount(root: string): Mount {
+  return new Mount(new MachineVFS({ root }), { vfsRef: VFSName.MACHINE })
+}
+
+/**
+ * Hand every machine mount the workspace's machines. Mirrors Python's
+ * `bind_machine_mounts`.
+ *
+ * @param mounts the workspace's mounts.
+ * @param machines its machines.
+ * @param fallback where a new name lands when a mount's config names no
+ *   `defaultMachine`; null for a workspace without machines.
+ * @throws a machine mount names a machine the workspace lacks, or the
+ *   workspace has none.
+ */
+export function bindMachineMounts(
+  mounts: Iterable<MountEntry>,
+  machines: MachineTable,
+  fallback: string | null,
+): void {
+  for (const entry of mounts) {
+    if (!(entry.vfs instanceof MachineVFS)) continue
+    if (fallback === null)
+      throw new Error(`mount '${entry.prefix}': a machine mount needs a workspace with machines`)
+    entry.vfs.bindMachines(machines, fallback)
+  }
 }
 
 /**

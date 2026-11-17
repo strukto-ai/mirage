@@ -33,6 +33,7 @@ from mirage.context import (
     get_current_session,
     line_running,
 )
+from mirage.core.posix.constants import FIND
 from mirage.errors.types import QuotaExceededError
 from mirage.io.types import materialize
 from mirage.machine import mounts
@@ -143,6 +144,8 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
 
     async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
         self.commands.append(line)
+        if line.startswith(FIND + " "):
+            return RunAnswer(0, b"d 1777 4096 0 0 root root \0")
         if line == "cat /proc/mounts" and self.fail_table:
             return RunAnswer(1, b"", b"gone\n")
         if line == "cat /proc/mounts":
@@ -398,9 +401,10 @@ def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
     assert top_prefixes(prefixes) == ["/a/b", "/data", "/database"]
 
 
-def test_served_prefixes_leave_out_tmp_and_keep_a_mount_under_it():
+def test_served_prefixes_leave_out_what_the_machine_holds_itself():
     prefixes = ["/", "/dev/", "/tmp/", "/tmp/cache/", "/data/", "/data/sub/"]
-    assert served_prefixes(prefixes) == ["/data", "/tmp/cache"]
+    assert served_prefixes(prefixes, ["/tmp/"]) == ["/data", "/tmp/cache"]
+    assert served_prefixes(prefixes) == ["/data", "/tmp"]
 
 
 @pytest.mark.asyncio
@@ -429,18 +433,27 @@ async def test_ssh_serves_every_prefix_the_session_sees():
 async def test_ssh_leaves_the_machine_its_own_tmp():
     sandbox = FakeMachine("ssh")
     ws = Workspace(
-        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        {"/": RAMVFS(), "/data": RAMVFS()},
         mode=MountMode.WRITE,
         **on(sandbox),
     )
     assert (await ws.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data"]
     from_tmp = await ws.shell("cd /tmp && python3 job.py")
-    assert (from_tmp.exit_code, await from_tmp.stderr_str()) == (
-        126,
-        "fake: the machine cannot see the working directory /tmp; "
-        "cd into a mount first\n",
+    assert (from_tmp.exit_code, await from_tmp.stdout_str()) == (0, "ran\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ssh_serves_a_tmp_the_workspace_mounts_itself():
+    sandbox = FakeMachine("ssh")
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        mode=MountMode.WRITE,
+        **on(sandbox),
     )
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/tmp"]
     await ws.close()
 
 
@@ -448,7 +461,7 @@ async def test_ssh_leaves_the_machine_its_own_tmp():
 async def test_ssh_refuses_a_line_while_the_session_restricts_tmp():
     sandbox = FakeMachine("ssh")
     ws = Workspace(
-        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        {"/": RAMVFS(), "/data": RAMVFS()},
         mode=MountMode.WRITE,
         profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
         **on(sandbox),

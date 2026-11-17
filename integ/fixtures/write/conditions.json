@@ -80,6 +80,7 @@
     "lancedb": [],
     "langfuse": [],
     "linear": [],
+    "machine": [],
     "mem0": [],
     "minio": [
       "put"
@@ -265,6 +266,7 @@
       "lancedb": {},
       "langfuse": {},
       "linear": {},
+      "machine": {},
       "mem0": {},
       "minio": {
         "put": [

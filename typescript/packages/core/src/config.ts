@@ -55,9 +55,11 @@ import {
   parseMountMode,
   ReadPolicy,
   type ReadSpec,
+  VFSName,
 } from './types.ts'
 import { parseSystemTime } from './utils/clock.ts'
 import { snakeToCamel } from './utils/normalize.ts'
+import { norm } from './utils/path.ts'
 import { isPlainObject } from './utils/records.ts'
 import { parseLimit } from './utils/size.ts'
 import { compareCodePoints } from './utils/sort.ts'
@@ -67,6 +69,7 @@ import { coerceWritePolicy } from './workspace/mount/write_policy.ts'
 import type { WorkspaceStateStore } from './workspace/store/base.ts'
 import type { WorkspaceOptions } from './workspace/workspace/workspace.ts'
 import type { BaseVFS } from './vfs/base.ts'
+import { LOCAL } from './vfs/machine/constants.ts'
 
 function coerceMountMode(value: string | undefined, fallback: MountMode): MountMode {
   if (value === undefined) return fallback
@@ -726,6 +729,14 @@ export function checkWorkspaceConfig(
   ) {
     throw new Error('config requires a `mounts` mapping')
   }
+  // "@local" is the machine VFS over every machine at the prefix, as
+  // Python's `WorkspaceConfig._v_mounts` reads it.
+  interpolated.mounts = Object.fromEntries(
+    Object.entries(mounts).map(([prefix, block]) => [
+      prefix,
+      block === LOCAL ? { vfs: VFSName.MACHINE, config: { root: norm(prefix) } } : block,
+    ]),
+  )
   validateConfigKeys(interpolated)
   return interpolated
 }

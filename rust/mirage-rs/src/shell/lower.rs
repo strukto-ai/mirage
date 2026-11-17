@@ -477,9 +477,16 @@ impl Tree {
     /// the line its reader stands on then, and a body the input ends
     /// inside. Each leads with `head` (`bash: `, a sourced file's
     /// `name: `) and its line, the input's first row being line `first`.
-    pub fn warnings(&self, head: &[u8], first: usize) -> Vec<u8> {
+    /// Only a heredoc whose `<<` stands on the input's first `rows` rows
+    /// counts: an input refused on a later row is read again from that row
+    /// as a line of its own, which warns of its own.
+    pub fn warnings(&self, head: &[u8], first: usize, rows: usize) -> Vec<u8> {
         let on = |line: usize| first + line - 1;
-        let mut heredocs: Vec<&Heredoc> = self.heredocs.iter().collect();
+        let mut heredocs: Vec<&Heredoc> = self
+            .heredocs
+            .iter()
+            .filter(|heredoc| newlines(&self.original[..heredoc.operator]) < rows)
+            .collect();
         heredocs.sort_by_key(|heredoc| heredoc.body_start);
         let mut out = Vec::new();
         let mut previous: Option<&Heredoc> = None;

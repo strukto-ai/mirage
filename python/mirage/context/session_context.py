@@ -32,7 +32,7 @@ from mirage.cache.types import CacheInvalidator, WriteContext
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import PLAIN_TRAITS, ProcessTraits
-from mirage.execution.types import ProcessId
+from mirage.execution.types import MachineName, ProcessId
 from mirage.io.types import ByteSource, IOResult
 from mirage.observe.record import OpRecord, Recorder
 from mirage.policy.types import (
@@ -183,6 +183,9 @@ class Caller:
             end.
         output_file (str | None): the regular file the running command's
             stdout writes, None when it writes anywhere else.
+        machine (MachineName | None): the machine the running command's
+            program runs on, where a name its redirects make lands; None
+            for a command Mirage runs itself.
     """
 
     session: SessionState | None = None
@@ -228,6 +231,7 @@ class Caller:
         tuple[FileDescription, Callable[[], Awaitable[None]]], ...
     ] = ()
     output_file: str | None = None
+    machine: MachineName | None = None
 
     @property
     def visibility(self) -> Visibility | None:

@@ -1013,7 +1013,7 @@ it('ends a stopped run as stopped whatever its program said meanwhile', async ()
 // stderr when its streams are apart, on stdout, around the program's own,
 // when its exec joins them (`joinsStreams`, as Daytona's does).
 class PidLineBox extends RecordingMachine {
-  protected override readonly joinsStreams: boolean
+  override readonly joinsStreams: boolean
 
   constructor(joined: boolean) {
     super({ captures: ['train'] })
@@ -1137,5 +1137,27 @@ describe('MachineHandle close', () => {
         new Promise((resolve) => setTimeout(resolve, 1000, 'stuck')),
       ]),
     ).resolves.toBe('closed')
+  })
+})
+
+describe('hasProgram', () => {
+  it('asks the machine once per name', async () => {
+    const machine = new RecordingMachine()
+    expect(await machine.hasProgram('grep')).toBe(true)
+    expect(await machine.hasProgram('grep')).toBe(true)
+    expect(machine.execs.map(([line]) => line)).toEqual(['command -v grep >/dev/null 2>&1'])
+  })
+})
+
+describe('putFile', () => {
+  it('feeds cat the bytes', async () => {
+    const machine = new RecordingMachine()
+    await machine.putFile('/tmp/a b', ENC.encode('data'))
+    const [line, stdin, , cwd] = machine.execs.at(-1) ?? []
+    expect([line, new TextDecoder().decode(stdin ?? undefined), cwd]).toEqual([
+      'cat > "$1"',
+      'data',
+      '/',
+    ])
   })
 })

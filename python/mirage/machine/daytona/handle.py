@@ -26,7 +26,7 @@ from mirage.machine.daytona.config import DaytonaConfig
 from mirage.machine.daytona.constants import PAUSED_STATE
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.constants import sdk_install_hint
-from mirage.runtime.types import OutputFn, RunResult
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,18 @@ class DaytonaMachine(MachineHandle):
         if answer := decode_output(str(response.result)):
             await output(answer)
         return RunResult(exit_code=int(response.exit_code))
+
+    async def put_file(self, path: str, data: bytes) -> RunAnswer:
+        """Write a file through Daytona's file API, since its exec takes
+        no input.
+
+        Args:
+            path (str): the file's path in the sandbox.
+            data (bytes): its new bytes.
+        """
+        await self.ensure_connected()
+        await self._sandbox.fs.upload_file(data, path)
+        return RunAnswer(0)
 
     async def close(self) -> None:
         """Release the SDK client once a connect under way has settled; the

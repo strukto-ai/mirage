@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { RunAccessor, type RunAnswer } from '../../../tests/core/ssh/_test_utils.ts'
-import { filesContaining, grepCommand } from './search.ts'
+import { grepCommand } from '@struktoai/mirage-core/core/posix/search'
+import { filesContaining } from './search.ts'
 
 const ENC = new TextEncoder()
 
@@ -27,14 +28,6 @@ function scope(vfsPath = ''): PathSpec {
 function bytes(text: string): Uint8Array {
   return ENC.encode(text)
 }
-
-describe('grepCommand', () => {
-  it('quotes the text and every scope', () => {
-    expect(grepCommand("it's", ['data/a b'], true)).toBe(
-      "env LC_ALL=C grep --dereference-recursive --devices=skip -lF --null -i -e 'it'\\''s' -- 'data/a b'",
-    )
-  })
-})
 
 describe('filesContaining', () => {
   it.each<[string, string, string, string, string[]]>([

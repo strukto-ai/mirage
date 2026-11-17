@@ -12,29 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+from mirage.accessor.machine import MachineAccessor
+from mirage.core.machine.utils import checked, remote
+from mirage.types import PathSpec
+from mirage.utils.quote import single_quote
 
-from mirage.core.ssh.utils import join_root
 
-
-@pytest.mark.parametrize(
-    ("root", "rel", "expected"),
-    [
-        (
-            "/home/ubuntu/project",
-            "/src/main.py",
-            "/home/ubuntu/project/src/main.py",
-        ),
-        (
-            "/home/ubuntu/project/",
-            "src/main.py",
-            "/home/ubuntu/project/src/main.py",
-        ),
-        ("/home/ubuntu/project", "", "/home/ubuntu/project"),
-        ("/", "/file.txt", "/file.txt"),
-        ("/", "", "/"),
-        ("", "/", "/"),
-    ],
-)
-def test_join_root(root, rel, expected):
-    assert join_root(root, rel) == expected
+async def mkdir(
+    accessor: MachineAccessor, machine: str, path: PathSpec, parents: bool
+) -> None:
+    target = single_quote(remote(accessor, path))
+    flag = " -p" if parents else ""
+    await checked(accessor, machine, f"mkdir{flag} -- {target}", path)

@@ -19,7 +19,8 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot, openForWrite, sftpCall } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { openForWrite, sftpCall } from './utils.ts'
 
 export async function append(
   accessor: SSHAccessor,

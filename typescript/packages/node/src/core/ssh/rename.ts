@@ -16,7 +16,8 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot } from './utils.ts'
+import { joinRoot } from '@struktoai/mirage-core/core/posix/utils'
+import { isNoSuchFile } from './utils.ts'
 
 export async function rename(accessor: SSHAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const sftp = await accessor.sftp()

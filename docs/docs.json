@@ -340,6 +340,7 @@
             "group": "Machines",
             "pages": [
               "home/setup/machine/overview",
+              "home/setup/machine/local",
               "home/setup/machine/in_process",
               {
                 "group": "Runtimes",
@@ -544,7 +545,8 @@
                   "python/vfs/nextcloud",
                   "python/vfs/databricks_volume",
                   "python/vfs/tidb_filesystem",
-                  "python/vfs/ssh"
+                  "python/vfs/ssh",
+                  "python/vfs/machine"
                 ]
               },
               {
@@ -812,7 +814,8 @@
                   "typescript/setup/nextcloud",
                   "typescript/setup/databricks_volume",
                   "typescript/setup/tidb_filesystem",
-                  "typescript/setup/ssh"
+                  "typescript/setup/ssh",
+                  "typescript/setup/machine"
                 ]
               },
               {

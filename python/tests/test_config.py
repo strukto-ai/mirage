@@ -30,3 +30,17 @@ def test_workspace_body_limit_does_not_allow_unknown_siblings():
         WorkspaceConfig.model_validate(
             {"mounts": {}, "max_body_bytes": 10, "max_body_byte": 10}
         )
+
+
+def test_at_local_is_the_machine_vfs_at_its_own_path():
+    config = WorkspaceConfig.model_validate(
+        {"mounts": {"/testbed/": "@local", "/data": {"vfs": "ram"}}}
+    )
+    block = config.mounts["/testbed/"]
+    assert (block.vfs, block.config) == ("machine", {"root": "/testbed"})
+    mount = config.to_workspace_kwargs()["mounts"]["/testbed/"]
+    assert (mount.vfs.name, mount.vfs.config.root, mount.vfs_ref) == (
+        "machine",
+        "/testbed",
+        "machine",
+    )

@@ -376,8 +376,8 @@ export interface Heredoc {
  */
 export interface TSNodeLike {
   readonly heredoc?: Heredoc | undefined
-  /** What bash warns of while it reads the tree's heredocs, each line led by `head` and its line, the input's first row being `first`. */
-  warnings?(head: string, first: number): string
+  /** What bash warns of while it reads the tree's heredocs, each line led by `head` and its line, the input's first row being `first`, of those whose `<<` stands on its first `rows` rows (all when absent). */
+  warnings?(head: string, first: number, rows?: number | null): string
   readonly sourceText?: string
   readonly inlined?: string | undefined
   /** Where each UTF-16 unit of the text the tree reads came from in the line as typed, then its end. Undefined means identity. */
