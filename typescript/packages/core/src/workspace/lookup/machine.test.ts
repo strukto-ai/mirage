@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles } from '../../../tests/fixtures/machine_files.ts'
+import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { MountSpec, WorkspaceOptions } from '../workspace/types.ts'
@@ -170,6 +171,39 @@ describe('operand routing', () => {
     expect(await out(ws, 'cat /tmp/l')).toBe('b\n')
     expect(await out(ws, 'readlink /tmp/l')).toBe('/data/b\n')
     expect(await out(ws, 'ls /tmp')).toBe('a.py\nl\n')
+    expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it('keeps a command in Mirage while a coded file policy speaks', async () => {
+    const files = new FakeFiles({ '/tmp/secret': 's', '/tmp/a.py': 'x' }, TOOLS)
+    const ws = one(files)
+    ws.policies.add({
+      preVfs(ctx: VfsContext): Action | null {
+        return ctx.path.virtual.includes('secret') ? { kind: 'deny', reason: 'secret' } : null
+      },
+    })
+    expect((await ws.shell('cat /tmp/secret')).exitCode).not.toBe(0)
+    expect(await out(ws, 'cat /tmp/a.py')).toBe('x')
+    expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it('keeps a glob matching a Mirage link with Mirage', async () => {
+    const files = new FakeFiles({ '/tmp/a.py': 'x' }, [...TOOLS, 'ln'])
+    const ws = one(files, { '/data': new RAMVFS() })
+    await ws.shell('echo y > /data/y && ln -s /data/y /tmp/l')
+    expect(await out(ws, 'cat /tmp/*')).toBe('xy\n')
+    expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it("keeps an option naming another mount's file with Mirage", async () => {
+    const files = new FakeFiles({ '/tmp/a.py': 'x\n' }, TOOLS)
+    const ws = one(files, { '/data': new RAMVFS() })
+    await ws.shell('echo x > /data/p')
+    expect(await out(ws, 'grep -f /data/p /tmp/a.py')).toBe('x\n')
+    expect(await out(ws, 'grep --file=/data/p /tmp/a.py')).toBe('x\n')
     expect(files.ran).toEqual([])
     await ws.close()
   })

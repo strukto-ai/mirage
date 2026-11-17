@@ -48,4 +48,12 @@ describe('readdir', () => {
       code: 'ENOTDIR',
     })
   })
+
+  it('fails the listing when a machine cannot list it', async () => {
+    const a = new ScriptedMachine('a', () => failed("find: '/tmp/d': Permission denied\n"))
+    const b = new ScriptedMachine('b', () => ok(listing('x')))
+    await expect(readdir(bound([a, b]), ['a', 'b'], spec('/d'))).rejects.toMatchObject({
+      code: 'EACCES',
+    })
+  })
 })

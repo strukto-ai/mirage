@@ -1169,6 +1169,26 @@ async def test_a_mount_of_its_own_under_a_served_prefix_fails_loud():
 
 
 @pytest.mark.asyncio
+async def test_a_local_path_under_a_served_prefix_fails_loud():
+    sandbox = FakeMachine("ssh")
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS(), "/data/native": "@local"},
+        mode=MountMode.WRITE,
+        profiles={"agent": {"paths": {"hide": []}}},
+        **on(sandbox),
+    )
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == (
+        "python3: fake: the machine mounts /data/native itself, and serving "
+        "/data would cover it\n"
+    )
+    assert sandbox.pipes == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_mount_added_later_is_served_on_the_next_line():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)

@@ -18,7 +18,6 @@ import { closeQuietly } from '../../io/stream.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { concat } from '../../utils/bytes.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { refusal } from '../posix/errors.ts'
 import { checked, remote } from './utils.ts'
@@ -41,26 +40,39 @@ export function writeCommand(target: string, append: boolean, atomic: boolean): 
 }
 
 /**
- * Write a file whole through the machine's file API, from what `change`
- * makes of its bytes (none for a missing file): how a machine whose exec
- * takes no input (Daytona) appends and writes at an offset.
+ * Write bytes through the machine's file API, for a machine whose exec takes
+ * no input (Daytona): straight onto the file, or, with `apply`, onto a
+ * sibling name one line on the machine then applies to the file and removes,
+ * so an append or an offset write never rewrites the file whole and leaves
+ * what a program wrote meanwhile. Mirrors Python's `staged`.
  *
  * @param accessor the mount's machines.
  * @param machine the machine's name.
  * @param path the file.
- * @param change the new bytes from the old.
+ * @param data the bytes.
+ * @param apply the line that applies the staged file to the file, from both
+ *   quoted paths; null writes the file itself.
  */
-export async function rewrite(
+export async function staged(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
-  change: (old: Uint8Array) => Uint8Array,
+  data: Uint8Array,
+  apply: ((stage: string, target: string) => string) | null = null,
 ): Promise<void> {
   const target = remote(accessor, path)
-  const q = singleQuote(target)
-  const old = await checked(accessor, machine, `[ ! -e ${q} ] || cat -- ${q}`, path)
-  const done = await accessor.handle(machine).putFile(target, change(old))
+  const handle = accessor.handle(machine)
+  if (apply === null) {
+    const done = await handle.putFile(target, data)
+    if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
+    return
+  }
+  const stage = `${target}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+  const done = await handle.putFile(stage, data)
   if (done.exitCode !== 0) throw refusal(path, done.stderr.length > 0 ? done.stderr : done.stdout)
+  const q = singleQuote(stage)
+  const line = apply(q, singleQuote(target))
+  await checked(accessor, machine, `${line}; s=$?; rm -f -- ${q}; exit $s`, path)
 }
 
 /**
@@ -96,7 +108,7 @@ export async function write(
     } else {
       const body = await materialize(data)
       size = body.byteLength
-      await rewrite(accessor, machine, path, (old) => (append ? concat([old, body]) : body))
+      await staged(accessor, machine, path, body, append ? (st, t) => `cat -- ${st} >> ${t}` : null)
     }
   } finally {
     await closeQuietly(data)

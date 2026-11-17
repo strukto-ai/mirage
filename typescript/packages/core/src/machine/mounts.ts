@@ -630,10 +630,8 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const served = servedPrefixes(
-      binding.resolver.prefixes(),
-      binding.machinePrefixes(this.machine),
-    )
+    const local = binding.machinePrefixes(this.machine).map((p) => rstripSlash(p))
+    const served = servedPrefixes(binding.resolver.prefixes(), local)
     const visible = this.mountType === 'fuse' ? [] : await this.mountable(files, served)
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
@@ -677,7 +675,7 @@ export class MachineMounts {
       return `another mount covers ${covered} in this machine; the line did not run`
     }
     for (const prefix of wanted) {
-      const under = own.find((o) => o.startsWith(prefix + '/'))
+      const under = [...own, ...local].find((o) => o.startsWith(prefix + '/'))
       if (under !== undefined) {
         throw new Error(
           `${this.provider}: the machine mounts ${under} itself, and serving ${prefix} would cover it`,

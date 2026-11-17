@@ -15,10 +15,9 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { concat } from '../../utils/bytes.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { checked, remote } from './utils.ts'
-import { rewrite } from './write.ts'
+import { staged } from './write.ts'
 
 /**
  * Write bytes at an offset, as pwrite(2): the rest of the file stays, a gap
@@ -38,16 +37,12 @@ export async function pwrite(
   offset: number,
 ): Promise<void> {
   const timer = startOp()
+  const seek = `seek=${String(offset)} oflag=seek_bytes conv=notrunc status=none`
   if (accessor.handle(machine).takesInput) {
     const target = singleQuote(remote(accessor, path))
-    const command = `dd of=${target} seek=${String(offset)} oflag=seek_bytes conv=notrunc status=none`
-    await checked(accessor, machine, command, path, data)
+    await checked(accessor, machine, `dd of=${target} ${seek}`, path, data)
   } else {
-    await rewrite(accessor, machine, path, (old) => {
-      const head = new Uint8Array(offset)
-      head.set(old.subarray(0, offset))
-      return concat([head, data, old.subarray(offset + data.byteLength)])
-    })
+    await staged(accessor, machine, path, data, (st, t) => `dd if=${st} of=${t} ${seek}`)
   }
   record('pwrite', path.virtual, VFSName.MACHINE, data.byteLength, timer)
 }

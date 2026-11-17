@@ -48,28 +48,44 @@ def write_command(target: str, append: bool, atomic: bool) -> str:
     )
 
 
-async def rewrite(
+async def staged(
     accessor: MachineAccessor,
     machine: str,
     path: PathSpec,
-    change: Callable[[bytes], bytes],
+    data: bytes,
+    apply: Callable[[str, str], str] | None = None,
 ) -> None:
-    """Write a file whole through the machine's file API, from what
-    ``change`` makes of its bytes (none for a missing file): how a machine
-    whose exec takes no input (Daytona) appends and writes at an offset.
+    """Write bytes through the machine's file API, for a machine whose exec
+    takes no input (Daytona): straight onto the file, or, with ``apply``,
+    onto a sibling name one line on the machine then applies to the file
+    and removes, so an append or an offset write never rewrites the file
+    whole and leaves what a program wrote meanwhile.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         machine (str): the machine's name.
         path (PathSpec): the file.
-        change (Callable[[bytes], bytes]): the new bytes from the old.
+        data (bytes): the bytes.
+        apply (Callable[[str, str], str] | None): the line that applies
+            the staged file to the file, from both quoted paths; None
+            writes the file itself.
     """
     target = remote(accessor, path)
-    q = single_quote(target)
-    old = await checked(accessor, machine, f"[ ! -e {q} ] || cat -- {q}", path)
-    done = await accessor.handle(machine).put_file(target, change(old))
+    handle = accessor.handle(machine)
+    if apply is None:
+        done = await handle.put_file(target, data)
+        if done.exit_code != 0:
+            raise refusal(path, done.stderr or done.stdout)
+        return
+    stage = f"{target}.mirage-{uuid4().hex}"
+    done = await handle.put_file(stage, data)
     if done.exit_code != 0:
         raise refusal(path, done.stderr or done.stdout)
+    q = single_quote(stage)
+    line = apply(q, single_quote(target))
+    await checked(
+        accessor, machine, f"{line}; s=$?; rm -f -- {q}; exit $s", path
+    )
 
 
 async def write(
@@ -106,11 +122,12 @@ async def write(
         else:
             body = await materialize(data)
             size = len(body)
-            await rewrite(
+            await staged(
                 accessor,
                 machine,
                 path,
-                lambda old: old + body if append else body,
+                body,
+                (lambda s, t: f"cat -- {s} >> {t}") if append else None,
             )
     finally:
         await close_quietly(data)

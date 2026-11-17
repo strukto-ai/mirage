@@ -15,6 +15,8 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.policy import Deny
+from mirage.policy.base import Policy
 from tests.fixtures.machine import ScriptedMachine
 from tests.fixtures.machine_files import FakeFiles
 
@@ -190,5 +192,44 @@ async def test_a_link_to_another_mount_stays_mirage_s_and_reads_through():
     assert await out(ws, "cat /tmp/l") == "b\n"
     assert await out(ws, "readlink /tmp/l") == "/data/b\n"
     assert await out(ws, "ls /tmp") == "a.py\nl\n"
+    assert files.ran == []
+    await ws.close()
+
+
+class NoSecret(Policy):
+    async def pre_vfs(self, ctx):
+        if "secret" in ctx.path.virtual:
+            return Deny(reason="secret")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_coded_file_policy_keeps_the_command_in_mirage():
+    files = FakeFiles({"/tmp/secret": b"s", "/tmp/a.py": b"x"}, programs=TOOLS)
+    ws = one(files, policies=[NoSecret()])
+    done = await ws.shell("cat /tmp/secret")
+    assert done.exit_code != 0
+    assert await out(ws, "cat /tmp/a.py") == "x"
+    assert files.ran == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_glob_matching_a_mirage_link_stays_with_mirage():
+    files = FakeFiles({"/tmp/a.py": b"x"}, programs=(*TOOLS, "ln"))
+    ws = one(files, {"/data": RAMVFS()})
+    await ws.shell("echo y > /data/y && ln -s /data/y /tmp/l")
+    assert await out(ws, "cat /tmp/*") == "xy\n"
+    assert files.ran == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_option_naming_another_mount_s_file_stays_with_mirage():
+    files = FakeFiles({"/tmp/a.py": b"x\n"}, programs=TOOLS)
+    ws = one(files, {"/data": RAMVFS()})
+    await ws.shell("echo x > /data/p")
+    assert await out(ws, "grep -f /data/p /tmp/a.py") == "x\n"
+    assert await out(ws, "grep --file=/data/p /tmp/a.py") == "x\n"
     assert files.ran == []
     await ws.close()

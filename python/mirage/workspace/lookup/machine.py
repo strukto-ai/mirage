@@ -15,6 +15,7 @@
 import logging
 from collections.abc import Sequence
 
+from mirage.commands.spec import SPECS, parse_command
 from mirage.core.machine.place import holders
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
@@ -117,7 +118,9 @@ async def _machine_holding(
     if not scopes or None in entries:
         return None
     mounts = [e for e in entries if e is not None]
-    if _ruled(session, registry, mounts):
+    if _ruled(session, registry, mounts) or (
+        await registry.policies.wants_for("pre_vfs", session.session_id)
+    ):
         return None
     candidates: list[str] | None = None
     for (path, _), entry in zip(scopes, mounts):
@@ -148,6 +151,38 @@ async def _machine_holding(
     return runtime
 
 
+def several_machines(registry: MountRegistry) -> bool:
+    """Whether the workspace runs programs on more than one machine, the
+    only case where which machine a command runs on decides where a new
+    file lands.
+
+    Args:
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    machines = {
+        e.default_machine
+        for e in registry.runtime_entries
+        if isinstance(e, RemoteRuntime)
+    }
+    return len(machines) > 1
+
+
+def _option_paths(argv: Argv, cwd: str) -> list[str]:
+    """The paths a command's options name (``grep -f /data/patterns``),
+    which the machine must hold as well as its operands; none for a
+    command without a spec.
+
+    Args:
+        argv (Argv): the command.
+        cwd (str): the directory a relative path resolves against.
+    """
+    spec = SPECS.get(argv.name)
+    if spec is None:
+        return []
+    parsed = parse_command(spec, list(argv.args), cwd, argv.name)
+    return [p for p in parsed.path_flag_values if p != "-"]
+
+
 async def operand_machine(
     argv: Argv,
     session: SessionState,
@@ -167,8 +202,10 @@ async def operand_machine(
     another root, a mount nested under it); when no one machine holds
     every path (a new name, or a name on several machines, which Mirage
     places by its own rules); when the session's rules restrict its
-    mount or the mount is read-only; when the cwd is not on the machine;
-    when a path walks through a link of Mirage's own; or when the machine
+    mount, a coded file policy speaks for the session, or the mount is
+    read-only; when the cwd is not on the machine;
+    when a path, an option's included, walks through a link of Mirage's
+    own; or when the machine
     lacks the program. A command naming no path runs
     there from a cwd on the machine (``ls``, ``find``).
 
@@ -187,6 +224,7 @@ async def operand_machine(
         if isinstance(w, PathSpec)
     ]
     cwd = norm(session.cwd)
+    paths += _option_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
     if cwd != "/":
         scopes.append((cwd, False))

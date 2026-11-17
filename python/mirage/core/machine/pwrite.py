@@ -14,7 +14,7 @@
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.utils import checked, remote
-from mirage.core.machine.write import rewrite
+from mirage.core.machine.write import staged
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
@@ -38,22 +38,16 @@ async def pwrite(
         offset (int): where they start.
     """
     timer = start_op()
+    seek = f"seek={offset} oflag=seek_bytes conv=notrunc status=none"
     if accessor.handle(machine).takes_input:
         target = single_quote(remote(accessor, path))
-        command = (
-            f"dd of={target} seek={offset} oflag=seek_bytes conv=notrunc "
-            "status=none"
-        )
-        await checked(accessor, machine, command, path, data)
+        await checked(accessor, machine, f"dd of={target} {seek}", path, data)
     else:
-        await rewrite(
+        await staged(
             accessor,
             machine,
             path,
-            lambda old: (
-                old[:offset].ljust(offset, b"\0")
-                + data
-                + old[offset + len(data) :]
-            ),
+            data,
+            lambda s, t: f"dd if={s} of={t} {seek}",
         )
     record("pwrite", path.virtual, "machine", len(data), timer)

@@ -59,3 +59,14 @@ def test_names_follow_the_config_or_every_machine():
     one = MachineAccessor(MachineVFSConfig(machines=("b",)))
     one.bind_machines(table_of(a, b), "a")
     assert (one.names(), one.default_machine) == (["b"], "b")
+
+
+def test_a_default_the_mount_does_not_show_is_refused():
+    a = ScriptedMachine("a", lambda line, data: ok())
+    b = ScriptedMachine("b", lambda line, data: ok())
+    c = ScriptedMachine("c", lambda line, data: ok())
+    accessor = MachineAccessor(
+        MachineVFSConfig(machines=("a", "b"), default_machine="c")
+    )
+    with pytest.raises(ValueError, match="not one of the mount's machines"):
+        accessor.bind_machines(table_of(a, b, c), "a")

@@ -60,16 +60,20 @@ async def test_a_write_the_machine_refuses_raises_its_error():
 
 @pytest.mark.asyncio
 async def test_a_machine_without_input_writes_through_its_file_api():
-    box = InputlessMachine("box", lambda line, data: ok(b"old"))
+    box = InputlessMachine("box", lambda line, data: ok())
     accessor = bound(box)
     await write(accessor, "box", spec("/x"), b"new")
     await write(accessor, "box", spec("/y"), b"+", append=True)
     await pwrite(accessor, "box", spec("/z"), b"AB", 5)
-    assert box.put == {
-        "/tmp/x": b"new",
-        "/tmp/y": b"old+",
-        "/tmp/z": b"old\0\0AB",
-    }
+    stages = {k.rsplit(".mirage-", 1)[0]: (k, v) for k, v in box.put.items()}
+    assert box.put["/tmp/x"] == b"new"
+    y, z = stages["/tmp/y"][0], stages["/tmp/z"][0]
+    assert (stages["/tmp/y"][1], stages["/tmp/z"][1]) == (b"+", b"AB")
+    assert box.lines == [
+        f"cat -- '{y}' >> '/tmp/y'; s=$?; rm -f -- '{y}'; exit $s",
+        f"dd if='{z}' of='/tmp/z' seek=5 oflag=seek_bytes conv=notrunc"
+        f" status=none; s=$?; rm -f -- '{z}'; exit $s",
+    ]
     assert all(f is None for f in box.fed)
 
 

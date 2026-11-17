@@ -49,7 +49,8 @@ class MachineAccessor(Accessor):
                 no ``default_machine``.
 
         Raises:
-            ValueError: the config names a machine the workspace lacks.
+            ValueError: the config names a machine the workspace lacks,
+                or a ``default_machine`` the mount does not show.
         """
         for name in (
             *(self.config.machines or ()),
@@ -59,9 +60,13 @@ class MachineAccessor(Accessor):
                 machines.get(name)
         self._machines = machines
         names = self.names()
-        self._default = self.config.default_machine or (
-            default if default in names else names[0]
-        )
+        chosen = self.config.default_machine
+        if chosen is not None and chosen not in names:
+            raise ValueError(
+                f"machine: default_machine {chosen!r} is not one of the"
+                f" mount's machines: {', '.join(names)}"
+            )
+        self._default = chosen or (default if default in names else names[0])
 
     def names(self) -> list[str]:
         """The machines the mount shows, in the order ``machines:`` lists

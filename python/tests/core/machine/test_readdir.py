@@ -61,3 +61,14 @@ async def test_no_machine_holding_it_is_enoent_and_a_file_is_enotdir():
     f = ScriptedMachine("f", lambda line, data: ok(b"f 644 1 0 0 r r \0"))
     with pytest.raises(NotADirectoryError):
         await readdir(bound(a, f), ["a", "f"], spec("/d"))
+
+
+@pytest.mark.asyncio
+async def test_a_machine_that_cannot_list_fails_the_listing():
+    denied = b"find: '/tmp/d': Permission denied\n"
+    a = ScriptedMachine("a", lambda line, data: failed(denied))
+    b = ScriptedMachine(
+        "b", lambda line, data: ok(DIR + b"f 644 1 0 0 r r x\0")
+    )
+    with pytest.raises(PermissionError):
+        await readdir(bound(a, b), ["a", "b"], spec("/d"))

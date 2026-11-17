@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { holders } from '../../core/machine/place.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -101,6 +102,7 @@ async function machineHolding(
     mounts.push(entry)
   }
   if (scopes.length === 0 || ruled(session, registry, mounts)) return null
+  if (await registry.policies.wantsFor('preVfs', session.sessionId)) return null
   let candidates: string[] | null = null
   for (const [at, [path]] of scopes.entries()) {
     const vfs = mounts[at]?.vfs
@@ -120,6 +122,36 @@ async function machineHolding(
 }
 
 /**
+ * Whether the workspace runs programs on more than one machine, the only case
+ * where which machine a command runs on decides where a new file lands.
+ * Mirrors Python's `several_machines`.
+ *
+ * @param registry the workspace's mounts and machines.
+ */
+export function severalMachines(registry: MountRegistry): boolean {
+  const machines = new Set(
+    registry.runtimeEntries
+      .filter((e): e is RemoteRuntime => e instanceof RemoteRuntime)
+      .map((e) => e.defaultMachine),
+  )
+  return machines.size > 1
+}
+
+/**
+ * The paths a command's options name (`grep -f /data/patterns`), which the
+ * machine must hold as well as its operands; none for a command without a
+ * spec. Mirrors Python's `_option_paths`.
+ *
+ * @param argv the command.
+ * @param cwd the directory a relative path resolves against.
+ */
+function optionPaths(argv: Argv, cwd: string): string[] {
+  const spec = SPECS[argv.name]
+  if (spec === undefined) return []
+  return parseCommand(spec, [...argv.args], cwd, argv.name).pathFlagValues.filter((p) => p !== '-')
+}
+
+/**
  * The machine a mount command runs on whole, when every path it names is one
  * machine's own at the same path: `grep -rn x /testbed` is one exec there,
  * with the machine's own output, where Mirage's implementation would read
@@ -131,8 +163,10 @@ async function machineHolding(
  * anywhere else (another mount, a machine mount at another root, a mount
  * nested under it); when no one machine holds every path (a new name, or a
  * name on several machines, which Mirage places by its own rules); when the
- * session's rules restrict its mount or the mount is read-only; when the cwd
- * is not on the machine; when a path walks through a link of Mirage's own; or
+ * session's rules restrict its mount, a coded file policy speaks for the
+ * session, or the mount is read-only; when the cwd
+ * is not on the machine; when a path, an option's included, walks through a
+ * link of Mirage's own; or
  * when the machine lacks the program. A command
  * naming no path runs there from a cwd on the machine (`ls`, `find`).
  * Mirrors Python's `operand_machine`.
@@ -155,6 +189,7 @@ export async function operandMachine(
     w instanceof PathSpec ? [unmarkGlobs(w.virtual)] : [],
   )
   const cwd = norm(session.cwd)
+  paths.push(...optionPaths(argv, session.cwd))
   const scopes: [string, boolean][] = paths.map((path) => [path, true])
   if (cwd !== '/') scopes.push([cwd, false])
   const runtime = await machineHolding(scopes, session, registry, links, null)

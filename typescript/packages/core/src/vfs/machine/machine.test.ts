@@ -81,6 +81,25 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it("replaces another machine's name on mv", async () => {
+    const a = new FakeFiles({ '/tmp/src': 'new' })
+    const b = new FakeFiles({ '/tmp/dst': 'old' })
+    const ws = two(a, b)
+    expect((await run(ws, 'mv /tmp/src /tmp/dst'))[0]).toBe(0)
+    expect([texts(a), texts(b)]).toEqual([{ '/tmp/dst': 'new' }, {}])
+    expect(await run(ws, 'cat /tmp/dst')).toEqual([0, 'new', ''])
+    await ws.close()
+  })
+
+  it("lands a program's output on the machine running it", async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const ws = two(a, b)
+    expect((await run(ws, '/tmp/tool > /tmp/new'))[0]).toBe(0)
+    expect([texts(b)['/tmp/new'], '/tmp/new' in texts(a)]).toEqual(['ran\n', false])
+    await ws.close()
+  })
+
   it('moves the bytes through Mirage for a cp onto another machine', async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/src': 'payload' })

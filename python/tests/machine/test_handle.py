@@ -1015,4 +1015,4 @@ async def test_has_program_asks_the_machine_once_per_name():
 async def test_put_file_feeds_cat_the_bytes():
     box = RecordingMachine()
     await box.put_file("/tmp/a b", b"data")
-    assert box.execs[-1] == ("cat > \"$1\"", b"data", "/")
+    assert box.execs[-1] == ('cat > "$1"', b"data", "/")

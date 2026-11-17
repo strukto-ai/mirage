@@ -55,4 +55,15 @@ describe('MachineAccessor', () => {
     )
     expect([one.names(), one.defaultMachine]).toEqual([['b'], 'b'])
   })
+  it('refuses a default the mount does not show', () => {
+    const accessor = new MachineAccessor({ machines: ['a', 'b'], defaultMachine: 'c' })
+    const table = tableOf(
+      new ScriptedMachine('a', () => ok()),
+      new ScriptedMachine('b', () => ok()),
+      new ScriptedMachine('c', () => ok()),
+    )
+    expect(() => {
+      accessor.bindMachines(table, 'a')
+    }).toThrow("not one of the mount's machines")
+  })
 })

@@ -54,16 +54,20 @@ describe('write', () => {
   })
 
   it('goes through the file API on a machine without input', async () => {
-    const machine = new ScriptedMachine('box', () => ok('old'), false)
+    const machine = new ScriptedMachine('box', () => ok(), false)
     const accessor = bound([machine])
     await write(accessor, 'box', spec('/x'), ENC.encode('new'))
     await write(accessor, 'box', spec('/y'), ENC.encode('+'), true)
     await pwrite(accessor, 'box', spec('/z'), ENC.encode('AB'), 5)
-    expect(Object.fromEntries([...machine.put].map(([k, v]) => [k, DEC.decode(v)]))).toEqual({
-      '/tmp/x': 'new',
-      '/tmp/y': 'old+',
-      '/tmp/z': 'old\0\0AB',
-    })
+    const put = [...machine.put].map(([k, v]) => [k, DEC.decode(v)] as const)
+    const stage = (base: string): string =>
+      put.find(([k]) => k.startsWith(`${base}.mirage-`))?.[0] ?? ''
+    const [y, z] = [stage('/tmp/y'), stage('/tmp/z')]
+    expect(Object.fromEntries(put)).toEqual({ '/tmp/x': 'new', [y]: '+', [z]: 'AB' })
+    expect(machine.lines).toEqual([
+      `cat -- '${y}' >> '/tmp/y'; s=$?; rm -f -- '${y}'; exit $s`,
+      `dd if='${z}' of='/tmp/z' seek=5 oflag=seek_bytes conv=notrunc status=none; s=$?; rm -f -- '${z}'; exit $s`,
+    ])
     expect(machine.fed.every((f) => f === null)).toBe(true)
   })
 })

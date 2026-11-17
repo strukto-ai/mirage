@@ -726,10 +726,10 @@ class MachineMounts:
             nothing new served; None once in step, or with a mount of the
             machine's own gone, which ``validate`` refuses.
         """
-        served = served_prefixes(
-            binding.resolver.prefixes(),
-            binding.machine_prefixes(self._machine),
-        )
+        local = [
+            p.rstrip("/") for p in binding.machine_prefixes(self._machine)
+        ]
+        served = served_prefixes(binding.resolver.prefixes(), local)
         visible = frozenset(
             await self._mountable(files, served)
             if self._mount_type != "fuse"
@@ -785,7 +785,7 @@ class MachineMounts:
                 "did not run"
             )
         for prefix in wanted:
-            under = [o for o in own if o.startswith(prefix + "/")]
+            under = [o for o in (*own, *local) if o.startswith(prefix + "/")]
             if under:
                 raise RuntimeError(
                     f"{self._provider}: the machine mounts {under[0]} itself, "

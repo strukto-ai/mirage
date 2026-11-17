@@ -22,7 +22,9 @@ import { rowStat, rows } from './stat.ts'
 
 /**
  * A directory's children on every machine that holds it, each name once,
- * from one find on each machine.
+ * from one find on each machine. A machine that lacks it, or holds a file
+ * there, is passed over; any other failure fails the listing, so no
+ * machine's files go missing unseen.
  *
  * @param accessor the mount's machines.
  * @param machines the machines to list.
@@ -41,13 +43,14 @@ export async function readdir(
   for (const result of found) {
     if (result.status === 'rejected') {
       const reason: unknown = result.reason
-      if (!(reason instanceof Error) || !('code' in reason)) throw reason
-      if (failure === null || failure.code === 'ENOENT') failure = reason as FsError
+      if (!(reason instanceof Error) || !('code' in reason) || reason.code !== 'ENOENT')
+        throw reason
+      failure ??= reason as FsError
       continue
     }
     const [top, ...below] = result.value
     if (top?.kind !== 'd') {
-      if (failure === null || failure.code === 'ENOENT') failure = enotdir(scope)
+      failure = enotdir(scope)
       continue
     }
     listed = true

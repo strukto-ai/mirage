@@ -46,7 +46,9 @@ async def run(ws: Workspace, line: str) -> tuple[int, str, str]:
 async def test_a_heredoc_lands_in_the_machine_s_own_tmp():
     a = FakeFiles()
     ws = Workspace(
-        {}, mode=MountMode.WRITE, machines={"a": ScriptedMachine("a", a.answer)}
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": ScriptedMachine("a", a.answer)},
     )
     assert await run(ws, "cat > /tmp/fix.py << 'EOF'\nprint(1)\nEOF") == (
         0,
@@ -82,6 +84,28 @@ async def test_mv_stays_on_the_source_s_machine():
     ws = two(a, b)
     assert (await run(ws, "mv /tmp/m /tmp/n"))[0] == 0
     assert (b.files, a.files) == ({"/tmp/n": b"m"}, {})
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_mv_onto_another_machine_s_name_replaces_it():
+    a, b = FakeFiles({"/tmp/src": b"new"}), FakeFiles({"/tmp/dst": b"old"})
+    ws = two(a, b)
+    assert (await run(ws, "mv /tmp/src /tmp/dst"))[0] == 0
+    assert (a.files, b.files) == ({"/tmp/dst": b"new"}, {})
+    assert await run(ws, "cat /tmp/dst") == (0, "new", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_s_output_lands_on_the_machine_running_it():
+    a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b)
+    assert (await run(ws, "/tmp/tool > /tmp/new"))[0] == 0
+    assert (b.files.get("/tmp/new"), "/tmp/new" in a.files) == (
+        b"ran\n",
+        False,
+    )
     await ws.close()
 
 

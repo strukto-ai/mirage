@@ -1180,6 +1180,22 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
+  it('fails loud on a local path under a served prefix', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS(), '/data/native': '@local' },
+      { mode: MountMode.WRITE, profiles: { agent: { paths: { hide: [] } } }, ...on(sandbox) },
+    )
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      'python3: fake: the machine mounts /data/native itself, and serving /data would cover it\n',
+    )
+    expect(sandbox.pipes).toEqual([])
+    await ws.close()
+  })
+
   it('serves a mount added later on the next line', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox)

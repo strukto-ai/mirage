@@ -25,7 +25,9 @@ async def readdir(
     accessor: MachineAccessor, machines: list[str], path_spec: PathSpec
 ) -> list[FileStat]:
     """A directory's children on every machine that holds it, each name
-    once, from one find on each machine.
+    once, from one find on each machine. A machine that lacks it, or holds
+    a file there, is passed over; any other failure fails the listing, so
+    no machine's files go missing unseen.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -42,14 +44,12 @@ async def readdir(
     listed = False
     for result in found:
         if isinstance(result, BaseException):
-            if not isinstance(result, OSError):
+            if not isinstance(result, FileNotFoundError):
                 raise result
-            if failure is None or isinstance(failure, FileNotFoundError):
-                failure = result
+            failure = failure or result
             continue
         if result[0].kind != "d":
-            if failure is None or isinstance(failure, FileNotFoundError):
-                failure = enotdir(scope)
+            failure = enotdir(scope)
             continue
         listed = True
         for row in result[1:]:

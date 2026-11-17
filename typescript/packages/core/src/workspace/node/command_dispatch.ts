@@ -47,6 +47,7 @@ import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import type { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -106,7 +107,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { MACHINE_ANSWERED, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { lookup, programRuntime, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
-import { linkMachine, operandMachine, programMachine } from '../lookup/machine.ts'
+import { linkMachine, operandMachine, programMachine, severalMachines } from '../lookup/machine.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -1167,8 +1168,24 @@ async function runArgv(
       ? runner(runRedirected, guard, name, argv.args)
       : runRedirected(stdin, sink, redirects)
   // A name the command's redirects make lands on the machine its program
-  // runs on (`python gen.py > /tmp/out`).
-  const machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
+  // runs on (`python gen.py > /tmp/out`), or the machine a command runs on
+  // whole because its files are that machine's (`/tmp/tool > /tmp/out`),
+  // which matters only over several machines, so only then is it asked
+  // before the redirects open.
+  let machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
+  if ((runner !== null || redirects.length > 0) && severalMachines(registry)) {
+    const [held] = await heldMachine(
+      name,
+      argv,
+      session,
+      registry,
+      namespace,
+      dispatch,
+      stdin,
+      context.frame.routing,
+    )
+    if (held !== null) machine = held.machine
+  }
   const outer = currentCaller()
   if ((machine?.toString() ?? null) === (outer.machine?.toString() ?? null)) return run()
   return runWithCaller({ ...outer, machine }, run)
@@ -1216,6 +1233,44 @@ async function matched(
     words,
     argv.prefix,
   )
+}
+
+/**
+ * The machine a command runs on whole because its files are that machine's
+ * own, with the words it runs with there: a program named by a path the
+ * machine holds, or a mount command (or a namespace program the machine
+ * answers) whose every path, each glob match included, is the machine's.
+ * Null, with `argv`, for a command Mirage keeps. Mirrors Python's
+ * `_held_machine`.
+ */
+async function heldMachine(
+  name: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  stdin: ByteSource | null,
+  placed: RouteDecision<Runtime> | undefined,
+): Promise<[RemoteRuntime | null, Argv]> {
+  if (placed === undefined) return [null, argv]
+  const links = namespace.sessionLinks(session)
+  if (name.includes('/')) {
+    return [await programMachine(name, session, registry, links, dispatch, stdin), argv]
+  }
+  const [consumer] = routedConsumer(name, argv.args, session, registry, placed)
+  if (
+    !(
+      consumer === Consumer.MOUNT ||
+      (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name))
+    )
+  )
+    return [null, argv]
+  let machine = await operandMachine(argv, session, registry, links, stdin)
+  if (machine === null) return [null, argv]
+  const words = await matched(argv, session, registry, namespace)
+  if (words !== argv) machine = await operandMachine(words, session, registry, links, stdin)
+  return [machine, words]
 }
 
 // Drop the refusal lines the command tier already wrote.
@@ -1476,21 +1531,25 @@ async function routeArgv(
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
   // A mount command whose every path is one machine's own runs there whole,
-  // with the machine's own output.
+  // with the machine's own output. A glob's matches are checked too, since
+  // one may be a link only Mirage holds.
   if (
     routing !== undefined &&
     (consumer === Consumer.MOUNT || (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name)))
   ) {
-    const machine = await operandMachine(
+    const [machine, words] = await heldMachine(
+      name,
       argv,
       session,
       registry,
-      namespace.sessionLinks(session),
+      namespace,
+      dispatch,
       stdin,
+      context.frame.routing,
     )
     if (machine !== null)
       return runExternal(
-        await matched(argv, session, registry, namespace),
+        words,
         stdin,
         session,
         registry,

@@ -44,7 +44,8 @@ export class MachineAccessor extends Accessor {
    * @param machines the workspace's machines.
    * @param fallback where a new name lands when the config names no
    *   `defaultMachine`.
-   * @throws the config names a machine the workspace lacks.
+   * @throws the config names a machine the workspace lacks, or a
+   *   `defaultMachine` the mount does not show.
    */
   bindMachines(machines: MachineTable, fallback: string): void {
     for (const name of [...(this.config.machines ?? []), this.config.defaultMachine]) {
@@ -52,8 +53,12 @@ export class MachineAccessor extends Accessor {
     }
     this.machines = machines
     const names = this.names()
-    this.chosen =
-      this.config.defaultMachine ?? (names.includes(fallback) ? fallback : (names[0] ?? null))
+    const chosen = this.config.defaultMachine
+    if (chosen !== undefined && !names.includes(chosen))
+      throw new Error(
+        `machine: default_machine '${chosen}' is not one of the mount's machines: ${names.join(', ')}`,
+      )
+    this.chosen = chosen ?? (names.includes(fallback) ? fallback : (names[0] ?? null))
   }
 
   /**
