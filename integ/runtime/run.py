@@ -74,6 +74,7 @@ from mirage.types import FileStat, Limit, PathSpec  # noqa: E402
 from mirage.utils.key_prefix import mounted_path  # noqa: E402
 from mirage.utils.path import norm  # noqa: E402
 from mirage.vfs.base import BaseVFS  # noqa: E402
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.registry import build_vfs  # noqa: E402
 from mirage.workspace.workspace.lifecycle import (  # noqa: E402
@@ -884,8 +885,6 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
             key_prefix=f"mirage-integ-runtime-{run_id}/",
         )
     if kind == "gdrive":
-        from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
-
         return GoogleDriveVFS(
             GoogleDriveConfig(
                 client_id="integ",
