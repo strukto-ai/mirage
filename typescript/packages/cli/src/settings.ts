@@ -60,7 +60,6 @@ import {
   loginPath,
   readContext,
   readLogin,
-  writeContext,
   type Login,
 } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE } from './env.ts'
@@ -92,18 +91,11 @@ export function localUrl(table: Record<string, string>, env: Env = process.env):
   return own !== '' ? own : defaultLocalUrl(table, env)
 }
 
-/** The workspace a command uses when given none: `$MIRAGE_WORKSPACE`, else the current context's. */
-export function currentWorkspace(env: Env = process.env): string | null {
-  const fromEnv = env[ENV_WORKSPACE]
-  if (fromEnv !== undefined && fromEnv !== '') return fromEnv
-  return readContext(currentName(env), env)?.workspace ?? null
-}
-
-/** The workspace to act on: `-w`, else `$MIRAGE_WORKSPACE`, else the current context's. */
+/** The workspace to act on: `-w`, else `$MIRAGE_WORKSPACE`. */
 export function resolveWorkspace(given: string | undefined): string {
-  const found = given !== undefined && given !== '' ? given : currentWorkspace()
-  if (found === null || found === '') {
-    fail('no workspace selected · run `mirage workspace use <id>` or pass -w', 2)
+  const found = given !== undefined && given !== '' ? given : process.env[ENV_WORKSPACE]
+  if (found === undefined || found === '') {
+    fail('no workspace selected · pass -w or set MIRAGE_WORKSPACE', 2)
   }
   return found
 }
@@ -119,13 +111,6 @@ export function header(action: string, name?: string): void {
   const team = readContext(used)?.team ?? null
   const parts = [used, ...(team !== null && team !== '' ? [`team ${team}`] : []), action]
   process.stderr.write(parts.join(' · ') + '\n')
-}
-
-/** Make a workspace the current one of context `name`, as the command chose it. */
-export function useWorkspace(name: string, workspaceId: string): void {
-  const context = readContext(name)
-  if (context === null) throw new ContextError(`no context '${name}'`)
-  writeContext(name, { ...context, workspace: workspaceId })
 }
 
 /**

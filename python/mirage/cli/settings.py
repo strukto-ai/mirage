@@ -30,7 +30,6 @@ from mirage.cli.credentials import (
     login_path,
     read_context,
     read_login,
-    write_context,
 )
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE
 from mirage.cli.output import fail
@@ -130,23 +129,8 @@ def local_url(table: dict[str, Any]) -> str:
     return (local.url if local else "") or default_local_url(table)
 
 
-def current_workspace() -> str | None:
-    """The workspace a command uses when given none:
-    ``$MIRAGE_WORKSPACE``, else the current context's.
-
-    Returns:
-        str | None: the workspace, or None when none is selected.
-    """
-    env = os.environ.get(ENV_WORKSPACE)
-    if env:
-        return env
-    context = read_context(current_name())
-    return context.workspace if context else None
-
-
 def resolve_workspace(given: str | None) -> str:
-    """The workspace to act on: ``-w``, else ``$MIRAGE_WORKSPACE``,
-    else the current context's.
+    """The workspace to act on: ``-w``, else ``$MIRAGE_WORKSPACE``.
 
     Args:
         given (str | None): the ``-w`` value.
@@ -154,13 +138,9 @@ def resolve_workspace(given: str | None) -> str:
     Returns:
         str: the workspace.
     """
-    found = given or current_workspace()
+    found = given or os.environ.get(ENV_WORKSPACE)
     if not found:
-        fail(
-            "no workspace selected · run `mirage workspace use <id>` "
-            "or pass -w",
-            2,
-        )
+        fail("no workspace selected · pass -w or set MIRAGE_WORKSPACE", 2)
     return found
 
 
@@ -179,23 +159,6 @@ def header(action: str, name: str | None = None) -> None:
     team = context.team if context else None
     parts = [name, *([f"team {team}"] if team else []), action]
     typer.echo(" · ".join(parts), err=True)
-
-
-def use_workspace(name: str, workspace_id: str) -> None:
-    """Make a workspace a context's current one.
-
-    Args:
-        name (str): the context, as the command chose it.
-        workspace_id (str): the workspace.
-
-    Raises:
-        ContextError: the context was deleted meanwhile.
-    """
-    context = read_context(name)
-    if context is None:
-        raise ContextError(f"no context {name!r}")
-    context.workspace = workspace_id
-    write_context(name, context)
 
 
 def is_local_url(url: str) -> bool:

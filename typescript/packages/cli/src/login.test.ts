@@ -424,7 +424,7 @@ describe('contexts', () => {
   })
 
   it('takes $MIRAGE_CONTEXT over the file, and refuses an unknown one', () => {
-    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
+    writeContext('dev', { url: 'https://dev.example', team: null })
     vi.stubEnv('MIRAGE_CONTEXT', 'dev')
     expect(currentName()).toBe('dev')
     vi.stubEnv('MIRAGE_CONTEXT', 'nope')
@@ -432,11 +432,11 @@ describe('contexts', () => {
   })
 
   it('keeps each context in its own file, readable by its owner', () => {
-    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
+    writeContext('dev', { url: 'https://dev.example', team: null })
     writeCurrent('dev')
     expect(statSync(join(dir, 'contexts', 'dev.json')).mode & 0o777).toBe(0o600)
     expect(statSync(join(dir, 'current_context')).mode & 0o777).toBe(0o600)
-    expect(readContext('dev')).toEqual({ url: 'https://dev.example', team: null, workspace: null })
+    expect(readContext('dev')).toEqual({ url: 'https://dev.example', team: null })
   })
 
   it('refuses a context file of an unknown shape', () => {
@@ -459,13 +459,13 @@ describe('contexts', () => {
     vi.stubEnv('MIRAGE_DAEMON_PORT', '9200')
     expect(localUrl({ port: '9100' })).toBe('http://127.0.0.1:9200')
     expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9300')
-    writeContext('local', { url: 'http://127.0.0.1:9400', team: null, workspace: null })
+    writeContext('local', { url: 'http://127.0.0.1:9400', team: null })
     expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9400')
   })
 
   it("sends a remote context's login there, and never config.toml's token", () => {
     writeFileSync(join(dir, 'config.toml'), '[daemon]\nauth_token = "local-only"\n')
-    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: null })
+    writeContext('dev', { url: 'https://dev.example', team: 'acme' })
     writeCurrent('dev')
     expect(loadDaemonSettings().authToken).toBe('')
     writeLogin(stored('https://dev.example'), loginPath('dev'))
@@ -476,14 +476,12 @@ describe('contexts', () => {
 
   it('keeps two contexts written one after another apart', () => {
     for (const name of ['a', 'b']) {
-      writeContext(name, { url: `https://${name}.example`, team: null, workspace: null })
+      writeContext(name, { url: `https://${name}.example`, team: null })
     }
     expect(contextNames()).toEqual(['a', 'b', 'local'])
   })
 
-  it('picks the workspace from -w, then $MIRAGE_WORKSPACE, then the context', () => {
-    writeContext('local', { url: '', team: null, workspace: 'kept' })
-    expect(resolveWorkspace(undefined)).toBe('kept')
+  it('picks the workspace from -w, then $MIRAGE_WORKSPACE', () => {
     vi.stubEnv('MIRAGE_WORKSPACE', 'env')
     expect(resolveWorkspace(undefined)).toBe('env')
     expect(resolveWorkspace('flag')).toBe('flag')
@@ -492,18 +490,17 @@ describe('contexts', () => {
   it('fails with a hint when no workspace is selected', async () => {
     const done = await runProgram(['shell', '-c', 'true'])
     expect(done.exitCode).toBe(2)
-    expect(done.stderr).toContain('run `mirage workspace use <id>` or pass -w')
+    expect(done.stderr).toContain('pass -w or set MIRAGE_WORKSPACE')
   })
 
   it('switches, runs one command elsewhere, and forgets a context', async () => {
-    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: 'w1' })
+    writeContext('dev', { url: 'https://dev.example', team: 'acme' })
     writeLogin(stored('https://dev.example'), loginPath('dev'))
     const once = await runProgram(['--context', 'dev', 'whoami'])
     expect(JSON.parse(once.stdout)).toMatchObject({
       context: 'dev',
       url: 'https://dev.example',
       team: 'acme',
-      workspace: 'w1',
     })
     expect(readCurrent()).toBe('local')
     expect((await runProgram(['context', 'use', 'dev'])).exitCode).toBe(0)
@@ -518,7 +515,7 @@ describe('contexts', () => {
   })
 
   it('refuses a name that is no safe file name everywhere', async () => {
-    writeContext('local', { url: '', team: null, workspace: 'kept' })
+    writeContext('local', { url: '', team: 'acme' })
     for (const args of [
       ['context', 'delete', './local'],
       ['context', 'use', '../up'],

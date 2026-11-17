@@ -43,7 +43,6 @@ const REFRESH_MARGIN_SECONDS = 60
 export interface Context {
   url: string
   team: string | null
-  workspace: string | null
 }
 
 /** A context that does not exist, or one that cannot be changed. */
@@ -52,7 +51,7 @@ export class ContextError extends Error {
 }
 
 export function emptyContext(): Context {
-  return { url: '', team: null, workspace: null }
+  return { url: '', team: null }
 }
 
 /** Replace `path` whole, readable by this user only. */

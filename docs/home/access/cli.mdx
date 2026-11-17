@@ -119,9 +119,8 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/api/reference). |
 | `mirage workspace tools TOOL ARGS` | Run one of the [agent tools](/home/access/mcp#tools). |
 
-The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
-`mirage workspace use ID` set for the [context](#log-in). With none, the
-command exits 2. Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
+The workspace is `-w`, else `MIRAGE_WORKSPACE`. With neither, the command
+exits 2. Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
 take `--explain`, which says what the line or call would do and runs nothing;
 see [Explain](/home/policy/explain).
 
@@ -208,7 +207,6 @@ a `workspace_id`.
 | `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces, running and stopped, with the status of each. |
-| `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show its status, mounts and sessions. A stopped workspace shows the mounts its config names and no sessions. |
 | `mirage workspace delete ID` | Delete a workspace, running or stopped, with its state and config. |
 | `mirage workspace stop ID` | Stop a workspace and keep its state and config. A `ram` mount, and the sessions on a `ram` store, come back empty. Stopping a stopped workspace does nothing. |
@@ -295,7 +293,7 @@ name the daemon has no saved policy for is read as a file too.
 | `mirage workspace list-processes [-s S] [--state STATE] [--line LINE] [--job JOB] [--machine M]` | List its processes. |
 | `mirage workspace list-machines` | Check each [machine](/home/setup/machine/overview#machine-states) it runs programs on, and print its state. |
 
-Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
+Each takes `-w ID`, else `MIRAGE_WORKSPACE`, as `shell` and `vfs` do.
 `-s` keeps only that session's records.
 
 ## Saved connections
@@ -392,7 +390,7 @@ cannot read `from: strukto`.
 | `mirage workspace session kill -s S` | Kill the session's background jobs. |
 | `mirage workspace session update -s S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
 
-Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
+Each takes `-w ID`, else `MIRAGE_WORKSPACE`, as `shell` and `vfs` do.
 
 ## Daemon
 
@@ -424,7 +422,7 @@ mirage context use local
 | `mirage context list` | List the contexts; `*` marks the current one. |
 | `mirage context use NAME` | Make a context current. |
 | `mirage context delete NAME` | Forget a context and its login. `local` stays. |
-| `mirage whoami` | Show the context, its URL, team, user and workspace, and the date to log in again by. |
+| `mirage whoami` | Show the context, its URL, team and user, and the date to log in again by. |
 | `mirage logout` | Forget the current context's login; the context stays. |
 
 `--context NAME` before a command, or `MIRAGE_CONTEXT=NAME`, runs one command

@@ -346,9 +346,7 @@ def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
 
 
 def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
-    write_context(
-        "dev", Context(url="https://dev.example", team="acme", workspace="w1")
-    )
+    write_context("dev", Context(url="https://dev.example", team="acme"))
     write_login(
         Login(
             url="https://dev.example",
@@ -364,7 +362,6 @@ def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
         "url": "https://dev.example",
         "team": "acme",
         "user": None,
-        "workspace": "w1",
         "renew_by": None,
     }
     monkeypatch.setenv("MIRAGE_CONTEXT", "")
@@ -392,7 +389,7 @@ def test_daemon_config_holds_the_daemon_settings(home):
 
 def test_a_name_that_is_no_safe_file_name_is_refused_everywhere(home):
     runner = CliRunner()
-    write_context("local", Context(workspace="kept"))
+    write_context("local", Context(team="acme"))
     for args in (
         ["context", "delete", "./local"],
         ["context", "use", "../up"],
@@ -411,7 +408,7 @@ def test_list_works_when_the_current_context_is_gone(home):
 
 
 def test_relogin_to_local_writes_its_context_once(home, monkeypatch):
-    write_context("local", Context(url="http://127.0.0.1:9100", workspace="w"))
+    write_context("local", Context(url="http://127.0.0.1:9100"))
     writes: list[tuple[str, Context]] = []
     real = login_module.write_context
 
@@ -421,9 +418,7 @@ def test_relogin_to_local_writes_its_context_once(home, monkeypatch):
 
     monkeypatch.setattr(login_module, "write_context", record)
     login_module.save_context("local", "http://127.0.0.1:9100", None)
-    assert writes == [
-        ("local", Context(url="http://127.0.0.1:9100", workspace="w"))
-    ]
+    assert writes == [("local", Context(url="http://127.0.0.1:9100"))]
     writes.clear()
     login_module.save_context("local", "http://127.0.0.1:8765", None)
     assert writes == [("local", Context())]
