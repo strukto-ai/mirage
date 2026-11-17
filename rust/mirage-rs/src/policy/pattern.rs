@@ -163,7 +163,10 @@ mod tests {
             expand("curl --request={PUT,PATCH}").unwrap(),
             ["curl --request=PUT", "curl --request=PATCH"]
         );
-        assert_eq!(expand("find -exec rm {} ;").unwrap(), ["find -exec rm {} ;"]);
+        assert_eq!(
+            expand("find -exec rm {} ;").unwrap(),
+            ["find -exec rm {} ;"]
+        );
         assert_eq!(expand("awk {x}").unwrap(), ["awk {x}"]);
         assert_eq!(expand("git  status").unwrap(), ["git  status"]);
     }
@@ -184,7 +187,10 @@ mod tests {
         assert!(expand(&wide).unwrap_err().contains("64"));
         let square = "x {a,b,c,d,e,f,g,h} {a,b,c,d,e,f,g,h} {a,b}";
         assert!(expand(square).is_err());
-        assert_eq!(expanded(&text("gh {a,"), Whitespace::Python), vec![text("gh {a,")]);
+        assert_eq!(
+            expanded(&text("gh {a,"), Whitespace::Python),
+            vec![text("gh {a,")]
+        );
     }
 
     #[test]

@@ -208,7 +208,9 @@ fn allow(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
                     ));
                 }
                 if matches!(entry.get("flags"), Doc::Null) {
-                    return Err(format!("{at} lists no flags; write the command as a string"));
+                    return Err(format!(
+                        "{at} lists no flags; write the command as a string"
+                    ));
                 }
                 let flags = strings(entry.get("flags"), &format!("{at}.flags"), None, dialect)?;
                 if let Doc::List(items) = &flags {
@@ -219,7 +221,11 @@ fn allow(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
                     }
                 }
             }
-            _ => return Err(format!("{at} must be a command pattern or a {{command, flags}} entry")),
+            _ => {
+                return Err(format!(
+                    "{at} must be a command pattern or a {{command, flags}} entry"
+                ));
+            }
         }
     }
     Ok(Doc::List(entries.to_vec()))
@@ -769,8 +775,12 @@ mod tests {
         let list = Doc::List(vec![Doc::text("*"), Doc::text("gh pr {view,diff}"), flags]);
         assert!(allow(&list, "commands.allow", Whitespace::Python).is_ok());
         let refused = |entry: Doc, says: &str| {
-            let err = allow(&Doc::List(vec![entry]), "commands.allow", Whitespace::Python)
-                .unwrap_err();
+            let err = allow(
+                &Doc::List(vec![entry]),
+                "commands.allow",
+                Whitespace::Python,
+            )
+            .unwrap_err();
             assert!(err.contains(says), "{err}");
         };
         refused(Doc::text("gh {pr,"), "not closed");
