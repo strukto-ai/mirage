@@ -52,7 +52,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
-import { routedConsumer } from './lookup.ts'
+import { routedConsumer, runsOnMachine, runsWrapper } from './lookup.ts'
 import { buildRuntime } from '../../runtime/table.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
@@ -1282,5 +1282,38 @@ describe('lscpu, the view of the machines', () => {
       fallback: sandbox,
     } as never
     expect(routedConsumer('lscpu', [], session, ws.registry, routing)[0]).toBe(Consumer.EXTERNAL)
+  })
+})
+
+describe('a wrapper beside other layers', () => {
+  it('lets a CLI of its name run as the CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli(
+      'nice',
+      new CLI({
+        spec: new CommandSpec({ name: 'nice', subcommands: [new CommandSpec({ name: 'run' })] }),
+        handlers: { run: new CLIHandler({ fn: noopVerb }) },
+      }),
+    )
+    expect(runsWrapper('nice', ['run'], session, ws.registry, undefined)).toBe(false)
+    expect(runsWrapper('nohup', ['gcc'], session, ws.registry, undefined)).toBe(true)
+  })
+
+  it.each([
+    [['nice', 'gcc', 'x.c']],
+    [['nice', '/usr/bin/gcc', 'x.c']],
+    [['nohup', 'nice', '/usr/bin/gcc', 'x.c']],
+  ])("waits on its program's machine as a job: %j", async (words) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: [new Box('docker', 'gcc')] },
+    )
+    try {
+      const session = ws.getSession(ws.defaultSessionId)
+      const routing = { bindings: ws.registry.runtimeBindings, fallback: null } as never
+      expect(runsOnMachine(ws.registry, words, session, routing)).toBe(true)
+    } finally {
+      await ws.close()
+    }
   })
 })

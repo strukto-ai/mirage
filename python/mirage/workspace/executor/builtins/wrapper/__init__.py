@@ -12,8 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.builtins.wrapper.wrapper import handle_wrapper
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.builtins.wrapper.wrapper import (
+        handle_wrapper,
+    )
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.builtins.wrapper.wrapper": ("handle_wrapper",),
+}
 
 __all__ = [
     "handle_wrapper",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -1527,7 +1527,7 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=code, stderr=err),
         )
 
-    if runs_wrapper(name, argv.args, session, context.frame.routing):
+    if runs_wrapper(name, argv.args, session, registry, context.frame.routing):
         return handle_wrapper(
             execute_fn, name, argv.args, session, registry, stdin
         )

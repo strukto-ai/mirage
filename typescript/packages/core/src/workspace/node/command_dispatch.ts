@@ -1371,7 +1371,7 @@ async function routeArgv(
     ]
   }
 
-  if (runsWrapper(name, argv.args, session, context.frame.routing)) {
+  if (runsWrapper(name, argv.args, session, registry, context.frame.routing)) {
     return handleWrapper(executeFn, name, argv.args, session, registry, stdin)
   }
 

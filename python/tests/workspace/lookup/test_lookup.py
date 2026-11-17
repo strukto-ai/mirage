@@ -41,7 +41,11 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import (
+    routed_consumer,
+    runs_on_machine,
+    runs_wrapper,
+)
 from mirage.workspace.session import SessionState
 
 
@@ -789,3 +793,43 @@ def test_lscpu_captured_by_name_stays_the_program():
     )
     consumer, _ = routed_consumer("lscpu", (), session, ws.registry, routing)
     assert consumer is Consumer.EXTERNAL
+
+
+def test_a_cli_named_like_a_wrapper_runs_as_the_cli():
+    session, ws = _fixture()
+    ws.register_cli(
+        "nice",
+        CLI(
+            spec=CommandSpec(
+                name="nice", subcommands=(CommandSpec(name="run"),)
+            ),
+            handlers={"run": CLIHandler(fn=_noop)},
+        ),
+    )
+    assert not runs_wrapper("nice", ["run"], session, ws._registry, None)
+    assert runs_wrapper("nohup", ["gcc"], session, ws._registry, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["nice", "gcc", "x.c"],
+        ["nice", "/usr/bin/gcc", "x.c"],
+        ["nohup", "nice", "/usr/bin/gcc", "x.c"],
+    ],
+)
+async def test_a_job_under_wrappers_waits_on_its_program_s_machine(words):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines=[_Box("docker", "gcc")],
+    )
+    try:
+        session = ws.get_session(ws.default_session_id)
+        routing = RouteDecision(
+            bindings=ws._registry.runtime_bindings, fallback=None
+        )
+        assert runs_on_machine(ws._registry, words, session, routing)
+    finally:
+        await ws.close()

@@ -106,7 +106,8 @@ export function runsOnMachine(
 ): boolean {
   let head = words[0] ?? ''
   let args: readonly string[] = words.slice(1).filter((word) => word !== null)
-  if (args.length === words.length - 1) [head, args] = unwrapped(head, args, session, routing)
+  if (args.length === words.length - 1)
+    [head, args] = unwrapped(head, args, session, registry, routing)
   let runtime: unknown
   if (Object.hasOwn(routing.bindings, head)) runtime = routing.bindings[head]
   else if (lookup(head, session, registry, routing) === Consumer.EXTERNAL)
@@ -121,22 +122,24 @@ export function runsOnMachine(
 
 /**
  * The program a chain of wrappers Mirage runs comes to, and its words: the
- * command itself when it is no such wrapper. A machine that captures a
- * wrapper by name runs it. Mirrors Python's `_unwrapped`.
+ * command itself when it is no such wrapper, and a `/usr/bin` path the program
+ * it names, as the plain path runs it. A machine that captures a wrapper by
+ * name runs it. Mirrors Python's `_unwrapped`.
  */
 function unwrapped(
   head: string,
   args: readonly string[],
   session: SessionState,
+  registry: MountRegistry,
   routing: RouteDecision<Runtime>,
 ): [string, readonly string[]] {
-  while (runsWrapper(head, args, session, routing)) {
+  while (runsWrapper(head, args, session, registry, routing)) {
     const [at] = readWrapper(head, args)
     if (at === null) break
     head = args[at] ?? ''
     args = args.slice(at + 1)
   }
-  return [head, args]
+  return [pathProgram(head, session, registry) ?? head, args]
 }
 
 /**
@@ -230,23 +233,23 @@ export function withoutCapture(
 }
 
 /**
- * Whether Mirage runs a wrapper itself (`wrapperAnswer`): one no function
- * shadows and no machine captures by name, with a program to run, or one that
- * answers for itself without one (`nice` alone prints the niceness). Mirrors
- * Python's `runs_wrapper`.
+ * Whether Mirage runs a wrapper itself (`handleWrapper`): one no layer of the
+ * workspace holds (a function, a CLI, a mount's command) and no machine
+ * captures by name, with a program to run, or one that answers for itself
+ * without one (`nice` alone prints the niceness). Mirrors Python's
+ * `runs_wrapper`.
  */
 export function runsWrapper(
   name: string,
   args: readonly string[],
   session: SessionState,
+  registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
 ): boolean {
-  if (
-    !PROGRAM_WRAPPERS.has(name) ||
-    Object.hasOwn(session.functions, name) ||
-    (routing !== undefined && Object.hasOwn(routing.bindings, name))
-  )
-    return false
+  const bindings = routing?.bindings ?? registry.runtimeBindings
+  if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return false
+  const consumer = lookup(name, session, registry, routing)
+  if (consumer !== Consumer.UNKNOWN && consumer !== Consumer.EXTERNAL) return false
   return RUNNERS.has(name) || readWrapper(name, args)[0] !== null
 }
 

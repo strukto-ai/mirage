@@ -470,3 +470,25 @@ describe('routing on machines', () => {
     }
   })
 })
+
+it('explains a captured wrapper whose routes disagree as refused', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: box('a', 'nohup', 'hostname'), b: box('b', 'nohup', 'hostname') },
+      policies: [new WrapperApart()],
+    },
+  )
+  try {
+    const said = await ws.explain('nohup hostname; echo after')
+    const nodes = [...commands(said.node)]
+    const wrapper = nodes.find((c) => c.command === 'nohup')
+    const run = await ws.shell('nohup hostname')
+    expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
+    expect(wrapper?.decision).toEqual(run.decision)
+    expect(nodes.find((c) => c.command === 'echo')?.outcome).toBe(Outcome.ALLOW)
+  } finally {
+    await ws.close()
+  }
+})

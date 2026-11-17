@@ -142,8 +142,8 @@ export function handleWrapper(
   }
   const [traits, warned] = wrapperTraits(name, args, answer.runsFrom, caller.traits)
   const line = shellJoin(args.slice(answer.runsFrom))
-  caller.process?.wrap(traits, line)
-  return runProgram(executeFn, name, line, session, stdin, traits, warned)
+  const worn = caller.process?.wrap(traits, line) === true ? { ...traits, leads: false } : traits
+  return runProgram(executeFn, name, line, session, stdin, worn, warned)
 }
 
 /**

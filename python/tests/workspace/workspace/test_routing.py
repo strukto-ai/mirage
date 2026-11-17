@@ -465,3 +465,28 @@ async def test_a_forked_shells_last_program_runs_as_the_shell():
         assert line.parent == shell
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_a_captured_wrapper_whose_routes_disagree():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "a": _box("a", "nohup", "hostname"),
+            "b": _box("b", "nohup", "hostname"),
+        },
+        policies=[_WrapperApart()],
+    )
+    try:
+        said = await ws.explain("nohup hostname; echo after")
+        nodes = {n.command: n for n in _commands(said.node) if n.command}
+        run = await ws.shell("nohup hostname")
+        assert (nodes["nohup"].outcome, nodes["nohup"].exit_code) == (
+            Outcome.DENY,
+            126,
+        )
+        assert nodes["nohup"].decision == run.decision
+        assert nodes["echo"].outcome is Outcome.ALLOW
+    finally:
+        await ws.close()

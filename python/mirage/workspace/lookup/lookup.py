@@ -221,7 +221,7 @@ def runs_on_machine(
     head = str(words[0])
     args = [word for word in words[1:] if word is not None]
     if len(args) == len(words) - 1:
-        head, args = _unwrapped(head, args, session, routing)
+        head, args = _unwrapped(head, args, session, registry, routing)
     if head in routing.bindings:
         runtime = routing.bindings[head]
     elif lookup(head, session, registry, routing) is Consumer.EXTERNAL:
@@ -235,24 +235,27 @@ def _unwrapped(
     head: str,
     args: list[str],
     session: SessionState,
+    registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity],
 ) -> tuple[str, list[str]]:
     """The program a chain of wrappers Mirage runs comes to, and its
-    words: the command itself when it is no such wrapper.
+    words: the command itself when it is no such wrapper, and a
+    ``/usr/bin`` path the program it names, as the plain path runs it.
 
     Args:
         head (str): the command name.
         args (list[str]): its words.
         session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
         routing (RouteDecision): the line's placement, where a machine
             that captures a wrapper by name runs it.
     """
-    while runs_wrapper(head, args, session, routing):
+    while runs_wrapper(head, args, session, registry, routing):
         at = read_wrapper(head, args)[0]
         if at is None:
             break
         head, args = args[at], args[at + 1 :]
-    return head, args
+    return path_program(head, session, registry) or head, args
 
 
 def without_capture(
@@ -276,23 +279,29 @@ def runs_wrapper(
     name: str,
     args: Sequence[str],
     session: SessionState,
+    registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> bool:
-    """Whether Mirage runs a wrapper itself (``wrapper_answer``): one no
-    function shadows and no machine captures by name, with a program to
-    run, or one that answers for itself without one (``nice`` alone
-    prints the niceness).
+    """Whether Mirage runs a wrapper itself (``handle_wrapper``): one no
+    layer of the workspace holds (a function, a CLI, a mount's command)
+    and no machine captures by name, with a program to run, or one that
+    answers for itself without one (``nice`` alone prints the niceness).
 
     Args:
         name (str): expanded command name.
         args (Sequence[str]): its words, argv[0] excluded.
         session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (CLIs, mount commands).
         routing (RouteDecision | None): the line's placement.
     """
-    if (
-        name not in PROGRAM_WRAPPERS
-        or name in session.functions
-        or (routing is not None and name in routing.bindings)
+    bindings: Mapping[str, RuntimeIdentity | None] = (
+        routing.bindings if routing is not None else registry.runtime_bindings
+    )
+    if name not in PROGRAM_WRAPPERS or name in bindings:
+        return False
+    if lookup(name, session, registry, routing) not in (
+        Consumer.UNKNOWN,
+        Consumer.EXTERNAL,
     ):
         return False
     return name in RUNNERS or read_wrapper(name, args)[0] is not None

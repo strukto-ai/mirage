@@ -162,8 +162,8 @@ def handle_wrapper(
         name, args, answer.runs_from, caller.traits
     )
     line = shell_join(args[answer.runs_from :])
-    if caller.process is not None:
-        caller.process.wrap(traits, line)
+    if caller.process is not None and caller.process.wrap(traits, line):
+        traits = dataclasses.replace(traits, leads=False)
     return _run_program(execute_fn, name, line, session, stdin, traits, warned)
 
 

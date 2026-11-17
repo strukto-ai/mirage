@@ -361,3 +361,21 @@ async def test_a_setsid_job_leads_its_own_group_and_session():
         await ws.shell("wait")
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_setsid_job_s_children_join_its_session():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        io = await ws.shell(
+            "setsid sh -c 'sleep 3 & wait' & sleep 0.3; "
+            "ps -o pid=,pgid=,sid=,comm=; kill %1"
+        )
+        rows = [row.split() for row in (await io.stdout_str()).splitlines()]
+        sh = next(row for row in rows if row[3] == "sh")
+        sleep = next(row for row in rows if row[3] == "sleep")
+        assert sh[1] == sh[2] == sh[0]
+        assert sleep[1:3] == [sh[0], sh[0]]
+        await ws.shell("wait")
+    finally:
+        await ws.close()

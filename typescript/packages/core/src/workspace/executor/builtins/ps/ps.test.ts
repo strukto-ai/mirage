@@ -342,3 +342,22 @@ describe('ps under wrappers', () => {
     }
   })
 })
+
+it("puts a setsid job's children in its session", async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+  try {
+    const io = await ws.shell(
+      "setsid sh -c 'sleep 3 & wait' & sleep 0.3; ps -o pid=,pgid=,sid=,comm=; kill %1",
+    )
+    const rows = stdoutStr(io)
+      .split('\n')
+      .map((row) => row.trim().split(/\s+/))
+    const sh = rows.find((row) => row[3] === 'sh')
+    const sleep = rows.find((row) => row[3] === 'sleep')
+    expect([sh?.[1], sh?.[2]]).toEqual([sh?.[0], sh?.[0]])
+    expect([sleep?.[1], sleep?.[2]]).toEqual([sh?.[0], sh?.[0]])
+    await ws.shell('wait')
+  } finally {
+    await ws.close()
+  }
+})

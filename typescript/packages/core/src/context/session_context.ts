@@ -369,8 +369,16 @@ export function setTraits<T>(traits: ProcessTraits, fn: () => Promise<T>): Promi
   return runChanged({ traits }, fn)
 }
 
+/**
+ * Run `run` as the managed runner `process`. A process that a `setsid`
+ * started leads its session from its start; what it starts joins that session
+ * through its record, so it leads none of its own. Mirrors Python's
+ * `run_as_process`.
+ */
 export function runAsProcess<T>(run: () => Promise<T>, process: ProcessHandle): Promise<T> {
-  return runWithCaller({ ...currentCaller(), process }, run)
+  const caller = currentCaller()
+  const traits = caller.traits.leads ? { ...caller.traits, leads: false } : caller.traits
+  return runWithCaller({ ...caller, process, traits }, run)
 }
 
 function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {

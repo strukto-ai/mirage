@@ -454,6 +454,9 @@ function routedWs(routes: Record<string, Route>): Workspace {
 // Mirage runs the wrapper and hands its route to what it runs, where the
 // program's own route places it, as for the program run alone.
 describe('routes under one wrapper', () => {
+  // Mirage runs the wrapper and hands its route to what it runs, where the
+  // program's own route wins; a machine's find runs the -exec programs itself,
+  // so their routes move nothing.
   it.each<[Record<string, Route>, string, string]>([
     [
       {
@@ -461,7 +464,7 @@ describe('routes under one wrapper', () => {
         tool_b: { kind: 'route', machine: 'b' },
       },
       TWO_TOOLS,
-      TWO_TOOLS.replace('nohup ', ''),
+      'a\n',
     ],
     [
       {
@@ -469,7 +472,7 @@ describe('routes under one wrapper', () => {
         tool_b: { kind: 'route', machine: 'b' },
       },
       TWO_TOOLS,
-      TWO_TOOLS.replace('nohup ', ''),
+      'a\n',
     ],
     [
       {
@@ -477,15 +480,16 @@ describe('routes under one wrapper', () => {
         hostname: { kind: 'route', machine: 'b' },
       },
       'nohup hostname',
-      'hostname',
+      'b\n',
     ],
-    [{ nice: { kind: 'route', machine: 'b' } }, 'nohup nice hostname', 'nohup nice hostname'],
-  ])('place its program as it runs bare: %j', async (routes, line, bare) => {
+    [{ nice: { kind: 'route', machine: 'b' } }, 'nohup nice hostname', 'b\n'],
+    [{ nohup: { kind: 'route', machine: 'b' } }, 'nohup hostname', 'b\n'],
+    [{}, 'nohup hostname', 'a\n'],
+  ])('place its program where they say: %j %s', async (routes, line, out) => {
     const ws = routedWs(routes)
     try {
-      const alone = await ws.shell(bare)
       const io = await ws.shell(line)
-      expect([io.exitCode, text(io.stdout)]).toEqual([alone.exitCode, text(alone.stdout)])
+      expect([io.exitCode, text(io.stdout)]).toEqual([0, out])
     } finally {
       await ws.close()
     }

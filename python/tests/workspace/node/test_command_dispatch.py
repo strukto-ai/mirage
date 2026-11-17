@@ -443,32 +443,38 @@ def _routed(routes: dict[str, Route]) -> Workspace:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("routes", "line"),
+    ("routes", "line", "out"),
     [
         (
             {"tool_a": Route(machine="a"), "tool_b": Route(machine="b")},
             TWO_TOOLS,
+            b"a\n",
         ),
         (
             {"tool_a": Route(machine="b"), "tool_b": Route(machine="b")},
             TWO_TOOLS,
+            b"a\n",
         ),
         (
             {"nohup": Route(machine="a"), "hostname": Route(machine="b")},
             "nohup hostname",
+            b"b\n",
         ),
-        ({"nice": Route(machine="b")}, "nohup nice hostname"),
+        ({"nice": Route(machine="b")}, "nohup nice hostname", b"b\n"),
+        ({"nohup": Route(machine="b")}, "nohup hostname", b"b\n"),
+        ({}, "nohup hostname", b"a\n"),
     ],
 )
-async def test_a_wrapper_s_program_runs_where_it_runs_bare(routes, line):
+async def test_a_wrapper_s_program_runs_where_its_routes_place_it(
+    routes, line, out
+):
     # Mirage runs the wrapper and hands its route to what it runs, where the
-    # program's own route places it, as for the program run alone.
+    # program's own route wins; a machine's find runs the -exec programs
+    # itself, so their routes move nothing.
     ws = _routed(routes)
     try:
-        bare = line.removeprefix("nohup ").removeprefix("nice ")
-        alone = await ws.shell(bare if routes.get("nice") is None else line)
         r = await ws.shell(line)
-        assert (r.exit_code, r.stdout) == (alone.exit_code, alone.stdout)
+        assert (r.exit_code, r.stdout) == (0, out)
     finally:
         await ws.close()
 
