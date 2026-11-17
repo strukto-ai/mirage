@@ -208,6 +208,32 @@
       ]
     },
     {
+      "id": "mount_type_ssh_shows_mirages_change_to_the_next_command",
+      "note": "The box's kernel keeps a served name, its absence and its attributes for a second, so an import's folder checks stay in the box; a command after a change Mirage made waits that out, so it sees the new size, a new file and a removed one at once.",
+      "runtimes": ["docker", "e2b", "microsandbox", "kubernetes"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/served": { "vfs": "ram", "files": { "plan.txt": "plan\n" } }
+        }
+      },
+      "entry": { "captures": ["dash"], "config": { "mount_type": "ssh" } },
+      "steps": [
+        {
+          "command": "dash -c 'stat -c %s /served/plan.txt'; echo longer > /served/plan.txt; dash -c 'stat -c %s /served/plan.txt; cat /served/plan.txt'",
+          "expect": { "exit": 0, "stdout": "5\n7\nlonger\n", "stderr": "" }
+        },
+        {
+          "command": "dash -c 'test -e /served/new.txt || echo missing'; echo made > /served/new.txt; dash -c 'cat /served/new.txt'",
+          "expect": { "exit": 0, "stdout": "missing\nmade\n", "stderr": "" }
+        },
+        {
+          "command": "dash -c 'test -e /served/new.txt && echo there'; rm /served/new.txt; dash -c 'test -e /served/new.txt || echo gone'",
+          "expect": { "exit": 0, "stdout": "there\ngone\n", "stderr": "" }
+        }
+      ]
+    },
+    {
       "id": "mount_type_both_leaves_the_boxs_own_mounts_and_refuses_rules_on_them",
       "runtimes": [
         "docker",

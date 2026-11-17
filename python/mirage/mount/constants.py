@@ -29,6 +29,13 @@ LISTING_CONCURRENCY = 16
 # the descriptor twice more right after the open.
 FSTAT_ROW_SECONDS = 1.0
 
+# How long a machine's kernel keeps what a mount served into it answered
+# of a name, its absence or its attributes (sshfs's entry, negative and
+# attr timeouts), so the folder checks an import repeats stay on the
+# machine. What another changed in that time is waited out before a
+# program starts there (``RecentChanges``).
+KERNEL_CACHE_SECONDS = 1
+
 # The files an NFS server keeps open between reads. NFS has no open or
 # close, so a read opens its file and later reads reuse that handle; past
 # this many, the least recently read one no read is using is released.

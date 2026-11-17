@@ -21,7 +21,7 @@ import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
 import type { Process } from '../../execution/process/types.ts'
 import { LineId, MachineName, ProcessId } from '../../execution/types.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { FileChangeKind, FileEvent, MountMode, PathSpec } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -639,6 +639,29 @@ it('lists a queued line as waiting until it is aborted', async () => {
   } finally {
     stopFirst.abort()
     await first
+    await ws.close()
+  }
+})
+
+it('has a notice waited out on both sides of a move', async () => {
+  const clock = new ManualClock()
+  const ws = new Workspace(
+    { '/data': new RAMVFS(), '/old': new RAMVFS() },
+    { mode: MountMode.WRITE, clock },
+  )
+  try {
+    clock.advance(1)
+    await ws.notify(
+      new FileEvent({
+        kind: FileChangeKind.MOVE,
+        path: PathSpec.fromStrPath('/data/b'),
+        timestamp: new Date(),
+        previousPath: PathSpec.fromStrPath('/old/a'),
+      }),
+    )
+    await ws.registry.changes.waitOut(new Map([['/old', 0]]), 'box')
+    expect(clock.monotonic()).toBe(2)
+  } finally {
     await ws.close()
   }
 })

@@ -48,6 +48,8 @@ from mirage.io.network import (
     network_layer,
     network_routes,
 )
+from mirage.mount.changes import SERVED_BY, RecentChanges
+from mirage.mount.constants import KERNEL_CACHE_SECONDS
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -148,6 +150,9 @@ class MountRegistry:
         self.ids: IdSource = (
             ids if ids is not None else SystemIdSource(self.clock)
         )
+        # The file changes a machine's kernel may still hold, which a
+        # program waits out before it starts there.
+        self.changes = RecentChanges(self.clock, KERNEL_CACHE_SECONDS)
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None
@@ -262,6 +267,8 @@ class MountRegistry:
         reached = [
             m for m in mounts if by is None or by.reaches(m.vfs.accessor)
         ]
+        for mount in reached:
+            self.changes.note(mount.prefix)
         cache = self._file_cache
         # Every mount: one clear of the file cache, not a scan per mount.
         every = cache is not None and len(reached) == len(mounts)
@@ -292,12 +299,20 @@ class MountRegistry:
         mount, which the dispatcher never saw; without the drop the next
         `cat /data/x` would serve the stale "old".
 
+        The drop is the runtime's machine's own change, which that
+        machine's kernel needs no wait for.
+
         Args:
             runtime (Runtime): the runtime the line ran on.
         """
         await runtime.settle()
         if not runtime.file_effects_dispatched:
-            await self.drop_caches()
+            machine = runtime.machine
+            token = SERVED_BY.set(None if machine is None else machine.name)
+            try:
+                await self.drop_caches()
+            finally:
+                SERVED_BY.reset(token)
 
     def network_of(self, setting: NetworkSetting | None) -> NetworkRule | None:
         """The rule a session's lines are held to: the workspace's,
@@ -550,6 +565,7 @@ class MountRegistry:
             self._attach_manager(m)
             self._mounts.append(m)
             self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
+            self.changes.note(norm_prefix)
             if norm_prefix == "/":
                 self._root = m
             return m
@@ -612,6 +628,7 @@ class MountRegistry:
             if m.prefix == norm_prefix:
                 del self._mounts[i]
                 self._rows = None
+                self.changes.note(norm_prefix)
                 if m is self._root:
                     self._root = None
                 if m is self._anchor:

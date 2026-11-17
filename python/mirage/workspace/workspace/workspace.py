@@ -676,6 +676,7 @@ class Workspace:
             self.get_session,
             self._sandbox_mounts,
             self.process_table,
+            self._registry.changes,
         )
         handles, entries = split_machines(machines)
         self.machine_table = MachineTable(
@@ -1413,8 +1414,10 @@ class Workspace:
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
-        self._registry.mount_for_prefix(prefix).mode = mode
+        entry = self._registry.mount_for_prefix(prefix)
+        entry.mode = mode
         self._registry.rows_changed()
+        self._registry.changes.note(entry.prefix)
 
     def add_fuse_mount(
         self,
@@ -1930,8 +1933,9 @@ class Workspace:
 
     async def notify(self, change: FileEvent) -> None:
         """Inject one externally observed change into the event
-        runtime: invalidate its caches, then deliver it to every
-        matching subscription.
+        runtime: record it for the machines its path is served to,
+        invalidate its caches, then deliver it to every matching
+        subscription.
 
         The single entry point for consumer-side detection (webhook
         receiver or poll loop over ``VFS.delta_hook()``); see
@@ -1942,6 +1946,9 @@ class Workspace:
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
+        self._registry.changes.note(change.path.virtual)
+        if change.previous_path is not None:
+            self._registry.changes.note(change.previous_path.virtual)
         await self._events.notify(change)
 
     async def close(self) -> None:
@@ -2778,6 +2785,7 @@ class Workspace:
             session_id = self.default_session_id
         session = await self._session_mgr.set_profile(session_id, compiled)
         self.process_table.revoke_session(session_id)
+        self._registry.changes.note("/")
         return session
 
     def list_sessions(self) -> list[SessionState]:

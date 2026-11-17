@@ -20,6 +20,7 @@ import itertools
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -34,7 +35,13 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineName, ProcessId
 from mirage.machine import MachineHandle
-from mirage.types import MountBackend, MountMode, PathSpec
+from mirage.types import (
+    FileChangeKind,
+    FileEvent,
+    MountBackend,
+    MountMode,
+    PathSpec,
+)
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
@@ -1067,4 +1074,28 @@ async def test_a_queued_line_is_listed_waiting_until_it_is_cancelled():
         first.cancel()
         with contextlib.suppress(asyncio.CancelledError, MirageAbortError):
             await first
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_notice_is_waited_out_on_both_sides_of_a_move():
+    clock = ManualClock()
+    ws = Workspace(
+        {"/data": RAMVFS(), "/old": RAMVFS()},
+        mode=MountMode.WRITE,
+        clock=clock,
+    )
+    try:
+        clock.advance(1)
+        await ws.notify(
+            FileEvent(
+                kind=FileChangeKind.MOVE,
+                path=PathSpec.from_str_path("/data/b"),
+                timestamp=datetime.now(timezone.utc),
+                previous_path=PathSpec.from_str_path("/old/a"),
+            )
+        )
+        await ws.registry.changes.wait_out({"/old": 0.0}, "box")
+        assert clock.monotonic() == 2.0
+    finally:
         await ws.close()

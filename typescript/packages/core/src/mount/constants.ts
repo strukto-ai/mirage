@@ -43,3 +43,10 @@ export const STATUS = {
 
 // The size ssh2's SFTP class cuts each answer to on a sandbox's pipe.
 export const PIPE_PACKET_SIZE = 64 * 1024
+
+// How long a machine's kernel keeps what a mount served into it answered of a
+// name, its absence or its attributes (sshfs's entry, negative and attr
+// timeouts), so the folder checks an import repeats stay on the machine. What
+// another changed in that time is waited out before a program starts there
+// (`RecentChanges`). Mirrors Python's `KERNEL_CACHE_SECONDS`.
+export const KERNEL_CACHE_SECONDS = 1

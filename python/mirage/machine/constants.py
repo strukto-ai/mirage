@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
 from mirage.machine.types import MountType
+from mirage.mount.constants import KERNEL_CACHE_SECONDS
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
 
@@ -80,13 +81,17 @@ UNMOUNT_WAIT_SECONDS = 5.0
 PIPE_DIAGNOSTIC_BYTES = 16384
 PIPE_DIAGNOSTIC_WAIT_SECONDS = 1.0
 
-# sshfs keeps no copy of its own: every listing, stat and read asks the
-# host, so a file the host changes, or a profile now hides, shows at
-# once, and a file whose size the backend does not know reads whole
-# (direct_io), as the workspace's own FUSE mounts do.
+# sshfs keeps no copy of its own, and every read asks the host, so a file
+# whose size the backend does not know reads whole (direct_io), as the
+# workspace's own FUSE mounts do. The machine's kernel keeps what a name,
+# its absence and its attributes were for KERNEL_CACHE_SECONDS, so an
+# import's checks of its script's folder stay on the machine; a program
+# starts only once that holds nothing another changed since.
 SSHFS_OPTIONS = (
     "passive,dir_cache=no,direct_io,"
-    "attr_timeout=0,entry_timeout=0,negative_timeout=0"
+    f"attr_timeout={KERNEL_CACHE_SECONDS},"
+    f"entry_timeout={KERNEL_CACHE_SECONDS},"
+    f"negative_timeout={KERNEL_CACHE_SECONDS}"
 )
 
 # Where sshfs writes its errors in the machine, one file per prefix; its

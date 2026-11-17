@@ -53,8 +53,10 @@ from mirage.machine.mounts import (
     top_prefixes,
 )
 from mirage.machine.types import MachinePipe
+from mirage.mount.changes import SERVED_BY
 from mirage.runtime.types import RunResult
 from mirage.types import Limit
+from mirage.utils.clock import ManualClock
 from tests.fixtures.machine import on
 
 
@@ -1657,3 +1659,25 @@ def test_a_broken_sftp_module_is_not_blamed_on_the_extra(monkeypatch):
     with pytest.raises(ImportError) as raised:
         mounts.pipe_server()
     assert str(raised.value) != PIPE_SERVER_HINT
+
+
+@pytest.mark.asyncio
+async def test_a_line_waits_out_only_what_another_changed_under_its_mounts():
+    clock = ManualClock()
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox, clock=clock)
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    start = clock.monotonic()
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert clock.monotonic() == start
+    await ws.vfs.write("/data/f", b"x")
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert clock.monotonic() == start + 1
+    token = SERVED_BY.set("box")
+    try:
+        await ws.vfs.write("/data/g", b"y")
+    finally:
+        SERVED_BY.reset(token)
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert clock.monotonic() == start + 1
+    await ws.close()

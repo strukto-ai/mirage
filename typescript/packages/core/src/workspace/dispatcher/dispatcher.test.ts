@@ -32,6 +32,8 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { SERVED_BY } from '../../mount/changes.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { apiRequest } from '../../core/api/client.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
@@ -4107,6 +4109,41 @@ it.each([
       ['page', body, memory],
       ['close', body, memory],
     ])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has every machine but the one serving a write wait it out', async () => {
+  const clock = new ManualClock()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+  try {
+    clock.advance(1)
+    const changes = ws.registry.changes
+    const served = new Map([['/data', 0]])
+    await SERVED_BY.run('box', () => ws.vfs.write('/data/a', new TextEncoder().encode('x')))
+    await ws.vfs.read('/data/a')
+    await changes.waitOut(served, 'box')
+    expect(clock.monotonic()).toBe(1)
+    await changes.waitOut(served, 'gpu')
+    expect(clock.monotonic()).toBe(2)
+    await ws.vfs.write('/data/b', new TextEncoder().encode('y'))
+    await changes.waitOut(served, 'box')
+    expect(clock.monotonic()).toBe(3)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has a write through a link waited out where it lands', async () => {
+  const clock = new ManualClock()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+  try {
+    expect((await ws.shell('ln -s /data/f /alias')).exitCode).toBe(0)
+    clock.advance(1)
+    await ws.vfs.write('/alias', new TextEncoder().encode('x'))
+    await ws.registry.changes.waitOut(new Map([['/data', 0]]), 'box')
+    expect(clock.monotonic()).toBe(2)
   } finally {
     await ws.close()
   }

@@ -73,6 +73,8 @@ import { CLIRegistry } from '../cli/registry.ts'
 import { lineFacts } from '../lookup/constants.ts'
 import type { SessionState } from '../session/session.ts'
 import type { MountRow } from '../types.ts'
+import { RecentChanges, SERVED_BY } from '../../mount/changes.ts'
+import { KERNEL_CACHE_SECONDS } from '../../mount/constants.ts'
 import { backendCommands } from './backends.ts'
 import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
 import { MountEntry, type MountInit } from './mount.ts'
@@ -178,6 +180,8 @@ export class MountRegistry {
   // storage was mounted). The registry object is just the vehicle that
   // already reaches every dispatch site, same as the runtime fields.
   readonly clis: CLIRegistry
+  /** The file changes a machine's kernel may still hold, which a program waits out before it starts there. */
+  readonly changes: RecentChanges
   // Whether mounts take the workspace clock as they are placed: false while
   // the workspace is being built, which binds them all at the end.
   private clocksBound = false
@@ -200,6 +204,7 @@ export class MountRegistry {
   async dropCaches(by: Accessor | null = null): Promise<void> {
     const mounts = this.allMounts()
     const reached = mounts.filter((m) => by === null || (by.reaches?.(m.vfs.accessor) ?? true))
+    for (const mount of reached) this.changes.note(mount.prefix)
     const cache = this.cacheStore
     // Every mount: one clear of the file cache, not a scan per mount.
     const every = cache !== null && reached.length === mounts.length
@@ -226,11 +231,16 @@ export class MountRegistry {
    * command refetches instead of serving pre-line state: `cat /data/x`
    * caches "old", `python3 job.py` writes "new" straight to S3 through the
    * sandbox's own FUSE mount, and without the drop the next `cat /data/x`
-   * would serve the stale "old". Mirrors Python's `MountRegistry.settle`.
+   * would serve the stale "old". The drop is the runtime's machine's own
+   * change, which that machine's kernel needs no wait for. Mirrors Python's
+   * `MountRegistry.settle`.
    */
   async settle(runtime: Runtime): Promise<void> {
     await runtime.settle()
-    if (!runtime.fileEffectsDispatched) await this.dropCaches()
+    if (runtime.fileEffectsDispatched) return
+    const machine = runtime.machine
+    if (machine === null) await this.dropCaches()
+    else await SERVED_BY.run(machine.name, () => this.dropCaches())
   }
 
   /**
@@ -376,6 +386,7 @@ export class MountRegistry {
     readonly ids: IdSource = new SystemIdSource(clock),
   ) {
     this.clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor), clock)
+    this.changes = new RecentChanges(clock, KERNEL_CACHE_SECONDS)
     this.indexConfig = placements.index
     this.workspaceId = placements.workspaceId
     const list: MountEntry[] = []
@@ -561,6 +572,7 @@ export class MountRegistry {
       this.attachManager(m)
       this.mountList.push(m)
       this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
+      this.changes.note(norm)
       if (norm === '/') this.rootRef = m
       return m
     } catch (err) {
@@ -623,6 +635,7 @@ export class MountRegistry {
     }
     const [removed] = this.mountList.splice(idx, 1)
     this.rowCache = null
+    this.changes.note(norm)
     if (removed === undefined) {
       throw new Error(`no mount at prefix: ${norm}`)
     }

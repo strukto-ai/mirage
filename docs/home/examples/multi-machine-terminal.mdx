@@ -261,9 +261,7 @@ so the GPU is paid for the training alone.
 
 pandas runs about as fast on the E2B sandbox as on the GPU machine's CPU, so the
 two take about the same time. The GPU costs about 4.5 times as much a second, so
-moving the features off it cuts the cost by about 44%. `python3 -P` keeps the
-script's folder off Python's import path, so its imports do not search
-`/workspace` over the network.
+moving the features off it cuts the cost by about 44%.
 
 ### E2B: build features
 
@@ -285,7 +283,7 @@ with pandas, and writes them back to `/workspace`.
 </Accordion>
 
 ```bash
-python3 -P /workspace/jobs/build.py
+python3 /workspace/jobs/build.py
 # 1111538 events -> 50 users
 ```
 
@@ -319,14 +317,14 @@ same way.
 </Accordion>
 
 ```bash
-python3 -P /workspace/jobs/train.py &
+python3 /workspace/jobs/train.py &
 ```
 
 <ProcessTable
   command="ps -o pid,machine,cmd"
   rows={[
     ["4194305", "mirage", "ps -o pid,machine,cmd"],
-    ["3076", "ssh:gpu", "python3 -P /workspace/jobs/train.py", "/images/ec2-logo.svg"],
+    ["3076", "ssh:gpu", "python3 /workspace/jobs/train.py", "/images/ec2-logo.svg"],
   ]}
 />
 
@@ -348,10 +346,10 @@ mirage shell -w demo -c 'cat /workspace/counts/*.txt | python3 -c "import sys, n
 #   pipeline: cat /workspace/counts/*.txt | python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"
 #     cat /workspace/counts/*.txt  [allow]
 #     python3 -c "import sys, numpy as np; print(np.loadtxt(sys.stdin).mean())"  [allow]  on cf
-mirage shell -w demo -c "python3 -P /workspace/jobs/build.py" --explain
-# python3 -P /workspace/jobs/build.py  [allow, exit 0]
-#   python3 -P /workspace/jobs/build.py  [allow]  on cpu
-mirage shell -w demo -c "python3 -P /workspace/jobs/train.py" --explain
-# python3 -P /workspace/jobs/train.py  [allow, exit 0]
-#   python3 -P /workspace/jobs/train.py  [allow]  on gpu
+mirage shell -w demo -c "python3 /workspace/jobs/build.py" --explain
+# python3 /workspace/jobs/build.py  [allow, exit 0]
+#   python3 /workspace/jobs/build.py  [allow]  on cpu
+mirage shell -w demo -c "python3 /workspace/jobs/train.py" --explain
+# python3 /workspace/jobs/train.py  [allow, exit 0]
+#   python3 /workspace/jobs/train.py  [allow]  on gpu
 ```

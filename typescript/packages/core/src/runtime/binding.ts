@@ -28,6 +28,7 @@ import { PathSpec } from '../types.ts'
 import type { MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn, DispatchFn, RunResult } from './types.ts'
 import { Files } from '../workspace/files.ts'
+import type { RecentChanges } from '../mount/changes.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 
@@ -59,6 +60,8 @@ export class WorkspaceBinding {
    * @param bridge the guest bridge a run with no files rides.
    * @param processes the table a program a runtime runs starts its
    *   process in; null outside a workspace.
+   * @param changes the file changes a sandbox's kernel may still hold of
+   *   what it was served; null outside a workspace.
    */
   constructor(
     readonly dispatch: DispatchFn | null,
@@ -69,6 +72,7 @@ export class WorkspaceBinding {
     readonly mountPrefixes: (() => string[]) | null = null,
     readonly bridge: BridgeDispatchFn | null = null,
     readonly processes: ProcessTable | null = null,
+    readonly changes: RecentChanges | null = null,
   ) {}
 
   /**

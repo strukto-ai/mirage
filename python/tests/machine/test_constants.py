@@ -23,6 +23,7 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
+    SSHFS_OPTIONS,
     TOOLS_PATH,
     decode_output,
     mount_field,
@@ -306,3 +307,13 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
         b"",
         b"mirage: the machine needs dd and base64 to return output\n",
     )
+
+
+def test_sshfs_keeps_names_and_attributes_a_second_and_never_contents():
+    assert {
+        "attr_timeout=1",
+        "entry_timeout=1",
+        "negative_timeout=1",
+        "dir_cache=no",
+        "direct_io",
+    } <= set(SSHFS_OPTIONS.split(","))

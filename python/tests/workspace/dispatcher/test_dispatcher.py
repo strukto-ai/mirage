@@ -50,6 +50,7 @@ from mirage.io.memory import body_limit, memory_room
 from mirage.io.spool import MEMORY_LIMIT
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
+from mirage.mount.changes import SERVED_BY
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
@@ -77,6 +78,7 @@ from mirage.types import (
     SearchQuery,
     Visibility,
 )
+from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.ranges import slice_window, splice_window
 from mirage.utils.stat_view import ident
@@ -4301,3 +4303,41 @@ async def test_deferred_mount_reads_retain_body_and_memory(
             assert seen == [("page", body, memory), ("close", body, memory)]
         finally:
             await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_is_waited_out_by_every_machine_but_the_one_serving_it():
+    clock = ManualClock()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        clock.advance(1)
+        changes = ws.registry.changes
+        token = SERVED_BY.set("box")
+        try:
+            await ws.vfs.write("/data/a", b"x")
+        finally:
+            SERVED_BY.reset(token)
+        await ws.vfs.read("/data/a")
+        await changes.wait_out({"/data": 0.0}, "box")
+        assert clock.monotonic() == 1.0
+        await changes.wait_out({"/data": 0.0}, "gpu")
+        assert clock.monotonic() == 2.0
+        await ws.vfs.write("/data/b", b"y")
+        await changes.wait_out({"/data": 0.0}, "box")
+        assert clock.monotonic() == 3.0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_through_a_link_is_waited_out_where_it_lands():
+    clock = ManualClock()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        assert (await ws.shell("ln -s /data/f /alias")).exit_code == 0
+        clock.advance(1)
+        await ws.vfs.write("/alias", b"x")
+        await ws.registry.changes.wait_out({"/data": 0.0}, "box")
+        assert clock.monotonic() == 2.0
+    finally:
+        await ws.close()
