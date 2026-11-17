@@ -576,16 +576,21 @@ class _Denied(Exception):
 
 
 @pytest.mark.asyncio
-async def test_a_remote_refusal_never_shows_the_key(monkeypatch):
+@pytest.mark.parametrize("on_open", [False, True])
+async def test_a_remote_refusal_never_shows_the_key(monkeypatch, on_open):
+    reason = "denied:\r\nBearer s3cret"
+
     class _Checkout:
         async def __aenter__(self):
-            raise _Denied("denied: Bearer s3cret")
+            raise _Denied(reason)
 
         async def __aexit__(self, *exc) -> None:
             return None
 
     class _Pool:
         async def __aenter__(self):
+            if on_open:
+                raise _Denied(reason)
             return self
 
         async def __aexit__(self, *exc) -> None:

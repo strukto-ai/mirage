@@ -352,8 +352,7 @@ jobs:
             runtime:
               - 'integ/runtime/**'
               - 'integ/fixtures/runtime/**'
-              - 'integ/server/monty_remote/**'
-              - 'integ/server/{gws,kit}/**'
+              - 'integ/server/{gws,kit,monty_remote}/**'
               - 'integ/prisma/gws.prisma'
               - 'integ/fixtures/gws/**'
               - 'integ/package.json'
@@ -2229,8 +2228,7 @@ jobs:
                 + [(.world.machines // {})[] | (.runtime // .provider)])[]; . == $r))' "$f" >/dev/null
             }
             if named wasi; then wasi_suites+=("$n"); fi
-            # A remote machine reaches the Monty relay CI starts.
-            if jq -e 'any(.cases[]?; any((.world.machines // {})[]; .provider == "remote"))' "$f" >/dev/null; then
+            if jq -e 'any((.requires, .cases[]?.requires) | .. | strings; . == "env:MONTY_REMOTE_URL")' "$f" >/dev/null; then
               relay_suites+=("$n")
             fi
             if named docker || named ssh; then box_suites+=("$n"); fi

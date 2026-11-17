@@ -938,7 +938,7 @@ describe('a remote monty', () => {
       apiKey: 's3cret',
     })
     ;((await (rt as MontyRuntime).engine()) as unknown as { pool: unknown }).pool = {
-      checkout: () => Promise.reject(new real.MontyRefusedError('denied: Bearer s3cret')),
+      checkout: () => Promise.reject(new real.MontyRefusedError('denied:\r\nBearer s3cret')),
       close: () => Promise.resolve(),
     }
     try {
