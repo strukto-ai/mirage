@@ -39,7 +39,7 @@ import {
 } from '../../policy/index.ts'
 import { allowPatterns } from '../../policy/match/grammar.ts'
 import { splitPattern } from '../../policy/match/pattern.ts'
-import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
+import { ioReach, ioRefusal, namingRules } from '../../policy/match/rule.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
@@ -136,6 +136,7 @@ export class Admitted implements EntryGate {
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
   readonly route: Route | null
+  private namedRules: readonly number[] | null = null
 
   constructor(init: {
     rules: AdmissionRules | null
@@ -164,14 +165,22 @@ export class Admitted implements EntryGate {
   // running command: a rule in force at any path its scope could cover.
   // The dispatcher checks coded file policies separately.
   scopes(virtual: string): boolean {
-    return ioReach(this.rules, this.ctx, virtual)
+    return this.rules !== null && ioReach(this.rules, this.named(), virtual)
+  }
+
+  // The rules that name the command (`namingRules`), asked on the first
+  // entry it reaches and kept for the rest of its run.
+  named(): readonly number[] {
+    this.namedRules ??= namingRules(this.rules, this.ctx)
+    return this.namedRules
   }
 
   // The reason a rule in force refuses this entry, null when the line was
   // admitted on it or nothing refuses it.
   refusal(virtual: string): string | null {
     if (this.judged.has(norm(virtual))) return null
-    return ioRefusal(this.rules, this.ctx, virtual, this.granted)
+    if (this.rules === null) return null
+    return ioRefusal(this.rules, this.named(), virtual, this.granted)
   }
 }
 

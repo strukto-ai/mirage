@@ -25,10 +25,22 @@ import {
 } from '../types.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { decide } from './decide.ts'
-import { ioReach, ioRefusal, opRuling, skippedAtDispatch } from './rule.ts'
+import { ioReach, ioRefusal, namingRules, opRuling, skippedAtDispatch } from './rule.ts'
 import { CALLS } from '../../workspace/dispatcher/constants.ts'
 import { lineFacts } from '../../workspace/lookup/index.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
+function refusal(
+  rules: AdmissionRules | null,
+  ctx: CommandContext,
+  virtual: string,
+  granted: readonly CommandRule[],
+): string | null {
+  return ioRefusal(rules, namingRules(rules, ctx), virtual, granted)
+}
+
+function reach(rules: AdmissionRules | null, ctx: CommandContext, virtual: string): boolean {
+  return ioReach(rules, namingRules(rules, ctx), virtual)
+}
 
 function line(...tokens: string[]): CommandContext {
   return { command: tokens[0] ?? '', paths: [], argv: tokens.slice(1), cwd: '/', tokens }
@@ -322,23 +334,23 @@ describe('rules', () => {
     const rules: AdmissionRules = { allow: null, ask: [ask, later], deny: [deny] }
     const tokens = line('rm', '-r', '/data/both')
     // deny > ask, wherever either was written.
-    expect(ioRefusal(rules, tokens, '/data/both/locked/y', [ask])).toBe('locked')
+    expect(refusal(rules, tokens, '/data/both/locked/y', [ask])).toBe('locked')
     // The first matching ask rule speaks: refused without a grant under
     // it, passed with one, and the later rule never gets a say.
-    expect(ioRefusal(rules, tokens, '/data/both/a', [])).toBe('needs a nod')
-    expect(ioRefusal(rules, tokens, '/data/both/a', [ask])).toBeNull()
+    expect(refusal(rules, tokens, '/data/both/a', [])).toBe('needs a nod')
+    expect(refusal(rules, tokens, '/data/both/a', [ask])).toBeNull()
     // A grant is the rule's value: the same rule compiled again still holds it.
-    expect(ioRefusal(rules, tokens, '/data/both/a', [{ ...ask }])).toBeNull()
-    expect(ioRefusal(rules, tokens, '/data/both/a', [later])).toBe('needs a nod')
+    expect(refusal(rules, tokens, '/data/both/a', [{ ...ask }])).toBeNull()
+    expect(refusal(rules, tokens, '/data/both/a', [later])).toBe('needs a nod')
     // An entry no rule holds passes; so does one a whole-line rule names.
-    expect(ioRefusal(rules, tokens, '/data/open/a', [])).toBeNull()
+    expect(refusal(rules, tokens, '/data/open/a', [])).toBeNull()
     const whole: AdmissionRules = {
       allow: null,
       ask: [],
       deny: [{ reason: 'no', commands: ['rm'] }],
     }
-    expect(ioRefusal(whole, tokens, '/data/x', [])).toBeNull()
-    expect(ioRefusal(null, tokens, '/data/x', [])).toBeNull()
+    expect(refusal(whole, tokens, '/data/x', [])).toBeNull()
+    expect(refusal(null, tokens, '/data/x', [])).toBeNull()
   })
 
   it('ioRefusal orders by anchor depth like the admission gate', () => {
@@ -351,11 +363,11 @@ describe('rules', () => {
     const ask: CommandRule = { reason: 'sealed', commands: ['rm'], paths: ['/repo/sealed/*'] }
     const rules: AdmissionRules = { allow: null, ask: [ask], deny: [deny] }
     const tokens = line('rm', '-r', '/repo')
-    expect(ioRefusal(rules, tokens, '/repo/sealed/secret', [ask])).toBeNull()
+    expect(refusal(rules, tokens, '/repo/sealed/secret', [ask])).toBeNull()
     // Without the grant the deeper ask still wins, and asks.
-    expect(ioRefusal(rules, tokens, '/repo/sealed/secret', [])).toBe('sealed')
+    expect(refusal(rules, tokens, '/repo/sealed/secret', [])).toBe('sealed')
     // Outside the carve-out the broad deny is what is left.
-    expect(ioRefusal(rules, tokens, '/repo/other/x', [ask])).toBe('ro repo')
+    expect(refusal(rules, tokens, '/repo/other/x', [ask])).toBe('ro repo')
   })
 
   it('ioReach reads each start point on its own', () => {
@@ -366,20 +378,20 @@ describe('rules', () => {
     const rmOnly: CommandRule = { reason: 'no deletes', commands: ['rm'], paths: ['/data/*'] }
     const rules: AdmissionRules = { allow: null, deny: [env], ask: [rmOnly] }
     const find = line('find', '/repo', '/s3', '/data')
-    expect(ioReach(rules, find, '/repo')).toBe(true)
-    expect(ioReach(rules, find, '/repo/.env')).toBe(true)
-    expect(ioReach(rules, find, '/s3')).toBe(false)
+    expect(reach(rules, find, '/repo')).toBe(true)
+    expect(reach(rules, find, '/repo/.env')).toBe(true)
+    expect(reach(rules, find, '/s3')).toBe(false)
     // A rule naming another command does not reach this line's walk.
-    expect(ioReach(rules, find, '/data')).toBe(false)
-    expect(ioReach(rules, line('rm', '-r', '/data'), '/data')).toBe(true)
+    expect(reach(rules, find, '/data')).toBe(false)
+    expect(reach(rules, line('rm', '-r', '/data'), '/data')).toBe(true)
     // A whole-line rule has no paths to reach an entry with.
     const whole: AdmissionRules = {
       allow: null,
       ask: [],
       deny: [{ reason: 'no', commands: ['rm'] }],
     }
-    expect(ioReach(whole, line('rm', '-r', '/data'), '/data')).toBe(false)
-    expect(ioReach(null, find, '/repo')).toBe(false)
+    expect(reach(whole, line('rm', '-r', '/data'), '/data')).toBe(false)
+    expect(reach(null, find, '/repo')).toBe(false)
   })
 
   it('skippedAtDispatch names the command-level rules', () => {

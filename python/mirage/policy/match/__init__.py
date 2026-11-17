@@ -24,6 +24,7 @@ from mirage.policy.match.reads import has_rules, reads_args, scopes_paths
 from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
+    naming_rules,
     op_ruling,
     operand_paths,
     posix_level,
@@ -42,6 +43,7 @@ __all__ = [
     "io_reach",
     "io_refusal",
     "line_tokens",
+    "naming_rules",
     "op_ruling",
     "operand_paths",
     "pattern_matches",

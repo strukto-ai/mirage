@@ -15,7 +15,7 @@
 import asyncio
 import dataclasses
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.commands.cli.types import CLI
@@ -46,6 +46,7 @@ from mirage.policy.match import (
     Outcome,
     io_reach,
     io_refusal,
+    naming_rules,
     split_pattern,
 )
 from mirage.policy.match.grammar import allow_patterns
@@ -170,6 +171,16 @@ class Admitted:
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
     route: Route | None = None
+    _named: list[tuple[int, ...]] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
+
+    def named(self) -> tuple[int, ...]:
+        """The rules that name the command (``naming_rules``), asked on
+        the first entry it reaches and kept for the rest of its run."""
+        if not self._named:
+            self._named.append(naming_rules(self.rules, self.ctx))
+        return self._named[0]
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
@@ -179,7 +190,9 @@ class Admitted:
         Args:
             virtual (str): absolute virtual path of a walk's start point.
         """
-        return io_reach(self.rules, self.ctx, virtual)
+        return self.rules is not None and io_reach(
+            self.rules, self.named(), virtual
+        )
 
     def check(self, virtual: str) -> None:
         """Raise ``PolicyDenied`` when a rule in force refuses this entry
@@ -203,7 +216,9 @@ class Admitted:
         """
         if _norm(virtual) in self.judged:
             return None
-        return io_refusal(self.rules, self.ctx, virtual, self.granted)
+        if self.rules is None:
+            return None
+        return io_refusal(self.rules, self.named(), virtual, self.granted)
 
 
 def _seen(

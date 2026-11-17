@@ -710,6 +710,21 @@
    ]
   },
   {
+   "id": "an_entry_rule_judges_each_line_by_the_rules_naming_it",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "exec", "command": "mkdir -p /data/k /data/o && echo foo > /data/k/f && echo foo > /data/o/g", "expect": {"value": {"exit_code": 0}}},
+    {"op": "session", "id": "a", "profile": {"commands": {"deny": [{"reason": "kept", "command": "grep", "paths": ["/data/k/*"]}]}}},
+    {"op": "session", "id": "b", "profile": {"commands": {"deny": [{"reason": "kept", "command": "grep", "paths": ["/data/k/*"]}]}}},
+    {"op": "exec", "session": "a", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 2, "stdout": "/data/o/g:foo\n", "stderr": "grep: /data/k/f: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "a", "command": "cat /data/k/f", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "a", "command": "cat /data/k/f | grep foo", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": ""}}},
+    {"op": "exec", "session": "b", "command": "cat /data/k/f", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "b", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 2, "stdout": "/data/o/g:foo\n", "stderr": "grep: /data/k/f: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "b", "command": "cat /data/k/f | grep foo", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": ""}}}
+   ]
+  },
+  {
    "id": "an_env_filled_option_counts_against_a_flags_entry",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
    "steps": [

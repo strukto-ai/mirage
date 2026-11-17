@@ -22,7 +22,7 @@ import { WordKind } from '../commands/spec/types.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { StreamRefusal } from './errors.ts'
 import { units } from './document.ts'
-import { admissionMatcher, visibilityMatcher } from './policy.ts'
+import { admissionMatcher, Encoded, request, visibilityMatcher } from './policy.ts'
 import { PosixRegex } from './regex.ts'
 import { openStream, openStreamSync } from './stream.ts'
 
@@ -181,5 +181,16 @@ describe('policy stream', () => {
     stream.close()
     expect(matcher.ask('path_visible', { path: units('/secret/key') })).toBe(false)
     expect(matcher.ask('path_visible', { path: units('/public') })).toBe(true)
+  })
+})
+
+describe('request', () => {
+  it('places an encoded field as written', () => {
+    const reads = new Encoded('[{"pattern":[114],"read":null}]')
+    expect(JSON.parse(request('decide', { facts: { reads }, n: 1 }))).toEqual({
+      op: 'decide',
+      facts: { reads: [{ pattern: [114], read: null }] },
+      n: 1,
+    })
   })
 })

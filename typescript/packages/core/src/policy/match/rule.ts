@@ -15,7 +15,7 @@
 import type { util } from 'zod'
 import { WordKind } from '../../commands/spec/types.ts'
 import { units } from '../../rs/document.ts'
-import { admissionMatcher } from '../../rs/policy.ts'
+import { admissionMatcher, Encoded } from '../../rs/policy.ts'
 import type { PathSpec } from '../../types.ts'
 import { METADATA_OPS, SUBTREE_OPS } from '../constants.ts'
 import { sameRule } from '../decisions.ts'
@@ -30,7 +30,7 @@ import type {
 import { lineTokens } from './allow.ts'
 import { patternReads } from './grammar.ts'
 
-const READS_WIRE = new WeakMap<readonly [string, CommandRead | null][], util.JSONType[]>()
+const READS_WIRE = new WeakMap<readonly [string, CommandRead | null][], Encoded>()
 
 /**
  * The paths a command's operands name, in order: what `rm -r` removes or
@@ -53,18 +53,18 @@ export function readWire(read: CommandRead): Record<string, util.JSONType> {
     operands: read.operands.map(units),
   }
 }
-function readsWire(
-  rules: AdmissionRules,
-  path: readonly string[],
-  grammar: Grammar,
-): util.JSONType[] {
+function readsWire(rules: AdmissionRules, path: readonly string[], grammar: Grammar): Encoded {
   const reads = patternReads(rules, path, grammar)
   const hit = READS_WIRE.get(reads)
   if (hit !== undefined) return hit
-  const wire = reads.map(([pattern, read]) => ({
-    pattern: units(pattern),
-    read: read === null ? null : readWire(read),
-  }))
+  const wire = new Encoded(
+    JSON.stringify(
+      reads.map(([pattern, read]) => ({
+        pattern: units(pattern),
+        read: read === null ? null : readWire(read),
+      })),
+    ),
+  )
   READS_WIRE.set(reads, wire)
   return wire
 }
@@ -76,7 +76,7 @@ function readsWire(
 export function lineWords(
   ctx: CommandContext,
   rules: AdmissionRules | null,
-): Record<string, util.JSONType> {
+): Record<string, util.JSONType | Encoded> {
   const words = { tokens: lineTokens(ctx).map(units) }
   const read = ctx.read ?? null
   const grammar = ctx.grammar ?? null
@@ -94,7 +94,7 @@ export function lineWords(
 export function commandFacts(
   ctx: CommandContext,
   rules: AdmissionRules | null = null,
-): Record<string, util.JSONType> {
+): Record<string, util.JSONType | Encoded> {
   const moves = ctx.command === 'mv'
   const target = moves && ctx.paths.length > 0 ? (ctx.moveTarget ?? null) : null
   return {
@@ -141,23 +141,31 @@ export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
   return skipped
 }
 /**
+ * The rules that name the running line, by id: what every entry its
+ * command reaches is judged under. Asked once per line, since an entry
+ * changes the path and never the line. Mirrors Python's naming_rules.
+ */
+export function namingRules(rules: AdmissionRules | null, ctx: CommandContext): number[] {
+  if (rules === null) return []
+  return admissionMatcher(rules).ask('naming_rules', lineWords(ctx, rules)) as number[]
+}
+/**
  * Whether a rule in force could reach an entry at or under this path for
  * the running line: the rule names the line and its paths, or a mount
  * rule's mount, could cover something in the subtree. What a native walk asks before it trusts the
  * raw tree, per operand the way a hide is: a rule on `/repo/.env` leaves
- * `find /s3` its native op.
+ * `find /s3` its native op. `named` holds the rules naming the line
+ * (`namingRules`).
  */
 export function ioReach(
   rules: AdmissionRules | null,
-  ctx: CommandContext,
+  named: readonly number[],
   virtual: string,
 ): boolean {
   return (
     rules !== null &&
-    admissionMatcher(rules).ask('io_reach', {
-      ...lineWords(ctx, rules),
-      path: units(virtual),
-    }) === true
+    named.length > 0 &&
+    admissionMatcher(rules).ask('io_reach', { named: [...named], path: units(virtual) }) === true
   )
 }
 function grantIndices(rules: AdmissionRules, granted: readonly CommandRule[]): number[] {
@@ -187,17 +195,18 @@ function ruleAt(rules: AdmissionRules, id: number): CommandRule {
  * the line holds a grant under it (the nod the gate took for `rm -r /x`
  * covers the entries under `/x`; a walk that wanders into an asked
  * scope from outside gets no nod mid-command, so it is refused and the
- * agent names the path to be asked).
+ * agent names the path to be asked). `named` holds the rules naming the line
+ * (`namingRules`).
  */
 export function ioRefusal(
   rules: AdmissionRules | null,
-  ctx: CommandContext,
+  named: readonly number[],
   virtual: string,
   granted: readonly CommandRule[],
 ): string | null {
-  if (rules === null) return null
+  if (rules === null || named.length === 0) return null
   const id = admissionMatcher(rules).ask('io_refusal', {
-    ...lineWords(ctx, rules),
+    named: [...named],
     path: units(virtual),
     granted: grantIndices(rules, granted),
   }) as number | null

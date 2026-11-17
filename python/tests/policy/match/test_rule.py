@@ -17,6 +17,7 @@ from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
+    naming_rules,
     op_ruling,
     skipped_at_dispatch,
 )
@@ -347,6 +348,14 @@ def _line(*tokens: str) -> CommandContext:
     )
 
 
+def _refusal(rules, ctx, virtual, granted):
+    return io_refusal(rules, naming_rules(rules, ctx), virtual, granted)
+
+
+def _reach(rules, ctx, virtual):
+    return io_reach(rules, naming_rules(rules, ctx), virtual)
+
+
 def test_io_refusal_applies_the_gate_precedence_to_an_entry():
     deny = CommandRule(
         reason="locked", commands=("rm",), paths=("/data/both/locked/*",)
@@ -360,22 +369,22 @@ def test_io_refusal_applies_the_gate_precedence_to_an_entry():
     rules = AdmissionRules(ask=(ask, later), deny=(deny,))
     tokens = _line("rm", "-r", "/data/both")
     # deny > ask, wherever either was written.
-    assert io_refusal(rules, tokens, "/data/both/locked/y", (ask,)) == "locked"
+    assert _refusal(rules, tokens, "/data/both/locked/y", (ask,)) == "locked"
     # The first matching ask rule speaks: refused without a grant under
     # it, passed with one, and the later rule never gets a say.
-    assert io_refusal(rules, tokens, "/data/both/a", ()) == "needs a nod"
-    assert io_refusal(rules, tokens, "/data/both/a", (ask,)) is None
+    assert _refusal(rules, tokens, "/data/both/a", ()) == "needs a nod"
+    assert _refusal(rules, tokens, "/data/both/a", (ask,)) is None
     # A grant is the rule's value: the same rule compiled again still holds it.
     again = CommandRule(
         reason="needs a nod", commands=("rm",), paths=("/data/both/*",)
     )
-    assert io_refusal(rules, tokens, "/data/both/a", (again,)) is None
-    assert io_refusal(rules, tokens, "/data/both/a", (later,)) == "needs a nod"
+    assert _refusal(rules, tokens, "/data/both/a", (again,)) is None
+    assert _refusal(rules, tokens, "/data/both/a", (later,)) == "needs a nod"
     # An entry no rule holds passes; so does one a whole-line rule names.
-    assert io_refusal(rules, tokens, "/data/open/a", ()) is None
+    assert _refusal(rules, tokens, "/data/open/a", ()) is None
     whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
-    assert io_refusal(whole, tokens, "/data/x", ()) is None
-    assert io_refusal(None, tokens, "/data/x", ()) is None
+    assert _refusal(whole, tokens, "/data/x", ()) is None
+    assert _refusal(None, tokens, "/data/x", ()) is None
 
 
 def test_io_refusal_orders_by_anchor_depth_like_the_admission_gate():
@@ -390,11 +399,11 @@ def test_io_refusal_orders_by_anchor_depth_like_the_admission_gate():
     )
     rules = AdmissionRules(ask=(ask,), deny=(deny,))
     tokens = _line("rm", "-r", "/repo")
-    assert io_refusal(rules, tokens, "/repo/sealed/secret", (ask,)) is None
+    assert _refusal(rules, tokens, "/repo/sealed/secret", (ask,)) is None
     # Without the grant the deeper ask still wins, and asks.
-    assert io_refusal(rules, tokens, "/repo/sealed/secret", ()) == "sealed"
+    assert _refusal(rules, tokens, "/repo/sealed/secret", ()) == "sealed"
     # Outside the carve-out the broad deny is what is left.
-    assert io_refusal(rules, tokens, "/repo/other/x", (ask,)) == "ro repo"
+    assert _refusal(rules, tokens, "/repo/other/x", (ask,)) == "ro repo"
 
 
 def test_io_reach_reads_each_start_point_on_its_own():
@@ -407,16 +416,16 @@ def test_io_reach_reads_each_start_point_on_its_own():
     )
     rules = AdmissionRules(deny=(env,), ask=(rm_only,))
     find = _line("find", "/repo", "/s3", "/data")
-    assert io_reach(rules, find, "/repo")
-    assert io_reach(rules, find, "/repo/.env")
-    assert not io_reach(rules, find, "/s3")
+    assert _reach(rules, find, "/repo")
+    assert _reach(rules, find, "/repo/.env")
+    assert not _reach(rules, find, "/s3")
     # A rule naming another command does not reach this line's walk.
-    assert not io_reach(rules, find, "/data")
-    assert io_reach(rules, _line("rm", "-r", "/data"), "/data")
+    assert not _reach(rules, find, "/data")
+    assert _reach(rules, _line("rm", "-r", "/data"), "/data")
     # A whole-line rule has no paths to reach an entry with.
     whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
-    assert not io_reach(whole, _line("rm", "-r", "/data"), "/data")
-    assert not io_reach(None, find, "/repo")
+    assert not _reach(whole, _line("rm", "-r", "/data"), "/data")
+    assert not _reach(None, find, "/repo")
 
 
 def test_skipped_at_dispatcher_names_the_command_level_rules():

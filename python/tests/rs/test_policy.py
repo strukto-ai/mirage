@@ -32,7 +32,12 @@ from mirage.policy.types import (
 )
 from mirage.rs.document import units
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.policy import admission_matcher, visibility_matcher
+from mirage.rs.policy import (
+    Encoded,
+    admission_matcher,
+    request,
+    visibility_matcher,
+)
 from mirage.rs.stream import open_stream
 from mirage.types import (
     HiddenPaths,
@@ -239,3 +244,15 @@ def test_shared_composition_transcripts():
             assert json.loads(output) == case["expected"], case["name"]
         finally:
             stream.cancel()
+
+
+def test_a_request_places_an_encoded_field_as_written():
+    reads = Encoded('[{"pattern": [114], "read": null}]')
+    sent = json.loads(request("decide", {"facts": {"reads": reads}, "n": 1}))
+    assert sent == {
+        "op": "decide",
+        "facts": {"reads": [{"pattern": [114], "read": None}]},
+        "n": 1,
+    }
+    with pytest.raises(TypeError, match="not JSON"):
+        request("decide", {"facts": Path("/x")})

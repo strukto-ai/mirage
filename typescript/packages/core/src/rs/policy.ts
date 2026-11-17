@@ -30,6 +30,34 @@ function open(config: Readonly<Wire>): MovableStream {
 }
 
 /**
+ * A request field already encoded as JSON, which `ask` places as written:
+ * a value asked about on every line, such as the reads of the patterns on
+ * a command, is encoded once. Mirrors Python's Encoded.
+ */
+export class Encoded {
+  constructor(readonly text: string) {}
+}
+
+/** One request's JSON, each `Encoded` field placed as written. Mirrors Python's request. */
+export function request(
+  op: string,
+  args: Readonly<
+    Record<string, util.JSONType | Encoded | Readonly<Record<string, util.JSONType | Encoded>>>
+  >,
+): string {
+  const held: string[] = []
+  const text = JSON.stringify({ op, ...args }, (_key, value: unknown) => {
+    if (!(value instanceof Encoded)) return value
+    held.push(value.text)
+    return `\u0000${String(held.length - 1)}\u0000`
+  })
+  return held.reduce(
+    (out, raw, at) => out.replace(`"\\u0000${String(at)}\\u0000"`, () => raw),
+    text,
+  )
+}
+
+/**
  * A profile's rules and visibility, compiled once by mirage-rs's `policy`
  * stream and asked one request at a time. Mirrors Python's PolicyMatcher.
  */
@@ -41,9 +69,9 @@ export class PolicyMatcher {
   }
 
   /** The answer to one request, decoded from its JSON; text travels as code points. */
-  ask(op: string, args: Readonly<Wire> = {}): unknown {
+  ask(op: string, args: Parameters<typeof request>[1] = {}): unknown {
     const stream = this.stream.live
-    stream.feed(encoder.encode(JSON.stringify({ op, ...args })))
+    stream.feed(encoder.encode(request(op, args)))
     return JSON.parse(decoder.decode(stream.finish()))
   }
 }

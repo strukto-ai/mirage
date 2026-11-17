@@ -49,6 +49,42 @@ def _open(config: Mapping[str, Any]) -> OpenStream:
     return open_stream("policy", {**config, "dialect": "python"})
 
 
+class Encoded:
+    """A request field already encoded as JSON, which ``ask`` places as
+    written: a value asked about on every line, such as the reads of the
+    patterns on a command, is encoded once.
+
+    Args:
+        text (str): the field's JSON.
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+def request(op: str, args: Mapping[str, Any]) -> bytes:
+    """One request's JSON, each ``Encoded`` field placed as written.
+
+    Args:
+        op (str): the request's name.
+        args (Mapping[str, Any]): its fields in the wire shape.
+    """
+    held: list[str] = []
+
+    def place(value: Encoded) -> str:
+        if not isinstance(value, Encoded):
+            raise TypeError(f"{type(value).__name__} is not JSON")
+        held.append(value.text)
+        return f"\0{len(held) - 1}\0"
+
+    text = json.dumps({"op": op, **args}, default=place)
+    for at, raw in enumerate(held):
+        text = text.replace(f'"\\u0000{at}\\u0000"', raw, 1)
+    return text.encode()
+
+
 class PolicyMatcher:
     """A profile's rules and visibility, compiled once by mirage-rs's
     ``policy`` stream and asked one request at a time. Mirrors
@@ -71,7 +107,7 @@ class PolicyMatcher:
             **args (Any): its fields in the wire shape, text as code
                 points.
         """
-        data = json.dumps({"op": op, **args}).encode()
+        data = request(op, args)
         with self._lock:
             self._stream.feed(data)
             return json.loads(self._stream.finish())

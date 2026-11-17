@@ -1,46 +1,50 @@
+use std::collections::HashMap;
+
 use super::pattern::{expanded, prefix_matches};
 use super::{
     AllowEntry, CommandFacts, Matched, Outcome, PathFact, PatternRead, Reading, Rule, Rules,
-    Ruling, Subject, Text, Visibility, VisibilityMatcher, Whitespace, anchor_depth,
-    classify_paths, split_pattern,
+    Ruling, Subject, Text, Visibility, VisibilityMatcher, Whitespace, anchor_depth, classify_paths,
+    split_pattern,
 };
 
 const DASH: u32 = 45;
 const SPACE: u32 = 32;
 
 /// A line as the matcher reads it: its tokens, and when its grammar read
-/// it, that read and each pattern's read with the same grammar.
-#[derive(Clone, Copy)]
+/// it, that read and each pattern's read with the same grammar, by pattern.
 pub struct Line<'a> {
     pub tokens: &'a [Text],
     pub read: Option<&'a Reading>,
-    pub reads: &'a [PatternRead],
+    reads: HashMap<&'a [u32], Option<&'a Reading>>,
 }
 
 impl<'a> Line<'a> {
-    pub fn of(facts: &'a CommandFacts) -> Self {
+    pub fn new(tokens: &'a [Text], read: Option<&'a Reading>, reads: &'a [PatternRead]) -> Self {
         Self {
-            tokens: &facts.tokens,
-            read: facts.line.as_ref(),
-            reads: &facts.reads,
+            tokens,
+            read,
+            reads: reads
+                .iter()
+                .map(|r| (r.pattern.as_slice(), r.read.as_ref()))
+                .collect(),
         }
+    }
+
+    pub fn of(facts: &'a CommandFacts) -> Self {
+        Self::new(&facts.tokens, facts.line.as_ref(), &facts.reads)
     }
 
     #[cfg(test)]
     pub fn words(tokens: &'a [Text]) -> Self {
-        Self {
-            tokens,
-            read: None,
-            reads: &[],
-        }
+        Self::new(tokens, None, &[])
     }
 
     /// The line's read and a pattern's, when both were read; the
     /// pattern's is None when it cannot match this line at all.
     fn read_of(&self, pattern: &[u32]) -> Option<(&'a Reading, Option<&'a Reading>)> {
         let have = self.read?;
-        let entry = self.reads.iter().find(|r| r.pattern == pattern)?;
-        Some((have, entry.read.as_ref()))
+        let want = self.reads.get(pattern)?;
+        Some((have, *want))
     }
 
     fn path(&self) -> Vec<Text> {
@@ -92,7 +96,9 @@ impl Pattern {
         match line.read_of(&self.text) {
             Some((have, Some(want))) => covers(want, have),
             Some((_, None)) => false,
-            None => self.words.len() <= line.tokens.len() && prefix_matches(&self.words, line.tokens),
+            None => {
+                self.words.len() <= line.tokens.len() && prefix_matches(&self.words, line.tokens)
+            }
         }
     }
 
@@ -110,7 +116,11 @@ impl Pattern {
             .unwrap_or(self.words.len());
         Matched {
             command: self.words[..at].to_vec(),
-            flags: self.words[at..].iter().filter(|w| dashed(w)).cloned().collect(),
+            flags: self.words[at..]
+                .iter()
+                .filter(|w| dashed(w))
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -329,10 +339,27 @@ impl AdmissionMatcher {
         })
     }
 
-    pub fn rule_applies(&self, id: usize, facts: &CommandFacts) -> bool {
+    fn rule_applies(&self, id: usize, line: &Line, facts: &CommandFacts) -> bool {
         let rule = &self.rules[id];
         let mount = rule.value.mount.as_deref().unwrap_or_default();
-        rule.names(&Line::of(facts)) && (mount.is_empty() || touches(mount, facts))
+        rule.names(line) && (mount.is_empty() || touches(mount, facts))
+    }
+
+    /// The rules that name the line, by id, ascending: what every entry
+    /// the line's command reaches is judged under, so a host asks once
+    /// per line and hands the ids to `io_reach` and `io_refusal`.
+    pub fn naming(&self, line: &Line) -> Vec<usize> {
+        (0..self.rules.len())
+            .filter(|&id| self.rules[id].names(line))
+            .collect()
+    }
+
+    fn named(&self, ids: &[usize]) -> Vec<bool> {
+        let mut named = vec![false; self.rules.len()];
+        for &id in ids {
+            named[id] = true;
+        }
+        named
     }
 
     pub fn hidden_depth(&self, id: usize, path: &[u32]) -> usize {
@@ -388,7 +415,7 @@ impl AdmissionMatcher {
             };
         }
         let live: Vec<bool> = (0..self.rules.len())
-            .map(|id| self.rule_applies(id, facts))
+            .map(|id| self.rule_applies(id, &line, facts))
             .collect();
         let mut chosen = Ruling::default();
         let mut best: Option<(Outcome, usize)> = None;
@@ -433,11 +460,8 @@ impl AdmissionMatcher {
         chosen
     }
 
-    pub fn match_io(&self, id: usize, line: &Line, path: &[u32], subtree: bool) -> bool {
+    fn match_io(&self, id: usize, path: &[u32], subtree: bool) -> bool {
         let rule = &self.rules[id];
-        if !rule.names(line) {
-            return false;
-        }
         if rule.value.paths.is_empty() {
             let mount = rule.value.mount.as_deref().unwrap_or_default();
             return !mount.is_empty() && (under(path, mount) || (subtree && under(mount, path)));
@@ -449,8 +473,10 @@ impl AdmissionMatcher {
         }
     }
 
-    pub fn io_reach(&self, line: &Line, path: &[u32]) -> bool {
-        (0..self.rules.len()).any(|id| self.match_io(id, line, path, true))
+    /// Whether a rule naming the line (`naming`) could reach an entry at
+    /// or under this path. `named` holds rule ids under `rule_count`.
+    pub fn io_reach(&self, named: &[usize], path: &[u32]) -> bool {
+        named.iter().any(|&id| self.match_io(id, path, true))
     }
 
     fn ungranted(
@@ -463,11 +489,13 @@ impl AdmissionMatcher {
         (!asks || !granted.contains(&id)).then_some((id, asks))
     }
 
-    pub fn io_refusal(&self, line: &Line, path: &[u32], granted: &[usize]) -> Option<usize> {
+    /// The rule that refuses an entry for a line, among those naming it
+    /// (`naming`). `named` holds rule ids under `rule_count`.
+    pub fn io_refusal(&self, named: &[usize], path: &[u32], granted: &[usize]) -> Option<usize> {
+        let named = self.named(named);
         self.ungranted(
             self.winner(|id| {
-                self.match_io(id, line, path, false)
-                    .then(|| self.hidden_depth(id, path))
+                (named[id] && self.match_io(id, path, false)).then(|| self.hidden_depth(id, path))
             }),
             granted,
         )
@@ -678,7 +706,9 @@ mod tests {
             let rules = &case["rules"];
             let matcher = AdmissionMatcher::new(
                 Rules {
-                    allow: rules["allow"].as_array().map(|values| values.iter().map(allow).collect()),
+                    allow: rules["allow"]
+                        .as_array()
+                        .map(|values| values.iter().map(allow).collect()),
                     deny: rules["deny"].as_array().unwrap().iter().map(rule).collect(),
                     ask: rules["ask"].as_array().unwrap().iter().map(rule).collect(),
                 },
@@ -775,7 +805,11 @@ mod tests {
     #[test]
     fn a_read_pattern_matches_its_flags_in_any_spelling_and_order() {
         let matcher = deny(&["rm -rf"]);
-        let rf = read(&["rm"], vec![flag("--recursive", &[]), flag("--force", &[])], &[]);
+        let rf = read(
+            &["rm"],
+            vec![flag("--recursive", &[]), flag("--force", &[])],
+            &[],
+        );
         let line = |flags: Vec<FlagFact>| {
             facts(
                 &["rm", "-fr", "/a"],
@@ -793,7 +827,12 @@ mod tests {
                 flags: vec![text("--recursive"), text("--force")],
             })
         );
-        assert_eq!(matcher.decide(&line(vec![flag("--recursive", &[])])).outcome, Outcome::Allow);
+        assert_eq!(
+            matcher
+                .decide(&line(vec![flag("--recursive", &[])]))
+                .outcome,
+            Outcome::Allow
+        );
     }
 
     #[test]
@@ -921,7 +960,11 @@ mod tests {
             Some((1, true))
         );
         assert_eq!(
-            matcher.io_refusal(&Line::words(&[text("cp")]), &text("/repo/outbox/x"), &[1]),
+            matcher.io_refusal(
+                &matcher.naming(&Line::words(&[text("cp")])),
+                &text("/repo/outbox/x"),
+                &[1]
+            ),
             None
         );
     }

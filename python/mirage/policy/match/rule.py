@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Collection
+import json
+from collections.abc import Collection, Sequence
 from functools import lru_cache
 from typing import Any
 
@@ -29,7 +30,7 @@ from mirage.policy.types import (
     VfsContext,
 )
 from mirage.rs.document import units
-from mirage.rs.policy import CACHE_SIZE, admission_matcher
+from mirage.rs.policy import CACHE_SIZE, Encoded, admission_matcher
 from mirage.types import PathSpec
 
 
@@ -74,14 +75,18 @@ def read_wire(read: CommandRead) -> dict[str, Any]:
 @lru_cache(maxsize=CACHE_SIZE)
 def _reads_wire(
     rules: AdmissionRules, path: tuple[str, ...], grammar: Grammar
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "pattern": units(pattern),
-            "read": None if read is None else read_wire(read),
-        }
-        for pattern, read in pattern_reads(rules, path, grammar)
-    ]
+) -> Encoded:
+    return Encoded(
+        json.dumps(
+            [
+                {
+                    "pattern": units(pattern),
+                    "read": None if read is None else read_wire(read),
+                }
+                for pattern, read in pattern_reads(rules, path, grammar)
+            ]
+        )
+    )
 
 
 def line_words(
@@ -134,8 +139,26 @@ def command_facts(
     }
 
 
+def naming_rules(
+    rules: AdmissionRules | None, ctx: CommandContext
+) -> tuple[int, ...]:
+    """The rules that name the running line, by id: what every entry
+    its command reaches is judged under. Asked once per line, since an
+    entry changes the path and never the line.
+
+    Args:
+        rules (AdmissionRules | None): the session's admission rules.
+        ctx (CommandContext): the running command.
+    """
+    if rules is None:
+        return ()
+    return tuple(
+        admission_matcher(rules).ask("naming_rules", **line_words(ctx, rules))
+    )
+
+
 def io_reach(
-    rules: AdmissionRules | None, ctx: CommandContext, virtual: str
+    rules: AdmissionRules | None, named: Sequence[int], virtual: str
 ) -> bool:
     """Whether a rule in force could reach an entry at or under this
     path for the running line: the rule names the line and its paths,
@@ -147,13 +170,15 @@ def io_reach(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        ctx (CommandContext): the running command.
+        named (Sequence[int]): the rules naming the line
+            (``naming_rules``).
         virtual (str): absolute virtual path of the walk's start point.
     """
     return (
         rules is not None
+        and bool(named)
         and admission_matcher(rules).ask(
-            "io_reach", **line_words(ctx, rules), path=units(virtual)
+            "io_reach", named=list(named), path=units(virtual)
         )
         is True
     )
@@ -177,7 +202,7 @@ def _rule_at(rules: AdmissionRules, index: int) -> CommandRule:
 
 def io_refusal(
     rules: AdmissionRules | None,
-    ctx: CommandContext,
+    named: Sequence[int],
     virtual: str,
     granted: Collection[CommandRule],
 ) -> str | None:
@@ -200,16 +225,17 @@ def io_refusal(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        ctx (CommandContext): the running command.
+        named (Sequence[int]): the rules naming the line
+            (``naming_rules``).
         virtual (str): absolute virtual path of the entry.
         granted (Collection[CommandRule]): the ask rules the line runs
             under a grant for.
     """
-    if rules is None:
+    if rules is None or not named:
         return None
     result = admission_matcher(rules).ask(
         "io_refusal",
-        **line_words(ctx, rules),
+        named=list(named),
         path=units(virtual),
         granted=_grant_indices(rules, granted),
     )
