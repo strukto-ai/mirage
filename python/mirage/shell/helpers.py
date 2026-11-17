@@ -83,8 +83,10 @@ def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
         before (TSNodeLike): the earlier node.
         after (TSNodeLike): the later one.
     """
-    text = root.text or b""
-    base = root.start_byte
+    if isinstance(root, ProgramNode):
+        text, base = root.program.text, root.program.root.start_byte
+    else:
+        text, base = root.text or b"", root.start_byte
     return b"\n" not in text[before.end_byte - base : after.start_byte - base]
 
 

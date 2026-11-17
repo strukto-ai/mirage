@@ -166,21 +166,19 @@ def test_ioresult_merge_stderr_none_both():
     asyncio.run(_run())
 
 
-def test_ioresult_merges_keep_each_sides_stderr_its_own():
-    async def _run():
-        merged = IOResult()
-        for i in range(1000):
-            said = b"%d\n" % i if i % 3 else None
-            merged = await merged.merge(IOResult(stderr=said))
-        left = merged
-        merged = await left.merge(IOResult(stderr=b"end\n"))
-        merged.add_stderr(b"more\n")
-        left.add_stderr(b"left\n")
-        before = b"".join(b"%d\n" % i for i in range(1000) if i % 3)
-        assert merged.stderr == before + b"end\nmore\n"
-        assert left.stderr == before + b"left\n"
-
-    asyncio.run(_run())
+@pytest.mark.asyncio
+async def test_ioresult_merges_keep_each_sides_stderr_its_own():
+    merged = IOResult()
+    for i in range(1000):
+        said = b"%d\n" % i if i % 3 else None
+        merged = await merged.merge(IOResult(stderr=said))
+    left = merged
+    merged = await left.merge(IOResult(stderr=b"end\n"))
+    merged.add_stderr(b"more\n")
+    left.add_stderr(b"left\n")
+    before = b"".join(b"%d\n" % i for i in range(1000) if i % 3)
+    assert merged.stderr == before + b"end\nmore\n"
+    assert left.stderr == before + b"left\n"
 
 
 def test_stdout_str_materializes_async_iterator():

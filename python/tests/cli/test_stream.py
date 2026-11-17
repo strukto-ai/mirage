@@ -64,13 +64,14 @@ async def test_many_records_in_one_chunk_arrive_in_order():
     assert out == b"".join(lines)
 
 
-async def test_a_record_past_the_cap_is_refused_across_chunks():
-    async def source():
-        for _ in range(17):
-            yield b"x" * (64 * 1024)
+async def oversized():
+    for _ in range(17):
+        yield b"x" * (64 * 1024)
 
+
+async def test_a_record_past_the_cap_is_refused_across_chunks():
     with pytest.raises(ValueError, match="too large"):
-        await consume_stream(source(), ignore, ignore)
+        await consume_stream(oversized(), ignore, ignore)
 
 
 @pytest.mark.parametrize(
