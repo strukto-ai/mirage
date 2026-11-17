@@ -868,7 +868,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "disown; echo $?",
+      "command": "(disown; echo $?)",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
