@@ -782,8 +782,8 @@ class Policies:
     """Ordered policies; at every method the first Deny wins, and every
     Ask is put to the host.
 
-    Built-ins are seeded first (MountRegistry registers
-    MountRootPolicy), then the document's deny rules compiled by the
+    The mount-root built-in comes first (MountRegistry hands it over as
+    ``root``), then the document's deny rules compiled by the
     workspace, then user policies in registration order
     (``Workspace(policies=...)``, then anything added later through
     ``add``). There is no allow arm, so adding a policy can only
@@ -809,10 +809,18 @@ class Policies:
     Args:
         policies (list[Policy] | None): initial policies, consulted in
             order before anything registered later through add().
+        root (MountRootPolicy | None): the mount-root built-in, held
+            apart from the registered policies as the mount-mode one is,
+            and asked before all of them.
     """
 
-    def __init__(self, policies: list[Policy] | None = None) -> None:
+    def __init__(
+        self,
+        policies: list[Policy] | None = None,
+        root: MountRootPolicy | None = None,
+    ) -> None:
         self._policies: list[Policy] = list(policies or [])
+        self._root = root
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
         self._orders: dict[tuple[str, bool, bool], tuple[int, ...]] = {}
@@ -887,7 +895,7 @@ class Policies:
         return method in self._wanted
 
     async def wants_for(
-        self, method: str, session_id: str, user_only: bool = False
+        self, method: str, session_id: str, coded_only: bool = False
     ) -> bool:
         """True when some policy will speak at ``method`` for this session.
 
@@ -901,15 +909,12 @@ class Policies:
         Args:
             method (str): method name (pre_command, pre_vfs, pre_network).
             session_id (str): the session, empty when none is bound.
-            user_only (bool): leave Mirage's own policies out: the
-                profile's rules, for a caller whose line's gate already
-                answers for them, and the mount-root rule.
+            coded_only (bool): leave the profile's rules out, for a
+                caller whose line's gate already answers for them.
         """
         base = getattr(Policy, method)
         for policy in (*self._policies, *filter(None, [self._placement])):
-            if user_only and isinstance(
-                policy, (PermissionsPolicy, MountRootPolicy)
-            ):
+            if coded_only and isinstance(policy, PermissionsPolicy):
                 continue
             if getattr(type(policy), method) is base:
                 continue
@@ -922,7 +927,11 @@ class Policies:
     def _rescan(self) -> None:
         wanted = set()
         self._orders = {}
-        policies = [*self._policies, *filter(None, [self._placement])]
+        policies = [
+            *filter(None, [self._root]),
+            *self._policies,
+            *filter(None, [self._placement]),
+        ]
         for method in VALIDITY:
             base = getattr(Policy, method)
             for policy in policies:
@@ -968,7 +977,7 @@ class Policies:
                 the policies that answered nothing or only a Limit, and
                 those without the method.
         """
-        snapshot = tuple(self._policies)
+        snapshot = (*filter(None, [self._root]), *self._policies)
         placement = self._placement
         orders = self._orders
         policies = (

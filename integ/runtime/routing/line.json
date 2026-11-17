@@ -108,6 +108,13 @@
           }
         },
         {
+          "command": "r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
+          }
+        },
+        {
           "command": "PAYLOAD='rm /ram/x'; eval \"$PAYLOAD\"",
           "expect": {
             "exit": 126,
@@ -327,6 +334,20 @@
           }
         },
         {
+          "command": "r? -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
+          }
+        },
+        {
+          "command": "rm -r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
           "command": "rm /ram/x",
           "expect": {
             "exit": 0,
@@ -389,6 +410,20 @@
           "expect": {
             "exit": 126,
             "stderr": "sh: Permission denied\n"
+          }
+        },
+        {
+          "command": "r? -rf /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "r?: Permission denied\n"
+          }
+        },
+        {
+          "command": "rm -r? /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
           }
         },
         {

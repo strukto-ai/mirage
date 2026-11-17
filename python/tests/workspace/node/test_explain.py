@@ -1114,6 +1114,8 @@ HIDDEN_HOSTNAME = (
     "printf hostname > /data/s; sh /data/s",
     "source /dev/stdin <<< hostname",
     "xargs <<< hostname",
+    "hostnam?",
+    "env hostnam?",
 )
 
 
@@ -1162,6 +1164,27 @@ async def test_a_whole_line_runs_as_typed_with_no_policy_at_pre_command():
         for line in HIDDEN_HOSTNAME:
             assert (await ws.shell(line)).exit_code == 0, line
         assert box.lines == list(HIDDEN_HOSTNAME)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rule_refuses_a_command_name_the_runtime_globs():
+    # The runtime turns `hostnam?` into `hostname` itself, so under a
+    # rule the gate refuses a name pattern as it refuses `$X`.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"commands": {"deny": ["hostname"]}}},
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line in ("hostnam?", "cd /data; hostnam?"):
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code == 126, line
+        assert box.lines == []
     finally:
         await ws.close()
 

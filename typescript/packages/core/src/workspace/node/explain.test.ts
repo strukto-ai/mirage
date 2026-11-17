@@ -209,6 +209,8 @@ const HIDDEN_HOSTNAME = [
   'printf hostname > /data/s; sh /data/s',
   'source /dev/stdin <<< hostname',
   'xargs <<< hostname',
+  'hostnam?',
+  'env hostnam?',
 ] as const
 
 /** Every command an explained tree holds, nested scopes included. */
@@ -942,6 +944,26 @@ describe('prejudge', () => {
       expect([line, (await w.shell(line)).exitCode]).toEqual([line, 0])
     }
     expect(box.lines).toEqual([...HIDDEN_HOSTNAME])
+  })
+
+  it('refuses a command name the runtime globs under a rule', async () => {
+    // The runtime turns `hostnam?` into `hostname` itself, so under a rule
+    // the gate refuses a name pattern as it refuses `$X`.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: { r: SessionProfile({ commands: { deny: ['hostname'] } }) },
+        machines: [box],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    for (const line of ['hostnam?', 'cd /data; hostnam?']) {
+      expect([line, (await w.shell(line, { sessionId: 's' })).exitCode]).toEqual([line, 126])
+    }
+    expect(box.lines).toEqual([])
   })
 
   it('says what a whole-line gate refuses past the chain', async () => {

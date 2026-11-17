@@ -407,16 +407,17 @@ def _line_decision(
     reads must not reach it with any of them in hand. A command a path
     or mount rule reads is refused when it walks (``find``,
     ``grep -r``, ``tar -c``) or names a glob; one a rule reads the
-    arguments of when a word only the runtime can expand stands among
-    them, when the runtime appends operands (``xargs``, ``find -exec``)
-    or when it runs after a ``cd`` the walk could not follow; and any
-    command, under any rule, that runs lines the gate cannot read (a
-    sourced file, a script, ``eval "$p"``). A user policy answering
-    ``pre_command`` (in code, or a profile's program) is shown every
-    command's expanded words off such a runtime, so here it refuses as
-    a rule that reads every command's arguments does; it is never shown
-    a glob's matches or a walk's files, so those stay. With neither in
-    force nothing is refused on this account.
+    arguments of when a word only the runtime can expand (a parameter,
+    a substitution, an unquoted glob) stands among them, when the
+    runtime appends operands (``xargs``, ``find -exec``) or when it runs
+    after a ``cd`` the walk could not follow; and any command, under any
+    rule, that runs lines the gate cannot read (a sourced file, a
+    script, ``eval "$p"``). A user policy answering ``pre_command`` (in
+    code, or a profile's program) is shown every command's expanded
+    words off such a runtime, so here it refuses as a rule that reads
+    every command's arguments does; it is never shown a walk's files,
+    so a walk stays. With neither in force nothing is refused on this
+    account.
 
     Args:
         name (str): the command name.
@@ -446,7 +447,9 @@ def _line_decision(
         ):
             return "expands a pattern only the runtime can read"
     if coded or reads_args(rules, name):
-        unread = next((w.raw for w in words if w.text is None), None)
+        unread = next(
+            (w.raw for w in words if w.text is None or w.glob), None
+        )
         if unread is not None:
             return unreadable(unread)
         if open_:
@@ -544,7 +547,11 @@ async def _judge_words(
         return
     if head.text is None and not whole_line:
         return
-    if head.text is None and has_rules(rules):
+    if (
+        whole_line
+        and (head.text is None or head.glob)
+        and has_rules(rules)
+    ):
         yield Judged(
             _denied(head.raw, unreadable(head.raw)), occurrence, False
         )
@@ -604,7 +611,7 @@ async def _judge_words(
         )
     )
     coded = whole_line and await registry.policies.wants_for(
-        "pre_command", session.session_id, user_only=True
+        "pre_command", session.session_id, coded_only=True
     )
     refused = (
         _line_decision(

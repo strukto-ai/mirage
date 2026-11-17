@@ -164,12 +164,12 @@ export class MountRegistry {
   // profile can narrow a workspace that limits nothing itself.
   private watch: (() => void) | null = null
   // Command admission policies. Policies itself is a bare mechanism;
-  // the registry seeds the POSIX mount-root rule (mount-root semantics
+  // the registry hands it the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user
   // policies (Workspace policies option), follow it. Registry-hosted
   // like runtimeBindings so the executor reaches them without new
   // threading.
-  readonly policies = new Policies([new MountRootPolicy(this)])
+  readonly policies = new Policies([], new MountRootPolicy(this))
   /** The approval ledger an Ask is taken to, which the policies hold
    * (`Policies.decisions`) so a session write reaches it too. */
   get decisions(): Decisions {

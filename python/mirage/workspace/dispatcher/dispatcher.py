@@ -2345,7 +2345,7 @@ class Dispatcher:
         return await policies.wants_for(
             "pre_vfs",
             _session_id(call.caller),
-            user_only=call.rule_gate is not None,
+            coded_only=call.rule_gate is not None,
         ) or (
             call.name in {"dir_copy", "files_containing"}
             and await policies.wants_for("post_vfs", _session_id(call.caller))

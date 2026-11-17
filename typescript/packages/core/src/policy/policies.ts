@@ -38,7 +38,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
-import { MountRootPolicy } from './builtin/mount_root.ts'
+import type { MountRootPolicy } from './builtin/mount_root.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
 import { composeSettled, Composition, type CompositionResult } from './composition.ts'
 import { Decisions, opQuestion } from './decisions.ts'
@@ -640,8 +640,8 @@ export async function postNetworkGate(
  * Ordered policies; at every method the first Deny wins, and every Ask is
  * put to the host.
  *
- * Built-ins are seeded first (MountRegistry registers
- * MountRootPolicy), then the document's deny rules compiled by the
+ * The mount-root built-in comes first (MountRegistry hands it over as
+ * `root`), then the document's deny rules compiled by the
  * workspace, then user policies in registration order
  * (`Workspace({policies})`, then anything added later through
  * `add`). There is no allow arm, so adding a policy can only tighten
@@ -660,6 +660,7 @@ export async function postNetworkGate(
  */
 export class Policies {
   private readonly policies: Policy[]
+  private readonly root: MountRootPolicy | null
   private readonly mode: Policy = new MountModePolicy()
   private placement: Policy | null = null
   private wanted: ReadonlySet<PolicyMethod> = new Set()
@@ -673,8 +674,13 @@ export class Policies {
     | null = null
   account: string | null = null
 
-  constructor(policies?: readonly Policy[]) {
+  /**
+   * `root` is the mount-root built-in, held apart from the registered
+   * policies as the mount-mode one is, and asked before all of them.
+   */
+  constructor(policies?: readonly Policy[], root: MountRootPolicy | null = null) {
     this.policies = [...(policies ?? [])]
+    this.root = root
     this.rescan()
   }
 
@@ -709,16 +715,12 @@ export class Policies {
    * counts, unless it speaks per session (`SessionScopedMixin`) and says this
    * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it, a profile's policy at that entry point is one profile's,
-   * not every session's. `userOnly` leaves Mirage's own policies out: the
-   * profile's rules, for a caller whose line's gate already answers for them,
-   * and the mount-root rule.
+   * not every session's. `codedOnly` leaves the profile's rules out, for a
+   * caller whose line's gate already answers for them.
    */
-  async wantsFor(method: PolicyMethod, sessionId: string, userOnly = false): Promise<boolean> {
+  async wantsFor(method: PolicyMethod, sessionId: string, codedOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    const kept = policies.filter(
-      (p) => !(userOnly && (p instanceof PermissionsPolicy || p instanceof MountRootPolicy)),
-    )
-    for (const policy of kept) {
+    for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(method, sessionId)) return true
@@ -729,7 +731,11 @@ export class Policies {
   private rescan(): void {
     this.orders = new Map()
     const wanted = new Set<PolicyMethod>()
-    const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
+    const policies: Policy[] = [
+      ...(this.root === null ? [] : [this.root]),
+      ...this.policies,
+      ...(this.placement === null ? [] : [this.placement]),
+    ]
     for (const method of Object.keys(VALIDITY) as PolicyMethod[]) {
       if (policies.some((p) => p[method] !== undefined)) wanted.add(method)
     }
@@ -779,7 +785,7 @@ export class Policies {
     among: readonly Policy[] | null = null,
     passed: Policy[] | null = null,
   ): Promise<CompositionResult> {
-    const snapshot = [...this.policies]
+    const snapshot: Policy[] = [...(this.root === null ? [] : [this.root]), ...this.policies]
     const placement = this.placement
     const orders = this.orders
     const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]

@@ -263,7 +263,7 @@ describe('Policies', () => {
   })
 
   it('builtin runs first, then user policies in order', async () => {
-    const policies = new Policies([new MountRootPolicy(registry())])
+    const policies = new Policies([], new MountRootPolicy(registry()))
     policies.add(new UserRule())
     // Both match `rm /data`; the built-in GNU message wins by order.
     let deny = await policies.preCommand(ctx('rm', [path('/data')]))
