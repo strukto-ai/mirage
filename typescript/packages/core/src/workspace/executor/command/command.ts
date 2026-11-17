@@ -861,7 +861,11 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
     )
   }
-  if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
+  if (
+    JOB_BUILTINS.has(cmdName) &&
+    jobTable !== null &&
+    lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
+  ) {
     const textParts = parts.map((p) =>
       typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,
     )

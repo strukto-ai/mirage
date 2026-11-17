@@ -840,3 +840,25 @@ async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
         assert b"No such file or directory" in r.stderr
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, stdout",
+    [
+        ("timeout() { echo fn; }; timeout 1 echo x", b"fn\n"),
+        ("env() { echo fn; }; env true", b"fn\n"),
+        ("sleep() { echo fn; }; sleep 5", b"fn\n"),
+        ("echo() { builtin echo fn:$1; }; echo hi", b"fn:hi\n"),
+        ("ps() { echo fn; }; ps", b"fn\n"),
+        ("ln() { echo fn; }; ln -s a b", b"fn\n"),
+        ("chmod() { echo fn; }; chmod 644 x", b"fn\n"),
+        ("timeout() { echo fn; }; timeout --help", b"fn\n"),
+        ("timeout() { echo fn; }; command timeout 1 echo x", b"x\n"),
+        ("sleep() { echo fn; }; timeout 1 sleep 0", b""),
+        ("cd() { echo fn; }; cd /data; pwd", b"/data\n"),
+    ],
+)
+async def test_a_function_shadows_a_builtin_that_is_a_program(line, stdout):
+    r = await _ws().shell(line)
+    assert (await materialize(r.stdout), r.exit_code) == (stdout, 0)

@@ -798,3 +798,22 @@ describe('a path no file of Mirage answers', () => {
     }
   })
 })
+
+describe('a function named like a builtin that is a program', () => {
+  it.each([
+    ['timeout() { echo fn; }; timeout 1 echo x', 'fn\n'],
+    ['env() { echo fn; }; env true', 'fn\n'],
+    ['sleep() { echo fn; }; sleep 5', 'fn\n'],
+    ['echo() { builtin echo fn:$1; }; echo hi', 'fn:hi\n'],
+    ['ps() { echo fn; }; ps', 'fn\n'],
+    ['ln() { echo fn; }; ln -s a b', 'fn\n'],
+    ['chmod() { echo fn; }; chmod 644 x', 'fn\n'],
+    ['timeout() { echo fn; }; timeout --help', 'fn\n'],
+    ['timeout() { echo fn; }; command timeout 1 echo x', 'x\n'],
+    ['sleep() { echo fn; }; timeout 1 sleep 0', ''],
+    ['cd() { echo fn; }; cd /data; pwd', '/data\n'],
+  ])('runs as bash runs it: %s', async (line, stdout) => {
+    const r = await makeWs().shell(line)
+    expect([text(r.stdout), r.exitCode]).toEqual([stdout, 0])
+  })
+})

@@ -217,7 +217,9 @@ it('spawn uses programs and exported environment', async () => {
       .spawn({ argv: ['printenv', 'PARENT'], env: { PARENT: 'child' } })
       .communicate()
     expect(new TextDecoder().decode(childEnv.stdout)).toBe('child\n')
-    expect(new TextDecoder().decode((await ws.shell('printf %s "$PARENT"')).stdout)).toBe('outer')
+    expect(new TextDecoder().decode((await ws.shell('command printf %s "$PARENT"')).stdout)).toBe(
+      'outer',
+    )
     const merged = await ws
       .spawn({ argv: ['sh', '-c', 'printf out; printf err >&2'], mergeStderr: true })
       .communicate()

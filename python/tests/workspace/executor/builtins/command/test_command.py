@@ -263,3 +263,30 @@ async def test_run_mode_masks_function_then_restores():
     await handle_command_builtin(shell, ["cat"], session, make_registry())
     assert seen["masked"] is True
     assert session.functions["cat"] is body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, masked",
+    [("echo", True), ("timeout", True), ("cd", False), ("unset", False)],
+)
+async def test_run_mode_masks_a_function_the_builtin_is_shadowed_by(
+    name, masked
+):
+    session = make_session()
+    body = ["<fn-body>"]
+    session.functions[name] = body
+    seen: dict[str, bool] = {}
+
+    async def shell(
+        line: str,
+        session_id: str,
+        stdin: ByteSource | None = None,
+        call_stack: CallStack | None = None,
+    ) -> IOResult:
+        seen["masked"] = name not in session.functions
+        return IOResult(exit_code=0)
+
+    await handle_command_builtin(shell, [name], session, make_registry())
+    assert seen["masked"] is masked
+    assert session.functions[name] is body

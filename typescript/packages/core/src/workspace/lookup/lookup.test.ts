@@ -16,6 +16,7 @@ import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
 import { specOf } from '../../commands/spec/builtins.ts'
 import { PARSES_KEPT } from '../../commands/spec/constants.ts'
+import { runAsProgram } from '../../context/session_context.ts'
 import { parseCommand } from '../../commands/spec/index.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
@@ -122,10 +123,37 @@ describe('lookup', () => {
     expect(lookup('greet', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
-  it('builtin shadows a function of the same name', () => {
+  it('function shadows a builtin that is a program', () => {
     const { session, ws } = fixture()
-    session.functions.echo = 'echo() { :; }'
-    expect(lookup('echo', session, ws.registry)).toBe(Consumer.SESSION)
+    for (const name of ['echo', 'timeout', 'env', 'sleep', 'ps', 'ln']) {
+      session.functions[name] = `${name}() { :; }`
+      expect(lookup(name, session, ws.registry)).toBe(Consumer.FUNCTION)
+    }
+    expect(lookupAll('timeout', session, ws.registry)).toEqual([
+      Consumer.FUNCTION,
+      Consumer.SESSION,
+    ])
+  })
+
+  it("shell's own word shadows a function", () => {
+    const { session, ws } = fixture()
+    for (const name of ['cd', 'export', 'type', 'kill']) {
+      session.functions[name] = `${name}() { :; }`
+      expect(lookup(name, session, ws.registry)).not.toBe(Consumer.FUNCTION)
+    }
+    expect(lookupAll('cd', session, ws.registry)).toEqual([Consumer.SESSION, Consumer.FUNCTION])
+  })
+
+  it('a program run answers with the builtin past a function', async () => {
+    const { session, ws } = fixture()
+    session.functions.sleep = 'sleep() { :; }'
+    session.functions.greet = 'greet() { :; }'
+    await runAsProgram(session, () => {
+      expect(lookup('sleep', session, ws.registry)).toBe(Consumer.SESSION)
+      expect(lookup('greet', session, ws.registry)).toBe(Consumer.FUNCTION)
+      return Promise.resolve()
+    })
+    expect(lookup('sleep', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
   it('function shadows a mount command', () => {

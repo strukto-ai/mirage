@@ -1395,11 +1395,16 @@ async function routeArgv(
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
+  // A function of a builtin's or a namespace program's name runs in its
+  // place (`timeout() { ...; }`), as bash finds a function first; the
+  // arms below are the builtin's and the program's.
+  const shadowed = consumer === Consumer.FUNCTION
+
   // `--help` as a builtin's first word: bash answers it with the builtin's
   // help and status 2 before the builtin reads its options, the job
   // builtins included. A program run (`find -exec printf --help`) is the
   // program's own, not this.
-  if (argv.args[0] === '--help' && !isProgramInvocation(session)) {
+  if (argv.args[0] === '--help' && !shadowed && !isProgramInvocation(session)) {
     const answered = flagHelp(name)
     if (answered !== null) return answered
   }
@@ -1408,7 +1413,7 @@ async function routeArgv(
   // a handler that takes the whole invocation, so the arms live beside
   // their workers (builtins/<word>/) rather than here. Job builtins and
   // the interpreters are not in the table; they route below.
-  const builtin = BUILTINS.get(name)
+  const builtin = shadowed ? undefined : BUILTINS.get(name)
   if (builtin !== undefined) {
     try {
       return await builtin({
@@ -1456,15 +1461,9 @@ async function routeArgv(
   // reaches what `chmod -R` walks into, not only its operands.
   const made = madeByCommand(dispatch, admission)
 
-  const program = await runNamespaceProgram(
-    name,
-    namespace,
-    made,
-    registry,
-    session,
-    operands,
-    stdin,
-  )
+  const program = shadowed
+    ? null
+    : await runNamespaceProgram(name, namespace, made, registry, session, operands, stdin)
   if (program !== null) return program
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

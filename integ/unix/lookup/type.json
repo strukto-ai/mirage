@@ -196,6 +196,20 @@
         "stdout": "rc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "lookup_function_shadows_a_builtin_that_is_a_program",
+      "seq": 991519,
+      "targets": [
+        "ram",
+        "opfs"
+      ],
+      "command": "timeout() { builtin echo fn-timeout \"$@\"; }; env() { builtin echo fn-env; }; sleep() { builtin echo fn-sleep; }; echo() { builtin echo \"fn:$*\"; }; timeout 1 echo x; env true; sleep 5; echo hi; command timeout 1 echo y; command env printf 'z\\n'; command echo plain; type -t timeout env sleep echo; builtin timeout 1 true; unset -f timeout echo; timeout 1 sleep 0; timeout 1 echo w",
+      "expect": {
+        "exit": 0,
+        "stdout": "fn-timeout 1 echo x\nfn-env\nfn-sleep\nfn:hi\ny\nz\nplain\nfunction\nfunction\nfunction\nfunction\nw\n",
+        "stderr": "bash: line 1: builtin: timeout: not a shell builtin\n"
+      }
     }
   ]
 }
