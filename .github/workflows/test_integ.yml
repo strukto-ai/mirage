@@ -20,12 +20,14 @@ permissions:
       - .github/actions/nextcloud-tune/action.yml
       - .github/workflows/test_nextcloud_full.yml
       # README files under these trees are prose that nothing loads, so a
-      # change to one alone runs nothing. integ/fixtures/** is not listed:
+      # change to one alone runs nothing. typescript/scripts/ holds the docs
+      # and parity generators, which no integ job imports, builds or runs. integ/fixtures/** is not listed:
       # the fake hubs serve the READMEs there as fixture content.
       - '!integ/README.md'
       - '!integ/runtime/**/README.md'
       - '!python/**/README.md'
       - '!typescript/**/README.md'
+      - '!typescript/scripts/**'
       - '!rust/**/README.md'
   pull_request:
     branches: [main]
@@ -147,6 +149,7 @@ jobs:
               - '!integ/README.md'
               - '!integ/runtime/**/README.md'
               - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
               - '!rust/**/README.md'
             database:
               - 'integ/vfs/mongodb/**'
@@ -182,6 +185,7 @@ jobs:
               - '.github/actions/setup-rust/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
               - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
               - '!rust/**/README.md'
             data:
               - 'integ/**'
@@ -199,6 +203,7 @@ jobs:
               - '!integ/runtime/**/README.md'
               - '!python/**/README.md'
               - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
               - '!rust/**/README.md'
             observability:
               - 'integ/server/langfuse_compose.yml'
@@ -296,6 +301,7 @@ jobs:
               - '!typescript/**/*.test.ts'
               - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,pydantic_ai}/**'
               - '!typescript/packages/{browser,dsh,opencode}/**'
+              - '!typescript/scripts/**'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcal,gcs}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
@@ -406,6 +412,7 @@ jobs:
               - '.github/actions/setup-rust/**'
               - '!python/**/README.md'
               - '!typescript/**/README.md'
+              - '!typescript/scripts/**'
               - '!rust/**/README.md'
               - '!integ/server/**/README.md'
 

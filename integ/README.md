@@ -419,7 +419,9 @@ does not measure the full corpus or the end-to-end GitHub Actions savings.
 
 A README under one of the filtered trees is prose that nothing loads, so a
 pull request that changes only README files selects no job; the READMEs
-under `integ/fixtures/` are fixture content and still count.
+under `integ/fixtures/` are fixture content and still count. The same goes
+for `typescript/scripts/`: the docs and parity generators there are a pnpm
+member with no dependencies or build, and no integ job imports or runs them.
 
 ```mermaid
 flowchart LR
@@ -502,8 +504,8 @@ remain covered by the same whole-host filters on both hosts.
 | `rust/`, the shared command streams including colrm and envsubst, date formatter, JSON validation, Lance SQL and jq both hosts run           | core, ts, data, database, runtime |
 | `test_integ.yml`                                                                                                                             | every filter                      |
 
-Besides the README exclusions above, the runtime drop list is the only
-subtraction in any filter, and it holds only what nothing integ-runtime
+Besides the README and `typescript/scripts/` exclusions above, the runtime
+drop list is the only subtraction in any filter, and it holds only what nothing integ-runtime
 loads can import, directly or not: unit tests, markdown, the python agent
 adapters, the browser, dsh and opencode packages, and the python layers of
 the backends and account CLIs no runtime case mounts or runs (the python
