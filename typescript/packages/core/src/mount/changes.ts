@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
+import { abortable, makeAbortError } from '../utils/abort.ts'
 import type { Clock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
@@ -40,7 +41,10 @@ function overlaps(path: string, prefix: string): boolean {
  * may still be held. Mirrors Python's `RecentChanges`.
  */
 export class RecentChanges {
-  private readonly changes: [number, string | null, string][] = []
+  // Oldest first; those before `head` are past the window, dropped in one
+  // slice once they make up half the list, so a write never shifts the rest.
+  private changes: [number, string | null, string][] = []
+  private head = 0
 
   /**
    * @param clock the workspace's clock.
@@ -88,7 +92,7 @@ export class RecentChanges {
     const now = this.clock.monotonic()
     this.forget(now)
     let last: number | null = null
-    for (const [at, by, path] of this.changes) {
+    for (const [at, by, path] of this.changes.slice(this.head)) {
       if (by === machine) continue
       for (const [prefix, since] of served) {
         if (at >= since && overlaps(path, prefix)) {
@@ -98,25 +102,14 @@ export class RecentChanges {
       }
     }
     if (last === null) return
-    const waited = this.clock.sleep(last + this.window - now)
-    if (signal === undefined) return waited
-    await Promise.race([
-      waited,
-      new Promise<void>((resolve) => {
-        signal.addEventListener(
-          'abort',
-          () => {
-            resolve()
-          },
-          { once: true },
-        )
-      }),
-    ])
-    signal.throwIfAborted()
+    if (signal?.aborted === true) throw makeAbortError(signal)
+    await abortable(this.clock.sleep(last + this.window - now), signal)
   }
 
   private forget(now: number): void {
-    const kept = this.changes.findIndex(([at]) => at > now - this.window)
-    this.changes.splice(0, kept === -1 ? this.changes.length : kept)
+    while ((this.changes[this.head]?.[0] ?? Infinity) <= now - this.window) this.head += 1
+    if (this.head * 2 < this.changes.length) return
+    this.changes = this.changes.slice(this.head)
+    this.head = 0
   }
 }

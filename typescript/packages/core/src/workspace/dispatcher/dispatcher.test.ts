@@ -4134,3 +4134,17 @@ it('has every machine but the one serving a write wait it out', async () => {
     await ws.close()
   }
 })
+
+it('has a write through a link waited out where it lands', async () => {
+  const clock = new ManualClock()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+  try {
+    expect((await ws.shell('ln -s /data/f /alias')).exitCode).toBe(0)
+    clock.advance(1)
+    await ws.vfs.write('/alias', new TextEncoder().encode('x'))
+    await ws.registry.changes.waitOut(new Map([['/data', 0]]), 'box')
+    expect(clock.monotonic()).toBe(2)
+  } finally {
+    await ws.close()
+  }
+})

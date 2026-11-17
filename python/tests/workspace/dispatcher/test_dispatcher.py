@@ -4327,3 +4327,17 @@ async def test_a_write_is_waited_out_by_every_machine_but_the_one_serving_it():
         assert clock.monotonic() == 3.0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_through_a_link_is_waited_out_where_it_lands():
+    clock = ManualClock()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        assert (await ws.shell("ln -s /data/f /alias")).exit_code == 0
+        clock.advance(1)
+        await ws.vfs.write("/alias", b"x")
+        await ws.registry.changes.wait_out({"/data": 0.0}, "box")
+        assert clock.monotonic() == 2.0
+    finally:
+        await ws.close()

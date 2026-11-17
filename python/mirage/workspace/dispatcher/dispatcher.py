@@ -1061,10 +1061,12 @@ class Dispatcher:
         finally:
             if name in POLICY_WRITE_OPS:
                 changes = self._namespace.registry.changes
-                changes.note(path.virtual)
                 dst = kwargs.get("dst")
-                if isinstance(dst, PathSpec):
-                    changes.note(dst.virtual)
+                for changed in (
+                    (path, dst) if isinstance(dst, PathSpec) else (path,)
+                ):
+                    changes.note(changed.virtual)
+                    changes.note(self._spelled(changed))
             if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
 

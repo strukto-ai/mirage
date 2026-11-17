@@ -1888,6 +1888,8 @@ export class Workspace {
 
   async notify(change: FileEvent): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    this.registry.changes.note(change.path.virtual)
+    if (change.previousPath !== null) this.registry.changes.note(change.previousPath.virtual)
     await this.eventManager.notify(change)
   }
 

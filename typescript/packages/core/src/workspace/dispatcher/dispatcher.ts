@@ -860,8 +860,10 @@ export class Dispatcher {
     } finally {
       if (POLICY_WRITE_OPS.has(name)) {
         const changes = this.namespace.registry.changes
-        changes.note(path.virtual)
-        if (args?.[0] instanceof PathSpec) changes.note(args[0].virtual)
+        for (const changed of args?.[0] instanceof PathSpec ? [path, args[0]] : [path]) {
+          changes.note(changed.virtual)
+          changes.note(this.spelled(changed))
+        }
       }
       const data = args?.[0] ?? kwargs?.data
       if (

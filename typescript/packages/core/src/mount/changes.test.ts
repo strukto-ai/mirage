@@ -72,4 +72,23 @@ describe('RecentChanges', () => {
     await changes.waitOut(new Map([['/data', changes.now()]]), 'box')
     expect(clock.monotonic()).toBe(0.25)
   })
+
+  it('ends the wait at once on a line already stopped', async () => {
+    const clock = new ManualClock()
+    const changes = new RecentChanges(clock, 1)
+    changes.note('/data/f')
+    await expect(changes.waitOut(SERVED, 'box', AbortSignal.abort())).rejects.toThrow()
+    expect(clock.monotonic()).toBe(0)
+  })
+
+  it('keeps answering past a long run of expired changes', async () => {
+    const clock = new ManualClock()
+    const changes = new RecentChanges(clock, 1)
+    for (let at = 0; at < 1000; at += 1) {
+      changes.note('/data/f')
+      clock.advance(0.01)
+    }
+    await changes.waitOut(SERVED, 'box')
+    expect(clock.monotonic()).toBeCloseTo(10.99)
+  })
 })

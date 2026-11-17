@@ -1933,8 +1933,9 @@ class Workspace:
 
     async def notify(self, change: FileEvent) -> None:
         """Inject one externally observed change into the event
-        runtime: invalidate its caches, then deliver it to every
-        matching subscription.
+        runtime: record it for the machines its path is served to,
+        invalidate its caches, then deliver it to every matching
+        subscription.
 
         The single entry point for consumer-side detection (webhook
         receiver or poll loop over ``VFS.delta_hook()``); see
@@ -1945,6 +1946,9 @@ class Workspace:
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
+        self._registry.changes.note(change.path.virtual)
+        if change.previous_path is not None:
+            self._registry.changes.note(change.previous_path.virtual)
         await self._events.notify(change)
 
     async def close(self) -> None:
