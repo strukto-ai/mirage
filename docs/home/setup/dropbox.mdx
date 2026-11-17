@@ -1,194 +1,213 @@
 ---
 title: Dropbox
 icon: /images/dropbox-logo.svg
-description: Set up Dropbox OAuth2 credentials and obtain a long-lived refresh token.
+description: Virtualize a Dropbox account or one of its folders as files.
 ---
 
-## Overview
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The Dropbox VFS uses OAuth2 with a long-lived refresh token to authenticate against the
-[Dropbox v2 HTTP API](https://www.dropbox.com/developers/documentation/http/documentation):
-
-- **`/2/files/list_folder`**, list folder entries
-- **`/2/files/download`**, download file bytes
-- **`/2/files/search_v2`**, search files by name/content
-- **`/2/files/get_metadata`**, fetch entry metadata
-
-Two flows are supported:
-
-- **Code flow with client secret**, for Node/server. Needs `client_id`, `client_secret`, `refresh_token`.
-- **PKCE flow**, for browsers. Needs only `client_id` and `refresh_token` (no secret in the bundle).
-
-Both produce the same long-lived refresh token; the VFS auto-refreshes short-lived access
-tokens (≈4h) behind the scenes.
+A Dropbox account, or one folder of it, becomes a folder tree of its real
+files, served as raw bytes.
 
 ## Setup
 
-### 1. Create a Dropbox App
+Create a Dropbox app, give it file permissions and trade one sign-in for a
+long-lived refresh token. Mirage mints the short-lived access tokens (about 4
+hours) from it and renews each one 5 minutes before it expires.
 
-1. Go to https://www.dropbox.com/developers/apps
-1. Click **Create app**
-1. Choose:
-   - API: **Scoped access**
-   - Access type: **App folder** (sandboxed to one folder Dropbox creates for you) or
-     **Full Dropbox** (your entire account). Pick App folder for least privilege.
-   - Name it (e.g., "Mirage") -> **Create app**
+<AccordionGroup>
+  <Accordion title="1. Create a Dropbox app">
+    1. Open the [App Console](https://www.dropbox.com/developers/apps) and
+       click **Create app**.
+    1. Choose **Scoped access**.
+    1. Choose **App folder** (one folder Dropbox creates for the app, the
+       least privilege) or **Full Dropbox** (the whole account).
+    1. Name it (for example "Mirage") and click **Create app**.
+  </Accordion>
+  <Accordion title="2. Set permissions">
+    On the **Permissions** tab, check:
 
-### 2. Configure Permissions
+    | Scope | Purpose |
+    | --- | --- |
+    | `files.metadata.read` | List folders, read file metadata |
+    | `files.content.read` | Download file bytes |
+    | `files.content.write` | Upload, overwrite, create, delete, move and copy (write mounts) |
+    | `account_info.read` | Account space usage for `df` (optional) |
 
-On the app's settings page, click the **Permissions** tab and check:
+    Click **Submit**. Dropbox leaves unchecked scopes out of tokens, even
+    when the sign-in URL asks for them.
+  </Accordion>
+  <Accordion title="3. Get the refresh token">
+    1. On the **Settings** tab, add `http://localhost:1` under **OAuth 2** >
+       **Redirect URIs**, then copy the **App key** and the **App secret**.
+    1. Open this URL in a browser, with `YOUR_APP_KEY` replaced.
+       `token_access_type=offline` is required for a refresh token:
 
-- `files.metadata.read`, list folders, read file metadata
-- `files.content.read`, download file bytes
+       ```text
+       https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&response_type=code&token_access_type=offline&redirect_uri=http://localhost:1
+       ```
 
-For a write mount, also check `files.content.write`. Mirage uses it for
-uploads, overwrites, creates, deletes, moves and copies.
+    1. Sign in and click **Allow**. The browser goes to
+       `http://localhost:1/?code=...`, a page that does not load. Copy the
+       `code` value and exchange it right away:
 
-Click **Submit** at the bottom of the Permissions tab. **Required**: Dropbox does not include
-unchecked scopes in tokens, even if the auth URL requests them.
+       ```bash
+       curl https://api.dropboxapi.com/oauth2/token \
+         -d "code=THE_CODE" \
+         -d "grant_type=authorization_code" \
+         -d "client_id=YOUR_APP_KEY" \
+         -d "client_secret=YOUR_APP_SECRET" \
+         -d "redirect_uri=http://localhost:1"
+       ```
 
-### 3. Configure OAuth 2 Redirect URI
+    The JSON reply holds `refresh_token` (and `expires_in: 14400` for the
+    access token). Save the refresh token.
+  </Accordion>
+  <Accordion title="Browser sign-in with PKCE (no app secret)">
+    A browser app can skip the app secret: the TypeScript `DropboxVFS` from
+    `@struktoai/mirage-browser` takes only `clientId` and `refreshToken`.
 
-On the **Settings** tab, scroll to **OAuth 2 -> Redirect URIs** and add:
+    1. Add `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` to the
+       **Redirect URIs**. It must match exactly, with no trailing slash.
+    1. Set only `DROPBOX_APP_KEY` in `.env.development` at the repo root.
+    1. Run `pnpm dev` in `examples/browser/` and open that URL.
+    1. Click **Connect Dropbox**.
 
-- For the CLI flow below: `http://localhost:1`
-- For the browser PKCE example: `http://localhost:5173/vfs/dropbox/dropbox_pkce.html`
+    The example keeps the refresh token in `localStorage`. The same token
+    works headless as `DROPBOX_REFRESH_TOKEN`.
+  </Accordion>
+  <Accordion title="Troubleshooting">
+    | Issue | Fix |
+    | --- | --- |
+    | `400 invalid_grant` on the exchange | The code is single-use and short-lived: sign in again |
+    | No `refresh_token` in the reply | Add `token_access_type=offline` to the URL |
+    | `path/not_found` on `ls /dropbox` | The account is empty, or an App folder app's folder does not exist yet |
+    | `missing_scope` on a read | Check `files.content.read` and click **Submit** on **Permissions** |
+    | Refresh stops working | The refresh token was revoked: sign in again |
 
-Click **Add** after each.
-
-### 4. Copy the App Key (and Secret)
-
-Still on **Settings**, copy:
-
-- **App key**, this is your `DROPBOX_APP_KEY`
-- **App secret**, click **Show** -> copy. This is your `DROPBOX_APP_SECRET`. **Skip if you
-  only need the PKCE flow.**
-
-### 5. Get the Refresh Token (CLI flow with client secret)
-
-This mirrors the Google flow, easiest path for Node/server use.
-
-**A) Open this URL in a browser** (replace `YOUR_APP_KEY`):
-
-```
-https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&response_type=code&token_access_type=offline&redirect_uri=http://localhost:1
-```
-
-- `token_access_type=offline`, **required** to receive a refresh token. Without this you only
-  get a short-lived access token.
-
-**B) Authorize:** sign in -> click **Allow**.
-
-**C) Copy the code:** the browser redirects to `http://localhost:1?code=ABC...` (the page won't
-load, expected). Copy the `code` value from the URL bar.
-
-**D) Exchange the code for a refresh token:**
-
-```bash
-curl https://api.dropboxapi.com/oauth2/token \
-  -d "code=THE_CODE_FROM_STEP_C" \
-  -d "grant_type=authorization_code" \
-  -d "client_id=YOUR_APP_KEY" \
-  -d "client_secret=YOUR_APP_SECRET" \
-  -d "redirect_uri=http://localhost:1"
-```
-
-The response contains `refresh_token`, save it. Example:
-
-```json
-{
-  "access_token": "sl.B...",
-  "expires_in": 14400,
-  "refresh_token": "abc123...",
-  "scope": "files.metadata.read files.content.read",
-  "token_type": "bearer",
-  "uid": "12345",
-  "account_id": "dbid:..."
-}
-```
-
-### 6. Set Environment Variables
+    A refresh token lasts until it is revoked: the user disconnects the app
+    at [connected apps](https://www.dropbox.com/account/connected_apps), or
+    the app is deleted.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-DROPBOX_APP_KEY=abc123app4key
-DROPBOX_APP_SECRET=def456app4secret
-DROPBOX_REFRESH_TOKEN=ghi789refresh4token
+export DROPBOX_APP_KEY=abc123appkey
+export DROPBOX_APP_SECRET=def456appsecret
+export DROPBOX_REFRESH_TOKEN=ghi789refresh
 ```
 
-## Alternative: PKCE Flow (browser, no client secret)
+## Connect
 
-If you're mounting Dropbox from a browser SPA and don't want to ship a client secret, use the
-PKCE flow. The bundled example does the dance end-to-end.
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /dropbox:
+        vfs: dropbox
+        mode: read
+        config:
+          client_id: ${DROPBOX_APP_KEY}
+          client_secret: ${DROPBOX_APP_SECRET}
+          refresh_token: ${DROPBOX_REFRESH_TOKEN}
+    ```
 
-1. In the Dropbox app **Settings** tab, ensure the redirect URI
-   `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` is registered (Step 3).
-1. Set only `DROPBOX_APP_KEY` in `.env.development` at the repo root (no secret needed).
-1. From `examples/browser/`, run `pnpm dev`.
-1. Open `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` and click **Connect Dropbox**.
+    ```bash
+    mirage workspace create workspace.yaml --id dbx
+    mirage shell -w dbx -c 'ls /dropbox'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
 
-The example persists the refresh token to `localStorage`, then mounts a `DropboxVFS` with
-just `{ clientId, refreshToken }` and runs `ls /dropbox/`. Inspect DevTools -> Network -> filter
-`token` to confirm refresh calls don't include `client_secret`.
+    from mirage import MountMode, Workspace
+    from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
 
-The same `refresh_token` can be reused for headless setups, copy it out of `localStorage` and
-set it as `DROPBOX_REFRESH_TOKEN` in your env.
+    config = DropboxConfig(
+        client_id=os.environ["DROPBOX_APP_KEY"],
+        client_secret=os.environ["DROPBOX_APP_SECRET"],
+        refresh_token=os.environ["DROPBOX_REFRESH_TOKEN"],
+    )
+    ws = Workspace({"/dropbox": DropboxVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /dropbox")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-## Token Lifetime
+    const ws = new Workspace(
+      {
+        '/dropbox': new DropboxVFS({
+          clientId: process.env.DROPBOX_APP_KEY!,
+          clientSecret: process.env.DROPBOX_APP_SECRET!,
+          refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /dropbox')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
 
-| Token         | Lifetime                                   |
-| ------------- | ------------------------------------------ |
-| Access token  | ~4 hours (`expires_in: 14400`)             |
-| Refresh token | Long-lived; survives until manually revoked |
+## Layout
 
-Refresh tokens get revoked if:
-
-- The user revokes the app at https://www.dropbox.com/account/connected_apps
-- The Dropbox account password is changed
-- The app is deleted in the developer console
-
-The `DropboxTokenManager` in the VFS transparently exchanges the refresh token for a fresh
-access token whenever the cached one is within 5 minutes of expiry.
-
-## Scopes Reference
-
-| Scope                    | Purpose                              |
-| ------------------------ | ------------------------------------ |
-| `files.metadata.read`    | List folders, read file metadata     |
-| `files.content.read`     | Download file bytes                  |
-| `files.content.write`    | Upload, overwrite, create, delete, move and copy |
-| `account_info.read`      | Account space usage, for `df` (optional) |
-
-## Troubleshooting
-
-| Issue                                                | Fix                                                                                            |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `400 invalid_grant` on token exchange                | The `code` is single-use and expires fast, re-do Step 5A with a fresh URL                     |
-| No `refresh_token` in token response                 | Add `token_access_type=offline` to the auth URL                                                |
-| `path/not_found/.` on `ls /dropbox/`                 | Account is empty, or app is **App folder** scoped and the sandbox folder hasn't been created  |
-| `missing_scope` on download                          | Check `files.content.read` is enabled in the **Permissions** tab and **submitted**             |
-| Browser PKCE: redirect URI mismatch                  | Dropbox is strict, `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` must match exactly (no trailing slash) |
-| Token works locally but fails after a while          | Access token expired, the `TokenManager` should auto-refresh; if not, refresh token may be revoked |
-
-For TypeScript usage, mount with:
-
-```ts
-import { DropboxVFS } from '@struktoai/mirage-node'
-
-const dropbox = new DropboxVFS({
-  clientId: process.env.DROPBOX_APP_KEY!,
-  clientSecret: process.env.DROPBOX_APP_SECRET!,
-  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
-})
+```text
+/dropbox/
+  Photos/
+  Projects/
+    data.csv
+    report.pdf
+  notes.txt
 ```
 
-Or browser (PKCE):
+- `root_path` (such as `/Team/data`) mounts one folder; an App folder app sees
+  only its own folder.
+- Files keep their names and bytes.
+- `grep -rw` asks Dropbox search first; below the Professional plan it matches
+  file names only.
 
-```ts
-import { DropboxVFS } from '@struktoai/mirage-browser'
+## Sample runs
 
-const dropbox = new DropboxVFS({
-  clientId: 'YOUR_APP_KEY',
-  refreshToken: refreshTokenFromLocalStorage,
-})
+```bash
+$ ls /dropbox
+Photos
+Projects
+notes.txt
 ```
+
+```bash
+$ head -n 3 /dropbox/Projects/data.csv
+date,region,revenue
+2026-11-01,us-east,1250
+2026-11-01,eu-west,980
+```
+
+```bash
+$ find /dropbox/Projects -name '*.pdf'
+/dropbox/Projects/report.pdf
+```
+
+On a `write` mount, `tee`, `cp`, `mv`, `rm` and `mkdir` change Dropbox and
+need `files.content.write`. `rmdir` fails with `ENOTEMPTY` on a non-empty
+folder; `rm -r` removes it.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/dropbox">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/dropbox">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

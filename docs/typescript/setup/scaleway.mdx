@@ -1,18 +1,21 @@
 ---
 title: Scaleway
 icon: /images/scaleway-logo.svg
-description: Set up Scaleway Object Storage as a MIRAGE VFS from Node or the browser.
+description: Virtualize a Scaleway Object Storage bucket from Node or the browser.
 ---
 
-Scaleway Object Storage uses the S3 API with AWS Signature V4 against `https://s3.<region>.scw.cloud`. MIRAGE derives this endpoint from your region automatically.
+`ScalewayVFS` mounts one bucket: every object becomes a file and every `/` in a key
+a folder. It is the [S3 VFS](/typescript/setup/s3) pointed at Scaleway's
+endpoint, so commands behave as they do on S3. Credentials are set up on the
+[Scaleway page](/home/setup/scaleway).
 
-Credentials (IAM API key, the access key + secret key pair) are created the same way in both runtimes, see [Scaleway Credentials](/home/setup/scaleway).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-node'
@@ -23,57 +26,131 @@ const scw = new ScalewayVFS({
   accessKeyId: process.env.SCW_ACCESS_KEY!,
   secretAccessKey: process.env.SCW_SECRET_KEY!,
 })
+const ws = new Workspace({ '/scw': scw }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': scw }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /scw && find /scw -name '*.csv'")
+console.log(result.stdoutText)
 ```
 
-### Config
+`region` also picks the endpoint, `https://s3.<region>.scw.cloud`;
+`endpoint` replaces it.
+A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table scaleway start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table scaleway end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from the first of:
+
+1. `accessKeyId` and `secretAccessKey`, with `sessionToken` for temporary
+   credentials.
+2. `profile`, a profile in `~/.aws/credentials`.
+3. The AWS SDK credential chain: environment variables, then the instance or
+   container role.
+
+The API key's bearer needs `ObjectStorageReadOnly`, or
+`ObjectStorageFullAccess` for a write mount, on the bucket's Project. The
+key reaches Object Storage in its preferred Project only.
+An object the key may not read or change answers `Permission denied`.
+
+## Layout
+
+```text
+/scw/
+  README.md
+  logs/
+    app-2026-11-15.log
+    app-2026-11-16.log
+  reports/
+    2026-q3.csv
+    2026-q4.csv
 ```
 
-The browser `ScalewayVFS` is secret-free, your backend signs each operation using your Scaleway keys and returns a URL. Scaleway accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Scaleway endpoint.
+`/scw/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+from the `/` in keys.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/scaleway start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code> | Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/scw/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/scaleway end */}
+## Browser
 
-### 1. Server: sign URLs with the Scaleway endpoint
+The browser `ScalewayVFS` from `@struktoai/mirage-browser` keeps the keys off the
+page: a server signs a URL for each S3 call with the Scaleway keys, and the
+browser fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-browser'
+
+const scw = new ScalewayVFS({
+  bucket: 'my-bucket',
+  region: 'fr-par',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/scw': scw }, { mode: MountMode.READ })
+```
+
+- Requests go to the host each signed URL names; `region` and `endpoint` only
+  name the mount's storage location.
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server and the key's permissions.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -88,7 +165,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 const REGION = process.env.SCW_REGION!
-
+const BUCKET = process.env.SCW_BUCKET!
 const client = new S3Client({
   region: REGION,
   endpoint: `https://s3.${REGION}.scw.cloud`,
@@ -97,63 +174,45 @@ const client = new S3Client({
     secretAccessKey: process.env.SCW_SECRET_KEY!,
   },
 })
-const BUCKET = process.env.SCW_BUCKET!
 
-app.post('/presign/scw', async (req, res) => {
-  const { path, op, opts } = req.body
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
   const key = path.replace(/^\/+/, '')
   const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
   let cmd
   switch (op) {
     case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
-    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
     case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'LIST':   cmd = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: opts?.listPrefix,
-      Delimiter: opts?.listDelimiter,
-      ContinuationToken: opts?.listContinuationToken,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
     }); break
     case 'COPY':   cmd = new CopyObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      CopySource: `${BUCKET}/${opts?.copySource}`,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
     }); break
   }
-  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
 })
 ```
 
-### 2. Browser: wire it up
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-```ts
-import { MountMode, ScalewayVFS, Workspace } from '@struktoai/mirage-browser'
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
 
-const scw = new ScalewayVFS({
-  bucket: 'my-bucket',
-  region: 'fr-par',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign/scw', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = await r.json()
-    return url
-  },
-})
-
-const ws = new Workspace({ '/bucket/': scw }, { mode: MountMode.READ })
-```
-
-<Tip>
-`region` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
-</Tip>
-
-### 3. CORS
-
-Scaleway supports the S3 `PutBucketCors` call, so the AWS CLI works against the Scaleway endpoint:
+Scaleway takes the S3 `PutBucketCors` call, so the AWS CLI works against
+its endpoint:
 
 ```bash
 aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
@@ -161,24 +220,64 @@ aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
-See the [Scaleway VFS](/python/vfs/scaleway) docs for the equivalent Python wiring.
+  </Accordion>
+  <Accordion title="Browser fields">
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+{/* generated: config-table browser/scaleway start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/scaleway end */}
+
+  </Accordion>
+</AccordionGroup>
+
+## Integration
+
+Scaleway answers these commands through its own API, so fewer objects are
+read. See [Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md scaleway start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -186,7 +285,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -207,7 +306,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -229,12 +328,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md scaleway end */}
-
-## Integration
-
-What Scaleway answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Scaleway |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

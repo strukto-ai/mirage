@@ -1,43 +1,155 @@
 ---
 title: MongoDB
 icon: /images/mongodb-logo.svg
-description: Set up a MongoDB connection for the MongoDB VFS.
+description: Virtualize MongoDB databases as read-only folders of collections and documents.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+</div>
 
-### 1. Get Your Connection URI
+Every database becomes a folder of collections and views. Each one holds a
+sampled schema and its documents as JSON lines.
 
-#### Local MongoDB
+## Setup
+
+Get a connection URI for a user that can read the databases. Then export it:
+
+<AccordionGroup>
+  <Accordion title="Get a connection URI">
+    - Local server: `mongodb://localhost:27017`.
+    - Self-hosted with auth:
+      `mongodb://<username>:<password>@<host>:27017/?authSource=admin`.
+    - MongoDB Atlas:
+      1. Open the project's **Clusters** page and select **Connect** on the
+         cluster.
+      1. Add the application host's IP address to the access list (also under
+         **Network Access**).
+      1. Create a database user. The built-in **Only read any database** role
+         is enough, or `read` on the databases the mount should see.
+      1. Select **Drivers** and copy the `mongodb+srv://` string.
+      1. Put the user's password in place of `<db_password>`, percent-encoding
+         reserved characters such as `@` (`%40`).
+
+    See the Atlas [driver connection guide](https://www.mongodb.com/docs/atlas/driver-connection/).
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# Default local instance
-MONGODB_URI=mongodb://localhost:27017
+export MONGODB_URI="mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/"
 ```
 
-#### MongoDB Atlas (Cloud)
+Python needs `pip install "mirage-ai[mongodb]"`; Node needs the `mongodb` peer
+dependency (`pnpm add @struktoai/mirage-node mongodb`).
 
-1. Create a database user and allow the application host through **Network Access**.
-1. Select your cluster, then **Connect** → **Drivers**.
-1. Copy the connection URI, replace its username and password, and
-   percent-encode special characters in the credentials:
-   ```
-   mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
-   ```
+## Connect
 
-See the Atlas [connection guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/).
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /mongodb:
+        vfs: mongodb
+        mode: read
+        config:
+          uri: ${MONGODB_URI}
+          databases: [shop]
+    ```
 
-#### Self-hosted with Authentication
+    ```bash
+    mirage workspace create workspace.yaml --id mongo
+    mirage shell -w mongo -c 'ls /mongodb/shop/collections'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
+
+    config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=["shop"])
+    ws = Workspace({"/mongodb": MongoDBVFS(config=config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /mongodb/shop/collections")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MongoDBVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/mongodb': new MongoDBVFS({
+          uri: process.env.MONGODB_URI!,
+          databases: ['shop'],
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /mongodb/shop/collections')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/mongodb/
+  shop/
+    database.json
+    collections/
+      orders/
+        schema.json
+        documents.jsonl
+    views/
+      paid_orders/
+        schema.json
+        documents.jsonl
+```
+
+- `databases` limits the tree to those databases. Unset, it shows all but
+  `admin`, `config` and `local`.
+- `documents.jsonl` holds one document per line in Relaxed Extended JSON;
+  `schema.json` holds field types from the first 100 documents, the indexes
+  and any validator.
+- `tail -n` past `max_doc_limit` (5,000) documents fails with
+  `File too large`. `elide_fields` drops heavy fields such as embeddings.
+
+## Sample runs
 
 ```bash
-MONGODB_URI=mongodb://username:password@host:27017/?authSource=admin
+$ head -n 2 /mongodb/shop/collections/orders/documents.jsonl
+{"_id": {"$oid": "6735a1f2c9e77a1b2c3d4e01"}, "customer": "ada", "total": 120.5, "status": "paid", "placed_at": {"$date": "2026-11-14T10:00:00Z"}}
+{"_id": {"$oid": "6735a1f2c9e77a1b2c3d4e02"}, "customer": "linus", "total": 35, "status": "refunded", "placed_at": {"$date": "2026-11-14T11:30:00Z"}}
 ```
-
-### 2. Set Environment Variables
 
 ```bash
-# .env.development
-MONGODB_URI=mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/
+$ grep refunded /mongodb/shop/collections/orders/documents.jsonl
+{"_id": {"$oid": "6735a1f2c9e77a1b2c3d4e02"}, "customer": "linus", "total": 35, "status": "refunded", "placed_at": {"$date": "2026-11-14T11:30:00Z"}}
 ```
 
-For SDK guides, see [MongoDB (Python)](/python/vfs/mongodb) and [MongoDB (TypeScript)](/typescript/setup/mongodb).
+```bash
+$ jq -c '.fields[] | {path, types}' /mongodb/shop/collections/orders/schema.json
+{"path":"customer","types":{"string":1}}
+{"path":"placed_at","types":{"date":1}}
+{"path":"status","types":{"string":1}}
+{"path":"total","types":{"double":0.6666666666666666,"int":0.3333333333333333}}
+```
+
+`grep` fetches only the documents that may match, and `wc -l` counts on the
+server. The mount is read-only: no command changes the database.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/mongodb">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/mongodb">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

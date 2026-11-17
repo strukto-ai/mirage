@@ -1,31 +1,153 @@
 ---
 title: QingStor
 icon: cloud
-description: Set up QingStor (QingCloud) Object Storage credentials for the QingStor VFS.
+description: Virtualize a QingStor (QingCloud Object Storage) bucket as a tree of files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an access key
+Every object in a QingStor (QingCloud Object Storage) bucket becomes a file, and every `/` in a key becomes a folder.
 
-1. Sign in to the [QingCloud console](https://console.qingcloud.com/)
-1. Go to **API Keys** (under your account) -> **Create**
-1. Copy the **Access Key ID** and **Secret Access Key**
-1. Note your bucket's **zone** (e.g. `pek3a`) and **bucket** name
 
-The endpoint is derived from the zone (`region`) as `s3.<region>.qingstor.com`,
-QingStor's S3-compatible host (distinct from the native `<zone>.qingstor.com`).
-Set `QINGSTOR_ENDPOINT_URL` to override.
 
-### 2. Set environment variables
+## Setup
+
+Create an access key in the [QingCloud console](https://console.qingcloud.com/), then export it.
+
+<AccordionGroup>
+  <Accordion title="Create a QingStor access key">
+
+1. Open **API Keys** from the account menu and create a key.
+1. Copy the **Access Key ID** and **Secret Access Key**.
+1. Note the bucket's zone, for example `pek3a`. The zone goes in `region`.
+
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-QINGSTOR_BUCKET=my-bucket
-QINGSTOR_ZONE=pek3a
-QINGSTOR_ACCESS_KEY_ID=...
-QINGSTOR_SECRET_ACCESS_KEY=...
-# QINGSTOR_ENDPOINT_URL=https://s3.pek3a.qingstor.com   # optional override
+export QINGSTOR_BUCKET=my-bucket
+export QINGSTOR_ZONE=pek3a
+export QINGSTOR_ACCESS_KEY_ID=...
+export QINGSTOR_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [QingStor (Python)](/python/vfs/qingstor) and [QingStor (TypeScript)](/typescript/setup/qingstor).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /qingstor:
+        vfs: qingstor
+        mode: read
+        config:
+          bucket: ${QINGSTOR_BUCKET}
+          region: ${QINGSTOR_ZONE}
+          access_key_id: ${QINGSTOR_ACCESS_KEY_ID}
+          secret_access_key: ${QINGSTOR_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id qingstor
+    mirage shell -w qingstor -c 'ls /qingstor'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.qingstor import QingStorConfig, QingStorVFS
+
+    config = QingStorConfig(
+        bucket=os.environ["QINGSTOR_BUCKET"],
+        region=os.environ["QINGSTOR_ZONE"],
+        access_key_id=os.environ["QINGSTOR_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["QINGSTOR_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/qingstor": QingStorVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /qingstor")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/qingstor': new QingStorVFS({
+          bucket: process.env.QINGSTOR_BUCKET!,
+          region: process.env.QINGSTOR_ZONE!,
+          accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.QINGSTOR_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /qingstor')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/qingstor/
+  README.md
+  logs/
+    app-2026-11-15.log
+    app-2026-11-16.log
+  reports/
+    2026-q3.csv
+    2026-q4.csv
+```
+
+- The endpoint comes from the zone: `s3.<zone>.qingstor.com`, the
+  S3-compatible host, not the native `<zone>.qingstor.com`. Set `endpoint_url`
+  (`endpoint` in TypeScript) for another host, such as `s3.<zone>.qsstor.com`.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one folder of the bucket as
+  the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more,
+  `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ ls /qingstor
+README.md
+logs
+reports
+```
+
+```bash
+$ find /qingstor -name '*.csv'
+/qingstor/reports/2026-q3.csv
+/qingstor/reports/2026-q4.csv
+```
+
+```bash
+$ grep -r ERROR /qingstor/logs
+/qingstor/logs/app-2026-11-15.log:2026-11-15T08:01:13Z ERROR timeout reaching db
+/qingstor/logs/app-2026-11-16.log:2026-11-16T09:12:40Z ERROR timeout reaching db
+```
+
+On a `write` mount, `cp`, `mv`, `rm` and `>` change objects in the bucket. For
+`write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/qingstor">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/qingstor">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

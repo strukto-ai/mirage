@@ -1,29 +1,146 @@
 ---
 title: HF Models
 icon: /images/huggingface-logo.svg
-description: Set up Hugging Face Models credentials.
+description: Virtualize a Hugging Face model repo as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Pick a Model Repo
+A [Hugging Face model](https://huggingface.co/models) repo becomes a read-only
+folder of its files. Configs, tokenizers and cards read at once; weights stream
+only when a command reads them.
 
-Browse [huggingface.co/models](https://huggingface.co/models) and note the
-full `namespace/model-name` (e.g. `sapientinc/HRM-Text-1B`).
+## Setup
 
-Public models need no token. Gated/private models do.
+Public models need no token. A gated or private model needs a Hugging Face
+access token:
 
-### 2. Create an Access Token (gated/private only)
-
-1. Go to https://huggingface.co/settings/tokens
-2. Create a fine-grained token with **Read** access to the model
-
-### 3. Set Environment Variables
+1. For a gated model, open its page on the Hub, accept the conditions and wait
+   for access to be granted.
+1. At [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens),
+   click **New token** and create a `read` token, or a fine-grained token with
+   read access to that model.
+1. Add `token: ${HF_TOKEN}` to the YAML config.
 
 ```bash
-# .env.development
-HF_MODEL_REPO=sapientinc/HRM-Text-1B
-HF_TOKEN=hf_...   # optional, public models work without it
+export HF_TOKEN=hf_...
 ```
 
-For SDK guides, see [HF Models (Python)](/python/vfs/hf_models) and [HF Models (TypeScript)](/typescript/setup/hf_models).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /model:
+        vfs: hf_models
+        mode: read
+        config:
+          repo_id: sapientinc/HRM-Text-1B
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id model
+    mirage shell -w model -c 'ls /model'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
+
+    config = HfModelsConfig(
+        repo_id="sapientinc/HRM-Text-1B",
+        token=os.environ.get("HF_TOKEN"),
+    )
+    ws = Workspace({"/model": HfModelsVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /model")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { HfModelsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/model': new HfModelsVFS({
+          repoId: 'sapientinc/HRM-Text-1B',
+          token: process.env.HF_TOKEN,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /model')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/model/
+  LICENSE
+  README.md
+  banner.jpg
+  benchmark_scatter.png
+  config.json
+  model.safetensors
+  tokenizer.json
+  tokenizer_config.json
+```
+
+- Files keep their repo paths. `repo_id` is `namespace/name`, or a bare name
+  under the token's owner.
+- `revision` pins a branch, tag or commit (default `main`); `key_prefix` mounts
+  one folder of the repo.
+- `ls` and `stat` never download a file; `sha256sum` on an LFS file answers with
+  the hash the Hub keeps.
+
+## Sample runs
+
+```bash
+$ ls -lh /model
+total ?
+-rw-r--r-- 1 - -  12K May 18  2026 LICENSE
+-rw-r--r-- 1 - - 7.6K May 21 05:57 README.md
+-rw-r--r-- 1 - - 865K Sep  4 08:30 banner.jpg
+-rw-r--r-- 1 - - 404K May 18  2026 benchmark_scatter.png
+-rw-r--r-- 1 - -  619 May 21 05:57 config.json
+-rw-r--r-- 1 - - 2.3G May 18  2026 model.safetensors
+-rw-r--r-- 1 - - 4.6M May 18  2026 tokenizer.json
+-rw-r--r-- 1 - -  326 May 18  2026 tokenizer_config.json
+```
+
+```bash
+$ jq -r '.architectures[0], .hidden_size' /model/config.json
+HrmTextForCausalLM
+1536
+```
+
+```bash
+$ stat -c '%n %s' /model/model.safetensors
+/model/model.safetensors 2365606568
+```
+
+The mount is read-only: a Hub write is a commit, so `echo >`, `rm`, `cp` and
+`mv` are refused. The [`hf` CLI](/home/setup/cli/hf) downloads a copy and
+uploads changes back as one commit.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/hf_models">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/hf_models">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

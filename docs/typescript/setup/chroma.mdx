@@ -1,89 +1,163 @@
 ---
 title: Chroma
 icon: /images/chroma-logo.svg
-description: Mount a ChromaDB collection as a Mirage filesystem in TypeScript, with shell commands and vector retrieval through the search CLI.
+description: Virtualize a ChromaDB collection from Node or the browser.
 ---
 
-`ChromaVFS` exposes a ChromaDB collection as a read-only filesystem: the
-directory tree comes from the collection's `__path_tree__` document, pages are
-chunk sets joined in `chunk_index` order, and vector retrieval is the
-[`search` CLI](/typescript/cli/search). The TypeScript backend mirrors the
-[Python one](/python/vfs/chroma) and returns identical results.
+`ChromaVFS` mounts one ChromaDB collection, read-only, as a tree of text files:
+each file is its chunks joined in order. The collection's shape is set up on
+the [Chroma page](/home/setup/chroma).
 
-## Node
-
-The `chromadb` client is an optional peer dependency; install it alongside
-Mirage:
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node chromadb
+npm install @struktoai/mirage-node chromadb
+```
+
+## Configure
+
+```ts
+import { ChromaVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const knowledge = new ChromaVFS({
+  host: 'localhost',
+  port: 8000,
+  collectionName: 'knowledge',
+})
+const ws = new Workspace({ '/knowledge': knowledge }, { mode: MountMode.READ })
+
+const result = await ws.shell('tree /knowledge && grep -rn refund /knowledge')
+console.log(result.stdoutText)
+```
+
+`ssl: true` reaches the server over HTTPS. A collection whose chunks name their
+file and position with keys other than `page_slug` and `chunk_index` sets
+`slugField` and `chunkIndexField`.
+
+### Fields
+
+{/* generated: config-table chroma start */}
+<ResponseField name="host" type={"string"} default={"'localhost'"}>
+  Host name of the Chroma HTTP server.
+</ResponseField>
+<ResponseField name="port" type={"number"} default={"8000"}>
+  Port of the Chroma HTTP server.
+</ResponseField>
+<ResponseField name="ssl" type={"boolean"} default={"false"}>
+  Connect over HTTPS instead of HTTP.
+</ResponseField>
+<ResponseField name="collectionName" type={"string"} required>
+  Name of the existing Chroma collection to mount.
+</ResponseField>
+<ResponseField name="slugField" type={"string"} default={"'page_slug'"}>
+  Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`).
+</ResponseField>
+<ResponseField name="chunkIndexField" type={"string"} default={"'chunk_index'"}>
+  Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.
+</ResponseField>
+{/* generated: config-table chroma end */}
+
+## Layout
+
+```text
+/knowledge/
+  README.md
+  guides/
+    api.md
+    quickstart.md
+  policies/
+    refunds.md
+```
+
+Paths come from the collection's path tree document, the one with the ID
+`__path_tree__`: a JSON object whose keys are file paths below the mount.
+Folders come from the `/` in those paths. `/knowledge/guides/quickstart.md` is
+every chunk whose `page_slug` is `guides/quickstart.md`.
+
+## Behavior
+
+- **Read-only:** no command changes the collection.
+- **Pages:** a file is its chunks sorted by chunk index and joined by line
+  breaks.
+- **Tree refresh:** the path tree is fetched on the first listing and reused
+  until the index expires, so a change to `__path_tree__` shows up after that.
+  File text is always read from Chroma.
+
+### Vector search
+
+The [`search` CLI](/typescript/cli/search) ranks chunks by meaning with
+Chroma's vector query. Register it on the workspace:
+
+```ts
+import { SEARCH } from '@struktoai/mirage-node'
+
+ws.registerCli('search', SEARCH)
+```
+
+```bash
+search "how do I get started" /knowledge/
+search --top-k 5 "billing policy" /knowledge/policies/
+search --threshold 0.8 "billing policy" /knowledge/
+```
+
+The score is 1 minus Chroma's distance, and `--threshold` keeps the hits that
+reach it. `--top-k` defaults to 10. `--method` takes only `semantic`. Each hit
+prints its page and score, then the chunk.
+
+## Browser
+
+The same `ChromaVFS` runs in the browser from `@struktoai/mirage-browser`.
+
+```bash
+npm install @struktoai/mirage-browser chromadb
 ```
 
 ```ts
-import { ChromaVFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
+import { ChromaVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const knowledge = new ChromaVFS({
-  config: {
-    host: 'localhost',
-    port: 8000,
-    collectionName: 'knowledge',
-    // slugField: 'page_slug',      (default)
-    // chunkIndexField: 'chunk_index', (default)
-  },
+  host: 'chroma.example.com',
+  port: 443,
+  ssl: true,
+  collectionName: 'knowledge',
 })
-
 const ws = new Workspace({ '/knowledge': knowledge }, { mode: MountMode.READ })
-ws.registerCli('search', SEARCH)
-
-console.log(await (await ws.shell('tree /knowledge/')).stdoutStr())
-console.log(await (await ws.shell('grep -r refund /knowledge/policies/')).stdoutStr())
-console.log(
-  await (await ws.shell('search "how am I throttled" /knowledge/')).stdoutStr(),
-)
 ```
 
-`grep` pushes `$contains` / `$regex` filters down to ChromaDB before fine
-filtering locally, so recursive searches avoid fetching the whole collection.
+- The page calls the Chroma server directly, so the server must accept requests
+  from the page's origin.
 
-`search` takes `--top-k`, `--threshold` and `--method` as it does in
-[Python](/python/vfs/chroma#vector-search).
+## Integration
 
-### Config
+Chroma answers this command through its own API, so fewer pages are read. See
+[Integration](/home/integration/overview).
 
-{/* generated: config-table chroma start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'localhost'` | Host name of the Chroma HTTP server. |
-| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `8000` | Port of the Chroma HTTP server. |
-| <code style={{ whiteSpace: 'nowrap' }}>ssl</code><br />default `false` | Connect over HTTPS instead of HTTP. |
-| <code style={{ whiteSpace: 'nowrap' }}>collectionName</code><br />required | Name of the existing Chroma collection to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>slugField</code><br />default `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
-| <code style={{ whiteSpace: 'nowrap' }}>chunkIndexField</code><br />default `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
-{/* generated: config-table chroma end */}
+- `grep -r` and `rg`: read only the pages with a chunk holding the text,
+  which Chroma's `$contains` answers, then match each page as `grep` does. No
+  match can span two chunks, so it misses nothing. `$contains` matches case,
+  so `-i` reads every page.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`.
 
 {/* generated: vfs-md chroma start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `chroma`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
-    - One ChromaDB collection, mounted read only.
     - Paths are document slugs from the collection's path tree.
-    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
-      `grep`. Writes are not supported.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -91,7 +165,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -118,10 +192,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     ### `/<path>`
 
-    - One ChromaDB collection, mounted read only.
     - Paths are document slugs from the collection's path tree.
-    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
-      `grep`. Writes are not supported.
 
     ## Supported Unix Commands for VFS
 
@@ -143,4 +214,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md chroma end */}

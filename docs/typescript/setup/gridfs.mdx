@@ -1,18 +1,21 @@
 ---
 title: GridFS
+description: Virtualize a MongoDB GridFS bucket from Node.
 icon: /images/mongodb-logo.svg
-description: Mount a MongoDB GridFS bucket as a MIRAGE filesystem from Node.
 ---
 
-`GridFSVFS` mounts a MongoDB GridFS bucket (file metadata in `<bucket>.files`, content chunks in `<bucket>.chunks`) as a read-write filesystem. Files are keyed by slash-separated filenames, writes keep old revisions, and a walk (`find`, `du`, `ls -R`, `tree`, `grep -r`) reads the whole subtree with one `fs.files` query ([Walks](/home/integration/walks)).
+`GridFSVFS` mounts a MongoDB GridFS bucket: every file in the bucket becomes a
+file and every `/` in a filename a folder. Metadata lives in the
+`<bucket>.files` collection and content in `<bucket>.chunks`. The connection
+URI is set up on the [GridFS page](/home/setup/gridfs).
 
-Setup steps for the connection URI live at [GridFS Credentials](/home/setup/gridfs).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node mongodb
+npm install @struktoai/mirage-node mongodb
 ```
+
+## Configure
 
 ```ts
 import { GridFSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -20,76 +23,124 @@ import { GridFSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 const gridfs = new GridFSVFS({
   uri: process.env.MONGODB_URI!,
   database: 'app',
-  bucket: 'assets', // default "fs"
 })
+const ws = new Workspace({ '/gridfs': gridfs }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/gridfs/': gridfs }, { mode: MountMode.WRITE })
-await ws.shell('echo hello | tee /gridfs/notes/a.txt > /dev/null')
-const res = await ws.shell("find /gridfs/ -name '*.txt'")
-console.log(res.stdoutText)
+const result = await ws.shell("echo hello > /gridfs/notes/a.txt && find /gridfs -name '*.txt'")
+console.log(result.stdoutText)
 ```
 
-The `mongodb` driver is an optional peer dependency; it is only loaded when a `GridFSVFS` is constructed.
+The `mongodb` peer package loads only when a `GridFSVFS` is built. `bucket`
+names a bucket other than `fs`, `keyPrefix` scopes the mount to part of it, and
+`keepRevisions` bounds the history each file keeps. A mount takes
+`MountMode.READ`, `WRITE` or `EXEC`.
 
-### Config
+### Fields
 
 {/* generated: config-table gridfs start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI. |
-| <code style={{ whiteSpace: 'nowrap' }}>database</code><br />required | Database that holds the GridFS bucket. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />default `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Filename prefix the mount treats as its root; files outside it are not listed. |
-| <code style={{ whiteSpace: 'nowrap' }}>chunkSizeBytes</code> | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
-| <code style={{ whiteSpace: 'nowrap' }}>keepRevisions</code> | Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="uri" type={"string"} required post={["secret"]}>
+  MongoDB connection URI.
+</ResponseField>
+<ResponseField name="database" type={"string"} required>
+  Database that holds the GridFS bucket.
+</ResponseField>
+<ResponseField name="bucket" type={"string"} default={"'fs'"}>
+  GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Filename prefix the mount treats as its root; files outside it are not listed.
+</ResponseField>
+<ResponseField name="chunkSizeBytes" type={"number"}>
+  Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB.
+</ResponseField>
+<ResponseField name="keepRevisions" type={"number"}>
+  Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}
 
-## Scoping to a key prefix
+## Authentication
 
-```ts
-const scoped = new GridFSVFS({
-  uri: process.env.MONGODB_URI!,
-  database: 'app',
-  bucket: 'shared',
-  keyPrefix: `users/${userId}`,
-})
+The user in the URI needs `readWrite` on the database that holds the bucket,
+or `read` for a `read` mount. On Atlas, the built-in **Read and write to any
+database** role also works.
+
+## Layout
+
+```text
+/gridfs/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
 ```
 
-Every operation is transparently scoped to that subpath: agents see `/data/notes.md`, the stored filename is `users/<id>/data/notes.md`. YAML configs may spell it `key_prefix`; both are accepted.
+`/gridfs/data/file.txt` is the GridFS filename `data/file.txt`. Folders come
+from the `/` in filenames; `mkdir` stores a zero-byte `data/` marker so an
+empty folder stays visible.
 
-## Revisions
+## Behavior
 
-Every write uploads a new revision and keeps the old ones; reads and listings
-serve the newest per filename, and a snapshot-pinned read resolves an older
-revision by its `_id`. `mv` retags every revision server-side, and `rm`
-retags them into the trash, `/trash/<filename>`, which no mount path can
-reach, so the name reads as gone while a pinned read still works. Set
-`keepRevisions` (`keep_revisions` in YAML) to delete the revisions past that
-count per filename on each write or `rm`, oldest first, in the trash too;
-unset keeps every revision. The [Python page](/python/vfs/gridfs#revisions)
-has the details.
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/gridfs/data/notes.md` is the filename `users/42/data/notes.md`. A
+  leading `/` is dropped and a trailing `/` added; an empty prefix means none.
+- **Range reads:** `head -c` and `tail -c` seek by chunk, so a large file is
+  never downloaded whole. A file smaller than the chunk size is one chunk.
+- **Trash:** `rm`, and a file `mv` overwrites, retag every revision to
+  `/trash/<filename>`. No mount path reaches the trash, so the name reads as
+  gone, and the full original filename stays traceable.
+
+### Revisions
+
+GridFS filenames are not unique: every write uploads a new revision and keeps
+the old ones. Reads and listings serve the newest revision per filename, and a
+snapshot-pinned read resolves an older revision by its `_id`. `mv` retags every
+revision's filename on the server, so history moves with the file.
+
+`keepRevisions` bounds the history. Set it, and a write or an `rm` deletes the
+revisions past that count per filename, oldest first, under the file's name and
+in the trash alike; a snapshot pinned to a pruned revision then fails to read
+it. Unset keeps every revision.
 
 ## Browser
 
-GridFS requires a direct MongoDB connection, so `GridFSVFS` ships in `@struktoai/mirage-node` only. Browser workspaces can reach GridFS content through a Node-side MIRAGE server instead.
+GridFS needs a direct MongoDB connection, so `GridFSVFS` ships in
+`@struktoai/mirage-node` only. A browser workspace reaches GridFS through a
+Node-side Mirage server instead.
+
+## Integration
+
+GridFS answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
+- `grep -r`, `rg` and `cp -r`: one `fs.files` query for the whole tree; see
+  [Walks](/home/integration/walks).
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md gridfs start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -97,7 +148,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -118,7 +169,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -140,12 +191,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GridFS mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md gridfs end */}
-
-## Integration
-
-What GridFS answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On GridFS |
-| --- | --- |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

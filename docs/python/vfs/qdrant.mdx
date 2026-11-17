@@ -1,148 +1,241 @@
 ---
 title: Qdrant
-description: Mount a Qdrant collection as a Mirage filesystem, with payload folders, multimodal blobs, and semantic search through the search CLI for Python agents.
+description: Virtualize a Qdrant collection from Python.
 icon: /images/qdrant-logo.svg
 ---
 
-The Qdrant VFS exposes a [Qdrant](https://qdrant.tech/) collection as a virtual filesystem mounted
-at some prefix such as `/q/`. Group-by payload fields become nested folders,
-each point becomes a `.json` payload file (plus a `.txt` text file and an optional blob), and semantic search is the
-[`search` CLI](/python/cli/search), which returns ranked points as canonical file paths.
+`QdrantVFS` mounts a [Qdrant](https://qdrant.tech/) collection, read-only, as
+nested folders, one level per group-by payload field. Each point is a `.json`
+payload file, plus a `.txt` text file and an optional blob. The cluster URL and
+API key are set up on the [Qdrant page](/home/setup/qdrant).
 
-For connection setup (self-hosted, Qdrant Cloud, search), see
-[Qdrant Setup](/home/setup/qdrant).
-
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[qdrant]"
 ```
 
-## Config
+## Configure
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 
 config = QdrantConfig(
-    url="https://xyz.cloud.qdrant.io",
-    api_key="...",
+    url=os.environ["QDRANT_URL"],
+    api_key=os.environ["QDRANT_API_KEY"],
     collection="fashion",
     group_by=["gender", "articleType", "baseColour"],
-    id_field="id",
     text_field="productDisplayName",
-    blob_field="image_b64",
-    blob_ext="jpg",
-    cloud_inference=True,
-    search_limit=5,
 )
-vfs = QdrantVFS(config)
-ws = Workspace({"/fashion/": vfs}, mode=MountMode.READ)
+ws = Workspace({"/fashion": QdrantVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /fashion/Men/Shoes/White && cat /fashion/Men/Shoes/White/3.json")
+print(await result.stdout_str())
 ```
 
-The mapping is config-driven; nothing about the dataset is hardcoded. Point
-`group_by` at different payload fields and the folder tree changes.
+A self-hosted Qdrant sets `host` and `port` (default `localhost:6333`) instead
+of `url`. `blob_field` and `blob_ext` serve a payload field of raw or base64
+bytes as a file, such as `3.jpg`.
+
+### Fields
 
 {/* generated: config-table qdrant start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>url</code> | Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'localhost'` | Host name of the Qdrant server when `url` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `6333` | Port of the Qdrant server when `url` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>https</code><br />default `False` | Connect to `host` over HTTPS when `url` is unset. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />secret | Qdrant API key, required by Qdrant Cloud. |
-| <code style={{ whiteSpace: 'nowrap' }}>collection</code> | Collection the mount root shows; unset lists every collection as a top-level folder. |
-| <code style={{ whiteSpace: 'nowrap' }}>group_by</code><br />default `[]` | Payload fields that become folder levels, one per field in order; dotted paths reach nested keys. Unset puts every point's files directly under the collection. |
-| <code style={{ whiteSpace: 'nowrap' }}>basename_fields</code><br />default `[]` | `group_by` fields whose folder names keep only the last path or URL segment of the value; two values with one basename under the same parent are refused as a collision. |
-| <code style={{ whiteSpace: 'nowrap' }}>id_field</code><br />default `'id'` | Key the point id is written under in a point's `.json`; it replaces a payload field of that name. |
-| <code style={{ whiteSpace: 'nowrap' }}>name_field</code> | Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone. |
-| <code style={{ whiteSpace: 'nowrap' }}>text_field</code> | Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`. |
-| <code style={{ whiteSpace: 'nowrap' }}>blob_field</code> | Payload field of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the `.json`; unset adds no blob file. |
-| <code style={{ whiteSpace: 'nowrap' }}>blob_ext</code><br />default `'bin'` | File extension of the blob file, without the dot. |
-| <code style={{ whiteSpace: 'nowrap' }}>vector_field</code> | Payload field holding a copy of the vector, left out of the `.json`. |
-| <code style={{ whiteSpace: 'nowrap' }}>search_limit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_rows</code><br />default `1000` | Most points one folder listing scrolls; points past it are left out, and a group folder lists only the values those points carry. |
-| <code style={{ whiteSpace: 'nowrap' }}>embedding_model</code><br />default `'sentence-transformers/all-MiniLM-L6-v2'` | Model the server embeds a `search` query with under `cloud_inference`; it must match the model the stored vectors came from. |
-| <code style={{ whiteSpace: 'nowrap' }}>cloud_inference</code><br />default `False` | Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query. |
-| <code style={{ whiteSpace: 'nowrap' }}>embed</code><br />secret | Async function that turns a `search` query into a vector in-process, `(text: str) -> list[float]`. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="url" type={"str"}>
+  Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored.
+</ResponseField>
+<ResponseField name="host" type={"str"} default={"'localhost'"}>
+  Host name of the Qdrant server when `url` is unset.
+</ResponseField>
+<ResponseField name="port" type={"int"} default={"6333"}>
+  Port of the Qdrant server when `url` is unset.
+</ResponseField>
+<ResponseField name="https" type={"bool"} default={"False"}>
+  Connect to `host` over HTTPS when `url` is unset.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} post={["secret"]}>
+  Qdrant API key, required by Qdrant Cloud.
+</ResponseField>
+<ResponseField name="collection" type={"str"}>
+  Collection the mount root shows; unset lists every collection as a top-level folder.
+</ResponseField>
+<ResponseField name="group_by" type={"list[str]"} default={"[]"}>
+  Payload fields that become folder levels, one per field in order; dotted paths reach nested keys. Unset puts every point's files directly under the collection.
+</ResponseField>
+<ResponseField name="basename_fields" type={"list[str]"} default={"[]"}>
+  `group_by` fields whose folder names keep only the last path or URL segment of the value; two values with one basename under the same parent are refused as a collision.
+</ResponseField>
+<ResponseField name="id_field" type={"str"} default={"'id'"}>
+  Key the point id is written under in a point's `.json`; it replaces a payload field of that name.
+</ResponseField>
+<ResponseField name="name_field" type={"str"}>
+  Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone.
+</ResponseField>
+<ResponseField name="text_field" type={"str"}>
+  Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`.
+</ResponseField>
+<ResponseField name="blob_field" type={"str"}>
+  Payload field of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the `.json`; unset adds no blob file.
+</ResponseField>
+<ResponseField name="blob_ext" type={"str"} default={"'bin'"}>
+  File extension of the blob file, without the dot.
+</ResponseField>
+<ResponseField name="vector_field" type={"str"}>
+  Payload field holding a copy of the vector, left out of the `.json`.
+</ResponseField>
+<ResponseField name="search_limit" type={"int"} default={"10"}>
+  Results `search` returns when `--top-k` is not given.
+</ResponseField>
+<ResponseField name="max_rows" type={"int"} default={"1000"}>
+  Most points one folder listing scrolls; points past it are left out, and a group folder lists only the values those points carry.
+</ResponseField>
+<ResponseField name="embedding_model" type={"str"} default={"'sentence-transformers/all-MiniLM-L6-v2'"}>
+  Model the server embeds a `search` query with under `cloud_inference`; it must match the model the stored vectors came from.
+</ResponseField>
+<ResponseField name="cloud_inference" type={"bool"} default={"False"}>
+  Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query.
+</ResponseField>
+<ResponseField name="embed" type={"callable"} post={["secret"]}>
+  Async function that turns a `search` query into a vector in-process, `(text: str) -> list[float]`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qdrant end */}
 
-### Document and chunk lineage
+## Authentication
 
-Config fields use Qdrant's dotted nested-key syntax. For example, a LangChain-style
-point can be mounted by source document and named by page:
+A self-hosted Qdrant needs no key. Qdrant Cloud needs `api_key`; a read-only
+key, for the cluster or for the mounted collections, is enough to browse.
 
-```json
-{
-  "page_content": "Refunds are processed within 14 days…",
-  "metadata": {
-    "source": "s3://docs/policies/refund-2026.pdf",
-    "page": "004"
-  }
-}
+A filtered listing creates a keyword payload index for a `group_by` field only
+when Qdrant reports that one is required. A read-only key cannot create it, so
+index those fields first or use a key that manages the collection.
+
+## Layout
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      White/
+        3.json
+        3.txt
+  Women/
+    Tops/
+      Blue/
+        12.json
+        12.txt
 ```
+
+Each folder level filters on one `group_by` field, in order. Once every field
+is bound, the folder lists each point's files, named by point id, or
+`<name>__<id>` with `name_field`. Without `collection`, every collection is a
+top-level folder. A value holding `/` renders as `∕`, and a blank or dot-led
+value is led by `⁄`, so every value keeps its own folder that lists and opens.
+
+- `<id>.txt` is the `text_field` value, the text the vector was built from.
+- `<id>.json` is the full payload as compact JSON, without the vector and the
+  blob.
+- `<id>.<blob_ext>` is the raw bytes of `blob_field`, when it is set.
+
+```text
+$ cat /fashion/Men/Shoes/White/3.json
+{"gender":"Men","articleType":"Shoes","baseColour":"White","productDisplayName":"Nike Men White Running Sneakers","id":3}
+```
+
+## Behavior
+
+- **Read-only:** no command changes the collection.
+- **Nested fields:** fields take Qdrant's dotted keys. For LangChain-style
+  chunks, `group_by=["metadata.source"]`, `basename_fields=["metadata.source"]`,
+  `name_field="metadata.page"` and `text_field="page_content"` show page `004`
+  of `s3://docs/policies/refund-2026.pdf` as
+  `refund-2026.pdf/004__<point-id>.txt`.
+- **File names:** the point id stays in every name, so two equal labels never
+  collide. Only the name a listing shows opens: another label in front of the
+  same id reads as absent. A label that is not a string is written as compact
+  JSON (`true`, `1`, `1e-7`).
+- **Basenames:** `basename_fields` keeps only the last path or URL segment of a
+  value. Two values with one basename under the same parent are refused rather
+  than merged, and opening a basename folder checks every point of its parent,
+  so a second source past `max_rows` is refused rather than hidden. A name over
+  255 bytes is cut to fit and ends in `__` plus the md5 of the whole name.
+- **Listing cap:** one folder listing scrolls at most `max_rows` (1,000)
+  points; points past it are left out. Keep `group_by` to low-cardinality
+  fields on a large collection.
+
+### Semantic search
+
+The [`search` CLI](/python/cli/search) runs Qdrant's vector query. Register it
+on the workspace:
 
 ```python
-config = QdrantConfig(
-    collection="company_docs",
-    group_by=["metadata.source"],
-    basename_fields=["metadata.source"],
-    name_field="metadata.page",
-    text_field="page_content",
-)
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
 ```
 
-This produces `refund-2026.pdf/004__<point-id>.txt`. The readable prefix comes
-from `name_field`; the Qdrant point id remains as a stable suffix so duplicate
-page labels cannot collide and a direct read never depends on a warm listing
-cache. Only the stem the listing publishes opens: another label in front of
-the same id reads as absent. A label that is not a string spells as compact
-JSON (`true`, `1`, `1e-7`), the same in Python and TypeScript.
-`basename_fields` strips
-URL/path parents from the named `group_by` fields. Leave a field out to preserve its
-complete value in one path-safe segment: `/` renders as `∕`, and a blank or
-dot-led value is led by `⁄`, so every value has its own segment that lists and
-opens. A basename longer than 255
-bytes, which ext4 and APFS refuse, is cut to fit and ends in `__` plus the md5
-of the whole name, so two long leaves stay two directories. Basenames must be
-unique within their parent group; Mirage refuses an ambiguous listing instead
-of silently merging two source documents, and opening a basename directory
-checks every point of its parent group, so a second source past `max_rows` is
-refused rather than hidden.
+Each hit prints the point's `.txt` path, or its `.json` without `text_field`,
+with the similarity score, then the content:
+
+```text
+$ search "white running sneakers" /fashion
+/fashion/Men/Shoes/White/3.txt:0.7421
+Nike Men White Running Sneakers
+```
+
+`--top-k` defaults to `search_limit` (10). `--threshold` is the lowest score
+kept. `--method` takes only `semantic`.
+
+The query needs a vector. `embed`, an async `(text: str) -> list[float]`,
+builds it in-process, so a self-hosted Qdrant works with any model.
+Without it, `cloud_inference=True` sends the query text to the cluster, which
+must have inference enabled (Qdrant Cloud) and store vectors from the same
+`embedding_model`. With neither, `search` refuses the query. `embed` never
+lands in a snapshot, so a restored mount needs a fresh `QdrantVFS`.
+
+## Integration
+
+Qdrant answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `grep -r` and `rg`: one scroll per folder, as a listing does, picks the
+  `.json` and `.txt` files whose text holds the pattern's text in any case, for
+  ASCII text, and misses nothing. A point changed since the last listing is
+  still found. A blob, a `.json` or `.txt` over 8 KiB, and every file for a
+  text that is not ASCII are read as usual.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`.
 
 {/* generated: vfs-md qdrant start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `qdrant`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
-    - A Qdrant vector database, exposed as a filesystem.
-    - At the root each directory is a collection, unless config pins a
-      single collection.
-    - Inside a collection, directories are the configured group-by payload
-      fields; descending one narrows a filter.
-    - Each matching point appears as files named by its Qdrant point id:
-      `<id>.json` (the full payload), `<id>.txt` (the embedded source text)
-      when a text field is configured, and `<id>.<ext>` (raw blob bytes)
-      when a blob field is configured. The embedding vector is never shown.
-    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
-      usual.
+    - At the root each directory is a collection, unless config pins one.
+    - Inside a collection, directories are the group-by payload fields;
+      descending one narrows a filter.
+    - Each point is `<id>.json` (its payload), plus `<id>.txt` (source text)
+      and `<id>.<ext>` (blob bytes) when those fields are configured. The
+      vector is never shown.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -150,7 +243,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -177,17 +270,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 
     ### `/<path>`
 
-    - A Qdrant vector database, exposed as a filesystem.
-    - At the root each directory is a collection, unless config pins a
-      single collection.
-    - Inside a collection, directories are the configured group-by payload
-      fields; descending one narrows a filter.
-    - Each matching point appears as files named by its Qdrant point id:
-      `<id>.json` (the full payload), `<id>.txt` (the embedded source text)
-      when a text field is configured, and `<id>.<ext>` (raw blob bytes)
-      when a blob field is configured. The embedding vector is never shown.
-    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
-      usual.
+    - At the root each directory is a collection, unless config pins one.
+    - Inside a collection, directories are the group-by payload fields;
+      descending one narrows a filter.
+    - Each point is `<id>.json` (its payload), plus `<id>.txt` (source text)
+      and `<id>.<ext>` (blob bytes) when those fields are configured. The
+      vector is never shown.
 
     ## Supported Unix Commands for VFS
 
@@ -209,131 +297,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md qdrant end */}
-
-Every path is translated into a Qdrant query. Descending a folder adds one
-payload filter; the leaf level lists points.
-
-```text
-/                                  # list collections (omitted when `collection` is pinned)
-/<collection>/                     # distinct group_by[0] values
-  <v1>/                            # distinct group_by[1] where group_by[0]=v1
-    .../<vN>/                      # all group-by fields bound -> point files
-      <id>.json                    # full payload (the metadata)
-      <id>.txt                     # embedded source text (when text_field set)
-      <id>.<ext>                   # raw blob / image bytes (when blob_field set)
-```
-
-`<id>` is the Qdrant point id. When `name_field` is set, leaf stems instead use
-`<name>__<id>`. When `collection` is set the collection level is elided, so the
-mount root is that collection:
-
-```text
-/fashion/
-  Men/
-    Shoes/
-      White/
-        3.json
-        3.txt
-        3.jpg
-```
-
-### Point files
-
-A point is shown as its underlying data in its original format, never as the
-embedding vector:
-
-- `<id>.txt` is the embedded source text (the `text_field` value), exactly what
-  the vector was built from.
-- `<id>.json` is the full payload as compact JSON (the metadata), with the vector
-  and the raw blob omitted.
-- `<id>.<ext>` is the raw blob bytes when `blob_field` is configured.
-
-```text
-$ cat /fashion/Men/Shoes/White/3.txt
-Nike Men White Running Sneakers
-
-$ cat /fashion/Men/Shoes/White/3.json
-{"gender":"Men","articleType":"Shoes","baseColour":"White","productDisplayName":"Nike Men White Running Sneakers","id":3}
-```
-
-## Semantic search
-
-Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
-workspace:
-
-```python
-from mirage.commands.cli.builtin.search import SEARCH
-
-ws.register_cli("search", SEARCH)
-```
-
-It returns each ranked point as its **canonical
-content path** (the `.txt`, or `.json` when no `text_field` is set)
-annotated with the similarity score, followed by the content:
-
-```text
-$ search "white running sneakers" /fashion
-/fashion/Men/Shoes/White/3.txt:0.7421
-Nike Men White Running Sneakers
-```
-
-Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
-`--method semantic` (the only supported method; `grep`/`rg` stay lexical).
-
-### Search embedding
-
-`search` needs a vector for the query, and the config decides where it comes
-from. With `embed` set, an async `(text: str) -> list[float]` the caller brings,
-the query is vectorized in-process, so a self-hosted Qdrant works and mirage
-depends on no model runtime; `examples/python/vfs/qdrant/qdrant_vfs.py` feeds it
-a dependency-free bag of words, and any model that returns a vector plugs in the
-same way. Without it, `cloud_inference=True` sends the query text to the server,
-so the cluster must have inference enabled (Qdrant Cloud) and store vectors from
-the same `embedding_model` (default `sentence-transformers/all-MiniLM-L6-v2`).
-With neither, `search` refuses the query. The hook never lands in a snapshot: a
-restored mount asks for a fresh VFS.
-
-## Supported commands
-
-All commands delegate to Mirage's shared implementations.
-
-| Command         | Behaviour on a Qdrant mount                              |
-| --------------- | -------------------------------------------------------- |
-| `ls`            | list collections, payload folders, or point files        |
-| `cd`            | navigate (each level narrows the filter)                 |
-| `tree`          | render the folder hierarchy                              |
-| `cat`           | print a point's text/JSON, or dump raw blob/image bytes  |
-| `stat`          | directory vs file, blob size, image mime type            |
-| `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
-| `grep` / `rg`   | lexical search over the text/JSON files ([below](#integration)) |
-| `head` / `tail` | first/last lines of a file                               |
-| `wc`            | count lines/bytes of a file                              |
-
-## Integration
-
-What Qdrant answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Qdrant |
-| --- | --- |
-| `grep -r`, `rg` | The payload text the listing keeps, for ASCII text. It misses nothing. |
-
-A folder listing scrolls every point's payload anyway, so `grep -r` and `rg`
-scroll each folder once more, as a listing does, and read only the `.json` and
-`.txt` files whose text holds the pattern's text in any case. A point changed
-since the last listing is still found. A blob, a `.json` or `.txt` over 8 KiB,
-and every file for a text that is not ASCII are read as usual.
-
-## Access pattern
-
-The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
-read modes are:
-
-- **Browse** by payload folders: scroll filters on `group_by` fields, no embedding.
-- **Search** by meaning: the `search` CLI's `search "<query>" <path>` runs vector search and returns
-  canonical point paths.
-
-Folder listings are capped by `max_rows`. A filtered listing scrolls first and
-only creates keyword payload indexes for the `group_by` fields if Qdrant reports
-one is required, so already-indexed collections work under read-only keys. Keep
-`group_by` to low-cardinality fields for large collections.

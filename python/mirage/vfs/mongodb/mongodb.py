@@ -43,13 +43,10 @@ VFS_MD = """\
       documents.jsonl
 ```
 
-- Read `database.json` first to discover entities, and `schema.json`
-  before reading a large document stream.
-- `head`, `tail`, `wc`, `grep`, `rg` and `jq` understand
-  `documents.jsonl`; `grep` and `rg` fetch only the documents that may
-  match.
-- An unknown size displays as `-`; `wc -c` measures bytes and `wc -l`
-  counts documents on demand. These counts may scan the collection."""
+- Read `database.json` first, and `schema.json` before a large
+  `documents.jsonl`.
+- Sizes show as `-`; `wc -c` and `wc -l` count on demand and may scan
+  the collection."""
 
 
 class MongoDBVFS(BaseVFS):

@@ -1,69 +1,173 @@
 ---
 title: OCI Object Storage
 icon: /images/oracle-logo.svg
-description: Set up Oracle Cloud Infrastructure Object Storage credentials for the OCI VFS.
+description: Virtualize an Oracle Cloud Infrastructure Object Storage bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The OCI VFS needs:
+An OCI Object Storage bucket becomes a folder tree, with one file per
+object, reached through OCI's Amazon S3 Compatibility API.
 
-- an Object Storage bucket
-- your Object Storage namespace
-- your OCI region
-- a Customer Secret Key pair for the S3 Compatibility API
 
-### 1. Create a Bucket
 
-1. Open the OCI Console
-1. Go to `Storage` -> `Buckets`
-1. Choose the target compartment
-1. Click `Create bucket`
-1. Enter the bucket name, such as `mirage`
-1. Keep the storage tier as `Standard` unless you specifically want archive
+## Setup
 
-If you want MIRAGE data under a prefix like `data/`, create objects under that
-prefix inside the bucket. The prefix is not part of the bucket name.
+The OCI VFS needs a bucket, the tenancy's Object Storage namespace, the region
+and a Customer Secret Key pair.
 
-### 2. Get the Namespace
-
-1. Open the profile menu in the OCI Console
-1. Go to `Tenancy`
-1. Copy the Object Storage namespace string, such as `idsiqbdbcr4i`
-
-You can also fetch it with:
-
-```bash
-oci os ns get
-```
-
-### 3. Get S3-compatible Keys
-
-1. Open the profile menu
-1. Go to `User settings`
-1. Open `Customer secret keys`
-1. Click `Generate secret key`
-1. Copy both the `Access Key` and `Secret Key`
-
-Oracle only shows the secret once, so save it immediately.
-
-### 4. Find the Region
-
-Use the OCI Console region selector in the top-right. For example:
-
-- `us-ashburn-1`
-- `us-phoenix-1`
-- `eu-frankfurt-1`
-
-### 5. Set Environment Variables
+<AccordionGroup>
+  <Accordion title="Create the bucket, namespace and keys">
+    1. In the OCI Console, open **Storage** > **Buckets**, choose the compartment
+       and pick **Create bucket**, such as `mirage`. Keep the **Standard** tier
+       unless archive is wanted.
+    1. Open the **Profile** menu > **Tenancy** and copy the
+       **Object Storage namespace**, such as `idsiqbdbcr4i`, or run
+       `oci os ns get`.
+    1. Open the **Profile** menu > **User settings** > **Customer secret keys**
+       and pick **Generate secret key**. Copy the **Secret Key** right away:
+       Oracle shows it only once. Then copy the key's **Access Key** from the list.
+    1. Give the user's group policies such as
+       `Allow group <group> to read buckets in compartment <compartment>` and
+       `Allow group <group> to manage objects in compartment <compartment>`
+       (`read objects` for a read-only mount).
+    1. Read the region identifier from the region selector, such as
+       `us-ashburn-1`, `us-phoenix-1` or `eu-frankfurt-1`.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-OCI_BUCKET=mirage
-OCI_NAMESPACE=idsiqbdbcr4i
-OCI_REGION=us-ashburn-1
-OCI_ACCESS_KEY_ID=...
-OCI_SECRET_ACCESS_KEY=...
+export OCI_BUCKET=mirage
+export OCI_NAMESPACE=idsiqbdbcr4i
+export OCI_REGION=us-ashburn-1
+export OCI_ACCESS_KEY_ID=...
+export OCI_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [OCI Object Storage (Python)](/python/vfs/oci) and [OCI Object Storage (TypeScript)](/typescript/setup/oci).
+- The namespace and region build the endpoint
+  `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com`,
+  addressed path-style.
+- A user holds at most two Customer Secret Keys.
+- A prefix such as `data/` is not part of the bucket name; set `key_prefix` to
+  mount it.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /oci:
+        vfs: oci
+        mode: read
+        config:
+          bucket: ${OCI_BUCKET}
+          namespace: ${OCI_NAMESPACE}
+          region: ${OCI_REGION}
+          access_key_id: ${OCI_ACCESS_KEY_ID}
+          secret_access_key: ${OCI_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id oci
+    mirage shell -w oci -c 'ls /oci'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.oci import OCIConfig, OCIVFS
+
+    config = OCIConfig(
+        bucket=os.environ["OCI_BUCKET"],
+        namespace=os.environ["OCI_NAMESPACE"],
+        region=os.environ["OCI_REGION"],
+        access_key_id=os.environ["OCI_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/oci": OCIVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /oci")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/oci': new OCIVFS({
+          bucket: process.env.OCI_BUCKET!,
+          namespace: process.env.OCI_NAMESPACE!,
+          region: process.env.OCI_REGION!,
+          accessKeyId: process.env.OCI_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.OCI_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /oci')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/oci/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /oci -type f
+/oci/data/events.jsonl
+/oci/data/users.parquet
+/oci/reports/2026-11/metrics.csv
+/oci/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /oci/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /oci/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/oci">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/oci">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

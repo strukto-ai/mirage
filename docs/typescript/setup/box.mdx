@@ -1,285 +1,191 @@
 ---
 title: Box
+description: Virtualize a Box account or folder from Node or the browser.
 icon: /images/box-logo.svg
-description: Mount Box as a MIRAGE VFS from Node or the browser via OAuth2.
 ---
 
-Mirage ships `BoxVFS` in **two runtimes**:
+`BoxVFS` mounts a Box account, or one folder of it: every item keeps its real
+name and raw bytes, and folders stay folders. Tokens and apps are set up on
+the [Box page](/home/setup/box).
 
-- `@struktoai/mirage-node`, uses `client_id` + `client_secret` + refresh token (rotated on each use)
-- `@struktoai/mirage-browser`, supports the same refresh token via PKCE (no client secret in the bundle)
-
-Both runtimes hit the same [Box v2 API](https://developer.box.com/reference/) endpoints
-(`/folders/{id}/items`, `/files/{id}/content`, `/search`, plus multipart upload, folder
-create, delete, rename/move, and copy for writes). Credentials are obtained the same way
-in both runtimes, see [Box Credentials](/home/setup/box).
-
-Both `READ` and `WRITE` modes are supported (mount with `{ mode: MountMode.WRITE }` to
-enable `tee`/`cp`/`mv`/`rm`/`mkdir`/`touch`). Pass `rootFolderId` to mount a single Box
-folder as the workspace root instead of the whole account; folder ids are stable across
-renames and moves. The Python package ships the same backend, see
-[Box (Python)](/python/vfs/box).
-
-## Quick start: developer token
-
-For exploration, skip the OAuth flow and use a developer token (one-button-click in the Box
-app console, 60-minute lifetime). The `BoxVFS` accepts an `accessToken` field that
-short-circuits the refresh logic:
-
-```ts
-import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
-
-const box = new BoxVFS({
-  accessToken: process.env.BOX_DEVELOPER_TOKEN!,
-})
-const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-await ws.shell('ls /box/')
-```
-
-When the token expires (Box 401s with `invalid_token`), regenerate it in the console and
-re-run. See [Box Credentials -> Quick Start](/home/setup/box#quick-start-developer-token-60-minutes-no-oauth).
-
-## Service account (client credentials, no refresh token)
-
-For headless server auth, skip OAuth and refresh tokens entirely. Create a Box app with the
-**Server Authentication (Client Credentials Grant)** method, authorize it once in the Box
-admin console (**Apps -> Custom Apps Manager**), and pass the enterprise ID:
-
-```ts
-const box = new BoxVFS({
-  clientId: process.env.BOX_CLIENT_ID!,
-  clientSecret: process.env.BOX_CLIENT_SECRET!,
-  enterpriseId: process.env.BOX_ENTERPRISE_ID!,
-})
-```
-
-Tokens are minted for the app's **service account** and re-fetched automatically on expiry;
-there is no refresh token to rotate or persist.
-
-<Warning>
-The service account is a separate Box user with its own (initially empty) root folder. To see
-your content, share folders with the service account's email address, shown under the app's
-**General Settings** in the developer console.
-</Warning>
-
-## Node (server-side, long-running)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
 
+## Configure
+
 ```ts
-import fs from 'node:fs/promises'
 import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const box = new BoxVFS({
   clientId: process.env.BOX_CLIENT_ID!,
   clientSecret: process.env.BOX_CLIENT_SECRET!,
   refreshToken: process.env.BOX_REFRESH_TOKEN!,
-  // Box rotates the refresh token; persist the new one if you want to survive restarts.
-  onRefreshTokenRotated: async (next) => {
-    await fs.writeFile('.box-refresh', next, 'utf-8')
-  },
 })
+const ws = new Workspace({ '/box': box }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-const res = await ws.shell('ls /box/')
-console.log(res.stdoutText)
+const result = await ws.shell('ls /box && grep -rlw report /box/Contracts')
+console.log(result.stdoutText)
 ```
 
-The `BoxTokenManager` caches the access token in memory (5-minute safety buffer before expiry)
-and rotates the refresh token on every refresh. Without `onRefreshTokenRotated`, the rotation
-is in-memory only and a process restart needs a fresh refresh token.
+`rootFolderId` mounts one folder instead of the whole account. To try the
+mount quickly, pass only `accessToken` with a
+[developer token](/home/setup/box#quick-start-developer-token-60-minutes-no-oauth).
 
-### Config
+### Fields
 
 {/* generated: config-table box start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>rootFolderId</code><br />default `'0'` | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root. |
-| <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials). |
-| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />secret | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />secret | OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`. |
-| <code style={{ whiteSpace: 'nowrap' }}>enterpriseId</code> | Box enterprise ID for the client-credentials grant. With `clientId` and `clientSecret`, tokens are minted for the app's service account and no refresh token is involved. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />secret | Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`. |
-| <code style={{ whiteSpace: 'nowrap' }}>onRefreshTokenRotated</code><br />secret | Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use. |
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts.
+</ResponseField>
+<ResponseField name="rootFolderId" type={"string"} default={"'0'"}>
+  Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root.
+</ResponseField>
+<ResponseField name="clientId" type={"string"}>
+  Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials).
+</ResponseField>
+<ResponseField name="clientSecret" type={"string"} post={["secret"]}>
+  Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it.
+</ResponseField>
+<ResponseField name="refreshToken" type={"string"} post={["secret"]}>
+  OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`.
+</ResponseField>
+<ResponseField name="enterpriseId" type={"string"}>
+  Box enterprise ID for the client-credentials grant. With `clientId` and `clientSecret`, tokens are minted for the app's service account and no refresh token is involved.
+</ResponseField>
+<ResponseField name="accessToken" type={"string"} post={["secret"]}>
+  Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`.
+</ResponseField>
+<ResponseField name="refreshFn" type={"object"} post={["secret"]}>
+  Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`.
+</ResponseField>
+<ResponseField name="onRefreshTokenRotated" type={"object"} post={["secret"]}>
+  Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table box end */}
 
-## Browser (PKCE, no client secret)
+## Authentication
+
+Set one of these credential sets:
+
+1. `accessToken`: a developer token, used as is. It lasts 60 minutes, cannot
+   be renewed by code, and wins over every other credential.
+2. `clientId` and `refreshToken`, with `clientSecret` unless the app is a
+   PKCE client: OAuth for a user. Box rotates the refresh token on every
+   refresh and the old one stops working after its first use, so pass
+   `onRefreshTokenRotated`, a function given each new token, to
+   persist it across restarts.
+3. `clientId`, `clientSecret` and `enterpriseId`: client credentials for
+   the app's service account, fetched again on expiry with no refresh token.
+
+Access tokens are renewed 5 minutes before they expire. A service account
+starts with an empty root: share folders with its email address to see them.
+
+The app needs the **Read all files and folders stored in Box** scope, and
+**Write all files and folders stored in Box** for a `write` mount. In an
+enterprise, a Box admin may have to enable the app first; until then Box
+answers `403 access_denied`.
+
+## Layout
+
+```text
+/box/
+  Contracts/
+    2026_MSA.pdf
+  Roadmap.gdoc
+  Team Notes.boxnote
+  data.csv
+```
+
+Box addresses items by numeric ID, and the account root is folder `0`. The
+mount resolves each path one folder level at a time, so the first access to a
+nested folder costs one request per level, and keeps the result.
+
+## Behavior
+
+- **Folder root:** `rootFolderId` mounts one folder, its ID taken from the
+  web URL (`app.box.com/folder/<id>`). Unlike a path, it survives renames and
+  moves. Paths outside it are unreachable.
+- **Box files:** `.boxnote` and `.boxcanvas` come back as the JSON Box
+  stores, so `cat notes.boxnote | jq .` works. `.gdoc`, `.gsheet` and
+  `.gslides` come back as the Office zips Box stores (`docx`, `xlsx`,
+  `pptx`). Mirage does not convert them; for an editable view of Google
+  files, mount [Google Drive](/typescript/setup/gdrive) instead.
+- **`read: fresh`:** a cached file is checked against the SHA-1 Box keeps,
+  with one request. A file Box reports without a SHA-1 cannot be checked, so
+  each fresh read downloads it again. Listings are fetched again once per
+  command, since a folder's version does not change with its children.
+
+## Browser
+
+`@struktoai/mirage-browser` exports the same `BoxVFS`. It signs in with PKCE,
+so the page holds the client ID and a refresh token but no client secret.
 
 ```bash
-pnpm add @struktoai/mirage-browser
+npm install @struktoai/mirage-browser
 ```
 
 ```ts
 import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-// Refresh token obtained via the PKCE flow, see examples/browser/vfs/box/box_pkce.ts.
 const box = new BoxVFS({
   clientId: import.meta.env.VITE_BOX_CLIENT_ID,
   refreshToken: localStorage.getItem('box-refresh')!,
   onRefreshTokenRotated: (next) => localStorage.setItem('box-refresh', next),
 })
-
 const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-await ws.shell('ls /box/')
 ```
 
-Box requires the origin to be allowlisted on the app's **Allowed Origins** config (see
-[setup](/home/setup/box#cors-notes)). The bundled
-[`examples/browser/vfs/box/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/box/box_pkce.ts)
-runs the full PKCE dance and persists the rotated refresh token to `localStorage`.
+- The page's origin must be listed in the app's CORS domains, matched
+  exactly; see [CORS notes](/home/setup/box#cors-notes).
+- Save each rotated refresh token, as above, so a reload needs no new
+  sign-in.
+- [`examples/browser/vfs/box/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/box/box_pkce.ts)
+  runs the whole PKCE sign-in.
 
-## VFS mode (`patchNodeFs`)
+## Integration
 
-```ts
-import { createRequire } from 'node:module'
-import { BoxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
+Box answers these commands through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
 
-const require = createRequire(import.meta.url)
-const fs = require('fs') as typeof import('fs')
-
-const box = new BoxVFS({ accessToken: process.env.BOX_DEVELOPER_TOKEN! })
-
-const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-const restore = patchNodeFs(ws)
-
-const entries = await fs.promises.readdir('/box/')
-const stat = await fs.promises.stat('/box/Documents')
-const bytes = await fs.promises.readFile('/box/Documents/example.json')
-
-restore()
-```
-
-The async forms (`fs.promises.*` and the callbacks) are routed; a sync form like `fs.statSync` refuses a mounted path.
-
-## FUSE mode
-
-```ts
-import { BoxVFS, Mount, MountBackend, MountMode, Workspace } from '@struktoai/mirage-node'
-
-const box = new BoxVFS({ accessToken: process.env.BOX_DEVELOPER_TOKEN! })
-
-const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
-await ws.fuseReady()
-const mp = ws.fuseMountpoint
-// The box subtree is exposed at the mountpoint root, so ${mp}/ is a real path:
-//   ls ${mp}/
-//   find ${mp} -type f
-//   cat ${mp}/example.json | jq .
-await ws.close()
-```
-
-Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux.
-
-## Path → ID resolution
-
-Box uses numeric folder/file IDs internally (root folder is id `0`). Mirage caches the path → ID
-mapping in the mount's index store (RAM unless an `index:` is configured). The first time you `ls /box/foo/bar/`,
-it walks the tree top-down (one API call per level) and caches each entry's ID. Subsequent reads
-of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
-
-With no `index:` configured, listings live for the mount's `ttl` (600 s by default), at most 24 hours; a configured `index:` uses its own `ttl`, still capped by the mount's `ttl:`. To force re-resolution, unmount the prefix and mount a new `BoxVFS` there.
-
-## Writes
-
-A write records the `sha1` its upload reply names, so a `fresh` read
-right after a `tee` or `sed -i` downloads nothing.
-
-## Conditional writes
-
-A rewrite that observes a missing file requires atomic create-only support,
-which this backend does not currently enable. Appending to a missing file
-therefore returns an unsupported-operation error under either write policy.
-An intentional write with `>` can create the file, and subsequent appends to
-that existing file retain the selected policy.
-
-A Box mount accepts `write: conditional`. A
-write or a file delete compares the `sha1` mirage holds with the one the
-folder listing it walks anyway shows, and refuses a file changed since it
-was read before sending anything; the request then carries the file's
-`etag` as `If-Match`, so Box refuses (412) a change that lands in between.
-A conditional write costs no request more than a plain one. `rm -r` walks
-the folder file by file, and a `mv` within the mount is Box's own move,
-which is not refused when its source changed (a `mv` to another mount is a
-copy and a conditioned delete, so there a changed source stays and `mv`
-reports the failed removal).
-
-## Reads under `fresh`
-
-A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
-folder listing and `GET /files/{id}` both carry; a download names no version,
-so a whole read stamps the listed `sha1` only when the downloaded bytes hash
-to it, and a ranged read stamps nothing. On a
-`write: conditional` mount a whole read stamps
-the `sha1` of the bytes it downloaded, so a listing another client has since
-outdated cannot leave the next write without the version the agent read. `modified_at` is never the token:
-two same-size edits in one second share it.
-
-Checking a cached file costs one request, `GET /files/{id}` by the id the
-mount last listed, while the mount still holds that file's listing row. The
-answer is trusted only when Box places the same active file at the same path
-from the mount root; a file that was moved, renamed, trashed or recreated
-falls back to listing each folder from the mount root, one listing per level
-(up to two per level when the file is gone). When that fallback confirms
-byte-identical content, the built-in RAM and Redis indexes retain the newly
-resolved file row if the original hint is still current. A later check then
-uses the recovered id without refreshing the parent listing. Custom indexes
-must implement `replaceIfUnchanged` to retain this row; otherwise later checks
-repeat the fallback walk. A persistent 403
-still requires the failed point request and a listing walk on each check.
-Any stale, unknown or gone verdict on the mount
-drops its cached listings, so the checks after one walk until a cold read or
-an `ls` lists the folders again. A file Box reports without a `sha1` cannot
-be verified: each fresh read of it downloads it again and drops the mount's
-cached listings.
-
-A folder's `etag` does not move when its children change, so under `fresh`
-listings are re-fetched once per command. Repeated uses within that command
-share the result; outside commands, the existing one-second listing trust
-window applies. Before fetching a nested listing, mirage resolves its folder through current
-parent listings up to the configured mount root. A folder moved away and
-replaced under the same name is therefore resolved to the replacement on
-the next fresh command. This costs one listing per ancestor level; a warm
-file check still uses one metadata request.
-
-## Box-native file types
-
-Every Box item is served as its **raw bytes**, keeping its real name (no `.json` suffix).
-Box has no API to edit these formats from a structured payload, so Mirage does not render
-them, it hands back exactly what Box stores:
-
-- `.boxnote` / `.boxcanvas`, Box's native Notes and Canvas, stored as ProseMirror-style
-  JSON. They are text, so `cat foo.boxnote | jq .` works if you want to poke at the structure.
-- `.gdoc` / `.gsheet` / `.gslides`, Box's V2 Google-format files, stored as Office Open XML
-  zips (`.docx` / `.xlsx` / `.pptx`). These are opaque binary, like any other Office document
-  on a Mirage mount.
-
-For a rich, editable view of Google-format documents, mount them through
-[Google Drive](/home/setup/google) with Google credentials instead, the `gws docs ...`
-commands operate on Google file IDs and do not apply to Box.
+- `grep -rw` and `rg -w`: Box search names the files to read, for whole
+  words. Every file is read when the search fails, reaches its 10,000-match
+  limit or finds nothing, or when the searched path is not a folder.
+  [Search](/home/integration/search) lists how each option uses it. Box
+  searches the text it extracted, not the bytes, and indexes a write some
+  time after it lands, so it can miss Office files, PDFs, archives, the end
+  of a large file, a word Box splits differently (`foo.bar`) and recent
+  writes. `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
+- `grep -r` and `rg` without `-w`: every file is read.
+- `sha1sum`: the SHA-1 Box keeps, asked live.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md box start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `box`, write |
+    | `/<path>` | `box`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -292,13 +198,11 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
         <file>             # PDFs, images and the rest: raw bytes
     ```
 
-    - Every item is served as its raw bytes; pipe the JSON ones to `jq`.
-    - This is a remote mount: prefer targeted reads over full scans.
-    - Box names folders by numeric id (the root is `0`). The path-to-id
-      mapping is cached, so a nested directory costs one API call per level
-      on first access. `ls` the parent before constructing a path.
+    - Pipe `.boxnote` and `.boxcanvas` files to `jq`.
+    - Each path level resolves to a Box id with one API call on first
+      access; `ls` the parent before building a path.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -306,7 +210,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `box` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -327,7 +231,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `box`, write |
+    | `/<path>` | `box`, `<mode>` |
 
     ## VFS Layout
 
@@ -344,11 +248,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
         <file>             # PDFs, images and the rest: raw bytes
     ```
 
-    - Every item is served as its raw bytes; pipe the JSON ones to `jq`.
-    - This is a remote mount: prefer targeted reads over full scans.
-    - Box names folders by numeric id (the root is `0`). The path-to-id
-      mapping is cached, so a nested directory costs one API call per level
-      on first access. `ls` the parent before constructing a path.
+    - Pipe `.boxnote` and `.boxcanvas` files to `jq`.
+    - Each path level resolves to a Box id with one API call on first
+      access; `ls` the parent before building a path.
 
     ## Supported Unix Commands for VFS
 
@@ -370,35 +272,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md box end */}
-
-## Integration
-
-What Box answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Box |
-| --- | --- |
-| `grep -r`, `rg` | Box search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Box splits differently (`foo.bar`) and recent writes. |
-| `sha1sum` | The SHA-1 Box keeps, asked live |
-
-The [Python Box docs](/python/vfs/box#integration) list when each search answers and what it can miss.
-
-## Available commands
-
-`BoxVFS` ships the same shell command set as `GoogleDriveVFS` and `DropboxVFS`:
-
-- **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
-  `realpath`, `basename`, `dirname`
-- **Writes** (in `WRITE` mode): `tee`, `cp`, `mv`, `rm` (`-r`), `mkdir` (`-p`), `touch`,
-  `truncate`
-- **Search/text**: `grep`, `rg`, `awk`, `sed`, `sort`, `uniq`, `cut`, `diff`, `cmp`, `jq`
-- **Encoding**: `base64`
-
-## Examples
-
-End-to-end runnable scripts are in
-[`examples/typescript/vfs/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/box):
-
-- [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
-- [`box_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
-- [`box_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box_fuse.ts), FUSE mount with shell access in another terminal

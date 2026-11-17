@@ -1,109 +1,173 @@
 ---
 title: SharePoint
-description: Mount Microsoft SharePoint Online sites and document libraries as a Mirage filesystem with multi-site discovery, versioning, and shell commands.
+description: Virtualize SharePoint Online sites and document libraries from Python.
 icon: microsoft
 ---
 
-The SharePoint VFS mounts Microsoft SharePoint Online at some prefix such
-as `/sharepoint/`. Unlike the single-drive OneDrive VFS, it exposes the
-full enterprise topology: many sites, each with many document libraries. Site
-and drive names are resolved to Microsoft Graph ids automatically, so you mount
-once and browse everything you have access to. All operations involve network
-I/O to Microsoft Graph. Files are served as raw bytes (no Office filetype
-conversion). Uses aiohttp for async Graph access.
+`SharePointVFS` mounts SharePoint Online: every site the token can reach
+becomes a folder of its document libraries, each holding its real files as raw
+bytes. Site and library names are resolved to Microsoft Graph IDs by the
+mount, so no drive ID is needed. Tokens are set up on the
+[SharePoint page](/home/setup/sharepoint).
 
-For credential setup (tokens, app vs delegated auth, permissions), see the
-[SharePoint Setup](/home/setup/sharepoint) guide.
+## Install
 
-## Config
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
 
 from mirage import MountMode, Workspace
-from mirage.vfs.sharepoint import SharePointVFS, SharePointConfig
+from mirage.vfs.sharepoint import SharePointConfig, SharePointVFS
 
 config = SharePointConfig(
     access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
-    # Optional:
-    # tenant_host="contoso.sharepoint.com",  # restrict to one tenant host
-    # site_filter="Engineering",             # narrow the site search
-    # site="Engineering",                    # mount one site
-    # drive="Documents",                     # mount one library
-    # key_prefix="team/reports",             # mount one folder subtree
-    # graph_base_url="https://graph.microsoft.us/v1.0",  # non-worldwide root
-    # timeout=30,
-    # max_retries=5,
+    tenant_host="contoso.sharepoint.com",
 )
+ws = Workspace({"/sharepoint": SharePointVFS(config)}, mode=MountMode.WRITE)
 
-vfs = SharePointVFS(config)
-ws = Workspace({"/sharepoint": vfs}, mode=MountMode.WRITE)
+result = await ws.shell("ls /sharepoint && ls /sharepoint/Engineering")
+print(await result.stdout_str())
 ```
 
-`SharePointVFS(config)` takes a `SharePointConfig` object with a Microsoft
-Graph bearer token. No drive id is required: the VFS discovers sites and
-drives for you. Both `READ` and `WRITE` modes are supported.
+`tenant_host` and `site_filter` narrow the sites listed. `site` and `drive`
+together mount one library as the root, and `key_prefix` one folder inside it.
 
-### Config Reference
+### Fields
 
 {/* generated: config-table sharepoint start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />required, secret | Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`. |
-| <code style={{ whiteSpace: 'nowrap' }}>tenant_host</code> | SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it. |
-| <code style={{ whiteSpace: 'nowrap' }}>graph_base_url</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_retries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
-| <code style={{ whiteSpace: 'nowrap' }}>site_filter</code> | Search term passed to Graph's `/sites?search=` to choose which sites the mount lists. Unset searches `*`. |
-| <code style={{ whiteSpace: 'nowrap' }}>site</code> | Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`. |
-| <code style={{ whiteSpace: 'nowrap' }}>drive</code> | Document library in `site` that the mount uses as its root; takes effect only with `site` set. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected. |
+<ResponseField name="access_token" type={"str | callable"} required post={["secret"]}>
+  Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`.
+</ResponseField>
+<ResponseField name="tenant_host" type={"str"}>
+  SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it.
+</ResponseField>
+<ResponseField name="graph_base_url" type={"str"}>
+  Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`.
+</ResponseField>
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed.
+</ResponseField>
+<ResponseField name="max_retries" type={"int"} default={"5"}>
+  Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds.
+</ResponseField>
+<ResponseField name="site_filter" type={"str"}>
+  Search term passed to Graph's `/sites?search=` to choose which sites the mount lists. Unset searches `*`.
+</ResponseField>
+<ResponseField name="site" type={"str"}>
+  Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`.
+</ResponseField>
+<ResponseField name="drive" type={"str"}>
+  Document library in `site` that the mount uses as its root; takes effect only with `site` set.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table sharepoint end */}
 
-`access_token` accepts either a static string or a `Callable[[], str]` provider.
-With a callable, the VFS refreshes the token on `401`, so long-running
-mounts survive token expiry.
+## Authentication
 
-`graph_base_url` selects the Graph deployment, and means the same here as for
-OneDrive: see [The service root](/python/vfs/onedrive#the-service-root).
+`access_token` is a Microsoft Graph bearer token, or a callable that returns
+one. A callable is called for each request and again after a `401`, so a
+long-running mount outlives one token; a plain string lasts about an hour.
+
+An app-only token works, since the mount reaches sites through `/sites` and
+needs no signed-in user. Reads need `Sites.Read.All`; writes need
+`Sites.ReadWrite.All`. A delegated token reaches only what its user can.
+
+## Layout
+
+```text
+/sharepoint/
+  Engineering/
+    Documents/
+      specs/
+        api.md
+    Design Reviews/
+  Marketing/
+    Documents/
+```
+
+Paths read `/<site>/<library>/<path>`, with the site's display name. The first
+two levels are sites and libraries; everything below is a real driveItem.
+`/sharepoint/Engineering/Documents/specs/api.md` is the driveItem
+`/root:/specs/api.md` in the `Documents` library of the `Engineering` site.
+
+With `site="Engineering"` and `drive="Documents"`, those two levels disappear.
+Adding `key_prefix="team/reports"` makes that folder the root, so
+`/sharepoint/q1.csv` is the driveItem `/root:/team/reports/q1.csv`.
+
+## Behavior
+
+- **Scoping:** `drive` takes effect only with `site` set, and `key_prefix`
+  only with both. `..` segments in `key_prefix` are rejected.
+- **Service root:** mounts address `https://graph.microsoft.com/v1.0` unless
+  `graph_base_url` names another root, given in full with its version
+  segment, such as `https://graph.microsoft.us/v1.0`. A token minted for one
+  sovereign cloud is rejected by the others, so a mount on the wrong root
+  fails outright.
+- **Raw bytes:** Office files stay as they are stored, with no conversion.
+- **Snapshots:** a snapshot pins each file the agent read to its version, and
+  replaying it reads those exact bytes. A file the agent wrote carries no
+  version and is not checked on replay. Old versions read only while the
+  library keeps them; an admin can cap or turn off versioning.
+- **One drive instead:** for a single drive, such as a personal OneDrive or
+  one known library, use [OneDrive](/python/vfs/onedrive).
+
+## Integration
+
+SharePoint answers these commands through its own API, so fewer files are
+read. See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Microsoft Graph search names the files to read,
+  for whole words, within one document library; a directory above a library
+  is read in full. Every file is read when the search fails or finds nothing.
+  Graph searches the text it extracted, not the bytes, and indexes a write
+  some time after it lands, so it can miss Office files, PDFs, archives, the
+  end of a large file, a word Graph splits differently (`foo.bar`) and recent
+  writes. `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
+- `grep -r` and `rg` without `-w`: every file is read.
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with SharePoint mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md sharepoint start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `sharepoint`, write |
+    | `/<path>` | `sharepoint`, `<mode>` |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
-      <site>/             # every SharePoint site you can reach
+      <site>/             # every SharePoint site the account reaches
         <library>/        # its document libraries (drives)
           <path>          # the drive's files and folders
     ```
 
-    - SharePoint document libraries, discovered across sites and drives. An
-      unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`:
-      `ls /` lists the sites, `ls /site/` a site's libraries, and
-      `ls /site/lib/...` a drive's files and folders.
-    - This is a remote mount: prefer targeted reads (`grep`, `head`) over
-      full scans, and pipe a large file to `head` or `tail` rather than
-      `cat` it whole.
-    - File versions are retained; a snapshot pins and reads prior
-      versions.
+    - An unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -111,7 +175,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SharePoint mounted at `/<pa
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `sharepoint` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -132,7 +196,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SharePoint mounted at `/<pa
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `sharepoint`, write |
+    | `/<path>` | `sharepoint`, `<mode>` |
 
     ## VFS Layout
 
@@ -140,20 +204,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SharePoint mounted at `/<pa
 
     ```text
     /<path>
-      <site>/             # every SharePoint site you can reach
+      <site>/             # every SharePoint site the account reaches
         <library>/        # its document libraries (drives)
           <path>          # the drive's files and folders
     ```
 
-    - SharePoint document libraries, discovered across sites and drives. An
-      unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`:
-      `ls /` lists the sites, `ls /site/` a site's libraries, and
-      `ls /site/lib/...` a drive's files and folders.
-    - This is a remote mount: prefer targeted reads (`grep`, `head`) over
-      full scans, and pipe a large file to `head` or `tail` rather than
-      `cat` it whole.
-    - File versions are retained; a snapshot pins and reads prior
-      versions.
+    - An unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`.
 
     ## Supported Unix Commands for VFS
 
@@ -175,161 +231,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SharePoint mounted at `/<pa
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md sharepoint end */}
-
-SharePoint paths follow the structure `/{site}/{library}/{path}`. The first two
-levels are virtual (sites and drives), and everything below is a real Graph
-driveItem.
-
-- **Level 0** (`/sharepoint/`): lists all accessible sites
-- **Level 1** (`/sharepoint/{site}/`): lists document libraries (drives) in that site
-- **Level 2+** (`/sharepoint/{site}/{library}/...`): lists files and folders
-
-Path mapping: virtual `/sharepoint/Engineering/Documents/spec.md` resolves the
-site `Engineering` to a site id, the library `Documents` to a drive id, then
-reads the driveItem at `/root:/spec.md`.
-
-When `site` and `drive` are configured, those two namespace levels disappear.
-Adding `key_prefix="team/reports"` makes that folder the mount root, so virtual
-`/sharepoint/q1.csv` resolves to the driveItem at
-`/root:/team/reports/q1.csv`.
-
-## Versioning and Snapshots
-
-SharePoint keeps per-file version history. The VFS exposes it the same way
-the OneDrive and S3 backends do:
-
-- **Fingerprint** is the driveItem `cTag`, so normal reads and `stat` reflect
-  the current content without extra Graph calls.
-- **Snapshots** pin each file the agent read to its driveItem version id.
-  Replaying a snapshot reads `/versions/{id}/content`, giving the exact bytes
-  captured at snapshot time. A file the agent wrote carries no version and is
-  not checked on replay.
-
-## Cache
-
-The SharePoint VFS caches site, drive, and directory listings via
-`IndexCacheStore` to reduce repeated Graph calls during traversal.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from mirage import MountMode, Workspace
-from mirage.vfs.sharepoint import SharePointVFS, SharePointConfig
-
-config = SharePointConfig(access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"])
-vfs = SharePointVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/sharepoint/": vfs}, mode=MountMode.WRITE)
-
-    # list sites, then drives in the first site
-    r = await ws.shell("ls /sharepoint/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("ls /sharepoint/Engineering/")
-    print(await r.stdout_str())
-
-    await ws.shell(
-        "echo 'hello from mirage' > /sharepoint/Engineering/Documents/note.txt")
-
-    r = await ws.shell("cat /sharepoint/Engineering/Documents/note.txt")
-    print(await r.stdout_str())
-
-    r = await ws.shell("tree /sharepoint/Engineering/Documents/")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-Runnable versions live at `examples/python/vfs/sharepoint/sharepoint.py` (command
-matrix) and `examples/python/vfs/sharepoint/sharepoint_vfs.py` (an in-process
-`ws.shell()` run that writes a Markdown report).
-
-## Shell Commands
-
-The SharePoint VFS supports the full set of shell commands since it
-operates on real file content (text, binary, JSON, CSV, etc.). Large files
-benefit from range reads to avoid downloading entire items.
-
-### Read Commands
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `cat`           | Read file content                          |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type, modified) |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `nl`            | Number lines                               |
-| `du`            | Disk usage summary                         |
-| `file`          | Detect file type                           |
-| `strings`       | Extract printable strings from binary      |
-| `xxd`           | Hex dump                                   |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-
-### File Operations
-
-| Command | Notes                                 |
-| ------- | ------------------------------------- |
-| `cp`    | Copy files                            |
-| `mv`    | Move/rename files                     |
-| `rm`    | Remove files                          |
-| `mkdir` | Create directories                    |
-| `touch` | Create empty file or update timestamp |
-| `tee`   | Write stdin to file and stdout        |
-
-### Path Utilities
-
-| Command    | Notes                     |
-| ---------- | ------------------------- |
-| `basename` | Strip directory from path |
-| `dirname`  | Strip filename from path  |
-| `realpath` | Resolve path              |
-| `ls`       | List directory contents   |
-
-## Use Cases
-
-- **AI agents accessing org documents**: Mount enterprise SharePoint for agents to read and process files across many sites
-- **Multi-site discovery**: Browse every accessible site and library from a single mount, no drive ids to manage
-- **Versioned document workflows**: Snapshot and replay exact file states over time
-- **FUSE mounting**: Expose SharePoint through a virtual FUSE mount for external tools
-
-## Integration
-
-What SharePoint answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On SharePoint |
-| --- | --- |
-| `grep -r`, `rg` | Microsoft Graph search within one document library, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`) and recent writes. |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-`grep -rw` and
-`rg -w` read only the files Microsoft Graph search names, within one document
-library (a directory above one is read in full); every file is read when the
-search fails or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Graph searches the text
-it extracted, not the bytes `grep` reads, and indexes a write some time after
-it lands, so a file that holds the word can be left out: an office file, PDF
-or archive, the end of a large file, or a word Graph splits differently
-(`foo.bar`).
-
-## SharePoint vs OneDrive
-
-Both backends talk to Microsoft Graph driveItems and behave identically below
-the drive level. Choose by topology:
-
-- Use **[OneDrive](/python/vfs/onedrive)** for a single drive (personal
-  OneDrive, OneDrive for Business, or one targeted SharePoint library via
-  `drive_id` / `site_id`).
-- Use **SharePoint** for enterprise scenarios with many sites and libraries that
-  you want to discover and traverse without knowing drive ids up front.

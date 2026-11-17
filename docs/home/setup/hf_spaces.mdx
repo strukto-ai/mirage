@@ -1,29 +1,154 @@
 ---
 title: HF Spaces
 icon: /images/huggingface-logo.svg
-description: Set up Hugging Face Spaces credentials.
+description: Virtualize a Hugging Face Space repository as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Pick a Space Repo
+A Space repository becomes its file tree: the app code, README, Dockerfile and
+requirements, at one revision.
 
-Browse [huggingface.co/spaces](https://huggingface.co/spaces) and note the
-full `namespace/space-name` (e.g. `HuggingFaceBio/carbon-demo`).
+## Setup
 
-Public spaces need no token. Private spaces do.
-
-### 2. Create an Access Token (private only)
-
-1. Go to https://huggingface.co/settings/tokens
-2. Create a fine-grained token with **Read** access to the space
-
-### 3. Set Environment Variables
+Note the Space's full `namespace/space-name` from its URL on
+[huggingface.co/spaces](https://huggingface.co/spaces). A public Space needs
+no token. For a private one, create a token at
+[Access Tokens](https://huggingface.co/settings/tokens) with **New token**:
+a **Read** token, or a **Fine-grained** one with read access to that Space's
+repository.
 
 ```bash
-# .env.development
-HF_SPACE_REPO=HuggingFaceBio/carbon-demo
-HF_TOKEN=hf_...   # optional, public spaces work without it
+export HF_SPACE_REPO=HuggingFaceBio/carbon-demo
+export HF_TOKEN=hf_...
 ```
 
-For SDK guides, see [HF Spaces (Python)](/python/vfs/hf_spaces) and [HF Spaces (TypeScript)](/typescript/setup/hf_spaces).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /space:
+        vfs: hf_spaces
+        mode: read
+        config:
+          repo_id: ${HF_SPACE_REPO}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id space
+    mirage shell -w space -c 'ls /space'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.hf_spaces import HfSpacesConfig, HfSpacesVFS
+
+    config = HfSpacesConfig(
+        repo_id=os.environ["HF_SPACE_REPO"],
+        token=os.environ.get("HF_TOKEN"),
+    )
+    ws = Workspace({"/space": HfSpacesVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /space")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { HfSpacesVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/space': new HfSpacesVFS({
+          repoId: process.env.HF_SPACE_REPO!,
+          token: process.env.HF_TOKEN,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /space')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/space/
+  Dockerfile
+  README.md
+  app.py
+  requirements.txt
+  scripts/
+    precompute.py
+```
+
+- The tree mirrors the repository at `revision`, `main` when unset.
+- Add `token: ${HF_TOKEN}` to the YAML config for a private Space.
+- In TypeScript the class ships in `@struktoai/mirage-node`, not
+  `@struktoai/mirage-browser`.
+
+## Sample runs
+
+```bash
+$ ls /space
+Dockerfile
+README.md
+annotations
+app.py
+assets
+data
+demo.html
+img
+index.html
+llms.txt
+requirements.txt
+robots.txt
+scripts
+sitemap.xml
+social-banner.html
+social_reel.html
+```
+
+```bash
+$ head -n 8 /space/README.md
+---
+title: Carbon
+emoji: 🧬
+colorFrom: gray
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+```
+
+```bash
+$ head -n 3 /space/requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.27
+openai>=1.40
+```
+
+The mount is read-only: a Hub write is a commit, so `echo >`, `rm`, `cp` and
+`mv` are refused. Download, edit and upload as one commit with the
+[`hf`](/home/setup/cli/hf) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/hf_spaces">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/hf_spaces">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

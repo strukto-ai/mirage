@@ -1,23 +1,21 @@
 ---
 title: Scaleway
+description: Virtualize a Scaleway Object Storage bucket from Python.
 icon: /images/scaleway-logo.svg
-description: Mount a Scaleway Object Storage bucket via its S3-compatible API.
 ---
-The Scaleway VFS is a thin wrapper over the [S3 VFS](/python/vfs/s3).
-It maps a `ScalewayConfig` to an `S3Config` and reuses the exact same backend,
-commands, and behavior as S3, it just derives the right endpoint from `region`.
-Uses aioboto3 against Scaleway Object Storage's S3-compatible API.
 
-The endpoint is computed from `region` as `s3.<region>.scw.cloud`
-(e.g. `s3.fr-par.scw.cloud`). Pass `endpoint_url` to override.
+`ScalewayVFS` mounts one bucket: every object becomes a file and every `/` in
+a key a folder. It is the [S3 VFS](/python/vfs/s3) pointed at Scaleway's
+endpoint, so commands behave as they do on S3. Credentials are set up on the
+[Scaleway page](/home/setup/scaleway).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[s3]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -27,54 +25,123 @@ from mirage.vfs.scaleway import ScalewayConfig, ScalewayVFS
 
 config = ScalewayConfig(
     bucket=os.environ["SCW_BUCKET"],
-    region=os.environ.get("SCW_REGION", "fr-par"),
+    region=os.environ["SCW_REGION"],
     access_key_id=os.environ["SCW_ACCESS_KEY"],
     secret_access_key=os.environ["SCW_SECRET_KEY"],
-    # Optional:
-    # endpoint_url="https://s3.fr-par.scw.cloud",
-    # timeout=30,
-    # proxy="http://proxy:8080",
 )
-vfs = ScalewayVFS(config)
-ws = Workspace({"/data": vfs}, mode=MountMode.READ)
+ws = Workspace({"/scw": ScalewayVFS(config)}, mode=MountMode.WRITE)
+
+result = await ws.shell("ls /scw && find /scw -name '*.csv'")
+print(await result.stdout_str())
 ```
 
-Both `READ` and `WRITE` modes are supported.
+`region` also picks the endpoint, `https://s3.<region>.scw.cloud`;
+`endpoint_url` replaces it.
+A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table scaleway start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL that replaces the one the provider derives. |
-| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="bucket" type={"str"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="region" type={"str"} required>
+  Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set.
+</ResponseField>
+<ResponseField name="endpoint_url" type={"str"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+<ResponseField name="access_key_id" type={"str"} post={["secret"]}>
+  Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain.
+</ResponseField>
+<ResponseField name="secret_access_key" type={"str"} post={["secret"]}>
+  Secret access key paired with `access_key_id`.
+</ResponseField>
+<ResponseField name="session_token" type={"str"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="aws_profile" type={"str"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="path_style" type={"bool"} default={"False"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="proxy" type={"str"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table scaleway end */}
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+## Authentication
+
+Credentials come from the first of:
+
+1. `access_key_id` and `secret_access_key`, with `session_token` for temporary
+   credentials.
+2. `aws_profile`, a profile in `~/.aws/credentials`.
+3. The AWS credential chain: environment variables, then the instance or
+   container role.
+
+The API key's bearer needs `ObjectStorageReadOnly`, or
+`ObjectStorageFullAccess` for a write mount, on the bucket's Project. The
+key reaches Object Storage in its preferred Project only.
+An object the key may not read or change answers `Permission denied`.
+
+## Layout
+
+```text
+/scw/
+  README.md
+  logs/
+    app-2026-11-15.log
+    app-2026-11-16.log
+  reports/
+    2026-q3.csv
+    2026-q4.csv
+```
+
+`/scw/reports/2026-q3.csv` is the key `reports/2026-q3.csv`. Folders come
+from the `/` in keys.
+
+## Behavior
+
+- **Key prefix:** `key_prefix="users/42/"` mounts only that part of the bucket,
+  so `/scw/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+
+## Integration
+
+Scaleway answers these commands through its own API, so fewer objects are
+read. See [Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md scaleway start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -82,7 +149,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -103,7 +170,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -125,48 +192,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Scaleway mounted at `/<path
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md scaleway end */}
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.scaleway import ScalewayConfig, ScalewayVFS
-
-load_dotenv(".env.development")
-
-config = ScalewayConfig(
-    bucket=os.environ["SCW_BUCKET"],
-    region=os.environ.get("SCW_REGION", "fr-par"),
-    access_key_id=os.environ["SCW_ACCESS_KEY"],
-    secret_access_key=os.environ["SCW_SECRET_KEY"],
-)
-vfs = ScalewayVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/data/": vfs}, mode=MountMode.READ)
-
-    r = await ws.shell("ls /data/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("tree /data/")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Notes
-
-- Scaleway registers under its own `VFSName` and routes through the same `core/s3`
-  implementation, so the full S3 shell-command set applies. See the
-  [S3 VFS](/python/vfs/s3) for the complete command reference,
-  range reads, streaming, and the index cache fast path.
-- For credential setup, see [Scaleway Setup](/home/setup/scaleway).

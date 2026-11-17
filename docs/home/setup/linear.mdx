@@ -1,22 +1,137 @@
 ---
 title: Linear
 icon: /images/linear-logo.svg
-description: Set up a Linear personal API key for the Linear VFS.
+description: Virtualize Linear teams, issues, projects, cycles and documents as JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create a Personal API Key
+Every team the API key can reach becomes a folder of members, issues,
+projects, cycles and documents, one JSON file each, with an issue's comments
+as one JSONL file.
 
-1. Go to Settings -> Security & Access
-1. Create a new personal API key
-1. Copy the key
+## Setup
 
-### 2. Set Environment Variables
+Create a personal API key in Linear under **Settings**, **Account**,
+**Security & Access**, in the **Personal API keys** section. The **Read**
+permission is enough for the mount; the [`linear`](/home/setup/cli/linear) CLI
+needs **Write** or the create permissions to change issues. A key can also be
+limited to some teams. Admins can always create keys; members can when an
+admin allows it under **Administration**, **API**. Copy the key when it is
+shown.
 
 ```bash
-# .env.development
-LINEAR_API_KEY=lin_api_xxxx...
+export LINEAR_API_KEY=lin_api_...
 ```
 
-For SDK guides, see [Linear (Python)](/python/vfs/linear) and [Linear (TypeScript)](/typescript/setup/linear).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /linear:
+        vfs: linear
+        mode: read
+        config:
+          api_key: ${LINEAR_API_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id lin
+    mirage shell -w lin -c 'ls /linear/teams'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.linear import LinearConfig, LinearVFS
+
+    config = LinearConfig(api_key=os.environ["LINEAR_API_KEY"])
+    ws = Workspace({"/linear": LinearVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /linear/teams")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/linear': new LinearVFS({ apiKey: process.env.LINEAR_API_KEY! }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /linear/teams')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/linear/
+  teams/
+    ENG__Engineering__<team-id>/
+      team.json
+      members/
+        Alice_Chen__<user-id>.json
+      issues/
+        ENG-142__<issue-id>/
+          issue.json
+          comments.jsonl
+      projects/
+        Q4_Launch__<project-id>.json
+      cycles/
+        Cycle_12__<cycle-id>.json
+      documents/
+        Roadmap_2027__<document-id>.json
+```
+
+- Every name ends in `__<id>`; the readable part is sanitized, so `ls` the
+  parent instead of building it.
+- Files hold Mirage's normalized JSON with snake_case keys, not Linear's raw
+  GraphQL response.
+- `team_ids` limits the mount to some teams.
+
+## Sample runs
+
+```bash
+$ ls /linear/teams
+DES__Design__5b0e7c1a-3f2d-4e8b-9a61-0c4d2f7e8b13
+ENG__Engineering__9f3a2c71-8d4e-4b6a-a1f0-6e2d5c7b9a04
+```
+
+```bash
+$ ls /linear/teams/ENG__Engineering__9f3a2c71-8d4e-4b6a-a1f0-6e2d5c7b9a04/issues
+ENG-141__2c8e5f0a-7b1d-4c3e-9f62-a4d8b0e1c357
+ENG-142__7d1b4e9c-0a3f-4e52-8c6d-b9f2a5e7c018
+```
+
+```bash
+$ jq -r '.issue_key, .state_name, .assignee_name' /linear/teams/ENG__Engineering__9f3a2c71-8d4e-4b6a-a1f0-6e2d5c7b9a04/issues/ENG-142__7d1b4e9c-0a3f-4e52-8c6d-b9f2a5e7c018/issue.json
+ENG-142
+In Progress
+Alice Chen
+```
+
+The mount is read-only. Create, update, assign and comment on issues with the
+[`linear`](/home/setup/cli/linear) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/linear">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/linear">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

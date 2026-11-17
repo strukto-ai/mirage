@@ -1,22 +1,20 @@
 ---
 title: Mem0
 icon: /images/mem0.svg
-description: Mount a Mem0 memory scope as a read-only virtual filesystem.
+description: Virtualize a Mem0 memory scope from Python.
 ---
 
-The Mem0 VFS exposes the memories of a single scope — a `user_id`,
-`agent_id`, or `run_id` — as JSON files mounted at a prefix such as `/memory/`.
-Each memory is one file named `<memory_id>.json`.
+`Mem0VFS` mounts the memories of one Mem0 scope, a user, an agent or a run,
+read-only. Each memory is one `<memory_id>.json` file. The API key and the
+scope are set up on the [Mem0 page](/home/setup/mem0).
 
-For API key setup, see [Mem0 Setup](/home/setup/mem0).
-
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[mem0]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -26,53 +24,139 @@ from mirage.vfs.mem0 import Mem0Config, Mem0VFS
 
 config = Mem0Config(
     api_key=os.environ["MEM0_API_KEY"],
-    user_id=os.environ.get("MEM0_USER_ID"),
+    user_id=os.environ["MEM0_USER_ID"],
 )
-vfs = Mem0VFS(config=config)
-ws = Workspace({"/memory/": vfs}, mode=MountMode.READ)
+ws = Workspace({"/memory": Mem0VFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /memory && grep -rl allergic /memory")
+print(await result.stdout_str())
 ```
 
-The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so restored cache entries are served as saved and other reads reach the live backend. Set exactly one of
-`user_id`, `agent_id`, or `run_id` (see [Setup](/home/setup/mem0)).
+An agent or run scope sets `agent_id` or `run_id` instead of `user_id`. `host`
+(default `https://api.mem0.ai`) points at another Mem0 API host.
+
+### Fields
 
 {/* generated: config-table mem0 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Mem0 Platform API key. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
-| <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>agent_id</code> | Mount this agent's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>run_id</code> | Mount this run's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_page_size</code><br />default `100` | Memories fetched per request while listing the scope. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_search_limit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} required post={["secret"]}>
+  Mem0 Platform API key.
+</ResponseField>
+<ResponseField name="host" type={"str"} default={"'https://api.mem0.ai'"}>
+  Mem0 API base URL.
+</ResponseField>
+<ResponseField name="user_id" type={"str"}>
+  Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`.
+</ResponseField>
+<ResponseField name="agent_id" type={"str"}>
+  Mount this agent's memories. Set exactly one of `user_id`, `agent_id` and `run_id`.
+</ResponseField>
+<ResponseField name="run_id" type={"str"}>
+  Mount this run's memories. Set exactly one of `user_id`, `agent_id` and `run_id`.
+</ResponseField>
+<ResponseField name="default_page_size" type={"int"} default={"100"}>
+  Memories fetched per request while listing the scope.
+</ResponseField>
+<ResponseField name="default_search_limit" type={"int"} default={"10"}>
+  How many results `search` returns unless the line sets `top_k`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
+
+## Authentication
+
+The mount sends a Mem0 Platform API key, created on the dashboard's **API
+Keys** page; the organization and project come from the key. Exactly one of
+`user_id`, `agent_id` and `run_id` is set. A pair is refused: Mem0 splits a
+memory added with both into separate memories, so a combined filter matches
+nothing.
+
+## Layout
+
+```text
+/memory/
+  6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
+  b52e7a19-0c4d-4a8e-9f3b-2d6c1e8a7f40.json
+```
+
+The tree is flat: one file per memory in the scope, named by memory id. A file
+holds the full record, `memory`, `categories`, `metadata`, `created_at`,
+`updated_at`, `structured_attributes` and the rest:
+
+```json
+{
+  "id": "6d1ba0fc-1f0c-495b-b5b1-9141b2674b37",
+  "memory": "User's name is Alex, follows a vegetarian diet, allergic to nuts",
+  "categories": ["personal_details"],
+  "created_at": "2026-06-15T00:34:18-07:00",
+  "updated_at": "2026-06-15T00:34:22-07:00"
+}
+```
+
+## Behavior
+
+- **Read-only:** no command changes the memories.
+- **Times:** `stat` reports `updated_at`, or `created_at` when unset, as the
+  modified time, and shows both.
+- **grep:** `grep` and `rg` search the JSON that `cat` prints, so a match can
+  come from metadata such as categories and timestamps. Plain `grep` needs `-r`
+  or a glob on the mount; `rg` recurses by default.
+- **Freshness:** the first `ls` fetches every memory in the scope, and reads
+  reuse it until the cache expires. `search` always asks Mem0.
+- **Snapshots:** a snapshot keeps the config, and loading it needs the mount
+  handed back through `mounts=`.
+
+### Search
+
+The [`search` CLI](/python/cli/search) runs Mem0's semantic search in the same
+scope. Register it on the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
+
+```bash
+search "what does the user eat for breakfast" /memory/
+search --top-k 5 --threshold 0.4 "morning routine" /memory/
+```
+
+`--top-k` defaults to `default_search_limit` (10). `--threshold` is between 0
+and 1. Each hit prints its file and score, then the memory, ranked by score:
+
+```text
+/memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json:0.91
+User asked for food recommendations to stay full in the morning
+```
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
 {/* generated: vfs-md mem0 start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `mem0`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
       <memory-id>.json
     ```
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -80,7 +164,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -132,133 +216,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md mem0 end */}
-
-The tree is flat: the mount root lists one `<memory_id>.json` file per memory in
-the configured scope.
-
-`cat` returns the full memory JSON, including `memory`, `categories`,
-`metadata`, `created_at`, `updated_at`, and `structured_attributes`:
-
-```json
-{
-  "id": "6d1ba0fc-1f0c-495b-b5b1-9141b2674b37",
-  "memory": "User's name is Alex, follows a vegetarian diet, allergic to nuts",
-  "categories": ["personal_details"],
-  "created_at": "2026-06-15T00:34:18-07:00",
-  "updated_at": "2026-06-15T00:34:22-07:00"
-}
-```
-
-`stat` reports `updated_at` (falling back to `created_at`) as the modified time
-and exposes both timestamps.
-
-## Reading Memories
-
-```bash
-ls /memory/
-find /memory/ -type f
-cat /memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
-jq '.memory' /memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
-wc /memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
-```
-
-### grep and rg search the JSON files
-
-`grep` and `rg` follow normal filesystem semantics and search the same JSON
-bytes that `cat` returns. A match can therefore come from the memory text or
-from metadata such as categories and timestamps. Because the mount is a
-directory, plain `grep` needs `-r` (or a glob); `rg` recurses by default:
-
-```bash
-grep -r "banana" /memory/
-grep "banana" /memory/*.json
-rg "banana" /memory/
-```
-
-## Search
-
-The [`search` CLI](/python/cli/search) asks Mem0's semantic search API within
-the configured scope. Use it when meaning matters more than exact text.
-Register it on the workspace:
-
-```python
-from mirage.commands.cli.builtin.search import SEARCH
-
-ws.register_cli("search", SEARCH)
-```
-
-```bash
-search "what does the user eat for breakfast" /memory/
-search --top-k 5 "morning routine" /memory/
-search --threshold 0.4 "movie preferences" /memory/
-```
-
-`--top-k` defaults to `default_search_limit` (10). `--threshold` must be
-between `0` and `1`. Results are emitted one hit per block, ranked by score:
-
-```text
-/memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json:0.91
-User asked for food recommendations to stay full in the morning
-```
-
-## Cache
-
-The VFS uses Mirage's index cache for the virtual tree. The first `ls`
-fetches the scope's memories (following Mem0 pagination) and primes the cache;
-read commands reuse the cached metadata and rendered bytes until the cache
-expires or the workspace is recreated. `search` always calls the Mem0 API
-directly and is not cached.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.search import SEARCH
-from mirage.vfs.mem0 import Mem0Config, Mem0VFS
-
-load_dotenv(".env.development")
-
-config = Mem0Config(
-    api_key=os.environ["MEM0_API_KEY"],
-    user_id=os.environ.get("MEM0_USER_ID"),
-)
-vfs = Mem0VFS(config=config)
-
-
-async def main() -> None:
-    ws = Workspace({"/memory/": vfs}, mode=MountMode.READ)
-    ws.register_cli("search", SEARCH)
-
-    r = await ws.shell("ls /memory/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("grep -r -i 'allergic' /memory/")
-    print(await r.stdout_str())
-
-    r = await ws.shell('search --top-k 5 "morning routine" /memory/')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-| Command | Notes |
-| ------- | ----- |
-| `ls` | List the memory files in the scope |
-| `cat` | Read a memory's full JSON |
-| `jq` | Query a memory's JSON fields |
-| `head` / `tail` | Read the first or last lines/bytes of a memory JSON |
-| `grep` | Search rendered JSON (use `-r` on a directory) |
-| `rg` | Search rendered JSON, recursive by default |
-| `find` | Search the virtual tree by name, type, depth, and size |
-| `wc` | Count lines, words, bytes, characters, and max line length |
-| `stat` | Show a memory's size and timestamps |

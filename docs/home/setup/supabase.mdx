@@ -1,38 +1,157 @@
 ---
 title: Supabase Storage
 icon: /images/supabase-logo.svg
-description: Set up Supabase Storage credentials for the Supabase VFS.
+description: Virtualize a Supabase Storage bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-Supabase Storage exposes an S3-compatible API at `https://<project-ref>.storage.supabase.co/storage/v1/s3`, signed with **S3 Access Keys** scoped to a Supabase project (not your `anon` or `service_role` JWT).
+A Supabase Storage bucket becomes a folder tree, with one file per object,
+reached through its S3-compatible API at
+`https://<project-ref>.storage.supabase.co/storage/v1/s3`.
 
-### 1. Create an S3 access key
 
-1. Open the [Supabase dashboard](https://supabase.com/dashboard) and pick your project.
-2. **Storage** -> **Settings** -> **S3 Access Keys**.
-3. **New access key** -> scope to the bucket(s) you want Mirage to mount.
-4. Copy the **Access key ID** and **Secret access key**, the secret is shown once.
 
-### 2. Note the project reference and region
+## Setup
 
-- **Project reference** is in the dashboard URL: `https://supabase.com/dashboard/project/<project-ref>`.
-- **Region** is the region you selected when creating the project. Supabase requires a region string for SigV4 signing even though it is metadata only.
+Supabase signs S3 requests with an S3 access key, not the project's `anon` or
+`service_role` key.
 
-### 3. Set Environment Variables
+1. In the [Supabase dashboard](https://supabase.com/dashboard), open the project, then **Storage** > **Settings**, and turn on the S3 connection.
+1. Under **S3 Access Keys**, pick **New access key**.
+1. Copy the **Access key ID** and **Secret access key**. Supabase shows the secret only once.
+1. Copy the **Region** from the same page. Supabase needs one to sign requests.
+1. Copy the project reference from the dashboard URL: `https://supabase.com/dashboard/project/<project-ref>`.
 
 ```bash
-# .env.development
-SUPABASE_BUCKET=my-bucket
-SUPABASE_REGION=us-east-1
-SUPABASE_PROJECT_REF=abcdefghijklmnop
-SUPABASE_ACCESS_KEY_ID=...
-SUPABASE_SECRET_ACCESS_KEY=...
+export SUPABASE_BUCKET=my-bucket
+export SUPABASE_REGION=us-east-1
+export SUPABASE_PROJECT_REF=abcdefghijklmnop
+export SUPABASE_ACCESS_KEY_ID=...
+export SUPABASE_SECRET_ACCESS_KEY=...
 ```
 
-<Tip>
-Supabase requires **path-style** S3 URLs. The Mirage VFS uses them by default in both SDKs.
-</Tip>
+- An S3 access key reaches every bucket in the project and bypasses Row Level
+  Security. Keep it on a server.
+- Supabase requires path-style URLs; both SDKs use them by default.
 
-For SDK guides, see [Supabase Storage (Python)](/python/vfs/supabase) and [Supabase Storage (TypeScript)](/typescript/setup/supabase).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /supabase:
+        vfs: supabase
+        mode: read
+        config:
+          bucket: ${SUPABASE_BUCKET}
+          region: ${SUPABASE_REGION}
+          project_ref: ${SUPABASE_PROJECT_REF}
+          access_key_id: ${SUPABASE_ACCESS_KEY_ID}
+          secret_access_key: ${SUPABASE_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id supa
+    mirage shell -w supa -c 'ls /supabase'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.supabase import SupabaseConfig, SupabaseVFS
+
+    config = SupabaseConfig(
+        bucket=os.environ["SUPABASE_BUCKET"],
+        region=os.environ["SUPABASE_REGION"],
+        project_ref=os.environ["SUPABASE_PROJECT_REF"],
+        access_key_id=os.environ["SUPABASE_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["SUPABASE_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/supabase": SupabaseVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /supabase")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SupabaseVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/supabase': new SupabaseVFS({
+          bucket: process.env.SUPABASE_BUCKET!,
+          region: process.env.SUPABASE_REGION!,
+          projectRef: process.env.SUPABASE_PROJECT_REF!,
+          accessKeyId: process.env.SUPABASE_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.SUPABASE_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /supabase')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/supabase/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /supabase -type f
+/supabase/data/events.jsonl
+/supabase/data/users.parquet
+/supabase/reports/2026-11/metrics.csv
+/supabase/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /supabase/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /supabase/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/supabase">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/supabase">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,39 +1,139 @@
 ---
 title: SSH
 icon: /images/ssh-logo.svg
-description: Access a remote directory as workspace files over SFTP.
+description: Virtualize a remote directory over SFTP as files.
 ---
 
-SSH mounts a directory from a remote server. You need an SSH account with
-access to that directory and an SFTP-enabled server. Available in Python
-and Node.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-## Configuration
+A directory on a remote server becomes a local-looking tree of files, read
+and written over SFTP. It works from Python and Node.
 
-Set the server, username, key and remote directory:
+## Setup
 
-```yaml
-mounts:
-  /remote:
-    vfs: ssh
-    mode: read
-    config:
-      host: server.example.com
-      username: deploy
-      identity_file: ~/.ssh/id_ed25519
-      root: /srv/data
+The server needs SFTP turned on and an SSH account with access to the
+directory. Create a key and install it on the server, then check that SFTP
+answers:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+ssh-copy-id -i ~/.ssh/id_ed25519.pub deploy@server.example.com
+sftp -i ~/.ssh/id_ed25519 deploy@server.example.com
 ```
 
-`ls /remote` lists the remote directory. Set `mode: write` to allow changes,
-subject to the SSH account's permissions.
+- `private_key` takes the key's own text in place of `identity_file`'s path,
+  so a [credential pointer](/home/service-credentials#pointer-fields) can read
+  it from a secret store.
+- Without `identity_file` or `private_key`, the SSH agent and the default keys
+  in `~/.ssh` are tried. `password` works too, but a key is preferred.
 
-`private_key` takes the key's own text in place of `identity_file`'s path, so
-a [credential pointer](/home/service-credentials#pointer-fields) can read it from a
-secret store.
+## Connect
 
-To run programs on the server, use the [SSH runtime](/home/setup/machine/ssh).
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /remote:
+        vfs: ssh
+        mode: read
+        config:
+          host: server.example.com
+          username: deploy
+          identity_file: ~/.ssh/id_ed25519
+          root: /srv/data
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id remote
+    mirage shell -w remote -c 'ls /remote'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.ssh import SSHConfig, SSHVFS
+
+    config = SSHConfig(
+        host="server.example.com",
+        username="deploy",
+        identity_file="~/.ssh/id_ed25519",
+        root="/srv/data",
+    )
+    ws = Workspace({"/remote": SSHVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /remote")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SSHVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/remote': new SSHVFS({
+          host: 'server.example.com',
+          username: 'deploy',
+          identityFile: '~/.ssh/id_ed25519',
+          root: '/srv/data',
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /remote')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/remote/
+  logs/
+    app.log
+  reports/
+    2026-11.csv
+```
+
+- `/remote/logs/app.log` is `/srv/data/logs/app.log` on the server.
+- In Python, `host` also matches a `~/.ssh/config` alias, and its settings
+  apply.
+- Host keys are checked only in Python with `known_hosts` set; the TypeScript
+  VFS does not verify them.
+
+## Sample runs
+
+```bash
+$ ls /remote
+logs
+reports
+```
+
+```bash
+$ tail -n 2 /remote/logs/app.log
+2026-11-16T09:14:02Z INFO request served path=/health
+2026-11-16T09:14:05Z WARN slow query took=1.8s
+```
+
+```bash
+$ head -n 2 /remote/reports/2026-11.csv
+day,orders
+2026-11-01,412
+```
+
+`mode: write` allows changes, as far as the SSH account's permissions allow.
+To run programs on the server, use the [SSH machine](/home/setup/machine/ssh).
 
 ## SDK guides
 
-- [Python SSH VFS](/python/vfs/ssh)
-- [TypeScript SSH setup](/typescript/setup/ssh)
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/ssh">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/ssh">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

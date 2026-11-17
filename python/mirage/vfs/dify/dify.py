@@ -12,11 +12,8 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.dify.config import DifyConfig
 
 VFS_MD = """\
-- A Dify knowledge base, mounted read only.
 - Every file is plain text assembled from the document's Dify segments,
-  whatever its original extension.
-- `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
-  files."""
+  whatever its original extension."""
 
 
 class DifyVFS(BaseVFS):

@@ -1,71 +1,86 @@
 ---
 title: GitHub
 icon: github
-description: Mount a GitHub repository as a Mirage filesystem from Node or the browser.
+description: Virtualize a GitHub repository from Node or the browser.
 ---
 
-`GitHubVFS` exposes a single repository at a ref as a read-only
-filesystem. Reads stream blobs through GitHub's
-[REST API](https://docs.github.com/en/rest); it does not imitate another CLI.
+`GitHubVFS` mounts one repository at a branch, tag or commit as read-only
+files, read through GitHub's [REST API](https://docs.github.com/en/rest). The
+token is set up on the [GitHub page](/home/setup/github).
 
-Setup steps for the personal access token live at [GitHub Credentials](/home/setup/github).
-
-## Node
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gh = await GitHubVFS.create({
+const github = await GitHubVFS.create({
   token: process.env.GITHUB_TOKEN!,
   owner: 'strukto-ai',
   repo: 'mirage',
   ref: 'main',
 })
+const ws = new Workspace({ '/github': github }, { mode: MountMode.READ })
 
-const ws = new Workspace({ '/repo': gh }, { mode: MountMode.READ })
-await ws.shell('cat /repo/README.md')
+const result = await ws.shell('ls /github && rg -w "def build_vfs" /github/python')
+console.log(result.stdoutText)
 ```
 
-The constructor is private: `create` fetches the repo's git tree before it
-builds the VFS, so it has to be awaited. Python deliberately differs
-here: `GitHubVFS(...)` is an ordinary call that contacts nothing, and
-hydrates the tree on first read, which is what lets its `build_vfs`
-stay synchronous.
+`GitHubVFS.create` is awaited: it fetches the repository tree before it
+returns. Unset `ref` uses the repository's default branch. Set `baseUrl` for
+GitHub Enterprise. A GitHub App can replace `token`; see
+[Authentication](#authentication).
 
-## Browser
+### Fields
 
-```bash
-pnpm add @struktoai/mirage-browser
-```
+{/* generated: config-table github start */}
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"string"} post={["secret"]}>
+  GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set.
+</ResponseField>
+<ResponseField name="app">
+  A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set.
+</ResponseField>
+<ResponseField name="owner" type={"string"} required>
+  Repository owner, a user or an organization.
+</ResponseField>
+<ResponseField name="repo" type={"string"} required>
+  Repository name.
+</ResponseField>
+<ResponseField name="ref" type={"string"}>
+  Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created.
+</ResponseField>
+<ResponseField name="baseUrl" type={"string"} default={"'https://api.github.com'"}>
+  GitHub API root; set it for GitHub Enterprise.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table github end */}
+
+## Authentication
+
+The mount takes exactly one of `token` and `app`.
+
+- **Token:** a fine-grained personal access token with read-only **Contents**
+  on the repository, or a classic token with the `repo` scope for a private
+  repository. A public repository still needs a token; one with no scopes
+  reads it.
+- **GitHub App:** with `app`, Mirage mints the App's installation tokens
+  itself and replaces each before its hour runs out, so a long-lived mount
+  keeps reading. `repositories` and `permissions` narrow every token it mints.
 
 ```ts
-import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
-
-const gh = await GitHubVFS.create({
-  token: GITHUB_TOKEN,
-  owner: 'strukto-ai',
-  repo: 'mirage',
-})
-```
-
-The token reaches the browser, so use a fine-grained PAT scoped to read-only access on a single repo.
-
-## GitHub App
-
-Instead of `token`, give `app` and Mirage mints the App's installation tokens
-itself, replacing each before its hour runs out, so a long-lived VFS keeps
-reading. `repositories` and `permissions` narrow every token it mints.
-
-```ts
-const gh = await GitHubVFS.create({
+const github = await GitHubVFS.create({
   app: {
     appId: 123456,
-    // A Worker secret, an env var, or any string holding the PEM.
-    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
     installationId: 7890123,
     repositories: ['mirage'],
     permissions: { contents: 'read' },
@@ -75,56 +90,79 @@ const gh = await GitHubVFS.create({
 })
 ```
 
-The private key is a string, so nothing reads a file: pass it from an
-environment variable, a Worker secret, or a secret store through a
-[pointer](/home/service-credentials). It is the PEM GitHub generates (PKCS#1)
-or PKCS#8, with real newlines or `\n` escapes, and works in Node, the browser
-and Cloudflare Workers. Keep it on a server: in the browser it is readable by
-the page. An installation token cannot ask who it is, so
-`gh repo clone NAME` without an owner clones from the account the App is
-installed on. `gh` takes the same `app` block.
+The private key is the PEM GitHub generates (PKCS#1) or PKCS#8, with real
+newlines or `\n` escapes, and works in Node, the browser and Cloudflare
+Workers. It is a string, so nothing reads a file: pass it from an environment
+variable, a Worker secret, or a secret store through a
+[pointer](/home/service-credentials). An installation token cannot ask who it
+is, so `gh repo clone NAME` without an owner clones from the account the App
+is installed on.
 
-## Config
+## Layout
 
-{/* generated: config-table github start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>app</code> | A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>owner</code><br />required | Repository owner, a user or an organization. |
-| <code style={{ whiteSpace: 'nowrap' }}>repo</code><br />required | Repository name. |
-| <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created. |
-| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.github.com'` | GitHub API root; set it for GitHub Enterprise. |
+```text
+/github/
+  README.md
+  package.json
+  src/
+    index.ts
+    models/
+      user.ts
+  tests/
+    index.test.ts
+```
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table github end */}
+The tree mirrors the repository at `ref`: `/github/src/index.ts` is
+`src/index.ts`. Owner, repo and ref are set at mount time, never in the path.
+`stat` shows each file's git blob SHA.
 
-## Listings under `fresh`
+## Behavior
 
-Under `read: fresh`, a cached listing is checked against the head commit
-the `ref` resolves to: one small check per command (a shallow
-`git/trees/{ref}`), after which every cached listing of the mount at that
-commit is served. A mount whose `ref` is a full 40- or 64-hex commit sha
-serves its cached listings with no request: github.com refuses a branch or
-tag named with 40 or 64 hex characters, so such a ref always names a commit
-(a GitHub Enterprise host is assumed to do the same). A repository whose recursive
-tree comes back truncated stores no version, so each folder is re-listed
-once per command.
+- **Read only:** no command changes files. Act on the repository with the
+  [`gh`](/home/setup/cli/gh) CLI.
+- **Fresh reads:** under `read: fresh`, each command checks the head commit of
+  `ref` once. A `ref` that is a full commit SHA needs no check. A repository
+  whose tree GitHub truncates re-lists each folder once per command.
+- **Walk limit:** each file is one request, so `grep -r`, `find` and the other
+  walks stop after 5000 files and keep what they printed. A glob matching
+  more, `tar -c`, `cp -r`, `rm -r` and the
+  [other whole-tree commands](/home/integration/search#walk_limit) are refused
+  above it.
 
-## Mount mode
+## Browser
 
-`read`. Writes are not yet exposed.
+The browser `GitHubVFS` from `@struktoai/mirage-browser` takes the same fields.
 
-For the mounted layout (refs, paths, blob caching) see the [Python GitHub docs](/python/vfs/github).
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const github = await GitHubVFS.create({
+  token: GITHUB_TOKEN,
+  owner: 'strukto-ai',
+  repo: 'mirage',
+})
+const ws = new Workspace({ '/github': github }, { mode: MountMode.READ })
+```
+
+- The token reaches the page, so use a fine-grained token scoped to read-only
+  access on one repository.
+- Keep a GitHub App's private key on a server: in the browser the page can
+  read it.
 
 ## Integration
 
-What GitHub answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
+GitHub answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
 
-| Command | On GitHub |
-| --- | --- |
-| `grep -r`, `rg` | GitHub code search, for whole words, on the default branch, under a path with more than 100 files. It can miss recent pushes. |
-| `find`, `du`, `ls -R`, `tree` | One recursive tree listing |
-
-The [Python GitHub docs](/python/vfs/github#integration) list when each search answers and what it can miss.
+- `grep -rw` and `rg -w`: GitHub code search names the files to read when the
+  scope holds more than 100 files, the mounted ref is the default branch (the
+  only one code search indexes), the tree was listed in full and the search
+  returns every hit (100 at most). Otherwise every file is read. Code search
+  can miss recent pushes, and files it never indexes are always read.
+- `find`: one recursive tree listing.
+- `du`: one recursive tree listing.
+- `ls -R` and `tree`: one recursive tree listing.

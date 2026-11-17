@@ -1,39 +1,113 @@
 ---
 title: SQL
 icon: database
-description: Store workspace files in SQL tables.
+description: Store workspace files in the tables of a SQL database.
 ---
 
-SQL stores workspace files in a database's tables, laid out as
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
+
+SQL keeps workspace files in a database's tables, laid out as
 [AgentFS](https://github.com/tursodatabase/agentfs)'s. The files last as long
-as the database does. A mount serves the whole database, or one folder of it,
-so several mounts can share one database.
+as the database does.
 
-## Configuration
+## Connect
 
-For Python or Node, set `path` to the SQLite file. Leave it out to keep the
-database in memory:
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /sql:
+        vfs: sql
+        mode: write
+        config:
+          path: ./workspace.db
+    ```
 
-```yaml
-mounts:
-  /data:
-    vfs: sql
-    mode: write
-    config:
-      path: ./workspace.db
+    ```bash
+    mirage workspace create workspace.yaml --id db
+    mirage shell -w db -c 'ls /sql'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.sql import SqlVFS
+
+    ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
+    result = await ws.shell("ls /sql")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/sql': new SqlVFS({ path: './workspace.db' }) },
+      { mode: MountMode.WRITE },
+    )
+    const result = await ws.shell('ls /sql')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/sql/
+  notes/
+    hello.txt
+  users.csv
 ```
 
-A Postgres server, a Durable Object's storage or a D1 database mounts from
-code, through its driver. See the SDK guides.
+- `path` is a SQLite file; leave it out to keep the database in memory. The
+  file holds the tables `fs_inode`, `fs_dentry`, `fs_data` and `fs_config`.
+- `root: /workspace` under `config` serves only that folder, made when
+  missing. Several mounts can share one database this way, and a mount of the
+  whole database lists the folder too.
+- A Postgres server, a Durable Object's storage or a D1 database mounts from
+  code, through its driver; see the SDK guides.
 
-Add `capacity: 100MB` under `config` to cap the bytes the database's files
-hold. See [capacity](/home/setup/vfs#mount-capacity).
+## Sample runs
 
-Add `root: /workspace` under `config` to serve only that folder of the
-database. Mirage makes the folder when it is missing. A mount of the whole
-database lists the folder too, and its files count against the same database.
+```bash
+$ tree /sql
+/sql
+|-- notes
+|   `-- hello.txt
+`-- users.csv
+
+2 directories, 2 files
+```
+
+```bash
+$ cut -d, -f2 /sql/users.csv
+name
+ada
+linus
+```
+
+```bash
+$ cat /sql/notes/hello.txt
+hello world
+```
+
+Every command that writes works on a `write` mount. Add `capacity: 100MB`
+under `config` to cap the bytes the database's files hold, whichever folder
+they are in; see [capacity](/home/setup/vfs#mount-capacity).
 
 ## SDK guides
 
-- [Python SQL VFS](/python/vfs/sql)
-- [TypeScript SQL setup](/typescript/setup/sql)
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/sql">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/sql">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

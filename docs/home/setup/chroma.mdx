@@ -1,106 +1,173 @@
 ---
 title: Chroma
 icon: /images/chroma-logo.svg
-description: Prepare a ChromaDB collection for the Chroma VFS.
+description: Virtualize a chunked ChromaDB collection as read-only text files.
 ---
 
-## Requirements
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+</div>
 
-Mirage mounts an existing ChromaDB collection as a read-only virtual
-filesystem. The collection must already contain:
+A ChromaDB collection becomes a tree of text files. Each file is its chunks
+joined in order.
 
-- One path tree document with ID `__path_tree__`.
-- One or more page chunk documents.
-- A metadata field that maps each chunk to a virtual file path slug.
-- A metadata field that orders chunks within each file.
+## Setup
 
-The Python VFS connects via Chroma's `AsyncHttpClient`.
+Run a Chroma server (it listens on port 8000 by default) and store the
+collection in the shape the mount reads: one path tree document plus chunk
+documents that name their file.
 
-## Path Tree Document
+<AccordionGroup>
+  <Accordion title="1. Add the path tree document">
+    Store one document with the ID `__path_tree__`. Its content is a JSON
+    object, plain or gzip-compressed and base64-encoded, whose keys are file
+    paths below the mount:
 
-The path tree document defines the filesystem tree. Store it in Chroma with the
-ID `__path_tree__`. Its document content must be either plain JSON or
-gzip-compressed base64 JSON.
+    ```json
+    {
+      "README.md": {"size": 1024, "created_at": "2026-01-01T00:00:00Z"},
+      "guides/quickstart.md": {"size": 4096, "updated_at": "2026-01-03T00:00:00Z"}
+    }
+    ```
 
-```json
-{
-  "README.md": {
-    "size": 1024,
-    "created_at": "2026-01-01T00:00:00Z",
-    "updated_at": "2026-01-02T00:00:00Z"
-  },
-  "guides/quickstart.md": {
-    "size": 4096,
-    "updated_at": "2026-01-03T00:00:00Z"
-  }
-}
+    - Forward slashes make folders.
+    - No empty path, and no `.`, `..` or empty segment.
+    - Every path stays unique after leading and trailing slashes are trimmed.
+    - A path is never both a file and a folder prefix: `guides` and
+      `guides/quickstart.md` cannot both be files.
+    - `size`, `created_at` and `updated_at` are optional and used when present.
+  </Accordion>
+  <Accordion title="2. Tag every chunk">
+    Each chunk document names its file and its place in that file:
+
+    ```json
+    {"page_slug": "guides/quickstart.md", "chunk_index": 0}
+    ```
+
+    The keys default to `page_slug` and `chunk_index`. A collection with other
+    names sets `slug_field` and `chunk_index_field` in the config.
+  </Accordion>
+  <Accordion title="3. Check the collection">
+    Confirm the tree document and at least one chunk for a path:
+
+    ```python
+    import chromadb
+
+    client = chromadb.HttpClient(host="localhost", port=8000)
+    collection = client.get_collection("knowledge")
+
+    tree = collection.get(ids=["__path_tree__"])
+    chunks = collection.get(where={"page_slug": "guides/quickstart.md"})
+
+    print(tree["documents"][0])
+    print(len(chunks["documents"]))
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /knowledge:
+        vfs: chroma
+        mode: read
+        config:
+          host: localhost
+          port: 8000
+          collection_name: knowledge
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id kb
+    mirage shell -w kb -c 'ls /knowledge'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.chroma import ChromaConfig, ChromaVFS
+
+    config = ChromaConfig(host="localhost", port=8000, collection_name="knowledge")
+    ws = Workspace({"/knowledge": ChromaVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /knowledge")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { ChromaVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/knowledge': new ChromaVFS({
+          host: 'localhost',
+          port: 8000,
+          collectionName: 'knowledge',
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /knowledge')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/knowledge/
+  README.md
+  guides/
+    api.md
+    quickstart.md
+  policies/
+    refunds.md
 ```
 
-Path tree keys become file paths below the Mirage mount. Use forward slashes to
-create directories.
+- Paths come from the `__path_tree__` document; `ssl: true` reaches the server
+  over HTTPS.
+- A file is its chunks sorted by chunk index and joined by line breaks, so no
+  `grep` match spans two chunks.
+- The [`search` CLI](/python/cli/search) ranks chunks by meaning with Chroma's
+  vector query.
 
-Path rules:
-
-- Do not use an empty path.
-- Do not use `.`, `..`, or empty path segments.
-- Keep every path unique after trimming leading and trailing slashes.
-- Do not use a path both as a file and as a directory prefix. For example,
-  `guides` and `guides/quickstart.md` cannot both be files.
-
-Metadata fields are optional. Mirage uses `size`, `created_at`, and
-`updated_at` when present.
-
-## Chunk Documents
-
-Each file is materialized from one or more Chroma documents. Every chunk must
-include metadata that identifies the file slug and chunk order:
-
-```json
-{
-  "page_slug": "guides/quickstart.md",
-  "chunk_index": 0
-}
-```
-
-Default metadata fields:
-
-| Field | Default | Purpose |
-| ----- | ------- | ------- |
-| Slug field | `page_slug` | File path in the virtual tree |
-| Chunk index field | `chunk_index` | Sort order when assembling file content |
-
-If your collection uses different metadata names, configure
-`ChromaConfig(slug_field="...", chunk_index_field="...")`.
-
-## Environment Variables
+## Sample runs
 
 ```bash
-# .env.development
-CHROMA_COLLECTION=knowledge
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-CHROMA_SSL=false
-CHROMA_SLUG_FIELD=page_slug
-CHROMA_CHUNK_INDEX_FIELD=chunk_index
-CHROMA_EXAMPLE_QUERY=getting started
+$ ls /knowledge
+README.md
+guides
+policies
 ```
 
-## Validate the Collection
-
-Before mounting, verify that the collection contains the path tree document and
-at least one chunk with matching slug metadata:
-
-```python
-import chromadb
-
-client = chromadb.HttpClient(host="localhost", port=8000)
-collection = client.get_collection("knowledge")
-
-tree = collection.get(ids=["__path_tree__"])
-chunks = collection.get(where={"page_slug": "guides/quickstart.md"})
-
-print(tree["documents"][0])
-print(len(chunks["documents"]))
+```bash
+$ cat /knowledge/guides/quickstart.md
+# Quickstart
+Create an API key in Settings.
+Send the key in the Authorization header.
 ```
 
-For SDK guides, see [Chroma (Python)](/python/vfs/chroma) and [Chroma (TypeScript)](/typescript/setup/chroma).
+```bash
+$ grep -rn Authorization /knowledge
+/knowledge/guides/quickstart.md:3:Send the key in the Authorization header.
+```
+
+The mount is read-only. `grep -r` reads only the files Chroma finds the text
+in; Chroma matches case, so `grep -ri` reads every file.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/chroma">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/chroma">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

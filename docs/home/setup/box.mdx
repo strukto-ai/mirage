@@ -1,225 +1,221 @@
 ---
 title: Box
 icon: /images/box-logo.svg
-description: Set up Box OAuth2 credentials and obtain a refresh token (Python, Node, and browser).
+description: Virtualize a Box account or one of its folders as files.
 ---
 
-## Overview
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The Box VFS uses OAuth2 against the [Box v2 API](https://developer.box.com/reference/) to:
+A Box account, or one folder of it, becomes a folder tree of its real files,
+served as raw bytes.
 
-- **`/folders/{id}/items`**, list folder items (root id is `0`)
-- **`/files/{id}/content`**, download file bytes
-- **`/files/{id}`** / **`/folders/{id}`**, fetch entry metadata
-- **`/search`**, search files by name/content
-- **`/oauth2/token`**, refresh access tokens
+## Setup
 
-Box is similar to Dropbox in shape but uses **numeric folder/file IDs** rather than paths.
-Mirage caches the path → ID mapping in the index store, so once you `ls /box/` the IDs are
-remembered and subsequent reads don't pay the lookup cost.
+Box takes a developer token (quickest), an OAuth refresh token (long-running),
+a PKCE refresh token (browsers) or client credentials (a service account).
 
-Four credential modes are supported:
+### Quick Start: Developer Token (60 minutes, no OAuth)
 
-- **Developer token**, fastest first-run path. Click one button in the Box app console, paste
-  the 32-char access token, and you're done. Lives 60 minutes; you regenerate by hand. No
-  client_id / refresh_token / OAuth flow needed. Recommended for `mirage` exploration.
-- **Code flow with client secret**, for Node/server long-running use. Needs `client_id`,
-  `client_secret`, `refresh_token`.
-- **PKCE flow**, for browsers. Needs only `client_id` and `refresh_token` (no secret in the bundle).
-- **Client credentials (service account)**, for headless servers. Needs `client_id`,
-  `client_secret`, `enterprise_id`; no refresh token, expired tokens are re-fetched.
-  Follow the [service-account setup](/typescript/setup/box#service-account-client-credentials-no-refresh-token)
-  to create a Server Authentication app and authorize it in the Box admin console.
+1. In the [Developer Console](https://app.box.com/developers/console), click
+   **New App**, pick the **User** type (OAuth 2.0) and click **Create**.
+1. On the **Configuration** tab, under **Developer Token**, click **Generate
+   Developer Token** and copy it.
 
-<Note>
-**Box rotates the refresh token on every refresh.** The token you copy out of the initial code
-exchange is only valid until the next refresh, after that, only the new rotated token works.
-The `BoxTokenManager` keeps the latest token in memory; pass `onRefreshTokenRotated` if you
-want to persist it across restarts (the browser example does this with `localStorage`).
-</Note>
-
-## Quick Start: Developer Token (60 minutes, no OAuth)
-
-If you just want to try the VFS against your own Box account, the developer token is the
-fastest path, no redirect URI, no client secret, no curl exchange:
-
-1. Go to https://app.box.com/developers/console -> **Create New App** -> **Custom App** ->
-   **User Authentication (OAuth 2.0)** -> name it "Mirage" -> **Create App**
-1. On the **Configuration** tab, scroll to the **Developer Token** section near the bottom.
-1. Click **Generate Developer Token**. Copy the 32-char token.
-1. Save it for the repository examples in `.env.development`:
-   ```bash
-   BOX_DEVELOPER_TOKEN=...
-   ```
-1. Run any of the examples in [`examples/typescript/vfs/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/box).
-
-The token expires in **60 minutes** and there is no programmatic way to renew it; you regenerate
-by hand. For long-running processes, use the OAuth flow below instead.
-
-## Setup (long-running OAuth flow)
-
-### 1. Create a Box App
-
-1. Go to https://app.box.com/developers/console
-1. Click **Create New App**
-1. Choose **Custom App**
-1. **Authentication Method**: **User Authentication (OAuth 2.0)**
-1. Name it (e.g. "Mirage") -> **Create App**
-
-### 2. Configure the App
-
-Open the app's **Configuration** tab:
-
-- **OAuth 2.0 Redirect URIs**: add every destination you'll redirect back to. Box accepts
-  multiple values, register them all up front so you don't bounce between dev and prod:
-  - For the CLI flow below: `http://localhost:1`
-  - For the browser PKCE example: `http://localhost:5173/vfs/box/box_pkce.html`
-  - For production: e.g. `https://yourapp.com/box/callback`
-- **Allowed Origins** (only needed if you'll call from a browser; older Box docs call this
-  "CORS Domains"):
-  - `http://localhost:5173`
-  - Any production origins (e.g. `https://yourapp.com`)
-- **Application Scopes**:
-  - **Read all files and folders stored in Box** (required)
-  - **Write all files and folders stored in Box** (only if you'll mount Box in `WRITE` mode)
-- Click **Save Changes**
-
-### 3. Submit for Authorization (enterprise apps only)
-
-If your Box account is part of an enterprise, the **Authorization** tab requires an admin to
-approve the app before it can issue tokens. Personal/free Box accounts skip this step.
-
-### 4. Copy the Client Credentials
-
-Still on **Configuration**, copy:
-
-- **Client ID** -> `BOX_CLIENT_ID`
-- **Client Secret** -> `BOX_CLIENT_SECRET` (skip if you only need PKCE)
-
-### 5. Get the Refresh Token (CLI flow with client secret)
-
-**A) Open this URL in a browser** (replace `YOUR_CLIENT_ID`):
-
-```
-https://account.box.com/api/oauth2/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=http://localhost:1
-```
-
-**B) Authorize:** sign in -> click **Grant access**.
-
-**C) Copy the code:** browser redirects to `http://localhost:1?code=...` (page won't load,
-expected). Copy the `code` from the URL bar.
-
-**D) Exchange the code:**
+The token lasts 60 minutes and cannot be renewed by code: generate a new one
+by hand, or use a refresh token below for long runs.
 
 ```bash
-curl https://api.box.com/oauth2/token \
-  -d "code=THE_CODE" \
-  -d "grant_type=authorization_code" \
-  -d "client_id=YOUR_CLIENT_ID" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "redirect_uri=http://localhost:1"
+export BOX_DEVELOPER_TOKEN=...
 ```
 
-Response shape:
+<AccordionGroup>
+  <Accordion title="OAuth refresh token (long-running)">
+    1. Create a **User** app as above. On its **Configuration** tab:
+       - Under **OAuth 2.0 Redirect URIs**, add `http://localhost:1` (and any
+         browser or production callback).
+       - Under **Application Scopes**, check **Read all files and folders
+         stored in Box**, plus **Write all files and folders stored in Box**
+         for a write mount.
+       - Copy the **Client ID** and **Client Secret**, then **Save Changes**.
+    1. In an enterprise, a Box admin may have to enable the app before it
+       issues tokens. Personal accounts skip this.
+    1. Open this URL with `YOUR_CLIENT_ID` replaced, sign in and click **Grant
+       access**:
 
-```json
-{
-  "access_token": "T...",
-  "expires_in": 3884,
-  "refresh_token": "R...",
-  "restricted_to": [],
-  "token_type": "bearer"
-}
+       ```text
+       https://account.box.com/api/oauth2/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=http://localhost:1
+       ```
+
+    1. The browser goes to `http://localhost:1/?code=...`, a page that does
+       not load. The code is valid for 30 seconds, so exchange it at once:
+
+       ```bash
+       curl https://api.box.com/oauth2/token \
+         -d "code=THE_CODE" \
+         -d "grant_type=authorization_code" \
+         -d "client_id=YOUR_CLIENT_ID" \
+         -d "client_secret=YOUR_CLIENT_SECRET" \
+         -d "redirect_uri=http://localhost:1"
+       ```
+
+    The reply holds `refresh_token`. Set `client_id`, `client_secret` and
+    `refresh_token` (`BOX_CLIENT_ID`, `BOX_CLIENT_SECRET`, `BOX_REFRESH_TOKEN`).
+  </Accordion>
+  <Accordion title="Service account (client credentials)">
+    1. In the Developer Console, click **New App**, pick the **Server** type
+       and keep **Client Credentials Grant**.
+    1. A Box admin authorizes it in the
+       [Admin Console](https://app.box.com/master/settings/custom) under
+       **Platform** > **Platform Apps**, adding it by Client ID. Free developer
+       accounts are authorized on creation.
+    1. Set `client_id`, `client_secret` and `enterprise_id`
+       (`BOX_CLIENT_ID`, `BOX_CLIENT_SECRET`, `BOX_ENTERPRISE_ID`).
+
+    Tokens are minted for the app's service account and fetched again on
+    expiry, with no refresh token. The service account starts with an empty
+    root: share folders with its email address to see them.
+  </Accordion>
+  <Accordion title="Browser sign-in with PKCE (no client secret)">
+    The TypeScript `BoxVFS` from `@struktoai/mirage-browser` takes `clientId`
+    and `refreshToken` with no secret.
+
+    1. Add `http://localhost:5173/vfs/box/box_pkce.html` to **OAuth 2.0
+       Redirect URIs** and `http://localhost:5173` to the CORS origins below.
+    1. Set only `BOX_CLIENT_ID` in `.env.development`.
+    1. Run `pnpm dev` in `examples/browser/` and open that URL.
+    1. Click **Connect Box**.
+
+    The example saves each rotated refresh token to `localStorage` through
+    `onRefreshTokenRotated`, so a reload needs no new sign-in.
+  </Accordion>
+  <Accordion title="Token lifetime and troubleshooting">
+    | Token | Lifetime |
+    | --- | --- |
+    | Developer token | 60 minutes, no refresh |
+    | Access token | About 60 minutes, renewed 5 minutes before it expires |
+    | Refresh token | Single use, valid 60 days; each refresh returns a new one |
+
+    | Issue | Fix |
+    | --- | --- |
+    | `400 invalid_grant` on the exchange | The code is single-use and lasts 30 seconds: sign in again |
+    | `403 access_denied` | A Box admin has not enabled the app |
+    | `401` after a restart | The refresh token was rotated: persist the new one |
+    | Browser CORS error | The origin must match exactly (no trailing slash, `http` vs `https`) |
+    | `not_found` on a nested path | `ls` the parent first and use a name from the list |
+  </Accordion>
+</AccordionGroup>
+
+Box rotates the refresh token on every refresh. Mirage keeps the newest one in
+memory; pass `on_refresh_token_rotated` (TypeScript `onRefreshTokenRotated`)
+to persist it across restarts.
+
+### CORS notes
+
+A browser can call Box only from origins listed under **CORS Domains** (some
+consoles say **Allowed Origins**) on the app's **Configuration** tab. Each
+origin must match exactly: no trailing slash, and the protocol counts.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /box:
+        vfs: box
+        mode: read
+        config:
+          access_token: ${BOX_DEVELOPER_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id box
+    mirage shell -w box -c 'ls /box'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.box import BoxConfig, BoxVFS
+
+    config = BoxConfig(access_token=os.environ["BOX_DEVELOPER_TOKEN"])
+    ws = Workspace({"/box": BoxVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /box")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/box': new BoxVFS({ accessToken: process.env.BOX_DEVELOPER_TOKEN! }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /box')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/box/
+  Contracts/
+    2026_MSA.pdf
+  Roadmap.gdoc
+  Team Notes.boxnote
+  data.csv
 ```
 
-Save the `refresh_token`.
+- Every item keeps its name and raw bytes. `.boxnote` and `.boxcanvas` are
+  JSON; `.gdoc`, `.gsheet` and `.gslides` are the Office zips Box stores (mount
+  [Google Drive](/home/setup/google) for an editable view).
+- Box addresses items by numeric ID; the mount resolves each path one folder
+  level at a time and caches the result.
+- `root_folder_id` (from `box.com/folder/<id>`) mounts one folder and survives
+  renames and moves.
 
-### 6. Set Environment Variables
+## Sample runs
 
 ```bash
-# .env.development
-BOX_CLIENT_ID=...
-BOX_CLIENT_SECRET=...
-BOX_REFRESH_TOKEN=...
+$ ls /box
+Contracts
+Roadmap.gdoc
+Team Notes.boxnote
+data.csv
 ```
 
-## Alternative: PKCE Flow (browser, no client secret)
-
-1. Add `http://localhost:5173/vfs/box/box_pkce.html` to **OAuth 2.0 Redirect URIs**
-1. Add `http://localhost:5173` to **Allowed Origins**
-1. Set only `BOX_CLIENT_ID` in `.env.development`
-1. From `examples/browser/`, run `pnpm dev`
-1. Open `http://localhost:5173/vfs/box/box_pkce.html` and click **Connect Box**
-
-The example persists the rotated refresh token to `localStorage` via the
-`onRefreshTokenRotated` callback so subsequent page loads work without re-auth.
-
-## Token Lifetime
-
-| Token         | Lifetime                                                 |
-| ------------- | -------------------------------------------------------- |
-| Access token  | ~1 hour (`expires_in: ~3600`)                            |
-| Refresh token | 60 days from issue, OR 60 days from last use (whichever) |
-
-A refresh token gets revoked when:
-
-- 60 days pass without use
-- The user revokes the app at https://app.box.com/account/security
-- The Box account password changes
-- A new refresh token is issued (the old one expires after a short grace period)
-
-The `BoxTokenManager` always uses the latest token. For long-running processes restart-safe,
-provide `onRefreshTokenRotated` to persist the new token to disk / a vault.
-
-## CORS Notes
-
-Unlike Dropbox, Box has first-class CORS but **only for origins you've explicitly allowlisted**
-in the **Allowed Origins** section of the app configuration. If you see browser-side
-`Access-Control-Allow-Origin` errors, double-check the origin matches exactly (no trailing
-slash; protocol matters).
-
-## Troubleshooting
-
-| Issue                                          | Fix                                                                                                |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `400 invalid_grant` on token exchange          | The `code` is single-use and short-lived, redo Step 5A with a fresh URL                           |
-| `403 access_denied`                            | Enterprise admin hasn't approved the app on the **Authorization** tab                              |
-| `401 unauthorized` after a few hours           | Refresh token rotation, the original token is invalid; persist via `onRefreshTokenRotated`        |
-| Browser: `CORS error` even though origin set  | Check that the origin in **Allowed Origins** is exact (no trailing slash, http vs https)              |
-| `path/not_found` on `ls /box/<folder>/`        | The folder name was constructed wrong, use `ls /box/` first, then drill into a name from the list |
-
-For TypeScript usage:
-
-```ts
-import { BoxVFS } from '@struktoai/mirage-node'
-
-const box = new BoxVFS({
-  clientId: process.env.BOX_CLIENT_ID!,
-  clientSecret: process.env.BOX_CLIENT_SECRET!,
-  refreshToken: process.env.BOX_REFRESH_TOKEN!,
-})
+```bash
+$ jq -r '.. | .text? // empty' "/box/Team Notes.boxnote"
+Weekly sync
+Ship the importer by Friday.
 ```
 
-Or browser (PKCE):
-
-```ts
-import { BoxVFS } from '@struktoai/mirage-browser'
-
-const box = new BoxVFS({
-  clientId: 'YOUR_CLIENT_ID',
-  refreshToken: refreshTokenFromLocalStorage,
-  onRefreshTokenRotated: (next) => localStorage.setItem('box-refresh', next),
-})
+```bash
+$ head -n 2 /box/data.csv
+date,region,revenue
+2026-11-01,us-east,1250
 ```
 
-For Python usage (same credentials), see [Box (Python)](/python/vfs/box):
+On a `write` mount, `tee`, `cp`, `mv`, `rm` and `mkdir` change Box; the app
+needs the **Write all files and folders stored in Box** scope.
 
-```python
-from mirage.vfs.box import BoxConfig, BoxVFS
+## SDK guides
 
-vfs = BoxVFS(BoxConfig(
-    client_id=os.environ["BOX_CLIENT_ID"],
-    client_secret=os.environ["BOX_CLIENT_SECRET"],
-    refresh_token=os.environ["BOX_REFRESH_TOKEN"],
-))
-```
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/box">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/box">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,106 +1,156 @@
 ---
 title: OneDrive
-description: Mount Microsoft OneDrive or SharePoint document libraries as a Mirage filesystem with async access, versioning, and shell commands.
+description: Virtualize a OneDrive drive or SharePoint document library from Python.
 icon: microsoft
 ---
-The OneDrive VFS mounts a Microsoft OneDrive (or SharePoint document
-library) at some prefix such as `/onedrive/`. All operations involve network
-I/O to Microsoft Graph. Files are served as raw bytes (no Office filetype
-conversion). Uses aiohttp for async Graph access.
 
-Compatible with: personal OneDrive, OneDrive for Business, and SharePoint
-document libraries (driveItems on Microsoft Graph v1.0).
+`OneDriveVFS` mounts one Microsoft Graph drive: a personal OneDrive, OneDrive
+for Business or one SharePoint document library. Its files and folders become
+a folder tree of raw bytes. Tokens and drive IDs are set up on the
+[OneDrive page](/home/setup/onedrive).
 
-For credential setup (tokens, drive ids, app vs delegated auth), see the
-[OneDrive Setup](/home/setup/onedrive) guide.
+## Install
 
-## Config
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
 
 from mirage import MountMode, Workspace
-from mirage.vfs.onedrive import OneDriveVFS, OneDriveConfig
+from mirage.vfs.onedrive import OneDriveConfig, OneDriveVFS
 
-config = OneDriveConfig(
-    access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
-    # Optional:
-    # Name at most one drive:
-    # drive_id="b!...",        # target a specific drive
-    # site_id="contoso.sharepoint.com,...",  # a SharePoint site's default drive
-    # group_id="...",          # a Teams / Microsoft 365 group's library
-    # user_id="user@contoso.com",  # another user's drive (app-only)
-    # graph_base_url="https://graph.microsoft.us/v1.0",  # non-worldwide root
-    # key_prefix="Documents/",  # mount a sub-folder as the root
-    # timeout=30,
-)
+config = OneDriveConfig(access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"])
+ws = Workspace({"/onedrive": OneDriveVFS(config)}, mode=MountMode.WRITE)
 
-vfs = OneDriveVFS(config)
-ws = Workspace({"/onedrive": vfs}, mode=MountMode.WRITE)
+result = await ws.shell("ls /onedrive && find /onedrive -name '*.xlsx'")
+print(await result.stdout_str())
 ```
 
-`OneDriveVFS(config)` takes an `OneDriveConfig` object with a Microsoft
-Graph bearer token and optional drive/site targeting. Both `READ` and `WRITE`
-modes are supported.
+With no drive named, the mount is the signed-in user's own drive. Set one of
+`drive_id`, `site_id`, `group_id` or `user_id` to mount another drive, and
+`key_prefix` to mount one folder.
 
-### Config Reference
+### Fields
 
 {/* generated: config-table onedrive omit=tenant_host start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />required, secret | Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`. |
-| <code style={{ whiteSpace: 'nowrap' }}>graph_base_url</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_retries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
-| <code style={{ whiteSpace: 'nowrap' }}>drive_id</code> | Graph drive ID of the drive to mount. Set at most one of `drive_id`, `site_id`, `group_id` and `user_id`; with none the mount uses the signed-in user's drive. |
-| <code style={{ whiteSpace: 'nowrap' }}>site_id</code> | Graph site ID whose default document library the mount uses. |
-| <code style={{ whiteSpace: 'nowrap' }}>group_id</code> | Microsoft 365 or Teams group ID whose document library the mount uses. |
-| <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | User ID or UPN whose drive the mount uses, under app-only auth. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Folder path from the drive root that the mount uses as its root. |
+<ResponseField name="access_token" type={"str | callable"} required post={["secret"]}>
+  Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`.
+</ResponseField>
+<ResponseField name="graph_base_url" type={"str"}>
+  Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`.
+</ResponseField>
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed.
+</ResponseField>
+<ResponseField name="max_retries" type={"int"} default={"5"}>
+  Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds.
+</ResponseField>
+<ResponseField name="drive_id" type={"str"}>
+  Graph drive ID of the drive to mount. Set at most one of `drive_id`, `site_id`, `group_id` and `user_id`; with none the mount uses the signed-in user's drive.
+</ResponseField>
+<ResponseField name="site_id" type={"str"}>
+  Graph site ID whose default document library the mount uses.
+</ResponseField>
+<ResponseField name="group_id" type={"str"}>
+  Microsoft 365 or Teams group ID whose document library the mount uses.
+</ResponseField>
+<ResponseField name="user_id" type={"str"}>
+  User ID or UPN whose drive the mount uses, under app-only auth.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Folder path from the drive root that the mount uses as its root.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table onedrive end */}
 
-### Naming the drive
+## Authentication
 
-`drive_id`, `site_id`, `group_id` and `user_id` are four ways of saying which
-drive the mount is, so set **at most one**. Setting two raises at config time
-rather than silently addressing whichever came first, which otherwise surfaces
-much later as an unexplained 404. Setting none means `/me/drive`, the
-signed-in user's own drive, which requires delegated auth; app-only auth must
-set one selector and the permissions to read that target.
+`access_token` is a Microsoft Graph bearer token, or a callable that returns
+one. A callable is called for each request and again after a `401`, so a
+long-running mount outlives one token; a plain string lasts about an hour.
 
-### The service root
+A delegated token reaches the signed-in user's drive with no drive named. An
+app-only token cannot use `/me/drive`, so it must set one of `drive_id`,
+`site_id`, `group_id` or `user_id`, and have the permission to read that
+target. Reads need `Files.Read`; writes need `Files.ReadWrite` or a wider
+write permission. Other drives and SharePoint may need `Files.Read.All`,
+`Files.ReadWrite.All` or a `Sites.*` permission.
 
-Mounts address `https://graph.microsoft.com/v1.0` unless `graph_base_url` says
-otherwise. Set it to reach anything else: a sovereign cloud, a private
-endpoint, or a test server. Give the full root including the version segment,
-for example `https://graph.microsoft.us/v1.0`.
+## Layout
 
-This matters most for the sovereign deployments, which are network-isolated
-instances rather than regions: a token minted for one is rejected by the
-others, so a mount pointed at the wrong root fails outright rather than
-degrading. mirage does not ship a table of their hostnames, since it has no
-way to verify one; take the root from Microsoft's national cloud
-documentation for your tenant.
+```text
+/onedrive/
+  Documents/
+    file.txt
+    config.json
+  Reports/
+    q1.csv
+    q2.csv
+```
 
-Because the root is read from the config rather than a module constant, two
-mounts in one process can address different deployments.
+`/onedrive/Documents/file.txt` is the driveItem at `/root:/Documents/file.txt`.
+Folders are real driveItems, so the tree matches what OneDrive shows.
+
+## Behavior
+
+- **Naming the drive:** `drive_id`, `site_id`, `group_id` and `user_id` are
+  four ways to name the drive, so set at most one. Setting two raises at
+  config time rather than addressing whichever came first.
+- **Folder scope:** `key_prefix="users/42"` mounts only that folder, so
+  `/onedrive/data/notes.md` is the driveItem `users/42/data/notes.md`.
+  Slashes at either end are ignored.
+- **Service root:** mounts address `https://graph.microsoft.com/v1.0` unless
+  `graph_base_url` names another root, given in full with its version
+  segment, such as `https://graph.microsoft.us/v1.0`. Sovereign clouds are
+  separate instances, so a token minted for one is rejected by the others and
+  a mount on the wrong root fails outright. Take the root from Microsoft's
+  national cloud documentation for the tenant; two mounts in one process can
+  use different roots.
+- **Raw bytes:** Office files stay as they are stored, with no conversion.
+- **Snapshots:** a snapshot pins each file the agent read to its version, and
+  replaying it reads those exact bytes. A file the agent wrote carries no
+  version and is not checked on replay. Old versions read only while the
+  library keeps them; an admin can cap or turn off versioning.
+
+## Integration
+
+OneDrive answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: Microsoft Graph search names the files to read,
+  for whole words. Every file is read when the search fails or finds nothing.
+  Graph searches the text it extracted, not the bytes, and indexes a write
+  some time after it lands, so it can miss Office files, PDFs, archives, the
+  end of a large file, a word Graph splits differently (`foo.bar`) and recent
+  writes. `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
+- `grep -r` and `rg` without `-w`: every file is read.
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with OneDrive mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md onedrive start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `onedrive`, write |
+    | `/<path>` | `onedrive`, `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -108,7 +158,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OneDrive mounted at `/<path
     | --- | --- |
     | `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` ask `onedrive` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -129,7 +179,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OneDrive mounted at `/<path
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | `onedrive`, write |
+    | `/<path>` | `onedrive`, `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -151,180 +201,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with OneDrive mounted at `/<path
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md onedrive end */}
-
-The OneDrive VFS maps Graph driveItems (path-addressed) to virtual paths
-under the mount prefix. Folders are real driveItems, so the tree matches what
-you see in OneDrive.
-
-For example, if the drive contains:
-
-```text
-Documents/file.txt
-Documents/config.json
-Reports/q1.csv
-Reports/q2.csv
-```
-
-Then mounting at `/onedrive/` exposes:
-
-```text
-/onedrive/
-  Documents/
-    file.txt
-    config.json
-  Reports/
-    q1.csv
-    q2.csv
-```
-
-Path mapping: virtual `/onedrive/Documents/file.txt` maps to the driveItem at
-`/root:/Documents/file.txt`.
-
-## Versioning and Snapshots
-
-OneDrive keeps per-file version history. The VFS exposes it the same way
-the S3 backend does:
-
-- **Fingerprint** is the driveItem `cTag`, so normal reads and `stat` reflect
-  the current content without extra Graph calls.
-- **Snapshots** pin each file the agent read to its driveItem version id.
-  Replaying a snapshot reads `/versions/{id}/content`, giving the exact bytes
-  captured at snapshot time. A file the agent wrote carries no version and is
-  not checked on replay.
-
-## Cache
-
-The OneDrive VFS caches directory listings via `IndexCacheStore` to reduce
-repeated Graph calls during traversal.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from mirage import MountMode, Workspace
-from mirage.vfs.onedrive import OneDriveVFS, OneDriveConfig
-
-config = OneDriveConfig(
-    access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
-    drive_id=os.environ.get("MS_GRAPH_DRIVE_ID") or None,
-)
-
-vfs = OneDriveVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/onedrive/": vfs}, mode=MountMode.WRITE)
-
-    r = await ws.shell("ls /onedrive/")
-    print(await r.stdout_str())
-
-    await ws.shell("echo 'hello from mirage' > /onedrive/note.txt")
-
-    r = await ws.shell("cat /onedrive/note.txt")
-    print(await r.stdout_str())
-
-    r = await ws.shell("stat /onedrive/note.txt")
-    print(await r.stdout_str())
-
-    r = await ws.shell("tree /onedrive/")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-A runnable version lives at `examples/python/vfs/onedrive/onedrive.py`.
-
-## Shell Commands
-
-The OneDrive VFS supports the full set of shell commands since it operates
-on real file content (text, binary, JSON, CSV, etc.). Large files benefit from
-range reads to avoid downloading entire items.
-
-### Read Commands
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `cat`           | Read file content                          |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON fields                          |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type, modified) |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `nl`            | Number lines                               |
-| `du`            | Disk usage summary                         |
-| `file`          | Detect file type                           |
-| `strings`       | Extract printable strings from binary      |
-| `xxd`           | Hex dump                                   |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-
-### File Operations
-
-| Command  | Notes                                 |
-| -------- | ------------------------------------- |
-| `cp`     | Copy files                            |
-| `mv`     | Move/rename files                     |
-| `rm`     | Remove files                          |
-| `mkdir`  | Create directories                    |
-| `touch`  | Create empty file or update timestamp |
-| `tee`    | Write stdin to file and stdout        |
-
-### Path Utilities
-
-| Command    | Notes                     |
-| ---------- | ------------------------- |
-| `basename` | Strip directory from path |
-| `dirname`  | Strip filename from path  |
-| `realpath` | Resolve path              |
-| `ls`       | List directory contents   |
-
-## Use Cases
-
-- **AI agents accessing org documents**: Mount OneDrive/SharePoint for agents to read and process files
-- **Versioned document workflows**: Snapshot and replay exact file states over time
-- **Sandboxed access**: Restrict agent operations to a specific drive and sub-folder via `key_prefix`
-- **FUSE mounting**: Expose a OneDrive through a virtual FUSE mount for external tools
-
-## Integration
-
-What OneDrive answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On OneDrive |
-| --- | --- |
-| `grep -r`, `rg` | Microsoft Graph search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`) and recent writes. |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |
-
-`grep -rw` and
-`rg -w` read only the files Microsoft Graph search names; every file is read
-when the search fails or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Graph searches
-the text it extracted, not the bytes `grep` reads, and indexes a write some
-time after it lands, so a file that holds the word can be left out: an office
-file, PDF or archive, the end of a large file, or a word Graph splits
-differently (`foo.bar`).
-
-## Scoping a VFS to a folder
-
-Pass `key_prefix: str | None = None` to `OneDriveConfig` to transparently scope
-every operation to a sub-folder of the drive:
-
-```python
-OneDriveVFS(OneDriveConfig(
-    access_token=token,
-    drive_id=drive_id,
-    key_prefix=f"users/{user_id}/",
-))
-```
-
-When set, every read/write/list/stat/copy/rename/delete operation is scoped to
-that sub-folder. Agents see clean paths like `/data/notes.md`; the underlying
-driveItem is `users/{user_id}/data/notes.md`. Useful for multi-tenant systems.
-
-**Normalization:** leading slashes are stripped and a trailing slash is added
-automatically. Both `None` and an empty string are treated as "no prefix."

@@ -1,134 +1,328 @@
 ---
 title: Google Workspace
 icon: /images/google-logo.svg
-description: Set up Google OAuth2 credentials for Google mounts and the GWS CLI.
+description: Set up Google OAuth credentials and mount Drive, Docs, Sheets, Slides and Gmail as files.
 ---
 
-## Overview
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-Google mounts and the `gws` CLI accept an access token or OAuth refresh
-credentials. The steps below obtain refresh credentials for the services you
-enable.
+One OAuth client and refresh token cover every Google mount and the `gws` CLI.
+Drive becomes its folder tree, Docs, Sheets and Slides become JSON files, and
+Gmail becomes folders of labels and days.
+[Google Calendar](/home/setup/gcal) uses the same credentials.
 
 ## Setup
 
-### 1. Create a Google Cloud Project
+Create a Google Cloud project, turn on the APIs, configure the consent screen,
+create a Desktop OAuth client and trade one sign-in for a refresh token.
 
-1. Go to https://console.cloud.google.com/
-1. Click the project selector dropdown -> **New Project**
-1. Name it (e.g., "Mirage") -> **Create**
-1. Select it from the dropdown
+<AccordionGroup>
+  <Accordion title="1. Create a Google Cloud project">
+    1. Open the [Google Cloud console](https://console.cloud.google.com/).
+    1. Open the project selector and click **New Project**.
+    1. Name it (for example "Mirage") and click **Create**.
+    1. Select the new project in the selector.
+  </Accordion>
+  <Accordion title="2. Enable the APIs">
+    In the [API Library](https://console.cloud.google.com/apis/library), enable
+    the API for each service in use:
 
-### 2. Enable APIs
+    | Service | API to enable | Scope for read and write commands |
+    | --- | --- | --- |
+    | Drive | Google Drive API | `https://www.googleapis.com/auth/drive` |
+    | Docs | Google Docs API | `https://www.googleapis.com/auth/documents` |
+    | Sheets | Google Sheets API | `https://www.googleapis.com/auth/spreadsheets` |
+    | Slides | Google Slides API | `https://www.googleapis.com/auth/presentations` |
+    | Gmail | Gmail API | `https://www.googleapis.com/auth/gmail.modify` |
+    | Calendar | Google Calendar API | `https://www.googleapis.com/auth/calendar` |
 
-1. Go to https://console.cloud.google.com/apis/library
+    - Keep the Drive API and scope for every Google file mount.
+    - The `gws` create commands also need Drive to place new files inside a
+      configured folder.
+    - For read-only use, pick the matching read-only scopes.
+  </Accordion>
+  <Accordion title="3. Configure Google Auth Platform">
+    The OAuth settings live under **Google Auth Platform** in the console
+    sidebar ([overview](https://console.cloud.google.com/auth/overview)).
 
-Enable the API for each service you plan to use:
+    1. **Branding**: enter an app name (for example "Mirage"), a support
+       email and a developer contact email, then save.
+    1. **Audience**: set the user type to **External** and add the Google
+       account that will sign in as a **test user**, then save.
+    1. **Data Access**: click **Add or Remove Scopes**, add the scopes from
+       step 2, then save.
+  </Accordion>
+  <Accordion title="4. Create an OAuth client">
+    1. Open **Clients** in the sidebar (or **Create OAuth client** on the
+       Overview page).
+    1. Set the application type to **Desktop app**.
+    1. Name it and click **Create**.
+    1. Copy the **Client ID** and **Client Secret**.
+  </Accordion>
+  <Accordion title="5. Get the refresh token">
+    Open this URL in a browser. Replace `YOUR_CLIENT_ID` and put the scopes
+    from step 2 in `scope`, separated by `%20`. This one asks for Drive and
+    Docs:
 
-| Service | API to enable | Scope for Mirage's read/write commands |
-| --- | --- | --- |
-| Drive | Google Drive API | `https://www.googleapis.com/auth/drive` |
-| Docs | Google Docs API | `https://www.googleapis.com/auth/documents` |
-| Sheets | Google Sheets API | `https://www.googleapis.com/auth/spreadsheets` |
-| Slides | Google Slides API | `https://www.googleapis.com/auth/presentations` |
-| Gmail | Gmail API | `https://www.googleapis.com/auth/gmail.modify` |
-| Calendar | Google Calendar API | `https://www.googleapis.com/auth/calendar` |
+    ```text
+    https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=http://localhost:1&response_type=code&scope=https://www.googleapis.com/auth/drive%20https://www.googleapis.com/auth/documents&access_type=offline&prompt=consent
+    ```
 
-Keep the Drive API and scope when using Google file mounts. The `gws` create
-commands also need Drive when placing new files inside a configured folder.
-For read-only use, select the corresponding read-only scopes.
+    - `access_type=offline` asks for a refresh token.
+    - `prompt=consent` issues a new refresh token on every sign-in.
 
-### 3. Configure Google Auth Platform
+    Sign in, click through the "unverified app" warning and grant access. The
+    browser then goes to `http://localhost:1/?code=4/0A...`, a page that does
+    not load. Copy the `code` value from the address bar and exchange it
+    right away:
 
-The OAuth settings are under **Google Auth Platform** in the Cloud Console left sidebar (or go to https://console.cloud.google.com/auth/overview).
+    ```bash
+    curl -X POST https://oauth2.googleapis.com/token \
+      -d "client_id=YOUR_CLIENT_ID" \
+      -d "client_secret=YOUR_CLIENT_SECRET" \
+      -d "code=THE_CODE" \
+      -d "grant_type=authorization_code" \
+      -d "redirect_uri=http://localhost:1"
+    ```
 
-**A) Branding** (left sidebar):
+    The JSON reply holds `refresh_token`. Save it.
+  </Accordion>
+  <Accordion title="Token lifetime">
+    | Publishing status | Refresh token |
+    | --- | --- |
+    | Testing (default) | Expires after 7 days for External users, unless only basic profile scopes are requested |
+    | In production | Lasts while the grant stays valid |
 
-1. Fill in: App name (e.g., "Mirage"), support email, developer contact email
-1. Save
-
-**B) Audience** (left sidebar):
-
-1. Set user type to **External**
-1. Add your own Google email as a **test user**
-1. Save
-
-**C) Data Access** (left sidebar) - this is where scopes are configured:
-
-1. Click **Add or Remove Scopes**
-1. Add the scopes for the services you enabled in [Step 2](#2-enable-apis).
-1. Select them -> Save
-
-### 4. Create OAuth2 Client
-
-1. Go to **Clients** in the left sidebar (or click **Create OAuth client** on the Overview page)
-1. Application type: **Desktop app**
-1. Name it -> **Create**
-1. Copy the **Client ID** and **Client Secret**
-
-### 5. Get the Refresh Token
-
-**A) Build and open the authorization URL.** Replace `YOUR_CLIENT_ID` and add
-the scopes selected above to `scope`. This example requests Drive and Docs:
-
-```
-https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=http://localhost:1&response_type=code&scope=https://www.googleapis.com/auth/drive%20https://www.googleapis.com/auth/documents&access_type=offline&prompt=consent
-```
-
-- `access_type=offline` - required to receive a refresh token
-- `prompt=consent` - forces refresh token issuance on re-auth
-
-**B) Authorize:** Sign in -> click through "unverified app" warning -> grant permissions.
-
-**C) Copy the code:** The browser redirects to `http://localhost:1?code=4/0AXXXX...` (page won't load - expected). Copy the `code` value from the URL bar.
-
-**D) Exchange for tokens:**
+    - Setup works in Testing. To publish, open **Audience** and click
+      **Publish App**.
+    - Mirage trades the refresh token for short-lived access tokens on its
+      own.
+    - A refresh token can still be revoked or expire; sign in again when that
+      happens. See
+      [Google's token expiration notes](https://developers.google.com/identity/protocols/oauth2#expiration).
+  </Accordion>
+  <Accordion title="Troubleshooting">
+    | Issue | Fix |
+    | --- | --- |
+    | 403 during the OAuth flow | Add the account as a test user under **Audience** |
+    | No `refresh_token` in the reply | Keep `access_type=offline` and `prompt=consent` in the URL |
+    | Token exchange fails | `redirect_uri` must match exactly in the URL and the `curl` |
+    | Refresh token stops after 7 days | Publish the app under **Audience**, or sign in again while testing |
+    | The code fails a second time | Codes are single-use: sign in again |
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-curl -X POST https://oauth2.googleapis.com/token \
-  -d "client_id=YOUR_CLIENT_ID" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "code=THE_CODE_FROM_STEP_C" \
-  -d "grant_type=authorization_code" \
-  -d "redirect_uri=http://localhost:1"
+export GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
+export GOOGLE_CLIENT_SECRET=GOCSPX-...
+export GOOGLE_REFRESH_TOKEN=1//0...
 ```
 
-The response JSON contains `refresh_token` - save it.
+## Connect
 
-### 6. Save the credentials
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /gdrive:
+        vfs: gdrive
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+      /gdocs:
+        vfs: gdocs
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+      /gsheets:
+        vfs: gsheets
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+      /gslides:
+        vfs: gslides
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+      /gmail:
+        vfs: gmail
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id gws
+    mirage shell -w gws -c 'ls /gdocs/owned'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
+    from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+    from mirage.vfs.gmail import GmailConfig, GmailVFS
+    from mirage.vfs.gsheets import GSheetsConfig, GSheetsVFS
+    from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
+
+    creds = dict(
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+    )
+    ws = Workspace(
+        {
+            "/gdrive": GoogleDriveVFS(GoogleDriveConfig(**creds)),
+            "/gdocs": GDocsVFS(GDocsConfig(**creds)),
+            "/gsheets": GSheetsVFS(GSheetsConfig(**creds)),
+            "/gslides": GSlidesVFS(GSlidesConfig(**creds)),
+            "/gmail": GmailVFS(GmailConfig(**creds)),
+        },
+        mode=MountMode.READ,
+    )
+    result = await ws.shell("ls /gdocs/owned")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import {
+      GDocsVFS,
+      GmailVFS,
+      GoogleDriveVFS,
+      GSheetsVFS,
+      GSlidesVFS,
+      MountMode,
+      Workspace,
+    } from '@struktoai/mirage-node'
+
+    const creds = {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+    }
+    const ws = new Workspace(
+      {
+        '/gdrive': new GoogleDriveVFS(creds),
+        '/gdocs': new GDocsVFS(creds),
+        '/gsheets': new GSheetsVFS(creds),
+        '/gslides': new GSlidesVFS(creds),
+        '/gmail': new GmailVFS(creds),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /gdocs/owned')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/gdrive/
+  Projects/
+    roadmap.gsheet.json
+    spec.pdf
+  Engineering/
+/gdocs/
+  owned/
+    2026-11-14_Meeting_Notes__1Xk9rT2bQ.gdoc.json
+  shared/
+/gsheets/
+  owned/
+  shared/
+/gslides/
+  owned/
+  shared/
+/gmail/
+  INBOX/
+    2026-11-16/
+      Invoice_November__18c2f9a4b7e3d1a0.gmail.json
+      Invoice_November__18c2f9a4b7e3d1a0/
+        invoice.pdf
+```
+
+- `/gdrive` mirrors My Drive plus one folder per Shared Drive. Docs, Sheets
+  and Slides there read as `.gdoc.json`, `.gsheet.json` and `.gslide.json`.
+- `/gdocs`, `/gsheets` and `/gslides` split files into `owned/` and `shared/`,
+  named `<date>_<title>__<id>`, holding the API's JSON.
+- `/gmail` is read only: one folder per label and day, a `.gmail.json` per
+  message and a folder of its attachments.
+
+## Sample runs
 
 ```bash
-# .env.development
-GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPx-xxx
-GOOGLE_REFRESH_TOKEN=1//0abc...
+$ ls /gdrive/Projects
+roadmap.gsheet.json
+spec.pdf
 ```
 
-## Token Lifetime
+```bash
+$ jq -r '.sheets[].properties.title' /gdrive/Projects/roadmap.gsheet.json
+Q4
+Backlog
+```
 
-| App Publishing Status | Typical behavior |
-| --- | --- |
-| Testing (default) | External-user grants expire after 7 days unless only basic profile scopes are requested |
-| In production | Long-lived while the grant remains valid |
+```bash
+$ jq -r '.from.email, .subject' /gmail/INBOX/2026-11-16/Invoice_November__18c2f9a4b7e3d1a0.gmail.json
+billing@example.com
+Invoice November
+```
 
-You can complete setup in Testing mode. To publish, go to **Audience** and
-click **Publish App**.
+On a `write` mount, Drive takes `cp`, `mv`, `rm`, `mkdir` and `tee` on regular
+files; a Docs, Sheets or Slides file is read only as bytes, and `/gdocs`,
+`/gsheets` and `/gslides` take `mv` (rename) and `rm`. Edit their content with
+the [`gws`](/home/setup/cli/gws) CLI, which also covers Forms.
 
-The `TokenManager` exchanges a valid refresh token for short-lived access
-tokens automatically. Refresh tokens can still be revoked or expire; repeat
-authorization when that happens. See
-[Google's token lifecycle documentation](https://developers.google.com/identity/protocols/oauth2#expiration).
+## SDK guides
 
-## Troubleshooting
-
-| Issue                              | Fix                                                               |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| 403 during OAuth flow              | Add yourself as a test user under **Audience**                    |
-| No `refresh_token` in response     | Ensure `access_type=offline` and `prompt=consent` in the auth URL |
-| Token exchange fails               | `redirect_uri` must exactly match between auth URL and curl       |
-| Refresh token expires after 7 days | Publish the app under **Audience**, or re-authorize while testing |
-| Auth code doesn't work twice       | Codes are single-use - re-authorize if exchange fails             |
-
-For Python configuration, see [Gmail](/python/vfs/gmail), [Drive](/python/vfs/gdrive), [Docs](/python/vfs/gdocs), [Sheets](/python/vfs/gsheets), [Slides](/python/vfs/gslides), and [Calendar](/python/vfs/gcal).
-For TypeScript configuration, see [Gmail](/typescript/setup/gmail), [Drive](/typescript/setup/gdrive), [Docs](/typescript/setup/gdocs), [Sheets](/typescript/setup/gsheets), [Slides](/typescript/setup/gslides), and [Calendar](/typescript/setup/gcal).
-For Forms and service command trees, see [GWS setup](/home/setup/cli/gws).
+<CardGroup cols={2}>
+  <Card title="Drive (Python)" icon="/images/python-logo.svg" href="/python/vfs/gdrive">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Drive (TypeScript)" icon="/images/typescript-logo.svg" href="/typescript/setup/gdrive">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Docs (Python)" icon="/images/python-logo.svg" href="/python/vfs/gdocs">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Docs (TypeScript)" icon="/images/typescript-logo.svg" href="/typescript/setup/gdocs">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Sheets (Python)" icon="/images/python-logo.svg" href="/python/vfs/gsheets">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Sheets (TypeScript)" icon="/images/typescript-logo.svg" href="/typescript/setup/gsheets">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Slides (Python)" icon="/images/python-logo.svg" href="/python/vfs/gslides">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Slides (TypeScript)" icon="/images/typescript-logo.svg" href="/typescript/setup/gslides">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Gmail (Python)" icon="/images/python-logo.svg" href="/python/vfs/gmail">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="Gmail (TypeScript)" icon="/images/typescript-logo.svg" href="/typescript/setup/gmail">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

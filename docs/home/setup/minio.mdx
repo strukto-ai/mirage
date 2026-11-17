@@ -1,29 +1,158 @@
 ---
 title: MinIO
 icon: /images/minio-logo.svg
-description: Set up MinIO credentials for the MinIO VFS.
+description: Virtualize a self-hosted MinIO bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create an access key
+A MinIO bucket becomes a folder tree, with one file per object.
 
-1. Open the **MinIO Console** (e.g. `http://localhost:9001`) and sign in
-1. Go to **Access Keys** -> **Create access key**
-1. Copy the **Access Key** and **Secret Key**
-1. Note your server **endpoint** (e.g. `http://localhost:9000`) and **bucket** name
 
-MinIO is self-hosted, so there is no region-derived endpoint, the `endpoint_url`
-is required and MinIO uses path-style addressing.
 
-### 2. Set environment variables
+## Setup
+
+MinIO signs S3 requests with an access key that inherits its user's policies.
+Create one with the `mc` client, signed in as an admin:
 
 ```bash
-# .env.development
-MINIO_BUCKET=my-bucket
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=...
-MINIO_SECRET_KEY=...
+mc alias set local http://localhost:9000 ADMIN_USER ADMIN_PASSWORD
+mc admin user add local mirage USER_PASSWORD
+mc admin policy attach local readwrite --user mirage
+mc admin accesskey create local/ mirage
 ```
 
-For SDK guides, see [MinIO (Python)](/python/vfs/minio) and [MinIO (TypeScript)](/typescript/setup/minio).
+The last command prints the **Access Key** and **Secret Key**. Attach
+`readonly` instead of `readwrite` for a read-only mount. A MinIO Console that
+has the **Access Keys** page can create a key there too.
+
+```bash
+export MINIO_BUCKET=my-bucket
+export MINIO_ENDPOINT=http://localhost:9000
+export MINIO_ACCESS_KEY=...
+export MINIO_SECRET_KEY=...
+```
+
+- MinIO is self-hosted, so the endpoint is required and requests are
+  path-style.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /minio:
+        vfs: minio
+        mode: read
+        config:
+          bucket: ${MINIO_BUCKET}
+          endpoint_url: ${MINIO_ENDPOINT}
+          access_key_id: ${MINIO_ACCESS_KEY}
+          secret_access_key: ${MINIO_SECRET_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id minio
+    mirage shell -w minio -c 'ls /minio'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.minio import MinIOConfig, MinIOVFS
+
+    config = MinIOConfig(
+        bucket=os.environ["MINIO_BUCKET"],
+        endpoint_url=os.environ["MINIO_ENDPOINT"],
+        access_key_id=os.environ["MINIO_ACCESS_KEY"],
+        secret_access_key=os.environ["MINIO_SECRET_KEY"],
+    )
+    ws = Workspace({"/minio": MinIOVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /minio")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/minio': new MinIOVFS({
+          bucket: process.env.MINIO_BUCKET!,
+          endpoint: process.env.MINIO_ENDPOINT!,
+          accessKeyId: process.env.MINIO_ACCESS_KEY!,
+          secretAccessKey: process.env.MINIO_SECRET_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /minio')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/minio/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /minio -type f
+/minio/data/events.jsonl
+/minio/data/users.parquet
+/minio/reports/2026-11/metrics.csv
+/minio/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /minio/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /minio/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+MinIO ignores copy and delete conditions, so under `write: conditional` Mirage
+refuses a `cp` or `mv` within the mount, a `mv` out of it, `rm` and
+`find -delete`; a `cp` or `mv` into it from another mount is a write and goes
+through. See [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/minio">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/minio">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

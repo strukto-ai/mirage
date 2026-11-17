@@ -1,22 +1,21 @@
 ---
 title: HF Datasets
-description: "Mount a Hugging Face dataset repository as a read-only filesystem and browse its shards with shell commands."
+description: Virtualize a Hugging Face dataset repository from Python.
 icon: /images/huggingface-logo.svg
 ---
-The HF Datasets VFS mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
-repo at some prefix such as `/ds/`.
-All reads are lazy: only the bytes you actually `cat`/`head` get transferred.
 
-For credential setup, see [HF Datasets Setup](/home/setup/hf_datasets).
+`HfDatasetsVFS` mounts one [Hugging Face dataset](https://huggingface.co/datasets)
+repository, read-only: every file in the repo becomes a file, read lazily, so
+only the bytes a command reads are transferred. Tokens for gated and private
+datasets are set up on the [HF Datasets page](/home/setup/hf_datasets).
 
 ## Install
 
 ```bash
-# No extra needed: the Hub API is reached over aiohttp, a core dependency.
-uv add mirage-ai
+pip install mirage-ai
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -25,69 +24,105 @@ from mirage import MountMode, Workspace
 from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
 
 config = HfDatasetsConfig(
-    repo_id=os.environ["HF_DATASET_REPO"],   # "namespace/dataset-name"
+    repo_id="AlienKevin/SWE-ZERO-12M-trajectories",
     token=os.environ.get("HF_TOKEN"),
-    # Optional:
-    # endpoint="https://huggingface.co",
-    # revision="main",
-    # key_prefix="train/",
 )
-vfs = HfDatasetsVFS(config)
-ws = Workspace({"/ds": vfs}, mode=MountMode.READ)
+ws = Workspace({"/data": HfDatasetsVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /data && find /data -name '*.parquet' | head -n 5")
+print(await result.stdout_str())
 ```
 
-`HfDatasetsConfig` takes `repo_id` in `namespace/dataset-name` form plus an
-optional access token. Public datasets need no token.
+`revision` pins a branch, tag or commit (default `main`), and `key_prefix`
+mounts one folder of the repo. `endpoint` points at a mirror or a self-hosted
+Hub.
+
+### Fields
 
 {/* generated: config-table hf_datasets start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>repo_id</code><br />required | Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token; unset sends anonymous requests, which reach public repositories only. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
-| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Path inside the repository that becomes the mount root; files outside it are not listed. |
-| <code style={{ whiteSpace: 'nowrap' }}>revision</code> | Branch, tag or commit the mount reads; unset reads `main`. |
-| <code style={{ whiteSpace: 'nowrap' }}>expand_commits</code> | Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="repo_id" type={"str"} required>
+  Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner.
+</ResponseField>
+<ResponseField name="token" type={"str"} post={["secret"]}>
+  Hugging Face access token; unset sends anonymous requests, which reach public repositories only.
+</ResponseField>
+<ResponseField name="endpoint" type={"str"} default={"'https://huggingface.co'"}>
+  Hub origin requests go to, for a mirror or a self-hosted Hub.
+</ResponseField>
+<ResponseField name="key_prefix" type={"str"}>
+  Path inside the repository that becomes the mount root; files outside it are not listed.
+</ResponseField>
+<ResponseField name="revision" type={"str"}>
+  Branch, tag or commit the mount reads; unset reads `main`.
+</ResponseField>
+<ResponseField name="expand_commits" type={"bool"}>
+  Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_datasets end */}
 
-## Reading, not writing
+## Authentication
 
-This mount is read-only, the way a [`github`](/python/vfs/github) mount is. A Hub write is
-a **commit**, and a POSIX write cannot say where a commit ends, so `echo >`,
-`rm`, `cp` and `mv` are refused here rather than silently making one commit
-per file. The [`hf` CLI](/python/cli/hf) is the write half: `hf download --local-dir`
-puts a copy on a ram or disk mount, which is an ordinary writable filesystem,
-and `hf upload` sends it back as a single commit.
+A public dataset needs no token. A gated or private one needs `token`: a `read`
+token, or a fine-grained token with read access to that dataset; a gated
+dataset also needs its conditions accepted on the Hub. A repository or revision
+the token cannot see, or that does not exist, answers `Permission denied`.
 
-## Listings under `fresh`
+## Layout
 
-Under `read: fresh`, a cached listing is checked against the commit the
-`revision` resolves to: one small check per command
-(`revision/{rev}?expand[]=sha`), after which every cached listing of the
-mount at that commit is served. A mount whose `revision` is a full 40- or
-64-hex commit sha is checked the same way, with that one small request
-per command: a branch or tag named like the sha could take the name, and
-mirage does not assume which one the Hub resolves. With a
-`key_prefix`, the stored version is that commit joined with the prefix, so mounts
-of different subtrees sharing an index never share a version.
+```text
+/data/
+  README.md
+  assets/
+    marin8b_swe_bench_scaling.png
+  data/
+    train-00000.parquet
+    train-00001.parquet
+```
+
+Files keep their repo paths: `/data/data/train-00000.parquet` is
+`data/train-00000.parquet` in the repo. `repo_id` is `namespace/name`, or a
+bare name under the token's owner.
+
+## Behavior
+
+- **Read-only:** a Hub write is a commit, and a file write cannot say where a
+  commit ends, so `echo >`, `rm`, `cp` and `mv` are refused rather than making
+  one commit per file. The [`hf` CLI](/python/cli/hf) is the write half:
+  `hf download --local-dir` puts a copy on a writable mount, and `hf upload`
+  sends it back as one commit.
+- **Lazy reads:** `ls` and `stat` never download a file, and `head` on a large
+  shard reads only its first bytes.
+- **Fresh reads:** under `read: fresh`, each command checks once which commit
+  `revision` points at, even when `revision` is a full commit sha, since a
+  branch or tag can carry the same name.
+
+## Integration
+
+The Hub answers this command through its own API, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `sha256sum`: the LFS sha256 the Hub keeps; other files are read.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with HF Datasets mounted at `/<path>`.
 
 {/* generated: vfs-md hf_datasets start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | read |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -95,7 +130,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Datasets mounted at `/<p
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -138,94 +173,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with HF Datasets mounted at `/<p
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md hf_datasets end */}
-
-Maps dataset repo files to virtual paths under the mount prefix.
-
-For example, if dataset `AlienKevin/SWE-ZERO-12M-trajectories` contains:
-
-```text
-README.md
-data/train-00000-of-01000.parquet
-data/train-00001-of-01000.parquet
-```
-
-Then mounting at `/ds/` exposes:
-
-```text
-/ds/
-  README.md
-  data/
-    train-00000-of-01000.parquet
-    train-00001-of-01000.parquet
-```
-
-## Integration
-
-What Hugging Face datasets answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Hugging Face datasets |
-| --- | --- |
-| `sha256sum` | The LFS sha256 the Hub keeps; other files are read |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
-
-load_dotenv(".env.development")
-
-config = HfDatasetsConfig(
-    repo_id=os.environ.get("HF_DATASET_REPO",
-                           "AlienKevin/SWE-ZERO-12M-trajectories"),
-    token=os.environ.get("HF_TOKEN"),
-)
-vfs = HfDatasetsVFS(config)
-
-
-async def main() -> None:
-    ws = Workspace({"/ds": vfs}, mode=MountMode.READ)
-
-    r = await ws.shell("ls /ds/")
-    print(await r.stdout_str())
-
-    r = await ws.shell("cat /ds/README.md | head -n 20")
-    print(await r.stdout_str())
-
-    r = await ws.shell("find /ds/ -name '*.parquet' | head -n 5")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-Every read command in [HF Buckets'](/python/vfs/hf_buckets#read-commands) set works here, as
-do the text processing and path utilities, which only read. What does not is
-the [File Operations](/python/vfs/hf_buckets#file-operations) group: this mount is read-only,
-so `rm` and `touch` are refused, as is any command asked to write into it.
-
-## Cache
-
-Uses `IndexCacheStore` with `index_ttl = 86_400` (one day), capped by the
-mount's `ttl:` (600 seconds unless raised). Directory listings are cached and populate file-size/type entries for `stat`'s fast
-path. The first listing fills the index for the whole mount: one revision
-request for the commit, then the recursive tree walked at that commit, so a
-`readdir` + per-entry `stat` (which `ls`, FUSE `getattr`, and most shell
-commands trigger) costs those requests rather than one per entry.
-
-## Use Cases
-
-- **AI agents inspecting datasets**: Mount, browse the README, read byte
-  ranges from large shards without downloading the whole dataset
-- **Dataset triage**: `ls`, `stat`, `find` to see what's in a repo before
-  committing to a full local copy
-- **Sandboxed access**: Pin a `revision` for reproducibility

@@ -1,14 +1,21 @@
 ---
 title: Notion
 icon: /images/notion-logo.svg
-description: Mount Notion pages as a virtual filesystem.
+description: Virtualize a Notion workspace from Python.
 ---
-The Notion VFS exposes a Notion workspace as a virtual filesystem
-mounted at a prefix such as `/notion/`.
 
-For API key setup, see [Notion Setup](/home/setup/notion).
+`NotionVFS` mounts the Notion pages and databases shared with a connection as
+read-only JSON files: pages with their content as Markdown, and databases with
+their schema and rows. The token is set up on the
+[Notion page](/home/setup/notion).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -17,37 +24,125 @@ from mirage import MountMode, Workspace
 from mirage.vfs.notion import NotionConfig, NotionVFS
 
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
-vfs = NotionVFS(config=config)
-ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
+ws = Workspace({"/notion": NotionVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("tree -L 3 /notion && grep -r deadline /notion/pages")
+print(await result.stdout_str())
 ```
 
+`base_url` points at a proxy. `api_version` sets the `Notion-Version` header,
+`2025-09-03` when unset.
+
+### Fields
+
 {/* generated: config-table notion start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Notion integration token. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_version</code> | `Notion-Version` header sent with every request. Unset sends `2025-09-03`; `ntn --notion-version` overrides it per line. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="api_key" type={"str"} required post={["secret"]}>
+  Notion integration token.
+</ResponseField>
+<ResponseField name="base_url" type={"str"} default={"'https://api.notion.com/v1'"}>
+  Notion API root; override to point at a fake or proxy.
+</ResponseField>
+<ResponseField name="api_version" type={"str"}>
+  `Notion-Version` header sent with every request. Unset sends `2025-09-03`; `ntn --notion-version` overrides it per line.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table notion end */}
+
+## Authentication
+
+The token is an internal connection's API token (`ntn_...`) with the read
+content capability. The connection reaches only the pages and databases
+shared with it; child pages inherit access, so sharing a top-level page
+exposes its whole subtree. A personal access token with the **Notion API**
+capability also works: it acts with its creator's permissions and needs no
+sharing. The update and insert content capabilities are only for writes
+through the [`ntn`](/python/cli/ntn) CLI.
+
+## Layout
+
+```text
+/notion/
+  pages/
+    Engineering_Wiki__<page-id>/
+      page.json
+      Onboarding__<child-id>/
+        page.json
+  databases/
+    Roadmap__<database-id>/
+      database.json
+      Roadmap__<data-source-id>/
+        data_source.json
+        rows.jsonl
+```
+
+Titles are sanitized and end in `__<id>`, so `ls` the parent instead of
+building a path. `pages/` mirrors Notion's page tree, with child pages as
+nested folders. Since the `2025-09-03` API, a database is a container of one
+or more data sources, so `databases/` is one level deeper. A single-source
+database repeats its name, since Notion names the data source after its
+database.
+
+- **`page.json`:** a page, a database row included. Blocks render to
+  `markdown` and stay raw under `blocks`; blocks with children embed them
+  under `children`. A row's cell values are under `properties`, as Notion's
+  own property objects; a standalone page's `properties` holds only its
+  title.
+- **`database.json`:** the container: `database_id`, `title`, `url`,
+  timestamps, `parent`, `archived`, `is_inline` and the `data_sources` that
+  name the folders beneath it. It carries no `properties`.
+- **`data_source.json`:** the typed column schema under `properties`, with no
+  rows. A data source id is not its database id; `ntn datasources resolve
+  <database-id>` turns one into the other.
+- **`rows.jsonl`:** every row, one JSON object per line in query order: the
+  row's `page.json` without the body, plus `path`, where that `page.json` is
+  below the data source folder.
+
+```bash
+jq -r 'select(.properties.Priority.number > 1) | .title' "$DS/rows.jsonl"
+grep -c '"checkbox":true' "$DS/rows.jsonl"
+cat "$DS/$(jq -r 'select(.title == "Write spec") | .path' "$DS/rows.jsonl")"
+```
+
+## Behavior
+
+- **Read only:** create, edit and trash pages, query data sources and reach
+  every other route through the [`ntn`](/python/cli/ntn) CLI, which takes the same token. Ids
+  are positional: use the `<page-id>`, `<database-id>` or `<data-source-id>`
+  from a path segment.
+- **Rows in one file:** a query answers a hundred rows' cells in one call,
+  while each row folder costs calls of its own, so rows are one file and
+  `grep -r` or `find` over a large database stays cheap. Row folders are not
+  listed; open one by the `path` on its line. Reading `rows.jsonl` costs one
+  query call per hundred rows.
+
+## Integration
+
+Notion answers this command through its own API, so less is read. See
+[Integration](/home/integration/overview).
+
+- `head -n N`: renders only the first N rows.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`.
 
 {/* generated: vfs-md notion start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `notion`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -64,21 +159,19 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`
             rows.jsonl
     ```
 
-    - `page.json` holds the page's metadata, its body rendered as Markdown
-      and its raw blocks (nested blocks under `children`).
-    - A database is a container plus one or more data sources.
-      `database.json` holds the container's identity and its `data_sources`
-      stubs, `data_source.json` the typed property schema, and `rows.jsonl`
-      the rows, one JSON line each: the row page's `page.json` without the
-      body, plus `path`, that `page.json`'s path below the data source
-      directory. Row directories are not listed; open one by its path.
-    - Titles are sanitized. Don't construct paths: `ls` the parent
-      directory, or take a row's `path` from `rows.jsonl`.
-    - `ntn` takes ids as positional operands, not flags:
-      `ntn pages get <page-id>`, `ntn datasources query <data-source-id>`,
+    - `page.json` holds the page's metadata, its body as Markdown and its raw
+      blocks.
+    - `database.json` lists a database's data sources, `data_source.json`
+      holds the property schema and `rows.jsonl` one row per line, with its
+      `path` below the data source directory. Row directories are not
+      listed; open one by that `path`.
+    - Titles are sanitized: `ls` the parent or take a row's `path` instead of
+      building paths.
+    - `ntn` takes ids as positional operands: `ntn pages get <page-id>`,
+      `ntn datasources query <data-source-id>`,
       `ntn datasources resolve <database-id>`.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -86,7 +179,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` asks `notion` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -128,18 +221,16 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`
             rows.jsonl
     ```
 
-    - `page.json` holds the page's metadata, its body rendered as Markdown
-      and its raw blocks (nested blocks under `children`).
-    - A database is a container plus one or more data sources.
-      `database.json` holds the container's identity and its `data_sources`
-      stubs, `data_source.json` the typed property schema, and `rows.jsonl`
-      the rows, one JSON line each: the row page's `page.json` without the
-      body, plus `path`, that `page.json`'s path below the data source
-      directory. Row directories are not listed; open one by its path.
-    - Titles are sanitized. Don't construct paths: `ls` the parent
-      directory, or take a row's `path` from `rows.jsonl`.
-    - `ntn` takes ids as positional operands, not flags:
-      `ntn pages get <page-id>`, `ntn datasources query <data-source-id>`,
+    - `page.json` holds the page's metadata, its body as Markdown and its raw
+      blocks.
+    - `database.json` lists a database's data sources, `data_source.json`
+      holds the property schema and `rows.jsonl` one row per line, with its
+      `path` below the data source directory. Row directories are not
+      listed; open one by that `path`.
+    - Titles are sanitized: `ls` the parent or take a row's `path` instead of
+      building paths.
+    - `ntn` takes ids as positional operands: `ntn pages get <page-id>`,
+      `ntn datasources query <data-source-id>`,
       `ntn datasources resolve <database-id>`.
 
     ## Supported Unix Commands for VFS
@@ -162,242 +253,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md notion end */}
-
-The `pages/` hierarchy mirrors Notion's standalone page tree. Each page
-directory contains a `page.json` with the page metadata and content, and
-child pages appear as nested directories.
-
-The `databases/` hierarchy is one level deeper than the page tree,
-because the `2025-09-03` API generation split a database into a
-container plus one or more **data sources**. The column schema and the
-rows both live on the data source: `data_source.json` and `rows.jsonl`.
-The name stutters for a single-source database because Notion names the
-auto-created data source after its database; that disappears the moment
-a database holds two.
-
-A data source lists its rows as one file, not as a directory each. A
-query answers a hundred rows' cells in one call, while every row
-directory costs calls of its own to enter, so a `grep -r` or `find` over
-a large database would cost calls per row. A row is still a page with a
-`page.json`, at `<data-source-dir>/<row-title>__<page-id>/page.json`: it
-is not listed, and its path is on the row's line in `rows.jsonl`.
-
-### database.json
-
-The container's identity. It carries `database_id`, `title`, `url`,
-timestamps, `parent`, `archived`, `is_inline`, and the `data_sources`
-stubs that name the directories beneath it. It **does not carry
-`properties`**: at this API version the column schema lives on the data
-source, and `GET /v1/databases/{id}` no longer returns one.
-
-```json
-{
-  "database_id": "eeee1111-2222-3333-4444-555566667777",
-  "title": "Tasks",
-  "url": "https://www.notion.so/eeee1111222233334444555566667777",
-  "created_time": "2026-01-01T00:00:00.000Z",
-  "last_edited_time": "2026-01-02T00:00:00.000Z",
-  "parent": { "type": "workspace", "workspace": true },
-  "archived": false,
-  "is_inline": false,
-  "data_sources": [
-    { "id": "d5000000-2222-3333-4444-555566667777", "name": "Tasks" }
-  ]
-}
-```
-
-### data_source.json
-
-The typed column schema (Notion's own property objects), with no rows
-inline:
-
-```json
-{
-  "data_source_id": "d5000000-2222-3333-4444-555566667777",
-  "database_id": "eeee1111-2222-3333-4444-555566667777",
-  "title": "Tasks",
-  "created_time": "2026-01-01T00:00:00.000Z",
-  "last_edited_time": "2026-01-02T00:00:00.000Z",
-  "database_parent": { "type": "workspace", "workspace": true },
-  "archived": false,
-  "properties": {
-    "Name": { "id": "title", "type": "title", "title": {} },
-    "Priority": { "id": "pri", "type": "number", "number": { "format": "number" } },
-    "Due": { "id": "du", "type": "date", "date": {} }
-  }
-}
-```
-
-A data source id is **not** its database id. Turn one into the other
-with `ntn datasources resolve <database-id>`.
-
-### rows.jsonl
-
-Every row of the data source, one JSON object per line, in the order the
-query returns them. A line is the row's `page.json` without the body,
-which a query does not carry, plus `path`, where that `page.json` is
-below the data source directory:
-
-```json
-{"page_id":"ffff1111-2222-3333-4444-555566667777","title":"Write spec","path":"Write_spec__ffff1111-2222-3333-4444-555566667777/page.json","url":"https://www.notion.so/ffff1111222233334444555566667777","created_time":"2026-01-01T00:00:00.000Z","last_edited_time":"2026-01-02T00:00:00.000Z","parent_type":"data_source_id","parent_id":"d5000000-2222-3333-4444-555566667777","archived":false,"created_by":"faa6ebe0-0686-466d-96b3-2480ddda715b","last_edited_by":"faa6ebe0-0686-466d-96b3-2480ddda715b","properties":{"Name":{"id":"title","type":"title","title":[{"type":"text","plain_text":"Write spec"}]},"Priority":{"id":"pri","type":"number","number":2},"Done":{"id":"dn","type":"checkbox","checkbox":true}}}
-```
-
-Reading it costs one query call per hundred rows, however many rows
-match.
-
-### page.json
-
-A page, including a database row. Notion blocks render to `markdown` and
-stay available raw under `blocks`; a row's cell values are under
-`properties`, as Notion's own property objects, answering to the schema
-in the `data_source.json` one level up:
-
-```json
-{
-  "page_id": "ffff1111-2222-3333-4444-555566667777",
-  "title": "Write spec",
-  "url": "https://www.notion.so/ffff1111222233334444555566667777",
-  "created_time": "2026-01-01T00:00:00.000Z",
-  "last_edited_time": "2026-01-02T00:00:00.000Z",
-  "parent_type": "data_source_id",
-  "parent_id": "d5000000-2222-3333-4444-555566667777",
-  "archived": false,
-  "created_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
-  "last_edited_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
-  "properties": {
-    "Name": {
-      "id": "title",
-      "type": "title",
-      "title": [{ "type": "text", "plain_text": "Write spec" }]
-    },
-    "Priority": { "id": "pri", "type": "number", "number": 2 },
-    "Done": { "id": "dn", "type": "checkbox", "checkbox": true }
-  },
-  "markdown": "",
-  "blocks": []
-}
-```
-
-So a table's cells are readable with the ordinary tools, and a row's
-body by the path its line carries:
-
-```bash
-jq -r 'select(.properties.Priority.number > 1) | .title' "$DS/rows.jsonl"
-grep -c '"checkbox":true' "$DS/rows.jsonl"
-cat "$DS/$(jq -r 'select(.title == "Write spec") | .path' "$DS/rows.jsonl")"
-```
-
-Blocks with children embed them recursively under a `children` key, and
-the Markdown renders nested blocks with indentation. A standalone page's
-`properties` holds only its title, which is what the API returns for
-one.
-
-## Cache
-
-Uses `IndexCacheStore` for page metadata. File bytes go through the workspace
-file cache.
-
-## Integration
-
-What Notion answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Notion |
-| --- | --- |
-| `head -n N` | Renders only the first N rows |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.commands.cli.builtin.ntn import NTN
-from mirage.vfs.notion import NotionConfig, NotionVFS
-
-load_dotenv(".env.development")
-
-config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
-vfs = NotionVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
-    ws.register_cli("ntn", NTN, config)
-
-    # List top-level pages
-    r = await ws.shell("ls /notion/pages/")
-    print(await r.stdout_str())
-
-    # List shared databases, then their data sources and row files
-    r = await ws.shell("ls /notion/databases/")
-    print(await r.stdout_str())
-    r = await ws.shell("tree -L 3 /notion/databases/")
-    print(await r.stdout_str())
-
-    # Read a page
-    r = await ws.shell(
-        'cat "/notion/pages/Project_Roadmap__a1b2c3d4/page.json"'
-    )
-    print(await r.stdout_str())
-
-    # Read every row's cells
-    r = await ws.shell(
-        'jq -r ".title" '
-        '"/notion/databases/Tasks__4a3b21915e77'
-        '/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl"'
-    )
-    print(await r.stdout_str())
-
-    # Search across all pages
-    r = await ws.shell('grep -r "deadline" /notion/pages/')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 2 /notion/")
-    print(await r.stdout_str())
-
-    # Search pages with the Notion search API
-    r = await ws.shell('ntn api v1/search -d \'{"query":"Roadmap"}\'')
-    print(await r.stdout_str())
-
-    # Create a new page from Markdown
-    r = await ws.shell(
-        "ntn pages create --content '# New Page' --parent page:a1b2c3d4"
-    )
-    print(await r.stdout_str())
-
-    # Replace an existing page's body
-    r = await ws.shell(
-        "ntn pages edit a1b2c3d4 --content '# Replaced body'")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-Standard commands available on the mounted Notion tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List pages and child pages                 |
-| `cat`           | Read page.json content                     |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Search across pages                        |
-| `jq`            | Query page JSON fields                     |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata                              |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-
-Acting on Notion (creating, editing and trashing pages, querying data
-sources, and every route that has no typed verb) goes through the
-[ntn CLI](/python/cli/ntn) when installed. Ids are positional: use the
-`<page-id>` / `<database-id>` / `<data-source-id>` from a path segment as
-the operand.

@@ -1,29 +1,146 @@
 ---
 title: HF Datasets
 icon: /images/huggingface-logo.svg
-description: Set up Hugging Face Datasets credentials.
+description: Virtualize a Hugging Face dataset repo as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Pick a Dataset Repo
+A [Hugging Face dataset](https://huggingface.co/datasets) repo becomes a
+read-only folder of its files. Reads are lazy: only the bytes a command reads
+are transferred.
 
-Browse [huggingface.co/datasets](https://huggingface.co/datasets) and note the
-full `namespace/dataset-name` (e.g. `AlienKevin/SWE-ZERO-12M-trajectories`).
+## Setup
 
-Public datasets need no token. Gated/private datasets do.
+Public datasets need no token. A gated or private dataset needs a Hugging Face
+access token:
 
-### 2. Create an Access Token (gated/private only)
-
-1. Go to https://huggingface.co/settings/tokens
-2. Create a fine-grained token with **Read** access to the dataset
-
-### 3. Set Environment Variables
+1. For a gated dataset, open its page on the Hub, accept the conditions and
+   wait for access to be granted.
+1. At [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens),
+   click **New token** and create a `read` token, or a fine-grained token with
+   read access to that dataset.
+1. Add `token: ${HF_TOKEN}` to the YAML config.
 
 ```bash
-# .env.development
-HF_DATASET_REPO=AlienKevin/SWE-ZERO-12M-trajectories
-HF_TOKEN=hf_...   # optional, public datasets work without it
+export HF_TOKEN=hf_...
 ```
 
-For SDK guides, see [HF Datasets (Python)](/python/vfs/hf_datasets) and [HF Datasets (TypeScript)](/typescript/setup/hf_datasets).
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /data:
+        vfs: hf_datasets
+        mode: read
+        config:
+          repo_id: AlienKevin/SWE-ZERO-12M-trajectories
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id ds
+    mirage shell -w ds -c 'ls /data'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
+
+    config = HfDatasetsConfig(
+        repo_id="AlienKevin/SWE-ZERO-12M-trajectories",
+        token=os.environ.get("HF_TOKEN"),
+    )
+    ws = Workspace({"/data": HfDatasetsVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /data")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { HfDatasetsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/data': new HfDatasetsVFS({
+          repoId: 'AlienKevin/SWE-ZERO-12M-trajectories',
+          token: process.env.HF_TOKEN,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /data')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/data/
+  README.md
+  assets/
+    marin8b_swe_bench_scaling.png
+  data/
+    train-00000.parquet
+    train-00001.parquet
+    ...
+```
+
+- Files keep their repo paths. `repo_id` is `namespace/name`, or a bare name
+  under the token's owner.
+- `revision` pins a branch, tag or commit (default `main`); `key_prefix` mounts
+  one folder of the repo.
+- `sha256sum` on an LFS file answers with the hash the Hub keeps.
+
+## Sample runs
+
+```bash
+$ ls /data
+README.md
+assets
+data
+```
+
+```bash
+$ ls -lh /data/data | head -n 4
+total ?
+-rw-r--r-- 1 - -  28M - train-00000.parquet
+-rw-r--r-- 1 - -  28M - train-00001.parquet
+-rw-r--r-- 1 - -  30M - train-00002.parquet
+```
+
+```bash
+$ head -n 7 /data/README.md
+---
+configs:
+- config_name: default
+  data_files:
+  - split: train
+    path: data/train-*.parquet
+license: apache-2.0
+```
+
+The mount is read-only: a Hub write is a commit, so `echo >`, `rm`, `cp` and
+`mv` are refused. The [`hf` CLI](/home/setup/cli/hf) downloads a copy and
+uploads changes back as one commit.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/hf_datasets">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/hf_datasets">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

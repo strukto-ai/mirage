@@ -1,15 +1,20 @@
 ---
 title: GitHub
-description: Mount a GitHub repository as a read-only Mirage filesystem for agents to list, read, search, and inspect code.
+description: Virtualize a GitHub repository from Python.
 icon: github
 ---
-The GitHub VFS uses GitHub's [REST API](https://docs.github.com/en/rest)
-to mount a repository as a read-only virtual filesystem. It does not imitate
-another CLI.
 
-For token setup, see [GitHub Setup](/home/setup/github).
+`GitHubVFS` mounts one repository at a branch, tag or commit as read-only
+files, read through GitHub's [REST API](https://docs.github.com/en/rest). The
+token is set up on the [GitHub page](/home/setup/github).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -17,17 +22,61 @@ import os
 from mirage import MountMode, Workspace
 from mirage.vfs.github import GitHubConfig, GitHubVFS
 
-config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
-vfs = GitHubVFS(
-    config=config, owner="my-org", repo="my-repo", ref="main")
-ws = Workspace({"/github": vfs}, mode=MountMode.READ)
+config = GitHubConfig(
+    token=os.environ["GITHUB_TOKEN"],
+    owner="strukto-ai",
+    repo="mirage",
+    ref="main",
+)
+ws = Workspace({"/github": GitHubVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell('ls /github && rg -w "def build_vfs" /github/python')
+print(await result.stdout_str())
 ```
 
-### GitHub App
+Unset `ref` follows the repository's default branch. Set `base_url` for GitHub
+Enterprise. A GitHub App can replace `token`; see
+[Authentication](#authentication).
 
-Instead of `token`, give `app` and Mirage mints the App's installation tokens
-itself, replacing each before its hour runs out, so a long-lived VFS keeps
-reading. `repositories` and `permissions` narrow every token it mints.
+### Fields
+
+{/* generated: config-table github start */}
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"str"} post={["secret"]}>
+  GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set.
+</ResponseField>
+<ResponseField name="app" type={"object"}>
+  A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set.
+</ResponseField>
+<ResponseField name="owner" type={"str"}>
+  Repository owner, a user or an organization. Required unless the `GitHubVFS` constructor is given `owner`.
+</ResponseField>
+<ResponseField name="repo" type={"str"}>
+  Repository name. Required unless the `GitHubVFS` constructor is given `repo`.
+</ResponseField>
+<ResponseField name="ref" type={"str"}>
+  Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read.
+</ResponseField>
+<ResponseField name="base_url" type={"str"}>
+  GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table github end */}
+
+## Authentication
+
+The mount takes exactly one of `token` and `app`.
+
+- **Token:** a fine-grained personal access token with read-only **Contents**
+  on the repository, or a classic token with the `repo` scope for a private
+  repository. A public repository still needs a token; one with no scopes
+  reads it.
+- **GitHub App:** with `app`, Mirage mints the App's installation tokens
+  itself and replaces each before its hour runs out, so a long-lived mount
+  keeps reading. `repositories` and `permissions` narrow every token it mints.
 
 ```python
 import os
@@ -39,61 +88,90 @@ config = GitHubConfig(
         app_id=123456,
         private_key=os.environ["GITHUB_APP_PRIVATE_KEY"],
         installation_id=7890123,
-        repositories=["my-repo"],
+        repositories=["mirage"],
         permissions={"contents": "read"},
-    ))
+    ),
+    owner="strukto-ai",
+    repo="mirage",
+)
 ```
 
-The private key is a string, so it can come from anywhere: an environment
+The private key is the PEM GitHub generates (PKCS#1) or PKCS#8, with real
+newlines or `\n` escapes. It is a string, so it can come from an environment
 variable, a dotenv file, or a secret store through a
-[pointer](/home/service-credentials):
+[pointer](/home/service-credentials). An installation token cannot ask who it
+is, so `gh repo clone NAME` without an owner clones from the account the App
+is installed on.
 
-```yaml
-mounts:
-  /github:
-    vfs: github
-    config:
-      owner: my-org
-      repo: my-repo
-      app:
-        app_id: 123456
-        installation_id: 7890123
-        private_key: {from: aws-sm, ref: mirage/github-app, key: PRIVATE_KEY}
+## Layout
+
+```text
+/github/
+  README.md
+  pyproject.toml
+  src/
+    main.py
+    models/
+      user.py
+  tests/
+    test_main.py
 ```
 
-It is the PEM GitHub generates (PKCS#1) or PKCS#8, with real newlines or
-`\n` escapes. An installation token cannot ask who it is, so
-`gh repo clone NAME` without an owner clones from the account the App is
-installed on. `gh` takes the same `app` block.
+The tree mirrors the repository at `ref`: `/github/src/main.py` is
+`src/main.py`. Owner, repo and ref are set at mount time, never in the path.
+`stat` shows each file's git blob SHA.
 
-{/* generated: config-table github start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | GitHub token: a personal access token, an OAuth token or an App installation token. Exactly one of `token` and `app` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>app</code> | A GitHub App installation mirage mints and refreshes tokens for. Exactly one of `token` and `app` is set. |
-| <code style={{ whiteSpace: 'nowrap' }}>owner</code> | Repository owner, a user or an organization. Required unless the `GitHubVFS` constructor is given `owner`. |
-| <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
-| <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise. |
+## Behavior
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table github end */}
+- **Read only:** no command changes files. Act on the repository with the
+  [`gh`](/home/setup/cli/gh) CLI.
+- **Tree fetch:** the full tree is fetched on the first read, not when the
+  mount is built, so building a workspace contacts nothing. A repository over
+  100,000 entries is listed one folder at a time.
+- **Fresh reads:** under `read: fresh`, each command checks the head commit of
+  `ref` once. A `ref` that is a full commit SHA needs no check. A repository
+  whose tree GitHub truncates re-lists each folder once per command.
+- **Walk limit:** each file is one request, so `grep -r`, `git grep`, `find`
+  and the other walks stop after 5000 files and keep what they printed. A glob
+  matching more, `tar -c`, `cp -r`, `rm -r` and the
+  [other whole-tree commands](/home/integration/search#walk_limit) are refused
+  above it.
+
+```bash
+$ grep -r TODO /github/
+/github/src/main.py:# TODO: retry
+grep: /github/: stopped after 5000 files (walk_limit); narrow the path
+```
+
+## Integration
+
+GitHub answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: GitHub code search names the files to read when the
+  scope holds more than 100 files, the mounted ref is the default branch (the
+  only one code search indexes), the tree was listed in full and the search
+  returns every hit (100 at most). Otherwise every file is read. Code search
+  can miss recent pushes, and files it never indexes are always read.
+- `find`: one recursive tree listing.
+- `du`: one recursive tree listing.
+- `ls -R` and `tree`: one recursive tree listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with GitHub mounted at `/<path>`.
 
 {/* generated: vfs-md github start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `github`, read |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -101,7 +179,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GitHub mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `github` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -144,183 +222,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with GitHub mounted at `/<path>`
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md github end */}
-
-```text
-/github/
-  README.md
-  pyproject.toml
-  src/
-    __init__.py
-    main.py
-    utils.py
-    models/
-      user.py
-      item.py
-  tests/
-    test_main.py
-```
-
-The filesystem mirrors the repository tree. No owner/repo/branch in
-the path - those are specified at mount time.
-
-## Tree Fetching
-
-The full recursive tree is fetched on the first read, not at mount time, so
-constructing the VFS never blocks on the network. For repos with
-
-> 100K entries, it falls back to per-directory fetching.
-
-## Cache
-
-The GitHub VFS uses `IndexCacheStore` with SHA-based fingerprinting. Content is content-addressed - if the SHA matches, the content is identical.
-
-Under `read: fresh`, a cached listing is checked against the head commit
-the `ref` resolves to: one small check per command (a shallow
-`git/trees/{ref}`), after which every cached listing of the mount at that
-commit is served. A mount whose `ref` is a full 40- or 64-hex commit sha
-serves its cached listings with no request: github.com refuses a branch or
-tag named with 40 or 64 hex characters, so such a ref always names a commit
-(a GitHub Enterprise host is assumed to do the same). A repository whose recursive
-tree comes back truncated stores no version, so each folder is re-listed
-once per command.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.github import GitHubConfig, GitHubVFS
-
-load_dotenv(".env.development")
-
-
-async def main():
-    config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
-    vfs = GitHubVFS(
-        config=config, owner="my-org", repo="my-repo", ref="main")
-    ws = Workspace({"/github": vfs}, mode=MountMode.READ)
-
-    # List repository root
-    r = await ws.shell("ls /github/")
-    print(await r.stdout_str())
-
-    # Read a file
-    r = await ws.shell("cat /github/README.md")
-    print(await r.stdout_str())
-
-    # Search for a pattern
-    r = await ws.shell('rg "def main" /github/')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 2 /github/")
-    print(await r.stdout_str())
-
-    # File metadata with SHA
-    r = await ws.shell("stat /github/README.md")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-See [`examples/python/vfs/github/github.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/github/github.py) for the full working example.
-
-## Finding SHAs
-
-Git blob SHAs are available via the `stat` command:
-
-```bash
-stat /github/README.md
-# -> extra={"sha": "a1b2c3d4e5f6..."}
-
-stat /github/src/main.py
-# -> extra={"sha": "f6e5d4c3b2a1..."}
-```
-
-## Working with Large Repos
-
-Tips for efficient access on large repositories:
-
-```bash
-# Find files by name
-find /github/ -name "*.py"
-
-# Search whole words with rg (uses GitHub code search on large repos)
-rg -w "TODO" /github/
-
-# Read only the first lines of a file
-head -n 20 /github/src/main.py
-
-# Check file sizes
-du /github/src/
-
-# List deeply nested directories
-tree -L 3 /github/src/
-```
-
-## Shell Commands
-
-Standard commands available on the mounted GitHub tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List files and directories                 |
-| `cat`           | Read file contents                         |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search; see [grep and rg](#integration) |
-| `jq`            | Query JSON files                           |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata including git SHA            |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-| `diff`          | Compare files                              |
-| `du`            | Disk usage / file sizes                    |
-| `awk`           | Text processing                            |
-| `sed`           | Stream editing                             |
-| `sort`          | Sort lines                                 |
-| `uniq`          | Deduplicate lines                          |
-| `cut`           | Extract columns                            |
-| `tr`            | Translate characters                       |
-| `nl`            | Number lines                               |
-| `md5`           | MD5 checksum                               |
-| `sha256sum`     | SHA-256 checksum                           |
-| `file`          | Detect file type                           |
-| `basename`      | Strip directory from path                  |
-| `dirname`       | Strip filename from path                   |
-| `realpath`      | Resolve path                               |
-
-## Integration
-
-What GitHub answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On GitHub |
-| --- | --- |
-| `grep -r`, `rg` | GitHub code search, for whole words, on the default branch, under a path with more than 100 files. It can miss recent pushes. |
-| `find`, `du`, `ls -R`, `tree` | One recursive tree listing |
-
-`grep -rw` and `rg -w` read only the files GitHub code search names when:
-
-- the scope holds more than 100 files; a smaller one is read directly,
-- the mounted ref is the default branch, the only one code search indexes,
-- the repository tree was listed in full,
-- and the search returns every hit, 100 at most.
-
-Every file is read otherwise. Files code search never indexes are always read.
-
-Each file is one request, so `grep -r`, `git grep`, `find` and the other walks
-stop after `walk_limit` files (default 5000) and keep what they printed,
-and a glob matching more, `tar -c`, `cp -r`, `rm -r` and the [other whole-tree
-commands](/home/integration/search#walk_limit) are refused above it:
-
-```bash
-$ grep -r TODO /github/
-/github/src/main.py:# TODO: retry
-grep: /github/: stopped after 5000 files (walk_limit); narrow the path
-```

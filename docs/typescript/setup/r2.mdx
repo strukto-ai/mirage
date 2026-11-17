@@ -1,18 +1,21 @@
 ---
 title: Cloudflare R2
 icon: /images/cloudflare-logo.svg
-description: Set up Cloudflare R2 as a MIRAGE VFS from Node or the browser.
+description: Virtualize a Cloudflare R2 bucket from Node or the browser.
 ---
 
-R2 uses the S3 API with AWS Signature V4 against `https://<account-id>.r2.cloudflarestorage.com`. MIRAGE derives this endpoint from your account ID automatically.
+`R2VFS` mounts one Cloudflare R2 bucket: every object becomes a file and every
+`/` in a key a folder. It reaches R2 through its S3-compatible API at
+`https://<accountId>.r2.cloudflarestorage.com`. Credentials are set up on the
+[R2 page](/home/setup/r2).
 
-Credentials (R2 API token with object read/write scopes) are created the same way in both runtimes, see [R2 Credentials](/home/setup/r2).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-node'
@@ -23,59 +26,127 @@ const r2 = new R2VFS({
   accessKeyId: process.env.R2_ACCESS_KEY_ID!,
   secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
 })
+const ws = new Workspace({ '/r2': r2 }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': r2 }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /r2 && find /r2 -name '*.csv'")
+console.log(result.stdoutText)
 ```
 
-### Config
+A bucket in a jurisdiction has its own endpoint, such as
+`https://<accountId>.eu.r2.cloudflarestorage.com`; set `endpoint` to it. A mount
+takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table r2 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region requests are signed for; R2 addresses a bucket by account, not by region. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. |
-| <code style={{ whiteSpace: 'nowrap' }}>accountId</code> | Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'auto'"}>
+  Region requests are signed for; R2 addresses a bucket by account, not by region.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives.
+</ResponseField>
+<ResponseField name="accountId" type={"string"}>
+  Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table r2 end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from `accessKeyId` and `secretAccessKey`, an R2 API token's key
+pair, with `sessionToken` for temporary credentials. Without them, the AWS SDK
+reads its own chain: environment variables, `~/.aws/credentials`, then the
+instance or container role.
+
+The token needs **Object Read only** on the bucket, or **Object Read & Write**
+to write. A request the credentials may not make answers `Permission denied`.
+
+## Layout
+
+```text
+/r2/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-The browser `R2VFS` is secret-free, your backend signs each operation using your R2 keys and returns a URL. R2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works with `region: 'auto'` pointed at R2's endpoint.
+`/r2/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; R2 stores no folder objects.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/r2 start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region of the bucket; R2 addresses a bucket by account, not by region. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>accountId</code> | Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/r2/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped and
+  a trailing `/` added.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/r2 end */}
+## Browser
 
-### 1. Server: sign URLs with the R2 endpoint
+The browser `R2VFS` from `@struktoai/mirage-browser` keeps credentials off the
+page: a server signs a URL for each S3 call with the R2 keys, and the browser
+fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-browser'
+
+const r2 = new R2VFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/r2': r2 }, { mode: MountMode.READ })
+```
+
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server.
+- `accountId` and `endpoint` only name the mount's storage location: requests go
+  to the host each signed URL names.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -99,102 +170,130 @@ const client = new S3Client({
 })
 const BUCKET = process.env.R2_BUCKET!
 
-app.post('/presign/r2', async (req, res) => {
-  const { path, op, opts } = req.body
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
   const key = path.replace(/^\/+/, '')
   const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
   let cmd
   switch (op) {
     case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
-    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
     case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'LIST':   cmd = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: opts?.listPrefix,
-      Delimiter: opts?.listDelimiter,
-      ContinuationToken: opts?.listContinuationToken,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
     }); break
     case 'COPY':   cmd = new CopyObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      CopySource: `${BUCKET}/${opts?.copySource}`,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
     }); break
   }
-  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
 })
 ```
 
-### 2. Browser: wire it up
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-```ts
-import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-browser'
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
 
-const r2 = new R2VFS({
-  bucket: 'my-r2-bucket',
-  accountId: 'abc123...',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign/r2', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = await r.json()
-    return url
-  },
-})
+R2 accepts the S3 CORS call only from a token with **Admin Read & Write** on the
+bucket; an object token gets `Access Denied`. Without one, set the policy in the
+[Cloudflare dashboard](https://dash.cloudflare.com/): **R2**, the bucket,
+**Settings** > **CORS Policy**, with the page's origins, methods
+`GET,PUT,HEAD,DELETE,POST` and allowed headers `*`. With an admin token:
 
-const ws = new Workspace({ '/bucket/': r2 }, { mode: MountMode.READ })
+```json
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["http://localhost:5173", "https://app.example.com"],
+      "AllowedMethods": ["GET", "PUT", "HEAD", "DELETE", "POST"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "Content-Length", "Content-Type", "Last-Modified"]
+    }
+  ]
+}
 ```
-
-<Tip>
-`accountId` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
-</Tip>
-
-### 3. Configure CORS on the bucket
-
-R2 does accept S3-flavored `PutBucketCors`, but your token needs **"Admin Read & Write"** permissions on the bucket, object-scoped tokens will get `Access Denied`. Two paths:
-
-**Option A, Cloudflare Dashboard (fastest, no new token):**
-
-1. Open https://dash.cloudflare.com → **R2** → your bucket
-2. **Settings** tab → **CORS Policy** → **Add CORS policy**
-3. Origin: `http://localhost:5173` (and any production origins), methods `GET,PUT,HEAD,DELETE,POST`, allowed headers `*`
-
-**Option B, admin-scoped R2 API token + the helper script:**
-
-1. Cloudflare Dashboard → **R2** → **Manage R2 API Tokens** → **Create API token**
-2. Permissions: **Admin Read & Write** on your bucket
-3. Update `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` in `.env.development`
-4. Run the same helper used for S3:
 
 ```bash
-cd examples/browser
-npx tsx scripts/configure-cors.ts http://localhost:5173 https://app.example.com
+aws s3api put-bucket-cors --bucket $R2_BUCKET \
+  --endpoint-url https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com \
+  --cors-configuration file://cors.json
 ```
 
-<Warning>
-Object-scoped tokens (`Object Read & Write`) cannot edit CORS. If the script returns `Access Denied` on R2, you're almost certainly using an object token.
-</Warning>
+  </Accordion>
+  <Accordion title="Browser fields">
 
-See the [R2 VFS](/python/vfs/r2) docs for the equivalent Python wiring.
+{/* generated: config-table browser/r2 start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'auto'"}>
+  Region of the bucket; R2 addresses a bucket by account, not by region.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="accountId" type={"string"}>
+  Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set.
+</ResponseField>
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/r2 end */}
+
+  </Accordion>
+</AccordionGroup>
+
+## Integration
+
+R2 answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
-The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/<path>`.
+The [VFS.md](/home/setup/vfs-md) an agent reads with R2 mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md r2 start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -202,7 +301,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -223,7 +322,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -245,13 +344,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md r2 end */}
-
-## Integration
-
-What R2 answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On R2 |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

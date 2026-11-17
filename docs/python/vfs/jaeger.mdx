@@ -1,53 +1,105 @@
 ---
 title: "Jaeger"
 icon: /images/jaeger-logo.svg
-description: "Read Jaeger services, operations, and traces as read-only JSON files."
+description: Virtualize a Jaeger query service from Python.
 ---
 
-The Jaeger VFS provides read-only access to the services, operations, and
-traces of an existing Jaeger query service. It needs no extra: its HTTP client
-ships with `mirage-ai`.
+`JaegerVFS` mounts an existing Jaeger query service as read-only JSON files:
+each service becomes a folder with its operations and one file per trace. The
+connection is set up on the [Jaeger page](/home/setup/jaeger).
 
-For connection setup, see [Jaeger Setup](/home/setup/jaeger).
-For the TypeScript SDK, see [Jaeger (TypeScript)](/typescript/setup/jaeger).
+## Install
 
-## Config
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 from mirage import MountMode, Workspace
 from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
 
 config = JaegerConfig(host="http://localhost:16686")
-vfs = JaegerVFS(config)
-ws = Workspace({"/jaeger": vfs}, mode=MountMode.READ)
+ws = Workspace({"/jaeger": JaegerVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("jq -r '.[].name' /jaeger/services/frontend/operations.json")
+print(await result.stdout_str())
 ```
 
+`host` is the query service's base URL; it needs no credentials.
+`default_trace_limit`, `default_from_timestamp` and `default_to_timestamp`
+bound each trace listing.
+
+### Fields
+
 {/* generated: config-table jaeger start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'http://localhost:16686'` | Jaeger query service URL. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_trace_limit</code><br />default `100` | The most traces one service's `traces/` listing shows, newest first. An older trace is still readable by its id. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_from_timestamp</code> | Lower bound of trace listings, an ISO 8601 timestamp. Unset searches from the beginning. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_to_timestamp</code> | Upper bound of trace listings, an ISO 8601 timestamp. Unset means now. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="host" type={"str"} default={"'http://localhost:16686'"}>
+  Jaeger query service URL.
+</ResponseField>
+<ResponseField name="default_trace_limit" type={"int"} default={"100"}>
+  The most traces one service's `traces/` listing shows, newest first. An older trace is still readable by its id.
+</ResponseField>
+<ResponseField name="default_from_timestamp" type={"str"}>
+  Lower bound of trace listings, an ISO 8601 timestamp. Unset searches from the beginning.
+</ResponseField>
+<ResponseField name="default_to_timestamp" type={"str"}>
+  Upper bound of trace listings, an ISO 8601 timestamp. Unset means now.
+</ResponseField>
 {/* generated: config-table jaeger end */}
+
+## Layout
+
+```text
+/jaeger/
+  services/
+    <service>/
+      operations.json
+      traces/
+        <trace-id>.json
+```
+
+- **`services/`:** one folder per service Jaeger reports, including Jaeger's
+  own `jaeger` service when it traces itself.
+- **`operations.json`:** the service's operation records, as Jaeger returns
+  them.
+- **`traces/<trace-id>.json`:** the trace document Jaeger returns, with
+  `traceID`, `spans`, `processes` and `warnings`.
+
+## Behavior
+
+- **Read only:** the mount has no write operations.
+- **Trace listing:** `traces/` shows the newest `default_trace_limit` traces
+  (100) of the service between `default_from_timestamp` and
+  `default_to_timestamp`; unset bounds search from the beginning up to now. A
+  trace older than the listing is still readable by its id, as long as one of
+  its spans comes from that service.
+- **Missing paths:** a service Jaeger does not know, a trace id that is not 16
+  or 32 hex digits, and a trace without a span from the addressed service are
+  reported as missing.
+- **Sizes:** every listed file has an exact size, so `ls -l`, `du` and `stat`
+  work without reading the files.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Jaeger mounted at `/<path>`.
 
 {/* generated: vfs-md jaeger start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `jaeger`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -58,7 +110,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Jaeger mounted at `/<path>`
             <trace-id>.json
     ```
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -66,7 +118,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Jaeger mounted at `/<path>`
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -122,58 +174,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Jaeger mounted at `/<path>`
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md jaeger end */}
-
-## Layout reference
-
-| Path | Contents |
-| --- | --- |
-| `services/` | One directory per service Jaeger's `/api/services` reports, including Jaeger's own `jaeger` service when it traces itself |
-| `services/<service>/operations.json` | The operation records `/api/operations` returns for the service |
-| `services/<service>/traces/<trace-id>.json` | The trace document `/api/traces/<trace-id>` returns |
-
-The `traces/` listing shows the newest `default_trace_limit` traces of the
-service within `default_from_timestamp` and `default_to_timestamp`. Unset
-bounds search from the beginning up to now. A trace older than the listing is
-still readable by its id, as long as one of its spans comes from that service.
-
-A service Jaeger does not know, a trace id that is not 16 or 32 hex digits, and
-a trace without a span from the addressed service are reported as missing
-paths. Every listed file has an exact size, so `ls -l`, `du`, and `stat` work
-without reading the files. The mount has no write operations.
-
-## Example
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
-
-
-async def main() -> None:
-    config = JaegerConfig(host="http://localhost:16686")
-    ws = Workspace({"/jaeger": JaegerVFS(config)}, mode=MountMode.READ)
-
-    # Discover services
-    res = await ws.shell("ls /jaeger/services")
-    print(await res.stdout_str())
-
-    # Operation names of one service
-    res = await ws.shell(
-        "jq -r '.[].name' /jaeger/services/frontend/operations.json"
-    )
-    print(await res.stdout_str())
-
-    # Span names of the newest traces
-    res = await ws.shell(
-        "jq -r '.spans[].operationName' /jaeger/services/frontend/traces/*.json"
-    )
-    print(await res.stdout_str())
-
-    await ws.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```

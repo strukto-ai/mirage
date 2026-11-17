@@ -18,12 +18,9 @@ import { read, readdir, SEARCH, stat } from '../../core/lancedb/tree.ts'
 import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 
-export const VFS_MD = `- A LanceDB table, exposed as a filesystem.
-- Directories are the configured group-by columns; descending one narrows
+export const VFS_MD = `- Directories are the configured group-by columns; descending one narrows
   a filter.
-- Each matching row is a \`<id>.md\` card plus a \`<id>.<ext>\` blob file.
-- \`ls\`, \`cd\`, \`cat\`, \`tree\`, \`find\`, \`wc\`, \`grep\` and \`rg\` work as
-  usual.`
+- Each matching row is a \`<id>.md\` card plus a \`<id>.<ext>\` blob file.`
 
 /**
  * LanceDB's functions over its accessor, which a host package builds

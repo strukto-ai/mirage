@@ -1,64 +1,94 @@
 ---
 title: Disk
 icon: hard-drive
-description: Mount a directory on the host filesystem as a Mirage VFS (Node only).
+description: Virtualize a local directory from Node.
 ---
 
-`DiskVFS` mounts a directory on the host filesystem. Reads and writes go through `node:fs` against the configured `root`.
+`DiskVFS` mounts a directory on the host: every file and folder under `root`
+appears under the mount, and reads and writes go to the real files. It needs
+no credentials; see the [Disk page](/home/setup/disk).
 
 <Note>
-  Node only. The browser SDK has no kernel filesystem; use [OPFS](/typescript/setup/opfs) instead.
+  Node only. A browser has no host filesystem; use
+  [OPFS](/typescript/setup/opfs) instead.
 </Note>
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
 
-## Config
+## Configure
 
 ```ts
 import { DiskVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const disk = new DiskVFS({ root: '/Users/me/data' })
-const ws = new Workspace({ '/disk': disk }, { mode: MountMode.WRITE })
+const disk = new DiskVFS({ root: '/srv/files' })
+const ws = new Workspace({ '/data': disk }, { mode: MountMode.WRITE })
 
-await ws.shell('echo hello | tee /disk/note.txt')
-await ws.shell('cat /disk/note.txt')
+const result = await ws.shell("ls /data && find /data -name '*.json'")
+console.log(result.stdoutText)
 ```
+
+`capacity: '1GB'` caps the bytes the root may hold; see
+[capacity](/home/setup/vfs#mount-capacity). A mount takes `MountMode.READ`,
+`WRITE` or `EXEC`; use `EXEC` when `python3` or `js` should run scripts from
+the mount.
+
+### Fields
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. A second disk mount whose root resolves to a folder already mounted is refused; a folder inside one is fine. |
-| `folderVersions` | `true` | Store each listing at its folder's version (device, inode, change and modified time), so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Set `false` for a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose change time may not move with its entries. In YAML: `folder_versions`. |
+| `root` | required | Path on the host. Reads and writes are scoped to this directory. |
+| `folderVersions` | `true` | Store each listing at its folder's version, so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. In YAML: `folder_versions`. |
+| `capacity` | none | The most bytes the root may hold, a size like `100MB` or a count of bytes. |
 
-A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.
+## Layout
 
-## Mount mode
+```text
+/data/
+  notes.txt
+  config.json
+  reports/
+    q1.csv
+    q2.csv
+```
 
-`read`, `write`, `exec`. Use `MountMode.EXEC` if `python3` or `js` should run scripts from the mount.
+The mount mirrors `root`: with `root: '/srv/files'`, `/data/reports/q1.csv` is
+the file `/srv/files/reports/q1.csv`.
 
-## Snapshot behavior
+## Behavior
 
-A snapshot carries the mount's files, and loading it restores them.
-
-For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).
+- **Root boundary:** a path such as `../../etc/passwd` is rejected; every path
+  resolves inside `root`.
+- **One mount per folder:** a second disk mount whose `root` resolves to a
+  folder already mounted is refused; a folder inside one is fine.
+- **Folder versions:** a version is the folder's device, inode, change and
+  modified time. Set `folderVersions: false` for a network or FUSE root (NFS,
+  SMB, rclone, s3fs, Mirage's own FUSE), whose change time may not move with
+  its entries. A folder changed in the last 2 seconds gets no version and is
+  re-listed until it has been quiet that long.
+- **Snapshots:** a snapshot carries the mount's files, and loading it restores
+  them.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Disk mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md disk start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -66,7 +96,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Disk mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -87,7 +117,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Disk mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -109,4 +139,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Disk mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md disk end */}

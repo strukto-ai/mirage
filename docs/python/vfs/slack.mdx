@@ -1,14 +1,20 @@
 ---
 title: Slack
-description: Mount Slack channels, DMs, messages, users, and shared files as a Mirage virtual filesystem for Python agents.
+description: Virtualize a Slack workspace from Python.
 icon: /images/slack-logo.svg
 ---
-The Slack VFS exposes a Slack workspace as a virtual filesystem
-mounted at some prefix such as `/slack/`.
 
-For token setup, see [Slack Setup](/home/setup/slack).
+`SlackVFS` mounts a Slack workspace as read-only files: channels and DMs as
+one folder per day of messages and attachments, plus user profiles. The tokens
+are set up on the [Slack page](/home/setup/slack).
 
-## Config
+## Install
+
+```bash
+pip install mirage-ai
+```
+
+## Configure
 
 ```python
 import os
@@ -18,41 +24,150 @@ from mirage.vfs.slack import SlackConfig, SlackVFS
 
 config = SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
-    search_token=os.environ.get("SLACK_USER_TOKEN"),
+    search_token=os.environ["SLACK_USER_TOKEN"],
 )
-vfs = SlackVFS(config=config)
-ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
+ws = Workspace({"/slack": SlackVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /slack/channels && grep -rlw refund /slack/channels")
+print(await result.stdout_str())
 ```
 
+`search_token` is optional: without it, `grep` reads the files. `start_time`
+and `end_time` bound the mount to a time range.
+
+### Fields
+
 {/* generated: config-table slack start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>start_time</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
-| <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). |
-| <code style={{ whiteSpace: 'nowrap' }}>search_token</code><br />secret | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. |
-| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |
+<ResponseField name="start_time" type={"str"}>
+  Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open.
+</ResponseField>
+<ResponseField name="end_time" type={"str"}>
+  End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open.
+</ResponseField>
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="token" type={"str"} required post={["secret"]}>
+  Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`).
+</ResponseField>
+<ResponseField name="search_token" type={"str"} post={["secret"]}>
+  User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`.
+</ResponseField>
+<ResponseField name="base_url" type={"str"} default={"'https://slack.com/api'"}>
+  Slack Web API root; override to point at a fake or proxy.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table slack end */}
+
+## Authentication
+
+`token` is a bot token (`xoxb-...`) with these bot scopes:
+
+- `channels:read`, `channels:history`: public channels.
+- `groups:read`, `groups:history`: private channels (optional).
+- `im:read`, `im:history`: direct messages (optional).
+- `mpim:read`, `mpim:history`: group DMs (optional).
+- `users:read`: the `users/` folder.
+- `files:read`: attachments under `files/`.
+
+Invite the bot to each channel it should read with `/invite @Mirage`; a
+channel it is not in answers `Permission denied`. The mount never posts.
+
+Slack's search refuses bot tokens (`not_allowed_token_type`). The optional
+`search_token` is a user token (`xoxp-...`) with `search:read`, used only for
+Slack's search methods; the bot token still does every read. For `grep` and
+`rg`, that user token also needs `channels:read`, `groups:read`, `im:read` and
+`mpim:read`, so Mirage can tell which channels and DMs its search covers.
+
+## Layout
+
+```text
+/slack/
+  channels/
+    general__C04KEPWF6V7/
+      2026-11-16/
+        chat.jsonl
+        files/
+          roadmap__F07AB12CD.pdf
+  dms/
+    alice__D0AQDJ5FP9V/
+      2026-11-16/
+        chat.jsonl
+  users/
+    alice__U12345678.json
+```
+
+- **Names:** a channel, DM or user is `<display-name>__<id>`, so the CLI's
+  channel and user flags take the id from the path. Only `/` in a name
+  becomes `∕` (U+2215); `ls` the parent for exact names and quote names with
+  spaces.
+- **Days:** each channel and DM lists one folder per day for the 90 days up
+  to its newest message; a date glob finds earlier days.
+- **`chat.jsonl`:** one message per line as Slack's API returns it (`.text`,
+  `.user`, `.ts`, `.files`). `.user` is a user id, matched against
+  `users/<name>__<user-id>.json`.
+- **`files/`:** the attachments shared that day.
+- **`users/`:** one file per user that is not deleted or a bot, holding the
+  full profile from Slack.
+
+## Behavior
+
+- **Read only:** send messages, react, pin, look up members, search and upload
+  files with the [`slack`](/python/cli/slack) CLI.
+- **Time scope:** `start_time` and `end_time` bound the mount with RFC 3339
+  timestamps that carry a timezone, at most to the millisecond. Start is
+  inclusive, end exclusive, and an unset bound is open. Listings then cover
+  that period instead of the recent window, day folders use UTC, messages are
+  picked by creation time and attachments follow their messages. Direct
+  paths, `stat`, date globs, `grep` and `rg` cannot leave the scope. Users and
+  channel metadata stay visible. The scope applies to the mount, not to the
+  `slack` CLI; rebuild the mount to change it.
+- **Upstream changes:** a `read` mount refuses writes through Mirage; it does
+  not freeze edits or deletions made in Slack.
+- **Rate limits:** many reads of `chat.jsonl` can hit Slack's per-method rate
+  limits, and history limits depend on how the app is distributed; see
+  Slack's
+  [`conversations.history` limits](https://docs.slack.dev/reference/methods/conversations.history/).
+
+## Integration
+
+Slack answers these commands through its own API, so fewer files are read.
+See [Integration](/home/integration/overview).
+
+- `grep -rw` and `rg -w`: with a user token, only the channel and DM days
+  Slack search names are read, and the output matches reading every day.
+  Search covers message text, file names and titles, and reactions
+  (`has::name:`); a file hit names each day the file was shared. Users, file
+  blobs and a day searched on its own are always read. Every day is read when
+  the word is a key or fixed value of the message JSON, a file-type or URL
+  word, a join or leave message word, or part of a user's name or of the
+  workspace's domain, and when a search fails, returns more than 1,000
+  messages or finds nothing. With a separate `search_token`, every day is also
+  read when the scope holds a private channel or DM that token's user is not
+  in (a bot's own DMs). Slack indexes a message some time after it is posted,
+  and a word held only in another field (a bot's username, an unfurled link)
+  is not searched; `walk_limit: -1` in the mount's `"@all"`
+  [command limit](/home/core/output-limits) reads every file instead.
+- `tail -f`: each new message as it is posted.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
 
 {/* generated: vfs-md slack start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `slack`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -72,26 +187,20 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
         <username>__<user-id>.json  # user profile
     ```
 
-    - A channel, DM or user name is `<display-name>__<id>`. The display name
-      keeps Slack's spelling; only `/` becomes `∕` (U+2215). `ls` the parent
-      first to find exact names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.text`, `.user`,
-      `.ts` and `.files`. A day's `files/` may be empty.
-    - `.user` is a user ID (`U…`), not a username; resolve it through
-      `users/<username>__<user-id>.json` and filter messages by the ID.
-    - Without `start_time`/`end_time`, a channel lists the latest 90 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included, and `grep`
-      and `rg` see only the in-scope files. Users and channel metadata stay
-      available as context.
-    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the channel
-      and DM days Slack search names; attachments under `files/` are always
-      read.
+    - A channel, DM or user name is `<display-name>__<id>`; only `/` becomes
+      `∕` (U+2215). `ls` the parent for exact names and quote names with
+      spaces.
+    - `chat.jsonl` holds one message per line (`.text`, `.user`, `.ts`,
+      `.files`). `.user` is a user id (`U…`); match it against
+      `users/<username>__<user-id>.json`.
+    - Without `start_time`/`end_time`, a channel lists the 90 days up to its
+      newest message; a date glob finds earlier days.
+    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the days
+      Slack search names; `files/` is always read.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -99,7 +208,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `slack` which files may match. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -144,24 +253,18 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
         <username>__<user-id>.json  # user profile
     ```
 
-    - A channel, DM or user name is `<display-name>__<id>`. The display name
-      keeps Slack's spelling; only `/` becomes `∕` (U+2215). `ls` the parent
-      first to find exact names, and quote a name that has spaces.
-    - Messages are JSONL; use `jq` for fields such as `.text`, `.user`,
-      `.ts` and `.files`. A day's `files/` may be empty.
-    - `.user` is a user ID (`U…`), not a username; resolve it through
-      `users/<username>__<user-id>.json` and filter messages by the ID.
-    - Without `start_time`/`end_time`, a channel lists the latest 90 days up
-      to its newest message; a date glob finds earlier days.
-    - With `start_time`/`end_time`, listings cover that scope; messages and
-      attachments outside it are absent, direct paths included, and `grep`
-      and `rg` see only the in-scope files. Users and channel metadata stay
-      available as context.
-    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the channel
-      and DM days Slack search names; attachments under `files/` are always
-      read.
+    - A channel, DM or user name is `<display-name>__<id>`; only `/` becomes
+      `∕` (U+2215). `ls` the parent for exact names and quote names with
+      spaces.
+    - `chat.jsonl` holds one message per line (`.text`, `.user`, `.ts`,
+      `.files`). `.user` is a user id (`U…`); match it against
+      `users/<username>__<user-id>.json`.
+    - Without `start_time`/`end_time`, a channel lists the 90 days up to its
+      newest message; a date glob finds earlier days.
+    - Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the days
+      Slack search names; `files/` is always read.
 
-    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive); explicit paths and globs cannot escape it.
 
     ## Supported Unix Commands for VFS
 
@@ -183,234 +286,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md slack end */}
-
-Directory names embed the Slack ID so that write commands
-(`slack send-message --channel`, etc.) can reference the correct
-VFS without extra lookups.
-
-### Channels
-
-`/slack/channels/` lists public and private channels the bot has
-access to. The channel ID is appended after `__`. Each channel
-directory contains day-partitioned directories for the last 90 days
-(or since channel creation, whichever is shorter). Each date directory
-contains `chat.jsonl` plus a `files/` directory for attachments shared
-that day.
-
-The date range is derived from the channel's `created` timestamp.
-
-### DMs
-
-`/slack/dms/` lists direct message conversations. The DM ID is
-appended after `__`. Like channels, DM directories contain daily
-directories with `chat.jsonl` and `files/`.
-
-### Users
-
-`/slack/users/` lists one `.json` file per non-deleted, non-bot user.
-Reading a user file calls `get_user_profile()` and returns the full
-profile JSON from the Slack API.
-
-## Cache
-
-The Slack VFS uses `IndexCacheStore` (same as Discord and other
-mounts). Index entries store channel IDs, DM IDs, user IDs, and
-channel creation timestamps for date range computation. File bytes go through the workspace
-file cache.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.slack import SlackConfig, SlackVFS
-
-load_dotenv(".env.development")
-
-config = SlackConfig(
-    token=os.environ["SLACK_BOT_TOKEN"],
-    search_token=os.environ.get("SLACK_USER_TOKEN"),
-)
-vfs = SlackVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
-
-    # List structure
-    r = await ws.shell("ls /slack/")
-    print(await r.stdout_str())
-
-    # List channels
-    r = await ws.shell("ls /slack/channels/")
-    print(await r.stdout_str())
-
-    ch = (await r.stdout_str()).strip().splitlines()[0]
-    base = f"/slack/channels/{ch}"
-
-    # Discover an available day, then read a few messages
-    r = await ws.shell(f'ls "{base}/" | tail -n 1')
-    day = (await r.stdout_str()).strip()
-    r = await ws.shell(f'head -n 3 "{base}/{day}/chat.jsonl"')
-    print(await r.stdout_str())
-
-    # Extract message text with jq
-    r = await ws.shell(
-        f'cat "{base}/{day}/chat.jsonl"'
-        ' | jq -r ".text" | head -n 5')
-    print(await r.stdout_str())
-
-    # Search across channel (scans all date files)
-    r = await ws.shell(f'rg message "{base}/"')
-    print(await r.stdout_str())
-
-    # Tree view
-    r = await ws.shell("tree -L 1 /slack/")
-    print(await r.stdout_str())
-
-    # Navigate with cd/pwd
-    await ws.shell(f'cd "{base}"')
-    r = await ws.shell("pwd")
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-See `examples/python/vfs/slack/slack.py` for the full working example.
-
-## Finding IDs
-
-VFS-specific commands require Slack IDs (`channel_id`, `user_id`,
-`ts`). These can be extracted from the filesystem:
-
-```bash
-# Channel ID - embedded in directory name after "__"
-ls /slack/channels/
-# → general__C04KEPWF6V7   ← channel_id = C04KEPWF6V7
-
-# User ID - embedded in filename after "__"
-ls /slack/users/
-# → alice__U04K21SEVR9.json   ← user_id = U04K21SEVR9
-
-# Message timestamp (ts) - inside JSONL messages
-jq -r '"\(.ts) [\(.user)] \(.text)"' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
-# → 1712345678.123456 [U04K21SEVR9] hello world
-
-# Find a specific message then reply
-jq -r 'select(.text | test("hello")) | .ts' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
-# → 1712345678.123456
-slack send-message --channel C04KEPWF6V7 \
-  --thread-ts 1712345678.123456 --text "Reply to hello"
-```
-
-## Working with Large Channels
-
-Channels with many messages produce large `chat.jsonl` files per day.
-Tips for efficient access:
-
-```bash
-# Check message count per day
-wc -l "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
-
-# Read only recent messages
-tail -n 10 "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
-
-# Search across all dates (scans each file)
-rg "keyword" "/slack/channels/general__C04KEPWF6V7/"
-
-# Extract specific fields to reduce output
-jq -r '"\(.ts) [\(.user)] \(.text)"' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl" | head -n 20
-
-# Count messages per user
-cat "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl" \
-  | jq -r '.user' | sort | uniq -c
-```
-
-## Shell Commands
-
-Standard commands available on the mounted Slack tree:
-
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List channels, DMs, users, dates           |
-| `cat`           | Read `chat.jsonl`, user `.json`, or files  |
-| `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search (file or directory level)   |
-| `jq`            | Query JSON, once per JSONL line (`-s` all) |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | File metadata (name, size, type)           |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
-| `tree`          | Directory tree view                        |
-
-Acting on Slack (sending, reacting, pins, member info, search) goes
-through the [slack CLI](/python/cli/slack) when installed; the mounted
-tree stays read-oriented. The `<name>__<id>` path segments supply the
-channel and user IDs the CLI flags take.
-
-## Integration
-
-What Slack answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Slack |
-| --- | --- |
-| `grep -r`, `rg` | Slack search, for whole words, with a user token. It can miss recent messages, words only in other fields (bot names and link previews). |
-| `tail -f` | Each new message as it is posted |
-
-With a user token,
-`grep -rw` and `rg -w` read only the channel and DM days Slack search names,
-and print what reading every day would. Search covers message text, file names
-and titles (`search.files`) and reactions (`has::name:`); listing a day already
-fetches its history, so this saves the second fetch of each day it rules out.
-A file hit names each day the file was shared. Users, file blobs and a day
-searched on its own are always read.
-
-Every day is read when the word is a key or fixed value of the message JSON, a
-file-type or URL word, a join or leave message word, or part of a user's name
-or of the workspace's domain, and when a search fails, returns more than 1,000
-messages or finds nothing. With a separate `search_token`, every day is also read
-when the scope holds a private channel or a DM that token's user is not in (a
-bot's own DMs), since their search never sees it; that token needs
-`channels:read`, `groups:read`, `im:read` and `mpim:read` to list the
-conversations it sees. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Slack indexes a message some
-time after it is posted, and a word held only in another field of a message (a
-bot's username, an unfurled link) is not searched.
-
-## Time scope
-
-Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
-`start_time`/`end_time` to Python; `startTime`/`endTime` to the TypeScript
-constructor). Bounds are RFC3339 timestamps with an explicit timezone and
-at most millisecond precision. Start is inclusive; end is exclusive.
-An omitted or null bound is open. Start must precede end.
-
-```yaml
-mounts:
-  /history:
-    vfs: slack
-    mode: read
-    config:
-      token: "<bot-token>"
-      start_time: "2026-06-01T10:00:00Z"
-      end_time: "2026-06-02T00:00:00Z"
-```
-
-With a bound configured, channel listings cover the selected period rather
-than the default recent window. Day directories use UTC. Messages are selected
-by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope: a search only rules
-out files, so scoped searches scan the filtered files. User/member
-and channel/server metadata remain visible as context.
-
-These settings apply to the VFS, not to separately installed account CLIs.
-`mode: read` prevents mount writes; it does not freeze upstream edits or deletions.
-Rebuild/remount the VFS to change its scope so cached listings and bytes are cleared.

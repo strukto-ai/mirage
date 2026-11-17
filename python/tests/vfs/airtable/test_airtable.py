@@ -118,7 +118,7 @@ def test_vfs_md_maps_every_file_and_the_record_shape():
         assert name in rendered
     assert "`created_time` and `fields`" in rendered
     assert "max_read_records" in rendered
-    assert "head -n 20 /airtable/bases/" in rendered
+    assert "head -n N" in rendered
     assert "{" not in rendered and "}" not in rendered
 
 

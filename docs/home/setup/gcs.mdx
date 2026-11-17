@@ -1,26 +1,145 @@
 ---
 title: Google Cloud Storage
 icon: /images/gcs-logo.svg
-description: Set up Google Cloud Storage credentials for the GCS VFS.
+description: Virtualize a Google Cloud Storage bucket as files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create HMAC Keys
+A GCS bucket becomes a folder tree, with one file per object, reached
+through the S3-compatible XML API at `https://storage.googleapis.com`.
 
-1. Go to https://console.cloud.google.com/storage/settings -> **Interoperability**
-1. Under **Service account HMAC**, click **Create a key for a service account**
-1. Select a service account with Storage Object Viewer (read) or
-   Storage Object Admin (read/write)
-1. Copy the **Access key** and **Secret**
 
-### 2. Set Environment Variables
+
+## Setup
+
+GCS signs S3 requests with an HMAC key that belongs to a service account.
+
+1. In the Google Cloud console, open **Cloud Storage** > [**Settings**](https://console.cloud.google.com/storage/settings) > **Interoperability**.
+1. Under **Service account HMAC**, pick **Create a key for a service account**, choose the service account, then **Create key**.
+1. Grant that service account **Storage Object Viewer** on the bucket, or **Storage Object User** (or **Storage Object Admin**) for writes.
+1. Copy the **Access key** and **Secret**. Google shows the secret only once.
 
 ```bash
-# .env.development
-GCS_BUCKET=mirage-ai
-GCS_ACCESS_KEY_ID=GOOG...
-GCS_SECRET_ACCESS_KEY=...
+export GCS_BUCKET=my-bucket
+export GCS_ACCESS_KEY_ID=GOOG...
+export GCS_SECRET_ACCESS_KEY=...
 ```
 
-For SDK guides, see [Google Cloud Storage (Python)](/python/vfs/gcs) and [Google Cloud Storage (TypeScript)](/typescript/setup/gcs).
+- Creating a key takes the **Storage HMAC Key Admin** role. A new key can take
+  up to a minute to work.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /gcs:
+        vfs: gcs
+        mode: read
+        config:
+          bucket: ${GCS_BUCKET}
+          access_key_id: ${GCS_ACCESS_KEY_ID}
+          secret_access_key: ${GCS_SECRET_ACCESS_KEY}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id gcs
+    mirage shell -w gcs -c 'ls /gcs'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.gcs import GCSConfig, GCSVFS
+
+    config = GCSConfig(
+        bucket=os.environ["GCS_BUCKET"],
+        access_key_id=os.environ["GCS_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["GCS_SECRET_ACCESS_KEY"],
+    )
+    ws = Workspace({"/gcs": GCSVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /gcs")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/gcs': new GCSVFS({
+          bucket: process.env.GCS_BUCKET!,
+          accessKeyId: process.env.GCS_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.GCS_SECRET_ACCESS_KEY!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /gcs')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/gcs/
+  data/
+    events.jsonl
+    users.parquet
+  reports/
+    2026-11/
+      metrics.csv
+      summary.md
+```
+
+- Each object key is a file path; folders are key prefixes, and the bucket holds no directory objects.
+- `key_prefix` (`keyPrefix` in TypeScript) mounts one subpath of the bucket as the root.
+- `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused.
+
+## Sample runs
+
+```bash
+$ find /gcs -type f
+/gcs/data/events.jsonl
+/gcs/data/users.parquet
+/gcs/reports/2026-11/metrics.csv
+/gcs/reports/2026-11/summary.md
+```
+
+```bash
+$ head -n 3 /gcs/reports/2026-11/metrics.csv
+date,signups,active_users
+2026-11-01,412,9810
+2026-11-02,398,9875
+```
+
+```bash
+$ grep -c signup /gcs/data/events.jsonl
+2
+```
+
+On a `write` mount, redirects, `cp`, `mv` and `rm` change objects in the bucket.
+For `write: conditional`, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/gcs">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/gcs">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

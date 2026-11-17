@@ -1,21 +1,20 @@
 ---
 title: Langfuse
-description: Mount Langfuse traces, observations, prompts, datasets, and scores as a Mirage virtual filesystem.
+description: Virtualize a Langfuse project from Python.
 icon: /images/langfuse-logo.svg
 ---
-The Langfuse VFS exposes LLM observability data (traces, observations,
-prompts, datasets, scores) as a virtual filesystem mounted at some prefix
-such as `/langfuse/`.
 
-For credential setup, see [Langfuse Setup](/home/setup/langfuse).
+`LangfuseVFS` mounts one Langfuse project as read-only files: its traces with
+their observations and scores, sessions, prompt versions and datasets. The key
+pair is set up on the [Langfuse page](/home/setup/langfuse).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[langfuse]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -26,41 +25,111 @@ from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
 config = LangfuseConfig(
     public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
     secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-    host=os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+    host=os.environ["LANGFUSE_HOST"],
 )
-vfs = LangfuseVFS(config=config)
-ws = Workspace({"/langfuse": vfs}, mode=MountMode.READ)
+ws = Workspace({"/langfuse": LangfuseVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("ls /langfuse/traces && ls /langfuse/prompts")
+print(await result.stdout_str())
 ```
 
+`default_trace_limit` sets how many traces a listing shows, and
+`default_from_timestamp` lists only traces from an ISO 8601 time on.
+
+### Fields
+
 {/* generated: config-table langfuse start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>public_key</code><br />required | Langfuse project public key. |
-| <code style={{ whiteSpace: 'nowrap' }}>secret_key</code><br />required, secret | Langfuse project secret key. |
-| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://cloud.langfuse.com'` | Langfuse API host; override for a self-hosted or regional instance. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_trace_limit</code><br />default `100` | The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id. |
-| <code style={{ whiteSpace: 'nowrap' }}>default_from_timestamp</code> | List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `default_trace_limit`. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="public_key" type={"str"} required>
+  Langfuse project public key.
+</ResponseField>
+<ResponseField name="secret_key" type={"str"} required post={["secret"]}>
+  Langfuse project secret key.
+</ResponseField>
+<ResponseField name="host" type={"str"} default={"'https://cloud.langfuse.com'"}>
+  Langfuse API host; override for a self-hosted or regional instance.
+</ResponseField>
+<ResponseField name="default_trace_limit" type={"int"} default={"100"}>
+  The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id.
+</ResponseField>
+<ResponseField name="default_from_timestamp" type={"str"}>
+  List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `default_trace_limit`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table langfuse end */}
+
+## Authentication
+
+The mount reads with a project's key pair, the public key (`pk-lf-...`) and
+the secret key (`sk-lf-...`), and sees only that project. `host` is the
+project's region, such as `https://cloud.langfuse.com` (EU) or
+`https://us.cloud.langfuse.com` (US), or a self-hosted URL. The mount reads
+the Langfuse v4 API, so a self-hosted instance must run Langfuse v4.
+
+## Layout
+
+```text
+/langfuse/
+  traces/
+    <trace-id>.json
+  sessions/
+    <session-id>/
+      <trace-id>.json
+  prompts/
+    <prompt-name>/
+      1.json
+      2.json
+  datasets/
+    <dataset-name>/
+      items.jsonl
+      runs/
+        <run-name>.jsonl
+```
+
+- **`traces/`:** one `.json` file per trace: the trace's root observation,
+  with its other observations (spans, generations, events) in `observations`
+  and its scores in `scores`. `input` and `output` are the strings Langfuse
+  stores; `jq '.input | fromjson'` parses a JSON one.
+- **`sessions/`:** the sessions of the traces `traces/` lists, each holding
+  its own traces.
+- **`prompts/`:** one folder per prompt name, one file per version (`1.json`,
+  `2.json`) with the prompt content and metadata.
+- **`datasets/`:** one folder per dataset, with `items.jsonl` (its items) and
+  `runs/`, one `.jsonl` file per experiment run.
+
+## Behavior
+
+- **Read only:** no command changes Langfuse.
+- **Trace limit:** `traces/` lists up to `default_trace_limit` traces (100),
+  from `default_from_timestamp` on. The cap bounds the listing, not the tree:
+  `stat` and `cat` still reach an older trace by its id, and
+  `sessions/<id>/` serves only that session's traces.
+- **Search:** `grep` and `rg` read each file as `cat` renders it. Langfuse has
+  no content search, so `grep -r` over `traces/` reads every trace the listing
+  returns.
+- **No counts:** Langfuse has no count endpoint, so `wc -l traces/` is not
+  supported.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path>`.
 
 {/* generated: vfs-md langfuse start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `langfuse`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -79,7 +148,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
             <run-name>.jsonl
     ```
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -87,7 +156,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -151,125 +220,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md langfuse end */}
-
-### Traces
-
-`/langfuse/traces/` lists traces (capped at `default_trace_limit`,
-from `default_from_timestamp` on). The cap bounds the listing, not the tree:
-`stat` and `cat` still reach an older trace by its id, and `sessions/<id>/`
-serves only that session's traces.
-Each trace is a `.json` file: the trace's root observation, with its other
-observations (spans, generations, events) in `observations` and its scores in
-`scores`. `input` and `output` are the strings Langfuse stores; `jq
-'.input | fromjson'` parses a JSON one.
-
-### Sessions
-
-`/langfuse/sessions/` lists the sessions of the traces `traces/` lists. Each
-session directory contains trace `.json` files belonging to that session.
-
-### Prompts
-
-`/langfuse/prompts/` lists prompt names as directories. Each prompt directory
-contains version files (`1.json`, `2.json`, etc.) with the prompt content
-and metadata.
-
-### Datasets
-
-`/langfuse/datasets/` lists dataset names as directories. Each contains
-`items.jsonl` (dataset items) and `runs/`, one `.jsonl` file per experiment
-run on the dataset.
-
-## grep and rg
-
-grep and rg read each file as `cat` renders it, at every scope; `grep -r`
-and `rg` walk a directory. No provider-side content search is used, so a
-search over `traces/` reads every trace the listing returns.
-
-```bash
-grep -r "error" "/langfuse/traces/"
-rg -l "classify" "/langfuse/prompts/"
-```
-
-## Limits
-
-| Command                  | Limit behavior                                       |
-| ------------------------ | ---------------------------------------------------- |
-| `ls traces/`             | Returns up to `default_trace_limit` traces           |
-| `cat traces/<id>.json`   | Full trace (single doc, no limit needed)             |
-| `grep -r traces/`         | Reads every trace `ls traces/` lists                 |
-| `wc -l traces/`          | Not supported (Langfuse has no count endpoint)       |
-
-## Cache
-
-The Langfuse VFS uses `IndexCacheStore` (same as other mounts).
-Index entries store trace IDs, session IDs, and prompt names.
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
-
-load_dotenv(".env.development")
-
-config = LangfuseConfig(
-    public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
-    secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-)
-vfs = LangfuseVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/langfuse": vfs}, mode=MountMode.READ)
-
-    # List top-level resources
-    r = await ws.shell("ls /langfuse/")
-    print(await r.stdout_str())
-
-    # List traces
-    r = await ws.shell("ls /langfuse/traces/")
-    print(await r.stdout_str())
-
-    # Read a specific trace
-    traces = (await r.stdout_str()).strip().splitlines()
-    if traces:
-        r = await ws.shell(f'cat "/langfuse/traces/{traces[0]}"')
-        print((await r.stdout_str())[:500])
-
-    # List prompts
-    r = await ws.shell("ls /langfuse/prompts/")
-    print(await r.stdout_str())
-
-    # Search the listed traces
-    r = await ws.shell('grep -r "error" "/langfuse/traces/"')
-    print(await r.stdout_str())
-
-    # List datasets
-    r = await ws.shell("ls /langfuse/datasets/")
-    print(await r.stdout_str())
-
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Shell Commands
-
-| Command         | Notes                                                  |
-| --------------- | ------------------------------------------------------ |
-| `ls`            | List traces, sessions, prompts, datasets               |
-| `cat`           | Read trace JSON, prompt version, dataset items         |
-| `head` / `tail` | Read the beginning/end of a file; directories are rejected |
-| `grep` / `rg`   | Lexically search files; recursive forms walk listed files |
-| `jq`            | Query JSON trace/prompt data                           |
-| `stat`          | Metadata (trace count, prompt versions, dataset items) |
-| `find`          | Search across resources with `-name`                   |
-| `tree`          | Directory tree view                                    |

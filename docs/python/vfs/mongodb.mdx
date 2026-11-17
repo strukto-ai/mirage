@@ -1,20 +1,20 @@
 ---
 title: MongoDB
-description: Mount MongoDB databases, collections, and documents as a Mirage filesystem with JSON access for Python agents.
+description: Virtualize MongoDB databases from Python.
 icon: /images/mongodb-logo.svg
 ---
-The MongoDB VFS exposes MongoDB databases, collections, and documents
-as a virtual filesystem mounted at some prefix such as `/mongodb/`.
 
-For connection setup, see [MongoDB Setup](/home/setup/mongodb).
+`MongoDBVFS` turns MongoDB databases into a read-only tree: every collection
+and view is a folder holding its sampled schema and its documents as JSON
+lines. The connection URI is set up on the [MongoDB page](/home/setup/mongodb).
 
-Install the extra:
+## Install
 
 ```bash
 pip install "mirage-ai[mongodb]"
 ```
 
-## Config
+## Configure
 
 ```python
 import os
@@ -22,43 +22,136 @@ import os
 from mirage import MountMode, Workspace
 from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
 
-config = MongoDBConfig(
-    uri=os.environ["MONGODB_URI"],
-    max_doc_limit=5000,
-    elide_fields={"sample_mflix.movies": ["plot_embedding"]},
-)
-vfs = MongoDBVFS(config=config)
-ws = Workspace({"/mongodb": vfs}, mode=MountMode.READ)
+config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=["sample_mflix"])
+ws = Workspace({"/mongodb": MongoDBVFS(config)}, mode=MountMode.READ)
+
+result = await ws.shell("head -n 3 /mongodb/sample_mflix/collections/movies/documents.jsonl")
+print(await result.stdout_str())
 ```
 
+`databases` limits the tree to those databases.
+`elide_fields={"sample_mflix.movies": ["plot_embedding"]}` drops heavy fields,
+such as embeddings, from what an agent reads.
+
+### Fields
+
 {/* generated: config-table mongodb start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI. |
-| <code style={{ whiteSpace: 'nowrap' }}>databases</code> | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
-| <code style={{ whiteSpace: 'nowrap' }}>max_doc_limit</code><br />default `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
-| <code style={{ whiteSpace: 'nowrap' }}>elide_fields</code><br />default `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+<ResponseField name="timeout" type={"float"} default={"30"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="uri" type={"str"} required post={["secret"]}>
+  MongoDB connection URI.
+</ResponseField>
+<ResponseField name="databases" type={"list[str]"}>
+  Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`.
+</ResponseField>
+<ResponseField name="max_doc_limit" type={"int"} default={"5000"}>
+  Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`).
+</ResponseField>
+<ResponseField name="elide_fields" type={"dict"} default={"{}"}>
+  Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mongodb end */}
+
+## Authentication
+
+The user in the URI needs to read the databases the mount shows: the built-in
+**Only read any database** role on Atlas, or `read` on each database.
+
+## Layout
+
+```text
+/mongodb/
+  sample_mflix/
+    database.json
+    collections/
+      movies/
+        schema.json
+        documents.jsonl
+    views/
+      top_movies/
+        schema.json
+        documents.jsonl
+```
+
+The tree mirrors MongoDB's cluster, database, collection and view. The
+database folder always appears, even when `databases` names one database.
+Listings show databases, collections, views and their fixed files, never one
+entry per document.
+
+- `database.json`: the collection and view names, without counts.
+- `schema.json`: field paths and the BSON types seen in the first 100
+  documents in `_id` order, the indexes and the `$jsonSchema` validator if one
+  is set. Views have no indexes. Unchanged data reads as identical bytes.
+- `documents.jsonl`: one document per line in
+  [Relaxed Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/),
+  in `_id` order:
+
+```json
+{"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
+```
+
+## Behavior
+
+- **Read-only:** the mount only reads; no command changes the database.
+- **Streaming:** `cat`, `grep`, `jq` and `head` read documents in batches, and
+  `head` stops after its count. Commands that need the whole input, such as
+  `sort` or `jq -s`, still buffer it, so read a large collection in bounded
+  slices.
+- **Read limit:** `tail -n` with a count past `max_doc_limit` on a collection
+  that long fails with `File too large` rather than printing fewer lines.
+- **Elided fields:** fields under `elide_fields` are dropped from
+  `documents.jsonl`, for `cat` and `tail -f` alike, and keep their type in
+  `schema.json`. Nested paths use dots, such as `metadata.embedding`.
+- **File size:** `documents.jsonl` is rendered on demand, so `stat` and `ls -l`
+  show `-` for its size and `du` counts `0`. `wc -c` measures the bytes and
+  `wc -l` counts the documents; both may scan the collection. A nonempty
+  `ls -l` prints `total ?`.
+- **Following inserts:** `tail -f` prints the last lines, then follows new
+  inserts through a change stream. That needs a replica set on MongoDB 5.0 or
+  later, which Atlas is; on a standalone server, and on a view, it polls.
+
+## Integration
+
+MongoDB answers these commands through its own API, so fewer documents are
+read. See [Integration](/home/integration/overview).
+
+- `grep` and `rg` on one file: a filter on the server sends only the documents
+  that may match. `grep -r` on a folder does the same for each
+  `documents.jsonl` under it.
+- `tail -n N`: the last N documents by `_id`, sorted on the server.
+- `wc -l`: `countDocuments()` on the server.
+- `tail -f`: a change stream yields each new insert.
+
+For one plain text, the filter matches it in any case against every key and
+string of a document, eight levels deep, in the `_id` order a plain read takes.
+A document nested deeper, or holding a value the filter cannot look into
+(binary, a regex, code), is always sent. MongoDB still scans the collection,
+but only those documents are sent. The file is read as usual when the text
+holds anything but ASCII letters and spaces, or could match an Extended JSON
+key (`$oid`, `$date`, `$numberLong`), a JSON literal (`true`, `null`) or an id
+(a word of hex letters only, such as `ada`). `schema.json` and `database.json`
+are always read, and `-m` stops the cursor early.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>`.
 
 {/* generated: vfs-md mongodb start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
     | `/<path>` | `mongodb`, read |
 
-    #### VFS Layout
+    **VFS Layout**
 
-    ##### `/<path>`
+    **`/<path>`**
 
     ```text
     /<path>
@@ -72,15 +165,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>
           documents.jsonl
     ```
 
-    - Read `database.json` first to discover entities, and `schema.json`
-      before reading a large document stream.
-    - `head`, `tail`, `wc`, `grep`, `rg` and `jq` understand
-      `documents.jsonl`; `grep` and `rg` fetch only the documents that may
-      match.
-    - An unknown size displays as `-`; `wc -c` measures bytes and `wc -l`
-      counts documents on demand. These counts may scan the collection.
+    - Read `database.json` first, and `schema.json` before a large
+      `documents.jsonl`.
+    - Sizes show as `-`; `wc -c` and `wc -l` count on demand and may scan
+      the collection.
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -88,7 +178,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>
     | --- | --- |
     | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `mongodb` for the matching lines. `tail` and `wc -l` ask `mongodb` instead of reading a file. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -127,13 +217,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>
           documents.jsonl
     ```
 
-    - Read `database.json` first to discover entities, and `schema.json`
-      before reading a large document stream.
-    - `head`, `tail`, `wc`, `grep`, `rg` and `jq` understand
-      `documents.jsonl`; `grep` and `rg` fetch only the documents that may
-      match.
-    - An unknown size displays as `-`; `wc -c` measures bytes and `wc -l`
-      counts documents on demand. These counts may scan the collection.
+    - Read `database.json` first, and `schema.json` before a large
+      `documents.jsonl`.
+    - Sizes show as `-`; `wc -c` and `wc -l` count on demand and may scan
+      the collection.
 
     ## Supported Unix Commands for VFS
 
@@ -155,315 +242,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MongoDB mounted at `/<path>
     ````
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md mongodb end */}
-
-The mount mirrors MongoDB's `cluster → database → collection / view`
-model. The database directory always appears in the path, even when
-`databases` filters to a single entry.
-
-Discovery lists databases, collections, views, and their fixed file names.
-It does not enumerate one filesystem entry per document. Schema inspection
-is separate from bulk document reads, so discovering a collection does not
-require exporting it. These paths and read contracts are shared by Python
-and TypeScript.
-
-### documents.jsonl
-
-One JSON object per line, encoded with BSON
-[Relaxed Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/).
-BSON-specific types round-trip through their canonical `$` wrappers:
-
-```json
-{"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
-```
-
-`cat` / `head` / `tail` / `grep` / `jq` can read this file through the same
-streaming interface. The cursor fetches documents in batches; `head` can stop
-after a prefix. Commands that need the whole input, such as `sort` or `jq -s`,
-can still buffer it. Use bounded reads when exploring a large collection.
-
-Because the file is rendered on demand, `stat` / `ls -l` report no size and
-`du` returns `0` for it (computing the real size would require rendering the
-whole collection). Use `wc -c documents.jsonl` for the actual rendered byte
-count, or `wc -l documents.jsonl` for an exact document count (which can scan
-the collection). `stat -c %s` prints `-` for an unknown size and `0` only for
-a known empty file. Missing dates also display as `-`.
-
-Long directory listings include a `total` row. GNU `ls` reports allocated disk
-blocks there; the VFS does not expose allocation metadata, so Mirage prints
-`total ?` for nonempty listings and `total 0` for empty listings. This is an
-intentional divergence from GNU output, not a sum of rendered file sizes.
-
-`stat` checks existence and type without counting documents, sampling fields,
-or fetching indexes. This keeps `ls`, `find`, and opening a stream independent
-of the collection size. The same unknown-size convention applies to Postgres
-row exports and other rendered VFS files.
-
-### schema.json
-
-Generated from the first 100 documents in `_id` order. Includes:
-
-- field path → observed BSON type frequencies (nested paths unioned across the sample)
-- index definitions from `listIndexes`, without volatile access counters
-- the `$jsonSchema` validator if one is registered
-
-Repeated reads of unchanged data produce identical bytes. Schema reads do
-not include document counts or `$indexStats`, so reading a schema cannot
-change its own content. Views skip indexes.
-
-### database.json
-
-Lists collection and view names using two catalog listings, without a
-per-collection count. Useful for `cat /mongodb/<db>/database.json` to get an overview
-without recursing into each entity.
-
-### Elided fields
-
-Fields listed under `elide_fields` are dropped entirely from
-`documents.jsonl` output. The type stays documented in `schema.json`, so
-heavy fields (embeddings, large binary, raw text blobs) can be hidden
-from agent reads without losing the schema signal:
-
-```python
-config = MongoDBConfig(
-    uri=os.environ["MONGODB_URI"],
-    elide_fields={
-        "sample_mflix.movies": ["plot_embedding"],
-        "rag.docs": ["metadata.embedding"],
-    },
-)
-```
-
-Nested paths use dot notation. Elision applies to both `cat` (one-shot
-streaming reads) and `tail -f` (live change-stream follows).
-
-## Streaming and Limits
-
-`cat`, `grep`, `head`, and `tail -f` consume documents lazily through a
-batched PyMongo async cursor (or change stream); the consumer cancels to stop
-fetching. Direct output is capped at 2,000 lines by default, with a truncation
-notice on stderr. Pipes and redirects bypass this output cap. See
-[command output limits](/home/core/output-limits) to change the bound.
-
-| Command                      | Behavior                                                          |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `cat`                        | Streams the collection sorted by `_id`; direct output uses the command limit above |
-| `head -n K`                  | Streams from `_id` order and stops after K documents              |
-| `tail -n K`                  | Server-side sort + limit; a K past `max_doc_limit` on a collection that long is `File too large` |
-| `tail -f`                    | Prints the last lines, then opens a change stream and yields each new insert as a JSONL line |
-| `grep` (file level)          | Streams from `documents.jsonl`; supports `-m` for short-circuit   |
-| `grep -r` (collection/db level) | Every file under the directory; MongoDB sends only the documents that may match |
-| `jq`                         | Inherits the streaming `cat` source                               |
-| `wc -l`                      | Uses `countDocuments()` server-side; zero download                |
-| `stat`                       | Existence and type only; no counts or index queries   |
-
-## Smart Commands
-
-### grep and rg
-
-For one plain text in a collection's or view's `documents.jsonl`, grep and
-rg ask MongoDB for the documents that may hold it, in the `_id` order a plain
-read takes, and search their lines instead of the whole collection. The
-filter matches the text in any case against every key and string of a
-document, eight levels deep; a document nested deeper, or holding a value it
-cannot look into (binary, a regex, code), is always sent. MongoDB still scans
-the collection, but only those documents are sent. The file is read as usual
-when the text holds anything but ASCII letters and spaces, or could match an
-Extended JSON key (`$oid`, `$date`, `$numberLong`), a JSON literal (`true`,
-`null`) or an id (a word of hex letters only, such as `ada`). `schema.json`
-and `database.json` are always read, and `-m` stops the cursor early.
-
-```bash
-grep "Godfather" "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-grep -r "Godfather" "/mongodb/sample_mflix/"
-```
-
-### head / tail / tail -f
-
-`tail` uses server-side `sort` + `limit`. A count past `max_doc_limit` on
-a collection that long is refused with `File too large` rather than
-printing fewer lines than asked. `head` streams in `_id` order and stops
-after the count. `tail -f` on a collection reads the last lines at one
-snapshot, then opens a Mongo change stream of the inserts after it and
-yields each new document as a JSONL line in the same format as `cat`; on a
-view it polls.
-See [Lines](/home/integration/lines):
-
-```bash
-# First 10 docs (sorted by _id ascending)
-head -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-
-# Last 10 docs (sorted by _id descending)
-tail -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-
-# Live-follow new inserts; consumer cancels to stop
-tail -f "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-```
-
-`tail -f` follows inserts on a replica set on MongoDB 5.0 or later, for
-the snapshot read and the change stream; Atlas already satisfies this. On
-a server outside a replica set it polls, and so does a view, which has no
-change stream.
-
-## Cache
-
-The MongoDB VFS lists database names, collection names, and document counts.
-These listings are not cached by default (`index_ttl = 0`); a workspace or
-mount `index:` caches them for its `ttl`.
-
-Document content is **not** cached. The VFS leaves `caches_reads`
-at its default of `False`, so `cat`, `grep`, `head`, and `tail` always
-query the live collection
-instead of serving a stored snapshot. This keeps reads consistent with a
-mutable database and ensures `tail -f` follows the live change stream
-rather than replaying cached bytes.
-
-## Integration
-
-What MongoDB answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On MongoDB |
-| --- | --- |
-| `grep`, `rg` on one file | A filter on the server sends only the documents that may match |
-| `tail -n N` | The last N documents by `_id` |
-| `wc -l` | `countDocuments()` on the server |
-| `tail -f` | A change stream yields each new insert |
-
-## Example
-
-```python
-import asyncio
-import os
-
-from dotenv import load_dotenv
-
-from mirage import MountMode, Workspace
-from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
-
-load_dotenv(".env.development")
-
-config = MongoDBConfig(uri=os.environ["MONGODB_URI"])
-vfs = MongoDBVFS(config=config)
-
-
-async def main():
-    ws = Workspace({"/mongodb": vfs}, mode=MountMode.READ)
-
-    # List all databases
-    r = await ws.shell("ls /mongodb/")
-    print(await r.stdout_str())
-
-    # List the entities under a database (database.json, collections/, views/)
-    r = await ws.shell("ls /mongodb/sample_mflix/")
-    print(await r.stdout_str())
-
-    # List collections
-    r = await ws.shell("ls /mongodb/sample_mflix/collections/")
-    print(await r.stdout_str())
-
-    # Read first 5 movies
-    r = await ws.shell(
-        'head -n 5 "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
-    print(await r.stdout_str())
-
-    # Read last 5 movies
-    r = await ws.shell(
-        'tail -n 5 "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
-    print(await r.stdout_str())
-
-    # Inspect the sampled schema and indexes
-    r = await ws.shell(
-        'cat "/mongodb/sample_mflix/collections/movies/schema.json"')
-    print(await r.stdout_str())
-
-    # Extract titles with jq
-    r = await ws.shell(
-        'jq -r ".title" "/mongodb/sample_mflix/collections/movies/documents.jsonl"'
-    )
-    print(await r.stdout_str())
-
-    # Search across a database
-    r = await ws.shell('grep -r "Godfather" "/mongodb/sample_mflix/"')
-    print(await r.stdout_str())
-
-    # Count documents (server-side, no download)
-    r = await ws.shell(
-        'wc -l "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
-    print(await r.stdout_str())
-
-    # View the database overview without recursing
-    r = await ws.shell('cat "/mongodb/sample_mflix/database.json"')
-    print(await r.stdout_str())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Runnable examples
-
-Three working examples live under `examples/python/vfs/mongodb/`:
-
-- [`mongodb.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/mongodb/mongodb.py) — agent-shell workflow: `ls`, `tree`, `cat`, `head`, `tail`, `wc`, `stat`, `grep`/`rg` at every scope, `jq`, `find`, `cd` + relative paths.
-- [`mongodb_vfs.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/mongodb/mongodb_vfs.py) — in-process VFS: `os.listdir` and `open()` walk every readdir level (root, database, `collections/`, `views/`, entity) and read `database.json`, `schema.json`, `documents.jsonl` (collection + view).
-- [`mongodb_fuse.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/mongodb/mongodb_fuse.py) — same coverage as the VFS example, but the tree is mounted as a real filesystem so other processes can `cat`/`ls`/`head` the mountpoint directly.
-
-All three default to the `mirage_test` database seeded by `scripts/seed_mongodb_test.py`.
-
-## Finding IDs
-
-`_id` is serialized as `{"$oid": "..."}` under Extended JSON:
-
-```bash
-# List the first 10 ObjectId values
-jq -r '._id["$oid"]' \
-  "/mongodb/sample_mflix/collections/movies/documents.jsonl" | head -n 10
-
-# Find a specific document by ID
-grep "573a1390f29313caabcd42e8" \
-  "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-
-# Extract a few fields together
-jq -r '"\(._id["$oid"]) \(.title) \(.year)"' \
-  "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-```
-
-## Working with Large Collections
-
-Streaming is the default; reach for these patterns when you want to keep
-the round trip small:
-
-```bash
-# Document count (server-side, no download)
-wc -l "/mongodb/sample_mflix/collections/comments/documents.jsonl"
-
-# Most recent documents (sorted by _id desc)
-tail -n 10 "/mongodb/sample_mflix/collections/comments/documents.jsonl"
-
-# MongoDB sends only the comments that may hold the word
-grep -r "love" "/mongodb/sample_mflix/collections/comments/"
-
-# Drop heavy fields via elide_fields, then take the slice you want
-head -n 20 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-```
-
-Hide embeddings or large blobs from agent reads with `elide_fields`;
-`schema.json` still documents the original type so the agent can decide
-when to ask for the raw bytes through a different path.
-
-## Shell Commands
-
-Standard commands available on the mounted MongoDB tree:
-
-| Command         | Notes                                                                   |
-| --------------- | ----------------------------------------------------------------------- |
-| `ls`            | List databases, collections, views, and per-entity files                |
-| `cat`           | Stream `documents.jsonl` (or read `schema.json` / `database.json`)      |
-| `head` / `tail` | `head` streams and stops early; `tail` sorts and limits server-side, up to `max_doc_limit` |
-| `tail -f`       | Live-follow new inserts via Mongo change stream                         |
-| `grep` / `rg`   | A directory operand searches every file under it (documents, schema.json, database.json, views); a file streams |
-| `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all)            |
-| `wc`            | Smart: `-l` uses `countDocuments()` server-side                         |
-| `stat`          | Existence and type only; no counts or index queries              |
-| `find`          | List databases/collections/views with `-name`, `-maxdepth`              |
-| `tree`          | Directory tree view                                                     |

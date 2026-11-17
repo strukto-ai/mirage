@@ -5,22 +5,25 @@ icon: grid-2
 description: Mount S3, Slack, databases and other services as files in Mirage.
 ---
 
-Mirage turns your data sources into one unified virtual filesystem. Each
-source is a VFS mounted under its own folder, such as S3 under `/s3`, Slack
-under `/slack` and PostgreSQL under `/pg`, and an agent reads them all with
-`ls`, `cat`, `grep` and `find`.
-
-Each VFS turns its service into files and folders. An S3 object is a file, a
-Slack channel is a folder with one `chat.jsonl` per day, and a PostgreSQL
-table is a folder with its rows in `rows.jsonl`. [RAM](/home/setup/ram) needs
-no credentials, so start there to try it.
+Each data source is a VFS mounted under its own folder: S3 under `/s3`, Slack
+under `/slack`, PostgreSQL under `/pg`. An agent reads them all with `ls`,
+`cat`, `grep` and `find`. [RAM](/home/setup/ram) needs no credentials, so
+start there.
 
 ## Example: Slack
 
-Mount Slack under `/slack` with a [bot token](/home/setup/slack), plus a user
-token for search:
-
 <Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mounts:
+      /slack:
+        vfs: slack
+        mode: read
+        config:
+          token: ${SLACK_BOT_TOKEN}
+          search_token: ${SLACK_USER_TOKEN}
+    ```
+  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     import os
@@ -48,20 +51,7 @@ token for search:
     const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
     ```
   </Tab>
-  <Tab title="YAML" icon="file-code">
-    ```yaml
-    mounts:
-      /slack:
-        vfs: slack
-        mode: read
-        config:
-          token: ${SLACK_BOT_TOKEN}
-          search_token: ${SLACK_USER_TOKEN}
-    ```
-  </Tab>
 </Tabs>
-
-Slack becomes:
 
 ```text
 /slack/
@@ -79,128 +69,128 @@ Slack becomes:
     alice__U12345678.json
 ```
 
-Each channel and DM has one folder per day for the last 90 days, and a day's
-`chat.jsonl` holds one message per line. A name ends with its Slack ID after
-`__`, so two channels with the same name stay apart.
-
 ```bash
 ls /slack/channels/
 head -1 /slack/channels/general__C04KEPWF6V7/2026-04-05/chat.jsonl
 grep -rw refund /slack/channels/
 ```
 
-The `head` prints:
-
-```json
-{"type":"message","user":"U12345678","text":"PR #326 is up for review","ts":"1775383200.000100"}
-```
-
-The `grep` uses Slack's own search: it asks Slack which days mention `refund`
-and reads only those, not every day of every channel. That takes the
-`search_token` (a user token with `search:read`) and `-w`,
-since Slack matches whole words. Without them, or when Slack's search cannot
-answer, `grep` reads the files. Slack searches message text, file names and
-reactions, and finds a new message only once it has indexed it. Attachments
-under `files/` are always read.
+- Each channel and DM has one folder per day for the last 90 days, one
+  message per line. A name ends with its Slack ID after `__`.
+- `grep -w` with a `search_token` asks Slack's search which days match and
+  reads only those. Without them, `grep` reads the files.
 
 ## Supported VFS
 
-A ✓ means the VFS runs there. In a browser, some need a proxy or CORS:
-[Redis](/typescript/setup/redis#browser) uses an HTTP endpoint,
-[PostgreSQL](/typescript/setup/postgres) uses Neon and
-[MongoDB](/typescript/setup/mongodb) an HTTP bridge.
+In a browser, [Redis](/typescript/setup/redis#browser) needs an HTTP endpoint,
+[PostgreSQL](/typescript/setup/postgres) Neon and
+[MongoDB](/typescript/setup/mongodb) an HTTP bridge. On
+[Cloudflare](/typescript/cloudflare-quickstart), Qdrant, PostgreSQL and Email
+need their client packages installed.
 
-### Local and infrastructure
+### Local
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [RAM](/home/setup/ram) | ✓ | ✓ | ✓ |
-| [Disk](/home/setup/disk) | ✓ | ✓ | — |
-| [OPFS](/home/setup/opfs) | — | — | ✓ |
-| [Redis](/home/setup/redis) | ✓ | ✓ | ✓ |
-| [SSH](/home/setup/ssh) | ✓ | ✓ | — |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <Icon icon="memory" size={14} /> [RAM](/home/setup/ram) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="hard-drive" size={14} /> [Disk](/home/setup/disk) | ✓ | ✓ |  |  |
+| <Icon icon="hard-drive" size={14} /> [OPFS](/home/setup/opfs) |  |  | ✓ |  |
 
-### Object storage
+### Buckets
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [Amazon S3](/home/setup/s3) | ✓ | ✓ | ✓ |
-| [Cloudflare R2](/home/setup/r2) | ✓ | ✓ | ✓ |
-| [Google Cloud Storage](/home/setup/gcs) | ✓ | ✓ | ✓ |
-| [Oracle Cloud Storage](/home/setup/oci) | ✓ | ✓ | ✓ |
-| [Supabase Storage](/home/setup/supabase) | ✓ | ✓ | ✓ |
-| [MinIO](/home/setup/minio) | ✓ | ✓ | ✓ |
-| [Ceph](/home/setup/ceph) | ✓ | ✓ | ✓ |
-| [SeaweedFS](/home/setup/seaweedfs) | ✓ | ✓ | ✓ |
-| [Wasabi](/home/setup/wasabi) | ✓ | ✓ | ✓ |
-| [Backblaze B2](/home/setup/backblaze) | ✓ | ✓ | ✓ |
-| [DigitalOcean Spaces](/home/setup/digitalocean) | ✓ | ✓ | ✓ |
-| [Tencent COS](/home/setup/tencent) | ✓ | ✓ | ✓ |
-| [Alibaba OSS](/home/setup/aliyun) | ✓ | ✓ | ✓ |
-| [Scaleway](/home/setup/scaleway) | ✓ | ✓ | ✓ |
-| [QingStor](/home/setup/qingstor) | ✓ | ✓ | ✓ |
-| [Hugging Face Buckets](/home/setup/hf_buckets) | ✓ | ✓ | — |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/s3-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Amazon S3](/home/setup/s3) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/cloudflare-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Cloudflare R2](/home/setup/r2) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/gcs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Cloud Storage](/home/setup/gcs) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/oracle-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Oracle Cloud Storage](/home/setup/oci) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/supabase-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Supabase Storage](/home/setup/supabase) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/minio-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MinIO](/home/setup/minio) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/ceph-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Ceph](/home/setup/ceph) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/seaweedfs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SeaweedFS](/home/setup/seaweedfs) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/wasabi-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Wasabi](/home/setup/wasabi) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/backblaze-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Backblaze B2](/home/setup/backblaze) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/digitalocean-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[DigitalOcean Spaces](/home/setup/digitalocean) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/tencent-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Tencent COS](/home/setup/tencent) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/aliyun-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Alibaba OSS](/home/setup/aliyun) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/scaleway-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Scaleway](/home/setup/scaleway) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="cloud" size={14} /> [QingStor](/home/setup/qingstor) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Hugging Face Buckets](/home/setup/hf_buckets) | ✓ | ✓ |  |  |
 
-### Cloud files and Google Workspace
+### Files
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [Google Drive](/home/setup/google) | ✓ | ✓ | ✓ |
-| [Google Docs](/home/setup/google) | ✓ | ✓ | ✓ |
-| [Google Sheets](/home/setup/google) | ✓ | ✓ | ✓ |
-| [Google Slides](/home/setup/google) | ✓ | ✓ | ✓ |
-| [Google Calendar](/home/setup/gcal) | ✓ | ✓ | ✓ |
-| [Gmail](/home/setup/google) | ✓ | ✓ | ✓ |
-| [OneDrive](/home/setup/onedrive) | ✓ | ✓ | ✓ |
-| [SharePoint](/home/setup/sharepoint) | ✓ | ✓ | ✓ |
-| [Dropbox](/home/setup/dropbox) | ✓ | ✓ | ✓ |
-| [Box](/home/setup/box) | ✓ | ✓ | ✓ |
-| [Nextcloud](/home/setup/nextcloud) | ✓ | ✓ | — |
-| [Databricks Volumes](/home/setup/databricks) | ✓ | ✓ | — |
-| [TiDB Cloud Filesystem](/home/setup/tidb) | ✓ | ✓ | — |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/home/setup/google) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/gdocs-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Docs](/home/setup/google) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/gsheets-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Sheets](/home/setup/google) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/gslides-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Slides](/home/setup/google) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="microsoft" size={14} /> [OneDrive](/home/setup/onedrive) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="microsoft" size={14} /> [SharePoint](/home/setup/sharepoint) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/home/setup/dropbox) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/home/setup/box) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/nextcloud-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Nextcloud](/home/setup/nextcloud) | ✓ | ✓ |  |  |
+| <img noZoom src="/images/databricks-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Databricks Volumes](/home/setup/databricks) | ✓ | ✓ |  | ✓ |
+| <img noZoom src="/images/tidb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[TiDB Cloud Filesystem](/home/setup/tidb) | ✓ | ✓ |  | ✓ |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/home/setup/ssh) | ✓ | ✓ |  |  |
 
-### Development, collaboration and messaging
+### Databases
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [GitHub](/home/setup/github) | ✓ | ✓ | ✓ |
-| [Hugging Face Spaces](/home/setup/hf_spaces) | ✓ | ✓ | — |
-| [Slack](/home/setup/slack) | ✓ | ✓ | ✓ |
-| [Discord](/home/setup/discord) | ✓ | ✓ | ✓ |
-| [Email](/home/setup/email) | ✓ | ✓ | — |
-| [Linear](/home/setup/linear) | ✓ | ✓ | ✓ |
-| [Notion](/home/setup/notion) | ✓ | ✓ | ✓ |
-| [Trello](/home/setup/trello) | ✓ | ✓ | ✓ |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/postgres-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[PostgreSQL](/home/setup/postgres) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MongoDB](/home/setup/mongodb) | ✓ | ✓ | ✓ |  |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GridFS](/home/setup/gridfs) | ✓ | ✓ |  |  |
+| <img noZoom src="/images/redis-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Redis](/home/setup/redis) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="database" size={14} /> [SQL](/home/setup/sql) | ✓ | ✓ |  | ✓ |
+| <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Airtable](/home/setup/airtable) | ✓ | ✓ | ✓ | ✓ |
 
-### Data and AI
+### AI
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [PostgreSQL](/home/setup/postgres) | ✓ | ✓ | ✓ |
-| [MongoDB](/home/setup/mongodb) | ✓ | ✓ | ✓ |
-| [GridFS](/home/setup/gridfs) | ✓ | ✓ | — |
-| [Airtable](/home/setup/airtable) | ✓ | ✓ | ✓ |
-| [Chroma](/home/setup/chroma) | ✓ | ✓ | ✓ |
-| [LanceDB](/home/setup/lancedb) | ✓ | ✓ | — |
-| [Qdrant](/home/setup/qdrant) | ✓ | ✓ | ✓ |
-| [Dify](/home/setup/dify) | ✓ | ✓ | ✓ |
-| [Mem0](/home/setup/mem0) | ✓ | ✓ | ✓ |
-| [Hugging Face Datasets](/home/setup/hf_datasets) | ✓ | ✓ | — |
-| [Hugging Face Models](/home/setup/hf_models) | ✓ | ✓ | — |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/chroma-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Chroma](/home/setup/chroma) | ✓ | ✓ | ✓ |  |
+| <img noZoom src="/images/lancedb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[LanceDB](/home/setup/lancedb) | ✓ | ✓ |  |  |
+| <img noZoom src="/images/qdrant-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Qdrant](/home/setup/qdrant) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/dify-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dify](/home/setup/dify) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/mem0.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Mem0](/home/setup/mem0) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Hugging Face Datasets](/home/setup/hf_datasets) | ✓ | ✓ |  | ✓ |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Hugging Face Models](/home/setup/hf_models) | ✓ | ✓ |  | ✓ |
 
-### Observability
+### Developer
 
-| VFS | Python | Node.js | Browser |
-| --- | --- | --- | --- |
-| [Weights & Biases](/home/setup/wandb) | ✓ | ✓ | ✓ |
-| [Langfuse](/home/setup/langfuse) | ✓ | ✓ | ✓ |
-| [Jaeger](/home/setup/jaeger) | ✓ | ✓ | — |
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <Icon icon="github" size={14} /> [GitHub](/home/setup/github) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/huggingface-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Hugging Face Spaces](/home/setup/hf_spaces) | ✓ | ✓ |  | ✓ |
+| <img noZoom src="/images/linear-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Linear](/home/setup/linear) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/wandb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Weights & Biases](/home/setup/wandb) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/langfuse-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Langfuse](/home/setup/langfuse) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/jaeger-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Jaeger](/home/setup/jaeger) | ✓ | ✓ |  | ✓ |
+
+### Chat
+
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/home/setup/slack) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/discord-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Discord](/home/setup/discord) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/gmail-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gmail](/home/setup/google) | ✓ | ✓ | ✓ | ✓ |
+| <Icon icon="envelope" size={14} /> [Email](/home/setup/email) | ✓ | ✓ |  | ✓ |
+
+### Productivity
+
+| VFS | Python | Node.js | Browser | Cloudflare |
+| --- | :-: | :-: | :-: | :-: |
+| <img noZoom src="/images/gcal-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Calendar](/home/setup/gcal) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Notion](/home/setup/notion) | ✓ | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Trello](/home/setup/trello) | ✓ | ✓ | ✓ | ✓ |
+
+To virtualize anything else, see [Adding a New VFS](/home/setup/custom-vfs).
 
 ## Mount capacity
 
-A RAM, disk, Redis, OPFS or SQL mount keeps the files itself, and takes
-`capacity` in its `config` to cap the bytes it holds, as a
-[size](/home/configuration/workspace#sizes):
+RAM, disk, Redis, OPFS and SQL keep the files themselves. `capacity` caps the
+bytes a mount holds, as a [size](/home/configuration/workspace#sizes):
 
 ```yaml
 mounts:
@@ -211,90 +201,39 @@ mounts:
       capacity: 100MB
 ```
 
-A write past it fails with `EDQUOT` ("Disk quota exceeded", the same message
-for every VFS). Through a [FUSE folder](/home/setup/fuse), a program gets it
-when it syncs or closes the file. Stored data stays readable and removable,
-and `df` shows the capacity as the mount's size.
-
-What counts toward it depends on the VFS:
-
-- **Disk, Redis and OPFS:** two workspaces on one folder, key prefix or OPFS
-  directory each count only their own writes.
-- **SQL:** every file in the database counts, and SQL mounts handed one
-  driver with the same `capacity` share one count.
-- **RAM:** files also count against the workspace's
-  [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory), which
-  refuses a write the same way.
+- A write past it fails with `EDQUOT` (`Disk quota exceeded`). Through
+  [FUSE](/home/setup/fuse), a program gets it on sync or close.
+- Stored files stay readable and removable, and `df` shows the capacity.
+- Disk, Redis and OPFS count only the mount's own writes. SQL counts every
+  file in the database, and SQL mounts on one driver with the same `capacity`
+  share one count. RAM also counts against [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory).
 
 ## Read and write behavior
 
-Two keys decide when a mount serves its cached copy of a file, and what
-happens when someone else changed the file. Set them on a mount, or set
-`read` and `write` at the top of `workspace.yaml` as the default for every
+`read` and `write` go on a mount, or at the top of `workspace.yaml` for every
 mount.
 
-### Reads
-
-| `read` | Mirage serves a cached copy |
+| `read` | A cached copy is served |
 | --- | --- |
-| `bounded` | Without asking the VFS, for up to `ttl` seconds. The default. |
-| `fresh` | Only after asking the VFS whether the file changed, by its ETag or version. |
-
-A mount that sets `read: bounded` also sets `ttl`, in whole seconds. A mount
-that sets neither serves its cached copy for 600 seconds.
-
-### Writes
+| `bounded` | Without asking the VFS, for `ttl` seconds: 600 by default. The default. |
+| `fresh` | Only after the VFS confirms the file did not change, by ETag or version. |
 
 | `write` | A write |
 | --- | --- |
-| `unconditional` | Replaces the file, and the last write wins. The default. |
-| `conditional` | Carries the version the session last read, so a write based on a stale read is refused. |
+| `unconditional` | Replaces the file; the last write wins. The default. |
+| `conditional` | Is refused when it is based on a stale read. |
 
-`write: conditional` works on the [S3 VFS and the VFSes built on
-it](/home/setup/s3#s3-compatible-vfses), [Box](/home/setup/box) and
-[Dropbox](/home/setup/dropbox). It needs a writable mount that caches reads.
-Any other mount that declares it is refused when it mounts.
+`write: conditional` works on [S3 and the VFSes built on it](/home/setup/s3#s3-compatible-vfses),
+[Box](/home/setup/box) and [Dropbox](/home/setup/dropbox), on a writable mount
+that caches reads. Any other mount refuses it. Under it:
 
-Under `write: conditional`:
+- A refused write stays refused until the session reads the file again.
+- Where the session last saw no file, a write only creates one, and fails if
+  someone else created it first.
+- A path the session never read is overwritten, as on a normal filesystem.
+- A refused append is not retried.
+- The check lasts while the session is live, not across a restart.
 
-- A write or a delete based on a stale read is refused. Read the file again
-  before you retry.
-- If the session last saw no file at a path (a failed `cat` or `test -e`,
-  or its own `rm`), a write there only creates the file. It fails if someone
-  else created the file first. S3 sends `If-None-Match: *` for this. A VFS
-  that cannot check it writes as usual.
-- A refused write stays refused until the session reads the file again,
-  even if the file was deleted.
-- A write to a path the session never read or checked overwrites it, as on
-  a normal filesystem.
-- An append can be refused when someone else changed the file. Mirage
-  returns the error and does not retry the append or rerun the command.
-- The check lasts only while the session is live. It does not survive a
-  workspace restart.
-
-### When Mirage rewrites the whole file
-
-Some VFSes, such as S3 and the other object stores, cannot append, write at
-an offset or truncate in place. For these writes Mirage reads the whole file
-and writes it back:
-
-- an append;
-- a write at an offset;
-- a truncate to a nonzero size.
-
-If that read finds no file, the write back only creates the file, under
-either `write` setting. It fails if someone else created the file between
-the read and the write, and that file keeps its bytes. A VFS that cannot
-check this returns an unsupported-operation error.
-
-An append with nothing to add, such as `cmd >> f` when `cmd` prints
-nothing, is not rewritten. It leaves an existing file alone, and creates a
-missing one under the same create-only rule.
-
-A VFS with its own append, offset write or truncate, such as RAM, keeps its
-own behavior. A plain replacement and a truncate to zero follow the mount's
-`write` setting.
-
-## Add your own VFS
-
-To mount a service Mirage does not ship, [write a custom VFS](/home/setup/custom-vfs).
+Object stores cannot append, write at an offset or truncate in place, so
+Mirage reads the whole file and writes it back. If that read finds no file,
+the write only creates one. An append of nothing leaves the file alone.

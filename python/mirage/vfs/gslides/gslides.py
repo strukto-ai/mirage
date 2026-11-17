@@ -44,74 +44,15 @@ VFS_MD = """\
 ```
 
 - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
-  `2026-05-*` narrows by it.
-- `<title>` is sanitized: spaces and any character outside
-  `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
-- `<presentation-id>` is the Google Slides presentation id.
-- `shared/` holds presentations shared with you by others; ones you own
-  and shared with others are still in `owned/`.
-
-A `.gslide.json` matches the Google Slides API `presentations.get`
-response:
-
-```jsonc
-{
-  "presentationId": "...",
-  "title": "...",
-  "pageSize": { "width": {...}, "height": {...} },
-  "slides": [
-    {                                      // one element per slide
-      "objectId": "...",
-      "pageElements": [
-        {
-          "objectId": "...",
-          "shape": {
-            "shapeType": "TEXT_BOX",
-            "text": {
-              "textElements": [
-                { "textRun": { "content": "the actual text\\n",
-                               "style": {...} } }
-              ]
-            }
-          }
-        },
-        { "image": {...} },
-        { "table": {...} }
-      ]
-    }
-  ],
-  "masters": [...],
-  "layouts": [...]
-}
-```
-
-Useful `jq` paths:
-
-```jq
-.title
-.slides | length                                                    # slide count
-.slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
-.slides[0].objectId
-```
-
-Delete, on a `write` path:
-
-```sh
-rm {prefix}/owned/<file>.gslide.json   # deletes it from Drive for good
-rm -f <path>                       # ignores a missing file
-```
-
-Only `.gslide.json` files can be removed; `owned/` and `shared/` cannot.
-
-Rename to a new title, on a `write` path:
-
-```sh
-mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
-   {prefix}/owned/<date>_<new>__<id>.gslide.json
-```
-
-Keep the folder, the date and the id, and spell the title the way the
-listing does (spaces become `_`); any other name is refused."""
+  `2026-05-*` narrows the query; `<title>` turns spaces and characters
+  outside `[A-Za-z0-9_.-]` into `_`, at most 100 characters.
+- `shared/` holds presentations others shared; presentations owned and
+  shared out stay in `owned/`.
+- A file is the Slides API `presentations.get` response, one `.slides[]`
+  entry per slide. All text:
+  `[.. | .textRun? // empty | .content] | add`.
+- On a `write` path, `rm` a file to delete it from Drive, or `mv` it to a
+  new `<title>` with the same folder, date and id to rename it."""
 
 
 class GSlidesVFS(BaseVFS):

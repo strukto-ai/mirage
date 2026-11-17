@@ -25,10 +25,7 @@ import type { ConfigState, Handed } from '../types.ts'
 import type { RedactedSchema } from '../secrets.ts'
 import { resolveChromaConfig, type ChromaConfig } from './config.ts'
 
-export const VFS_MD = `- One ChromaDB collection, mounted read only.
-- Paths are document slugs from the collection's path tree.
-- Inspect documents with \`cat\`, \`head\`, \`tail\`, \`ls\`, \`find\`, \`tree\` and
-  \`grep\`. Writes are not supported.`
+export const VFS_MD = `- Paths are document slugs from the collection's path tree.`
 
 export interface ChromaVFSOptions {
   config: ChromaConfig

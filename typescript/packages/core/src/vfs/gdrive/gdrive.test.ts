@@ -213,8 +213,6 @@ describe('VFS_MD', () => {
     expect(rendered).toContain('the gdocs gdoc.json shape')
     expect(rendered).toContain('the gsheets gsheet.json shape')
     expect(rendered).toContain('the gslides gslide.json shape')
-    expect(rendered).toContain('remote mount')
-    expect(rendered).toContain('`modifiedTime` range')
     expect(rendered).toContain('no `owned/` and `shared/` split')
   })
 })

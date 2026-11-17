@@ -1,30 +1,136 @@
 ---
 title: Airtable
 icon: /images/airtable-logo.svg
-description: Create an Airtable personal access token for the Airtable VFS.
+description: Virtualize Airtable bases as read-only folders of tables, records and views.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create a Personal Access Token
+Every base the token can reach becomes a folder of tables. Each table holds
+its field schema, its records as JSON lines and one file per saved view.
 
-1. Go to [airtable.com/create/tokens](https://airtable.com/create/tokens)
-1. Create a token with the scopes `data.records:read` and `schema.bases:read`
+## Setup
+
+Create a personal access token and export it:
+
+1. Open [airtable.com/create/tokens](https://airtable.com/create/tokens) and
+   select **Create new token**.
+1. Add the scopes `data.records:read` and `schema.bases:read`.
 1. For the [airtable CLI](/home/setup/cli/airtable)'s writes, add
    `data.records:write`, and for comments `data.recordComments:read` and
-   `data.recordComments:write`
-1. Under **Access**, add the bases the mount should see
-1. Copy the token (it starts with `pat`)
-
-The mount only reads; writes go through the airtable CLI. A token without
-`schema.bases:read` cannot list tables, and a base left out of the token's
-access list is invisible to it.
-
-### 2. Set Environment Variables
+   `data.recordComments:write`.
+1. Under **Access**, add the bases (or workspaces) the mount should see.
+1. Create the token and copy it; Airtable shows it only once.
 
 ```bash
-# .env.development
-AIRTABLE_TOKEN=patXXXXXXXXXXXXXX.xxxx...
+export AIRTABLE_TOKEN=patXXXXXXXXXXXXXX.xxxx...
 ```
 
-For SDK guides, see [Airtable (Python)](/python/vfs/airtable) and [Airtable (TypeScript)](/typescript/setup/airtable).
+A token without `schema.bases:read` cannot list tables, and a base left out
+of its access list is invisible to it.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /airtable:
+        vfs: airtable
+        mode: read
+        config:
+          token: ${AIRTABLE_TOKEN}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id at
+    mirage shell -w at -c 'ls /airtable/bases'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.airtable import AirtableConfig, AirtableVFS
+
+    config = AirtableConfig(token=os.environ["AIRTABLE_TOKEN"])
+    ws = Workspace({"/airtable": AirtableVFS(config=config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /airtable/bases")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { AirtableVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/airtable': new AirtableVFS({ token: process.env.AIRTABLE_TOKEN! }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /airtable/bases')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/airtable/
+  bases/
+    Product_Roadmap__appRm8kQ2nV4pX7sT/
+      base.json
+      Features__tblFt3jK9wL2cY6dE/
+        table.json
+        records.jsonl
+        views/
+          Done_shipped__viwDn5hB1qZ8rM3uA.jsonl
+          Grid_view__viwGr2tY6uI0oP4aS.jsonl
+```
+
+- Names are sanitized; the id after the last `__` is exact. `base_ids` limits
+  the mount to those bases.
+- Airtable omits empty cells, so a missing key means empty. An attachment URL
+  expires two hours after it was read.
+- A file over `max_read_records` (10,000) records fails with `File too large`;
+  `head -n N` fetches just N records. Requests keep to Airtable's 5 per
+  second per base.
+
+## Sample runs
+
+```bash
+$ head -n 2 /airtable/bases/Product_Roadmap__appRm8kQ2nV4pX7sT/Features__tblFt3jK9wL2cY6dE/records.jsonl
+{"record_id":"recA1b2C3d4E5f6G7","created_time":"2026-11-02T09:14:00.000Z","fields":{"Name":"Dark mode","Status":"Done","Points":3}}
+{"record_id":"recH8i9J0k1L2m3N4","created_time":"2026-11-05T16:40:00.000Z","fields":{"Name":"CSV export","Status":"Todo","Points":5}}
+```
+
+```bash
+$ grep -i csv /airtable/bases/Product_Roadmap__appRm8kQ2nV4pX7sT/Features__tblFt3jK9wL2cY6dE/records.jsonl
+{"record_id":"recH8i9J0k1L2m3N4","created_time":"2026-11-05T16:40:00.000Z","fields":{"Name":"CSV export","Status":"Todo","Points":5}}
+```
+
+```bash
+$ jq -r .fields.Name /airtable/bases/Product_Roadmap__appRm8kQ2nV4pX7sT/Features__tblFt3jK9wL2cY6dE/views/Done_shipped__viwDn5hB1qZ8rM3uA.jsonl
+Dark mode
+Offline sync
+```
+
+The mount is read-only. Create, update and delete records with the
+[airtable CLI](/home/setup/cli/airtable), which takes the same config.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/airtable">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/airtable">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

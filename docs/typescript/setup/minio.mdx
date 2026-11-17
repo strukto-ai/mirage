@@ -1,18 +1,20 @@
 ---
 title: MinIO
 icon: /images/minio-logo.svg
-description: Set up MinIO as a MIRAGE VFS from Node or the browser.
+description: Virtualize a self-hosted MinIO bucket from Node or the browser.
 ---
 
-MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (e.g. `http://localhost:9000`). MinIO is self-hosted, so the endpoint is required and path-style addressing is used by default. MinIO ignores copy and delete conditions, so under `write: conditional` mirage refuses what would copy or delete on a MinIO mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`); a `cp` or `mv` into it from another mount is a write, and goes through.
+`MinIOVFS` mounts one bucket on a self-hosted MinIO server: every object becomes
+a file and every `/` in a key a folder. It reaches MinIO through its S3 API.
+Credentials are set up on the [MinIO page](/home/setup/minio).
 
-Credentials (access key + secret key from the MinIO Console) are created the same way in both runtimes, see [MinIO Credentials](/home/setup/minio).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -23,57 +25,131 @@ const minio = new MinIOVFS({
   accessKeyId: process.env.MINIO_ACCESS_KEY!,
   secretAccessKey: process.env.MINIO_SECRET_KEY!,
 })
+const ws = new Workspace({ '/minio': minio }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': minio }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /minio && find /minio -name '*.csv'")
+console.log(result.stdoutText)
 ```
 
-### Config
+`endpoint` is required, since the server is self-hosted. `region` defaults to
+`us-east-1`. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table minio start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code><br />default `true` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | Region requests are signed for; the gateway's endpoint does not depend on it. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />required | URL of the self-hosted S3 gateway, such as `http://localhost:9000`. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"} default={"true"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
+  Region requests are signed for; the gateway's endpoint does not depend on it.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} required>
+  URL of the self-hosted S3 gateway, such as `http://localhost:9000`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table minio end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from `accessKeyId` and `secretAccessKey`, a MinIO access key,
+with `sessionToken` for temporary credentials. Without them, the AWS SDK reads
+its own chain: environment variables, `~/.aws/credentials`, then the instance or
+container role.
+
+The key inherits its user's policies: `readonly` to read, `readwrite` to write.
+A request the credentials may not make answers `Permission denied`.
+
+## Layout
+
+```text
+/minio/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-The browser `MinIOVFS` is secret-free, your backend signs each operation using your MinIO keys and returns a URL. MinIO accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your MinIO endpoint.
+`/minio/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; MinIO stores no folder objects.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/minio start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code> | Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/minio/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+- **Path style:** requests are path-style; `forcePathStyle` defaults to `true`.
+- **Conditional writes:** MinIO ignores copy and delete conditions, so under
+  `write: conditional` Mirage refuses a `cp` or `mv` within the mount, a `mv`
+  out of it, `rm` and `find -delete` (`ENOTSUP`); a `cp` or `mv` into it from
+  another mount is a write and goes through. See
+  [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/minio end */}
+## Browser
 
-### 1. Server: sign URLs with the MinIO endpoint
+The browser `MinIOVFS` from `@struktoai/mirage-browser` keeps credentials off
+the page: a server signs a URL for each S3 call with the MinIO keys, and the
+browser fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const minio = new MinIOVFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/minio': minio }, { mode: MountMode.READ })
+```
+
+- MinIO answers CORS for every origin by default. To restrict it, set
+  `MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:5173,https://app.example.com` on
+  the server and restart it.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server.
+- `endpoint` only names the mount's storage location: requests go to the host
+  each signed URL names.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -98,88 +174,102 @@ const client = new S3Client({
 })
 const BUCKET = process.env.MINIO_BUCKET!
 
-app.post('/presign/minio', async (req, res) => {
-  const { path, op, opts } = req.body
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
   const key = path.replace(/^\/+/, '')
   const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
   let cmd
   switch (op) {
     case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
-    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
     case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'LIST':   cmd = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: opts?.listPrefix,
-      Delimiter: opts?.listDelimiter,
-      ContinuationToken: opts?.listContinuationToken,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
     }); break
     case 'COPY':   cmd = new CopyObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      CopySource: `${BUCKET}/${opts?.copySource}`,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
     }); break
   }
-  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
 })
 ```
 
-<Warning>
-MinIO uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires extra DNS setup on a self-hosted server.
-</Warning>
+MinIO uses path-style URLs, since virtual-hosted buckets need extra DNS setup on
+a self-hosted server.
 
-### 2. Browser: wire it up
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-```ts
-import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+  </Accordion>
+  <Accordion title="Browser fields">
 
-const minio = new MinIOVFS({
-  bucket: 'my-bucket',
-  endpoint: 'http://localhost:9000',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign/minio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = await r.json()
-    return url
-  },
-})
+{/* generated: config-table browser/minio start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
 
-const ws = new Workspace({ '/bucket/': minio }, { mode: MountMode.READ })
-```
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/minio end */}
 
-<Tip>
-`endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
-</Tip>
+  </Accordion>
+</AccordionGroup>
 
-### 3. CORS
+## Integration
 
-MinIO answers CORS preflights for **all origins by default**, so local dev typically works without configuration. To restrict origins, set the server environment variable and restart MinIO:
+MinIO answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
 
-```bash
-MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:5173,https://app.example.com
-```
-
-See the [MinIO VFS](/python/vfs/minio) docs for the equivalent Python wiring.
-
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with MinIO mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md minio start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -187,7 +277,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MinIO mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -208,7 +298,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MinIO mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -230,13 +320,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with MinIO mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md minio end */}
-
-## Integration
-
-What MinIO answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On MinIO |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

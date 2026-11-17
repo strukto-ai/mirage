@@ -1,43 +1,86 @@
 ---
 title: RAM
-description: Use an in-memory Mirage filesystem for temporary files, tests, examples, and writable agent scratch space.
+description: Virtualize an in-memory filesystem from Node or the browser.
 icon: memory
 ---
 
-The RAM VFS exposes an in-memory filesystem mounted at a path prefix such as
-`/data/`. All files live in process memory and are discarded when the process exits.
+`RAMVFS` keeps files in process memory, for scratch work, tests and trying
+Mirage. The mount starts empty and its files are gone when the process exits.
+It needs no service and no credentials; see the [RAM page](/home/setup/ram).
 
-Available across Node, browser, and edge runtimes via `@struktoai/mirage-node` and
-`@struktoai/mirage-browser`. No setup or credentials required.
+## Install
 
-For Python, see the [RAM (Python)](/python/vfs/ram) documentation.
-
-## Config
-
-```typescript
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace({
-  '/data': new RAMVFS(),
-}, { mode: MountMode.WRITE })
+```bash
+npm install @struktoai/mirage-node
 ```
 
-`RAMVFS()` requires no configuration object.
+## Configure
+
+```ts
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+
+const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
+console.log(result.stdoutText)
+```
+
+`new RAMVFS()` takes no config. `new RAMVFS({ capacity: '100MB' })` caps the
+bytes the store holds; a write past it fails with "Disk quota exceeded". See
+[capacity](/home/setup/vfs#mount-capacity).
+
+## Layout
+
+```text
+/data/
+  note.txt
+  reports/
+    status.json
+```
+
+The mount starts empty. Files and folders exist once a command such as
+`touch`, `mkdir`, `tee` or `cp` writes them. The root `/` always exists.
+
+## Browser
+
+`@struktoai/mirage-browser` exports the same `RAMVFS`, with the same options.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
+
+const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+```
+
+## Integration
+
+RAM answers these commands from its own tree, so fewer files are read. See
+[Integration](/home/integration/overview).
+
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md ram start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -45,7 +88,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -66,7 +109,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -88,45 +131,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md ram end */}
-
-The RAM filesystem starts empty. Files and directories are created
-on demand via shell commands such as `touch`, `mkdir`, `tee`, and `cp`.
-
-Paths are normalized with a leading `/`. The root directory `/` always
-exists.
-
-## Cache
-
-The RAM VFS does not cache directory listings (`index_ttl = 0`): because data
-resides entirely in memory, every listing reads the live tree directly without
-network latency. A workspace or mount `index:` configuration still applies its
-`ttl` if specified.
-
-## Integration
-
-Commands like `find`, `du`, `ls -R`, and `tree` execute directly in-process via a
-single recursive tree traversal.
-
-## Example
-
-```typescript
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace({
-  '/data': new RAMVFS(),
-}, { mode: MountMode.WRITE })
-
-// Create files and directories
-await ws.shell('echo "hello world" > /data/hello.txt')
-await ws.shell('mkdir -p /data/reports')
-await ws.shell('echo \'{"status": "ok"}\' > /data/reports/status.json')
-
-// Read file contents
-const hello = await ws.shell('cat /data/hello.txt')
-console.log(await hello.stdoutStr())
-
-// Run shell pipelines
-const json = await ws.shell('jq -r .status /data/reports/status.json')
-console.log(await json.stdoutStr())
-```

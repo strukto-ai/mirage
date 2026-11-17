@@ -1,100 +1,129 @@
 ---
 title: SQL
 icon: database
-description: Keep a Mirage filesystem in SQL tables.
+description: Virtualize a filesystem kept in SQL tables from Node.
 ---
 
 `SqlVFS` keeps a filesystem in a database's tables: a SQLite file, a Postgres
-server, a Durable Object's storage or a D1 database.
+server, a Durable Object's storage or a D1 database. Every command that writes
+works, and the files persist with the database. Setup is on the
+[SQL page](/home/setup/sql).
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
 
-## Config
+Postgres also needs the `pg` peer package.
+
+## Configure
 
 ```ts
 import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-node'
 
 const sql = new SqlVFS({ path: './workspace.db' })
-
 const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
-await ws.shell('echo "hello" | tee /sql/greet')
-await ws.shell('cat /sql/greet')
+
+const result = await ws.shell('echo hello > /sql/note.txt && ls /sql')
+console.log(result.stdoutText)
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `path` | `:memory:` | The SQLite file, opened and closed with the mount. |
-| `driver` | none | A database to borrow instead of a file; you close it. |
-| `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
-| `root` | `/` | The folder of the database the mount serves, made if missing. |
-
-To mount Postgres, install `pg` and pass its driver:
+Leave out `path` to keep the database in memory. `capacity: '100MB'` caps the
+bytes the database's files hold; see [capacity](/home/setup/vfs#mount-capacity).
+To keep the tables in Postgres, pass its driver:
 
 ```ts
 import { PostgresSqlDriver, SqlVFS } from '@struktoai/mirage-node'
 
-const driver = new PostgresSqlDriver('postgres://user:pass@localhost:5432/app')
+const driver = new PostgresSqlDriver(process.env.DATABASE_URL!)
 const sql = new SqlVFS({ driver })
 ```
 
-The tables are laid out as
-[AgentFS](https://github.com/tursodatabase/agentfs)'s:
+### Fields
 
-- `fs_inode`: one row per file and directory, with its size and mtime
-- `fs_dentry`: each entry's name under its parent directory
-- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
-- `fs_config`: the chunk size
+| Field | Default | Notes |
+| --- | --- | --- |
+| `path` | `:memory:` | The SQLite file, opened and closed with the mount. |
+| `driver` | none | A database to borrow instead of a file: `SqliteDriver` or `PostgresSqlDriver`. The caller closes it. Not with `path`. |
+| `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
+| `root` | `/` | The folder of the database the mount serves, made if missing. |
 
-The Python mount reads and writes the same tables, so the two runtimes on one
-file serve one filesystem.
+## Layout
 
-## Several mounts on one database
-
-A mount serves one folder of its database, `/` by default. Hand two mounts one
-driver to serve the whole database at `/` and its `/workspace` folder as a mount
-of its own:
-
-```ts
-import { MountMode, SqliteDriver, SqlVFS, Workspace } from '@struktoai/mirage-node'
-
-const driver = new SqliteDriver('./workspace.db')
-const ws = new Workspace(
-  {
-    '/': new SqlVFS({ driver, capacity: '1GB' }),
-    '/workspace': new SqlVFS({ driver, root: '/workspace', capacity: '1GB' }),
-  },
-  { mode: MountMode.WRITE },
-)
+```text
+/sql/
+  notes/
+    hello.txt
+  users.csv
 ```
 
-- `capacity` counts every file in the database, whichever mount wrote it.
-  Mounts on one driver with the same `capacity` share one count, so their writes
-  together stay within it. Mounts on separate drivers count apart, even on one
-  file, and together they can pass it.
-- `getState` and `loadState` keep and replace the mount's own folder. A restore
-  leaves the rest of the database as it was.
+The tables are laid out as [AgentFS](https://github.com/tursodatabase/agentfs)'s:
 
-Core's `SqlVFS` takes the same `root` and `capacity` over any driver, a Durable
-Object's storage among them.
+- `fs_inode`: one row per file and folder, with its size and mtime.
+- `fs_dentry`: each entry's name under its parent folder.
+- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless
+  the database says otherwise).
+- `fs_config`: the chunk size.
+
+## Behavior
+
+- **One filesystem, both runtimes:** the Python mount reads and writes the
+  same tables, so the two runtimes on one file serve one filesystem.
+- **Several mounts on one database:** a mount serves one folder of its
+  database, `/` by default. Hand two mounts one driver to serve the whole
+  database and one folder as a mount of its own:
+
+  ```ts
+  import { MountMode, SqliteDriver, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+  const driver = new SqliteDriver('./workspace.db')
+  const ws = new Workspace(
+    {
+      '/': new SqlVFS({ driver, capacity: '1GB' }),
+      '/workspace': new SqlVFS({ driver, root: '/workspace', capacity: '1GB' }),
+    },
+    { mode: MountMode.WRITE },
+  )
+  ```
+
+- **Capacity:** `capacity` counts every file in the database, whichever mount
+  wrote it. Mounts on one driver with the same `capacity` share one count, so
+  their writes together stay within it. Mounts on separate drivers count apart,
+  even on one file, and together they can pass it.
+- **Snapshots:** a snapshot keeps the mount's own folder, and loading it
+  replaces that folder. The rest of the database stays as it was.
+
+## Cloudflare
+
+`@struktoai/mirage-cloudflare` takes a driver as the first argument and the
+same `root` and `capacity` after it: `DurableObjectSqlDriver` over a Durable
+Object's storage, or `D1SqlDriver` over a D1 database.
+
+```ts
+import { DurableObjectSqlDriver, MountMode, SqlVFS, Workspace } from '@struktoai/mirage-cloudflare'
+
+const sql = new SqlVFS(new DurableObjectSqlDriver(ctx.storage), { root: '/workspace' })
+const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
+```
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md sql start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -102,7 +131,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -123,7 +152,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -145,4 +174,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md sql end */}

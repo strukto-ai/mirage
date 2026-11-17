@@ -1,72 +1,109 @@
 ---
 title: Jaeger
 icon: /images/jaeger-logo.svg
-description: Virtualize Jaeger services and traces as read-only JSON files.
+description: Virtualize Jaeger services, operations and traces as read-only JSON files.
 ---
 
-Connect to an existing Jaeger query service. Set `host` to its base URL,
-such as `http://localhost:16686`.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-For SDK guides, see [Jaeger (Python)](/python/vfs/jaeger) and [Jaeger (TypeScript)](/typescript/setup/jaeger).
+Each service a Jaeger query service knows becomes a folder with its operations
+and one JSON file per trace. Point `host` at an existing query service's base
+URL, such as `http://localhost:16686`; it needs no credentials.
 
 ## Connect
 
 <Tabs>
-  <Tab title="Python">
-    ```python
-    import asyncio
-
-    from mirage import Workspace
-    from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
-
-
-    async def main() -> None:
-        ws = Workspace({
-            "/jaeger": JaegerVFS(JaegerConfig(host="http://localhost:16686")),
-        })
-        result = await ws.shell("ls /jaeger/services")
-        print(await result.stdout_str(), end="")
-        await ws.close()
-
-
-    asyncio.run(main())
-    ```
-  </Tab>
-  <Tab title="TypeScript">
-    ```typescript
-    import { JaegerVFS, Workspace } from '@struktoai/mirage-node'
-
-    const ws = new Workspace({
-      '/jaeger': new JaegerVFS({ host: 'http://localhost:16686' }),
-    })
-    const result = await ws.shell('ls /jaeger/services')
-    process.stdout.write(result.stdoutText)
-    await ws.close()
-    ```
-  </Tab>
-  <Tab title="YAML">
-    ```yaml
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
     mounts:
       /jaeger:
         vfs: jaeger
+        mode: read
         config:
           host: http://localhost:16686
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id jg
+    mirage shell -w jg -c 'ls /jaeger/services'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
+
+    config = JaegerConfig(host="http://localhost:16686")
+    ws = Workspace({"/jaeger": JaegerVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /jaeger/services")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { JaegerVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/jaeger': new JaegerVFS({ host: 'http://localhost:16686' }) },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /jaeger/services')
+    console.log(result.stdoutText)
     ```
   </Tab>
 </Tabs>
 
-## Browse traces
-
-Each service has an operations list and a directory of traces:
+## Layout
 
 ```text
-/jaeger/services/<service>/
-  operations.json
-  traces/
-    <trace-id>.json
+/jaeger/
+  services/
+    <service>/
+      operations.json
+      traces/
+        <trace-id>.json
 ```
 
-Use `ls` to find services and traces, then `cat` or `jq` to read a trace.
-Files are read-only. Trace listings return up to 100 traces per service by
-default; set `default_trace_limit` in Python or YAML, or `defaultTraceLimit`
-in TypeScript, to change the limit.
+- `traces/` lists the newest 100 traces of the service; change it with
+  `default_trace_limit` in Python or YAML, or `defaultTraceLimit` in
+  TypeScript. An older trace is still readable by its id.
+- `default_from_timestamp` and `default_to_timestamp` bound the listing.
+- A trace file is the trace document Jaeger returns, with `traceID`, `spans`,
+  `processes` and `warnings`.
+
+## Sample runs
+
+```bash
+$ ls /jaeger/services
+checkout
+```
+
+```bash
+$ jq -c '.[]' /jaeger/services/checkout/operations.json
+{"name":"SELECT carts","spanKind":"client"}
+{"name":"POST /cart","spanKind":"server"}
+{"name":"GET /cart","spanKind":"server"}
+```
+
+```bash
+$ jq -r '.spans[] | "\(.operationName) \(.duration)"' /jaeger/services/checkout/traces/58ca65951c47a64c90af3c8cfabc6e96.json
+POST /cart 42000
+SELECT carts 7000
+```
+
+The mount is read-only.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/jaeger">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/jaeger">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

@@ -1,34 +1,105 @@
 ---
 title: RAM
 icon: memory
-description: Use temporary workspace files without installing a service or configuring credentials.
+description: Keep scratch files in memory with no service and no credentials.
 ---
 
-RAM stores files in memory. Use it for scratch files, tests and trying Mirage.
-Files are lost when the application exits. Available in Python, Node and browsers.
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-## Configuration
+RAM keeps files in process memory, for scratch work, tests and trying Mirage.
+The mount starts empty and its files are gone when the process exits.
 
-```yaml
-mounts:
-  /data:
-    vfs: ram
-    mode: write
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /data:
+        vfs: ram
+        mode: write
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id scratch
+    mirage shell -w scratch -c 'echo hello > /data/note.txt && cat /data/note.txt'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.ram import RAMVFS
+
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    result = await ws.shell("echo hello > /data/note.txt && cat /data/note.txt")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    const result = await ws.shell('echo hello > /data/note.txt && cat /data/note.txt')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/data/
+  note.txt
+  reports/
+    q1.csv
 ```
 
-The mount starts empty. In Mirage's shell, create and read a file:
+- Files and folders exist only once a command writes them.
+- Runs in Python, Node and browsers; see the
+  [browser quickstart](/typescript/browser-quickstart).
+- `capacity: 100MB` under `config` caps the bytes it holds; a write past it
+  fails with "Disk quota exceeded". See [capacity](/home/setup/vfs#mount-capacity).
+
+## Sample runs
 
 ```bash
-echo "hello" > /data/note.txt
-cat /data/note.txt
+$ tree /data
+/data
+|-- note.txt
+`-- reports
+    `-- q1.csv
+
+2 directories, 2 files
 ```
 
-Add `capacity: 100MB` under `config` to cap the bytes it holds. See
-[capacity](/home/setup/vfs#mount-capacity).
+```bash
+$ sort -t, -k2 -n /data/reports/q1.csv
+region,revenue
+east,95
+west,120
+```
+
+```bash
+$ head -c 2000 /dev/zero > /data/big.bin
+bash: line 1: /data/big.bin: Disk quota exceeded
+```
+
+The last run is on a mount with `capacity: 1KB`. Every command that writes
+works here: `cp`, `mv`, `rm`, `mkdir`, `tee` and redirects.
 
 ## SDK guides
 
-- [Python RAM VFS](/python/vfs/ram)
-- [TypeScript RAM VFS](/typescript/setup/ram)
-- [TypeScript quickstart](/typescript/quickstart)
-- [Browser quickstart](/typescript/browser-quickstart)
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/ram">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/ram">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

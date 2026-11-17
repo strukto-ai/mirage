@@ -1,18 +1,20 @@
 ---
 title: Ceph
 icon: /images/ceph-logo.svg
-description: Set up Ceph Rados Gateway as a MIRAGE VFS from Node or the browser.
+description: Virtualize a Ceph Rados Gateway bucket from Node or the browser.
 ---
 
-Ceph Rados Gateway (RGW) speaks the S3 API with AWS Signature V4 against your own gateway endpoint (e.g. `https://ceph.example.com`). RGW is self-hosted, so the endpoint is required and path-style addressing is used by default.
+`CephVFS` mounts one bucket on a Ceph Rados Gateway (RGW): every object becomes
+a file and every `/` in a key a folder. It reaches the gateway through its S3
+API. Credentials are set up on the [Ceph page](/home/setup/ceph).
 
-Credentials (RGW user access key + secret key) are created the same way in both runtimes, see [Ceph Credentials](/home/setup/ceph).
-
-## Node (server-side)
+## Install
 
 ```bash
-pnpm add @struktoai/mirage-node
+npm install @struktoai/mirage-node
 ```
+
+## Configure
 
 ```ts
 import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -23,57 +25,124 @@ const ceph = new CephVFS({
   accessKeyId: process.env.CEPH_ACCESS_KEY_ID!,
   secretAccessKey: process.env.CEPH_SECRET_ACCESS_KEY!,
 })
+const ws = new Workspace({ '/ceph': ceph }, { mode: MountMode.WRITE })
 
-const ws = new Workspace({ '/bucket/': ceph }, { mode: MountMode.READ })
-const res = await ws.shell('ls /bucket/')
-console.log(res.stdoutText)
+const result = await ws.shell("ls /ceph && find /ceph -name '*.csv'")
+console.log(result.stdoutText)
 ```
 
-### Config
+`endpoint` is required, since the server is self-hosted. `region` defaults to
+`us-east-1`. A mount takes `MountMode.READ`, `WRITE` or `EXEC`.
+
+### Fields
 
 {/* generated: config-table ceph start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
-| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
-| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
-| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code><br />default `true` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
-| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | Region requests are signed for; the gateway's endpoint does not depend on it. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />required | URL of the self-hosted S3 gateway, such as `http://localhost:9000`. |
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="accessKeyId" type={"string"} post={["secret"]}>
+  Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.
+</ResponseField>
+<ResponseField name="secretAccessKey" type={"string"} post={["secret"]}>
+  Secret access key paired with `accessKeyId`.
+</ResponseField>
+<ResponseField name="sessionToken" type={"string"} post={["secret"]}>
+  Session token for temporary credentials, sent with the access key pair.
+</ResponseField>
+<ResponseField name="profile" type={"string"}>
+  Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.
+</ResponseField>
+<ResponseField name="forcePathStyle" type={"boolean"} default={"true"}>
+  Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+<ResponseField name="proxy" type={"string"} post={["secret"]}>
+  Proxy URL for every HTTP and HTTPS request to the endpoint.
+</ResponseField>
+<ResponseField name="region" type={"string"} default={"'us-east-1'"}>
+  Region requests are signed for; the gateway's endpoint does not depend on it.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"} required>
+  URL of the self-hosted S3 gateway, such as `http://localhost:9000`.
+</ResponseField>
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ceph end */}
 
-## Browser (presigned URLs)
+## Authentication
 
-```bash
-pnpm add @struktoai/mirage-browser
+Credentials come from `accessKeyId` and `secretAccessKey`, an RGW user's key
+pair, with `sessionToken` for temporary credentials. Without them, the AWS SDK
+reads its own chain: environment variables, `~/.aws/credentials`, then the
+instance or container role.
+
+The key pair belongs to an RGW user, created with `radosgw-admin user create`. A
+request the credentials may not make answers `Permission denied`.
+
+## Layout
+
+```text
+/ceph/
+  data/
+    config.json
+    file.txt
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-The browser `CephVFS` is secret-free, your backend signs each operation using your RGW keys and returns a URL. RGW accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
+`/ceph/data/file.txt` is the key `data/file.txt`. Folders come from the `/` in
+keys; Ceph stores no folder objects.
 
-### Config
+## Behavior
 
-{/* generated: config-table browser/ceph start */}
-| Field | Description |
-| --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
-| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
-| <code style={{ whiteSpace: 'nowrap' }}>region</code> | Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names. |
-| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
-| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
-| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+- **Key prefix:** `keyPrefix: 'users/42/'` mounts only that part of the bucket,
+  so `/ceph/notes.md` is the key `users/42/notes.md`. A leading `/` is dropped
+  and a trailing `/` added.
+- **Path style:** requests are path-style; `forcePathStyle` defaults to `true`.
 
-Fields marked secret are redacted in snapshots.
-{/* generated: config-table browser/ceph end */}
+## Browser
 
-### 1. Server: sign URLs with the RGW endpoint
+The browser `CephVFS` from `@struktoai/mirage-browser` keeps credentials off the
+page: a server signs a URL for each S3 call with the Ceph keys, and the browser
+fetches it.
+
+```bash
+npm install @struktoai/mirage-browser
+```
+
+```ts
+import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const ceph = new CephVFS({
+  bucket: 'my-bucket',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    return ((await r.json()) as { url: string }).url
+  },
+})
+const ws = new Workspace({ '/ceph': ceph }, { mode: MountMode.READ })
+```
+
+- The bucket's CORS rules must allow the page's origin, exactly as served.
+- A browser mount cannot declare `write: conditional`, and any HTTP 403 from a
+  signed URL, an expired one included, answers `Permission denied`.
+- `keyPrefix` set in the browser is no security boundary: enforce the prefix in
+  the signing server.
+- `endpoint` only names the mount's storage location: requests go to the host
+  each signed URL names.
+
+<AccordionGroup>
+  <Accordion title="Signing server">
 
 ```ts
 import {
@@ -98,65 +167,43 @@ const client = new S3Client({
 })
 const BUCKET = process.env.CEPH_BUCKET!
 
-app.post('/presign/ceph', async (req, res) => {
-  const { path, op, opts } = req.body
+app.post('/presign', async (req, res) => {
+  const { path, op, opts } = req.body as {
+    path: string
+    op: 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
+    opts?: Record<string, unknown>
+  }
   const key = path.replace(/^\/+/, '')
   const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
   let cmd
   switch (op) {
     case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
-    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType as string | undefined }); break
     case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
     case 'LIST':   cmd = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: opts?.listPrefix,
-      Delimiter: opts?.listDelimiter,
-      ContinuationToken: opts?.listContinuationToken,
+      Prefix: opts?.listPrefix as string | undefined,
+      Delimiter: opts?.listDelimiter as string | undefined,
+      ContinuationToken: opts?.listContinuationToken as string | undefined,
     }); break
     case 'COPY':   cmd = new CopyObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      CopySource: `${BUCKET}/${opts?.copySource}`,
+      CopySource: `${BUCKET}/${opts?.copySource as string}`,
     }); break
   }
-  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+  const url = await getSignedUrl(client, cmd, { expiresIn: ttl })
+  res.json({ url })
 })
 ```
 
-<Warning>
-RGW uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires wildcard DNS on the gateway.
-</Warning>
+Sign only the operations the app needs: a viewer needs `GET`, `HEAD` and `LIST`.
 
-### 2. Browser: wire it up
+  </Accordion>
+  <Accordion title="Bucket CORS rules">
 
-```ts
-import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
-
-const ceph = new CephVFS({
-  bucket: 'my-bucket',
-  endpoint: 'https://ceph.example.com',
-  presignedUrlProvider: async (path, op, opts) => {
-    const r = await fetch('/presign/ceph', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, op, opts }),
-    })
-    const { url } = await r.json()
-    return url
-  },
-})
-
-const ws = new Workspace({ '/bucket/': ceph }, { mode: MountMode.READ })
-```
-
-<Tip>
-`endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
-</Tip>
-
-### 3. CORS
-
-RGW supports the S3 `PutBucketCors` call, so the AWS CLI works against your gateway:
+RGW takes the S3 `PutBucketCors` call, so the AWS CLI sets the rules:
 
 ```bash
 aws s3api put-bucket-cors --bucket "$CEPH_BUCKET" \
@@ -164,24 +211,66 @@ aws s3api put-bucket-cors --bucket "$CEPH_BUCKET" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
-See the [Ceph VFS](/python/vfs/ceph) docs for the equivalent Python wiring.
+  </Accordion>
+  <Accordion title="Browser fields">
 
-For `write: conditional` on this provider, see [S3-compatible VFSes](/home/setup/s3#s3-compatible-vfses).
+{/* generated: config-table browser/ceph start */}
+<ResponseField name="bucket" type={"string"} required>
+  Name of the bucket to mount.
+</ResponseField>
+<ResponseField name="presignedUrlProvider" type={"object"} required post={["secret"]}>
+  Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.
+</ResponseField>
+<ResponseField name="region" type={"string"}>
+  Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.
+</ResponseField>
+<ResponseField name="endpoint" type={"string"}>
+  Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.
+</ResponseField>
+<ResponseField name="defaultContentType" type={"string"} default={"'application/octet-stream'"}>
+  `Content-Type` stored with every object the mount writes.
+</ResponseField>
+<ResponseField name="keyPrefix" type={"string"}>
+  Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.
+</ResponseField>
+<ResponseField name="timeout" type={"number"} default={"DEFAULT_TIMEOUT"}>
+  Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off.
+</ResponseField>
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/ceph end */}
+
+  </Accordion>
+</AccordionGroup>
+
+## Integration
+
+Ceph answers these commands through its own API, so fewer objects are read. See
+[Integration](/home/integration/overview).
+
+- `md5sum`: the object's ETag, when it is the MD5 (a single-part upload,
+  unencrypted or under SSE-S3).
+- `find`: one recursive listing.
+- `du`: one recursive listing.
+- `ls -R` and `tree`: one recursive listing.
 
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph mounted at `/<path>`.
+`<mode>` is the mount's mode: `read`, `write` or `exec`. The commands shown are
+those of a `write` mount.
 
 {/* generated: vfs-md ceph start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
 <Tabs>
   <Tab title="Rendered">
-    ### Virtual Filesystem
+    **Virtual Filesystem**
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
-    #### Supported Unix Commands for VFS
+    **Supported Unix Commands for VFS**
 
     Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
@@ -189,7 +278,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | Almost all Unix commands. |
 
-    #### Limitations of Unix Commands for VFS
+    **Limitations of Unix Commands for VFS**
 
     Where a path differs from a local filesystem:
 
@@ -210,7 +299,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph mounted at `/<path>`.
 
     | Path | Description |
     | --- | --- |
-    | `/<path>` | write |
+    | `/<path>` | `<mode>` |
 
     ## Supported Unix Commands for VFS
 
@@ -232,13 +321,5 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Ceph mounted at `/<path>`.
     ```
   </Tab>
 </Tabs>
+</div>
 {/* generated: vfs-md ceph end */}
-
-## Integration
-
-What Ceph answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Ceph |
-| --- | --- |
-| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
-| `find`, `du`, `ls -R`, `tree` | One recursive listing |

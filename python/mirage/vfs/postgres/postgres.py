@@ -46,14 +46,10 @@ VFS_MD = """\
       rows.jsonl
 ```
 
-- Read `database.json` first to plan joins.
-- Read `semantic.json` to learn what a table means: it splits columns
-  into dimensions (group by), time_dimensions and facts (aggregate), and
-  carries COMMENTs, enum domains and example values.
-- Reading `rows.jsonl` is refused for a table above the configured row
-  or byte threshold. Use `head`, `tail` or `wc`, which ask SQL for only
-  what they need, or `grep`, which fetches only the matching rows when
-  SQL can find every match."""
+- Read `database.json` first to plan joins, and a table's
+  `semantic.json` for its dimensions, facts and example values.
+- `rows.jsonl` is refused above the configured row or byte limit; use
+  `head`, `tail`, `wc` or `grep` on it instead."""
 
 
 class PostgresVFS(BaseVFS):

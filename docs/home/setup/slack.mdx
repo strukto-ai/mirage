@@ -1,64 +1,172 @@
 ---
 title: Slack
 icon: /images/slack-logo.svg
-description: Set up a Slack Bot Token for the Slack VFS.
+description: Virtualize Slack channels, DMs and users as read-only files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-### 1. Create a Slack App
+Every channel and DM the bot can see becomes a folder of days, each with a
+`chat.jsonl` of that day's messages and the files shared in it. Users become
+one JSON profile each.
 
-1. Go to https://api.slack.com/apps
-1. **Create New App** -> **From scratch**
-1. Name it (e.g., "Mirage") and select your workspace
+## Setup
 
-### 2. Configure Bot Permissions
+Create a Slack app with a bot token. A user token is optional and only lets
+`grep -w` and `slack search` use Slack's search.
 
-1. **OAuth & Permissions** in the left sidebar
-1. Under **Bot Token Scopes**, add:
-   - `channels:history` - read messages in public channels
-   - `channels:read` - list public channels
-   - `groups:history`, `groups:read` - private channels (optional)
-   - `im:history`, `im:read` - direct messages (optional)
-   - `mpim:history`, `mpim:read` - group direct messages (optional)
-   - `users:read` - the VFS `users/` directory
+<AccordionGroup>
+  <Accordion title="Create the app and bot token">
+    1. Open [api.slack.com/apps](https://api.slack.com/apps), click
+       **Create New App**, **From scratch**, name it (for example `Mirage`)
+       and pick the workspace.
+    2. Under **OAuth & Permissions**, **Bot Token Scopes**, add:
+       - `channels:read`, `channels:history`: public channels
+       - `groups:read`, `groups:history`: private channels (optional)
+       - `im:read`, `im:history`: direct messages (optional)
+       - `mpim:read`, `mpim:history`: group DMs (optional)
+       - `users:read`: the `users/` folder
+       - `files:read`: attachments under `files/`
+    3. **Install App**, **Install to Workspace**, then copy the
+       **Bot User OAuth Token** (`xoxb-...`).
+    4. Invite the bot to each channel it should read with `/invite @Mirage`.
+       A channel it is not in answers `Permission denied`.
 
-Add `chat:write` only for the CLI `send-message` command, and `files:write` for
-`upload-file`. The mount never posts.
+    The mount never posts. The [`slack`](/home/setup/cli/slack) CLI needs
+    `chat:write` for `send-message` and `files:write` for `upload-file`.
+  </Accordion>
+  <Accordion title="Optional: user token for search">
+    Slack's `search.messages` refuses bot tokens.
 
-### 3. Install to Workspace
+    1. Under **User Token Scopes**, add `search:read`. For `grep` and `rg`,
+       also add `channels:read`, `groups:read`, `im:read` and `mpim:read`, so
+       Mirage can tell which channels and DMs that user's search covers.
+    2. Reinstall the app and copy the **User OAuth Token** (`xoxp-...`).
 
-1. **Install App** in the left sidebar -> **Install to Workspace**
-1. Authorize the requested permissions
-1. Copy the **Bot User OAuth Token** (`xoxb-...`)
-
-### 4. Optional: Enable Workspace Search
-
-Slack's `search.messages` API does not accept bot tokens. To use `slack search` or workspace-level search push-down:
-
-1. Add `search:read` under **User Token Scopes**. For `grep` and `rg`, also add
-   `channels:read`, `groups:read`, `im:read` and `mpim:read`, so Mirage can see
-   which channels and DMs that user's search covers.
-1. Reinstall or reauthorize the app.
-1. Copy the resulting **User OAuth Token** (`xoxp-...`).
-
-Keep using the bot token for normal reads and writes. Mirage uses the optional user token only for Slack search endpoints.
-
-### 5. Set Environment Variables
+    The bot token still does every read; the user token is used only for
+    Slack's search methods.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-SLACK_BOT_TOKEN=xoxb-xxxx...
-SLACK_USER_TOKEN=xoxp-xxxx...  # optional, only needed for workspace search
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_USER_TOKEN=xoxp-...
 ```
 
-### 6. Invite the Bot
+## Connect
 
-The bot must be invited to channels it needs to read; a channel it is not in
-answers `Permission denied`:
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /slack:
+        vfs: slack
+        mode: read
+        config:
+          token: ${SLACK_BOT_TOKEN}
+          search_token: ${SLACK_USER_TOKEN}
+    ```
 
+    ```bash
+    mirage workspace create workspace.yaml --id slack
+    mirage shell -w slack -c 'ls /slack/channels'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.slack import SlackConfig, SlackVFS
+
+    config = SlackConfig(
+        token=os.environ["SLACK_BOT_TOKEN"],
+        search_token=os.environ.get("SLACK_USER_TOKEN"),
+    )
+    ws = Workspace({"/slack": SlackVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /slack/channels")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/slack': new SlackVFS({
+          token: process.env.SLACK_BOT_TOKEN!,
+          searchToken: process.env.SLACK_USER_TOKEN,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /slack/channels')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/slack/
+  channels/
+    general__C04KEPWF6V7/
+      2026-11-16/
+        chat.jsonl
+        files/
+          roadmap__F07AB12CD.pdf
+  dms/
+    alice__D0AQDJ5FP9V/
+      2026-11-16/
+        chat.jsonl
+  users/
+    alice__U12345678.json
 ```
-/invite @Mirage
+
+- A name ends with its Slack ID after `__`. Each channel and DM lists one
+  folder per day for the 90 days up to its newest message; `start_time` and
+  `end_time` set another range.
+- A `chat.jsonl` line is one message as Slack's API returns it; `.user` is a
+  user ID, resolved through `users/`.
+- `grep -w` with a `search_token` asks Slack's search which days match and
+  reads only those. Without them, `grep` reads the files.
+
+## Sample runs
+
+```bash
+$ ls /slack/channels
+engineering__C05RT2JH8LK
+general__C04KEPWF6V7
 ```
 
-For SDK guides, see [Slack (Python)](/python/vfs/slack) and [Slack (TypeScript)](/typescript/setup/slack).
+```bash
+$ jq -r '.user + ": " + .text' /slack/channels/general__C04KEPWF6V7/2026-11-16/chat.jsonl
+U12345678: Refund fix is live
+U23456789: Thanks, closing the ticket
+```
+
+```bash
+$ grep -rlw refund /slack/channels
+/slack/channels/general__C04KEPWF6V7/2026-11-16/chat.jsonl
+```
+
+The mount is read-only. Post messages and upload files with the
+[`slack`](/home/setup/cli/slack) CLI.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/slack">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/slack">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

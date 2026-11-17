@@ -1,85 +1,189 @@
 ---
 title: Email
 icon: envelope
-description: Set up IMAP/SMTP credentials for the Email VFS.
+description: Virtualize an IMAP mailbox as read-only JSON files.
 ---
 
-## Credentials
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
 
-The Email VFS connects to password-authenticated IMAP (reading) and SMTP
-(sending) servers. You need the server hostnames and a password or app
-password accepted by that provider.
+Every IMAP folder becomes a folder of days, with one JSON file per message and
+a folder of its attachments. Sending goes through SMTP with the `himalaya` CLI.
+
+## Setup
+
+The mailbox needs password-authenticated IMAP (reading) and SMTP (sending).
+Most providers want an app password instead of the account password.
 
 <Warning>
-Microsoft 365 is unsupported because it requires OAuth for IMAP, while the
-current Email VFS accepts only passwords.
+Microsoft 365 is unsupported: it requires OAuth for IMAP, and the Email VFS
+accepts only passwords.
 </Warning>
 
-### 1. Find Your IMAP/SMTP Settings
+| Provider | IMAP host | IMAP port | SMTP host | SMTP port |
+| --- | --- | --- | --- | --- |
+| Yahoo | `imap.mail.yahoo.com` | 993 | `smtp.mail.yahoo.com` | 587 |
+| Fastmail | `imap.fastmail.com` | 993 | `smtp.fastmail.com` | 587 |
+| iCloud | `imap.mail.me.com` | 993 | `smtp.mail.me.com` | 587 |
+| ProtonMail | `127.0.0.1` | 1143 | `127.0.0.1` | 1025 |
+| Self-hosted | the server's hostname | 993 | the server's hostname | 587 |
 
-| Provider    | IMAP Host               | IMAP Port | SMTP Host             | SMTP Port |
-| ----------- | ----------------------- | --------- | --------------------- | --------- |
-| Yahoo       | `imap.mail.yahoo.com`   | 993       | `smtp.mail.yahoo.com` | 587       |
-| Fastmail    | `imap.fastmail.com`     | 993       | `smtp.fastmail.com`   | 587       |
-| iCloud      | `imap.mail.me.com`      | 993       | `smtp.mail.me.com`    | 587       |
-| ProtonMail  | `127.0.0.1`             | 1143      | `127.0.0.1`           | 1025      |
-| Self-hosted | Your server hostname    | 993       | Your server hostname  | 587       |
+<AccordionGroup>
+  <Accordion title="Create an app password">
+    **Yahoo:** open [Account Security](https://login.yahoo.com/account/security),
+    select **Create app password** under **External connections**, name it
+    (for example `Mirage`), select **Generate password** and copy it.
 
-ProtonMail requires [ProtonMail Bridge](https://proton.me/mail/bridge)
-running locally.
+    **Fastmail:** open **Settings**, **Privacy & Security**, then
+    **Manage app passwords and access** and **New app password**. Keep the
+    **Mail, Contacts & Calendars** access, select **Generate password** and copy
+    it. Fastmail Basic plans have no IMAP or SMTP access.
 
-### 2. Create an App Password
+    **iCloud:** sign in at [account.apple.com](https://account.apple.com), open
+    **Sign-In and Security**, **App-Specific Passwords**, select
+    **Generate an app-specific password** and copy it. The Apple Account needs
+    two-factor authentication.
 
-Many providers require an **app password** instead of your regular account
-password. Check that your provider still supports password-authenticated IMAP
-and SMTP before creating one.
+    **ProtonMail:** run [Proton Mail Bridge](https://proton.me/mail/bridge)
+    locally and use the credentials it shows.
 
-**Yahoo:**
-
-1. Go to https://login.yahoo.com/account/security
-1. **Generate app password**
-1. Select **Other App**, name it (e.g., "Mirage")
-1. Copy the generated password
-
-**Fastmail:**
-
-1. Go to https://www.fastmail.com/settings/security/tokens
-1. **New App Password**
-1. Select **IMAP/SMTP** access
-1. Copy the generated password
-
-**iCloud:**
-
-1. Go to https://appleid.apple.com/account/manage
-1. **Sign-In and Security** -> **App-Specific Passwords**
-1. **Generate an app-specific password**
-1. Copy the generated password
-
-**Self-hosted / Other:**
-
-Use your regular email password, or whatever your mail server
-requires.
-
-### 3. Save the credentials
+    **Self-hosted or other:** use the mail account's password, or whatever the
+    server requires.
+  </Accordion>
+</AccordionGroup>
 
 ```bash
-# .env.development
-IMAP_HOST=imap.fastmail.com
-SMTP_HOST=smtp.fastmail.com
-EMAIL_USERNAME=you@fastmail.com
-EMAIL_PASSWORD=your-app-password
+export IMAP_HOST=imap.fastmail.com
+export SMTP_HOST=smtp.fastmail.com
+export EMAIL_USERNAME=alice@fastmail.com
+export EMAIL_PASSWORD=...
 ```
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /email:
+        vfs: email
+        mode: read
+        config:
+          imap_host: ${IMAP_HOST}
+          smtp_host: ${SMTP_HOST}
+          username: ${EMAIL_USERNAME}
+          password: ${EMAIL_PASSWORD}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id mail
+    mirage shell -w mail -c 'ls /email'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.email import EmailConfig, EmailVFS
+
+    config = EmailConfig(
+        imap_host=os.environ["IMAP_HOST"],
+        smtp_host=os.environ["SMTP_HOST"],
+        username=os.environ["EMAIL_USERNAME"],
+        password=os.environ["EMAIL_PASSWORD"],
+    )
+    ws = Workspace({"/email": EmailVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /email")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { EmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/email': new EmailVFS({
+          imapHost: process.env.IMAP_HOST!,
+          smtpHost: process.env.SMTP_HOST!,
+          username: process.env.EMAIL_USERNAME!,
+          password: process.env.EMAIL_PASSWORD!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /email')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/email/
+  INBOX/
+    2026-11-16/
+      Q4_planning_agenda__4812.email.json
+      Q4_planning_agenda__4812/
+        agenda.pdf
+  Sent/
+    2026-11-16/
+      ...
+```
+
+- A folder keeps its IMAP name; a day comes from the message's `Date` header.
+- A message file is `<subject>__<uid>.email.json` with a sanitized subject, so
+  `ls` the day rather than build the name.
+- Each folder lists its newest 200 messages; `max_messages` changes that.
+
+## Sample runs
+
+```bash
+$ ls /email
+Drafts
+INBOX
+Sent
+Trash
+```
+
+```bash
+$ ls /email/INBOX/2026-11-16
+Q4_planning_agenda__4812
+Q4_planning_agenda__4812.email.json
+Re_Invoice_2291__4815.email.json
+```
+
+```bash
+$ jq -r '.from.email, .subject' /email/INBOX/2026-11-16/Q4_planning_agenda__4812.email.json
+bob@example.com
+Q4 planning: agenda
+```
+
+The mount is read-only. Send, reply and forward with the
+[`himalaya`](/home/setup/cli/himalaya) CLI, which uses the SMTP settings.
 
 ## Troubleshooting
 
-**"Authentication failed"** - Check whether your provider accepts passwords
-for IMAP/SMTP and whether it requires an app password.
+- **Authentication failed:** check that the provider accepts passwords for
+  IMAP and SMTP, and whether it requires an app password.
+- **Connection refused:** check the host and port; some networks block 993 or
+  587. For ProtonMail, make sure Bridge is running.
+- **SSL handshake failed:** check the host and the implicit-TLS IMAP port
+  (commonly 993). `use_ssl: false` opens a plain connection with no STARTTLS
+  upgrade.
 
-**"Connection refused"** - Check the hostname and port. Some networks
-block port 993/587. For ProtonMail, make sure Bridge is running.
+## SDK guides
 
-**"SSL handshake failed"** - Verify the host and implicit-TLS port (commonly
-993 for IMAP). The current Python adapter's `use_ssl=False` setting opens a
-plain connection; it does not perform a STARTTLS upgrade.
-
-For SDK guides, see [Email (Python)](/python/vfs/email) and [Email (TypeScript)](/typescript/setup/email).
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/email">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/email">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>

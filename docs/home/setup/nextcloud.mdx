@@ -1,56 +1,143 @@
 ---
 title: Nextcloud
 icon: /images/nextcloud-logo.svg
-description: Set up Nextcloud / ownCloud / WebDAV credentials for the Nextcloud VFS.
+description: Virtualize a Nextcloud, ownCloud or other WebDAV server as files.
 ---
 
-## Overview
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+</div>
 
-The Nextcloud VFS talks to any [WebDAV](http://www.webdav.org/specs/rfc4918.html)
-server: self-hosted Nextcloud, ownCloud, Hetzner Storage Share, or any
-generic WebDAV endpoint. Authentication is HTTP Basic with an
-**app password** (not your account password).
+The files of one WebDAV account appear under the mount as they are on the
+server. It works with Nextcloud, ownCloud, Hetzner Storage Share or any
+[WebDAV](http://www.webdav.org/specs/rfc4918.html) endpoint.
 
-## Credentials
+## Setup
 
-### 1. Pick a server
+Any WebDAV server works: a hosted Nextcloud, a self-hosted one
+(`docker run -p 8080:80 nextcloud`), ownCloud or Hetzner Storage Share.
 
-Any of these works:
-
-- **Nextcloud Hosted trial** at https://try.nextcloud.com
-- **Self-hosted**: `docker run -p 8080:80 nextcloud`
-- **Hetzner Storage Share**, **ownCloud**, or any WebDAV server
-
-### 2. Create an app password
-
-In your Nextcloud web UI:
-
-1. Open **Settings** → **Security** → **Devices & sessions**
-2. Enter an app name (e.g. `mirage`) and click **Create new app password**
-3. Copy the generated password (shown once)
-
-Login password also works but **app passwords are strongly preferred** so
-you can revoke per-app access without changing your account password.
-
-### 3. Find your WebDAV URL
-
-The standard Nextcloud path is:
-
-```text
-https://<your-server>/remote.php/dav/files/<username>/
-```
-
-For example: `https://cloud.example.com/remote.php/dav/files/alice/`.
-
-For generic WebDAV servers, use whatever URL the provider gives.
-
-### 4. Set environment variables
+1. In Nextcloud, open **Personal settings**, then **Security**.
+2. Under **Devices & sessions**, enter an app name such as `mirage` and click
+   **Create new app password**. Copy it: Nextcloud shows it only once.
+3. Find the WebDAV URL under **Files settings**, **WebDAV**. On Nextcloud it is
+   `https://<server>/remote.php/dav/files/<username>/`, with any install
+   subdirectory before `/remote.php`. Other WebDAV servers give their own URL.
 
 ```bash
-# .env.development
-NEXTCLOUD_URL=https://cloud.example.com/remote.php/dav/files/alice/
-NEXTCLOUD_USERNAME=alice
-NEXTCLOUD_PASSWORD=<app-password>
+export NEXTCLOUD_URL=https://cloud.example.com/remote.php/dav/files/alice/
+export NEXTCLOUD_USERNAME=alice
+export NEXTCLOUD_PASSWORD=...
 ```
 
-For SDK configuration, see the [Nextcloud (Python)](/python/vfs/nextcloud) and [Nextcloud (TypeScript)](/typescript/setup/nextcloud) guides.
+The account password also works, but an app password can be revoked on its
+own without changing the account password.
+
+## Connect
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    mounts:
+      /nc:
+        vfs: nextcloud
+        mode: read
+        config:
+          url: ${NEXTCLOUD_URL}
+          username: ${NEXTCLOUD_USERNAME}
+          password: ${NEXTCLOUD_PASSWORD}
+    ```
+
+    ```bash
+    mirage workspace create workspace.yaml --id nc
+    mirage shell -w nc -c 'ls /nc'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
+
+    config = NextcloudConfig(
+        url=os.environ["NEXTCLOUD_URL"],
+        username=os.environ["NEXTCLOUD_USERNAME"],
+        password=os.environ["NEXTCLOUD_PASSWORD"],
+    )
+    ws = Workspace({"/nc": NextcloudVFS(config)}, mode=MountMode.READ)
+    result = await ws.shell("ls /nc")
+    print(await result.stdout_str())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, NextcloudVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/nc': new NextcloudVFS({
+          url: process.env.NEXTCLOUD_URL!,
+          username: process.env.NEXTCLOUD_USERNAME!,
+          password: process.env.NEXTCLOUD_PASSWORD!,
+        }),
+      },
+      { mode: MountMode.READ },
+    )
+    const result = await ws.shell('ls /nc')
+    console.log(result.stdoutText)
+    ```
+  </Tab>
+</Tabs>
+
+## Layout
+
+```text
+/nc/
+  Documents/
+    notes.md
+    contract.pdf
+  Photos/
+    2024/
+      cat.jpg
+```
+
+- `/nc/Documents/notes.md` is `<NEXTCLOUD_URL>/Documents/notes.md` on the
+  server.
+- Files keep their own names and bytes; nothing is converted.
+- Partial reads such as `head -c` send HTTP `Range` requests.
+
+## Sample runs
+
+```bash
+$ ls /nc
+Documents
+Photos
+```
+
+```bash
+$ ls /nc/Documents
+contract.pdf
+notes.md
+```
+
+```bash
+$ head -n 2 /nc/Documents/notes.md
+# Q4 planning
+- Ship the sync client
+```
+
+On a `write` mount, `cp`, `mv`, `rm` and `mkdir` run as WebDAV `COPY`, `MOVE`,
+`DELETE` and `MKCOL`. A write buffers the whole file before it uploads.
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/vfs/nextcloud">
+    Every config field, the VFS.md and write support.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/setup/nextcloud">
+    Every config field, the VFS.md and write support.
+  </Card>
+</CardGroup>
