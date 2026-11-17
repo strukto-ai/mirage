@@ -1,4 +1,5 @@
 import asyncio
+from io import BytesIO
 
 import pytest
 
@@ -81,13 +82,25 @@ async def test_collect_awaits_event_observer_and_preserves_output():
 
 
 @pytest.mark.asyncio
-async def test_collect_observer_failure_joins_producer_cleanup():
+@pytest.mark.parametrize("error_type", [ValueError, asyncio.CancelledError])
+async def test_collect_observer_failure_joins_producer_cleanup(
+    monkeypatch, error_type
+):
     closed = asyncio.Event()
     observed = []
+    buffers = []
+
+    def buffer():
+        output = BytesIO()
+        buffers.append(output)
+        return output
+
+    monkeypatch.setattr("mirage.workspace.shell_execution.BytesIO", buffer)
 
     async def run(output, cancel, scope):
         try:
             await output.emit(Channel.STDOUT, b"prefix")
+            await output.emit(Channel.STDERR, b"warning")
             await cancel.wait()
             raise MirageAbortError()
         finally:
@@ -95,13 +108,16 @@ async def test_collect_observer_failure_joins_producer_cleanup():
 
     async def observe(event):
         observed.append(event.data)
-        raise ValueError("preview failed")
+        if event.stream == Channel.STDERR:
+            raise error_type("preview failed")
 
     execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
-    with pytest.raises(ValueError, match="preview failed"):
+    with pytest.raises(error_type, match="preview failed"):
         await asyncio.wait_for(execution.collect(on_event=observe), 1)
-    assert observed == [b"prefix"]
+    assert observed == [b"prefix", b"warning"]
     assert closed.is_set()
+    assert len(buffers) == 2
+    assert all(output.closed for output in buffers)
     with pytest.raises(MirageAbortError):
         await execution.wait()
 

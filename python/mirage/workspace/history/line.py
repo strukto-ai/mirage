@@ -157,6 +157,11 @@ class LineHistory:
         """
         if not isinstance(sink, Terminal):
             return None
+        at_most_one_entry = len(root.named_children) <= 1 and not any(
+            row and not row.strip() for row in command.split("\n")
+        )
+        if at_most_one_entry:
+            return None
         entries = history_entries(root)
         if len(entries) < 2:
             return None

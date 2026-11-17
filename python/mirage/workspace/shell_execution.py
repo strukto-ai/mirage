@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import copy
+from io import BytesIO
 from types import TracebackType
 from typing import cast
 
@@ -170,19 +171,18 @@ class ShellExecution:
             on_event (Callable[[OutputEvent], Awaitable[None]] | None):
                 An asynchronous callback for each ordered output event.
         """
-        stdout: list[bytes] = []
-        stderr: list[bytes] = []
-        async with self:
-            async for event in self.events:
-                (stdout if event.stream == Channel.STDOUT else stderr).append(
-                    event.data
-                )
-                if on_event is not None:
-                    await on_event(event)
-            result = copy(await self.wait())
-            result.stdout = b"".join(stdout)
-            result.stderr = b"".join(stderr) if stderr else None
-            return result
+        with BytesIO() as stdout, BytesIO() as stderr:
+            async with self:
+                async for event in self.events:
+                    (
+                        stdout if event.stream == Channel.STDOUT else stderr
+                    ).write(event.data)
+                    if on_event is not None:
+                        await on_event(event)
+                result = copy(await self.wait())
+                result.stdout = stdout.getvalue()
+                result.stderr = stderr.getvalue() if stderr.tell() else None
+                return result
 
     async def _close(self) -> None:
         self.cancel()

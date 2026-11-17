@@ -1,16 +1,96 @@
+import asyncio
 from json import JSONDecodeError
 
 import pytest
 
+import mirage.commands.builtin.generic.grep as grep_module
 from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.config import Context
 from mirage.errors.fs import no_mount
+from mirage.io.stream import OutputStream
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.answers import memory_tree as _make_backend
 from tests.fixtures.readers import readers
+
+
+@pytest.fixture
+def engines(monkeypatch):
+    opened = []
+    opening = grep_module.open_grep
+
+    def tracked(config):
+        engine, warning = opening(config)
+        opened.append(engine)
+        return engine, warning
+
+    monkeypatch.setattr(grep_module, "open_grep", tracked)
+    return opened
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("files", [False, True])
+async def test_unstarted_output_releases_the_invocations_engine(
+    engines, files
+):
+    readdir, stat, _, read = _make_backend({"/a": b"a\n"})
+    output, _ = await grep_generic(
+        [_spec("/a")] if files else [],
+        ["a"],
+        Context(),
+        readdir=readdir,
+        stat=stat,
+        read=read,
+        stdin=b"a\n",
+    )
+    assert isinstance(output, OutputStream)
+    await output.aclose()
+    await output.aclose()
+    assert len(engines) == 1 and not engines[0].live
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_output_settles_active_input_before_releasing_engine(
+    engines, failure
+):
+    entered = asyncio.Event()
+    ended = []
+
+    async def source():
+        try:
+            yield b"unfinished"
+            entered.set()
+            if failure:
+                raise ValueError("input failed")
+            await asyncio.Event().wait()
+        finally:
+            ended.append(engines[0].live)
+
+    readdir, stat, _, read = _make_backend({})
+    output, _ = await grep_generic(
+        [],
+        ["z"],
+        Context(),
+        readdir=readdir,
+        stat=stat,
+        read=read,
+        stdin=source(),
+    )
+    assert isinstance(output, OutputStream)
+    pull = asyncio.create_task(anext(output))
+    await entered.wait()
+    if failure:
+        with pytest.raises(ValueError, match="input failed"):
+            await pull
+    else:
+        await output.aclose()
+        with pytest.raises(asyncio.CancelledError):
+            await pull
+    assert ended == [True]
+    assert not engines[0].live
 
 
 def _spec(path: str) -> PathSpec:
@@ -108,7 +188,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
 
 
 @pytest.mark.asyncio
-async def test_grep_recursive_files_only_mount_prefix():
+async def test_grep_recursive_files_only_mount_prefix(engines):
     readdir, stat, rb = _make_prefixed_backend(
         {
             "/dir/a.txt": b"apple\n",
@@ -133,6 +213,7 @@ async def test_grep_recursive_files_only_mount_prefix():
     decoded = (await _drain_async(output)).decode().strip()
     assert decoded == "/s3/dir/a.txt"
     assert "/s3/s3" not in decoded
+    assert len(engines) == 1 and not engines[0].live
 
 
 @pytest.mark.asyncio
@@ -284,7 +365,7 @@ async def test_grep_recursive_separates_context_groups_between_files():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("quiet", [False, True])
-async def test_recursive_grep_stops_reading_and_closes_stream(quiet):
+async def test_recursive_grep_stops_reading_and_closes_stream(quiet, engines):
     readdir, stat, rb, _ = _make_backend(
         {
             "/d/a/first": b"hit\n",
@@ -321,6 +402,7 @@ async def test_recursive_grep_stops_reading_and_closes_stream(quiet):
         await output.aclose()
     assert opened == ["/d/a/first"]
     assert closed == opened
+    assert len(engines) == 1 and not engines[0].live
 
 
 @pytest.mark.asyncio

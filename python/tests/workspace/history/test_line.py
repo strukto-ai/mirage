@@ -93,14 +93,43 @@ async def test_records_a_line_it_refuses_as_typed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_records_a_line_of_one_command_whole() -> None:
+@pytest.mark.parametrize(
+    ("source", "stdout"),
+    [
+        ("cat <<A\nx\nA\n", "x\n"),
+        ("cat <<A\n \t\nA\n", " \t\n"),
+        ("echo é\\\n😀\n", "é😀\n"),
+        ("if false; then\necho skipped\nfi\n", ""),
+    ],
+)
+async def test_records_a_line_of_one_command_whole(
+    source: str, stdout: str
+) -> None:
     ws = _workspace()
     try:
-        await ws.shell("cat <<A\nx\nA\n")
+        await ws.shell(source)
         history = await ws.history()
         assert [e.get("command", e.get("stdout")) for e in history] == [
-            "cat <<A\nx\nA\n",
-            "x\n",
+            source,
+            stdout,
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_records_blank_rows_around_a_transformed_command() -> None:
+    ws = _workspace()
+    try:
+        await ws.shell(" \t\necho é\\\n😀\n\t \n")
+        history = await ws.history()
+        assert [e.get("command", e.get("stdout")) for e in history] == [
+            " \t",
+            "",
+            "echo é😀",
+            "é😀\n",
+            "\t ",
+            "",
         ]
     finally:
         await ws.close()

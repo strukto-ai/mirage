@@ -421,6 +421,100 @@ fn orders_versions_as_gnu_does() {
 }
 
 #[test]
+fn version_comparison_resumes_through_filtered_bytes_suffixes_and_digits() {
+    use super::modifiers::Mods;
+    use super::version::{VersionScan, version_cmp};
+
+    let skipped = b"!\x01".repeat(800);
+    let long = b"a".repeat(800);
+    let pairs = [
+        (b"".to_vec(), skipped.clone()),
+        ([skipped.as_slice(), b"."].concat(), b"..".to_vec()),
+        (b".a1.tar.gz".to_vec(), b"a1.tar.gz".to_vec()),
+        (b"01".to_vec(), b"1.a".to_vec()),
+        (b"a1..a~.gz".to_vec(), b"a1..b.tar".to_vec()),
+        (b"abZ~1".to_vec(), b"abzA1".to_vec()),
+        (b"ab!1".to_vec(), b"abA1".to_vec()),
+        (long.clone(), long.clone()),
+        (
+            [b"9".repeat(800), b"1".to_vec()].concat(),
+            [b"9".repeat(800), b"2".to_vec()].concat(),
+        ),
+        ([b"0".repeat(800), b"12".to_vec()].concat(), b"12".to_vec()),
+        (
+            [long.as_slice(), b"~1"].concat(),
+            [long.as_slice(), b"A1"].concat(),
+        ),
+        (
+            [long.as_slice(), b"00012.tar.gz"].concat(),
+            [long.as_slice(), b"12.tar.xz"].concat(),
+        ),
+        (
+            [long.as_slice(), b"099999b"].concat(),
+            [long.as_slice(), b"100000a"].concat(),
+        ),
+        (
+            [long.as_slice(), b"000~"].concat(),
+            [long.as_slice(), b"0"].concat(),
+        ),
+        (
+            [skipped.as_slice(), b"Ab-01\x01.tar.gz"].concat(),
+            b"ab1targz".to_vec(),
+        ),
+    ];
+    for mods in [
+        Mods::default(),
+        Mods {
+            fold: true,
+            ..Mods::default()
+        },
+        Mods {
+            fold: true,
+            dictionary: true,
+            ..Mods::default()
+        },
+        Mods {
+            ignore_nonprinting: true,
+            ..Mods::default()
+        },
+    ] {
+        for (a, b) in &pairs {
+            let transform = |source: &[u8]| {
+                source
+                    .iter()
+                    .copied()
+                    .filter(|&byte| super::modifiers::kept(byte, &mods))
+                    .map(|byte| {
+                        if mods.fold {
+                            byte.to_ascii_uppercase()
+                        } else {
+                            byte
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let expected = version_cmp(&transform(a), &transform(b));
+            for budget in [1, 7, 4096] {
+                let mut scan = VersionScan::default();
+                let mut calls = 0;
+                let actual = loop {
+                    calls += 1;
+                    assert!(calls < 20000, "version comparison failed to advance");
+                    let mut remaining = budget;
+                    if let Some(order) = scan.step(a, b, &mods, &mut remaining) {
+                        break order;
+                    }
+                };
+                assert_eq!(actual, expected);
+                if budget == 1 && a.len() + b.len() > 256 {
+                    assert!(calls > 256, "source scanning must consume the allowance");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn merges_inputs_on_demand() {
     let cfg = config("merge", WHOLE, r#","inputs":2"#);
     let mut stream = open("sort", cfg.as_bytes()).unwrap();

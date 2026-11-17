@@ -118,6 +118,10 @@ export class LineHistory {
     sink: JobConsole | undefined,
   ): LineHistory | null {
     if (!(sink instanceof Terminal)) return null
+    const atMostOneEntry =
+      root.namedChildren.length <= 1 &&
+      !command.split('\n').some((row) => row !== '' && row.trim() === '')
+    if (atMostOneEntry) return null
     const entries = historyEntries(root)
     if (entries.length < 2) return null
     return new LineHistory(

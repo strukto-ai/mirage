@@ -223,7 +223,7 @@ async def test_cancel_during_awk_operation_releases_resources(
         assert not completed
         assert opened > 0 and sources == 0
         assert retirement_calls > (1 if case["id"] == "array-cleanup" else 0)
-        assert all(not stream.busy() for stream in retiring)
+        assert all(not stream.live or not stream.busy() for stream in retiring)
         result = await ws.shell("printf recovered")
         assert result.stdout == b"recovered"
     finally:

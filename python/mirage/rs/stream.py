@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 from collections.abc import (
     AsyncGenerator,
@@ -24,6 +25,7 @@ from contextlib import aclosing
 from typing import NamedTuple, Protocol
 
 from mirage._rs import Stream, StreamError
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import close_quietly
@@ -43,9 +45,35 @@ class OpenStream:
 
     def __init__(self, kind: str, config: Mapping[str, JsonValue]) -> None:
         try:
-            self._stream = Stream(kind, json.dumps(config).encode())
+            self._active: Stream | None = Stream(
+                kind, json.dumps(config).encode()
+            )
         except StreamError as exc:
             raise StreamRefusal(*exc.args) from exc
+        self._closing: asyncio.Task[None] | None = None
+        self._status = 0
+        self._stderr = b""
+
+    @property
+    def _stream(self) -> Stream:
+        if self._active is None:
+            raise RuntimeError("stream is closed")
+        return self._active
+
+    @property
+    def live(self) -> bool:
+        """Whether the stream still owns its native engine."""
+        return self._active is not None
+
+    def close(self) -> None:
+        """Release the native engine, keeping its terminal diagnostics."""
+        if self._active is None:
+            return
+        try:
+            self._status = self._active.status()
+            self._stderr = self._active.take_stderr()
+        finally:
+            self._active = None
 
     def feed(self, chunk: bytes) -> bytes:
         """Push one chunk.
@@ -125,6 +153,8 @@ class OpenStream:
 
     def status(self) -> int:
         """The command's exit status for the input so far."""
+        if self._active is None:
+            return self._status
         return self._stream.status()
 
     def metadata(self) -> bytes:
@@ -133,6 +163,9 @@ class OpenStream:
 
     def take_stderr(self) -> bytes:
         """What the stream wrote to stderr since the last call."""
+        if self._active is None:
+            stderr, self._stderr = self._stderr, b""
+            return stderr
         return self._stream.take_stderr()
 
     def request(self) -> tuple[dict[str, JsonValue], bytes] | None:
@@ -351,6 +384,17 @@ async def close_stream(stream: OpenStream) -> None:
     Args:
         stream (OpenStream): The owned command engine.
     """
-    if stream.cancel():
-        async for _ in _drained(stream, YieldBudget()):
-            pass
+    if not stream.live:
+        return
+    if stream._closing is None:
+
+        async def retire() -> None:
+            try:
+                if stream.cancel():
+                    async for _ in _drained(stream, YieldBudget()):
+                        pass
+            finally:
+                stream.close()
+
+        stream._closing = owned_task(retire())
+    await settle(stream._closing)

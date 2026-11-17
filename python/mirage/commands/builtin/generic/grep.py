@@ -61,9 +61,11 @@ from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, WalkLimitError
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
 from mirage.rs.scan import scanned
+from mirage.rs.stream import close_stream
 from mirage.shell.bytes import utf8_locale
 from mirage.types import (
     FileStat,
@@ -365,12 +367,15 @@ async def grep_generic(
 
     io = IOResult(exit_code=1, stderr=warning or None)
     if not paths:
-        return search(
-            resolve_source(stdin),
-            f.label,
-            f.with_filename and not f.no_filename,
-            io,
-            reads_stdin=True,
+        return OutputStream(
+            search(
+                resolve_source(stdin),
+                f.label,
+                f.with_filename and not f.no_filename,
+                io,
+                reads_stdin=True,
+            ),
+            partial(close_stream, stream),
         ), io
 
     mounts = mounts_of(ctx)
@@ -547,7 +552,7 @@ async def grep_generic(
         finally:
             said()
 
-    return run(), io
+    return OutputStream(run(), partial(close_stream, stream)), io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
