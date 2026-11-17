@@ -1,0 +1,128 @@
+{
+  "requires": [
+    "env:MONTY_REMOTE_URL"
+  ],
+  "cases": [
+    {
+      "id": "a_remote_run_reaches_the_workspace",
+      "world": {
+        "machines": {
+          "py": {
+            "provider": "monty_remote",
+            "url": "${MONTY_REMOTE_URL}"
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "n.txt": "6"
+            }
+          },
+          "/ro": {
+            "vfs": "ram",
+            "mode": "read"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(int(open('/ram/n.txt').read()) * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        },
+        {
+          "command": "python3 -c \"open('/ram/out.txt', 'w').write('from monty')\" && cat /ram/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from monty"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; print(sorted(os.listdir('/ram')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['n.txt', 'out.txt']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"\ntry:\n    open('/ro/x.txt', 'w').write('nope')\nexcept OSError as e:\n    print(type(e).__name__)\n\" && ls /ro",
+          "expect": {
+            "exit": 0,
+            "stdout": "OSError\n"
+          }
+        },
+        {
+          "command": "echo -n piped | GREETING=hi python3 -c \"import os; print(os.environ['GREETING'], stdin)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi b'piped'\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_timeout_stops_a_remote_run",
+      "world": {
+        "machines": {
+          "py": {
+            "provider": "monty_remote",
+            "url": "${MONTY_REMOTE_URL}"
+          }
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "slow.py": "n = 0\nfor i in range(300000000):\n    n = n + 1\n"
+            }
+          }
+        },
+        "command_limits": {
+          "@line": {
+            "timeout_seconds": 1
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/slow.py",
+          "expect": {
+            "exit": 124,
+            "stderr_contains": "timed out after"
+          }
+        },
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_server_out_of_reach_exits_1",
+      "world": {
+        "machines": {
+          "py": {
+            "provider": "monty_remote",
+            "url": "http://127.0.0.1:1"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "monty: remote server: "
+          }
+        }
+      ]
+    }
+  ]
+}

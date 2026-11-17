@@ -54,6 +54,34 @@
         "contains": "cpython-wasi-build",
         "http_contains": "config could not be built"
       }
+    },
+    {
+      "id": "monty_remote_names_its_url",
+      "world": {
+        "machines": {
+          "py": {
+            "provider": "monty_remote"
+          }
+        }
+      },
+      "build_error": {
+        "contains": "a monty_remote machine names its url"
+      }
+    },
+    {
+      "id": "in_process_monty_refuses_a_url",
+      "world": {
+        "machines": {
+          "py": {
+            "provider": "in_process",
+            "runtime": "monty",
+            "url": "https://m"
+          }
+        }
+      },
+      "build_error": {
+        "contains": "a remote monty server is provider monty_remote"
+      }
     }
   ]
 }

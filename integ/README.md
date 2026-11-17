@@ -452,7 +452,7 @@ flowchart LR
     FS["fuse and mount core modules,<br/>workspace fuse and nfs wiring<br/>integ/fuse, check_json.py"] --> fuse
     FP["shared Rust policy and glob,<br/>native and Wasm bindings,<br/>rs/policy, rs/approvals, hidden, path and session context adapters"] --> fuse
     CA["store capacity,<br/>the RAM mutators<br/>and store"] --> fuse
-    RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
+    RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime,<br/>integ/server/monty_remote"] --> runtime
     ts --> J2["integ-ts"]
     battery --> J3["integ-shared-py (3) · integ-shared-ts (2)<br/>integ-shared-parity · integ-selftests<br/>integ-facets with wandb · integ-shell-coverage"]
     hosting --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack<br/>python scenarios: metadata · lancedb · lifecycle · policy"]
@@ -511,7 +511,7 @@ remain covered by the same whole-host filters on both hosts.
 | Changed                                                                                                                                                                     | Also sets                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | python or typescript source, except the runtime drop list below                                                                                                             | runtime                                             |
-| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                                                                                          | runtime                                             |
+| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/server/monty_remote/`, `integ/tsconfig.json`                                                                            | runtime                                             |
 | `integ/package.json`                                                                                                                                                        | runtime, fuse                                       |
 | the python mongodb, postgres, chroma and qdrant layers and the `search` CLI; their `integ/vfs/` cases                                                                       | database                                            |
 | the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds                                                                | observability                                       |
