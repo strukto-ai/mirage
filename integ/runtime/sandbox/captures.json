@@ -93,7 +93,7 @@
     },
     {
       "id": "a_pid_two_machines_share_names_a_machine",
-      "note": "Two containers can each run a program under the same pid. The second machine's container sets its next pid to the first one's, so kill refuses the bare pid as bash refuses an ambiguous job spec, and -m names the machine.",
+      "note": "Two containers can each run a program under the same pid. The second machine's container sets its next pid to the first one's, retrying while other drivers' runs fork there too (a lock directory keeps their tries apart), so kill refuses the bare pid as bash refuses an ambiguous job spec, and -m names the machine.",
       "runtimes": [
         "docker"
       ],
@@ -127,7 +127,7 @@
           }
         },
         {
-          "command": "x=$((p - 1)); n=0; q=; until [ \"$q\" = \"$p\" ] || [ $n -ge 8 ]; do dash -c 'echo \"$1\" > /proc/sys/kernel/ns_last_pid' dash \"$x\"; dash -c 'exec sleep 31' & q=$!; if [ \"$q\" != \"$p\" ]; then kill \"$q\"; wait \"$q\" 2>/dev/null; x=$((x - q + p)); fi; n=$((n + 1)); done; [ \"$q\" = \"$p\" ] && echo same",
+          "command": "dash -c 'i=0; until mkdir /tmp/pid.lock 2>/dev/null; do i=$((i + 1)); [ $i -lt 600 ] || exit 1; sleep 0.1; done'; x=$((p - 1)); n=0; q=; until [ \"$q\" = \"$p\" ] || [ $n -ge 30 ]; do dash -c 'echo \"$1\" > /proc/sys/kernel/ns_last_pid' dash \"$x\"; dash -c 'exec sleep 31' & q=$!; if [ \"$q\" != \"$p\" ]; then kill \"$q\"; wait \"$q\" 2>/dev/null; x=$((x - q + p)); fi; n=$((n + 1)); done; dash -c 'rmdir /tmp/pid.lock'; [ \"$q\" = \"$p\" ] && echo same",
           "machine": "second",
           "expect": {
             "exit": 0,
