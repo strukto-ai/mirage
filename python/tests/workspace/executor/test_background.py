@@ -830,37 +830,39 @@ class _Held(JobConsole):
         await asyncio.Event().wait()
 
 
-def test_a_stopped_job_past_its_limit_still_ends() -> None:
-    # Cold preflight must not spend the launcher's budget before it
-    # creates a job; move the unchanged deadline only once the job is
-    # held and its runner, which starts on the loop's next turn, has begun.
-    async def main(loop: HeldLoop) -> int | None:
-        ws = Workspace(
-            {"/data": RAMVFS()},
-            mode=MountMode.WRITE,
-            command_limits={"@line": Limit(timeout_seconds=0.2)},
+# Cold preflight must not spend the launcher's budget before it creates a
+# job; move the unchanged deadline only once the job is held and its
+# runner, which starts on the loop's next turn, has begun. The held clock
+# never moves alone, so each step drains a bounded number of turns.
+async def _end_a_stopped_job(loop: HeldLoop) -> int | None:
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"@line": Limit(timeout_seconds=0.2)},
+    )
+    try:
+        line = await ws.shell("sleep 30 & p=$!; kill -STOP $p")
+        assert line.exit_code == 0
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job is not None and job.process is not None
+        assert job.process.paused
+        waiting = asyncio.ensure_future(
+            ws.job_table.wait(1, ws.default_session_id)
         )
-        try:
-            line = await ws.shell("sleep 30 & p=$!; kill -STOP $p")
-            assert line.exit_code == 0
-            job = ws.job_table.get(1, ws.default_session_id)
-            assert job is not None and job.process is not None
-            assert job.process.paused
-            waiting = asyncio.ensure_future(
-                ws.job_table.wait(1, ws.default_session_id)
-            )
-            await asyncio.sleep(0)
-            assert job.process.begun
-            loop.now += 0.199
+        await asyncio.sleep(0)
+        assert job.process.begun
+        for step, ended in ((0.199, False), (0.001, True)):
+            loop.now += step
             for _ in range(20):
                 await asyncio.sleep(0)
-            assert not waiting.done()
-            loop.now += 0.001
-            return (await waiting).exit_code
-        finally:
-            await ws.close()
+            assert waiting.done() is ended
+        return waiting.result().exit_code
+    finally:
+        await ws.close()
 
-    assert run_on_held_loop(main) == 124
+
+def test_a_stopped_job_past_its_limit_still_ends() -> None:
+    assert run_on_held_loop(_end_a_stopped_job) == 124
 
 
 @pytest.mark.asyncio
