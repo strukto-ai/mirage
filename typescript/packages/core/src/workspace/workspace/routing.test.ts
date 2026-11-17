@@ -306,6 +306,20 @@ describe('routing on machines', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
+        machines: { a: box('a', '@line'), b: box('b', '@external') },
+        policies: [new Answers('python3', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      const said = await ws.shell('python3 --version')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'a\n'])
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
         machines: { b: box('b', 'echo') },
         policies: [new Answers('echo', { kind: 'route', machine: 'b' })],
       },

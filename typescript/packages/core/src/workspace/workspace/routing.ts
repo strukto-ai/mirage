@@ -418,7 +418,7 @@ export class Router {
       ) {
         return ''
       }
-      if (!command.includes('/')) {
+      if (consumer === Consumer.EXTERNAL && !command.includes('/')) {
         fallback = Object.hasOwn(decision.bindings, EXTERNAL_COMMANDS)
           ? (decision.bindings[EXTERNAL_COMMANDS] ?? null)
           : null

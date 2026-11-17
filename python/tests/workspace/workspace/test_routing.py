@@ -223,6 +223,11 @@ class _EchoOnB(Policy):
         return Route(machine="b") if ctx.command == "echo" else None
 
 
+class _PythonOnB(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "python3" else None
+
+
 @pytest.mark.asyncio
 async def test_a_route_to_a_capturer_of_a_word_mirage_keeps_moves_nothing():
     ws = Workspace(
@@ -233,6 +238,17 @@ async def test_a_route_to_a_capturer_of_a_word_mirage_keeps_moves_nothing():
     )
     try:
         said = await ws.shell("echo hi")
+        assert (said.exit_code, said.stdout) == (0, b"a\n")
+    finally:
+        await ws.close()
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _box("a", "@line"), "b": _box("b", "@external")},
+        policies=[_PythonOnB()],
+    )
+    try:
+        said = await ws.shell("python3 --version")
         assert (said.exit_code, said.stdout) == (0, b"a\n")
     finally:
         await ws.close()

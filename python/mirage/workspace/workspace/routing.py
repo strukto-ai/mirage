@@ -598,7 +598,7 @@ class Router:
                 consumer is Consumer.SESSION and command in INTERPRETER_NAMES
             ):
                 return ""
-            if "/" not in command:
+            if consumer is Consumer.EXTERNAL and "/" not in command:
                 fallback = decision.bindings.get(EXTERNAL_COMMANDS)
         serving = decision.bindings.get(command, fallback)
         if not isinstance(serving, Runtime) or isinstance(
