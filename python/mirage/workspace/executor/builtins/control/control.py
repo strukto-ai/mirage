@@ -135,12 +135,13 @@ async def handle_exit(
     cleanup = await run_exit_trap(execute_fn, session, code, stdin, call_stack)
     if cleanup is None:
         raise ExitSignal(code, stderr=err)
+    written = await cleanup.materialize_stdout()
     leaving = ExitSignal(
         cleanup.exit_code,
         stderr=err + await cleanup.materialize_stderr(),
-        stdout=await cleanup.materialize_stdout(),
+        stdout=written,
     )
-    leaving.cleanup = leaving.stdout or b""
+    leaving.cleanup = written
     raise leaving
 
 

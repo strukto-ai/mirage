@@ -14,11 +14,17 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
-import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
+import {
+  answerOf,
+  refusedRun,
+  workspaceBridge,
+  type WorkspaceBinding,
+  type RuntimeContext,
+} from './binding.ts'
 import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import type { DispatchFn, ExecutionKind, Program, RunResult } from './types.ts'
+import type { DispatchFn, ExecutionKind, OutputFn, Program, RunAnswer, RunResult } from './types.ts'
 import { RuntimeFiles } from './files.ts'
 import type { Context } from '../commands/config.ts'
 import {
@@ -27,7 +33,9 @@ import {
   runWithCaller,
   runWithSession,
 } from '../context/session_context.ts'
-import { materialize } from '../io/types.ts'
+import { materialize, type ByteSource } from '../io/types.ts'
+import { yieldBytes } from '../io/stream.ts'
+import { enotsup } from '../errors/fs.ts'
 import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
@@ -56,9 +64,15 @@ class Probe extends LanguageRuntime {
     super.bind(binding)
     this.bound = binding
   }
-  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    program: Program,
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.contexts.push(ctx)
-    return Promise.resolve({ stdout: enc.encode(program.code), stderr: null, exitCode: 0 })
+    await output(enc.encode(program.code))
+    return { exitCode: 0 }
   }
 }
 class ShellProbe extends Runtime {
@@ -69,15 +83,26 @@ class ShellProbe extends Runtime {
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
+    output: OutputFn,
   ): Promise<RunResult> {
     const stdin = ctx.stdin === null ? new Uint8Array() : await materialize(ctx.stdin)
-    return {
-      stdout: enc.encode(`${ctx.flags.c as string}:${ctx.cwd.virtual}${dec.decode(stdin)}`),
-      stderr: null,
-      exitCode: 0,
-    }
+    await output(enc.encode(`${ctx.flags.c as string}:${ctx.cwd.virtual}${dec.decode(stdin)}`))
+    return { exitCode: 0 }
   }
 }
+
+/** One run of `runtime`, its answer kept whole. */
+function answered(
+  runtime: Runtime,
+  texts: string[],
+  ctx: Context,
+  kind?: ExecutionKind,
+): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    runtime.execute([], texts, ctx, { ...(kind === undefined ? {} : { kind }), output, errors }),
+  )
+}
+
 function world(machines?: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
@@ -87,6 +112,34 @@ function world(machines?: Runtime[]): Workspace {
     },
   )
 }
+
+describe('answerOf', () => {
+  it('keeps what a run wrote whole', async () => {
+    const run = async (output: OutputFn, errors: OutputFn): Promise<RunResult> => {
+      await output(enc.encode('one '))
+      await errors(enc.encode('warn\n'))
+      await output(enc.encode('two\n'))
+      return { exitCode: 3 }
+    }
+    const done = await answerOf(run)
+    expect([done.exitCode, dec.decode(done.stdout), dec.decode(done.stderr)]).toEqual([
+      3,
+      'one two\n',
+      'warn\n',
+    ])
+    const silent = await answerOf(() => Promise.resolve({ exitCode: 0 }))
+    expect(silent).toEqual({ exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array() })
+  })
+
+  it('takes a refusal written through errors', async () => {
+    const done = await answerOf((_output, errors) => refusedRun('probe', 'why', errors))
+    expect([done.exitCode, dec.decode(done.stdout), dec.decode(done.stderr)]).toEqual([
+      126,
+      '',
+      'probe: Permission denied\n',
+    ])
+  })
+})
 
 describe('execution bindings', () => {
   it('makes workspace services available during runtime binding', async () => {
@@ -137,7 +190,7 @@ describe('execution bindings', () => {
     expect([isLineExecutor(native), isProcessExecutor(native)]).toEqual([true, false])
     expect([language.filesystem, native.filesystem]).toEqual([[], []])
     const execute = (runtime: Runtime, [texts, ctx, kind]: Request) =>
-      runtime.execute([], texts, ctx, { kind })
+      answered(runtime, texts, ctx, kind)
     expect(dec.decode((await execute(language, code)).stdout)).toBe('hello')
     expect(dec.decode((await execute(native, shell)).stdout)).toBe('echo hello:/work!')
     for (const [runtime, request] of [
@@ -206,7 +259,7 @@ describe('execution bindings', () => {
     const first = world([runtime]),
       second = world()
     try {
-      const ok = await runtime.execute([], [], context({ flags: { c: 'ok' } }))
+      const ok = await answered(runtime, [], context({ flags: { c: 'ok' } }))
       expect(dec.decode(ok.stdout)).toBe('ok')
       expect(() => second.addMachine(runtime.name, runtime)).toThrow('another workspace')
     } finally {
@@ -249,13 +302,13 @@ it.each([
         ['one', 'two'].map((session) =>
           runWithSession(
             ws.getSession(session),
-            () => runtime.execute([], [], context({ flags: { c: code } })),
+            () => answered(runtime, [], context({ flags: { c: code } })),
             { owner: ws.sessionManager },
           ),
         ),
       )
       for (const result of results) {
-        expect(result.exitCode, dec.decode(result.stderr ?? new Uint8Array())).toBe(0)
+        expect(result.exitCode, dec.decode(result.stderr)).toBe(0)
         expect(dec.decode(result.stdout)).toBe('shared\n')
       }
       for (const entries of Object.values(calls))
@@ -382,4 +435,65 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+describe('workspaceBridge append on a mount with no append', () => {
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+
+  /** A bridge over a mount that declines `append`, its file held here. */
+  function noAppend(stored: { body: Uint8Array | null; read?: Error }) {
+    const asked: Record<string, unknown>[] = []
+    const written: ByteSource[] = []
+    const bridge = workspaceBridge(async (name, _path, args, kwargs) => {
+      if (name === 'append') throw enotsup('s3', 'append', '/a/x')
+      if (name === 'read') {
+        asked.push({ ...kwargs })
+        if (stored.read !== undefined) throw stored.read
+        if (stored.body === null) throw Object.assign(new Error('nope'), { code: 'ENOENT' })
+        return yieldBytes(stored.body)
+      }
+      if (name === 'write') {
+        const body = (args ?? [])[0] as ByteSource
+        written.push(body)
+        stored.body = await materialize(body)
+      }
+      return undefined
+    })
+    return { bridge, asked, written }
+  }
+
+  it('writes the base, read fresh as a stream, back as a stream with the tail', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null }
+    const { bridge, asked, written } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('tail'))
+    expect(dec.decode(stored.body ?? undefined)).toBe('headtail')
+    expect(asked).toEqual([{ filetype: null, direct: true, stream: true }])
+    expect(written[0]).not.toBeInstanceOf(Uint8Array)
+  })
+
+  // An append lands after whatever the file holds now, as O_APPEND does,
+  // so a copy kept from the last append would overwrite another write.
+  it('keeps a write made since the last append', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null }
+    const { bridge } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('-1'))
+    stored.body = enc.encode('other')
+    await bridge('append', '/a/x', enc.encode('-2'))
+    expect(dec.decode(stored.body)).toBe('other-2')
+  })
+
+  it('starts from an empty base when the file is simply absent', async () => {
+    const stored: { body: Uint8Array | null } = { body: null }
+    const { bridge } = noAppend(stored)
+    await bridge('append', '/a/x', enc.encode('tail'))
+    expect(dec.decode(stored.body ?? undefined)).toBe('tail')
+  })
+
+  it('propagates a read failure that is not an absence', async () => {
+    const stored = { body: enc.encode('head') as Uint8Array | null, read: new Error('down') }
+    const { bridge, written } = noAppend(stored)
+    await expect(bridge('append', '/a/x', enc.encode('tail'))).rejects.toThrow(/down/)
+    expect(written).toHaveLength(0)
+  })
 })

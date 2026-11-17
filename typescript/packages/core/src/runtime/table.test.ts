@@ -44,8 +44,7 @@ class FakeRuntime extends Runtime {
   }
 }
 
-const done = (): Promise<RunResult> =>
-  Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+const done = (): Promise<RunResult> => Promise.resolve({ exitCode: 0 })
 
 class PyEngine extends PythonRuntime {
   readonly name = 'pyengine'

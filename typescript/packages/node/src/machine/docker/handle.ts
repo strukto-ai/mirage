@@ -59,7 +59,7 @@ export class DockerMachine extends ProgramMachine<DockerConfig> {
 
   async connect(): Promise<void> {
     const container = this.config.container
-    const status = await this.execProgram(['inspect', '--format', '{{json .State}}', container])
+    const status = await this.programAnswer(['inspect', '--format', '{{json .State}}', container])
     const state = reportedState(status, 'docker inspect', ['Status'])
     if (state === PAUSED_STATE) await this.changeState(['unpause', container])
     else if (state !== RUNNING_STATE)

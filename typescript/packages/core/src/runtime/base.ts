@@ -163,14 +163,14 @@ export abstract class Runtime<E = unknown> {
    * @param ctx the run's context.
    * @param opts `kind`: code in the runtime's language (the default), a
    *   whole line (`sh -c` with `ctx.flags.c`), or a process; `output`:
-   *   where the run writes its output as it comes, absent to collect it in
-   *   the result; `errors`: the same for its stderr.
+   *   where the run writes its output as it comes; `errors`: the same for
+   *   its stderr.
    */
   async execute(
     paths: readonly PathSpec[],
     texts: readonly string[],
     ctx: Context,
-    opts: { kind?: ExecutionKind; output?: OutputFn; errors?: OutputFn } = {},
+    opts: { kind?: ExecutionKind; output: OutputFn; errors: OutputFn },
   ): Promise<RunResult> {
     const release = this.admit()
     try {
@@ -178,9 +178,10 @@ export abstract class Runtime<E = unknown> {
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
       if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
-        return refusedRun(
+        return await refusedRun(
           this.refusalName,
           "runtime cannot enforce this session's file restrictions",
+          opts.errors,
         )
       // A process on this machine opens its connections around the gateway,
       // so a workspace whose network is limited, or whose policies judge
@@ -188,7 +189,11 @@ export abstract class Runtime<E = unknown> {
       if (this.reach === 'process') {
         for (const egress of liveEgress()) {
           if (egress.rule !== null || (await egress.hooked))
-            return refusedRun(this.refusalName, "runtime cannot enforce this workspace's network")
+            return await refusedRun(
+              this.refusalName,
+              "runtime cannot enforce this workspace's network",
+              opts.errors,
+            )
         }
       }
       const engine = await this.engine()
@@ -204,7 +209,7 @@ export abstract class Runtime<E = unknown> {
       if (vfs === undefined) delete runCtx.vfs
       else runCtx.vfs = vfs
       return await runWithCaller(capture.caller, () =>
-        this.asProgram(kind, [...texts], runCtx, (programCtx) =>
+        this.asProgram(kind, [...texts], runCtx, opts.errors, (programCtx) =>
           this.runAs(kind, engine, [...paths], [...texts], programCtx, opts.output, opts.errors),
         ),
       )
@@ -235,12 +240,14 @@ export abstract class Runtime<E = unknown> {
    * @param kind what is asked, which names the program.
    * @param texts the text operands.
    * @param ctx the run's context.
+   * @param errors where a fork the table refuses says so.
    * @param run the program, to its end, under the context it is given.
    */
   private async asProgram(
     kind: ExecutionKind,
     texts: string[],
     ctx: Context,
+    errors: OutputFn,
     run: (ctx: Context) => Promise<RunResult>,
   ): Promise<RunResult> {
     const processes = this.binding?.processes ?? null
@@ -314,11 +321,8 @@ export abstract class Runtime<E = unknown> {
       })
     } catch (error) {
       if ((error as { code?: unknown }).code !== 'EAGAIN') throw error
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(FORK_FAILED),
-        exitCode: FORK_FAILED_STATUS,
-      }
+      await errors(new TextEncoder().encode(FORK_FAILED))
+      return { exitCode: FORK_FAILED_STATUS }
     }
     const stopped = (): void => {
       child.terminate(shell.signal ?? shell.interrupted ?? 9)
@@ -326,12 +330,12 @@ export abstract class Runtime<E = unknown> {
     ctx.signal?.addEventListener('abort', stopped, { once: true })
     try {
       const code = await child.task
-      return done ?? { stdout: new Uint8Array(), stderr: null, exitCode: code }
+      return done ?? { exitCode: code }
     } catch (error) {
       if (ctx.signal?.aborted === true || !isAborting(error)) throw error
       // The child alone was stopped (`kill` of its pid); its shell goes on
       // with its status.
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 128 + (child.signal ?? 9) }
+      return { exitCode: 128 + (child.signal ?? 9) }
     } finally {
       ctx.signal?.removeEventListener('abort', stopped)
     }
@@ -344,8 +348,8 @@ export abstract class Runtime<E = unknown> {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output: OutputFn | undefined,
-    errors: OutputFn | undefined,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     if (kind === 'process' && texts.length === 0) throw new Error('process argv must not be empty')
     if (kind === 'code') return this.run(engine, paths, texts, ctx, output, errors)
@@ -363,8 +367,7 @@ export abstract class Runtime<E = unknown> {
    * @param _paths the script operand, if any.
    * @param _texts the program's argv.
    * @param _ctx the run's context.
-   * @param _output receives stdout as it comes; undefined returns it in
-   *   the result.
+   * @param _output receives stdout as it comes.
    * @param _errors the same for stderr.
    */
   run(
@@ -372,8 +375,8 @@ export abstract class Runtime<E = unknown> {
     _paths: PathSpec[],
     _texts: string[],
     _ctx: Context,
-    _output?: OutputFn,
-    _errors?: OutputFn,
+    _output: OutputFn,
+    _errors: OutputFn,
   ): Promise<RunResult> {
     return Promise.reject(
       new UnsupportedExecutionError(`${this.name}: code execution is unsupported`),

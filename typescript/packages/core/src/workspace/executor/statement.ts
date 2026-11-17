@@ -429,9 +429,10 @@ export type Written = readonly [Channel, ByteSource, boolean]
  * Output written as it is, stdout then stderr, none of it through a copy of
  * the terminal. Mirrors Python's as_written.
  */
-export function asWritten(stdout: Uint8Array | null, stderr: Uint8Array | null): Written[] {
+export function asWritten(stdout: ByteSource | null, stderr: Uint8Array | null): Written[] {
   const written: Written[] = []
-  if (stdout !== null && stdout.byteLength > 0) written.push([Channel.STDOUT, stdout, false])
+  if (stdout !== null && !(stdout instanceof Uint8Array && stdout.byteLength === 0))
+    written.push([Channel.STDOUT, stdout, false])
   if (stderr !== null && stderr.byteLength > 0) written.push([Channel.STDERR, stderr, false])
   return written
 }

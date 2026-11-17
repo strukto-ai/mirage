@@ -26,16 +26,26 @@ from mirage.io.types import materialize
 from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.ssh import SSHMachine, sdk
-from mirage.runtime.types import RunResult
+from mirage.runtime.binding import answer_of
+from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from tests.fixtures.machine import machine_runtime, on
 
 
-def _line(box: SSHMachine, line: str, stdin: bytes | None = None):
-    return machine_runtime(box).run_line(
-        None, [], [], Context(flags={"c": line}, stdin=stdin)
+async def _line(
+    box: SSHMachine, line: str, stdin: bytes | None = None
+) -> RunAnswer:
+    ctx = Context(flags={"c": line}, stdin=stdin)
+    return await answer_of(
+        lambda output, errors: machine_runtime(box).run_line(
+            None, [], [], ctx, output, errors
+        )
     )
+
+
+async def _dropped(data: bytes) -> None:
+    pass
 
 
 class FakeSSHMachine(SSHMachine):
@@ -44,15 +54,12 @@ class FakeSSHMachine(SSHMachine):
         self.captures = captures
         self.calls: list[tuple[str, bytes | None]] = []
 
-    async def _ssh(
-        self, command, stdin, output=None, errors=None, tagged=False
-    ):
+    async def _ssh(self, command, stdin, output, errors, tagged=False):
         data = await materialize(stdin) if stdin is not None else None
         self.calls.append((command, data))
-        if output is not None:
-            await output(f"out:{command}".encode())
-            return RunResult(b"", b"warn", 0)
-        return RunResult(f"out:{command}".encode(), b"warn", 0)
+        await output(f"out:{command}".encode())
+        await errors(b"warn")
+        return RunResult(exit_code=0)
 
 
 class FakeConn:
@@ -320,7 +327,9 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
     process = HungProcess()
     runtime = SSHMachine("box", config={"host": "box"})
     runtime._conn = HungConn(process)
-    task = asyncio.create_task(runtime._ssh("sleep 30", None))
+    task = asyncio.create_task(
+        runtime._ssh("sleep 30", None, _dropped, _dropped)
+    )
     while "eof" not in process.calls:
         await asyncio.sleep(0)
     task.cancel()
@@ -346,8 +355,10 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
     runtime._conn = HungConn(process)
 
     async def run() -> int:
-        code = (await runtime._ssh("sleep 30", None, tagged=tagged)).exit_code
-        return code
+        done = await runtime._ssh(
+            "sleep 30", None, _dropped, _dropped, tagged=tagged
+        )
+        return done.exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s",
@@ -410,8 +421,8 @@ class EndedProcess(HungProcess):
 
 
 # A channel that closed with no exit status, or a connection asyncssh saw
-# drop, lost the remote command's end, keeping what it read; a reported
-# exit keeps its status.
+# drop, lost the remote command's end, what it read already written; a
+# reported exit keeps its status.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error", [None, asyncssh.ConnectionLost("Connection lost")]
@@ -419,9 +430,14 @@ class EndedProcess(HungProcess):
 async def test_a_dropped_channel_is_a_lost_connection(error):
     runtime = SSHMachine("box", config={"host": "box"})
     runtime._conn = HungConn(EndedProcess(None, error))
-    with pytest.raises(ConnectionLostError, match="closed") as lost:
-        await runtime._ssh("true", None)
-    assert lost.value.stdout == b"before\n"
+    seen: list[bytes] = []
+
+    async def output(data: bytes) -> None:
+        seen.append(data)
+
+    with pytest.raises(ConnectionLostError, match="closed"):
+        await runtime._ssh("true", None, output, _dropped)
+    assert b"".join(seen) == b"before\n"
 
 
 @pytest.mark.asyncio
@@ -429,7 +445,8 @@ async def test_a_dropped_channel_is_a_lost_connection(error):
 async def test_a_reported_exit_keeps_its_status(returncode, code):
     runtime = SSHMachine("box", config={"host": "box"})
     runtime._conn = HungConn(EndedProcess(returncode))
-    assert (await runtime._ssh("true", None)).exit_code == code
+    done = await runtime._ssh("true", None, _dropped, _dropped)
+    assert done.exit_code == code
 
 
 @pytest.mark.asyncio
@@ -438,7 +455,7 @@ async def test_a_failed_line_still_closes_its_channel():
     runtime = SSHMachine("box", config={"host": "box"})
     runtime._conn = HungConn(process)
     with pytest.raises(ConnectionResetError):
-        await runtime._ssh("true", None)
+        await runtime._ssh("true", None, _dropped, _dropped)
     assert process.calls == ["eof", "close"]
 
 

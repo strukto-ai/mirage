@@ -28,7 +28,7 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
-import type { Language, Program, RunResult } from '../../../runtime/types.ts'
+import type { Language, OutputFn, Program, RunAnswer, RunResult } from '../../../runtime/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { HOST, IN_PROCESS } from '../../../runtime/constants.ts'
 import { registerRuntime } from '../../../runtime/table.ts'
@@ -269,11 +269,28 @@ class FakePyRuntime extends LanguageRuntime {
   readonly name: string = 'fakepy'
   readonly language: Language = 'python'
   seen: (Context & Program)[] = []
-  result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
+  result: RunAnswer = {
+    exitCode: 0,
+    stdout: new TextEncoder().encode('ran\n'),
+    stderr: new Uint8Array(),
+  }
 
-  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+  interpret(
+    _engine: unknown,
+    program: Program,
+    ctx: Context,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
     this.seen.push({ ...ctx, ...program })
-    return Promise.resolve(this.result)
+    return this.answer(output, errors)
+  }
+
+  /** Write `result` through the sinks and end with its status. */
+  protected async answer(output: OutputFn, errors: OutputFn): Promise<RunResult> {
+    if (this.result.stdout.byteLength > 0) await output(this.result.stdout)
+    if (this.result.stderr.byteLength > 0) await errors(this.result.stderr)
+    return { exitCode: this.result.exitCode }
   }
 }
 
@@ -281,11 +298,17 @@ class ShellingRuntime extends FakePyRuntime {
   override readonly name = 'shellpy'
   shell: Context['shell']
 
-  override async interpret(_engine: unknown, _program: Program, ctx: Context): Promise<RunResult> {
+  override async interpret(
+    _engine: unknown,
+    _program: Program,
+    ctx: Context,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
     this.shell = ctx.shell
     if (ctx.shell === undefined) throw new Error('missing invocation shell')
     await ctx.shell('echo nested')
-    return this.result
+    return this.answer(output, errors)
   }
 }
 
@@ -299,9 +322,15 @@ class TierPyRuntime extends PythonRuntime {
     super(captures === undefined ? {} : { captures })
   }
 
-  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    program: Program,
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.seen.push({ ...ctx, ...program })
-    return Promise.resolve({ stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 })
+    await output(new TextEncoder().encode('ran\n'))
+    return { exitCode: 0 }
   }
 }
 
@@ -341,7 +370,13 @@ class CrashingRuntime extends FakePyRuntime {
 class SleepingRuntime extends FakePyRuntime {
   override readonly name = 'sleepy'
 
-  override async interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+  override async interpret(
+    _engine: unknown,
+    program: Program,
+    ctx: Context,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
     this.seen.push({ ...ctx, ...program })
     await new Promise<void>((resolve) =>
       ctx.signal?.addEventListener(
@@ -352,7 +387,7 @@ class SleepingRuntime extends FakePyRuntime {
         { once: true },
       ),
     )
-    return this.result
+    return this.answer(output, errors)
   }
 }
 
@@ -727,9 +762,9 @@ describe('handleCli script arm', () => {
   it('the exit code and stderr surface', async () => {
     const py = new FakePyRuntime()
     py.result = {
+      exitCode: 3,
       stdout: new Uint8Array(),
       stderr: new TextEncoder().encode('boom\n'),
-      exitCode: 3,
     }
     const [stdout, io, node] = await drained(
       scriptInstall(),

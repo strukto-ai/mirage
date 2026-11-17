@@ -71,7 +71,7 @@ class AppleContainerMachine(ProgramMachine):
         well; probing up front names the state and how to recover.
         """
         container = self.config.container
-        status = await self._exec_program(["inspect", container])
+        status = await self._program_answer(["inspect", container])
         state = reported_state(
             status, "container inspect", (0, "status", "state")
         )

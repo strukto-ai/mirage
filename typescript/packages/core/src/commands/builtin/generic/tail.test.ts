@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { MemoryExhausted } from '../../../io/errors.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
@@ -80,6 +81,7 @@ class Growing {
   ) {}
   wholeReads = 0
   ranged = 0
+  windows: (number | null)[] = []
   stat = (p: PathSpec): Promise<FileStat> => {
     const data = this.data.get(p.virtual)
     if (data === undefined) {
@@ -112,6 +114,7 @@ class Growing {
     size: number | null,
   ): AsyncIterable<Uint8Array> {
     await Promise.resolve()
+    this.windows.push(size)
     const window = bytesOf(this.data.get(p.virtual)).slice(
       offset,
       size === null ? undefined : offset + size,
@@ -129,6 +132,30 @@ class Growing {
     out.set(prior, 0)
     out.set(added, prior.byteLength)
     this.data.set(path, out)
+  }
+}
+
+// A fake with no ranged read whose whole read is a stream of CHUNK_SIZE
+// pieces, and a dispatcher over it that records what each poll asks for.
+class Streamed extends Growing {
+  readonly asked: Record<string, unknown>[] = []
+  override stream = async function* (this: Streamed, p: PathSpec): AsyncIterable<Uint8Array> {
+    this.wholeReads++
+    const body = bytesOf(this.data.get(p.virtual))
+    for (let at = 0; at < body.byteLength; at += CHUNK_SIZE) {
+      await Promise.resolve()
+      yield body.subarray(at, at + CHUNK_SIZE)
+    }
+  }.bind(this)
+  dispatch = async (
+    name: string,
+    p: PathSpec,
+    _args?: readonly unknown[],
+    kwargs: Record<string, unknown> = {},
+  ): Promise<[unknown, IOResult]> => {
+    if (name === 'stat') return [await this.stat(p), new IOResult()]
+    this.asked.push(kwargs)
+    return [this.stream(p), new IOResult()]
   }
 }
 
@@ -278,6 +305,117 @@ describe('tail -f', () => {
     expect(text).toBe('a\nb\nz\n')
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
     expect(fs.wholeReads).toBe(1)
+  })
+
+  // With no ranged read a poll reads the file whole, but as a stream it skips
+  // through: what it prints comes a chunk at a time, never the file joined,
+  // and a truncation is still noticed.
+  it.each([
+    [true, false],
+    [false, false],
+    [true, true],
+    [false, true],
+  ])(
+    'streams a backend with no range past what it showed (sized %s, dispatched %s)',
+    async (sized, dispatched) => {
+      const fs = new Streamed(new Map(), sized)
+      fs.set('/d/log', 'a\n')
+      const abort = new AbortController()
+      const opts = followOpts(abort)
+      const context = dispatched
+        ? ({ ...opts, vfs: { dispatch: fs.dispatch } } as unknown as Context)
+        : opts
+      const [stream, io] = (await tailGeneric(
+        [spec('/d/log')],
+        [],
+        context,
+        fs.stream,
+        fs.stat,
+      )) as [AsyncIterable<Uint8Array>, IOResult]
+      const big = 'x'.repeat(3 * CHUNK_SIZE) + '\n'
+      const pieces: number[] = []
+      const watched = (async function* () {
+        for await (const chunk of stream) {
+          pieces.push(chunk.byteLength)
+          yield chunk
+        }
+      })()
+      const grower = (async () => {
+        await sleep(60)
+        fs.append('/d/log', big)
+        await sleep(80)
+        fs.set('/d/log', 'z\n')
+      })()
+      const text = await drainFor(watched, 300, abort)
+      await grower
+      expect(text).toBe('a\n' + big + 'z\n')
+      expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
+      expect(Math.max(...pieces)).toBeLessThanOrEqual(CHUNK_SIZE)
+      for (const asked of fs.asked) {
+        expect(asked).toEqual({ filetype: null, direct: true, stream: true })
+      }
+      expect(fs.asked.length).toBe(dispatched ? fs.wholeReads - 1 : 0)
+    },
+  )
+
+  it.each([true, false])('streams a ranged poll a chunk at a time (sized %s)', async (sized) => {
+    // A backend that reads windows answers a poll with what the file
+    // gained, which goes out as it is read, never joined first.
+    const fs = new Growing(new Map(), sized)
+    fs.set('/d/log', 'a\n')
+    const abort = new AbortController()
+    const [stream, io] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const big = 'x'.repeat(3 * CHUNK_SIZE) + '\n'
+    const pieces: number[] = []
+    const watched = (async function* () {
+      for await (const chunk of stream) {
+        pieces.push(chunk.byteLength)
+        yield chunk
+      }
+    })()
+    const grower = (async () => {
+      await sleep(60)
+      fs.append('/d/log', big)
+      await sleep(80)
+      fs.set('/d/log', 'z\n')
+    })()
+    const text = await drainFor(watched, 300, abort)
+    await grower
+    expect(text).toBe('a\n' + big + 'z\n')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
+    expect(Math.max(...pieces)).toBeLessThanOrEqual(CHUNK_SIZE)
+  })
+
+  it.each([true, false])('reads a large gain a window at a time (sized %s)', async (sized) => {
+    // A poll asks a ranged backend for a window at a time, so a burst the
+    // file gained is never one read of all of it.
+    const fs = new Growing(new Map(), sized)
+    fs.set('/d/log', 'a\n')
+    const abort = new AbortController()
+    const [stream] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const big = 'x'.repeat(5 << 19) + '\n'
+    const grower = (async () => {
+      await sleep(60)
+      fs.append('/d/log', big)
+    })()
+    const text = await drainFor(stream, 300, abort)
+    await grower
+    expect(text).toBe('a\n' + big)
+    expect(fs.windows.every((size) => size !== null && size <= 1 << 20)).toBe(true)
   })
 
   it('reads only the end of a file for its first print', async () => {

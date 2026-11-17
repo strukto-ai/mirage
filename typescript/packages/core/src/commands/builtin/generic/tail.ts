@@ -17,7 +17,7 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { closeQuietly } from '../../../io/stream.ts'
+import { closeQuietly, sliceStream, type OutputStream } from '../../../io/stream.ts'
 import { abortable, hasAborted } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
@@ -141,59 +141,102 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
   })
 }
 
-// What a size-unknown file gained past `pos`, read from there, and where
-// the next poll starts. A read that finds nothing at a position the file no
-// longer reaches, its byte before `pos` gone too, means it was truncated,
-// which is noted and read from the start. Mirrors Python's `_gained`.
-async function gained(
+/**
+ * `source` a chunk at a time, the position `box` holds moved past each chunk
+ * handed on. Mirrors Python's `_advancing`.
+ */
+async function* advancing(source: ByteSource, box: { end: number }): AsyncGenerator<Uint8Array> {
+  for await (const part of chunks(source)) {
+    box.end += part.byteLength
+    yield part
+  }
+}
+
+/**
+ * What a size-unknown file gained past the position `box` holds, read from
+ * there a window at a time (`rangedStream`), leaving there where the next
+ * poll starts. A read that finds nothing at a position the file no longer
+ * reaches, its byte before the position gone too, means it was truncated,
+ * which is noted and read from the start. Mirrors Python's `_gained`.
+ */
+async function* gained(
   readRange: ReadStreamFn<[PathSpec, number, number | null]>,
   io: IOResult,
   p: PathSpec,
-  pos: number,
-): Promise<[Uint8Array, number]> {
-  let start = pos
-  let data = await materialize(readRange(p, start, null))
+  box: { end: number },
+): AsyncGenerator<Uint8Array> {
+  const start = box.end
+  yield* advancing(rangedStream(readRange, p, start, null), box)
   if (
-    data.byteLength === 0 &&
-    start > 0 &&
-    (await materialize(readRange(p, start - 1, 1))).byteLength === 0
-  ) {
-    note(io, `tail: ${p.rawPath}: file truncated\n`)
-    start = 0
-    data = await materialize(readRange(p, 0, null))
-  }
-  return [data, start + data.byteLength]
+    box.end > start ||
+    start === 0 ||
+    (await materialize(readRange(p, start - 1, 1))).byteLength > 0
+  )
+    return
+  note(io, `tail: ${p.rawPath}: file truncated\n`)
+  box.end = 0
+  yield* advancing(rangedStream(readRange, p, 0, null), box)
 }
 
-// What a followed file gained past `pos`, and where the next poll
-// starts: a size-unknown file is read from `pos` where the backend reads
-// windows (`gained`) and otherwise read whole and measured, and a file
-// shorter than `pos` was truncated, which is noted and read from the
-// start.
-async function catchUp(
+/**
+ * What a followed file gained past the position `box` holds, as it is read,
+ * leaving there where the next poll starts. Where the backend reads windows,
+ * a size-unknown file is read from that position (`gained`) and a sized one
+ * in the window it grew by; elsewhere the file is read whole as a stream, the
+ * bytes already shown skipped (`past`), and a size-unknown file is measured
+ * by that same read. Either way a poll holds a chunk, or a window where the
+ * backend answers one whole, never what the file gained. A file shorter than
+ * the position was truncated, which is noted and read from the start.
+ * Mirrors Python's `_catch_up`.
+ */
+async function* catchUp(
   stream: ReadStreamFn,
   readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
   io: IOResult,
   p: PathSpec,
   size: number | null,
-  pos: number,
-): Promise<[Uint8Array, number]> {
-  if (size === null && readRange !== null) return gained(readRange, io, p, pos)
-  let whole: Uint8Array | null = null
+  box: { end: number },
+): AsyncGenerator<Uint8Array> {
+  let start = box.end
+  if (readRange !== null && size === null) {
+    yield* gained(readRange, io, p, box)
+    return
+  }
   let length = size
   if (length === null) {
-    whole = await materialize(stream(p))
-    length = whole.byteLength
+    const seen = { end: 0 }
+    yield* advancing(past(stream, p, start, null, seen), box)
+    if (seen.end >= start) return
+    length = seen.end
   }
-  let start = pos
   if (length < start) {
     note(io, `tail: ${p.rawPath}: file truncated\n`)
-    start = 0
+    start = box.end = 0
   }
-  if (length <= start) return [new Uint8Array(), start]
-  const data =
-    whole !== null ? whole.slice(start) : await window(stream, readRange, p, start, length - start)
-  return [data, start + data.byteLength]
+  if (length <= start) return
+  yield* advancing(
+    readRange !== null
+      ? rangedStream(readRange, p, start, length)
+      : past(stream, p, start, length - start, { end: 0 }),
+    box,
+  )
+}
+
+/**
+ * A window of a file read whole, streamed: the bytes before `offset` are read
+ * and dropped a chunk at a time, never held, so a backend with no ranged read
+ * costs the file's length in time and a chunk in memory. `seen` counts every
+ * byte read, the dropped ones included, which is the file's length once a
+ * window to the end is drained. Mirrors Python's `_past`.
+ */
+function past(
+  stream: ReadStreamFn,
+  p: PathSpec,
+  offset: number,
+  size: number | null,
+  seen: { end: number },
+): OutputStream {
+  return sliceStream(counted(chunks(stream(p)), seen), offset, size)
 }
 
 /**
@@ -208,7 +251,7 @@ async function polledStat(dispatch: DispatchFn, p: PathSpec): Promise<FileStat> 
 }
 
 /**
- * A follow poll's read, whole or a window: what the backend holds now, at the
+ * A follow poll's ranged read: what the backend holds now in a window, at the
  * dispatcher. A direct read, never served from the file cache nor kept in it:
  * the poll looks for exactly the bytes a cached copy does not have yet. Mirrors
  * Python's `_polled_window`.
@@ -221,6 +264,17 @@ async function* polledWindow(
 ): AsyncIterable<Uint8Array> {
   const [data] = await dispatch('read', p, [], { filetype: null, offset, size, direct: true })
   yield await materialize(data as ByteSource)
+}
+
+/**
+ * A follow poll's whole read, streamed as the backend answers it: what it holds
+ * now, at the dispatcher, for a backend with no ranged read, which the poll
+ * skips through to the bytes it has not shown. A direct read, as
+ * `polledWindow` is. Mirrors Python's `_polled_read`.
+ */
+async function* polledRead(dispatch: DispatchFn, p: PathSpec): AsyncGenerator<Uint8Array> {
+  const [data] = await dispatch('read', p, [], { filetype: null, direct: true, stream: true })
+  yield* chunks(data as ByteSource)
 }
 
 async function* tailFile(
@@ -437,18 +491,6 @@ async function* tailMulti(
   }
 }
 
-async function window(
-  stream: ReadStreamFn,
-  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
-  p: PathSpec,
-  offset: number,
-  size: number,
-): Promise<Uint8Array> {
-  if (readRange !== null) return await materialize(readRange(p, offset, size))
-  const whole = await materialize(stream(p))
-  return whole.slice(offset, offset + size)
-}
-
 // Print each operand's tail, then keep printing what it gains. GNU tail
 // -f is a poll: every -s seconds each followed file is stat'ed, bytes
 // past the last position are printed under that file's header when the
@@ -468,11 +510,14 @@ async function window(
 // printed as it is read, so a count from the end reads only the end where
 // the backend reads windows; the polls go on from where it ended. Its first
 // bytes are the open: a read that fails before them is a failed open, and
-// one that fails later is reported and the file dropped the same way. A file
-// whose stat carries no size (a backend that cannot know one without reading
-// reports null, never a guess) is polled by reading from where the last poll
-// ended, where the backend reads windows, and otherwise by reading it whole
-// every interval and measuring that, rather than a follow that never prints.
+// one that fails later is reported and the file dropped the same way. A poll
+// reads only the bytes past where the last one ended where the backend reads
+// windows. Elsewhere it reads the file whole, as a stream that skips what was
+// shown and prints the rest as it comes, so it holds a chunk rather than the
+// file. A file whose stat carries no size (a backend that cannot know one
+// without reading reports null, never a guess) is polled the same way, from
+// where the last poll ended, and measured by that read, rather than a follow
+// that never prints.
 // State is per operand, not per path: `tail -f f f` prints what
 // f gains twice, under a header each time, as GNU does. Standard input is
 // printed once and never followed: POSIX has tail ignore -f on a pipe, and
@@ -521,6 +566,23 @@ async function* follow(
     await reportFsError(io, 'tail', entry[1], err)
     active.splice(active.indexOf(entry), 1)
     if (flags.retry) waiting.push([entry[0], entry[1], APPEARED])
+  }
+  // A path that went away, whether its stat failed or the read right after it
+  // did (a rotation between the two). Only name-following notices; under a
+  // descriptor --retry covers the initial open alone, as in GNU, which words
+  // the loss as an inaccessible name only when it means to wait for it.
+  const vanished = (entry: [number, PathSpec], err: unknown): void => {
+    if (!flags.byName) return
+    const [slot, p] = entry
+    const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')
+    note(
+      io,
+      flags.retry
+        ? `tail: '${p.rawPath}' has become inaccessible: ${strerror}\n`
+        : `tail: ${shellQuote(p.rawPath)}: ${strerror}\n`,
+    )
+    active.splice(active.indexOf(entry), 1)
+    if (flags.retry) waiting.push([slot, p, APPEARED])
   }
   try {
     for (const entry of [...active]) {
@@ -641,32 +703,21 @@ async function* follow(
     }
     for (const entry of [...active]) {
       const [slot, p] = entry
-      let grown: [Uint8Array, number] | null
+      const box = { end: positions.get(slot) ?? 0 }
+      let grown: AsyncGenerator<Uint8Array> | null = null
+      let piece: IteratorResult<Uint8Array> | null = null
       try {
         const current = await stat(p)
-        grown =
-          current.type === FileType.DIRECTORY
-            ? null
-            : await catchUp(pollStream, readRange, io, p, current.size, positions.get(slot) ?? 0)
+        if (current.type !== FileType.DIRECTORY) {
+          grown = catchUp(pollStream, readRange, io, p, current.size, box)
+          // The first pull is the read: one that finds the path gone or a
+          // directory there answers here.
+          piece = await grown.next()
+        }
       } catch (err) {
         if (!isFsError(err)) throw err
         if (!isEisdir(err)) {
-          // A path that went away, whether its stat failed or the read
-          // right after it did (a rotation between the two). Only
-          // name-following notices; under a descriptor --retry covers
-          // the initial open alone, as in GNU, which words the loss as an
-          // inaccessible name only when it means to wait for it.
-          if (flags.byName) {
-            const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')
-            note(
-              io,
-              flags.retry
-                ? `tail: '${p.rawPath}' has become inaccessible: ${strerror}\n`
-                : `tail: ${shellQuote(p.rawPath)}: ${strerror}\n`,
-            )
-            active.splice(active.indexOf(entry), 1)
-            if (flags.retry) waiting.push([slot, p, APPEARED])
-          }
+          vanished(entry, err)
           continue
         }
         grown = null
@@ -683,14 +734,24 @@ async function* follow(
         if (flags.retry) waiting.push([slot, p, ACCESSIBLE])
         continue
       }
-      const [data, pos] = grown
-      if (data.byteLength > 0) {
-        if (showHeaders && last !== slot) yield operandHeader(p, true)
-        last = slot
-        idle = false
-        yield data
+      // What the file gained goes out as it is read, so the read closes
+      // however the print ends, a reader that stops early included; a read
+      // that fails partway keeps what it printed.
+      try {
+        while (piece !== null && piece.done !== true) {
+          if (showHeaders && last !== slot) yield operandHeader(p, true)
+          last = slot
+          idle = false
+          yield piece.value
+          piece = await grown.next()
+        }
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        vanished(entry, err)
+      } finally {
+        await grown.return(undefined)
       }
-      positions.set(slot, pos)
+      positions.set(slot, box.end)
     }
   }
   if (hasAborted(signal)) return
@@ -924,17 +985,21 @@ export async function tailGeneric(
     // The first print reads like any other tail; the polls ask the dispatcher
     // for what the backend holds now, past the file cache and past the
     // stat the command's freshness probe kept: they look for exactly the
-    // change neither has yet.
+    // change neither has yet. A window is asked for only of a backend that
+    // reads one; any other is read whole, as a stream.
     const first = stdinStream(backend, ctx.stdin)
     const dispatch = dispatchOf(ctx)
     const polled =
       dispatch === undefined
         ? { stream: first, stat, readRange }
         : {
-            stream: (p: PathSpec) => polledWindow(dispatch, p),
+            stream: (p: PathSpec) => polledRead(dispatch, p),
             stat: (p: PathSpec) => polledStat(dispatch, p),
-            readRange: (p: PathSpec, offset: number, size: number | null) =>
-              polledWindow(dispatch, p, offset, size),
+            readRange:
+              readRange === null
+                ? null
+                : (p: PathSpec, offset: number, size: number | null) =>
+                    polledWindow(dispatch, p, offset, size),
           }
     return [
       follow(

@@ -236,12 +236,26 @@ export interface PipeWriter {
   end(): void
 }
 
-/** Outcome of one interpreter execution. */
+/**
+ * How one run ended: its exit status alone. What it wrote went to the
+ * `OutputFn` sinks it was given as it ran, a transport that gets its answer
+ * whole included, so no run holds its output.
+ */
 export interface RunResult {
-  stdout: Uint8Array
-  /** Captured standard error, null when empty (mirrors Python). */
-  stderr: Uint8Array | null
   exitCode: number
+}
+
+/**
+ * What a run answered, kept whole for its caller to read once it ends
+ * (`answerOf`): one of Mirage's own probe lines on a machine (a check, a
+ * scan, a status, a named pipe's path) or a policy program's verdict. Never
+ * a command's output, which streams through `OutputFn` and leaves its run
+ * only a status.
+ */
+export interface RunAnswer {
+  exitCode: number
+  stdout: Uint8Array
+  stderr: Uint8Array
 }
 
 /**

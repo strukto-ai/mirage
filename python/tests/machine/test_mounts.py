@@ -55,7 +55,7 @@ from mirage.machine.mounts import (
 )
 from mirage.machine.types import MachinePipe
 from mirage.mount.changes import SERVED_BY
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import Limit
 from mirage.utils.clock import ManualClock
 from tests.fixtures.machine import on
@@ -122,6 +122,14 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        done = await self._answer(argv, stdin, env, cwd)
+        if done.stdout:
+            await output(done.stdout)
+        if done.stderr:
+            await errors(done.stderr)
+        return RunResult(exit_code=done.exit_code)
+
+    async def _answer(self, argv, stdin, env, cwd) -> RunAnswer:
         if is_run(argv):
             argv = argv[RUN_PROGRAM_AT:]
         if argv[2:3] == (MOUNT_GUARD,):
@@ -133,15 +141,13 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
 
-    async def exec_line(self, line, stdin, env, cwd):
+    async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
         self.commands.append(line)
         if line == "cat /proc/mounts" and self.fail_table:
-            return RunResult(stdout=b"", stderr=b"gone\n", exit_code=1)
+            return RunAnswer(1, b"", b"gone\n")
         if line == "cat /proc/mounts":
             await asyncio.sleep(0)
-            return RunResult(
-                stdout=self.rows().encode(), stderr=None, exit_code=0
-            )
+            return RunAnswer(0, self.rows().encode())
         if line.startswith("for p in /proc/[0-9]*") and self.kill_seconds:
             await asyncio.sleep(self.kill_seconds)
         if line.startswith("for p in /proc/[0-9]*") and self.hang_kill:
@@ -156,38 +162,28 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
                 next(w[2:] for w in shlex.split(line) if w.startswith("S="))
             )
         if line.startswith("cat /proc/[0-9]*/cmdline") and self.fail_check:
-            return RunResult(stdout=b"", stderr=b"", exit_code=2)
+            return RunAnswer(2)
         if line.startswith("cat /proc/[0-9]*/cmdline"):
             source = next(
                 w[2:] for w in shlex.split(line) if w.startswith("S=")
             )
-            return RunResult(
-                stdout=b"",
-                stderr=None,
-                exit_code=0 if source in self.running else 1,
-            )
+            return RunAnswer(0 if source in self.running else 1)
         if line.startswith("d=$(PATH="):
-            return RunResult(
-                stdout=b"/home/u/.mirage", stderr=None, exit_code=0
-            )
+            return RunAnswer(0, b"/home/u/.mirage")
         if line == "command -v sshfs":
-            return RunResult(
-                stdout=b"", stderr=None, exit_code=0 if self.sshfs else 1
-            )
+            return RunAnswer(0 if self.sshfs else 1)
         if line == "python3 slow.py":
             await asyncio.Event().wait()
         if line == "python3 fails.py":
-            return RunResult(stdout=b"", stderr=b"boom\n", exit_code=3)
+            return RunAnswer(3, b"", b"boom\n")
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
                 raise RuntimeError("the machine went away")
             if self.refuse_unmount:
-                return RunResult(
-                    stdout=b"", stderr=b"fusermount: busy\n", exit_code=1
-                )
+                return RunAnswer(1, b"", b"fusermount: busy\n")
             source, _ = self.table.pop(shlex.split(line)[2], (None, None))
             self.running.discard(source)
-        return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
+        return RunAnswer(0, b"ran\n")
 
     def rows(self):
         return "".join(
@@ -215,7 +211,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
             out, err = await done.communicate()
         finally:
             os.unlink(path)
-        return RunResult(stdout=out, stderr=err, exit_code=done.returncode)
+        return RunAnswer(done.returncode, out, err)
 
     async def open_pipe(self, command):
         self.pipes.append(command)

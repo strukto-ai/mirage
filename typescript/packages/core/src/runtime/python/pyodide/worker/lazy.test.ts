@@ -20,7 +20,7 @@ import { PyodideRuntime } from '../runtime.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import { FileStat, FileType, Limit, MountMode } from '../../../../types.ts'
 import type { Context } from '../../../../commands/config.ts'
-import type { BridgeDispatchFn, RunResult } from '../../../types.ts'
+import type { BridgeDispatchFn, RunAnswer } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { CLI } from '../../../../commands/cli/types.ts'
 import { ScriptSource } from '../../../types.ts'
@@ -32,6 +32,7 @@ import { record, runWithRecording, startOp } from '../../../../observe/context.t
 import { SessionState } from '../../../../workspace/session/session.ts'
 import type * as asyncContextModule from '../../../../utils/async_context.ts'
 import { bindOver, runContext } from '../../../../../tests/runtime/fixtures/bridge.ts'
+import { answerOf } from '../../../binding.ts'
 
 vi.mock('../../../../utils/async_context.ts', async (importOriginal) => {
   const real = await importOriginal<typeof asyncContextModule>()
@@ -60,7 +61,10 @@ const interpret = (
   code: string,
   args: string[] = [],
   extra: Partial<Context> = {},
-): Promise<RunResult> => rt.interpret(undefined, { code, args, stdin: null }, runContext(rt, extra))
+): Promise<RunAnswer> =>
+  answerOf((output, errors) =>
+    rt.interpret(undefined, { code, args, stdin: null }, runContext(rt, extra), output, errors),
+  )
 
 describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it.each(['first', 'bad', 'later'])(
@@ -105,7 +109,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         // program stops there: what it wrote before landed at each close,
         // and nothing after it was attempted.
         expect(result.exitCode).toBe(1)
-        const stderr = DEC.decode(result.stderr ?? new Uint8Array())
+        const stderr = DEC.decode(result.stderr)
         expect(stderr).toContain(`OSError: [Errno 29] I/O error: '/data/${rejected}'`)
         expect(stderr).not.toContain('python3: failed to')
         expect(writes).toEqual(names.slice(0, failedAt + 1).map((name) => `/data/${name}`))
@@ -115,7 +119,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           expect(DEC.decode(files.get(`/data/${name}`))).toBe('old')
         const next = await interpret(rt, "with open('/data/last', 'w') as f: f.write('fresh')")
         expect(next.exitCode).toBe(0)
-        expect(DEC.decode(next.stderr ?? new Uint8Array())).toBe('')
+        expect(DEC.decode(next.stderr)).toBe('')
         expect(DEC.decode(files.get('/data/last'))).toBe('fresh')
       } finally {
         await rt.close()
@@ -158,7 +162,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           "print(os.path.exists('/data/f'), open('/data/moved').read())",
         ].join('\n'),
       )
-      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(DEC.decode(result.stderr)).toBe('')
       expect(DEC.decode(result.stdout)).toBe('False new\n')
       expect([...files.keys()]).toEqual(['/data/moved'])
     } finally {
@@ -203,7 +207,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           "with open('/data/later', 'r+') as f: f.write('new')",
         ].join('\n'),
       )
-      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(DEC.decode(result.stderr)).toBe('')
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('bad 29\n')
       expect(DEC.decode(files.get('/data/bad'))).toBe('old')
@@ -274,7 +278,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           "data = open('/data/one.bin', 'rb').read(); print(len(data), data[0], data[-1])",
         ),
       )
-      expect(DEC.decode(first.stderr ?? new Uint8Array())).toBe('')
+      expect(DEC.decode(first.stderr)).toBe('')
       expect(DEC.decode(first.stdout)).toBe('200000 65 65\n')
       expect(calls.every((c) => c.session === 'one')).toBe(true)
       expect(calls.filter((c) => c.op === 'read')).toHaveLength(1)
@@ -320,7 +324,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         "import os\nfirst = sorted(os.listdir('/data'))\nsecond = sorted(os.listdir('/data'))\n" +
           "print(first, second, [e.is_dir() for e in os.scandir('/data') if e.name == 'late'])",
       )
-      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(DEC.decode(result.stderr)).toBe('')
       expect(DEC.decode(result.stdout)).toBe(
         "['a.txt', 'b.txt'] ['a.txt', 'b.txt', 'late'] [True]\n",
       )

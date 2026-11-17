@@ -59,27 +59,25 @@ class ProcessProbe(Runtime, ProcessExecutorMixin):
         self.requests: list[SimpleNamespace] = []
 
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         request = await _request(texts, ctx)
         self.requests.append(request)
-        return RunResult(
-            stdout=request.stdin or b"GPU ready\nother\n",
-            stderr=None,
-            exit_code=0,
-        )
+        await output(request.stdin or b"GPU ready\nother\n")
+        return RunResult(exit_code=0)
 
 
 class DelayedProcessProbe(ProcessProbe):
     cancelled = False
 
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         self.requests.append(await _request(texts, ctx))
         try:
             await asyncio.sleep(0.15)
-            return RunResult(stdout=b"completed\n", stderr=None, exit_code=0)
+            await output(b"completed\n")
+            return RunResult(exit_code=0)
         except asyncio.CancelledError:
             self.cancelled = True
             raise
@@ -89,9 +87,9 @@ class InProcessPython(PythonRuntime):
     name = "inproc"
 
     async def interpret(
-        self, engine, program: Program, ctx, output=None, errors=None
+        self, engine, program: Program, ctx, output, errors
     ) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class _OneRule:
@@ -287,11 +285,10 @@ class ShellProbe(Runtime, LineExecutorMixin):
         super().__init__(**options)
         self.lines: list[str] = []
 
-    async def run_line(
-        self, engine, paths, texts, ctx, output=None, errors=None
-    ):
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
         self.lines.append(ctx.flags["c"])
-        return RunResult(stdout=b"ok\n", stderr=None, exit_code=0)
+        await output(b"ok\n")
+        return RunResult(exit_code=0)
 
 
 @command(
@@ -714,7 +711,7 @@ async def test_builtin_runs_the_shell_kill_past_a_capture():
 
 class FailingProcess(ProcessProbe):
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         raise RuntimeError("provider unavailable")
 
@@ -730,12 +727,10 @@ async def test_a_provider_error_belongs_to_its_command_and_the_line_continues():
 
 class ErringProbe(ProcessProbe):
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
-        if errors is None:
-            return RunResult(stdout=b"", stderr=b"whole\n", exit_code=0)
         await errors(b"streamed\n")
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class SeesResults(Policy):
@@ -765,9 +760,8 @@ async def test_streamed_stderr_stays_in_the_command_record():
 
 class WarnsThenFails(ProcessProbe):
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
-        assert errors is not None
         await errors(b"warning\n")
         raise RuntimeError("provider unavailable")
 
@@ -793,7 +787,7 @@ async def test_the_record_keeps_streamed_and_returned_stderr(line):
 
 class EndlessProbe(ProcessProbe):
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         while True:
             await output(b"y\n")

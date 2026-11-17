@@ -79,7 +79,7 @@ export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
    */
   async connect(): Promise<void> {
     const machine = this.config.machine
-    const status = await this.execProgram(['machine', 'status', '--name', machine, '--json'])
+    const status = await this.programAnswer(['machine', 'status', '--name', machine, '--json'])
     const state = reportedState(status, 'smolvm machine status', ['state'])
     if (state === PAUSED_STATE) await this.changeState(['machine', 'resume', '--name', machine])
     else if (state !== RUNNING_STATE)

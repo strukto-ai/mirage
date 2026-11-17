@@ -39,33 +39,26 @@ class FakeDockerMachine extends DockerMachine {
 
   protected override async execProgram(
     args: string[],
-    source: ByteSource | null = null,
-    output: OutputFn | null = null,
+    source: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
-      return Promise.resolve({
-        stdout: ENC.encode(`{"Status": "${this.state ?? (this.running ? 'running' : 'exited')}"}`),
-        stderr: new Uint8Array(),
-        exitCode: 0,
-      })
+      await output(
+        ENC.encode(`{"Status": "${this.state ?? (this.running ? 'running' : 'exited')}"}`),
+      )
+      return { exitCode: 0 }
     }
     if (args[0] === 'pause' || args[0] === 'unpause') {
-      return {
-        stdout: new Uint8Array(),
-        stderr: ENC.encode(this.refusal ?? ''),
-        exitCode: this.refusal === null ? 0 : 1,
-      }
+      if (this.refusal !== null) await errors(ENC.encode(this.refusal))
+      return { exitCode: this.refusal === null ? 0 : 1 }
     }
     const script = args[args.length - 1] ?? ''
-    const stdout = ENC.encode(`out:${script}`)
-    if (output !== null) await output(stdout)
-    return {
-      stdout: output === null ? stdout : new Uint8Array(),
-      stderr: ENC.encode('warn'),
-      exitCode: 0,
-    }
+    await output(ENC.encode(`out:${script}`))
+    await errors(ENC.encode('warn'))
+    return { exitCode: 0 }
   }
 }
 
@@ -100,7 +93,7 @@ describe('DockerMachine', () => {
     const result = await runtime.execLine('wc -l', ENC.encode('a\nb\n'), { E: '1' }, '/root/ws')
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('out:wc -l')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
+    expect(DEC.decode(result.stderr)).toBe('warn')
     const [args, stdin] = runtime.calls[runtime.calls.length - 1] ?? [[], null]
     expect(args).toEqual([
       'exec',
@@ -212,14 +205,17 @@ class MountingDockerMachine extends FakeDockerMachine {
 
   protected override async execProgram(
     args: string[],
-    source: ByteSource | null = null,
-    output: OutputFn | null = null,
+    source: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    if (args[args.length - 1] !== 'cat /proc/mounts') return super.execProgram(args, source, output)
+    if (args[args.length - 1] !== 'cat /proc/mounts')
+      return super.execProgram(args, source, output, errors)
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
-    return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
+    await output(ENC.encode(rows))
+    return { exitCode: 0 }
   }
 
   override openPipe(command: string): Promise<MachinePipe> {

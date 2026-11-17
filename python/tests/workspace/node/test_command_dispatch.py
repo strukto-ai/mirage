@@ -73,12 +73,11 @@ class ShellsOut(LanguageRuntime):
         super().__init__(captures=["python3"])
 
     async def interpret(
-        self, engine, program, ctx, output=None, errors=None
+        self, engine, program, ctx, output, errors
     ) -> RunResult:
         nested = await ctx.shell("printenv TOKEN")
-        return RunResult(
-            stdout=await materialize(nested.stdout), stderr=None, exit_code=0
-        )
+        await output(await materialize(nested.stdout))
+        return RunResult(exit_code=0)
 
 
 # A run starts as its output is read, after dispatch returned, and the
@@ -155,10 +154,10 @@ class Box(Runtime, ProcessExecutorMixin):
         return MachineName("ssh", self.name)
 
     async def run_process(
-        self, engine, paths, texts, ctx, output, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         self.ran.append(list(texts))
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 WRAPPERS = ["nohup", "nice", "stdbuf", "setsid", "ionice"]
@@ -380,9 +379,8 @@ class Named(MachineHandle):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        return RunResult(
-            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
-        )
+        await output(f"{self.name}\n".encode())
+        return RunResult(exit_code=0)
 
 
 class HostnameOn(Policy):

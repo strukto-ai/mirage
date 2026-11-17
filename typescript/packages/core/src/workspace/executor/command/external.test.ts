@@ -58,11 +58,14 @@ class ProcessProbe extends Runtime implements ProcessExecutorMixin {
     _p: PathSpec[],
     argv: string[],
     ctx: Context,
-    _out: OutputFn | undefined,
+    out: OutputFn,
+    _errors: OutputFn,
   ): Promise<RunResult> {
     const stdin = ctx.stdin === null ? null : await abortable(materialize(ctx.stdin), ctx.signal)
     this.requests.push({ ...ctx, stdin, argv })
-    return { stdout: stdin ?? ENC.encode('GPU ready\nother\n'), stderr: null, exitCode: 0 }
+    const said = stdin ?? ENC.encode('GPU ready\nother\n')
+    if (said.byteLength > 0) await out(said)
+    return { exitCode: 0 }
   }
 }
 
@@ -74,24 +77,29 @@ class StreamingProbe extends ProcessProbe {
     _p: PathSpec[],
     argv: string[],
     ctx: Context,
-    out: OutputFn | undefined,
+    out: OutputFn,
   ) {
     this.streams.push({ ...ctx, argv })
-    const said = ENC.encode(ctx.env?.TOKEN ?? 'unset')
-    if (out === undefined) return { stdout: said, stderr: null, exitCode: 0 }
-    await out(said)
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    await out(ENC.encode(ctx.env?.TOKEN ?? 'unset'))
+    return { exitCode: 0 }
   }
 }
 
 class DelayedProcessProbe extends ProcessProbe {
   aborted = false
 
-  override async runProcess(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context) {
+  override async runProcess(
+    _e: unknown,
+    _p: PathSpec[],
+    argv: string[],
+    ctx: Context,
+    out: OutputFn,
+  ) {
     this.requests.push({ ...ctx, argv })
     try {
       await sleep(5000, ctx.signal)
-      return { stdout: ENC.encode('completed\n'), stderr: null, exitCode: 0 }
+      await out(ENC.encode('completed\n'))
+      return { exitCode: 0 }
     } catch (err) {
       this.aborted = ctx.signal?.aborted ?? false
       throw err
@@ -103,7 +111,7 @@ class InProcessPython extends PythonRuntime {
   readonly name = 'inproc'
 
   interpret(_engine: unknown, _program: Program, _ctx: Context): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 
@@ -310,9 +318,16 @@ class ShellProbe extends Runtime implements LineExecutorMixin {
   readonly [LINE_EXECUTOR] = true as const
   name = 'shell-probe'
   lines: string[] = []
-  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.lines.push(ctx.flags.c as string)
-    return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
+    await output(ENC.encode('ok\n'))
+    return { exitCode: 0 }
   }
 }
 
@@ -707,13 +722,11 @@ class ErringProbe extends ProcessProbe {
     _p: PathSpec[],
     _argv: string[],
     _ctx: Context,
-    _out: OutputFn | undefined,
-    errors?: OutputFn,
+    _out: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    if (errors === undefined)
-      return { stdout: new Uint8Array(), stderr: ENC.encode('whole\n'), exitCode: 0 }
     await errors(ENC.encode('streamed\n'))
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    return { exitCode: 0 }
   }
 }
 
@@ -756,10 +769,10 @@ describe('streamed stderr', () => {
           _p: PathSpec[],
           _argv: string[],
           _ctx: Context,
-          _out: OutputFn | undefined,
-          errors?: OutputFn,
+          _out: OutputFn,
+          errors: OutputFn,
         ): Promise<RunResult> {
-          await errors?.(ENC.encode('warning\n'))
+          await errors(ENC.encode('warning\n'))
           throw new Error('provider unavailable')
         }
       }
@@ -794,9 +807,9 @@ class EndlessProbe extends ProcessProbe {
     _p: PathSpec[],
     _argv: string[],
     _ctx: Context,
-    out: OutputFn | undefined,
+    out: OutputFn,
   ): Promise<RunResult> {
-    for (;;) await out?.(ENC.encode('y\n'))
+    for (;;) await out(ENC.encode('y\n'))
   }
 }
 

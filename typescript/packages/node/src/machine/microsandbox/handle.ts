@@ -16,7 +16,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_FIELDS, type MicrosandboxConfig } from './config.ts'
 import { EXEC_PRELUDE, notRunningHint } from '@struktoai/mirage-core/machine/constants'
@@ -102,14 +102,9 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     const sandbox = this.config.sandbox
     const deadline = AbortSignal.timeout(INSPECT_TIMEOUT_SECONDS * 1000)
     const probeSignal = signal === undefined ? deadline : AbortSignal.any([signal, deadline])
-    let status: RunResult
+    let status: RunAnswer
     try {
-      status = await this.execProgram(
-        ['status', sandbox, '--format', 'json'],
-        null,
-        null,
-        probeSignal,
-      )
+      status = await this.programAnswer(['status', sandbox, '--format', 'json'], probeSignal)
     } catch (error) {
       signal?.throwIfAborted()
       if (deadline.aborted)
@@ -141,8 +136,8 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     // Released msb can still auto-start a guest stopped after this probe.
@@ -163,8 +158,8 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
       ]),
       stdin,
       output,
-      signal,
       errors,
+      signal,
     )
   }
 

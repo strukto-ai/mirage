@@ -1308,8 +1308,7 @@ async function runRedirects(
       throw error
     } else {
       unwound = error
-      const output = await takeStdout(error)
-      if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
+      await pump(recorder, Channel.STDOUT, await takeStdout(error))
       const own =
         error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id
       if (!own) {

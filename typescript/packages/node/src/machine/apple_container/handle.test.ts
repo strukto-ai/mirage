@@ -31,6 +31,7 @@ import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerMachine } from './handle.ts'
 import { Workspace } from '../../workspace.ts'
 import { machineRuntime } from '../../../tests/fixtures/machine.ts'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -43,28 +44,23 @@ class FakeAppleContainerMachine extends AppleContainerMachine {
 
   protected override async execProgram(
     args: string[],
-    source: ByteSource | null = null,
-    output: OutputFn | null = null,
+    source: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
       if (this.inspectStdout !== null) {
-        return Promise.resolve({
-          stdout: ENC.encode(this.inspectStdout),
-          stderr: new Uint8Array(),
-          exitCode: this.inspectCode,
-        })
+        await output(ENC.encode(this.inspectStdout))
+        return { exitCode: this.inspectCode }
       }
       if (this.inspectCode !== 0) {
-        return Promise.resolve({
-          stdout: new Uint8Array(),
-          stderr: ENC.encode(`Error: container not found: ${args[1] ?? ''}`),
-          exitCode: this.inspectCode,
-        })
+        await errors(ENC.encode(`Error: container not found: ${args[1] ?? ''}`))
+        return { exitCode: this.inspectCode }
       }
-      return Promise.resolve({
-        stdout: ENC.encode(
+      await output(
+        ENC.encode(
           JSON.stringify([
             {
               id: args[1],
@@ -73,18 +69,13 @@ class FakeAppleContainerMachine extends AppleContainerMachine {
             },
           ]),
         ),
-        stderr: new Uint8Array(),
-        exitCode: 0,
-      })
+      )
+      return { exitCode: 0 }
     }
     const script = args[args.length - 1] ?? ''
-    const stdout = ENC.encode(`out:${script}`)
-    if (output !== null) await output(stdout)
-    return {
-      stdout: output === null ? stdout : new Uint8Array(),
-      stderr: ENC.encode('warn'),
-      exitCode: 0,
-    }
+    await output(ENC.encode(`out:${script}`))
+    await errors(ENC.encode('warn'))
+    return { exitCode: 0 }
   }
 
   inspected(): string[] {
@@ -160,7 +151,7 @@ describe('AppleContainerMachine', () => {
     const result = await runtime.execLine('wc -l', ENC.encode('a\nb\n'), { E: '1' }, '/root/ws')
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('out:wc -l')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
+    expect(DEC.decode(result.stderr)).toBe('warn')
     const [args, stdin] = runtime.calls[runtime.calls.length - 1] ?? [[], null]
     expect(args).toEqual([
       'exec',
@@ -297,11 +288,13 @@ it('preserves argv through execute and shares the shell connection', async () =>
   const runtime = makeRuntime({ container: 'box', env: { E: 'config' } })
   const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
   const stdin = ENC.encode('input')
-  const result = await machineRuntime(runtime).execute(
-    [],
-    argv,
-    { stdin, flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { E: 'request' } },
-    { kind: 'process' },
+  const result = await answerOf((output, errors) =>
+    machineRuntime(runtime).execute(
+      [],
+      argv,
+      { stdin, flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { E: 'request' } },
+      { kind: 'process', output, errors },
+    ),
   )
   expect(DEC.decode(result.stdout)).toBe('out:--flag')
   expect(runtime.calls.at(-1)).toEqual([
@@ -322,11 +315,13 @@ it('preserves argv through execute and shares the shell connection', async () =>
     ],
     stdin,
   ])
-  await machineRuntime(runtime).execute(
-    [],
-    [],
-    { stdin: null, flags: { c: 'pwd' }, cwd: PathSpec.fromStrPath('/work') },
-    { kind: 'line' },
+  await answerOf((output, errors) =>
+    machineRuntime(runtime).execute(
+      [],
+      [],
+      { stdin: null, flags: { c: 'pwd' }, cwd: PathSpec.fromStrPath('/work') },
+      { kind: 'line', output, errors },
+    ),
   )
   expect(runtime.inspected()).toEqual(['box'])
   expect([
@@ -341,13 +336,17 @@ it('refuses empty argv and a stopped container before executing', async () => {
   runtime.states.box = 'stopped'
   const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
   const opts = { kind: 'process' } as const
-  await expect(machineRuntime(runtime).execute([], [], ctx, opts)).rejects.toThrow(
-    'argv must not be empty',
-  )
+  await expect(
+    answerOf((output, errors) =>
+      machineRuntime(runtime).execute([], [], ctx, { ...opts, output, errors }),
+    ),
+  ).rejects.toThrow('argv must not be empty')
   expect(runtime.calls).toHaveLength(0)
-  await expect(machineRuntime(runtime).execute([], ['node'], ctx, opts)).rejects.toThrow(
-    'not running',
-  )
+  await expect(
+    answerOf((output, errors) =>
+      machineRuntime(runtime).execute([], ['node'], ctx, { ...opts, output, errors }),
+    ),
+  ).rejects.toThrow('not running')
   expect(runtime.calls).toHaveLength(1)
 })
 

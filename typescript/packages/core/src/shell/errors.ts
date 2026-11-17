@@ -103,7 +103,10 @@ export class ReadonlyVariableError extends Error {
 export class ExitSignal extends Error {
   exitCode: number
   stderr: Uint8Array
-  stdout: Uint8Array | null
+  // Output produced before the exit that boundary handlers accumulated while
+  // unwinding, or what an `exec`'d program returned rather than wrote,
+  // handed on as it is read.
+  stdout: ByteSource | null
   // Status a containing boundary reports instead of exitCode. GNU bash
   // exits 127 on a fatal expansion error but a subshell wrapping one
   // returns 1; `exit N` uses N in both positions (the default).
@@ -134,7 +137,7 @@ export class ExitSignal extends Error {
   constructor(
     exitCode = 0,
     stderr: Uint8Array = new Uint8Array(),
-    stdout: Uint8Array | null = null,
+    stdout: ByteSource | null = null,
     containedCode: number | null = null,
   ) {
     super('exit')

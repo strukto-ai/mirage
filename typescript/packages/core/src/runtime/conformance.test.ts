@@ -18,7 +18,8 @@ import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import type { Runtime } from './base.ts'
-import type { BridgeDispatchFn, RunResult } from './types.ts'
+import type { BridgeDispatchFn, RunAnswer } from './types.ts'
+import { answerOf } from './binding.ts'
 import { PrefixResolver } from './resolver.ts'
 import { bindOver } from '../../tests/runtime/fixtures/bridge.ts'
 import { context } from '../../tests/workspace/fixtures/context.ts'
@@ -117,8 +118,10 @@ const APPEND_LOOP_PY =
 const APPEND_LOOP_JS =
   "for (let i = 0; i < 8; i++) { const w = std.open('/data/log.txt', 'a'); w.puts('xyz'); w.close() }"
 
-function run(rt: Runtime, code: string): Promise<RunResult> {
-  return rt.execute([], [], context({ flags: { c: code } }))
+function run(rt: Runtime, code: string): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    rt.execute([], [], context({ flags: { c: code } }), { output, errors }),
+  )
 }
 
 // Eight appends of three bytes must ship 24 bytes, not O(n^2). The

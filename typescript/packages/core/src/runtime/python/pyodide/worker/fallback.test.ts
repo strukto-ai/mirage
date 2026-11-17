@@ -19,6 +19,7 @@ import { PrefixResolver } from '../../../resolver.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
 import { PyodideUnavailableError } from '../errors.ts'
+import { answerOf } from '../../../binding.ts'
 
 const state = vi.hoisted(() => ({ mode: 'construction', terminated: 0 }))
 vi.mock('node:worker_threads', () => ({
@@ -53,10 +54,14 @@ it.each(['construction', 'startup'])(
     rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
       for (let i = 0; i < 2; i++) {
-        const run = rt.interpret(
-          undefined,
-          { code: "print(open('/data/one.txt').read())", args: [], stdin: null },
-          { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+        const run = answerOf((output, errors) =>
+          rt.interpret(
+            undefined,
+            { code: "print(open('/data/one.txt').read())", args: [], stdin: null },
+            { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+            output,
+            errors,
+          ),
         )
         await expect(run).rejects.toBeInstanceOf(PyodideUnavailableError)
         // What stopped the worker, not the shared-memory hint a host

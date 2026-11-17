@@ -22,6 +22,7 @@ from mirage.context.session_context import current_caller
 from mirage.execution.process.types import Process
 from mirage.execution.types import MachineName
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import answer_of
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.constants import IN_PROCESS
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -40,7 +41,13 @@ def test_base_carries_no_capability_entry_points():
     # belong to the tiers and mixins, detected by isinstance.
     rt = MarkerRuntime()
     with pytest.raises(UnsupportedExecutionError, match="code execution"):
-        asyncio.run(rt.execute([], [], Context()))
+        asyncio.run(
+            answer_of(
+                lambda output, errors: rt.execute(
+                    [], [], Context(), output=output, errors=errors
+                )
+            )
+        )
     assert not hasattr(rt, "run_line")
     assert not hasattr(rt, "attach")
     assert not isinstance(rt, LanguageRuntime)
@@ -137,7 +144,7 @@ class SeenRuntime(Runtime, ProcessExecutorMixin):
         return MachineName("box", "b1")
 
     async def run_process(
-        self, engine, paths, texts, ctx, output=None, errors=None
+        self, engine, paths, texts, ctx, output, errors
     ) -> RunResult:
         process = current_caller().process
         assert process is not None
@@ -146,7 +153,7 @@ class SeenRuntime(Runtime, ProcessExecutorMixin):
             await self.release.wait()
         if texts[0] == "peek" and ctx.vfs is not None:
             await ctx.vfs.read("/data/f")
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class EngineRuntime(SeenRuntime):

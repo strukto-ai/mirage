@@ -32,7 +32,7 @@ from mirage.machine.microsandbox.constants import own_session
 from mirage.machine.registry import build_machine
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
-from tests.fixtures.machine import machine_runtime
+from tests.fixtures.machine import machine_answer
 
 
 # A run's program leads a session of its own, and still gets its words
@@ -69,19 +69,18 @@ async def test_refuses_unusable_status_before_exec(
 ):
     calls = []
 
-    async def invoke(
-        executable, hint, args, stdin, output=None, errors=None, **_
-    ):
+    async def invoke(executable, hint, args, stdin, output, errors, **_):
         calls.append(args)
-        return RunResult(status, b"", 0)
+        await output(status)
+        return RunResult(exit_code=0)
 
     monkeypatch.setattr("mirage.machine.transport.run_program", invoke)
     runtime = build_machine(
         "box", {"provider": "microsandbox", **{"sandbox": "box"}}
     )
     with pytest.raises(RuntimeError, match=message):
-        await machine_runtime(runtime).execute(
-            [],
+        await machine_answer(
+            runtime,
             [],
             Context(
                 flags={"c": "touch /must-not-exist"},
@@ -92,10 +91,9 @@ async def test_refuses_unusable_status_before_exec(
     assert calls == [["status", "box", "--format", "json"]]
 
 
-async def _missing_sandbox(
-    executable, hint, args, stdin, output=None, errors=None, **_
-):
-    return RunResult(b"", b"sandbox not found", 1)
+async def _missing_sandbox(executable, hint, args, stdin, output, errors, **_):
+    await errors(b"sandbox not found")
+    return RunResult(exit_code=1)
 
 
 @pytest.mark.asyncio
@@ -130,14 +128,15 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
     calls = []
     connections = []
 
-    async def invoke(
-        executable, hint, args, stdin, output=None, errors=None, **options
-    ):
+    async def invoke(executable, hint, args, stdin, output, errors, **options):
         calls.append((executable, args, stdin))
         connections.append(options.get("connection"))
         if args[0] == "status":
-            return RunResult(b'{"status":"Running"}', b"", 0)
-        return RunResult(b"output", b"diagnostic", 7)
+            await output(b'{"status":"Running"}')
+            return RunResult(exit_code=0)
+        await output(b"output")
+        await errors(b"diagnostic")
+        return RunResult(exit_code=7)
 
     monkeypatch.setattr("mirage.machine.transport.run_program", invoke)
     runtime = build_machine(
@@ -148,8 +147,8 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
         },
     )
     words = ("python3", "a b", "$(literal)", "", "--flag")
-    result = await machine_runtime(runtime).execute(
-        [],
+    result = await machine_answer(
+        runtime,
         list(words),
         Context(
             cwd=PathSpec.from_str_path("/work"),
@@ -207,8 +206,8 @@ async def test_real_guest_process_shell_and_fuse():
     cwd = PathSpec.from_str_path("/data")
     payload = b"input\x00\xff\r\n"
     words = ("a b", "$(echo literal)", "", "--flag")
-    result = await machine_runtime(runtime).execute(
-        [],
+    result = await machine_answer(
+        runtime,
         list(
             (
                 "python3",
@@ -227,17 +226,17 @@ async def test_real_guest_process_shell_and_fuse():
     assert result.stdout == payload
     assert json.loads(result.stderr) == ["/data", "request", list(words)]
     assert result.exit_code == 7
-    shell = await machine_runtime(runtime).execute(
-        [],
+    shell = await machine_answer(
+        runtime,
         [],
         Context(flags={"c": 'printf "%s" "$MARK"; pwd'}, cwd=cwd),
-        kind="line",
+        "line",
     )
     assert shell.stdout == b"config/data\n"
     assert shell.stderr == b""
     assert shell.exit_code == 0
-    files = await machine_runtime(runtime).execute(
-        [],
+    files = await machine_answer(
+        runtime,
         list(
             (
                 "python3",
@@ -351,19 +350,19 @@ class FakeMsb:
         self.resumed: asyncio.Event | None = None
 
     async def __call__(
-        self, executable, hint, args, stdin, output=None, errors=None, **_
+        self, executable, hint, args, stdin, output, errors, **_
     ):
         self.calls.append(list(args))
         if args[0] == "status":
-            return RunResult(
-                json.dumps({"status": self.state}).encode(), b"", 0
-            )
+            await output(json.dumps({"status": self.state}).encode())
+            return RunResult(exit_code=0)
         if args[0] == "resume" and self.resumed is not None:
             self.resuming.set()
             await self.resumed.wait()
         if (said := self.refusals.get(args[0])) is not None:
-            return RunResult(b"", said, 1)
-        return RunResult(b"", b"", 0)
+            await errors(said)
+            return RunResult(exit_code=1)
+        return RunResult(exit_code=0)
 
 
 def _msb(monkeypatch, state: str = "Running") -> FakeMsb:
@@ -502,8 +501,8 @@ def test_mount_type_rejects_an_unknown_value():
 async def test_real_stopped_guest_is_not_started():
     runtime = MicrosandboxMachine("box", config={"sandbox": STOPPED_SANDBOX})
     with pytest.raises(RuntimeError, match="state: Stopped"):
-        await machine_runtime(runtime).execute(
-            [],
+        await machine_answer(
+            runtime,
             [],
             Context(
                 flags={"c": "echo must-not-run"},

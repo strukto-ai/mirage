@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import materialize
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import OutputFn, Program, RunResult
 from mirage.types import PathSpec
 
 STDIN_OPERAND = "-"
@@ -87,13 +87,15 @@ def script_operand(
     return None
 
 
-def _failed(message: str) -> RunResult:
+async def _failed(errors: OutputFn, message: str) -> RunResult:
     """An interpreter that ran nothing: its message and exit 1.
 
     Args:
+        errors (OutputFn): where the message goes.
         message (str): what it says on stderr, newline included.
     """
-    return RunResult(stdout=b"", stderr=message.encode(), exit_code=1)
+    await errors(message.encode())
+    return RunResult(exit_code=1)
 
 
 async def resolve_program(
@@ -104,6 +106,7 @@ async def resolve_program(
     rules: Argv0Rules,
     module_code: Callable[[str, str], str | None],
     runtime_name: str,
+    errors: OutputFn,
 ) -> Program | RunResult:
     """Resolve what a language runtime runs from its operands, as a real
     interpreter does.
@@ -124,6 +127,7 @@ async def resolve_program(
             ``-m`` runs, given the module and the label; None when this
             runtime cannot run a module.
         runtime_name (str): the runtime's name, for the ``-m`` refusal.
+        errors (OutputFn): where why nothing ran goes.
 
     Returns:
         Program | RunResult: the program, or why nothing ran.
@@ -141,9 +145,10 @@ async def resolve_program(
         # in for the runtimes that never reach runpy.
         code = module_code(module, label)
         if code is None:
-            return _failed(
+            return await _failed(
+                errors,
                 f"{label}: -m is not supported by the {runtime_name!r} "
-                "runtime\n"
+                "runtime\n",
             )
         args = [p.virtual for p in paths] + words
         argv0 = module
@@ -170,11 +175,15 @@ async def resolve_program(
         argv0 = rules.bare_stdin
     if code is None and script is not None:
         if ctx.vfs is None:
-            return _failed(f"{label}: no dispatch available to read script\n")
+            return await _failed(
+                errors, f"{label}: no dispatch available to read script\n"
+            )
         try:
             data, _ = await ctx.vfs.dispatch("read", script)
         except FileNotFoundError:
-            return _failed(f"{label}: {script.virtual}: No such file\n")
+            return await _failed(
+                errors, f"{label}: {script.virtual}: No such file\n"
+            )
         code = data.decode(errors="replace") if isinstance(data, bytes) else ""
         if flags.get("x"):
             code = skip_first_line(code)
@@ -182,7 +191,7 @@ async def resolve_program(
     if code is None:
         source = None if stdin is None else await materialize(stdin)
         if not source:
-            return _failed(f"{label}: no input\n")
+            return await _failed(errors, f"{label}: no input\n")
         code = source.decode(errors="replace")
         stdin = None
     script_cli = bool(flags.get("script_cli"))

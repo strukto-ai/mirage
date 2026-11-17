@@ -15,7 +15,6 @@
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { abortable, makeAbortError, sleep } from '../../utils/abort.ts'
-import { concat } from '../../utils/bytes.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { Descriptor } from '../files.ts'
 import type { OpenMode } from '../handles/mode.ts'
@@ -179,27 +178,26 @@ export interface GuestEnd {
 
 /**
  * The host's side of one run, wherever its guest runs: it answers each
- * call the guest makes over the run's view, input and output, keeps what
- * the guest writes to a stream no sink takes, and lands the files the
- * guest left open.
+ * call the guest makes over the run's view, input and output, hands what
+ * the guest writes to the run's sinks, and lands the files the guest left
+ * open.
  *
  * @param view - the files the guest sees.
  * @param stdin - the run's input, which the guest takes as it reads it.
- * @param output - receives stdout as the guest writes it; absent keeps it.
+ * @param output - receives stdout as the guest writes it.
  * @param errors - the same for stderr.
  * @param halt - ends the calls still waiting: the run's stop, or its end.
  * @param trapPrefix - the command name a failure's stderr line starts with.
  */
 export class GuestHost {
   private readonly open = new Map<number, Descriptor>()
-  private readonly kept: [Uint8Array[], Uint8Array[]] = [[], []]
   private readonly reader: AsyncLineIterator | null
 
   constructor(
     private readonly view: WasmView,
     stdin: ByteSource | null,
-    private readonly output: OutputFn | undefined,
-    private readonly errors: OutputFn | undefined,
+    private readonly output: OutputFn,
+    private readonly errors: OutputFn,
     private readonly halt: AbortSignal,
     private readonly trapPrefix: string,
   ) {
@@ -229,10 +227,6 @@ export class GuestHost {
         const fd = args[0] === 2 ? 2 : 1
         const bytes = args[1] as Uint8Array
         const sink = fd === 1 ? this.output : this.errors
-        if (sink === undefined) {
-          ;(fd === 1 ? this.kept[0] : this.kept[1]).push(bytes)
-          return true
-        }
         try {
           await abortable(sink(bytes), this.halt)
           return true
@@ -252,21 +246,18 @@ export class GuestHost {
   }
 
   /**
-   * The run's `[stdout, stderr, exitCode]`: what no sink took, and a line
-   * for the trap and each file whose writes were lost.
+   * The run's exit status, once a line for the trap and each file whose
+   * writes were lost is said on stderr.
    *
    * @param end - how the guest ended.
    */
-  result(end: GuestEnd): [Uint8Array, Uint8Array | null, number] {
-    let stderr = concat(this.kept[1])
+  async result(end: GuestEnd): Promise<number> {
     const lines = [...(end.trap === null ? [] : [end.trap]), ...end.lost]
     if (lines.length > 0)
-      stderr = concat([
-        stderr,
+      await this.errors(
         new TextEncoder().encode(lines.map((line) => `${this.trapPrefix}: ${line}\n`).join('')),
-      ])
-    const exitCode = end.lost.length > 0 && end.exitCode === 0 ? 1 : end.exitCode
-    return [concat(this.kept[0]), stderr.byteLength > 0 ? stderr : null, exitCode]
+      )
+    return end.lost.length > 0 && end.exitCode === 0 ? 1 : end.exitCode
   }
 
   /** Land the files the guest left open: what they wrote still lands, as a
@@ -421,17 +412,17 @@ export class WasmExecution {
   }
 
   /**
-   * Run the module once and return `[stdout, stderr, exitCode]`. A guest
-   * write to a stream with a sink waits until the sink takes it, so a
-   * reader that falls behind holds the guest back, as a full pipe would;
-   * that stream then comes back empty. A stop ends the guest where it is:
-   * the files it left open land, and the run rejects with the stop.
+   * Run the module once and return its exit status; what it wrote went to
+   * the sinks, a trap's or a lost landing's line last on `errors`. A guest
+   * write waits until the sink takes it, so a reader that falls behind
+   * holds the guest back, as a full pipe would. A stop ends the guest where
+   * it is: the files it left open land, and the run rejects with the stop.
    *
    * @param argv - full argv, the program name included.
    * @param stdin - the run's input, which the guest takes as it reads it.
    * @param env - the environment as `[name, value]` pairs.
    * @param view - the files the guest sees.
-   * @param output - receives stdout as the guest writes it; absent returns it.
+   * @param output - receives stdout as the guest writes it.
    * @param errors - the same for stderr.
    * @param stop - ends the run.
    * @param maxMemory - the linear memory this run may grow to, in bytes.
@@ -441,17 +432,18 @@ export class WasmExecution {
     stdin: ByteSource | null,
     env: [string, string][],
     view: WasmView,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
     stop?: AbortSignal,
     maxMemory: number | null = null,
-  ): Promise<[Uint8Array, Uint8Array | null, number]> {
+  ): Promise<number> {
     this.checkOpen()
     const refusal =
       maxMemory === null ? null : startRefusal(await abortable(this.load(), stop), maxMemory)
     if (refusal !== null) {
       const said = `${this.trapPrefix}: cannot start within max_memory (${String(maxMemory)} bytes): ${refusal}\n`
-      return [new Uint8Array(), new TextEncoder().encode(said), 1]
+      await errors(new TextEncoder().encode(said))
+      return 1
     }
     const module = await abortable(this.module(maxMemory), stop)
     const port = this.idle.pop() ?? (await this.started(stop))
@@ -520,7 +512,7 @@ export class WasmExecution {
         offset: boundSystemClock() === null ? 0 : systemNow() - Date.now() / 1000,
         ...(port.bridge !== undefined ? { bridge: port.bridge } : {}),
       } satisfies GuestRun)
-      return host.result(await result)
+      return await host.result(await result)
     } catch (error) {
       // A worker that failed is not reused.
       state.stopped = true

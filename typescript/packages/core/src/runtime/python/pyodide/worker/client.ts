@@ -309,7 +309,7 @@ export class PyodideWorkerClient {
           continue
         }
         // A stopped program says nothing more.
-        if (halted.signal.aborted) return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
+        if (halted.signal.aborted) return { exitCode: 1 }
         if (message.kind === 'result') return message.value
         if (message.name === 'PyodideUnavailableError')
           throw new PyodideUnavailableError(message.message)

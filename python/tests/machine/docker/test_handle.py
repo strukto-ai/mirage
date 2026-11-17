@@ -42,21 +42,22 @@ class FakeDockerMachine(DockerMachine):
         self.refusal: bytes | None = None
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
             state = self.state.encode()
-            return RunResult(b'{"Status": "' + state + b'"}', None, 0)
+            await output(b'{"Status": "' + state + b'"}')
+            return RunResult(exit_code=0)
         if args[0] in ("pause", "unpause"):
             if self.refusal is not None:
-                return RunResult(b"", self.refusal, 1)
-            return RunResult(b"", b"", 0)
+                await errors(self.refusal)
+                return RunResult(exit_code=1)
+            return RunResult(exit_code=0)
         script = args[-1]
-        if output is not None:
-            await output(f"out:{script}".encode())
-            return RunResult(b"", b"warn", 0)
-        return RunResult(f"out:{script}".encode(), b"warn", 0)
+        await output(f"out:{script}".encode())
+        await errors(b"warn")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -219,15 +220,16 @@ class MountingDockerMachine(FakeDockerMachine):
         self.captures = captures
         self.table: dict[str, tuple[str, str]] = {}
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         if args[-1] == "cat /proc/mounts":
             self.calls.append((list(args), stdin))
             rows = "".join(
                 f"{source} {p} {t} rw 0 0\n"
                 for p, (source, t) in self.table.items()
             )
-            return RunResult(rows.encode(), None, 0)
-        return await super()._exec_program(args, stdin, output)
+            await output(rows.encode())
+            return RunResult(exit_code=0)
+        return await super()._exec_program(args, stdin, output, errors)
 
     async def open_pipe(self, command):
         source, prefix = shlex.split(command)[5:7]

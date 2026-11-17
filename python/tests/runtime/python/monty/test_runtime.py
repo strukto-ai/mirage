@@ -19,8 +19,9 @@ import pytest
 
 from mirage.commands.config import Context
 from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.runtime.binding import answer_of
 from mirage.runtime.python import MontyRuntime
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -59,8 +60,25 @@ async def test_a_stop_holds_a_busy_program():
         await ws.close()
 
 
-async def _run(rt: MontyRuntime, program: Program, **fields) -> RunResult:
-    return await rt.interpret(await rt.engine(), program, Context(**fields))
+async def _run(rt: MontyRuntime, program: Program, **fields) -> RunAnswer:
+    engine = await rt.engine()
+    return await answer_of(
+        lambda output, errors: rt.interpret(
+            engine, program, Context(**fields), output, errors
+        )
+    )
+
+
+async def _execute(rt: MontyRuntime, code: str, **fields) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: rt.execute(
+            [],
+            [],
+            Context(flags={"c": code}, **fields),
+            output=output,
+            errors=errors,
+        )
+    )
 
 
 def _args(code: str, env: dict[str, str] | None = None, **fields):
@@ -173,7 +191,7 @@ def test_monty_runs_a_program(args, exit_code, stdout, stderr):
     result = asyncio.run(_run(MontyRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
-        assert result.stderr is None
+        assert result.stderr == b""
     else:
         assert stderr in result.stderr
 
@@ -274,12 +292,10 @@ async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     try:
         assert (await ws.shell("mkdir /data/sub; cd /data")).exit_code == 0
         code = "import os; print(os.getcwd())"
-        default = await runtime.execute([], [], Context(flags={"c": code}))
+        default = await _execute(runtime, code)
         assert default.stdout == b"/\n"
         cwd = PathSpec.from_str_path("/data/sub")
-        explicit = await runtime.execute(
-            [], [], Context(flags={"c": code}, cwd=cwd)
-        )
+        explicit = await _execute(runtime, code, cwd=cwd)
         assert explicit.stdout == b"/data/sub\n"
     finally:
         await ws.close()
@@ -312,7 +328,7 @@ async def test_max_memory_caps_a_run_and_leaves_a_small_one_alone():
     try:
         big = await _run(runtime, Program(code="x = [0] * 10_000_000"))
         assert big.exit_code == 1
-        assert big.stderr is not None and b"MemoryError" in big.stderr
+        assert b"MemoryError" in big.stderr
         small = await _run(runtime, Program(code="print(sum(range(10)))"))
         assert (small.exit_code, small.stdout) == (0, b"45\n")
     finally:
@@ -328,7 +344,7 @@ async def test_a_run_holds_no_more_than_its_workspace_has_left():
             _run(runtime, Program(code="x = [0] * 10_000_000")),
         )
         assert big.exit_code == 1
-        assert big.stderr is not None and b"MemoryError" in big.stderr
+        assert b"MemoryError" in big.stderr
         free = await _run(
             runtime, Program(code="print(len([0] * 10_000_000))")
         )

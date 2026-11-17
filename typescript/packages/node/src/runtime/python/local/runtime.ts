@@ -73,15 +73,15 @@ async function isExecutable(program: string): Promise<boolean> {
  * Why a program named by a path cannot run, in the shell's words and exit
  * code; null when it can.
  */
-async function unrunnable(name: string, path: string): Promise<RunResult | null> {
+async function unrunnable(name: string, path: string): Promise<readonly [string, number] | null> {
   const found = await stat(path).catch((err: unknown) => {
     const code = (err as NodeJS.ErrnoException).code
     if (code === undefined) throw err
     debuglog('mirage')('local: cannot stat %s: %s', path, code)
     return null
   })
-  if (found === null) return notRun(`${name}: No such file or directory\n`, NOT_FOUND_STATUS)
-  if (found.isDirectory()) return notRun(`${name}: Is a directory\n`, CANNOT_EXECUTE_STATUS)
+  if (found === null) return [`${name}: No such file or directory\n`, NOT_FOUND_STATUS]
+  if (found.isDirectory()) return [`${name}: Is a directory\n`, CANNOT_EXECUTE_STATUS]
   const runs = await access(path, constants.X_OK).then(
     () => true,
     (err: unknown) => {
@@ -91,12 +91,13 @@ async function unrunnable(name: string, path: string): Promise<RunResult | null>
       return false
     },
   )
-  return runs ? null : notRun(`${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS)
+  return runs ? null : [`${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS]
 }
 
-/** A program that never started: its message and exit code. */
-function notRun(message: string, exitCode: number): RunResult {
-  return { stdout: new Uint8Array(), stderr: new TextEncoder().encode(message), exitCode }
+/** A program that never started: its message, said on `errors`, and exit code. */
+async function notRun(errors: OutputFn, message: string, exitCode: number): Promise<RunResult> {
+  await errors(new TextEncoder().encode(message))
+  return { exitCode }
 }
 
 /**
@@ -158,17 +159,30 @@ export class LocalRuntime
     return new MachineName(HOST, this.name)
   }
 
-  override async version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
+  override async version(
+    _env: Record<string, string>,
+    output: OutputFn,
+    errors: OutputFn,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
     // Session loader variables can execute code before --version is read.
-    return this.spawnProgram(await this.interpreter(), ['--version'], {}, null, signal)
+    return this.spawnProgram(
+      await this.interpreter(),
+      ['--version'],
+      {},
+      null,
+      output,
+      errors,
+      signal,
+    )
   }
 
   async interpret(
     _engine: undefined,
     program: Program,
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
@@ -178,10 +192,9 @@ export class LocalRuntime
       [...initArgv(ctx.flags), '-c', prepareSource(program, ctx.cwd), ...program.args],
       ctx.env ?? {},
       program.stdin,
-      ctx.signal,
-      undefined,
       output,
       errors,
+      ctx.signal,
     )
   }
 
@@ -190,13 +203,13 @@ export class LocalRuntime
     _paths: PathSpec[],
     argv: string[],
     ctx: Context,
-    output: OutputFn | undefined,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     ctx.signal?.throwIfAborted()
     const name = argv[0] ?? ''
     const cwd = ctx.cwd.virtual
-    const refusal = await cwdRefusal(name, cwd)
+    const refusal = await cwdRefusal(name, cwd, errors)
     if (refusal !== null) return refusal
     let program: string
     if (name.includes('/')) {
@@ -204,12 +217,12 @@ export class LocalRuntime
       // Joined, not resolved, so the host follows a `..` past a symlink
       // as written.
       program = isAbsolute(name) ? name : `${rstripSlash(cwd)}/${name}`
-      const refusal = await unrunnable(name, program)
-      if (refusal !== null) return refusal
+      const refused = await unrunnable(name, program)
+      if (refused !== null) return notRun(errors, ...refused)
     } else {
       program = await onHostPath(name)
       if (!(await isExecutable(program)))
-        return notRun(`${name}: command not found\n`, NOT_FOUND_STATUS)
+        return notRun(errors, `${name}: command not found\n`, NOT_FOUND_STATUS)
     }
     // A program that cannot start (its script's interpreter missing, say)
     // fails as the shell's would, so `tool || fallback` goes on.
@@ -218,14 +231,18 @@ export class LocalRuntime
       argv.slice(1),
       ctx.env ?? {},
       ctx.stdin,
-      ctx.signal,
-      cwd,
       output,
       errors,
+      ctx.signal,
+      cwd,
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
-      return notRun(`${name}: cannot execute: ${fsStrerror(err) ?? code}\n`, CANNOT_EXECUTE_STATUS)
+      return notRun(
+        errors,
+        `${name}: cannot execute: ${fsStrerror(err) ?? code}\n`,
+        CANNOT_EXECUTE_STATUS,
+      )
     })
   }
 
@@ -246,10 +263,10 @@ export class LocalRuntime
     argv: string[],
     env: Record<string, string>,
     stdin: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
     cwd?: string,
-    output?: OutputFn,
-    errors?: OutputFn,
   ): Promise<RunResult> {
     const given = { ...(this.config as LocalConfig).env, ...env }
     const clock = await systemTimeEnv(given)
@@ -260,8 +277,8 @@ export class LocalRuntime
       env: { ...given, ...clock },
       children: this.children,
       direct: true,
-      ...(output === undefined ? {} : { output }),
-      ...(errors === undefined ? {} : { errors }),
+      output,
+      errors,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),
     })

@@ -35,40 +35,41 @@ class FakeKubernetesMachine extends KubernetesMachine {
   code = 0
   readonly calls: [string[], Uint8Array | null][] = []
 
+  /** One line run as the base class runs it, into the given sinks. */
+  line(line: string, output: OutputFn, errors: OutputFn): Promise<RunResult> {
+    return this.execArgv(['/bin/sh', '-c', line], null, {}, '/', output, errors)
+  }
+
   protected override async execProgram(
     args: string[],
-    source: ByteSource | null = null,
-    _output: OutputFn | null = null,
-    _signal?: AbortSignal,
-    errors: OutputFn | null = null,
+    source: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'get') {
-      return {
-        stdout: ENC.encode(JSON.stringify({ status: { phase: this.phase } })),
-        stderr: null,
-        exitCode: 0,
-      }
+      await output(ENC.encode(JSON.stringify({ status: { phase: this.phase } })))
+      return { exitCode: 0 }
     }
-    if (errors !== null && this.stderr !== '') await errors(ENC.encode(this.stderr))
-    return { stdout: ENC.encode('out'), stderr: null, exitCode: this.code }
+    if (this.stderr !== '') await errors(ENC.encode(this.stderr))
+    await output(ENC.encode('out'))
+    return { exitCode: this.code }
   }
 }
 
 class CutOffMachine extends KubernetesMachine {
   streamed(errors: OutputFn, signal?: AbortSignal): Promise<RunResult> {
-    return this.execArgv(['x'], null, {}, '/', null, errors, signal)
+    return this.execArgv(['x'], null, {}, '/', () => Promise.resolve(), errors, signal)
   }
 
   protected override async execProgram(
     _args: string[],
-    _source: ByteSource | null = null,
-    _output: OutputFn | null = null,
-    _signal?: AbortSignal,
-    errors: OutputFn | null = null,
+    _source: ByteSource | null,
+    _output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    await errors?.(ENC.encode('command'))
+    await errors(ENC.encode('command'))
     throw new Error('aborted')
   }
 }
@@ -137,7 +138,7 @@ describe('KubernetesMachine', () => {
     })
     const result = await machine.execLine('wc -l', ENC.encode('a\n'), { E: '1' }, '/work')
     expect(DEC.decode(result.stdout)).toBe('out')
-    expect(result.stderr).toBeNull()
+    expect(DEC.decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     const [args, stdin] = machine.calls[machine.calls.length - 1] ?? [[], null]
     expect(args).toEqual([
@@ -196,39 +197,40 @@ describe('KubernetesMachine', () => {
   it('a failing program says only what it said', async () => {
     const machine = makeMachine({ pod: 'p' }, { stderr: `boom\n${REPORT}`, code: 3 })
     const result = await machine.execLine('false', null, {}, '/')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('boom\n')
+    expect(DEC.decode(result.stderr)).toBe('boom\n')
     expect(result.exitCode).toBe(3)
   })
 
   it('a failure with no final newline keeps what it wrote', async () => {
     const machine = makeMachine({ pod: 'p' }, { stderr: `boom${REPORT}`, code: 3 })
     const result = await machine.execLine('false', null, {}, '/')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('boom')
+    expect(DEC.decode(result.stderr)).toBe('boom')
     expect(result.exitCode).toBe(3)
   })
 
   it('a silent failing program has no stderr', async () => {
     const machine = makeMachine({ pod: 'p' }, { stderr: REPORT, code: 3 })
     const result = await machine.execLine('false', null, {}, '/')
-    expect(result.stderr).toBeNull()
+    expect(DEC.decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(3)
   })
 
   it('a program that prints the report keeps it', async () => {
     const machine = makeMachine({ pod: 'p' }, { stderr: REPORT })
     const result = await machine.execLine('true', null, {}, '/')
-    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(REPORT)
+    expect(DEC.decode(result.stderr)).toBe(REPORT)
     expect(result.exitCode).toBe(0)
   })
 
+  // What the run wrote before kubectl failed reached its sinks already.
   it('kubectl failing by itself is a lost connection', async () => {
     const said = 'error: lost connection to pod\n'
     const machine = makeMachine({ pod: 'p' }, { stderr: said, code: 1 })
-    const caught = await machine.execLine('sleep 9', null, {}, '/').catch((error: unknown) => error)
+    const [out, output] = collector()
+    const [err, errors] = collector()
+    const caught = await machine.line('sleep 9', output, errors).catch((error: unknown) => error)
     expect(caught).toBeInstanceOf(ConnectionLostError)
-    const lost = caught as ConnectionLostError
-    expect(DEC.decode(lost.stdout)).toBe('out')
-    expect(DEC.decode(lost.stderr ?? new Uint8Array())).toBe(said)
+    expect([text(out), text(err)]).toEqual(['out', said])
   })
 
   it("a report for another status is kubectl's own failure", async () => {

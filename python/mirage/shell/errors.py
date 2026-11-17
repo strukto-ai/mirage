@@ -122,9 +122,10 @@ class ExitSignal(Exception):
     Args:
         exit_code (int): status the shell exits with.
         stderr (bytes): diagnostic already formatted for the user.
-        stdout (bytes | None): output produced before the exit that
-            boundary handlers accumulated while unwinding (e.g. the left
-            side of ``echo a && exit 3``).
+        stdout (ByteSource | None): output produced before the exit
+            that boundary handlers accumulated while unwinding (e.g. the
+            left side of ``echo a && exit 3``), or what an ``exec``'d
+            program returned rather than wrote, handed on as it is read.
         contained_code (int | None): status a containing boundary
             reports instead of ``exit_code``. GNU bash exits 127 on a
             fatal expansion error but a subshell wrapping one returns 1;
@@ -152,7 +153,7 @@ class ExitSignal(Exception):
         self,
         exit_code: int = 0,
         stderr: bytes = b"",
-        stdout: bytes | None = None,
+        stdout: ByteSource | None = None,
         contained_code: int | None = None,
     ) -> None:
         self.exit_code = exit_code

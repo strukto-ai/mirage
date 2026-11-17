@@ -43,12 +43,14 @@ class NamedFakeRuntime extends LanguageRuntime {
   constructor(readonly name: string) {
     super({ captures: ['python3', 'python'] })
   }
-  interpret(): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: ENC.encode(`ran-${this.name}\n`),
-      stderr: new Uint8Array(),
-      exitCode: 0,
-    })
+  async interpret(
+    _engine: unknown,
+    _program: unknown,
+    _ctx: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(ENC.encode(`ran-${this.name}\n`))
+    return { exitCode: 0 }
   }
 }
 
@@ -570,10 +572,18 @@ class LineBox extends Runtime implements LineExecutorMixin {
     super({ captures: ['nvidia-smi'] })
   }
 
-  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    ctx: Context,
+    output: OutputFn,
+    _errors?: OutputFn,
+  ): Promise<RunResult> {
     const line = ctx.flags.c as string
     this.lines.push([line, ctx.stdin as Uint8Array | null, ctx.cwd.virtual])
-    return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
+    await output(ENC.encode(`box:${line}`))
+    return { exitCode: 0 }
   }
 }
 
@@ -587,9 +597,11 @@ describe('whole-line runtimes', () => {
         _p: PathSpec[],
         _t: string[],
         ctx: Context,
+        output: OutputFn,
       ): Promise<RunResult> {
         if (ctx.vfs === undefined) throw new Error('no files')
-        return { stdout: await ctx.vfs.read('/f.txt'), stderr: null, exitCode: 0 }
+        await output(await ctx.vfs.read('/f.txt'))
+        return { exitCode: 0 }
       }
     }
     const box = new ReadingBox()

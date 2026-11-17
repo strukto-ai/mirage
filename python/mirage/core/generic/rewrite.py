@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 
 from mirage.cache.context import (
     read_versioned,
@@ -20,8 +21,9 @@ from mirage.cache.context import (
 )
 from mirage.cache.types import OwnRead, ReplaceRequest, RewriteWriteFn
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
-from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec, StatFn
 
@@ -123,6 +125,58 @@ async def append_by_streamed_rewrite(
         return seen[0]
 
     return await append_by_spooled_rewrite(fill, write, stat, path, data)
+
+
+async def append_through_spool(
+    read: Callable[[], Awaitable[ByteSource]],
+    write: Callable[[ByteSource], Awaitable[None]],
+    data: ByteSource,
+) -> None:
+    """Append over a plain whole-file read and write, as the layers above
+    the dispatcher have them (an open file's core, a runtime's files):
+    the file is read fresh into a spool, a chunk at a time in memory and
+    the rest in a scratch file, and only then written back as one stream
+    of its bytes followed by the new ones, so memory holds a chunk
+    whatever the sizes. The read is staged rather than handed to the
+    write as it comes: a writer that empties its file before it pulls
+    its source (disk opens it for writing, RAM resets the key) would
+    read back nothing. A missing file starts empty; any other failure,
+    or a read that fails once it has bytes, propagates, since writing
+    the new bytes alone would replace content never read.
+
+    Args:
+        read (Callable[[], Awaitable[ByteSource]]): the file's stored
+            bytes, read fresh past any cached copy.
+        write (Callable[[ByteSource], Awaitable[None]]): whole-file
+            replacement, handed a stream.
+        data (ByteSource): the bytes to add, consumed once.
+    """
+    try:
+        async with ByteSpool() as spool:
+            try:
+                await spool.fill(await read())
+            except FileNotFoundError:
+                if spool.size:
+                    raise
+            await write(_appended(spool, data))
+    finally:
+        await close_quietly(data)
+
+
+async def _appended(
+    spool: ByteSpool, data: ByteSource
+) -> AsyncIterator[bytes]:
+    """The spooled file, then the bytes added to it.
+
+    Args:
+        spool (ByteSpool): the stored file.
+        data (ByteSource): the new bytes.
+    """
+    async for chunk in spool.stream():
+        yield chunk
+    async with aclosing(chunks(data)) as tail:
+        async for chunk in tail:
+            yield chunk
 
 
 async def pwrite_by_streamed_rewrite(

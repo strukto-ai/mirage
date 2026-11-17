@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PythonRuntime } from './base.ts'
-import type { RunResult } from '../types.ts'
+import type { OutputFn, RunResult } from '../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -23,13 +23,15 @@ class ProcessRuntime extends PythonRuntime {
   readonly name = 'custom-process'
   runs = 0
 
-  interpret(): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    _program: unknown,
+    _ctx: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
     this.runs += 1
-    return Promise.resolve({
-      stdout: new TextEncoder().encode('unexpected execution'),
-      stderr: null,
-      exitCode: 0,
-    })
+    await output(new TextEncoder().encode('unexpected execution'))
+    return { exitCode: 0 }
   }
 }
 

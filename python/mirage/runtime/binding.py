@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
 from mirage.commands.config import Context
@@ -28,7 +28,7 @@ from mirage.context.session_context import (
 from mirage.execution.process.table import ProcessTable
 from mirage.mount.changes import RecentChanges
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import DispatchFn, RunResult
+from mirage.runtime.types import DispatchFn, OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import MountMode, PolicyDecision
 from mirage.utils.hidden import is_glob, show_head
@@ -97,7 +97,7 @@ class WorkspaceBinding:
         )
 
 
-def refused_run(name: str, reason: str) -> RunResult:
+async def refused_run(name: str, reason: str, errors: OutputFn) -> RunResult:
     """A run the session's restrictions refuse before it starts, as
     admission refuses a command: bash's ``<name>: Permission denied`` at
     126, the reason on the line's decision record and never on stderr.
@@ -105,13 +105,34 @@ def refused_run(name: str, reason: str) -> RunResult:
     Args:
         name (str): the runtime, which names the refusal.
         reason (str): why, for the record.
+        errors (OutputFn): where the refusal is said.
     """
     note_decision(PolicyDecision(kind="deny", reason=reason))
-    return RunResult(
-        stdout=b"",
-        stderr=f"{name}: Permission denied\n".encode(),
-        exit_code=CANNOT_EXECUTE_STATUS,
-    )
+    await errors(f"{name}: Permission denied\n".encode())
+    return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
+
+
+async def answer_of(
+    run: Callable[[OutputFn, OutputFn], Awaitable[RunResult]],
+) -> RunAnswer:
+    """What one of Mirage's own lines answered, kept whole: a probe's few
+    lines, read once the line ends. A program's run never comes here; it
+    streams.
+
+    Args:
+        run (Callable[[OutputFn, OutputFn], Awaitable[RunResult]]): runs
+            the line, given where it writes stdout and stderr.
+    """
+    out, err = bytearray(), bytearray()
+
+    async def keep_output(data: bytes) -> None:
+        out.extend(data)
+
+    async def keep_errors(data: bytes) -> None:
+        err.extend(data)
+
+    done = await run(keep_output, keep_errors)
+    return RunAnswer(done.exit_code, bytes(out), bytes(err))
 
 
 def restricted_mounts_for(

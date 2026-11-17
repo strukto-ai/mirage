@@ -14,7 +14,8 @@
 
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { Context } from '../../../commands/config.ts'
-import type { BridgeDispatchFn, Program, RunResult } from '../../types.ts'
+import type { BridgeDispatchFn, Program, RunAnswer } from '../../types.ts'
+import { answerOf } from '../../binding.ts'
 import { MontyRuntime } from './index.ts'
 import { MontyUnavailableError } from './errors.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -140,11 +141,16 @@ async function interpret(
   rt: MontyRuntime,
   program: Partial<Program> & { code: string },
   extra: Partial<Context> = {},
-): Promise<RunResult> {
-  return rt.interpret(
-    await rt.engine(),
-    { args: [], stdin: null, ...program },
-    runContext(rt, extra),
+): Promise<RunAnswer> {
+  const engine = await rt.engine()
+  return answerOf((output, errors) =>
+    rt.interpret(
+      engine,
+      { args: [], stdin: null, ...program },
+      runContext(rt, extra),
+      output,
+      errors,
+    ),
   )
 }
 
@@ -153,7 +159,7 @@ function run(
   code: string,
   args: string[] = [],
   env: Record<string, string> = {},
-): Promise<RunResult> {
+): Promise<RunAnswer> {
   return interpret(rt, { code, args }, { env })
 }
 
@@ -410,12 +416,17 @@ describe('MontyRuntime', () => {
     try {
       expect((await ws.shell('mkdir /data/sub; cd /data')).exitCode).toBe(0)
       const code = 'import os; print(os.getcwd())'
-      const fallback = await rt.execute([], [], context({ flags: { c: code } }))
+      const fallback = await answerOf((output, errors) =>
+        rt.execute([], [], context({ flags: { c: code } }), { output, errors }),
+      )
       expect(text(fallback.stdout)).toBe('/\n')
-      const explicit = await rt.execute(
-        [],
-        [],
-        context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+      const explicit = await answerOf((output, errors) =>
+        rt.execute(
+          [],
+          [],
+          context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+          { output, errors },
+        ),
       )
       expect(text(explicit.stdout)).toBe('/data/sub\n')
     } finally {
@@ -522,7 +533,7 @@ describe('MontyRuntime', () => {
     expect(result.exitCode).toBe(0)
     expect(appends).toEqual([])
     expect(text(files.get('/s3/log.txt') ?? new Uint8Array())).toBe('abc')
-    // One failed probe per mount, then whole-content writes.
+    // Each append's probe fails, then the bridge writes the whole content.
     expect(writes.map(([p, b]) => [p, text(b)])).toEqual([
       ['/s3/log.txt', 'ab'],
       ['/s3/log.txt', 'abc'],

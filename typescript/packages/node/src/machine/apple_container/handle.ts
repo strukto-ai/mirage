@@ -68,7 +68,7 @@ export class AppleContainerMachine extends ProgramMachine<AppleContainerConfig> 
    */
   async connect(): Promise<void> {
     const container = this.config.container
-    const status = await this.execProgram(['inspect', container])
+    const status = await this.programAnswer(['inspect', container])
     const state = reportedState(status, 'container inspect', [0, 'status', 'state'])
     if (state !== RUNNING_STATE)
       throw new Error(notRunningHint('container', container, state, STATE_HINTS))

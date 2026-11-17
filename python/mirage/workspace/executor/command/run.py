@@ -81,10 +81,22 @@ async def exec_node(
         exit_code=io.exit_code,
         paths=paths,
     )
+    follow_settled(node, io)
+    return node
+
+
+def follow_settled(node: ExecutionNode, io: IOResult) -> None:
+    """Bring a command's record up to date once its result has settled,
+    for a result whose fields fill in as its output drains
+    (``IOResult.output``).
+
+    Args:
+        node (ExecutionNode): the command's record.
+        io (IOResult): its result.
+    """
     state = io.output
     if state is not None and not state.settled:
         state.callbacks.append(functools.partial(_settled, node, io))
-    return node
 
 
 def _settled(node: ExecutionNode, io: IOResult) -> None:

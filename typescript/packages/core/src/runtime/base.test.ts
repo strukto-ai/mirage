@@ -123,10 +123,10 @@ class SeenRuntime extends Runtime implements ProcessExecutorMixin {
         })
       })
       const exitCode = await Promise.race([this.released.then(() => 0), stopped])
-      return { stdout: new Uint8Array(), stderr: null, exitCode }
+      return { exitCode }
     }
     if (texts[0] === 'peek') await ctx.vfs?.read('/data/f')
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    return { exitCode: 0 }
   }
 }
 

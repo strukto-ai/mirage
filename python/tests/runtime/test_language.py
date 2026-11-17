@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.commands.config import Context
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -32,17 +32,28 @@ class EchoRuntime(PythonRuntime):
     name = "echo"
     captures = ("echo-run",)
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
         self.seen = (program, ctx)
-        return RunResult(
-            stdout=program.code.encode(), stderr=None, exit_code=0
-        )
+        await output(program.code.encode())
+        return RunResult(exit_code=0)
 
 
 def test_language_inherits_workspace_binding():
     rt = EchoRuntime()
     rt.bind(WorkspaceBinding(lambda *a: None, PrefixResolver(lambda: [])))
-    result = asyncio.run(rt.execute([], [], Context(flags={"c": "hi"})))
+    result = asyncio.run(
+        answer_of(
+            lambda output, errors: rt.execute(
+                [],
+                [],
+                Context(flags={"c": "hi"}),
+                output=output,
+                errors=errors,
+            )
+        )
+    )
     assert result.stdout == b"hi"
     assert result.exit_code == 0
 
@@ -79,7 +90,13 @@ def test_run_hands_interpret_the_callers_context():
     rt = EchoRuntime()
     cwd = PathSpec.from_str_path("/data")
     ctx = Context(flags={"c": "pass", "module": True}, env={"K": "V"}, cwd=cwd)
-    asyncio.run(rt.execute([], [], ctx))
+    asyncio.run(
+        answer_of(
+            lambda output, errors: rt.execute(
+                [], [], ctx, output=output, errors=errors
+            )
+        )
+    )
     program, seen = rt.seen
     assert program.code == "pass"
     assert seen.flags == {"c": "pass", "module": True}

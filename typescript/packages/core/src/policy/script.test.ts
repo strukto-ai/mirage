@@ -91,15 +91,13 @@ class FakeProgram extends LanguageRuntime {
   override async execute(
     ...[paths, texts, ctx, opts]: Parameters<LanguageRuntime['execute']>
   ): Promise<RunResult> {
-    if ((opts?.kind ?? 'code') !== 'code' || paths.length > 0 || texts.length > 0)
+    if ((opts.kind ?? 'code') !== 'code' || paths.length > 0 || texts.length > 0)
       throw new Error('a policy program is a code run')
     this.requests.push(ctx)
     if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs))
-    return {
-      stdout: new TextEncoder().encode(this.stdout),
-      stderr: this.exitCode === 0 ? null : new TextEncoder().encode('Traceback'),
-      exitCode: this.exitCode,
-    }
+    await opts.output(new TextEncoder().encode(this.stdout))
+    if (this.exitCode !== 0) await opts.errors(new TextEncoder().encode('Traceback'))
+    return { exitCode: this.exitCode }
   }
 
   interpret(): Promise<RunResult> {

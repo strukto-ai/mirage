@@ -29,7 +29,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.types import OutputFn, RunResult, RuntimeReach
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult, RuntimeReach
 from mirage.types import PathSpec
 from mirage.utils.quote import shell_quote
 from mirage.workspace.files import Files
@@ -43,7 +43,7 @@ async def _feed(
     text: str,
     fifo: str,
     env: dict[str, str],
-) -> RunResult:
+) -> RunAnswer:
     """Stream a process substitution into the named pipe on the machine
     that stands for it, while the pipe is still there.
 
@@ -65,7 +65,7 @@ async def _feed(
 
 async def _unfeed(
     handle: MachineHandle,
-    feeds: list[tuple[str, asyncio.Task[RunResult]]],
+    feeds: list[tuple[str, asyncio.Task[RunAnswer]]],
     env: dict[str, str],
 ) -> None:
     """Remove the named pipes a run's substitutions fed, then stop their
@@ -74,7 +74,7 @@ async def _unfeed(
 
     Args:
         handle (MachineHandle): the machine.
-        feeds (list[tuple[str, asyncio.Task[RunResult]]]): each pipe and
+        feeds (list[tuple[str, asyncio.Task[RunAnswer]]]): each pipe and
             the feed writing it.
         env (dict[str, str]): the machine's environment.
     """
@@ -198,8 +198,8 @@ class RemoteRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run one raw line on the machine, connecting once.
 
@@ -214,8 +214,8 @@ class RemoteRuntime(
             texts (list[str]): unused.
             ctx (Context): the line in ``flags["c"]``, the bytes piped
                 into it, the session environment and working directory.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
         return await self.handle().run(
@@ -232,8 +232,8 @@ class RemoteRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run one program on the machine. A process substitution it
         reads by path (``node read.js <(python3 gen.py)``) becomes a named
@@ -245,8 +245,8 @@ class RemoteRuntime(
             paths (list[PathSpec]): unused; the words name the paths.
             texts (list[str]): the program and its words.
             ctx (Context): the run's stdin, environment and cwd.
-            output (OutputFn | None): receives stdout as it arrives.
-            errors (OutputFn | None): receives stderr as it arrives.
+            output (OutputFn): receives stdout as it arrives.
+            errors (OutputFn): receives stderr as it arrives.
         """
         handle = self.handle()
         env = dict(handle.config.env)
@@ -257,7 +257,7 @@ class RemoteRuntime(
             else set()
         )
         argv = list(texts)
-        feeds: list[tuple[str, asyncio.Task[RunResult]]] = []
+        feeds: list[tuple[str, asyncio.Task[RunAnswer]]] = []
         binding = self._binding
         prefixes = (
             served_prefixes(binding.mount_prefixes())
@@ -269,7 +269,7 @@ class RemoteRuntime(
                 if ctx.vfs is None or text not in reads:
                     continue
                 if not handle.takes_input:
-                    return handle.input_refused()
+                    return await handle.input_refused(errors)
                 await handle.ensure_connected()
                 made = await handle.exec_line(
                     fifo_line(uuid.uuid4().hex, prefixes), None, env, "/"

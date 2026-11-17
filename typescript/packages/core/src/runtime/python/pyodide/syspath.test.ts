@@ -19,13 +19,22 @@ import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
 import type { BridgeDispatchFn, Program } from '../../types.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { answerOf } from '../../binding.ts'
 
 const EMPTY_MOUNT: BridgeDispatchFn = (op) =>
   Promise.resolve(op === 'readdir' ? [] : new Uint8Array())
 
 /** Run `program` at `/` with an empty env and empty stdin. */
 function interpret(rt: PyodideRuntime, program: Partial<Program> & { code: string }) {
-  return rt.interpret(undefined, { args: [], stdin: new Uint8Array(), ...program }, context())
+  return answerOf((output, errors) =>
+    rt.interpret(
+      undefined,
+      { args: [], stdin: new Uint8Array(), ...program },
+      context(),
+      output,
+      errors,
+    ),
+  )
 }
 
 function decode(bytes: Uint8Array | null | undefined): string {

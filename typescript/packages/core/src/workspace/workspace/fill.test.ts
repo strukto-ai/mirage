@@ -27,7 +27,7 @@ import { Outcome, Scope, type Decision } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
-import { ScriptSource, type RunResult } from '../../runtime/types.ts'
+import { ScriptSource, type OutputFn, type RunResult } from '../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
@@ -135,12 +135,15 @@ class NiceBox extends Runtime implements LineExecutorMixin {
     super({ captures: ['nice'] })
   }
 
-  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new TextEncoder().encode(`${String(ctx.env?.TOKEN)}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  async runLine(
+    _e: unknown,
+    _p: PathSpec[],
+    _t: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode(`${String(ctx.env?.TOKEN)}\n`))
+    return { exitCode: 0 }
   }
 }
 

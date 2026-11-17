@@ -228,8 +228,8 @@ class MontyExecution:
         program: Program,
         cwd: PathSpec | None,
         fs: MontyFs,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
         external_lookup: Mapping[str, Callable[..., Any]] | None = None,
     ) -> RunResult:
         """Run one program on a pooled worker.
@@ -238,9 +238,9 @@ class MontyExecution:
             program (Program): the source and argv to run.
             cwd (PathSpec | None): the directory a feed starts in.
             fs (MontyFs): the files the program reaches.
-            output (OutputFn | None): receives stdout as it is printed;
-                None returns it in the result.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as it is printed.
+            errors (OutputFn): the same for stderr, the traceback or
+                crash note last.
             external_lookup (Mapping[str, Callable[..., Any]] | None):
                 the host functions the program may call by name.
         """
@@ -248,10 +248,9 @@ class MontyExecution:
         code, note = await self._feed(
             program, cwd, fs, prints, external_lookup
         )
-        stdout, stderr = prints.streams()
         if note:
-            stderr = (stderr or b"") + note
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
+            await errors(note)
+        return RunResult(exit_code=code)
 
     async def _feed(
         self,
@@ -429,26 +428,22 @@ def hold_worker(pid: int | None) -> Callable[[], None]:
 
 class _Prints:
     """What a program prints, in the order it printed it: each write
-    handed to its stream's sink as it comes, or kept for the result where
-    the stream has none.
+    handed to its stream's sink as it comes.
 
     Monty calls back from a thread of its own and goes on only once the
-    callback returns, so a write for a sink waits there until the loop
-    has handed it on: a reader that falls behind holds the program back,
-    as a full pipe would. One write waits at a time, and ``stop``
-    cancels it when the run is cancelled, so neither it nor the callback
-    outlives the run.
+    callback returns, so a write waits there until the loop has handed
+    it on: a reader that falls behind holds the program back, as a full
+    pipe would. One write waits at a time, and ``stop`` cancels it when
+    the run is cancelled, so neither it nor the callback outlives the
+    run.
 
     Args:
-        output (OutputFn | None): where stdout goes; None keeps it.
-        errors (OutputFn | None): where stderr goes; None keeps it.
+        output (OutputFn): where stdout goes.
+        errors (OutputFn): where stderr goes.
     """
 
-    def __init__(
-        self, output: OutputFn | None, errors: OutputFn | None
-    ) -> None:
+    def __init__(self, output: OutputFn, errors: OutputFn) -> None:
         self._sinks = {"stdout": output, "stderr": errors}
-        self._kept: dict[str, list[str]] = {"stdout": [], "stderr": []}
         self._loop = asyncio.get_running_loop()
         self._writing: concurrent.futures.Future[None] | None = None
         self._handing: asyncio.Task[Any] | None = None
@@ -457,7 +452,7 @@ class _Prints:
     def __call__(self, stream: str, text: str) -> None:
         sink = self._sinks.get(stream)
         if sink is None:
-            self._kept.setdefault(stream, []).append(text)
+            logger.debug("monty print to unknown stream %r dropped", stream)
             return
         self._writing = asyncio.run_coroutine_threadsafe(
             self._hand(sink, text.encode()), self._loop
@@ -477,9 +472,3 @@ class _Prints:
             self._writing.cancel()
         if self._handing is not None:
             await asyncio.gather(self._handing, return_exceptions=True)
-
-    def streams(self) -> tuple[bytes, bytes | None]:
-        """The stdout and stderr kept for the result, None for no stderr."""
-        err = self._kept["stderr"]
-        stderr = "".join(err).encode() if err else None
-        return "".join(self._kept["stdout"]).encode(), stderr

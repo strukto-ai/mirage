@@ -21,7 +21,7 @@ from mirage.runtime.source import (
     resolve_program,
     skip_first_line,
 )
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer, RunResult
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -55,11 +55,24 @@ async def resolve(
     texts: list[str],
     rules: Argv0Rules = Argv0Rules(),
     **fields,
-) -> Program | RunResult:
+) -> Program | RunAnswer:
     ctx = Context(vfs=Files(fake_dispatch, ledger=False), **fields)
-    return await resolve_program(
-        paths, texts, ctx, "python3", rules, no_module, "echo"
+    said = bytearray()
+
+    async def errors(data: bytes) -> None:
+        said.extend(data)
+
+    resolved = await resolve_program(
+        paths, texts, ctx, "python3", rules, no_module, "echo", errors
     )
+    if isinstance(resolved, RunResult):
+        return RunAnswer(resolved.exit_code, stderr=bytes(said))
+    assert not said
+    return resolved
+
+
+async def no_errors(data: bytes) -> None:
+    raise AssertionError(data)
 
 
 @pytest.mark.asyncio
@@ -83,7 +96,7 @@ async def test_script_operand_reads_through_the_files():
 @pytest.mark.asyncio
 async def test_missing_script_reports_no_such_file():
     result = await resolve([spec("/nope.js")], [])
-    assert isinstance(result, RunResult)
+    assert isinstance(result, RunAnswer)
     assert result.exit_code == 1
     assert result.stderr == b"python3: /nope.js: No such file\n"
 
@@ -91,7 +104,7 @@ async def test_missing_script_reports_no_such_file():
 @pytest.mark.asyncio
 async def test_no_input_reports_error():
     result = await resolve([], [])
-    assert isinstance(result, RunResult)
+    assert isinstance(result, RunAnswer)
     assert result.exit_code == 1
     assert result.stderr == b"python3: no input\n"
 
@@ -119,7 +132,7 @@ async def test_a_payload_leaves_stdin_to_the_program():
 @pytest.mark.asyncio
 async def test_a_module_this_runtime_cannot_run_is_refused():
     result = await resolve([], [], flags={"m": "json.tool"})
-    assert isinstance(result, RunResult)
+    assert isinstance(result, RunAnswer)
     assert result.exit_code == 1
     assert result.stderr == (
         b"python3: -m is not supported by the 'echo' runtime\n"
@@ -136,6 +149,7 @@ async def test_a_module_names_itself_in_argv0():
         RULES,
         lambda name, label: f"run {name} as {label}",
         "echo",
+        no_errors,
     )
     assert program == Program(
         code="run json.tool as python3", args=["a"], prog="json.tool"

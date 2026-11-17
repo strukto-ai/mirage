@@ -33,6 +33,7 @@ from mirage.context.session_context import (
 from mirage.core.generic.rewrite import (
     append_by_spooled_rewrite,
     append_by_streamed_rewrite,
+    append_through_spool,
     expect_offset,
     pwrite_by_streamed_rewrite,
     refuse_taken,
@@ -326,3 +327,57 @@ async def test_a_completed_own_read_replaces_the_saved_condition(
         reset_caller(token)
     condition = write.await_args.args[0].condition
     assert condition == (ANY_WRITE if version is None else MatchWrite(version))
+
+
+def _streamed_read(store: dict[str, bytes], fails: bool = False):
+    async def source():
+        for byte in store["f"]:
+            yield bytes([byte])
+        if fails:
+            raise FileNotFoundError("f")
+
+    async def read():
+        return source()
+
+    return read
+
+
+@pytest.mark.asyncio
+async def test_append_through_spool_stages_the_base_before_a_streamed_write():
+    # The write empties the file before it pulls its body, as disk's and
+    # RAM's do: a base handed to it unstaged would read back nothing.
+    store = {"f": b"0123456789"}
+    bodies = []
+
+    async def write(body):
+        store["f"] = b""
+        bodies.append(not isinstance(body, bytes))
+        store["f"] = await materialize(body)
+
+    await append_through_spool(_streamed_read(store), write, b"tail")
+    assert store["f"] == b"0123456789tail"
+    assert bodies == [True]
+
+
+@pytest.mark.asyncio
+async def test_append_through_spool_starts_a_missing_file_empty():
+    written = []
+
+    async def read():
+        raise FileNotFoundError("f")
+
+    async def write(body):
+        written.append(await materialize(body))
+
+    await append_through_spool(read, write, b"tail")
+    assert written == [b"tail"]
+
+
+@pytest.mark.asyncio
+async def test_append_through_spool_refuses_a_base_it_read_only_part_of():
+    write = AsyncMock()
+    with pytest.raises(FileNotFoundError):
+        await append_through_spool(
+            _streamed_read({"f": b"head"}, fails=True), write, b"tail"
+        )
+    write.assert_not_awaited()

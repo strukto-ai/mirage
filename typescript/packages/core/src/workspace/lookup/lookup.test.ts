@@ -35,7 +35,7 @@ import {
   type ProcessExecutorMixin,
 } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
 import { declaredCalls, methodName } from '../../vfs/call.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -64,7 +64,7 @@ class Sandbox extends Runtime implements ProcessExecutorMixin {
     super({}, ['gcc', EXTERNAL_COMMANDS])
   }
   runProcess(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 
@@ -72,10 +72,10 @@ class HostPython extends PythonRuntime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'host-python'
   interpret(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
   runProcess(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 
@@ -975,24 +975,29 @@ class Box extends Runtime implements LineExecutorMixin {
     return new MachineName('ssh', this.name)
   }
 
-  runLine(): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new TextEncoder().encode(`${this.name}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  async runLine(
+    _e: unknown,
+    _p: unknown,
+    _t: unknown,
+    _ctx: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode(`${this.name}\n`))
+    return { exitCode: 0 }
   }
 }
 
 class Monty extends PythonRuntime {
   readonly name = 'monty'
 
-  interpret(): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new TextEncoder().encode('monty\n'),
-      stderr: null,
-      exitCode: 0,
-    })
+  async interpret(
+    _engine: unknown,
+    _program: unknown,
+    _ctx: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode('monty\n'))
+    return { exitCode: 0 }
   }
 }
 
@@ -1081,17 +1086,15 @@ describe('a wrapper runs where the program it runs is captured', () => {
 })
 
 class Echo extends Box {
-  override runLine(
-    _e?: unknown,
-    _p?: unknown,
-    _t?: unknown,
-    ctx?: { flags: Record<string, unknown> },
+  override async runLine(
+    _e: unknown,
+    _p: unknown,
+    _t: unknown,
+    ctx: { flags: Record<string, unknown> },
+    output: OutputFn,
   ): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new TextEncoder().encode(`${String(ctx?.flags.c)}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+    await output(new TextEncoder().encode(`${String(ctx.flags.c)}\n`))
+    return { exitCode: 0 }
   }
 }
 

@@ -22,6 +22,7 @@ import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
 import { ExitLineFilter, MachineHandle, PidLineFilter } from './handle.ts'
 import { concat } from '../utils/bytes.ts'
+import type { Context } from '../commands/config.ts'
 import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
@@ -42,7 +43,8 @@ import {
 } from './constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { isLineExecutor } from '../runtime/mixin.ts'
-import type { OutputFn, RunResult } from '../runtime/types.ts'
+import { answerOf } from '../runtime/binding.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import type { MachineConfig } from './config.ts'
 import type { RunStatus } from './types.ts'
 import { ProcessTable } from '../execution/process/table.ts'
@@ -52,6 +54,22 @@ import { FIRST_PID } from '../execution/process/constants.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+const EMPTY = new Uint8Array()
+
+// What a fake box answers a line: its stdout, nothing on stderr.
+function answer(stdout: Uint8Array, exitCode = 0): RunAnswer {
+  return { exitCode, stdout, stderr: EMPTY }
+}
+
+// Where a run whose output a test does not read writes it.
+const ignore: OutputFn = () => Promise.resolve()
+
+// A line run on a box's remote runtime, its answer kept whole.
+function lineOn(box: MachineHandle, ctx: Context): Promise<RunAnswer> {
+  return answerOf((output, errors) =>
+    machineRuntime(box).runLine(undefined, [], [], ctx, output, errors),
+  )
+}
 
 // The argv a sandbox runs, as the line the fakes answer.
 function lineOf(argv: readonly string[]): string {
@@ -80,19 +98,31 @@ class RecordingMachine extends MachineHandle {
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
-  ): Promise<RunResult> {
+  ): Promise<RunAnswer> {
     this.execs.push([line, stdin, env, cwd])
-    return Promise.resolve({ stdout: ENC.encode(`ran:${line}`), stderr: null, exitCode: 0 })
+    return Promise.resolve(answer(ENC.encode(`ran:${line}`)))
   }
 
+  // Runs the line through `execLine` and writes its answer once, as a
+  // transport that gets it whole does.
   protected override async execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const given = isRun(argv) ? { ...env, [PROCESS]: runTag(argv) } : env
-    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), given, cwd)
+    const done = await this.execLine(
+      lineOf(argv),
+      stdin === null ? null : await materialize(stdin),
+      given,
+      cwd,
+    )
+    if (done.stdout.byteLength > 0) await output(done.stdout)
+    if (done.stderr.byteLength > 0) await errors(done.stderr)
+    return { exitCode: done.exitCode }
   }
 }
 
@@ -110,7 +140,7 @@ class FifoBox extends RecordingMachine {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-  ): Promise<RunResult> {
+  ): Promise<RunAnswer> {
     const data = stdin === null ? null : await materialize(stdin)
     if (line.includes('rm -f') && this.lost) throw new Error('gone')
     const done = await super.execLine(line, data, env, cwd)
@@ -134,40 +164,24 @@ function fifoOf(lines: readonly string[]): [string, string] {
   return [line, `/home/u/.mirage/fd-${named(line)}`]
 }
 
-// A box whose connection drops while it runs `train`.
+// A box whose connection drops while it runs `train`, once the run has
+// written a line to each stream.
 class DroppedBox extends RecordingMachine {
-  error: Error = new ConnectionLostError(
-    'closed by remote host',
-    ENC.encode('step 0\n'),
-    ENC.encode('warn\n'),
-  )
-
-  override async execLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-  ): Promise<RunResult> {
-    const result = await super.execLine(line, stdin, env, cwd)
-    if (line.startsWith('train')) throw this.error
-    return result
-  }
-}
-
-// A box that streams its errors before the connection drops.
-class StreamingDroppedBox extends DroppedBox {
-  override error: Error = new ConnectionLostError('closed by remote host', ENC.encode('step 0\n'))
+  error: Error = new ConnectionLostError('closed by remote host')
 
   protected override async execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    _output?: OutputFn | null,
-    errors?: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    if (errors !== null && errors !== undefined) await errors(ENC.encode('warn\n'))
-    return super.execArgv(argv, stdin, env, cwd)
+    const done = await super.execArgv(argv, stdin, env, cwd, ignore, ignore)
+    if (!lineOf(argv).startsWith('train')) return done
+    await output(ENC.encode('step 0\n'))
+    await errors(ENC.encode('warn\n'))
+    throw this.error
   }
 }
 
@@ -210,11 +224,11 @@ describe('MachineHandle', () => {
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
-      ): Promise<RunResult> {
+      ): Promise<RunAnswer> {
         if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
         this.execs.push([line, stdin, env, cwd])
         const found = this.holds === '' ? '' : `${this.holds}\n`
-        return Promise.resolve({ stdout: ENC.encode(found), stderr: null, exitCode: 0 })
+        return Promise.resolve(answer(ENC.encode(found)))
       }
     }
     for (const [holds, systemTime] of [
@@ -264,16 +278,12 @@ describe('MachineHandle', () => {
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
-      ): Promise<RunResult> {
+      ): Promise<RunAnswer> {
         if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
         this.probes += 1
         await new Promise((resolve) => setTimeout(resolve, 10))
         const exitCode = this.answers.shift() ?? 0
-        return {
-          stdout: ENC.encode('/usr/lib/faketime/libfaketime.so.1\n'),
-          stderr: null,
-          exitCode,
-        }
+        return answer(ENC.encode('/usr/lib/faketime/libfaketime.so.1\n'), exitCode)
       }
     }
     const box = new CountedBox()
@@ -307,15 +317,11 @@ describe('MachineHandle', () => {
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
-      ): Promise<RunResult> {
+      ): Promise<RunAnswer> {
         if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
         this.probes += 1
         if (this.probes === 1) return new Promise(() => undefined)
-        return Promise.resolve({
-          stdout: ENC.encode('/usr/lib/faketime/libfaketime.so.1\n'),
-          stderr: null,
-          exitCode: 0,
-        })
+        return Promise.resolve(answer(ENC.encode('/usr/lib/faketime/libfaketime.so.1\n')))
       }
     }
     const timeout = AbortSignal.timeout.bind(AbortSignal)
@@ -391,7 +397,7 @@ describe('MachineHandle', () => {
 
   it('passes cwd through verbatim and merges env', async () => {
     const box = new RecordingMachine({ captures: ['@line'], config: { env: { BASE: '1' } } })
-    const result = await machineRuntime(box).runLine(undefined, [], [], {
+    const result = await lineOn(box, {
       flags: { c: 'nvidia-smi' },
       stdin: null,
       env: { LINE: '2' },
@@ -443,32 +449,16 @@ describe('MachineHandle', () => {
     }
   })
 
-  // Only a transport's own ConnectionError means the connection went; an
-  // error of another name from elsewhere in the run stays the error it is.
-  // A run whose output was kept rather than streamed keeps what it read
-  // before the drop.
-  it('keeps the output a dropped run read', async () => {
+  // What a dropped run wrote before the drop reached its sinks as it came;
+  // the drop's own line follows on stderr.
+  it('keeps what a dropped run wrote', async () => {
     const box = new DroppedBox({ captures: ['train'] })
-    const ran = await machineRuntime(box).runLine(undefined, [], [], {
+    const ran = await lineOn(box, {
       flags: { c: 'train' },
       stdin: null,
       cwd: PathSpec.fromStrPath('/'),
     })
-    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
-      129,
-      'step 0\n',
-      `warn\nmirage: ${String(box.machine)}: connection lost\n`,
-    ])
-  })
-
-  it('a dropped run keeps the errors it streamed', async () => {
-    const box = new StreamingDroppedBox({ captures: ['train'] })
-    const ran = await machineRuntime(box).runLine(undefined, [], [], {
-      flags: { c: 'train' },
-      stdin: null,
-      cwd: PathSpec.fromStrPath('/'),
-    })
-    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
       129,
       'step 0\n',
       `warn\nmirage: ${String(box.machine)}: connection lost\n`,
@@ -526,7 +516,7 @@ describe('MachineHandle', () => {
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
-      ): Promise<RunResult> {
+      ): Promise<RunAnswer> {
         await new Promise((resolve) => setTimeout(resolve, 500))
         return super.execLine(line, stdin, env, cwd)
       }
@@ -560,11 +550,11 @@ describe('MachineHandle', () => {
         stdin: ByteSource | null,
         env: Record<string, string>,
         cwd: string,
-        _output?: unknown,
-        _errors?: unknown,
+        output: OutputFn,
+        errors: OutputFn,
         signal?: AbortSignal,
       ): Promise<RunResult> {
-        const result = await super.execArgv(argv, stdin, env, cwd)
+        const result = await super.execArgv(argv, stdin, env, cwd, output, errors)
         if (lineOf(argv) !== 'yes') return result
         return new Promise<RunResult>((_, reject) => {
           signal?.addEventListener(
@@ -586,7 +576,7 @@ describe('MachineHandle', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: abort.signal,
     }
-    const run = machineRuntime(box).runLine(undefined, [], [], ctx)
+    const run = machineRuntime(box).runLine(undefined, [], [], ctx, ignore, ignore)
     const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() => {
       expect(box.execs).toHaveLength(1)
@@ -607,11 +597,11 @@ describe('MachineHandle', () => {
         stdin: ByteSource | null,
         env: Record<string, string>,
         cwd: string,
-        _output?: unknown,
-        _errors?: unknown,
+        output: OutputFn,
+        errors: OutputFn,
         signal?: AbortSignal,
       ): Promise<RunResult> {
-        const result = await super.execArgv(argv, stdin, env, cwd)
+        const result = await super.execArgv(argv, stdin, env, cwd, output, errors)
         if (lineOf(argv) !== 'yes') return result
         return new Promise<RunResult>((_, reject) => {
           signal?.addEventListener(
@@ -640,7 +630,8 @@ describe('MachineHandle', () => {
       cancel: () => {
         abort.abort()
       },
-      run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
+      run: async () =>
+        (await machineRuntime(box).runLine(undefined, [], [], ctx, ignore, ignore)).exitCode,
     })
     await vi.waitFor(() => {
       expect(box.execs).toHaveLength(1)
@@ -664,7 +655,8 @@ describe('MachineHandle', () => {
       command: 'yes',
       cwd: ctx.cwd,
       cancel: () => undefined,
-      run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
+      run: async () =>
+        (await machineRuntime(box).runLine(undefined, [], [], ctx, ignore, ignore)).exitCode,
     })
     expect((await runner.join()).exit).toBe(0)
     expect(box.execs[0]?.[2][PROCESS]).toBe(`w1:${String(FIRST_PID)}`)
@@ -684,9 +676,9 @@ describe('MachineHandle', () => {
         stdin: Uint8Array | null,
         env: Record<string, string>,
         cwd: string,
-      ): Promise<RunResult> {
+      ): Promise<RunAnswer> {
         await super.execLine(line, stdin, env, cwd)
-        return { stdout: new Uint8Array(), stderr: null, exitCode: code }
+        return answer(EMPTY, code)
       }
     }
     const box = new AnsweringBox({ captures: ['yes'] })
@@ -697,8 +689,8 @@ describe('MachineHandle', () => {
 
   it('answers false for a stop that failed', async () => {
     class FailingBox extends RecordingMachine {
-      override execLine(): Promise<RunResult> {
-        return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 127 })
+      override execLine(): Promise<RunAnswer> {
+        return Promise.resolve(answer(EMPTY, 127))
       }
     }
     expect(await new FailingBox({ captures: ['yes'] }).stop('t1', 15)).toBe(false)
@@ -711,11 +703,11 @@ describe('MachineHandle', () => {
         stdin: ByteSource | null,
         env: Record<string, string>,
         cwd: string,
-        _output?: unknown,
-        _errors?: unknown,
+        output: OutputFn,
+        errors: OutputFn,
         signal?: AbortSignal,
       ): Promise<RunResult> {
-        await super.execArgv(argv, stdin, env, cwd)
+        await super.execArgv(argv, stdin, env, cwd, output, errors)
         if (lineOf(argv) !== 'yes') return new Promise<RunResult>(() => undefined)
         return new Promise<RunResult>((_, reject) => {
           signal?.addEventListener(
@@ -740,7 +732,7 @@ describe('MachineHandle', () => {
         cwd: PathSpec.fromStrPath('/'),
         signal: abort.signal,
       }
-      const run = machineRuntime(box).runLine(undefined, [], [], ctx)
+      const run = machineRuntime(box).runLine(undefined, [], [], ctx, ignore, ignore)
       const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
       await vi.waitFor(() => {
         expect(box.execs).toHaveLength(1)
@@ -754,10 +746,13 @@ describe('MachineHandle', () => {
     }
   })
 
+  // An answer the transport got whole streams through the run's stdout like
+  // any other, so a cap that stops reading stops the run before it settles,
+  // 141 as SIGPIPE leaves a program.
   it('line output caps truncate with a notice', async () => {
     class ChattyBox extends RecordingMachine {
-      override execLine(): Promise<RunResult> {
-        return Promise.resolve({ stdout: ENC.encode('a\nb\nc\n'), stderr: null, exitCode: 0 })
+      override execLine(): Promise<RunAnswer> {
+        return Promise.resolve(answer(ENC.encode('a\nb\nc\n')))
       }
     }
     const box = new ChattyBox({ captures: ['python3'] })
@@ -768,7 +763,7 @@ describe('MachineHandle', () => {
     )
     try {
       const io = await ws.shell('python3 train.py')
-      expect(io.exitCode).toBe(0)
+      expect(io.exitCode).toBe(141)
       expect(DEC.decode(io.stdout)).toBe('a\nb\n')
       expect(DEC.decode(io.stderr)).toContain('truncated at limit')
     } finally {
@@ -880,6 +875,29 @@ describe('ExitLineFilter', () => {
     expect(await exited(chunks)).toEqual(['err\nlater\n', [42]])
   })
 
+  // The status is told once the output written with the line has been taken,
+  // so a slow reader never has the run let go mid-write.
+  it('tells the status once the output written with it is taken', async () => {
+    let release = (): void => undefined
+    const taken = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const codes: number[] = []
+    const line = new ExitLineFilter(
+      () => taken,
+      (code) => codes.push(code),
+      MARK,
+    )
+    const writing = line.write(
+      new Uint8Array([...ENC.encode('out\n'), ...MARK, ...ENC.encode('0\n')]),
+    )
+    await Promise.resolve()
+    expect(codes).toEqual([])
+    release()
+    await writing
+    expect(codes).toEqual([0])
+  })
+
   // A mark with no status line after it is the program's own, and so is a
   // piece of one the stream ends on.
   it("leaves a mark without a status line as the program's own", async () => {
@@ -906,12 +924,12 @@ class LeftOpenBox extends RecordingMachine {
     _stdin: ByteSource | null,
     _env: Record<string, string>,
     _cwd: string,
-    _output?: OutputFn | null,
-    errors?: OutputFn | null,
+    _output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
-    await errors?.(new Uint8Array([...mark, ...ENC.encode('3\n')]))
+    await errors(new Uint8Array([...mark, ...ENC.encode('3\n')]))
     return new Promise((_, reject) => {
       signal?.addEventListener('abort', () => {
         reject(new Error('let go'))
@@ -944,11 +962,11 @@ class SlowStopBox extends RecordingMachine {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    _output?: OutputFn | null,
-    errors?: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd)
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
     this.started = true
     await new Promise<void>((resolve) => {
       signal?.addEventListener('abort', () => {
@@ -956,7 +974,7 @@ class SlowStopBox extends RecordingMachine {
       })
     })
     const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
-    await errors?.(new Uint8Array([...mark, ...ENC.encode('0\n')]))
+    await errors(new Uint8Array([...mark, ...ENC.encode('0\n')]))
     await new Promise((resolve) => setTimeout(resolve, (RUN_DRAIN_SECONDS + 0.3) * 1000))
     throw new DOMException('execute aborted', 'AbortError')
   }
@@ -981,7 +999,8 @@ it('ends a stopped run as stopped whatever its program said meanwhile', async ()
     cancel: () => {
       abort.abort()
     },
-    run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
+    run: async () =>
+      (await machineRuntime(box).runLine(undefined, [], [], ctx, ignore, ignore)).exitCode,
   })
   await vi.waitFor(() => {
     expect(box.started).toBe(true)
@@ -990,42 +1009,57 @@ it('ends a stopped run as stopped whatever its program said meanwhile', async ()
   expect((await runner.join()).exit).toBe(130)
 }, 5000)
 
-// A box that writes the run's pid line as its wrapper would: on stderr when
-// its streams are apart, at the start of a joined stdout returned whole.
+// A box that writes the run's pid and exit lines as its wrapper would: on
+// stderr when its streams are apart, on stdout, around the program's own,
+// when its exec joins them (`joinsStreams`, as Daytona's does).
 class PidLineBox extends RecordingMachine {
-  joined = false
+  protected override readonly joinsStreams: boolean
+
+  constructor(joined: boolean) {
+    super({ captures: ['train'] })
+    this.joinsStreams = joined
+  }
 
   protected override async execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output?: OutputFn | null,
-    errors?: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
-    const result = await super.execArgv(argv, stdin, env, cwd)
+    const own: Uint8Array[] = []
+    const keep: OutputFn = (data) => Promise.resolve(void own.push(data))
+    await super.execArgv(argv, stdin, env, cwd, keep, ignore)
     const line = new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')])
-    if (this.joined) return { stdout: concat([line, result.stdout]), stderr: null, exitCode: 0 }
-    await errors?.(line)
-    await output?.(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('7 1\nmine\n')]))
-    return { stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 }
+    const exit = new Uint8Array([...runExitMark(argv[RUN_PROGRAM_AT - 2] ?? ''), 0x30, 0x0a])
+    if (this.joinsStreams) {
+      await output(concat([line, ...own]))
+      await output(exit)
+      return { exitCode: 0 }
+    }
+    await errors(line)
+    await output(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('7 1\nmine\n')]))
+    await errors(exit)
+    return { exitCode: 0 }
   }
 }
 
 // The wrapper's pid line comes on stderr, so a program's own stdout that
-// starts like it is left whole; an exec that returns its streams joined
-// brings the line at the start of stdout. Either way the first line gives
-// the program's pid.
+// starts like it is left whole; an exec that joins its streams brings the
+// pid line at the start of stdout and the exit line after the program's
+// output, and both come off it. Either way the first line gives the
+// program's pid.
 it.each([
   [false, `${DEC.decode(RUN_PID_MARK)}7 1\nmine\n`],
   [true, 'ran:train'],
 ])('gives the program its pid from the first pid line (joined %s)', async (joined, stdout) => {
-  const box = new PidLineBox({ captures: ['train'] })
-  box.joined = joined
+  const box = new PidLineBox(joined)
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
   try {
     const io = await ws.shell('train')
     expect(DEC.decode(await materialize(io.stdout))).toBe(stdout)
+    expect(DEC.decode(await materialize(io.stderr))).toBe('')
     const [program] = (await ws.processes()).filter((p) => p.program)
     expect([program?.machinePid?.pid, program?.machineInstance]).toEqual([812, 'box'])
   } finally {

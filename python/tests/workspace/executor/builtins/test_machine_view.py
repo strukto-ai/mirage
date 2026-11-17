@@ -155,7 +155,7 @@ class Engine(Runtime):
         return None
 
     async def _run(self, kind, engine, paths, texts, ctx, output, errors):
-        return RunResult(stdout=b"", stderr=b"", exit_code=0)
+        return RunResult(exit_code=0)
 
 
 class OwnReach(Engine):

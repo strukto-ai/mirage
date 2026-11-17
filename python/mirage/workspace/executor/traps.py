@@ -380,7 +380,7 @@ async def run_exit_trap(
         ):
             final = io.exit_code
     except ExitSignal as sig:
-        stdout, stderr = sig.stdout or b"", sig.stderr
+        stdout, stderr = await materialize(sig.stdout), sig.stderr
         # A substitution bash cannot parse ends the action, not the status.
         final = status if sig.refused else sig.exit_code
     except ReturnSignal as sig:
@@ -454,9 +454,7 @@ async def end_shell(
             execute_fn, session, sig.contained_code, stdin, call_stack
         )
         if cleanup is not None:
-            sig.stdout = (sig.stdout or b"") + (
-                await cleanup.materialize_stdout()
-            )
+            sig.stdout = async_chain([sig.stdout, cleanup.stdout])
             sig.stderr += await cleanup.materialize_stderr()
             sig.exit_code = sig.contained_code = cleanup.exit_code
         raise

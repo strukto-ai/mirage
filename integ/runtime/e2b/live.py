@@ -33,6 +33,7 @@ from websockets.exceptions import ConnectionClosedError
 from mirage import Context, Limit, MountMode, PathSpec, Workspace
 from mirage.machine.e2b import E2BMachine
 from mirage.machine.ssh import SSHMachine
+from mirage.runtime.binding import answer_of
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -89,7 +90,11 @@ def run_line(machine, line, stdin, env, cwd):
     """Run one raw line on a machine, as the remote runtime runs an
     ``@line`` capture there."""
     ctx = Context(stdin=stdin, env=env, cwd=PathSpec.from_str_path(cwd))
-    return machine.run(("/bin/sh", "-c", line), ctx, None, None, None)
+    return answer_of(
+        lambda output, errors: machine.run(
+            ("/bin/sh", "-c", line), ctx, None, output, errors
+        )
+    )
 
 
 async def exercise(machine, label):

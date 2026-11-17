@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { posix } from 'node:path'
+import { posix } from "node:path";
 
-import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-node'
+import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from "@struktoai/mirage-node";
 
 // The TypeScript twin of remote_runtime.py: a runtime for an execution
 // service Mirage does not ship, named from yaml as
@@ -25,20 +25,20 @@ import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-
 // working directory and writes back the files the program changed. Both go
 // through ctx.vfs, so mount modes, policy and the cache apply to them.
 
-const MAX_BYTES = 16 * 1024 * 1024
+const MAX_BYTES = 16 * 1024 * 1024;
 
 export class RemoteRuntime extends Runtime {
-  [PROCESS_EXECUTOR] = true
-  name = 'remote'
-  reach = 'remote'
+  [PROCESS_EXECUTOR] = true;
+  name = "remote";
+  reach = "remote";
   static configFields = {
-    url: { type: 'string' },
-    token: { type: 'string' },
-    maxBytes: { type: 'number' },
-  }
+    url: { type: "string" },
+    token: { type: "string" },
+    maxBytes: { type: "number" },
+  };
 
   constructor(options = {}) {
-    super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], RemoteRuntime.configFields)
+    super(options, ["python3", "python", "node", EXTERNAL_COMMANDS], RemoteRuntime.configFields);
   }
 
   /**
@@ -51,87 +51,87 @@ export class RemoteRuntime extends Runtime {
    * @param {string[]} texts the argv, program first.
    * @param {import('@struktoai/mirage-node').Context} ctx the session's cwd,
    *   stdin, files and abort signal.
+   * @param {(chunk: Uint8Array) => Promise<void>} output receives the
+   *   program's stdout, which the service answers whole, so it is written once.
+   * @param {(chunk: Uint8Array) => Promise<void>} errors the same for stderr.
    */
-  async runProcess(_engine, _paths, texts, ctx) {
-    const cwd = ctx.cwd.virtual
-    const maxBytes = this.config.maxBytes ?? MAX_BYTES
-    const files = await snapshot(ctx, cwd, maxBytes)
+  async runProcess(_engine, _paths, texts, ctx, output, errors) {
+    const cwd = ctx.cwd.virtual;
+    const maxBytes = this.config.maxBytes ?? MAX_BYTES;
+    const files = await snapshot(ctx, cwd, maxBytes);
     const request = {
       argv: texts,
       stdin: b64(await collect(ctx.stdin, maxBytes)),
       files: Object.fromEntries(Object.entries(files).map(([rel, data]) => [rel, b64(data)])),
-    }
+    };
     const resp = await fetch(this.config.url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.config.token ?? ''}`,
+        "content-type": "application/json",
+        authorization: `Bearer ${this.config.token ?? ""}`,
       },
       body: JSON.stringify(request),
       signal: ctx.signal,
-    })
-    if (!resp.ok) throw new Error(`execution service answered ${resp.status}`)
-    const answer = await resp.json()
+    });
+    if (!resp.ok) throw new Error(`execution service answered ${resp.status}`);
+    const answer = await resp.json();
     for (const [rel, data] of Object.entries(answer.files)) {
-      let folder = cwd
-      for (const part of rel.includes('/') ? posix.dirname(rel).split('/') : []) {
-        folder = posix.join(folder, part)
-        if (!(await ctx.vfs.exists(folder))) await ctx.vfs.mkdir(folder)
+      let folder = cwd;
+      for (const part of rel.includes("/") ? posix.dirname(rel).split("/") : []) {
+        folder = posix.join(folder, part);
+        if (!(await ctx.vfs.exists(folder))) await ctx.vfs.mkdir(folder);
       }
-      await ctx.vfs.write(posix.join(cwd, rel), unb64(data))
+      await ctx.vfs.write(posix.join(cwd, rel), unb64(data));
     }
-    const stderr = unb64(answer.stderr)
-    return {
-      stdout: unb64(answer.stdout),
-      stderr: stderr.length > 0 ? stderr : null,
-      exitCode: answer.exit_code,
-    }
+    await output(unb64(answer.stdout));
+    await errors(unb64(answer.stderr));
+    return { exitCode: answer.exit_code };
   }
 }
 
 async function snapshot(ctx, cwd, maxBytes) {
   // No prototype, so a file named __proto__ is an entry like any other.
-  const files = Object.create(null)
-  let total = 0
-  const mount = ctx.vfs.mountOf(cwd)
-  const pending = [cwd]
+  const files = Object.create(null);
+  let total = 0;
+  const mount = ctx.vfs.mountOf(cwd);
+  const pending = [cwd];
   while (pending.length > 0) {
-    const folder = pending.pop()
+    const folder = pending.pop();
     for (const entry of await ctx.vfs.readdir(folder)) {
       // Copy the working directory's own mount only: another mount below
       // it (or /dev under the root) stays behind.
-      if (ctx.vfs.mountOf(entry) !== mount) continue
+      if (ctx.vfs.mountOf(entry) !== mount) continue;
       if (await ctx.vfs.isDir(entry)) {
-        pending.push(entry)
-        continue
+        pending.push(entry);
+        continue;
       }
-      const data = await ctx.vfs.read(entry, { raw: true })
-      total += data.length
-      if (total > maxBytes) throw new Error(`working directory is over ${maxBytes} bytes`)
-      files[posix.relative(cwd, entry)] = data
+      const data = await ctx.vfs.read(entry, { raw: true });
+      total += data.length;
+      if (total > maxBytes) throw new Error(`working directory is over ${maxBytes} bytes`);
+      files[posix.relative(cwd, entry)] = data;
     }
   }
-  return files
+  return files;
 }
 
 // The service takes a run's input whole, so stop reading at the budget: an
 // endless producer fails the run instead of hanging it.
 async function collect(source, maxBytes) {
-  if (source === null || source === undefined) return new Uint8Array()
-  const chunks = []
-  let total = 0
+  if (source === null || source === undefined) return new Uint8Array();
+  const chunks = [];
+  let total = 0;
   for await (const chunk of source instanceof Uint8Array ? [source] : source) {
-    chunks.push(chunk)
-    total += chunk.length
-    if (total > maxBytes) throw new Error(`stdin is over ${maxBytes} bytes`)
+    chunks.push(chunk);
+    total += chunk.length;
+    if (total > maxBytes) throw new Error(`stdin is over ${maxBytes} bytes`);
   }
-  return new Uint8Array(Buffer.concat(chunks))
+  return new Uint8Array(Buffer.concat(chunks));
 }
 
 function b64(data) {
-  return Buffer.from(data).toString('base64')
+  return Buffer.from(data).toString("base64");
 }
 
 function unb64(text) {
-  return new Uint8Array(Buffer.from(text, 'base64'))
+  return new Uint8Array(Buffer.from(text, "base64"));
 }

@@ -37,12 +37,13 @@ class Engine(PythonRuntime):
         self.release = asyncio.Event()
         self.release.set()
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
         self.entered.set()
         await self.release.wait()
-        return RunResult(
-            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
-        )
+        await output(f"{self.name}\n".encode())
+        return RunResult(exit_code=0)
 
     async def close(self) -> None:
         self.closed += 1
@@ -59,10 +60,10 @@ class Gate(Runtime, LineExecutorMixin):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def run_line(self, engine, paths, texts, ctx):
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
         self.entered.set()
         await self.release.wait()
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return RunResult(exit_code=0)
 
 
 def workspace(*runtimes):
@@ -195,10 +196,9 @@ class Box(Runtime, LineExecutorMixin):
         super().__init__(captures=captures or ("@external",))
         self.name = name
 
-    async def run_line(self, engine, paths, texts, ctx):
-        return RunResult(
-            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
-        )
+    async def run_line(self, engine, paths, texts, ctx, output, errors):
+        await output(f"{self.name}\n".encode())
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

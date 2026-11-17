@@ -17,6 +17,7 @@ import { MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PyodideRuntime } from './runtime.ts'
+import { answerOf } from '../../binding.ts'
 
 const DEC = new TextDecoder()
 
@@ -53,22 +54,26 @@ describe('pyodide extended attributes', { timeout: 120_000 }, () => {
   it('answer ENOTSUP where no worker can wait on the dispatcher', async () => {
     const rt = new PyodideRuntime()
     try {
-      const out = await rt.interpret(
-        undefined,
-        {
-          code: [
-            'import errno, os',
-            'try:',
-            '    os.listxattr("/data")',
-            '    answer = "served"',
-            'except OSError as exc:',
-            '    answer = exc.errno == errno.ENOTSUP',
-            'print(answer)',
-          ].join('\n'),
-          args: [],
-          stdin: null,
-        },
-        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+      const out = await answerOf((output, errors) =>
+        rt.interpret(
+          undefined,
+          {
+            code: [
+              'import errno, os',
+              'try:',
+              '    os.listxattr("/data")',
+              '    answer = "served"',
+              'except OSError as exc:',
+              '    answer = exc.errno == errno.ENOTSUP',
+              'print(answer)',
+            ].join('\n'),
+            args: [],
+            stdin: null,
+          },
+          { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+          output,
+          errors,
+        ),
       )
       expect(new TextDecoder().decode(out.stdout)).toBe('True\n')
     } finally {

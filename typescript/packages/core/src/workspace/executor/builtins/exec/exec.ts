@@ -97,7 +97,13 @@ import {
  * action, as bash's does. `-c` runs CMD with an empty environment; `-a` and
  * `-l` name an argv[0] that mirage's programs do not read, and are refused.
  * The redirect-only form (`exec > file`) never reaches here: it is a
- * redirected statement, handled where redirects are applied. Mirrors Python.
+ * redirected statement, handled where redirects are applied.
+ *
+ * CMD writes where the statement writes (`sink`), as it runs, the way
+ * `eval`'s line does: `exec yes | head -n1` ends once head has read its
+ * line, and `exec cat big` never holds the file. What it returns instead (a
+ * statement with nowhere to write) rides the signal as it is, read by
+ * whichever boundary the signal reaches. Mirrors Python.
  */
 export async function handleExecCommand(
   args: string[],
@@ -105,6 +111,7 @@ export async function handleExecCommand(
   executeFn: ExecuteFn | null = null,
   registry: MountRegistry | null = null,
   stdin: ByteSource | null = null,
+  sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   const scan = scanOptions(args, 'acl')
   const refused = scan.letters.find((f) => f === 'a' || f === 'l')
@@ -132,11 +139,13 @@ export async function handleExecCommand(
     (scan.letters.includes('c') ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
   clearTraps(session)
   const io = await runAsProgram(session, () =>
-    executeFn(line, { sessionId: session.sessionId, stdin }),
+    executeFn(line, {
+      sessionId: session.sessionId,
+      stdin,
+      ...(sink !== null ? { sink } : {}),
+    }),
   )
-  const stdout = await materialize(io.stdout)
-  const stderr = await io.materializeStderr()
-  const replaced = new ExitSignal(io.exitCode, stderr, stdout)
+  const replaced = new ExitSignal(io.exitCode, await io.materializeStderr(), io.stdout)
   replaced.replaced = head
   replaced.unrouted = true
   throw replaced
@@ -712,5 +721,6 @@ export function execBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     call.executeFn,
     call.registry,
     call.stdin,
+    call.sink ?? null,
   )
 }

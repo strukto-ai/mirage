@@ -1704,6 +1704,46 @@ async def test_an_appending_handle_lands_after_what_others_appended(native):
         assert files.appends == 1
 
 
+class _StreamedNoAppend(_NoAppend):
+    """A mount with no append that records how the rewrite reads the base
+    and what body it writes back."""
+
+    def __init__(self, ops):
+        super().__init__(ops)
+        self.reads = []
+        self.streamed = []
+
+    async def dispatch(self, name, path, **kwargs):
+        if name == "read":
+            self.reads.append(kwargs)
+        return await self._inner.dispatch(name, path, **kwargs)
+
+    async def write(self, path, data):
+        self.streamed.append(not isinstance(data, bytes))
+        await self._inner.write(path, data)
+
+
+@pytest.mark.asyncio
+async def test_an_append_with_no_native_append_streams_a_staged_base():
+    # The rewrite reads the base as a stream past the file cache, stages it
+    # (RAM's write empties the key before it pulls the body) and writes it
+    # back as a stream with the new bytes after it, never joined.
+    base = b"x" * (2 * MEMORY_LIMIT + 1)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/log", base)
+    files = _StreamedNoAppend(ws.vfs)
+    core = MountCore(files)
+    fh = await core.open("/log", open_mode(os.O_WRONLY | os.O_APPEND))
+    await core.write("/log", b"tail\n", 0, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/log") == base + b"tail\n"
+    assert files.appends == 1
+    assert files.streamed == [True]
+    assert [r for r in files.reads if r.get("direct")] == [
+        {"filetype": None, "direct": True, "stream": True}
+    ]
+
+
 @pytest.mark.asyncio
 async def test_an_appending_handle_appends_past_its_own_landed_writes():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)

@@ -25,7 +25,6 @@ import type { OutputFn, Program, RunResult, RuntimeReach } from '../../types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { type ByteSource, materialize } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { memoryLimit, type ConfigFields, type RuntimeOptions } from '../../config.ts'
 import { memoryRoom } from '../../../io/memory.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
@@ -58,32 +57,22 @@ import { boundSystemClock, systemNow } from '../../../utils/clock.ts'
 /**
  * The run's streams on the main thread: its input taken as the guest
  * reads it, as from a pipe, and its output handed to the sinks as it is
- * written, or kept for the result where a stream has none.
+ * written.
  *
  * Args:
  *   stdin: the run's input.
  *   output: receives stdout as it is written.
  *   errors: the same for stderr.
  */
-function hostStdio(
-  stdin: ByteSource | null,
-  output?: OutputFn,
-  errors?: OutputFn,
-): HostStdio & { kept: [Uint8Array[], Uint8Array[]] } {
+function hostStdio(stdin: ByteSource | null, output: OutputFn, errors: OutputFn): HostStdio {
   const input = stdin === null ? null : new AsyncLineIterator(stdin)
-  const kept: [Uint8Array[], Uint8Array[]] = [[], []]
   return {
-    kept,
     read: (size, stop) =>
       input === null ? Promise.resolve(new Uint8Array()) : abortable(input.read1(size), stop),
     write: async (fd, bytes, stop) => {
       // What a stopped program still writes goes nowhere.
       if (stop.aborted) return true
       const sink = fd === 1 ? output : errors
-      if (sink === undefined) {
-        ;(fd === 1 ? kept[0] : kept[1]).push(bytes)
-        return true
-      }
       try {
         await abortable(sink(bytes), stop)
         return true
@@ -101,11 +90,6 @@ function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
 }
 
-function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
-  const bytes = bridgeBytes(value)
-  return bytes.length > 0 ? bytes : null
-}
-
 // The init switches this engine acts on, by CPython letter. The rest
 // (-E, -I, -s, -S) only change how an interpreter *starts*, and this
 // one is already running by the time a line is typed, so it reports
@@ -120,16 +104,6 @@ function decodeNoticeLines(notice: Uint8Array): string[] {
     .decode(notice)
     .split('\n')
     .filter((line) => line.length > 0)
-}
-
-function appendStderrLines(stderr: Uint8Array | null, lines: string[]): Uint8Array | null {
-  if (lines.length === 0) return stderr
-  const extra = new TextEncoder().encode(lines.map((line) => line + '\n').join(''))
-  if (stderr === null) return extra
-  const out = new Uint8Array(stderr.length + extra.length)
-  out.set(stderr)
-  out.set(extra, stderr.length)
-  return out
 }
 
 // Mount prefixes are normalized with a trailing slash; an Emscripten
@@ -325,8 +299,8 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
    * Run one program on a fresh interpreter: in the worker for a run with
    * files, in process for one without. In the worker the guest reads its
    * input as it comes and its writes go to `output` and `errors` as it
-   * makes them; in process it reads its input whole and its output comes
-   * back in the result.
+   * makes them; in process it reads its input whole and its output, which
+   * a guest there writes without waiting, goes to them once it ends.
    *
    * @param _engine none; each run builds its own interpreter.
    * @param program the source and argv to run.
@@ -338,12 +312,12 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     _engine: undefined,
     program: Program,
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const binding = this.binding
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
-      this.capped(runtime, await runtime.runOne(program, ctx, binding, output, errors))
+      this.capped(runtime, await runtime.runOne(program, ctx, binding, output, errors), errors)
     if (this.sync === undefined && (ctx.processes?.depth ?? 0) > 0)
       return this.withFreshRuntime(execute)
     const caller = currentCaller()
@@ -391,11 +365,16 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     return new PyodideMemoryError(String(cap)).message
   }
 
-  /** A run's result, or a MemoryError when the run passed `maxMemory`. */
-  private capped(runtime: PyodideRuntime, result: RunResult): RunResult {
+  /** A run's result, or a MemoryError, said on `errors`, when the run passed `maxMemory`. */
+  private async capped(
+    runtime: PyodideRuntime,
+    result: RunResult,
+    errors: OutputFn,
+  ): Promise<RunResult> {
     const passed = this.passedCap(runtime)
     if (passed === null) return result
-    return { stdout: result.stdout, stderr: new TextEncoder().encode(`${passed}\n`), exitCode: 1 }
+    await errors(new TextEncoder().encode(`${passed}\n`))
+    return { exitCode: 1 }
   }
 
   private createRuntime(): PyodideRuntime {
@@ -866,21 +845,20 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     program: Program,
     ctx: Context,
     binding: WorkspaceBinding | null,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const files = RuntimeFiles.of(ctx, binding)
     this.files = files
     const hiding = stdlibMount(files?.prefixes() ?? [])
     if (hiding !== null) {
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(
+      await errors(
+        new TextEncoder().encode(
           `mirage: the ${this.name} runtime cannot run with a mount at '${hiding}', ` +
             `which hides the interpreter's standard library at /lib\n`,
         ),
-        exitCode: CANNOT_EXECUTE_STATUS,
-      }
+      )
+      return { exitCode: CANNOT_EXECUTE_STATUS }
     }
     const worker = await this.ensureWorker(files)
     if (worker instanceof PyodideUnavailableError) throw worker
@@ -888,7 +866,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
       const stdio = hostStdio(program.stdin, output, errors)
       const room = memoryRoom()
       try {
-        const result = await this.onWorker(() =>
+        return await this.onWorker(() =>
           worker.execute(
             {
               kind: 'execute',
@@ -910,20 +888,10 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
             stdio,
           ),
         )
-        const [out, err] = stdio.kept
-        const stderr = concat([...err, ...(result.stderr === null ? [] : [result.stderr])])
-        return {
-          ...result,
-          stdout: concat([...out, result.stdout]),
-          stderr: stderr.length > 0 ? stderr : null,
-        }
       } catch (error) {
         if (!(error instanceof PyodideMemoryError)) throw error
-        return {
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(`${error.message}\n`),
-          exitCode: 1,
-        }
+        await errors(new TextEncoder().encode(`${error.message}\n`))
+        return { exitCode: 1 }
       }
     }
     if (files !== null && this.sync === undefined) throw noWorker()
@@ -987,14 +955,16 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
         throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }
       const flushFailures = this.drainMutations()
-      return {
-        stdout: bridgeBytes(arr[0]),
-        // A seed notice rides on stderr but never on the exit code: an
-        // unmatched glob is a warning about the environment, not a
-        // failure of the program that just ran.
-        stderr: appendStderrLines(bridgeStderr(arr[1]), [...seedNotices, ...flushFailures]),
-        exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2],
-      }
+      const [stdout, stderr] = [bridgeBytes(arr[0]), bridgeBytes(arr[1])]
+      if (stdout.length > 0) await output(stdout)
+      if (stderr.length > 0) await errors(stderr)
+      // A seed notice rides on stderr but never on the exit code: an
+      // unmatched glob is a warning about the environment, not a failure
+      // of the program that just ran.
+      const notices = [...seedNotices, ...flushFailures]
+      if (notices.length > 0)
+        await errors(new TextEncoder().encode(notices.map((line) => line + '\n').join('')))
+      return { exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2] }
     } catch (err) {
       // The interrupt can also fire between wrapper statements, where
       // KeyboardInterrupt escapes as a rejection instead of a result.

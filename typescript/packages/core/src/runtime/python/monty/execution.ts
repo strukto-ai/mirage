@@ -19,7 +19,6 @@ import { memoryRoom } from '../../../io/memory.ts'
 import type { StreamName } from '../../../io/types.ts'
 import { materialize } from '../../../io/types.ts'
 import { boundDeadline } from '../../../utils/abort.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { boundSystemClock } from '../../../utils/clock.ts'
 import { TZ_VAR } from '../../../utils/timezone.ts'
 import type { RuntimeFiles } from '../../files.ts'
@@ -216,17 +215,16 @@ export class MontyExecution {
    * @param ctx the run's context: working directory, environment, signal
    *   and limit.
    * @param files the run's file adapter; null outside a workspace.
-   * @param output receives stdout as it is printed; absent returns it in
-   *   the result.
-   * @param errors the same for stderr.
+   * @param output receives stdout as it is printed.
+   * @param errors the same for stderr, a traceback or crash note last.
    * @param externalLookup the host functions the program may call by name.
    */
   async run(
     program: Program,
     ctx: Context,
     files: RuntimeFiles | null,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
     externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {},
   ): Promise<RunResult> {
     // Monty executes on its own worker process, so the event loop stays
@@ -290,12 +288,8 @@ export class MontyExecution {
         }
         if (winner !== INTERRUPTED) {
           const [exitCode, note] = winner
-          const [stdout, stderr] = prints.streams()
-          return {
-            stdout,
-            stderr: note === '' ? stderr : concat([stderr ?? new Uint8Array(), ENC.encode(note)]),
-            exitCode,
-          }
+          if (note !== '') await errors(ENC.encode(note))
+          return { exitCode }
         }
         prints.stop()
         run.catch(() => undefined)
@@ -315,7 +309,7 @@ export class MontyExecution {
     if (interruption.timedOut.value && ctx.timeoutSeconds !== undefined) {
       throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
     }
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
+    return { exitCode: 1 }
   }
 
   private installInterruption(
@@ -485,34 +479,28 @@ export class MontyExecution {
 
 /**
  * What a program prints, in the order it printed it: each write handed to
- * its stream's sink as it comes, or kept for the result where the stream
- * has none.
+ * its stream's sink as it comes.
  *
  * Monty calls back without waiting, so a write for a sink is chained
  * behind the one before it; the first that fails stops the rest, and
  * `end` reports it.
  */
 class Prints {
-  private readonly sinks: Record<StreamName, OutputFn | undefined>
-  private readonly kept: Record<StreamName, string[]> = { stdout: [], stderr: [] }
+  private readonly sinks: Record<StreamName, OutputFn>
   private writing: Promise<void> = Promise.resolve()
   private failure: { error: unknown } | null = null
   private stopped = false
 
   /**
-   * @param output where stdout goes; absent keeps it.
-   * @param errors where stderr goes; absent keeps it.
+   * @param output where stdout goes.
+   * @param errors where stderr goes.
    */
-  constructor(output?: OutputFn, errors?: OutputFn) {
+  constructor(output: OutputFn, errors: OutputFn) {
     this.sinks = { stdout: output, stderr: errors }
   }
 
   readonly write = (stream: StreamName, text: string): void => {
     const sink = this.sinks[stream]
-    if (sink === undefined) {
-      this.kept[stream].push(text)
-      return
-    }
     this.writing = this.writing
       .then(() => (this.failure === null && !this.stopped ? sink(ENC.encode(text)) : undefined))
       .catch((error: unknown) => {
@@ -529,11 +517,5 @@ class Prints {
   async end(): Promise<void> {
     await this.writing
     if (this.failure !== null) throw this.failure.error
-  }
-
-  /** The stdout and stderr kept for the result, null for no stderr. */
-  streams(): [Uint8Array, Uint8Array | null] {
-    const err = this.kept.stderr
-    return [ENC.encode(this.kept.stdout.join('')), err.length > 0 ? ENC.encode(err.join('')) : null]
   }
 }

@@ -24,6 +24,9 @@ import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
 import { MicrosandboxMachine, MountMode, PathSpec, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
+import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 
@@ -56,16 +59,14 @@ async function raw(command: string) {
 async function transport() {
   const runtime = new MicrosandboxMachine('msb', { sandbox })
   for (const data of [null, new Uint8Array(), new Uint8Array([0, 255, 13, 10]), payload]) {
-    const result = await runtime.run(
+    const result = await answered(
+      runtime,
       [
         'python3',
         '-c',
         'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())',
       ],
       { flags: {}, cwd: PathSpec.fromStrPath('/tmp'), stdin: data, env: {} },
-      null,
-      null,
-      null,
     )
     assert.equal(result.exitCode, 0, dec.decode(result.stderr ?? undefined))
     assert.equal(dec.decode(result.stdout).trim(), hash(data ?? new Uint8Array()))
@@ -73,7 +74,8 @@ async function transport() {
   }
   const words = ['a b', '$(literal)', '', '--flag', '\u2603', 'one\ntwo']
   const marker = 'quotes \' " $ and\nnewlines'
-  const result = await runtime.run(
+  const result = await answered(
+    runtime,
     [
       'python3',
       '-c',
@@ -84,9 +86,6 @@ async function transport() {
       ...words,
     ],
     { flags: {}, cwd: PathSpec.fromStrPath('/tmp'), env: { MARK: marker }, stdin: payload },
-    null,
-    null,
-    null,
   )
   assert.deepEqual(Buffer.from(result.stdout), Buffer.from(payload))
   assert.deepEqual(JSON.parse(dec.decode(result.stderr ?? undefined)), words)
@@ -344,17 +343,24 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
 class FullInspect extends MicrosandboxMachine {
   protected override execProgram(
     args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
+    stdin: ByteSource | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ) {
     return super.execProgram(
       args[0] === 'status' ? ['inspect', ...args.slice(1)] : args,
       stdin,
       output,
+      errors,
       signal,
     )
   }
+}
+
+/** A program's run on `machine`, its output kept whole to check. */
+function answered(machine: MachineHandle, argv: string[], ctx: Context) {
+  return answerOf((output, errors) => machine.run(argv, ctx, null, output, errors))
 }
 
 async function inspectPids() {
@@ -403,19 +409,13 @@ async function lifecycleChecks() {
       const result = await within(raw('printf runtime-probe-ok'), 5000)
       assert.equal(result.exitCode, 0, dec.decode(result.stderr ?? undefined))
       assert.equal(dec.decode(result.stdout), 'runtime-probe-ok')
-      pending = new FullInspect('msb', { sandbox }).run(
-        ['true'],
-        {
-          flags: {},
-          cwd: PathSpec.fromStrPath('/'),
-          env: {},
-          stdin: null,
-          signal: controller.signal,
-        },
-        null,
-        null,
-        null,
-      )
+      pending = answered(new FullInspect('msb', { sandbox }), ['true'], {
+        flags: {},
+        cwd: PathSpec.fromStrPath('/'),
+        env: {},
+        stdin: null,
+        signal: controller.signal,
+      })
       const refused = assert.rejects(pending, (error: Error) => error.name === 'AbortError')
       for (let i = 0; i < 80 && (await inspectPids()).length === 0; i++) await delay(25)
       assert.equal((await inspectPids()).length, 1, 'real msb inspect did not start')

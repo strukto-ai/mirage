@@ -47,15 +47,19 @@ from mirage.machine.constants import (
 from mirage.machine.e2b import E2BConfig, E2BMachine, sdk
 from mirage.machine.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.machine.types import MachinePipe
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import PathSpec
-from tests.fixtures.machine import machine_runtime, on
+from tests.fixtures.machine import machine_answer, on
 
 
 def _line(box: E2BMachine, line: str, stdin: bytes | None, env=None):
     cwd = PathSpec.from_str_path("/workspace")
     ctx = Context(flags={"c": line}, stdin=stdin, env=env, cwd=cwd)
-    return machine_runtime(box).run_line(None, [], [], ctx)
+    return machine_answer(box, [], ctx, "line")
+
+
+async def _dropped(data: bytes) -> None:
+    pass
 
 
 def b64(text: str) -> str:
@@ -95,6 +99,19 @@ class FakeHandle:
         self.eof = True
         self.closed.set()
 
+    async def _say(self, stdout: str, stderr: str) -> None:
+        """Hand the callbacks what the command printed, as E2B streams it
+        ahead of the result that carries it again.
+
+        Args:
+            stdout (str): the encoded stdout.
+            stderr (str): the encoded stderr.
+        """
+        if stdout and self.on_stdout is not None:
+            await self.on_stdout(stdout)
+        if stderr and self.on_stderr is not None:
+            await self.on_stderr(stderr)
+
     async def wait(self):
         self.waiting.set()
         if self.wait_error is not None:
@@ -102,8 +119,10 @@ class FakeHandle:
         if self.command == "sleep":
             await asyncio.Event().wait()
         if self.command == "exit 0":
+            await self._say(b64("partial"), b64("boom-err"))
             return FakeResult(b64("partial"), b64("boom-err"), 0)
         if self.command == "exit 3":
+            await self._say(b64("partial"), b64("boom-err"))
             raise CommandExitException(
                 stderr=b64("boom-err"),
                 stdout=b64("partial"),
@@ -112,13 +131,11 @@ class FakeHandle:
             )
         if self.command == "head":
             await self.received.wait()
+            await self._say(b64(self.input.hex()), "")
             return FakeResult(b64(self.input.hex()), "", 0)
         if not self.eof:
             await self.closed.wait()
-        if self.on_stdout is not None:
-            await self.on_stdout(b64(self.input.hex()))
-        if self.on_stderr is not None:
-            await self.on_stderr(b64("warn"))
+        await self._say(b64(self.input.hex()), b64("warn"))
         return FakeResult(b64(self.input.hex()), b64("warn"), 0)
 
     async def kill(self):
@@ -364,7 +381,12 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
     FakeMachine.last.commands.input_error = input_error
     with pytest.raises(type(input_error), match="stdin transport failed"):
         await runtime._exec_argv(
-            ("/bin/sh", "-c", "cat"), b"input", {}, "/workspace", None, None
+            ("/bin/sh", "-c", "cat"),
+            b"input",
+            {},
+            "/workspace",
+            _dropped,
+            _dropped,
         )
     handle = FakeMachine.last.commands.handles[0]
     assert handle.killed and handle.disconnected
@@ -387,8 +409,8 @@ async def test_a_tagged_run_that_fails_is_stopped_by_its_tag():
     ]
 
 
-# A streamed command's stderr goes to its errors callback as it arrives,
-# and the result carries none of it twice.
+# A command's stderr goes to its errors callback as it arrives, once,
+# though the result carries it again.
 @pytest.mark.asyncio
 async def test_streamed_stderr_goes_to_the_errors_callback():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
@@ -399,9 +421,9 @@ async def test_streamed_stderr_goes_to_the_errors_callback():
         said.append(chunk)
 
     result = await runtime._exec_argv(
-        ("/bin/sh", "-c", "cat"), b"in", {}, "/workspace", None, errors
+        ("/bin/sh", "-c", "cat"), b"in", {}, "/workspace", _dropped, errors
     )
-    assert (said, result.stderr) == ([b"warn"], b"")
+    assert (said, result.exit_code) == ([b"warn"], 0)
 
 
 # A kill reaches only the encoding shell, so a line run with no tag of its
@@ -467,7 +489,12 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
 
     async def run() -> int:
         result = await runtime._exec_argv(
-            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None, None
+            ("/bin/sh", "-c", "sleep"),
+            None,
+            env,
+            "/workspace",
+            _dropped,
+            _dropped,
         )
         return result.exit_code
 
@@ -645,9 +672,12 @@ class MountingE2BMachine(E2BMachine):
             argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
-        return await self.exec_line(line, data, env, cwd)
+        done = await self.exec_line(line, data, env, cwd)
+        if done.stdout:
+            await output(done.stdout)
+        return RunResult(exit_code=done.exit_code)
 
-    async def exec_line(self, line, stdin, env, cwd):
+    async def exec_line(self, line, stdin, env, cwd) -> RunAnswer:
         self.lines.append(line)
         rows = "".join(
             f"{source} {p} {t} rw 0 0\n"
@@ -660,7 +690,7 @@ class MountingE2BMachine(E2BMachine):
             if line.startswith("d=$(PATH=")
             else ""
         )
-        return RunResult(stdout=stdout.encode(), stderr=None, exit_code=0)
+        return RunAnswer(0, stdout.encode())
 
     async def open_pipe(self, command):
         source, prefix = shlex.split(command)[5:7]
@@ -827,8 +857,8 @@ BYTES_LINE = (
 
 
 # Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
-# unchanged on stdout and stderr, whole or streamed, with the program's
-# status.
+# unchanged on stdout and stderr, streamed or kept whole for one of
+# Mirage's own lines, with the program's status.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("streamed", [False, True])
 async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
@@ -845,24 +875,16 @@ async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
     async def errors(chunk: bytes) -> None:
         said["err"] += chunk
 
-    result = await runtime._exec_argv(
-        ("/bin/sh", "-c", BYTES_LINE),
-        None,
-        {},
-        "/",
-        output if streamed else None,
-        errors if streamed else None,
-    )
     if streamed:
-        stdout, stderr = bytes(said["out"]), bytes(said["err"])
-        assert (result.stdout, result.stderr) == (b"", b"")
+        result = await runtime._exec_argv(
+            ("/bin/sh", "-c", BYTES_LINE), None, {}, "/", output, errors
+        )
+        answer = RunAnswer(
+            result.exit_code, bytes(said["out"]), bytes(said["err"])
+        )
     else:
-        stdout, stderr = result.stdout, result.stderr
-    assert (result.exit_code, stdout, stderr) == (
-        5,
-        b"a\xff\x00b\r\n\xc3",
-        b"e\xfe\x00\r\n",
-    )
+        answer = await runtime.exec_line(BYTES_LINE, None, {}, "/")
+    assert answer == RunAnswer(5, b"a\xff\x00b\r\n\xc3", b"e\xfe\x00\r\n")
 
 
 # A program's output reaches the host while it still runs: here it waits
@@ -891,7 +913,7 @@ async def test_output_streams_while_the_program_runs():
             {},
             "/",
             output,
-            None,
+            _dropped,
         ),
         10,
     )

@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import answer_of
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -47,22 +48,28 @@ class FakeRuntime(Runtime):
     name = "fake"
     captures = ("python3", "made-up")
 
-    async def run(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def run(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 class PyEngine(PythonRuntime):
     name = "pyengine"
 
-    async def interpret(self, engine, program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 class JsEngine(JsRuntime):
     name = "jsengine"
 
-    async def interpret(self, engine, program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 class DirectEngine(LanguageRuntime):
@@ -70,8 +77,10 @@ class DirectEngine(LanguageRuntime):
     language = "python"
     captures = ("python3", "python")
 
-    async def interpret(self, engine, program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.parametrize(
@@ -290,8 +299,10 @@ class _LineRuntime(Runtime, LineExecutorMixin):
     name = "boxy"
     captures = ("nvidia-smi",)
 
-    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def run_line(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 def test_named_capture_does_not_take_the_whole_line():
@@ -319,7 +330,13 @@ def test_workspace_runtime_is_a_pure_routing_marker():
     assert not isinstance(vfs, LineExecutorMixin)
     assert not hasattr(vfs, "run_line")
     with pytest.raises(UnsupportedExecutionError, match="code execution"):
-        asyncio.run(vfs.execute([], [], Context()))
+        asyncio.run(
+            answer_of(
+                lambda output, errors: vfs.execute(
+                    [], [], Context(), output=output, errors=errors
+                )
+            )
+        )
 
 
 def test_workspace_runtime_reach_is_workspace():

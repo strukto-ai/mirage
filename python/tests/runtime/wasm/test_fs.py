@@ -74,6 +74,10 @@ def test_spec_covers_every_fs_import_of_the_shipped_guests():
     assert len(_spec()) == 33
 
 
+def _dropped(data: bytes) -> None:
+    pass
+
+
 def _raising(exc):
     """A host function double that fails with `exc`.
 
@@ -139,7 +143,11 @@ def test_install_wasi_fs_locks_the_callback_slab_before_its_funcs(monkeypatch):
         return real_func(*args, **kwargs)
 
     monkeypatch.setattr(fs, "Func", counting_func)
-    install_wasi_fs(linker, store, WasiFs(WasmView(), None))
+    install_wasi_fs(
+        linker,
+        store,
+        WasiFs(WasmView(), None, output=_dropped, errors=_dropped),
+    )
     assert order[0] == "lock"
     assert order.count("lock") == 1
     assert order.count("func") == len(_spec())
@@ -181,7 +189,7 @@ def _wasi_over_ram(
         ws.vfs.dispatch, asyncio.new_event_loop(), files=ws.vfs
     )
     view = WasmView(files=files)
-    wasi_fs = WasiFs(view, b"")
+    wasi_fs = WasiFs(view, b"", output=_dropped, errors=_dropped)
     desc = view.open("/data/f.txt", _READ_WRITE)
     assert desc is not None
     fd = wasi_fs._fds.add(
@@ -305,7 +313,9 @@ def test_wasi_open_wires_retained_read_checks(
         files=ws.vfs,
     )
     view = WasmView(files=files)
-    wasi = WasiFs(view, io.BytesIO(b"stdin").read)
+    wasi = WasiFs(
+        view, io.BytesIO(b"stdin").read, output=_dropped, errors=_dropped
+    )
     memory = {}
     monkeypatch.setattr(wasi, "_path_arg", lambda *args: path)
     monkeypatch.setattr(

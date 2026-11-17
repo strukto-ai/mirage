@@ -1356,7 +1356,10 @@ describe('machines runtime: reference', () => {
     '  [LINE_EXECUTOR] = true\n' +
     "  name = 'echobox'\n" +
     "  constructor(options = {}) { super(options, ['nvidia-smi']) }\n" +
-    '  runLine(line) { return Promise.resolve({ stdout: new TextEncoder().encode(`box:${line}\\n`), stderr: null, exitCode: 0 }) }\n' +
+    '  async runLine(_e, _p, _t, ctx, output) {\n' +
+    '    await output(new TextEncoder().encode(`box:${ctx.flags.c}\\n`))\n' +
+    '    return { exitCode: 0 }\n' +
+    '  }\n' +
     '}\n' +
     "export const NOT_A_RUNTIME = { name: 'nope' }\n"
 

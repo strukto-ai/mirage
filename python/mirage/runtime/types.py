@@ -323,18 +323,34 @@ class Program:
 
 @dataclass(frozen=True, slots=True)
 class RunResult:
-    """Outcome of one interpreter execution.
+    """How one run ended: its exit status alone. What it wrote went to
+    the ``OutputFn`` sinks it was given as it ran, a transport that gets
+    its answer whole included, so no run holds its output.
 
     Args:
-        stdout (bytes): captured standard output.
-        stderr (bytes | None): captured standard error, None when
-            empty.
-        exit_code (int): interpreter exit code.
+        exit_code (int): the run's exit status.
     """
 
-    stdout: bytes
-    stderr: bytes | None
     exit_code: int
+
+
+@dataclass(frozen=True, slots=True)
+class RunAnswer:
+    """What a run answered, kept whole for its caller to read once it
+    ends (``answer_of``): one of Mirage's own probe lines on a machine (a
+    check, a scan, a status, a named pipe's path) or a policy program's
+    verdict. Never a command's output, which streams through
+    ``OutputFn`` and leaves its run only a status.
+
+    Args:
+        exit_code (int): the run's status.
+        stdout (bytes): what it printed.
+        stderr (bytes): what it said on stderr.
+    """
+
+    exit_code: int
+    stdout: bytes = b""
+    stderr: bytes = b""
 
 
 class ByteReader(Protocol):

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
@@ -70,7 +70,7 @@ describe('control builtins', () => {
     )
     expect(seen).toEqual([['echo cleanup:$1', frames, 2]])
     expect((err as ExitSignal).exitCode).toBe(2)
-    expect(DEC.decode((err as ExitSignal).stdout ?? new Uint8Array())).toBe('cleanup\n')
+    expect(DEC.decode(await materialize((err as ExitSignal).stdout))).toBe('cleanup\n')
     expect(DEC.decode((err as ExitSignal).stderr)).toBe(
       'bash: exit: abc: numeric argument required\nwarn\n',
     )

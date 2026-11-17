@@ -49,7 +49,7 @@ from mirage.runtime.binding import (
     refused_run,
     restricted_mounts_for,
 )
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import FileType
 from mirage.utils.quote import single_quote
@@ -306,8 +306,8 @@ class MachineMounts:
         provider (str): the machine's provider, for messages.
         machine (str): the machine's name, its key under ``machines:``.
         mount_type (MountType): ssh, fuse or both.
-        run (Callable[[str], Awaitable[RunResult]]): runs one setup
-            command in the machine.
+        run (Callable[[str], Awaitable[RunAnswer]]): runs one setup
+            command in the machine, its answer kept whole.
         open_pipe (Callable[[str], Awaitable[MachinePipe]]): starts a
             command in the machine with its stdin and stdout held open.
     """
@@ -317,7 +317,7 @@ class MachineMounts:
         provider: str,
         machine: str,
         mount_type: MountType,
-        run: Callable[[str], Awaitable[RunResult]],
+        run: Callable[[str], Awaitable[RunAnswer]],
         open_pipe: Callable[[str], Awaitable[MachinePipe]],
     ) -> None:
         self._provider = provider
@@ -364,7 +364,7 @@ class MachineMounts:
         return self._mount_type == "ssh"
 
     async def validate(
-        self, binding: WorkspaceBinding | None, cwd: str
+        self, binding: WorkspaceBinding | None, cwd: str, errors: OutputFn
     ) -> RunResult | None:
         """Record the line for ``sync``, bring the mounts in step, then
         refuse a line that may not run: one from a cwd other than ``/``
@@ -379,6 +379,7 @@ class MachineMounts:
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
             cwd (str): the line's working directory.
+            errors (OutputFn): where a refusal says why.
 
         Returns:
             RunResult | None: the refused run, None when the line may run.
@@ -405,14 +406,13 @@ class MachineMounts:
                 for p in served_prefixes(binding.mount_prefixes())
             )
         ):
-            return RunResult(
-                stdout=b"",
-                stderr=(
+            await errors(
+                (
                     f"{self._provider}: the machine cannot see the working "
                     f"directory {seen}; cd into a mount first\n"
-                ).encode(),
-                exit_code=CANNOT_EXECUTE_STATUS,
+                ).encode()
             )
+            return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
         current = get_current_session()
         if current is None:
             raise RuntimeError(
@@ -424,10 +424,11 @@ class MachineMounts:
             rule.commands and (rule.paths or rule.mount)
             for rule in (*rules.ask, *rules.deny)
         ):
-            return refused_run(
+            return await refused_run(
                 self._provider,
                 "this file transport cannot enforce program-specific path "
                 "rules",
+                errors,
             )
         async with self._lock:
             ws_id = binding.processes.workspace_id if binding.processes else ""
@@ -445,16 +446,15 @@ class MachineMounts:
                     if served.session_id == current.session_id
                     else ""
                 )
-                return RunResult(
-                    stdout=b"",
-                    stderr=(
+                await errors(
+                    (
                         f"{self._provider}: this machine shows {earlier}"
                         f"session {served.session_id}'s view of the "
                         f"workspace; give session {current.session_id} a "
                         "machine of its own\n"
-                    ).encode(),
-                    exit_code=1,
+                    ).encode()
                 )
+                return RunResult(exit_code=1)
             every = mount_paths(binding.mount_prefixes())
             ruled = frozenset(
                 p.rstrip("/") or "/"
@@ -466,26 +466,21 @@ class MachineMounts:
                 binding, binding.files, session, every, ruled
             )
             if refused is not None:
-                return RunResult(
-                    stdout=b"",
-                    stderr=f"{self._provider}: {refused}\n".encode(),
-                    exit_code=1,
-                )
+                await errors(f"{self._provider}: {refused}\n".encode())
+                return RunResult(exit_code=1)
             lost = self._lost()
             if lost is not None:
-                return RunResult(
-                    stdout=b"",
-                    stderr=f"{unmounted(self._provider, lost)}\n".encode(),
-                    exit_code=CANNOT_EXECUTE_STATUS,
-                )
+                await errors(f"{unmounted(self._provider, lost)}\n".encode())
+                return RunResult(exit_code=CANNOT_EXECUTE_STATUS)
             unserved = self._unserved(ruled)
             if self._mount_type != "fuse" and (not unserved or self._served):
                 self._session = session
         if unserved:
-            return refused_run(
+            return await refused_run(
                 self._provider,
                 "a mount this session restricts is not served through the "
                 "dispatcher",
+                errors,
             )
         if self._served and binding.changes is not None:
             self._since = {

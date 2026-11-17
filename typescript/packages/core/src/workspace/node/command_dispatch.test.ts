@@ -30,7 +30,7 @@ import { MachineName } from '../../execution/types.ts'
 import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { parse, syntaxRefusal } from '../../shell/parse/parse.ts'
@@ -108,9 +108,15 @@ class ShellsOut extends LanguageRuntime {
   constructor() {
     super({ captures: ['python3'] })
   }
-  async interpret(_engine: unknown, _program: unknown, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: unknown,
+    _program: unknown,
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
     const nested = await ctx.shell?.('printenv TOKEN')
-    return { stdout: await materialize(nested?.stdout ?? null), stderr: null, exitCode: 0 }
+    await output(await materialize(nested?.stdout ?? null))
+    return { exitCode: 0 }
   }
 }
 
@@ -192,7 +198,7 @@ class Box extends Runtime implements ProcessExecutorMixin {
   }
   runProcess(_engine: unknown, _paths: unknown, texts: string[]): Promise<RunResult> {
     this.ran.push([...texts])
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 }
 
@@ -347,12 +353,15 @@ class Named extends MachineHandle {
     return Promise.resolve()
   }
 
-  protected override execArgv(): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: new TextEncoder().encode(`${this.name}\n`),
-      stderr: null,
-      exitCode: 0,
-    })
+  protected override async execArgv(
+    _argv: unknown,
+    _stdin: unknown,
+    _env: unknown,
+    _cwd: unknown,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    await output(new TextEncoder().encode(`${this.name}\n`))
+    return { exitCode: 0 }
   }
 }
 

@@ -895,7 +895,7 @@ class Napper extends MachineHandle {
   }
 
   protected override execArgv(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+    return Promise.resolve({ exitCode: 0 })
   }
 
   override async close(): Promise<void> {

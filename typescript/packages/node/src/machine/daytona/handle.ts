@@ -18,7 +18,7 @@ import { ON_PAUSE, PAUSED_STATE } from './constants.ts'
 import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { DaytonaSdk } from './sdk.ts'
@@ -32,8 +32,8 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
  * create`, or the SDK); mirage only connects by `sandboxId` and execs
  * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec takes
  * no stdin and reports combined output once the command ends, so a run
- * given input is refused (126) before it starts, stderr comes back null,
- * and a stream gets its output at the end. The output is base64-encoded in the
+ * given input is refused (126) before it starts, and the joined answer is
+ * written once through the run's stdout at the end (`joinsStreams`). The output is base64-encoded in the
  * sandbox, since the exec returns it as text (`encodeOutput`: the machine
  * needs dd and base64). close() releases the SDK client and never
  * touches the machine. Mirage pauses the sandbox only when the workspace
@@ -45,6 +45,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly provider = 'daytona'
   protected override readonly pauses = true
   override readonly takesInput = false
+  protected override readonly joinsStreams = true
   private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
@@ -110,17 +111,17 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
     if (stdin !== null && !(stdin instanceof Uint8Array && stdin.byteLength === 0))
-      return this.inputRefused()
+      return this.inputRefused(errors)
     const command = encodeOutput(wrapLine(argv, env, cwd), true)
     const response = await this.sandbox.process.executeCommand(command)
-    return {
-      stdout: decodeOutput(response.result),
-      stderr: null,
-      exitCode: response.exitCode,
-    }
+    const answer = decodeOutput(response.result)
+    if (answer.byteLength > 0) await output(answer)
+    return { exitCode: response.exitCode }
   }
 
   /** Release the SDK client once a connect under way has settled; the machine itself is the user's. */

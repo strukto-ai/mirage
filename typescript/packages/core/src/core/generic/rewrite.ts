@@ -16,8 +16,9 @@ import { readVersioned, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type RewriteWriteFn } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec, type StatFn } from '../../types.ts'
-import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
+import { closeQuietly } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
@@ -111,6 +112,44 @@ export async function appendByStreamedRewrite<Written>(
     path,
     data,
   )
+}
+
+/**
+ * Append over a plain whole-file read and write, as the layers above the
+ * dispatcher have them (an open file's core, a runtime's files): the file is
+ * read fresh into a spool, a chunk at a time in memory and the rest in the
+ * host's scratch storage, and only then written back as one stream of its
+ * bytes followed by the new ones, so memory holds a chunk whatever the sizes.
+ * The read is staged rather than handed to the write as it comes: a writer
+ * that empties its file before it pulls its source (disk opens it for
+ * writing, RAM resets the key) would read back nothing. A missing file starts
+ * empty; any other failure, or a read that fails once it has bytes,
+ * propagates, since writing the new bytes alone would replace content never
+ * read. `data` is consumed once. Mirrors Python's `append_through_spool`.
+ */
+export async function appendThroughSpool(
+  read: () => Promise<ByteSource>,
+  write: (body: ByteSource) => Promise<void>,
+  data: ByteSource,
+): Promise<void> {
+  const spool = new ByteSpool()
+  try {
+    try {
+      await spool.fill(await read())
+    } catch (error) {
+      if (!isMissingPath(error) || spool.size > 0) throw error
+    }
+    await write(appended(spool, data))
+  } finally {
+    await spool.close()
+    await closeQuietly(data)
+  }
+}
+
+/** The spooled file, then the bytes added to it. Mirrors Python's `_appended`. */
+async function* appended(spool: ByteSpool, data: ByteSource): AsyncGenerator<Uint8Array> {
+  yield* spool.stream()
+  yield* chunks(data)
 }
 
 /**

@@ -61,7 +61,7 @@ class DockerMachine(ProgramMachine):
 
     async def connect(self) -> None:
         container = self.config.container
-        status = await self._exec_program(
+        status = await self._program_answer(
             ["inspect", "--format", "{{json .State}}", container]
         )
         state = reported_state(status, "docker inspect", ("Status",))

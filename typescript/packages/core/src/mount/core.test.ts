@@ -1849,6 +1849,40 @@ describe('MountCore opens', () => {
     expect(dec.decode(await ws.vfs.read('/data/log'))).toBe('one\nother\ntwo\nthree\n')
   })
 
+  // The rewrite reads the base as a stream past the file cache, stages it
+  // (RAM's write empties the key before it pulls the body) and writes it
+  // back as a stream with the new bytes after it, never joined.
+  it('streams a staged base when the files have no append', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const base = 'x'.repeat(2 * MEMORY_LIMIT + 1)
+    await ws.vfs.write('/data/log', base)
+    const files = ws.vfs
+    const append = vi
+      .spyOn(files, 'append')
+      .mockRejectedValue(enotsup('ram', 'append', '/data/log'))
+    const reads: Record<string, unknown>[] = []
+    const dispatch = files.dispatch.bind(files)
+    vi.spyOn(files, 'dispatch').mockImplementation((name, path, args, kwargs, report) => {
+      if (name === 'read' && kwargs?.direct === true) reads.push(kwargs)
+      return dispatch(name, path, args, kwargs, report)
+    })
+    const bodies: boolean[] = []
+    const write = files.write.bind(files)
+    vi.spyOn(files, 'write').mockImplementation((path, data, sessionId) => {
+      bodies.push(!(data instanceof Uint8Array) && typeof data !== 'string')
+      return write(path, data, sessionId)
+    })
+    const core = new MountCore(files)
+    const fh = await core.open('/data/log', flags(fsConstants.O_WRONLY | fsConstants.O_APPEND))
+    await core.write('/data/log', fh, enc.encode('tail\n'), 0)
+    await core.release(fh)
+    vi.restoreAllMocks()
+    expect(dec.decode(await ws.vfs.read('/data/log'))).toBe(base + 'tail\n')
+    expect(append).toHaveBeenCalledTimes(1)
+    expect(bodies).toEqual([true])
+    expect(reads).toEqual([{ filetype: null, direct: true, stream: true }])
+  })
+
   it('appends past what its own landed writes added', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.write('/data/log', 'abc')

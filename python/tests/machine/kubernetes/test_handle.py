@@ -41,15 +41,17 @@ class FakeKubernetesMachine(KubernetesMachine):
         self.exit_code = exit_code
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "get":
             pod = {"status": {"phase": self.phase}}
-            return RunResult(json.dumps(pod).encode(), None, 0)
-        if errors is not None and self.stderr:
+            await output(json.dumps(pod).encode())
+            return RunResult(exit_code=0)
+        if self.stderr:
             await errors(self.stderr)
-        return RunResult(b"out", None, self.exit_code)
+        await output(b"out")
+        return RunResult(exit_code=self.exit_code)
 
 
 def collector() -> tuple[list[bytes], OutputFn]:
@@ -118,7 +120,7 @@ async def test_exec_line_carries_cwd_and_env_on_the_command():
     result = await machine.exec_line("wc -l", b"a\n", {"E": "1"}, "/work")
     assert (result.stdout, result.stderr, result.exit_code) == (
         b"out",
-        None,
+        b"",
         0,
     )
     args, stdin = machine.calls[-1]
@@ -161,7 +163,7 @@ async def test_exec_line_with_no_input_takes_no_stdin():
 class CutOffMachine(KubernetesMachine):
     cut_off: type[BaseException] = OSError
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         await errors(b"command")
         raise self.cut_off
 
@@ -169,19 +171,21 @@ class CutOffMachine(KubernetesMachine):
 @pytest.mark.asyncio
 async def test_a_failed_kubectl_keeps_what_was_held():
     chunks, collect = collector()
+    _, output = collector()
     machine = CutOffMachine("box", config={"pod": "p"})
     with pytest.raises(OSError):
-        await machine._exec_argv(("x",), None, {}, "/", None, collect)
+        await machine._exec_argv(("x",), None, {}, "/", output, collect)
     assert chunks == [b"command"]
 
 
 @pytest.mark.asyncio
 async def test_a_cancel_does_not_wait_on_the_receiver():
     chunks, collect = collector()
+    _, output = collector()
     machine = CutOffMachine("box", config={"pod": "p"})
     machine.cut_off = asyncio.CancelledError
     with pytest.raises(asyncio.CancelledError):
-        await machine._exec_argv(("x",), None, {}, "/", None, collect)
+        await machine._exec_argv(("x",), None, {}, "/", output, collect)
     assert chunks == []
 
 
@@ -209,7 +213,7 @@ async def test_a_silent_failing_program_has_no_stderr():
         stderr=REPORT, exit_code=3, config={"pod": "p"}
     )
     result = await machine.exec_line("false", None, {}, "/")
-    assert (result.stderr, result.exit_code) == (None, 3)
+    assert (result.stderr, result.exit_code) == (b"", 3)
 
 
 @pytest.mark.asyncio
@@ -225,9 +229,11 @@ async def test_kubectl_failing_by_itself_is_a_lost_connection():
     machine = FakeKubernetesMachine(
         stderr=said, exit_code=1, config={"pod": "p"}
     )
-    with pytest.raises(ConnectionLostError) as caught:
-        await machine.exec_line("sleep 9", None, {}, "/")
-    assert (caught.value.stdout, caught.value.stderr) == (b"out", said)
+    out, output = collector()
+    err, errors = collector()
+    with pytest.raises(ConnectionLostError):
+        await machine._exec_argv(("sleep 9",), None, {}, "/", output, errors)
+    assert (b"".join(out), b"".join(err)) == (b"out", said)
 
 
 @pytest.mark.asyncio
@@ -245,8 +251,12 @@ async def test_a_streamed_failure_reaches_the_receiver_without_the_report():
         stderr=b"boom\n" + REPORT, exit_code=3, config={"pod": "p"}
     )
     chunks, collect = collector()
-    result = await machine._exec_argv(("false",), None, {}, "/", None, collect)
+    out, output = collector()
+    result = await machine._exec_argv(
+        ("false",), None, {}, "/", output, collect
+    )
     assert (b"".join(chunks), result.exit_code) == (b"boom\n", 3)
+    assert out == [b"out"]
 
 
 @pytest.mark.parametrize(

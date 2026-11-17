@@ -27,6 +27,7 @@ from pathlib import Path
 from mirage import RAMVFS, MountMode, PathSpec, Workspace
 from mirage.commands.config import Context
 from mirage.machine.microsandbox import MicrosandboxMachine
+from mirage.runtime.binding import answer_of
 
 SANDBOX = os.environ["MIRAGE_E2E_SANDBOX"]
 GUEST = "/e2e-guest"
@@ -57,10 +58,18 @@ async def raw(command):
     )
 
 
+def answered(machine, argv, ctx, binding=None):
+    """A program's run on ``machine``, its output kept whole to check."""
+    return answer_of(
+        lambda output, errors: machine.run(argv, ctx, binding, output, errors)
+    )
+
+
 async def transport():
     runtime = MicrosandboxMachine("msb", {"sandbox": SANDBOX})
     for data in (None, b"", b"\x00\xff\r\n", bytes(range(256)) * 16384):
-        result = await runtime.run(
+        result = await answered(
+            runtime,
             (
                 "python3",
                 "-c",
@@ -68,9 +77,6 @@ async def transport():
                 "print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())",
             ),
             Context(cwd=PathSpec.from_str_path("/tmp"), stdin=data),
-            None,
-            None,
-            None,
         )
         assert result.exit_code == 0, result.stderr
         assert (
@@ -81,7 +87,8 @@ async def transport():
     data = bytes(range(256)) * 16384
     words = ("a b", "$(literal)", "", "--flag", "\u2603", "one\ntwo")
     marker = "quotes ' \" $ and\nnewlines"
-    result = await runtime.run(
+    result = await answered(
+        runtime,
         (
             "python3",
             "-c",
@@ -97,9 +104,6 @@ async def transport():
             env={"MARK": marker},
             stdin=data,
         ),
-        None,
-        None,
-        None,
     )
     assert result.stdout == data
     assert json.loads(result.stderr) == list(words)
@@ -394,11 +398,12 @@ async def host_pids(marker):
 
 
 class FullInspect(MicrosandboxMachine):
-    async def _microsandbox(self, args, stdin=None, output=None):
-        return await super()._microsandbox(
+    async def _exec_program(self, args, stdin, output, errors):
+        return await super()._exec_program(
             ["inspect", *args[1:]] if args[0] == "status" else args,
             stdin,
             output,
+            errors,
         )
 
 
@@ -427,12 +432,10 @@ async def probe_with_storage_locked():
             result.exit_code == 0 and result.stdout == b"runtime-probe-ok"
         ), result
         pending = asyncio.create_task(
-            FullInspect("msb", {"sandbox": SANDBOX}).run(
+            answered(
+                FullInspect("msb", {"sandbox": SANDBOX}),
                 ("true",),
                 Context(cwd=PathSpec.from_str_path("/")),
-                None,
-                None,
-                None,
             )
         )
         try:

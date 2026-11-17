@@ -17,7 +17,10 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
+import type { BridgeDispatchFn, Program, RunAnswer } from '../../types.ts'
+import { answerOf } from '../../binding.ts'
+import type { RuntimeFiles } from '../../files.ts'
+import type { Context } from '../../../commands/config.ts'
 import { runWithDeadline } from '../../../utils/abort.ts'
 import { POOL_WORKERS, SHARED_THREAD_SECONDS } from './constants.ts'
 import { MontyExecution, compileError } from './execution.ts'
@@ -36,6 +39,16 @@ vi.mock('./loader.ts', async (importOriginal) => {
     sharesThread: () => fake.shared,
   }
 })
+
+/** One run, its answer kept whole. */
+function runOf(
+  execution: MontyExecution,
+  program: Program,
+  ctx: Context,
+  files: RuntimeFiles | null,
+): Promise<RunAnswer> {
+  return answerOf((output, errors) => execution.run(program, ctx, files, output, errors))
+}
 
 interface PoolHooks {
   loadPool: () => Promise<unknown>
@@ -162,7 +175,8 @@ describe('MontyExecution.run', () => {
     })
     try {
       await expect(
-        execution.run(
+        runOf(
+          execution,
           { code: 'print(1)\n', args: [], stdin: null },
           { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), timeoutSeconds: 0.05 },
           null,
@@ -213,16 +227,16 @@ describe('MontyExecution.run', () => {
     const fired = vi.fn()
     try {
       fake.shared = true
-      const stopped = await runWithDeadline(2, fired, () => execution.run(loop, ctx, null))
+      const stopped = await runWithDeadline(2, fired, () => runOf(execution, loop, ctx, null))
       expect([stopped.exitCode, fired.mock.calls.length]).toEqual([1, 1])
       expect(limits[0]).toBeGreaterThan(1.9)
       expect(limits[0]).toBeLessThanOrEqual(2)
-      const capped = await runWithDeadline(600, fired, () => execution.run(loop, ctx, null))
+      const capped = await runWithDeadline(600, fired, () => runOf(execution, loop, ctx, null))
       expect([capped.exitCode, fired.mock.calls.length]).toEqual([1, 1])
-      expect(new TextDecoder().decode(capped.stderr ?? new Uint8Array())).toContain('time limit')
+      expect(new TextDecoder().decode(capped.stderr)).toContain('time limit')
       expect(limits[1]).toBe(SHARED_THREAD_SECONDS)
       fake.shared = false
-      await runWithDeadline(2, fired, () => execution.run(loop, ctx, null))
+      await runWithDeadline(2, fired, () => runOf(execution, loop, ctx, null))
       expect(limits[2]).toBeUndefined()
       expect(fired).toHaveBeenCalledTimes(1)
     } finally {
@@ -240,7 +254,8 @@ describe('MontyExecution.run', () => {
       close: () => Promise.resolve(),
     })
     try {
-      const run = execution.run(
+      const run = runOf(
+        execution,
         { code: 'print(1)\n', args: [], stdin: null },
         { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
         null,
@@ -278,7 +293,8 @@ describe('MontyExecution.run', () => {
     })
     const files = filesOver(dispatch, new PrefixResolver(() => ['/ram']))
     try {
-      const run = execution.run(
+      const run = runOf(
+        execution,
         { code: "import os\nlist(os.walk('/ram'))\n", args: [], stdin: null },
         { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
         files,
@@ -313,6 +329,7 @@ describe('MontyExecution.run', () => {
         { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
         null,
         output,
+        () => Promise.resolve(),
       )
       await vi.waitFor(() => {
         expect(taken).toBe(1)

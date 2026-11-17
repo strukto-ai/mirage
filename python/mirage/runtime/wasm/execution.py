@@ -223,16 +223,17 @@ class WasmExecution:
         stdin: ByteSource | None,
         env: list[tuple[str, str]],
         fs: WasmView,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
         max_memory: int | None = None,
-    ) -> tuple[bytes, bytes | None, int]:
-        """Run the module once and return (stdout, stderr, exit_code).
+    ) -> int:
+        """Run the module once and return its exit status; what it wrote
+        went to the sinks, a trap's or a lost landing's message last on
+        ``errors``.
 
-        A guest write to a stream with a sink waits on its worker thread
-        until the sink takes it, so a reader that falls behind holds the
-        guest back, as a full pipe would; that stream then comes back
-        empty.
+        A guest write waits on its worker thread until the sink takes
+        it, so a reader that falls behind holds the guest back, as a full
+        pipe would.
 
         Args:
             argv (list[str]): full argv, including the program name.
@@ -240,9 +241,8 @@ class WasmExecution:
                 takes as it reads it, as from a pipe.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
             fs (WasmView): path router serving the run's filesystem.
-            output (OutputFn | None): receives stdout as the guest writes
-                it; None returns it.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as the guest writes it.
+            errors (OutputFn): the same for stderr.
             max_memory (int | None): the linear memory this run may grow
                 to, in bytes, on top of the engine's own cap.
         """
@@ -262,10 +262,7 @@ class WasmExecution:
         reading: list[concurrent.futures.Future[bytes]] = []
         writes: set[asyncio.Task[Any]] = set()
 
-        def emitter(sink: OutputFn | None) -> Callable[[bytes], None] | None:
-            if sink is None:
-                return None
-
+        def emitter(sink: OutputFn) -> Callable[[bytes], None]:
             def emit(chunk: bytes) -> None:
                 future: concurrent.futures.Future[None] = (
                     asyncio.run_coroutine_threadsafe(
@@ -311,7 +308,7 @@ class WasmExecution:
             )
         )
         try:
-            return await asyncio.shield(worker)
+            exit_code, said = await asyncio.shield(worker)
         except asyncio.CancelledError:
             canceled.set()
             engine.increment_epoch()
@@ -331,6 +328,9 @@ class WasmExecution:
             raise
         finally:
             self._checkin(engine, module)
+        if said:
+            await errors(said)
+        return exit_code
 
     async def close(self) -> None:
         """Release pooled native modules outside a guest's host callbacks."""
@@ -351,10 +351,10 @@ class WasmExecution:
         env: list[tuple[str, str]],
         fs: WasmView,
         canceled: threading.Event,
-        output: Callable[[bytes], None] | None,
-        errors: Callable[[bytes], None] | None,
+        output: Callable[[bytes], None],
+        errors: Callable[[bytes], None],
         max_memory: int | None,
-    ) -> tuple[bytes, bytes | None, int]:
+    ) -> tuple[int, bytes]:
         caps = [c for c in (self._max_memory, max_memory) if c is not None]
         cap = min(caps) if caps else None
         with (
@@ -366,8 +366,8 @@ class WasmExecution:
             if cap is not None:
                 store.set_limits(memory_size=cap)
             if canceled.is_set():
-                return b"", None, INTERRUPTED_STATUS
-            wasi_fs = WasiFs(fs, stdin, canceled, output, errors)
+                return INTERRUPTED_STATUS, b""
+            wasi_fs = WasiFs(fs, stdin, canceled, output=output, errors=errors)
             install_wasi_fs(linker, store, wasi_fs)
             wasi = wasmtime.WasiConfig()
             wasi.argv = argv
@@ -382,7 +382,7 @@ class WasmExecution:
                     f"{self._trap_prefix}: cannot start within max_memory "
                     f"({cap} bytes): {exc}\n"
                 )
-                return b"", msg.encode(), 1
+                return 1, msg.encode()
             wasi_fs._memory = instance.exports(store).get("memory")
             start = instance.exports(store)["_start"]
             if not isinstance(start, wasmtime.Func):
@@ -409,6 +409,4 @@ class WasmExecution:
                     f"{self._trap_prefix}: {line}\n" for line in lost
                 ).encode()
                 exit_code = exit_code or 1
-            stdout = bytes(wasi_fs.stdout)
-            stderr = bytes(wasi_fs.stderr) + trap_message
-            return stdout, stderr or None, exit_code
+            return exit_code, trap_message

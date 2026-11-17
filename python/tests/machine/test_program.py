@@ -45,6 +45,8 @@ from mirage.machine.program import (
     system_time_env,
     unserve,
 )
+from mirage.runtime.binding import answer_of
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.types import PathSpec
 from mirage.utils.clock import (
     ShiftedClock,
@@ -71,6 +73,30 @@ UNREAD_THEN_EXIT = (
     "os._exit(0)\n"
 )
 UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))\n"
+
+
+async def _run(
+    executable: str,
+    hint: str | None,
+    args: list[str],
+    stdin,
+    *,
+    output: OutputFn | None = None,
+    errors: OutputFn | None = None,
+    **options,
+) -> RunAnswer:
+    async def run(kept_output: OutputFn, kept_errors: OutputFn) -> RunResult:
+        return await run_program(
+            executable,
+            hint,
+            args,
+            stdin,
+            output=output or kept_output,
+            errors=errors or kept_errors,
+            **options,
+        )
+
+    return await answer_of(run)
 
 
 async def _ended(pid: int) -> bool:
@@ -128,7 +154,7 @@ async def test_a_slow_sink_gets_all_a_direct_program_wrote():
         await asyncio.sleep(0.6)
         got.extend(chunk)
 
-    ran = await run_program(
+    ran = await _run(
         "sh",
         None,
         ["-c", "head -c 150000 /dev/zero"],
@@ -142,9 +168,7 @@ async def test_a_slow_sink_gets_all_a_direct_program_wrote():
 
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
-    ran = await run_program(
-        "sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in"
-    )
+    ran = await _run("sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in")
     assert (ran.stdout, ran.stderr, ran.exit_code) == (b"in", b"e\n", 3)
 
 
@@ -165,7 +189,7 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     async def output(chunk: bytes) -> None:
         seen.append(chunk)
 
-    ran = await run_program(
+    ran = await _run(
         "sh", None, ["-c", "cat; kill -TERM $$"], _two_chunks(), output=output
     )
     assert (ran.stdout, b"".join(seen), ran.exit_code) == (
@@ -180,14 +204,22 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
 # program's.
 @pytest.mark.asyncio
 async def test_a_connection_client_ended_by_a_signal_is_a_lost_connection():
-    with pytest.raises(ConnectionLostError) as lost:
-        await run_program(
-            "sh", None, ["-c", "echo hi; kill -KILL $$"], None, connection=True
+    seen: list[bytes] = []
+
+    async def output(chunk: bytes) -> None:
+        seen.append(chunk)
+
+    with pytest.raises(ConnectionLostError):
+        await _run(
+            "sh",
+            None,
+            ["-c", "echo hi; kill -KILL $$"],
+            None,
+            output=output,
+            connection=True,
         )
-    assert lost.value.stdout == b"hi\n"
-    ran = await run_program(
-        "sh", None, ["-c", "exit 3"], None, connection=True
-    )
+    assert b"".join(seen) == b"hi\n"
+    ran = await _run("sh", None, ["-c", "exit 3"], None, connection=True)
     assert ran.exit_code == 3
 
 
@@ -199,12 +231,12 @@ async def test_run_cli_streams_stderr_to_its_callback():
     async def errors(chunk: bytes) -> None:
         seen.append(chunk)
 
-    ran = await run_program(
+    ran = await _run(
         "sh", None, ["-c", "echo o; echo e >&2; exit 3"], None, errors=errors
     )
     assert (ran.stdout, ran.stderr, b"".join(seen), ran.exit_code) == (
         b"o\n",
-        None,
+        b"",
         b"e\n",
         3,
     )
@@ -219,14 +251,14 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
         yield b""
 
     async with asyncio.timeout(5):
-        ran = await run_program("sh", None, ["-c", "printf done"], source())
+        ran = await _run("sh", None, ["-c", "printf done"], source())
     assert (ran.stdout, ran.exit_code) == (b"done", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_direct_program_ends_though_what_it_left_holds_its_output():
     started = time.monotonic()
-    ran = await run_program(
+    ran = await _run(
         "sh", None, ["-c", "sleep 4 & echo out"], None, direct=True
     )
     assert ran.stdout == b"out\n"
@@ -237,7 +269,7 @@ async def test_a_direct_program_ends_though_what_it_left_holds_its_output():
 @pytest.mark.asyncio
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
-        await run_program("mirage-no-such-program", "install it", [], None)
+        await _run("mirage-no-such-program", "install it", [], None)
 
 
 def test_a_served_folder_is_known_by_its_absolute_and_resolved_names(
@@ -285,7 +317,7 @@ async def test_a_child_in_a_served_folder_starts_outside_it(
         "mirage.machine.program.SERVED",
         Counter([str(tmp_path)] if served else []),
     )
-    ran = await run_program(
+    ran = await _run(
         sys.executable,
         None,
         ["-c", "import os; print(os.getcwd())"],
@@ -302,7 +334,7 @@ async def test_a_child_in_a_served_folder_starts_outside_it(
 async def test_cancelling_a_call_kills_the_child(tmp_path):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_program(
+        _run(
             "sh", "no sh", ["-c", f"echo $$ > {pid_file}; exec sleep 30"], None
         )
     )
@@ -324,7 +356,7 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
     # alone left the wait running until the grandchild exited.
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_program(
+        _run(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -349,9 +381,7 @@ def _start_runner(
     stdin: AsyncIterator[bytes] | None = None,
 ):
     async def run() -> int:
-        ran = await run_program(
-            "sh", None, ["-c", script], stdin, direct=direct
-        )
+        ran = await _run("sh", None, ["-c", script], stdin, direct=direct)
         return ran.exit_code
 
     return processes.start(
@@ -617,7 +647,7 @@ async def test_close_children_kills_every_running_tree(tmp_path):
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_program(
+        _run(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -646,7 +676,7 @@ async def test_a_cancelled_call_does_not_wait_on_a_descendant_that_left(
 ):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_program(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
+        _run(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
     )
     escaped = await _wait_for_pid(pid_file)
     try:
@@ -665,7 +695,7 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_program(
+        _run(
             sys.executable,
             None,
             ["-c", ESCAPE, str(pid_file)],
@@ -727,7 +757,7 @@ async def test_a_program_run_directly_names_its_host_pid(tmp_path, direct):
     children: Children = {}
 
     async def run() -> int:
-        ran = await run_program(
+        ran = await _run(
             "sh",
             None,
             ["-c", f"echo $$ > {pid_file}; sleep 0.3"],
@@ -758,7 +788,7 @@ async def test_a_program_that_exits_first_marks_its_record(tmp_path):
     children: Children = {}
 
     async def run() -> int:
-        ran = await run_program(
+        ran = await _run(
             "sh",
             None,
             ["-c", f"echo $$ > {pid_file}; sleep 0.5 &"],

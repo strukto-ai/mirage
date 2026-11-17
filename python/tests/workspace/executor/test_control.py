@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from functools import partial
 
@@ -19,13 +20,16 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.shell.errors import ExitSignal
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.control import (
     ContinueSignal,
     _absorbed,
+    carried,
     execute_body,
     handle_if,
     handle_while,
+    take_stdout,
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -145,3 +149,37 @@ async def test_body_ampersand_without_a_job_table_fails_loud():
             no_line,
             None,
         )
+
+
+@pytest.mark.asyncio
+async def test_take_stdout_hands_on_a_stream_unread() -> None:
+    # An exec'd program's returned output reaches the redirects it ran
+    # under as it is read; only an EXIT action's output at its end is cut
+    # off, which needs the whole of it.
+    async def written() -> AsyncIterator[bytes]:
+        yield b"out\n"
+
+    stream = written()
+    sig = ExitSignal(0, stdout=stream)
+    sig.unrouted = True
+    assert await take_stdout(sig) is stream
+    assert sig.stdout is None
+    left = ExitSignal(0, stdout=b"out\nbye\n")
+    left.unrouted, left.cleanup = True, b"bye\n"
+    assert await take_stdout(left) == b"out\n"
+    assert left.stdout == b"bye\n"
+
+
+@pytest.mark.asyncio
+async def test_carried_chains_an_exit_after_the_output_before_it() -> None:
+    async def written() -> AsyncIterator[bytes]:
+        yield b"program\n"
+
+    left = await carried(
+        ExitSignal(3, stdout=written()),
+        b"before\n",
+        IOResult(stderr=b"said\n"),
+    )
+    assert isinstance(left, ExitSignal)
+    assert await materialize(left.stdout) == b"before\nprogram\n"
+    assert (left.exit_code, left.stderr) == (3, b"said\n")

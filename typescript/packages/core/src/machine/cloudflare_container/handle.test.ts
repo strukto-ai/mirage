@@ -30,7 +30,8 @@ import { logger } from '../handle.ts'
 import { buildMachine } from '../registry.ts'
 import { OPEN } from '../../mount/constants.ts'
 import '../../mount/sftp.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import { answerOf } from '../../runtime/binding.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../../runtime/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -289,7 +290,10 @@ function boxed(programs: Record<string, Program> = {}): {
   return { box, start, machine: new ContainerMachine('box', {}, box, start) }
 }
 
-/** The handle's transport called directly, as the base class calls it. */
+/**
+ * The handle's transport called directly, as the base class calls it; what
+ * it writes to a stream no sink of `more` takes is kept in the answer.
+ */
 function execArgv(
   machine: ContainerMachine,
   argv: string[],
@@ -297,25 +301,27 @@ function execArgv(
   more: {
     env?: Record<string, string>
     cwd?: string
-    output?: (data: Uint8Array) => Promise<void>
-    errors?: (data: Uint8Array) => Promise<void>
+    output?: OutputFn
+    errors?: OutputFn
   } = {},
-): Promise<RunResult> {
+): Promise<RunAnswer> {
   const direct = machine as unknown as { execArgv: (...args: unknown[]) => Promise<RunResult> }
-  return direct.execArgv(
-    argv,
-    stdin,
-    more.env ?? {},
-    more.cwd ?? '/',
-    more.output ?? null,
-    more.errors ?? null,
+  return answerOf((output, errors) =>
+    direct.execArgv(
+      argv,
+      stdin,
+      more.env ?? {},
+      more.cwd ?? '/',
+      more.output ?? output,
+      more.errors ?? errors,
+    ),
   )
 }
 
-/** One program's run, as a remote runtime starts it. */
-function run(machine: ContainerMachine, argv: string[]): Promise<RunResult> {
+/** One program's run, as a remote runtime starts it, its answer kept. */
+function run(machine: ContainerMachine, argv: string[]): Promise<RunAnswer> {
   const ctx: Context = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
-  return machine.run(argv, ctx, null, null, null)
+  return answerOf((output, errors) => machine.run(argv, ctx, null, output, errors))
 }
 
 afterEach(() => {
@@ -363,18 +369,6 @@ describe('ContainerMachine exec', () => {
     expect(concat(out)).toEqual(concat([ENC.encode('out-1 '), ODD]))
     expect(DEC.decode(concat(err))).toBe('err-1')
     expect(done).toEqual({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 7 })
-  })
-
-  it('returns what no sink took', async () => {
-    const { machine } = boxed({
-      both: async (proc) => {
-        await proc.say('out')
-        await proc.complain('err')
-        return 0
-      },
-    })
-    const done = await execArgv(machine, ['both'])
-    expect([DEC.decode(done.stdout), DEC.decode(done.stderr ?? undefined)]).toEqual(['out', 'err'])
   })
 
   it('ends a line by its exit status when the program closes its input early', async () => {
@@ -456,7 +450,7 @@ describe('ContainerMachine output after a line', () => {
       null,
       { [PROCESS]: 'w1:3' },
       '/',
-      null,
+      () => Promise.resolve(),
       (data: Uint8Array) => Promise.resolve(void got.push(data)),
       abort.signal,
     )
@@ -603,7 +597,7 @@ describe('ContainerMachine connection', () => {
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     box.refusals.push(new Error('container exited'))
     const cut = await run(machine, ['true'])
-    expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
+    expect([cut.exitCode, DEC.decode(cut.stderr)]).toEqual([129, lost])
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     expect(start).toHaveBeenCalledTimes(2)
   })
@@ -619,7 +613,7 @@ describe('ContainerMachine connection', () => {
     })
     box.exit(error)
     const cut = await running
-    expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
+    expect([cut.exitCode, DEC.decode(cut.stderr)]).toEqual([129, lost])
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     expect(start).toHaveBeenCalledTimes(2)
   })
@@ -631,7 +625,7 @@ describe('ContainerMachine connection', () => {
       },
     })
     const cut = await run(machine, ['boom'])
-    expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
+    expect([cut.exitCode, DEC.decode(cut.stderr)]).toEqual([129, lost])
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     expect(start).toHaveBeenCalledTimes(2)
   })
@@ -641,7 +635,7 @@ describe('ContainerMachine connection', () => {
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     box.exitsOnExec = true
     const cut = await run(machine, ['sleep', '60'])
-    expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
+    expect([cut.exitCode, DEC.decode(cut.stderr)]).toEqual([129, lost])
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     expect(start).toHaveBeenCalledTimes(2)
   })

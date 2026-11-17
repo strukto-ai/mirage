@@ -27,6 +27,7 @@ import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { Workspace } from '../../workspace.ts'
 import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/machine/constants'
 import { SandlockRuntime } from './runtime.ts'
+import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 
 const DEC = new TextDecoder()
 
@@ -49,7 +50,9 @@ function execute(
   ctx: Partial<Context> = {},
 ) {
   const run = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath(cwd), ...ctx }
-  return runtime.execute([], argv, run, { kind: 'process' })
+  return answerOf((output, errors) =>
+    runtime.execute([], argv, run, { kind: 'process', output, errors }),
+  )
 }
 
 describe.skipIf(process.platform === 'win32')('SandlockRuntime', () => {
@@ -140,11 +143,13 @@ else {
 
   it('keeps shell interpretation explicit', async () => {
     const runtime = new SandlockRuntime()
-    const result = await runtime.execute(
-      [],
-      [],
-      { stdin: null, flags: { c: 'node --version | cat' }, cwd: PathSpec.fromStrPath(dir) },
-      { kind: 'line' },
+    const result = await answerOf((output, errors) =>
+      runtime.execute(
+        [],
+        [],
+        { stdin: null, flags: { c: 'node --version | cat' }, cwd: PathSpec.fromStrPath(dir) },
+        { kind: 'line', output, errors },
+      ),
     )
     const data = JSON.parse(DEC.decode(result.stdout)) as Capture
     expect(data.argv.slice(-4)).toEqual(['--', '/bin/sh', '-c', 'node --version | cat'])

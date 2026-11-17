@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec echo hi; echo x ); echo \"after $?\"; ( exec false; echo x ); echo \"rc=$?\"; ( exec echo a b > /data/ex.txt; echo x ); cat /data/ex.txt; rm /data/ex.txt; echo \"[$(exec echo inner; echo x)]\"; bash -c 'exec echo hi; echo x'; echo \"after $?\"",
+      "command": "( exec echo hi; echo x ); echo \"after $?\"; ( exec false; echo x ); echo \"rc=$?\"; ( exec echo a b > /data/ex.txt; echo x ); cat /data/ex.txt; rm /data/ex.txt; echo \"[$(exec echo inner; echo x)]\"; bash -c 'exec echo hi; echo x'; echo \"after $?\"; exec yes | head -n1; echo \"${PIPESTATUS[@]}\"; ( exec yes ) | head -n1; echo \"${PIPESTATUS[@]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "hi\nafter 0\nrc=1\na b\n[inner]\nhi\nafter 0\n",
+        "stdout": "hi\nafter 0\nrc=1\na b\n[inner]\nhi\nafter 0\ny\n141 0\ny\n141 0\n",
         "stderr": ""
       }
     },

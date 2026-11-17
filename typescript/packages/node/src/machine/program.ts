@@ -22,7 +22,7 @@ import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   EXEC_PRELUDE,
   HOST_START_SLACK_SECONDS,
@@ -281,9 +281,10 @@ export async function runProgram(
     signal?: AbortSignal
     // Where the child is kept while it runs, for `closeChildren`.
     children?: Set<ChildProcess>
-    output?: OutputFn
-    // Receives stderr as it arrives instead of returning it.
-    errors?: OutputFn
+    // Receives stdout as it arrives.
+    output: OutputFn
+    // Receives stderr as it arrives.
+    errors: OutputFn
     // The child is the program itself, not a client that runs it elsewhere
     // and exits on its own terms (`docker exec` answers a TERM with 0 and
     // leaves the program running).
@@ -291,7 +292,7 @@ export async function runProgram(
     // The child is the client a machine is reached through, so its own end
     // on a signal is the connection's.
     connection?: boolean
-  } = {},
+  },
 ): Promise<RunResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
@@ -325,17 +326,16 @@ export async function runProgram(
   // output gets a moment and no more, counting only time no sink was taking
   // what had been read. Mirrors Python's `let_go`.
   let sinking = 0
-  const watched = (sink: OutputFn | undefined): OutputFn | undefined =>
-    sink === undefined
-      ? undefined
-      : async (chunk) => {
-          sinking += 1
-          try {
-            await sink(chunk)
-          } finally {
-            sinking -= 1
-          }
-        }
+  const watched =
+    (sink: OutputFn): OutputFn =>
+    async (chunk) => {
+      sinking += 1
+      try {
+        await sink(chunk)
+      } finally {
+        sinking -= 1
+      }
+    }
   let lettingGo: ReturnType<typeof setInterval> | undefined
   if (options.direct === true)
     child.once('exit', () => {
@@ -419,10 +419,8 @@ export async function runProgram(
       child.stdin.end()
     }
   })()
-  const out: Uint8Array[] = []
-  const err: Uint8Array[] = []
-  const reading = readInto(child, child.stdout, watched(options.output), out, signal)
-  const erring = readInto(child, child.stderr, watched(options.errors), err, signal)
+  const reading = readInto(child, child.stdout, watched(options.output), signal)
+  const erring = readInto(child, child.stderr, watched(options.errors), signal)
   const pumps = Promise.all([reading, erring, feeding])
   try {
     await pumps
@@ -432,17 +430,11 @@ export async function runProgram(
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
-    const stderr = Buffer.concat(err)
-    if (options.connection === true && child.signalCode !== null) {
-      throw new ConnectionLostError(
-        `${executable} ended on ${child.signalCode}`,
-        Buffer.concat(out),
-        stderr.length > 0 ? stderr : null,
-      )
-    }
+    if (options.connection === true && child.signalCode !== null)
+      throw new ConnectionLostError(`${executable} ended on ${child.signalCode}`)
     if (options.direct === true && child.signalCode !== null)
       runner?.programSignaled(mirageSignal(child.signalCode))
-    return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
+    return { exitCode: code }
   } finally {
     clearInterval(lettingGo)
     if (stopping !== null) await stopping
@@ -742,22 +734,20 @@ export async function stopHostRun(
 
 /**
  * Read a child's output to its end, handing each chunk to `sink` as it
- * arrives, or keeping it in `kept` without one. Past an abort the output is
- * read and dropped, so a signal handler that writes is not held on a full
- * pipe. Mirrors Python's `_read_into`.
+ * arrives. Past an abort the output is read and dropped, so a signal
+ * handler that writes is not held on a full pipe. Mirrors Python's
+ * `read_into`.
  */
 async function readInto(
   child: ChildProcess,
   stream: Readable,
-  sink: OutputFn | undefined,
-  kept: Uint8Array[],
+  sink: OutputFn,
   signal: AbortSignal | undefined,
 ): Promise<void> {
   try {
     for await (const chunk of stream.iterator({ destroyOnReturn: false })) {
       if (signal?.aborted === true) continue
-      if (sink === undefined) kept.push(chunk as Uint8Array)
-      else await abortable(sink(chunk as Uint8Array), signal)
+      await abortable(sink(chunk as Uint8Array), signal)
     }
   } catch (error) {
     if (
@@ -778,12 +768,12 @@ async function readInto(
  * no state. Mirrors Python's `reported_state`.
  */
 export function reportedState(
-  result: RunResult,
+  result: RunAnswer,
   command: string,
   path: readonly (string | number)[],
 ): string {
   if (result.exitCode !== 0) {
-    const said = DECODER.decode(result.stderr ?? new Uint8Array()).trim()
+    const said = DECODER.decode(result.stderr).trim()
     throw new Error(`${command} failed: ${said}`)
   }
   let state: unknown
@@ -833,18 +823,21 @@ export function execArgs(
  * session cwd is a workspace path; running elsewhere instead would point
  * a relative path at the wrong files. Mirrors Python's `cwd_refusal`.
  */
-export async function cwdRefusal(name: string, cwd: string): Promise<RunResult | null> {
+export async function cwdRefusal(
+  name: string,
+  cwd: string,
+  errors: OutputFn,
+): Promise<RunResult | null> {
   const here = await stat(cwd).catch((err: unknown) => {
     if ((err as NodeJS.ErrnoException).code === undefined) throw err
     debuglog('mirage')('cannot use %s as the working directory: %s', cwd, err)
     return null
   })
   if (here?.isDirectory() === true) return null
-  return {
-    stdout: new Uint8Array(),
-    stderr: new TextEncoder().encode(`${name}: the working directory ${cwd} is not on this host\n`),
-    exitCode: CANNOT_EXECUTE_STATUS,
-  }
+  await errors(
+    new TextEncoder().encode(`${name}: the working directory ${cwd} is not on this host\n`),
+  )
+  return { exitCode: CANNOT_EXECUTE_STATUS }
 }
 
 /**

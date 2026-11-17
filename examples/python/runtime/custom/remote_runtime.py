@@ -88,8 +88,8 @@ class RemoteRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run one program on the service, in a copy of the working
         directory.
@@ -104,9 +104,9 @@ class RemoteRuntime(
                 words.
             texts (list[str]): the argv, program first.
             ctx (Context): the session's cwd, stdin and files.
-            output (OutputFn | None): unused; the output comes back
-                whole in the result.
-            errors (OutputFn | None): unused, the same for stderr.
+            output (OutputFn): receives the program's stdout, which the
+                service answers whole, so it is written once.
+            errors (OutputFn): the same for stderr.
         """
         cwd = ctx.cwd.virtual
         files = await self._snapshot(ctx, cwd)
@@ -133,11 +133,9 @@ class RemoteRuntime(
             await ctx.vfs.write(
                 posixpath.join(cwd, rel), base64.b64decode(data)
             )
-        return RunResult(
-            stdout=base64.b64decode(answer["stdout"]),
-            stderr=base64.b64decode(answer["stderr"]) or None,
-            exit_code=answer["exit_code"],
-        )
+        await output(base64.b64decode(answer["stdout"]))
+        await errors(base64.b64decode(answer["stderr"]))
+        return RunResult(exit_code=answer["exit_code"])
 
     async def _stdin(self, ctx: Context) -> bytes:
         # The service takes a run's input whole, so stop reading at the

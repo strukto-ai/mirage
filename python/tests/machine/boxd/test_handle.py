@@ -31,7 +31,7 @@ from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
-from tests.fixtures.machine import machine_runtime, on
+from tests.fixtures.machine import machine_answer, on
 
 logger = logging.getLogger(__name__)
 
@@ -434,9 +434,8 @@ async def test_output_streams_to_the_caller_as_it_arrives():
         keep_out,
         keep_err,
     )
-    assert (result.stdout, result.stderr, bytes(out), bytes(err)) == (
-        b"",
-        b"",
+    assert (result.exit_code, bytes(out), bytes(err)) == (
+        0,
         b"out\n",
         b"err\n",
     )
@@ -477,9 +476,7 @@ async def test_a_kill_sends_its_signal_before_the_stream_ends(tmp_path):
     )
 
     async def run() -> int:
-        return (
-            await machine_runtime(box).run_line(None, [], [], ctx)
-        ).exit_code
+        return (await machine_answer(box, [], ctx, "line")).exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="sh", cwd=ctx.cwd, run=run
@@ -492,18 +489,32 @@ async def test_a_kill_sends_its_signal_before_the_stream_ends(tmp_path):
     assert seen.read_text() == "INT\n"
 
 
-# What a line with no sinks read before the drop comes back with the error.
+# What a line read before the drop reached its sinks already; boxd's hint
+# follows it on stderr.
 @pytest.mark.asyncio
 async def test_a_dropped_connection_keeps_what_the_line_read():
     machine = _machine()
     await machine.connect()
     FakeClient.stream_error = APIConnectionError("connection reset")
     FakeClient.stream_error_after = 2
-    with pytest.raises(ConnectionLostError) as lost:
-        await machine.exec_line(
-            "echo out; echo err >&2; sleep 0.3; echo more", None, {}, "/"
+    out, err = bytearray(), bytearray()
+
+    async def keep_out(data):
+        out.extend(data)
+
+    async def keep_err(data):
+        err.extend(data)
+
+    with pytest.raises(ConnectionLostError, match="connection reset"):
+        await machine._exec_argv(
+            ("/bin/sh", "-c", "echo out; echo err >&2; sleep 0.3; echo more"),
+            None,
+            {},
+            "/",
+            keep_out,
+            keep_err,
         )
-    assert (lost.value.stdout, lost.value.stderr) == (
+    assert (bytes(out), bytes(err)) == (
         b"out\n",
         b"err\nboxd: connection reset\n",
     )
@@ -516,12 +527,12 @@ async def test_a_dropped_connection_loses_the_line_and_reconnects():
     ctx = Context(
         flags={"c": "echo hi"}, env=None, cwd=PathSpec.from_str_path("/")
     )
-    result = await machine_runtime(box).run_line(None, [], [], ctx)
+    result = await machine_answer(box, [], ctx, "line")
     assert result.exit_code == 129
     assert b"boxd: connection reset\n" in result.stderr
     assert b"mirage: boxd:box: connection lost\n" in result.stderr
     FakeClient.stream_error = None
-    again = await machine_runtime(box).run_line(None, [], [], ctx)
+    again = await machine_answer(box, [], ctx, "line")
     assert again.exit_code == 0
     assert FakeClient.fetched == ["m-live", "m-live"]
 
@@ -533,13 +544,13 @@ async def test_a_refused_exec_loses_the_line_and_the_next_connects_again():
         flags={"c": "echo hi"}, env=None, cwd=PathSpec.from_str_path("/")
     )
     FakeClient.stream_error = ConflictError("machine is not running")
-    result = await machine_runtime(box).run_line(None, [], [], ctx)
+    result = await machine_answer(box, [], ctx, "line")
     assert result.exit_code == 129
     assert b"boxd: machine is not running\n" in result.stderr
     FakeClient.stream_error = None
     FakeClient.status = "stopped"
     with pytest.raises(RuntimeError, match="boxd machine start"):
-        await machine_runtime(box).run_line(None, [], [], ctx)
+        await machine_answer(box, [], ctx, "line")
     assert FakeClient.fetched == ["m-live", "m-live"]
 
 

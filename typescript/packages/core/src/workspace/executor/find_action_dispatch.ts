@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
+import { lineOutput } from '../../commands/builtin/general/interpreter.ts'
 import {
   compilePrintf,
   renderPrintf,
@@ -23,20 +24,28 @@ import { listedNames } from '../../commands/builtin/utils/files0.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
-import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
+import {
+  currentCaller,
+  getCurrentSession,
+  runAsProgram,
+  withCaller,
+} from '../../context/session_context.ts'
 import { depthFirstOrder, modifiedTs } from '../../core/generic/find.ts'
 import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
 import { ebusy, enoent, enotempty, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
-import { ensureStream, SharedStdin } from '../../io/stream.ts'
-import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { closeQuietly, ensureStream, OutputStream, SharedStdin } from '../../io/stream.ts'
+import { type ByteSource, IOResult, materialize, OutputState } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { FindExpr } from '../../rs/find.ts'
 import type { OpenStream } from '../../rs/stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { Channel } from '../../shell/console/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { shellQuoteAlways } from '../../utils/quote.ts'
@@ -130,6 +139,18 @@ export function execDir(path: string): [string, string] {
   return [trimmed.slice(0, at) || '/', `./${trimmed.slice(at + 1)}`]
 }
 
+/**
+ * Start one `-exec` invocation, its output passed on as the child writes it
+ * (`lineOutput`). A command that cannot be found is GNU's `find: 'cmd': No
+ * such file or directory` rather than the shell's `command not found`, and
+ * counts as a failed run. That is decided by looking the head word up
+ * before the line runs (GNU fails in `execvp`), never from the exit status:
+ * a program that exists and exits 127 keeps its own stderr and is just a
+ * failed run. The run's status, read once its stdout has ended, is the
+ * action's truth value. `stdin` is find's own input, one cursor shared by
+ * every child, and `where` is `-execdir`'s directory as printed, which the
+ * run enters first; null runs where find does.
+ */
 async function runExec(
   executeFn: ExecuteFn,
   session: SessionState | null,
@@ -138,13 +159,10 @@ async function runExec(
   statPath: StatPath | null,
   action: ExecAction,
   paths: readonly string[],
-  out: Uint8Array[],
-  errors: Uint8Array[],
   stdin: SharedStdin | null,
-  // -execdir's directory as printed, which the run enters first; null runs
-  // where find does.
-  where: string | null = null,
-): Promise<boolean> {
+  where: string | null,
+  signal: AbortSignal | undefined,
+): Promise<IOResult> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
   // \;` runs each match itself.
@@ -153,8 +171,10 @@ async function runExec(
   const here = where === null ? cwd : resolvePath(where, cwd)
   const [missing, shadowed] = await programHead(head, session, registry, here, statPath)
   if (missing) {
-    errors.push(encodeText(`find: '${head}': No such file or directory\n`))
-    return false
+    return new IOResult({
+      exitCode: 1,
+      stderr: encodeText(`find: '${head}': No such file or directory\n`),
+    })
   }
   // A function or alias of the head's name is invisible to execvp, so the
   // line runs the program past it, as `command` does. The run is marked a
@@ -165,15 +185,19 @@ async function runExec(
   // find stays its process and forks each program as a child of it.
   const process = currentCaller().process
   if (process != null) process.oneCommand = false
-  const run = () => executeFn(`( ${line} )`, { sessionId: session?.sessionId ?? '', stdin })
-  const io = session === null ? await run() : await runAsProgram(session, run)
-  if (io.stdout !== null) {
-    const data = await materialize(io.stdout)
-    if (data.byteLength > 0) out.push(data)
-  }
-  const err = await materialize(io.stderr)
-  if (err.byteLength > 0) errors.push(err)
-  return io.exitCode === 0
+  const [stdout, io] = lineOutput((sink, stop) => {
+    const merged = mergeSignals(signal, stop)
+    const run = (): Promise<IOResult> =>
+      executeFn(`( ${line} )`, {
+        sessionId: session?.sessionId ?? '',
+        stdin,
+        sink,
+        ...(merged !== undefined ? { signal: merged } : {}),
+      })
+    return session === null ? run() : runAsProgram(session, run)
+  })
+  io.stdout = stdout
+  return io
 }
 
 /** Remove a matched entry through the dispatcher, which owns admission,
@@ -447,13 +471,59 @@ export async function runListedFind(
   const dropped = new Set((expr.files0At ?? []).flatMap((at) => [at, at + 1]))
   const rest = words.slice(expr.start).filter((_, at) => !dropped.has(at))
   const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
-  const io = await executeFn(line, { sessionId, stdin: source === '-' ? null : stdin })
-  if (refused !== '') {
-    const existing = await materialize(io.stderr)
-    io.stderr = concat([encodeText(refused), existing])
-    io.exitCode = Math.max(io.exitCode, 1)
-  }
+  const given = source === '-' ? null : stdin
+  const execute = executeFn
+  const [stdout, io] = lineOutput(
+    (sink, signal) => execute(line, { sessionId, stdin: given, sink, signal }),
+    refused !== '' ? 1 : 0,
+  )
+  io.stdout = stdout
+  if (refused !== '') io.stderr = encodeText(refused)
   return io
+}
+
+/**
+ * Write what `-fprint`, `-fprint0`, `-fprintf` and `-fls` collected, each
+ * file once; `moved` says an `-exec` child ran, which may have moved or
+ * removed a file. Returns find's line for each file it could not write,
+ * empty when every one was written. Mirrors Python's `_write_files`.
+ */
+async function writeFiles(
+  sinks: Map<string, Uint8Array[]>,
+  cwd: string,
+  dispatch: DispatchFn | null,
+  moved: boolean,
+): Promise<Uint8Array> {
+  const failed: Uint8Array[] = []
+  for (const [file, rows] of sinks) {
+    if (STREAMS.includes(resolvePath(file, cwd)) || dispatch === null) continue
+    const spec = fileSpec(file, cwd)
+    if (moved) {
+      // The reference writes to the file it opened, wherever a child moves
+      // it; a workspace has no open file to follow, so a file a child moved
+      // or removed is not made again.
+      try {
+        await dispatch('stat', spec)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        console.debug(`find: ${file} is gone, rows dropped: ${String(err)}`)
+        continue
+      }
+    }
+    try {
+      await dispatch('write', spec, [concat(rows)])
+    } catch (err) {
+      failed.push(encodeText(`find: '${file}': ${strerrorOf(err)}\n`))
+    }
+  }
+  return concat(failed)
+}
+
+/** End find on a line its actions cannot run under, with exit 1 over a
+ * selection's 0 and no rows. Mirrors Python's `_refuse`. */
+function refuse(io: IOResult, line: Uint8Array): void {
+  io.addStderr(line)
+  if (io.exitCode === 0) io.exitCode = 1
 }
 
 /**
@@ -483,9 +553,21 @@ export async function runListedFind(
  * completion before the next, so `find b a -depth` prints `b/x b a/y a`
  * and `find d d/sub -depth` finishes `d` before it begins `d/sub` again,
  * which is why each row names the start point it was found under;
- * `-printf`'s %P and %d measure a row from that start point. Returns the rows to print, the stderr to append, and the
- * exit status the actions impose (0 when they impose none, even with
- * stderr).
+ * `-printf`'s %P and %d measure a row from that start point.
+ *
+ * The actions run as the rows are read. A child's output passes on as the
+ * child writes it, and a reader that stops early stops find there, so no
+ * later action or child runs, as `cat a b | head -n1` never opens `b`;
+ * GNU's find runs on and reports each later child that writes as killed by
+ * SIGPIPE. What the actions say goes on stderr as they say it, before the
+ * output that follows it, a child's after its own output; what `-fprint`
+ * and its kind collected is written once, when the stream ends.
+ *
+ * Returns the rows to print: the selection's own when no action rewrites
+ * them, else a stream the actions run in as it is read. `io` takes the
+ * expression's warnings first, then what the actions say, and the status
+ * they impose (1 over a selection's 0) as the stream ends
+ * (`IOResult.output`).
  */
 export async function applyFindActions(
   stdout: ByteSource | null,
@@ -526,13 +608,26 @@ export async function applyFindActions(
      * walk; empty means the working directory. */
     readonly starts?: readonly PathSpec[]
   } = {},
-): Promise<[ByteSource | null, Uint8Array, number]> {
+): Promise<ByteSource | null> {
+  const warned = concat(expr.warnings.map((line) => encodeText(`${line}\n`)))
   const reorders = expr.depthFirst
-  if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
+  if (stdout === null || !(hasActions(expr) || reorders)) {
+    if (warned.byteLength > 0) io.stderr = concat([warned, await materialize(io.stderr)])
+    return stdout
+  }
+  await materialize(stdout)
+  const said = concat([warned, await materialize(io.stderr)])
+  io.stderr = said.byteLength > 0 ? said : null
   const executeFn = options.executeFn
   const hasExec = expr.actions.some((a) => a.kind === 'exec')
   if (hasExec && executeFn === undefined) {
-    return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
+    refuse(io, encodeText('find: -exec: no shell to run the command\n'))
+    return null
+  }
+  const records = io.records
+  if (records === null) {
+    refuse(io, encodeText('find: actions require structured matches\n'))
+    return null
   }
   const session = options.session ?? getCurrentSession()
   const vfs = options.vfs ?? null
@@ -543,11 +638,6 @@ export async function applyFindActions(
   const signal = options.signal
   const once =
     options.stdin === undefined || options.stdin === null ? null : new SharedStdin(options.stdin)
-  await materialize(stdout)
-  const records = io.records
-  if (records === null) {
-    return [null, encodeText('find: actions require structured matches\n'), 1]
-  }
   // The rows arrive in operand order, each naming the start point it was
   // found under, whose spelling it carries.
   const matches = (
@@ -568,28 +658,66 @@ export async function applyFindActions(
   // implicit action -depth reorders.
   const actions: FindAction[] =
     expr.actions.length > 0 ? expr.actions.slice(0, expr.reached) : [{ kind: 'print' }]
-  const errors: Uint8Array[] = []
-  const out: Uint8Array[] = []
+  const caller = currentCaller()
   const batches = new Map<number, [string | null, string[]][]>()
   const sinks = new Map<string, Uint8Array[]>((expr.files ?? []).map((file) => [file, []]))
-  const sink = (file: string | null | undefined): Uint8Array[] => {
-    if (file === null || file === undefined) return out
-    const where = resolvePath(file, cwd)
-    if (where === STDOUT) return out
-    if (where === STDERR) return errors
-    const chunks = sinks.get(file) ?? []
-    sinks.set(file, chunks)
-    return chunks
-  }
-  let exitCode = 0
+  const held: [Channel, Uint8Array[]][] = []
+  const errors: Uint8Array[] = []
   const stats = actions.some(readsStat)
   const statted = testsStat(expr)
   const startVirtuals = new Set(starts.length > 0 ? starts.map((s) => s.virtual) : [cwd])
   const formatters = new Map<number, OpenStream>()
-  try {
-    for (const [position, action] of actions.entries()) {
-      if (action.kind === 'printf') formatters.set(position, compilePrintf(action.parts))
+  for (const [position, action] of actions.entries()) {
+    if (action.kind === 'printf') formatters.set(position, compilePrintf(action.parts))
+  }
+  const state = new OutputState()
+  io.output = state
+  let size = 0
+  let failed = false
+  let walked = false
+  let closing: Promise<void> | undefined
+  const route = (file: string | null | undefined): Channel | Uint8Array[] => {
+    if (file === null || file === undefined) return Channel.STDOUT
+    const where = resolvePath(file, cwd)
+    if (where === STDOUT) return Channel.STDOUT
+    if (where === STDERR) return Channel.STDERR
+    const rows = sinks.get(file) ?? []
+    sinks.set(file, rows)
+    return rows
+  }
+  const put = (target: Channel | Uint8Array[], data: Uint8Array): void => {
+    if (Array.isArray(target)) {
+      target.push(data)
+      return
     }
+    if (data.byteLength === 0) return
+    if (target === Channel.STDOUT) size += data.byteLength
+    const last = held.at(-1)
+    if (last?.[0] === target) last[1].push(data)
+    else held.push([target, [data]])
+  }
+  const heard = (): void => {
+    for (const line of errors.splice(0)) put(Channel.STDERR, line)
+  }
+  function* flushed(): Generator<Uint8Array> {
+    const taken = held.splice(0)
+    size = 0
+    for (const [channel, parts] of taken) {
+      if (channel === Channel.STDERR) io.addStderr(concat(parts))
+      else yield concat(parts)
+    }
+  }
+  async function* ran(run: IOResult): AsyncGenerator<Uint8Array> {
+    try {
+      if (held.length > 0) yield* flushed()
+      if (run.stdout !== null) yield* ensureStream(run.stdout)
+    } finally {
+      await closeQuietly(run.stdout)
+      put(Channel.STDERR, await materialize(run.stderr))
+    }
+  }
+  async function* walk(): AsyncGenerator<Uint8Array> {
+    walked = true
     for (const [match, base] of matches) {
       signal?.throwIfAborted()
       const path = match.rawPath || match.virtual
@@ -597,7 +725,7 @@ export async function applyFindActions(
       // taken before any action of the chain can remove the row; a row it
       // never statted is looked up by the first action that reads it, and
       // held from there, as GNU stats a row once.
-      let held =
+      let known =
         stats && (statted || startVirtuals.has(match.virtual))
           ? await rowStat(match, vfs, statPath, [])
           : null
@@ -616,98 +744,118 @@ export async function applyFindActions(
             continue
           }
           if (executeFn === undefined) break
-          if (
-            !(await runExec(
-              executeFn,
-              session,
-              registry,
-              cwd,
-              statPath,
-              action,
-              [arg],
-              out,
-              errors,
-              once,
-              where,
-            ))
-          )
-            break
-        } else if (readsStat(action)) {
-          held = held ?? (await rowStat(match, vfs, statPath, errors))
-          if (held === null) {
-            // A row -ls or -printf cannot stat is false, so the chain ends
-            // for it, as GNU's does.
-            exitCode = 1
-            break
-          }
-          sink(action.kind === 'printf' || action.kind === 'ls' ? action.file : null).push(
-            formatter !== undefined
-              ? await printfRow(formatter, match, base, held, vfs, identity, signal)
-              : lsRow(match, held, identity),
-          )
-        } else if (formatter !== undefined) {
-          sink(action.kind === 'printf' ? action.file : null).push(
-            await printfRow(formatter, match, base, null, vfs, identity, signal),
-          )
-        } else if (action.kind === 'delete') {
-          if (!(await deleteRow(match, vfs, dispatch, errors, statPath, registry))) {
-            exitCode = 1
-            break
-          }
-        } else {
-          sink(action.kind === 'print' || action.kind === 'print0' ? action.file : null).push(
-            encodeText(path + (action.kind === 'print0' ? '\0' : '\n')),
-          )
-        }
-      }
-    }
-    for (const [position, action] of actions.entries()) {
-      if (action.kind !== 'exec' || executeFn === undefined) continue
-      for (const [where, paths] of batches.get(position) ?? []) {
-        signal?.throwIfAborted()
-        if (
-          !(await runExec(
+          const run = await runExec(
             executeFn,
             session,
             registry,
             cwd,
             statPath,
             action,
-            paths,
-            out,
-            errors,
+            [arg],
             once,
             where,
-          ))
-        )
-          exitCode = 1
-      }
-    }
-    for (const [file, chunks] of sinks) {
-      if (STREAMS.includes(resolvePath(file, cwd)) || dispatch === null) continue
-      const spec = fileSpec(file, cwd)
-      if (hasExec) {
-        // The reference writes to the file it opened, wherever a child moves
-        // it; a workspace has no open file to follow, so a file a child moved
-        // or removed is not made again.
-        try {
-          await dispatch('stat', spec)
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          console.debug(`find: ${file} is gone, rows dropped: ${String(err)}`)
-          continue
+            signal,
+          )
+          yield* ran(run)
+          if (run.exitCode !== 0) break
+        } else if (readsStat(action)) {
+          if (known === null) {
+            known = await rowStat(match, vfs, statPath, errors)
+            heard()
+          }
+          if (known === null) {
+            // A row -ls or -printf cannot stat is false, so the chain ends
+            // for it, as GNU's does.
+            failed = true
+            break
+          }
+          put(
+            route(action.kind === 'printf' || action.kind === 'ls' ? action.file : null),
+            formatter !== undefined
+              ? await printfRow(formatter, match, base, known, vfs, identity, signal)
+              : lsRow(match, known, identity),
+          )
+        } else if (formatter !== undefined) {
+          put(
+            route(action.kind === 'printf' ? action.file : null),
+            await printfRow(formatter, match, base, null, vfs, identity, signal),
+          )
+        } else if (action.kind === 'delete') {
+          const deleted = await deleteRow(match, vfs, dispatch, errors, statPath, registry)
+          heard()
+          if (!deleted) {
+            failed = true
+            break
+          }
+        } else {
+          put(
+            route(action.kind === 'print' || action.kind === 'print0' ? action.file : null),
+            encodeText(path + (action.kind === 'print0' ? '\0' : '\n')),
+          )
         }
       }
-      try {
-        await dispatch('write', spec, [concat(chunks)])
-      } catch (err) {
-        errors.push(encodeText(`find: '${file}': ${strerrorOf(err)}\n`))
-        exitCode = 1
+      if (size >= CHUNK_SIZE) yield* flushed()
+    }
+    for (const [position, action] of actions.entries()) {
+      if (action.kind !== 'exec' || executeFn === undefined) continue
+      for (const [where, paths] of batches.get(position) ?? []) {
+        signal?.throwIfAborted()
+        const run = await runExec(
+          executeFn,
+          session,
+          registry,
+          cwd,
+          statPath,
+          action,
+          paths,
+          once,
+          where,
+          signal,
+        )
+        try {
+          yield* ran(run)
+        } finally {
+          // A batch the reader cut short died of SIGPIPE, which fails find
+          // as any failing batch does.
+          failed ||= run.exitCode !== 0
+        }
       }
     }
-    const body = concat(out)
-    return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
-  } finally {
-    for (const engine of formatters.values()) engine.close()
+    yield* flushed()
   }
+  const finalize = async (): Promise<void> => {
+    try {
+      for (const engine of formatters.values()) engine.close()
+      if (walked) {
+        const unwritten = await writeFiles(sinks, cwd, dispatch, hasExec)
+        put(Channel.STDERR, unwritten)
+        failed ||= unwritten.byteLength > 0
+      }
+      for (const [channel, parts] of held.splice(0)) {
+        if (channel === Channel.STDERR) io.addStderr(concat(parts))
+      }
+    } finally {
+      if (failed && io.exitCode === 0) io.exitCode = 1
+      state.finish()
+    }
+  }
+  const rows = walk()
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      try {
+        await rows.return(undefined)
+      } finally {
+        await finalize()
+      }
+    })()
+    return closing
+  }
+  async function* output(): AsyncGenerator<Uint8Array> {
+    try {
+      yield* rows
+    } finally {
+      await close()
+    }
+  }
+  return new OutputStream(withCaller(output(), caller), close)
 }

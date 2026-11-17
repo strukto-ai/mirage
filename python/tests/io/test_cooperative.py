@@ -227,7 +227,7 @@ async def test_cancel_reaches_a_whole_line_runtime():
         name = "hanging"
         captures = ("hangcmd",)
 
-        async def run_line(self, engine, paths, texts, ctx):
+        async def run_line(self, engine, paths, texts, ctx, output, errors):
             await asyncio.Event().wait()
 
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines=[Hanging()])

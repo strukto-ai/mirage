@@ -116,13 +116,22 @@ export async function execNode(
     exitCode: io.exitCode,
     paths,
   })
+  followSettled(node, io)
+  return node
+}
+
+/**
+ * Bring a command's record up to date once its result has settled, for a
+ * result whose fields fill in as its output drains (`IOResult.output`).
+ * Mirrors Python's `follow_settled`.
+ */
+export function followSettled(node: ExecutionNode, io: IOResult): void {
   const state = io.output
   if (state !== null && !state.settled) {
     state.callbacks.push(() => {
       settled(node, io)
     })
   }
-  return node
 }
 
 /** Record what a result settled as its output drained. Mirrors Python's `_settled`. */

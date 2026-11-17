@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+)
+from contextlib import aclosing
 from dataclasses import replace
 
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
 from mirage.commands.builtin.find_printf import compile_printf, render_printf
+from mirage.commands.builtin.general.interpreter import line_output
 from mirage.commands.builtin.types import (
     ExecAction,
     FindAction,
@@ -34,6 +40,7 @@ from mirage.context import (
     reset_caller,
     set_program_invocation,
 )
+from mirage.context.session_context import with_caller
 from mirage.core.generic import find_eval
 from mirage.core.generic import types as find_types
 from mirage.core.generic.find import depth_first_order
@@ -41,12 +48,21 @@ from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import ebusy, enoent, enotempty, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.stream import SharedStdin, ensure_stream, materialize
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.stream import (
+    OutputStream,
+    SharedStdin,
+    close_quietly,
+    ensure_stream,
+    materialize,
+)
+from mirage.io.types import ByteSource, IOResult, OutputState
 from mirage.rs.find import FindExpr
 from mirage.rs.stream import OpenStream, close_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
+from mirage.shell.console import JobConsole
+from mirage.shell.console.types import Channel
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
@@ -160,37 +176,37 @@ def exec_dir(path: str) -> tuple[str, str]:
 
 async def _run_exec(
     execute_fn: ExecuteFn,
+    session: SessionState | None,
     session_id: str,
     registry: MountRegistry,
     cwd: str,
     stat_path: StatPath | None,
     action: ExecAction,
     paths: list[str],
-    out: list[bytes],
-    errors: list[bytes],
     stdin: SharedStdin | None,
     where: str | None = None,
-) -> bool:
-    """Run one ``-exec`` invocation, collecting its streams.
+) -> IOResult:
+    """Start one ``-exec`` invocation, its output passed on as the child
+    writes it (``line_output``).
 
     A command that cannot be found is GNU's ``find: 'cmd': No such file
     or directory`` rather than the shell's ``command not found``, and
     counts as a failed run. That is decided by looking the head word up
     before the line runs (GNU fails in ``execvp``), never from the exit
     status: a program that exists and exits 127 keeps its own stderr and
-    is just a failed run. Returns whether the run succeeded, which is
-    the action's truth value.
+    is just a failed run. The run's status, read once its stdout has
+    ended, is the action's truth value.
 
     Args:
         execute_fn (ExecuteFn): runs a line in the session.
+        session (SessionState | None): the shell find runs in, where the
+            head is looked up; None outside one.
         session_id (str): the session the line runs under.
         registry (MountRegistry): where the head word is looked up.
         cwd (str): the session's working directory.
         stat_path (StatPath | None): dispatcher stat for a slash head.
         action (ExecAction): the action.
         paths (list[str]): the match, or every match for a batched run.
-        out (list[bytes]): where the run's stdout is appended.
-        errors (list[bytes]): where its stderr is appended.
         stdin (SharedStdin | None): find's own input, one cursor shared
             by every child; None keeps the ambient stdin.
         where (str | None): ``-execdir``'s directory as printed, which the
@@ -203,13 +219,13 @@ async def _run_exec(
     head = words[0] if words else action.argv[0]
     here = cwd if where is None else resolve_path(where, cwd)
     missing, shadowed = await program_head(
-        head, get_current_session(), registry, here, stat_path
+        head, session, registry, here, stat_path
     )
     if missing:
-        errors.append(
-            encode_text(f"find: '{head}': No such file or directory\n")
+        return IOResult(
+            exit_code=1,
+            stderr=encode_text(f"find: '{head}': No such file or directory\n"),
         )
-        return False
     # A function or alias of the head's name is invisible to execvp, so
     # the line runs the program past it, as `command` does. The run is
     # marked a program run for the session, so a builtin that doubles
@@ -221,24 +237,22 @@ async def _run_exec(
     process = current_caller().process
     if process is not None:
         process.one_command = False
-    sess = get_current_session()
-    token = set_program_invocation(sess) if sess is not None else None
-    try:
-        io = await execute_fn(
-            f"( {line} )", session_id=session_id, stdin=stdin
+
+    async def run(sink: JobConsole) -> IOResult:
+        token = (
+            set_program_invocation(session) if session is not None else None
         )
-    finally:
-        if token is not None:
-            reset_caller(token)
-    if io.stdout is not None:
-        data = await materialize(io.stdout)
-        if data:
-            out.append(data)
-    if io.stderr is not None:
-        err = await materialize(io.stderr)
-        if err:
-            errors.append(err)
-    return io.exit_code == 0
+        try:
+            return await execute_fn(
+                f"( {line} )", session_id=session_id, stdin=stdin, sink=sink
+            )
+        finally:
+            if token is not None:
+                reset_caller(token)
+
+    stdout, io = line_output(run)
+    io.stdout = stdout
+    return io
 
 
 async def _delete_row(
@@ -591,15 +605,17 @@ async def run_listed_find(
         if at not in dropped
     ]
     line = shell_join(["find", *words[: expr.start], *starts, *rest])
-    io = await execute_fn(
-        line,
-        session_id=session_id,
-        stdin=None if source == "-" else stdin,
-    )
-    if refused:
-        existing = await materialize(io.stderr) if io.stderr else b""
-        io.stderr = encode_text(refused) + existing
-        io.exit_code = max(io.exit_code, 1)
+    given = None if source == "-" else stdin
+
+    async def run(sink: JobConsole) -> IOResult:
+        assert execute_fn is not None
+        return await execute_fn(
+            line, session_id=session_id, stdin=given, sink=sink
+        )
+
+    stdout, io = line_output(run, 1 if refused else 0)
+    io.stdout = stdout
+    io.stderr = encode_text(refused) or None
     return io
 
 
@@ -623,6 +639,60 @@ def _check_unpinned(path: PathSpec, registry: MountRegistry) -> None:
         raise enotempty(path)
 
 
+async def _write_files(
+    sinks: dict[str, list[bytes]],
+    cwd: str,
+    dispatch: DispatchFn | None,
+    moved: bool,
+) -> bytes:
+    """Write what ``-fprint``, ``-fprint0``, ``-fprintf`` and ``-fls``
+    collected, each file once.
+
+    Args:
+        sinks (dict[str, list[bytes]]): each file's rows, in order.
+        cwd (str): where a relative file is resolved.
+        dispatch (DispatchFn | None): the workspace dispatcher.
+        moved (bool): an ``-exec`` child ran, which may have moved or
+            removed a file.
+
+    Returns:
+        find's line for each file it could not write, empty when every
+        one was written.
+    """
+    failed: list[bytes] = []
+    for file, rows in sinks.items():
+        if resolve_path(file, cwd) in _STREAMS or dispatch is None:
+            continue
+        spec = _file_spec(file, cwd)
+        if moved:
+            # The reference writes to the file it opened, wherever a
+            # child moves it; a workspace has no open file to follow,
+            # so a file a child moved or removed is not made again.
+            try:
+                await dispatch("stat", spec)
+            except (OSError, ValueError) as exc:
+                logger.debug("find: %s is gone, rows dropped: %s", file, exc)
+                continue
+        try:
+            await dispatch("write", spec, data=b"".join(rows))
+        except (OSError, ValueError) as exc:
+            failed.append(encode_text(f"find: '{file}': {strerror_of(exc)}\n"))
+    return b"".join(failed)
+
+
+def _refuse(io: IOResult, line: bytes) -> None:
+    """End find on a line its actions cannot run under, with exit 1 over
+    a selection's 0 and no rows.
+
+    Args:
+        io (IOResult): the selection's result, amended in place.
+        line (bytes): find's line.
+    """
+    io.add_stderr(line)
+    if io.exit_code == 0:
+        io.exit_code = 1
+
+
 async def _apply_find_actions(
     stdout: ByteSource | None,
     io: IOResult,
@@ -638,7 +708,7 @@ async def _apply_find_actions(
     identity: Identity | None = None,
     stdin: ByteSource | None = None,
     starts: list[PathSpec] | None = None,
-) -> tuple[ByteSource | None, bytes, int]:
+) -> ByteSource | None:
     """Apply find's actions (-exec / -delete / -print0 / -ls / -printf)
     to its rows.
 
@@ -679,6 +749,15 @@ async def _apply_find_actions(
     point it was found under; ``-printf``'s ``%P`` and ``%d`` measure a
     row from that start point.
 
+    The actions run as the rows are read. A child's output passes on as
+    the child writes it, and a reader that stops early stops find there,
+    so no later action or child runs, as ``cat a b | head -n1`` never
+    opens ``b``; GNU's find runs on and reports each later child that
+    writes as killed by SIGPIPE. What the actions say goes on stderr as
+    they say it, before the output that follows it, a child's after its
+    own output; what ``-fprint`` and its kind collected is written once,
+    when the stream ends.
+
     Args:
         stdout (ByteSource | None): display output from find.
         io (IOResult): the selection's result, whose ``records`` are the
@@ -701,10 +780,6 @@ async def _apply_find_actions(
             dispatcher, which owns admission and cleanup.
         identity (Identity | None): who the session is, for the owner
             and group columns of ``-ls``.
-
-    Returns:
-        The rows to print, the stderr to append, and the exit status the
-        actions impose (0 when they impose none, even with stderr).
         stdin (ByteSource | None): find's own input, which its ``-exec``
             children share as one cursor, as GNU's do (a pipe feeds one
             reader, and a child that never reads leaves it for the next);
@@ -712,25 +787,29 @@ async def _apply_find_actions(
         starts (list[PathSpec] | None): the start operands, whose rows
             GNU statted when it opened the walk; None or empty means the
             working directory.
+
+    Returns:
+        The rows to print: the selection's own when no action rewrites
+        them, else a stream the actions run in as it is read. ``io``
+        takes the expression's warnings first, then what the actions say,
+        and the status they impose (1 over a selection's 0) as the stream
+        ends (``IOResult.output``).
     """
-    once = SharedStdin(stdin) if stdin is not None else None
+    warned = b"".join(encode_text(f"{line}\n") for line in expr.warnings)
     reorders = expr.depth_first
     if stdout is None or not (_has_actions(expr) or reorders):
-        return stdout, b"", 0
+        if warned:
+            io.stderr = warned + await materialize(io.stderr)
+        return stdout
     await materialize(stdout)
+    io.stderr = warned + await materialize(io.stderr) or None
     records = io.records
     if expr.execs and execute_fn is None:
-        return (
-            None,
-            b"find: -exec: no shell to run the command\n",
-            1,
-        )
+        _refuse(io, b"find: -exec: no shell to run the command\n")
+        return None
     if records is None:
-        return (
-            None,
-            b"find: actions require structured matches\n",
-            1,
-        )
+        _refuse(io, b"find: actions require structured matches\n")
+        return None
     # The rows arrive in operand order, each naming the start point it was
     # found under; with no operand that is the working directory, which
     # prints as `.`.
@@ -759,22 +838,13 @@ async def _apply_find_actions(
     actions = (
         expr.actions[: expr.reached] if expr.actions else [RowAction("print")]
     )
-    errors: list[bytes] = []
-    out: list[bytes] = []
+    caller = current_caller()
+    session = get_current_session()
+    once = SharedStdin(stdin) if stdin is not None else None
     batches: dict[int, list[tuple[str | None, list[str]]]] = {}
     sinks: dict[str, list[bytes]] = {file: [] for file in expr.files}
-
-    def sink(file: str | None) -> list[bytes]:
-        if file is None:
-            return out
-        where = resolve_path(file, cwd)
-        if where == _STDOUT:
-            return out
-        if where == _STDERR:
-            return errors
-        return sinks[file]
-
-    exit_code = 0
+    held: list[tuple[Channel, list[bytes]]] = []
+    errors: list[bytes] = []
     stats = any(_reads_stat(a) for a in actions)
     statted = _tests_stat(expr)
     start_virtuals = {s.virtual for s in starts} if starts else {cwd}
@@ -783,14 +853,75 @@ async def _apply_find_actions(
         for position, action in enumerate(actions)
         if isinstance(action, PrintfAction)
     }
-    try:
+    io.output = state = OutputState()
+    size = 0
+    failed = False
+    walked = False
+    closing: asyncio.Task[None] | None = None
+
+    def route(file: str | None) -> Channel | list[bytes]:
+        if file is None:
+            return Channel.STDOUT
+        where = resolve_path(file, cwd)
+        if where == _STDOUT:
+            return Channel.STDOUT
+        if where == _STDERR:
+            return Channel.STDERR
+        return sinks[file]
+
+    def put(target: Channel | list[bytes], data: bytes) -> None:
+        nonlocal size
+        if isinstance(target, list):
+            target.append(data)
+            return
+        if not data:
+            return
+        if target is Channel.STDOUT:
+            size += len(data)
+        if held and held[-1][0] is target:
+            held[-1][1].append(data)
+        else:
+            held.append((target, [data]))
+
+    def heard() -> None:
+        for line in errors:
+            put(Channel.STDERR, line)
+        errors.clear()
+
+    async def flushed() -> AsyncGenerator[bytes, None]:
+        nonlocal size
+        taken = held[:]
+        held.clear()
+        size = 0
+        for channel, parts in taken:
+            if channel is Channel.STDERR:
+                io.add_stderr(b"".join(parts))
+            else:
+                yield b"".join(parts)
+
+    async def ran(run: IOResult) -> AsyncGenerator[bytes, None]:
+        try:
+            if held:
+                async with aclosing(flushed()) as rows:
+                    async for chunk in rows:
+                        yield chunk
+            if run.stdout is not None:
+                async for chunk in ensure_stream(run.stdout):
+                    yield chunk
+        finally:
+            await close_quietly(run.stdout)
+            put(Channel.STDERR, await materialize(run.stderr))
+
+    async def walk() -> AsyncGenerator[bytes, None]:
+        nonlocal failed, walked
+        walked = True
         for match, start in matches:
             path = match.raw_path or match.virtual
             # The stat -ls and -printf render is the one find already holds,
             # taken before any action of the chain can remove the row; a row
             # it never statted is looked up by the first action that reads
             # it, and held from there, as GNU stats a row once.
-            held = (
+            known = (
                 await _row_stat(match, vfs, stat_path, [])
                 if stats and (statted or match.virtual in start_virtuals)
                 else None
@@ -802,8 +933,8 @@ async def _apply_find_actions(
                     )
                     if action.batch:
                         # -execdir batches the rows of one directory that
-                        # arrive together, as the reference's runs end where its walk
-                        # leaves a directory.
+                        # arrive together, as the reference's runs end where
+                        # its walk leaves a directory.
                         groups = batches.setdefault(position, [])
                         if groups and groups[-1][0] == where:
                             groups[-1][1].append(arg)
@@ -811,43 +942,48 @@ async def _apply_find_actions(
                             groups.append((where, [arg]))
                         continue
                     assert execute_fn is not None
-                    if not await _run_exec(
+                    run = await _run_exec(
                         execute_fn,
+                        session,
                         session_id,
                         registry,
                         cwd,
                         stat_path,
                         action,
                         [arg],
-                        out,
-                        errors,
                         once,
                         where,
-                    ):
+                    )
+                    async with aclosing(ran(run)) as output:
+                        async for chunk in output:
+                            yield chunk
+                    if run.exit_code != 0:
                         break
                 elif _reads_stat(action):
-                    if held is None:
-                        held = await _row_stat(match, vfs, stat_path, errors)
-                    if held is None:
+                    if known is None:
+                        known = await _row_stat(match, vfs, stat_path, errors)
+                        heard()
+                    if known is None:
                         # A row -ls or -printf cannot stat is false, so the
                         # chain ends for it, as GNU's does.
-                        exit_code = 1
+                        failed = True
                         break
-                    rendered = (
+                    put(
+                        route(action.file),
                         await _printf_row(
                             formatters[position],
                             match,
                             start,
-                            held,
+                            known,
                             vfs,
                             identity,
                         )
                         if isinstance(action, PrintfAction)
-                        else _ls_row(match, held, identity)
+                        else _ls_row(match, known, identity),
                     )
-                    sink(action.file).append(rendered)
                 elif isinstance(action, PrintfAction):
-                    sink(action.file).append(
+                    put(
+                        route(action.file),
                         await _printf_row(
                             formatters[position],
                             match,
@@ -855,62 +991,87 @@ async def _apply_find_actions(
                             None,
                             vfs,
                             identity,
-                        )
+                        ),
                     )
                 elif action.kind == "delete":
-                    if not await _delete_row(
+                    deleted = await _delete_row(
                         match, vfs, dispatch, errors, stat_path, registry
-                    ):
-                        exit_code = 1
+                    )
+                    heard()
+                    if not deleted:
+                        failed = True
                         break
                 else:
-                    sink(action.file).append(
+                    put(
+                        route(action.file),
                         encode_text(path)
-                        + (b"\x00" if action.kind == "print0" else b"\n")
+                        + (b"\x00" if action.kind == "print0" else b"\n"),
                     )
+            if size >= CHUNK_SIZE:
+                async with aclosing(flushed()) as rows:
+                    async for chunk in rows:
+                        yield chunk
         for position, action in enumerate(actions):
             if not isinstance(action, ExecAction):
                 continue
             for where, paths in batches.get(position, []):
                 assert execute_fn is not None
-                if not await _run_exec(
+                run = await _run_exec(
                     execute_fn,
+                    session,
                     session_id,
                     registry,
                     cwd,
                     stat_path,
                     action,
                     paths,
-                    out,
-                    errors,
                     once,
                     where,
-                ):
-                    exit_code = 1
-        for file, chunks in sinks.items():
-            if resolve_path(file, cwd) in _STREAMS or dispatch is None:
-                continue
-            spec = _file_spec(file, cwd)
-            if expr.execs:
-                # The reference writes to the file it opened, wherever a
-                # child moves it; a workspace has no open file to follow,
-                # so a file a child moved or removed is not made again.
-                try:
-                    await dispatch("stat", spec)
-                except (OSError, ValueError) as exc:
-                    logger.debug(
-                        "find: %s is gone, rows dropped: %s", file, exc
-                    )
-                    continue
-            try:
-                await dispatch("write", spec, data=b"".join(chunks))
-            except (OSError, ValueError) as exc:
-                errors.append(
-                    encode_text(f"find: '{file}': {strerror_of(exc)}\n")
                 )
-                exit_code = 1
-        body = b"".join(out)
-        return (body if body else None), b"".join(errors), exit_code
-    finally:
-        for engine in formatters.values():
-            await close_stream(engine)
+                try:
+                    async with aclosing(ran(run)) as output:
+                        async for chunk in output:
+                            yield chunk
+                finally:
+                    # A batch the reader cut short died of SIGPIPE, which
+                    # fails find as any failing batch does.
+                    failed = failed or run.exit_code != 0
+        async with aclosing(flushed()) as rows:
+            async for chunk in rows:
+                yield chunk
+
+    async def finalize() -> None:
+        nonlocal failed
+        try:
+            for engine in formatters.values():
+                await close_stream(engine)
+            if walked:
+                unwritten = await _write_files(
+                    sinks, cwd, dispatch, bool(expr.execs)
+                )
+                put(Channel.STDERR, unwritten)
+                failed = failed or bool(unwritten)
+            for channel, parts in held:
+                if channel is Channel.STDERR:
+                    io.add_stderr(b"".join(parts))
+            held.clear()
+        finally:
+            if failed and io.exit_code == 0:
+                io.exit_code = 1
+            state.finish()
+
+    async def close() -> None:
+        nonlocal closing
+        if closing is None:
+            closing = asyncio.create_task(finalize())
+        await closing
+
+    async def output() -> AsyncIterator[bytes]:
+        try:
+            async with aclosing(walk()) as rows:
+                async for chunk in rows:
+                    yield chunk
+        finally:
+            await close()
+
+    return OutputStream(with_caller(output(), caller), close)

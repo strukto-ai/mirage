@@ -28,7 +28,7 @@ from mirage.machine.smolvm import SmolvmMachine
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
-from tests.fixtures.machine import machine_runtime, on
+from tests.fixtures.machine import machine_answer, machine_runtime, on
 
 
 class FakeSmolvmMachine(SmolvmMachine):
@@ -49,30 +49,29 @@ class FakeSmolvmMachine(SmolvmMachine):
         self.refusal: bytes | None = None
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin, output, errors):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[1] == "status":
             if self.status_stdout is not None:
-                return RunResult(self.status_stdout, b"", self.status_code)
+                await output(self.status_stdout)
+                return RunResult(exit_code=self.status_code)
             if self.status_code != 0:
-                return RunResult(
-                    b"", b"machine 'vm' not found", self.status_code
-                )
-            return RunResult(
-                json.dumps({"name": "vm", "state": self.state}).encode(),
-                b"",
-                0,
+                await errors(b"machine 'vm' not found")
+                return RunResult(exit_code=self.status_code)
+            await output(
+                json.dumps({"name": "vm", "state": self.state}).encode()
             )
+            return RunResult(exit_code=0)
         if args[1] in ("pause", "resume"):
             if self.refusal is not None:
-                return RunResult(b"", self.refusal, 1)
-            return RunResult(b"", b"", 0)
+                await errors(self.refusal)
+                return RunResult(exit_code=1)
+            return RunResult(exit_code=0)
         script = args[-1]
-        if output is not None:
-            await output(f"out:{script}".encode())
-            return RunResult(b"", b"warn", 0)
-        return RunResult(f"out:{script}".encode(), b"warn", 0)
+        await output(f"out:{script}".encode())
+        await errors(b"warn")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio
@@ -234,9 +233,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await machine_runtime(runtime).execute(
-        [], list(argv), ctx, kind="process"
-    )
+    result = await machine_answer(runtime, list(argv), ctx)
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -261,7 +258,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
         b"input",
     )
     line = Context(flags={"c": "pwd"}, cwd=work)
-    await machine_runtime(runtime).execute([], [], line, kind="line")
+    await machine_answer(runtime, [], line, "line")
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
     assert isinstance(machine_runtime(runtime), ProcessExecutorMixin)
     assert isinstance(machine_runtime(runtime), LineExecutorMixin)
@@ -272,14 +269,10 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
 async def test_process_refuses_a_stopped_vm_and_empty_argv():
     runtime = FakeSmolvmMachine(state="stopped", config={"machine": "vm"})
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await machine_runtime(runtime).execute(
-            [], [], Context(), kind="process"
-        )
+        await machine_answer(runtime, [], Context())
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await machine_runtime(runtime).execute(
-            [], ["node"], Context(), kind="process"
-        )
+        await machine_answer(runtime, ["node"], Context())
     assert len(runtime.calls) == 1
 
 

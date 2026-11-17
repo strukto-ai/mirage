@@ -47,8 +47,8 @@ class LineExecutorMixin(ABC, Generic[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Execute one raw command line wholesale, ``sh -c`` with it.
 
@@ -58,12 +58,10 @@ class LineExecutorMixin(ABC, Generic[E]):
             texts (list[str]): unused.
             ctx (Context): the line in ``flags["c"]``, its stdin, the
                 session environment and working directory.
-            output (OutputFn | None): receives stdout as it arrives,
-                each write awaited, which the result then leaves out;
-                None, or a transport that cannot stream, returns it
-                whole. A runtime that leaves both sinks out of its
-                signature is never handed them.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as it arrives, each
+                write awaited; a transport that gets it whole writes it
+                once.
+            errors (OutputFn): the same for stderr.
         """
 
 
@@ -79,8 +77,8 @@ class ProcessExecutorMixin(ABC, Generic[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
+        output: OutputFn,
+        errors: OutputFn,
     ) -> RunResult:
         """Run the program ``texts`` names, with ``ctx``'s working
         directory, environment and stdin, and return its status once it
@@ -92,9 +90,8 @@ class ProcessExecutorMixin(ABC, Generic[E]):
             texts (list[str]): the argv, program first.
             ctx (Context): the run's context; its stdin is read as the
                 program consumes it.
-            output (OutputFn | None): receives stdout as it arrives,
-                each write awaited, which the result then leaves out;
-                None, or a transport that cannot stream, returns it
-                whole.
-            errors (OutputFn | None): the same for stderr.
+            output (OutputFn): receives stdout as it arrives, each
+                write awaited; a transport that gets it whole writes it
+                once.
+            errors (OutputFn): the same for stderr.
         """

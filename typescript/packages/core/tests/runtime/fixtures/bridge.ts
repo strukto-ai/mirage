@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../../src/commands/config.ts'
-import { IOResult } from '../../../src/io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../src/io/types.ts'
 import { MountCore } from '../../../src/mount/core.ts'
 import type { Runtime } from '../../../src/runtime/base.ts'
 import { WorkspaceBinding } from '../../../src/runtime/binding.ts'
@@ -50,9 +50,11 @@ export function dispatchOver(bridge: BridgeDispatchFn): DispatchFn {
         out = await bridge('read', p, undefined, undefined, attrs)
         break
       case 'write':
+        // A bridge carries bytes, so a streamed body (an append rewritten
+        // through a spool) reaches the double whole.
         out = flag('admit_only')
           ? await bridge('write', p, undefined, undefined, { admitOnly: true })
-          : await bridge('write', p, args[0] as Uint8Array)
+          : await bridge('write', p, await materialize(args[0] as ByteSource))
         break
       case 'append':
         out = await bridge('append', p, args[0] as Uint8Array)

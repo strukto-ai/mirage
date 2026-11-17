@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} \\; ; echo rc=$? ; cd /",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} \\; ; echo rc=$? ; ( find d/a.txt d/b.txt -exec yes {} \\; | head -n1; echo \"${PIPESTATUS[@]}\" ) 2>/dev/null; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "got d/a.txt\ngot d/b.txt\ngot d/sub/c.txt\nrc=0\n",
+        "stdout": "got d/a.txt\ngot d/b.txt\ngot d/sub/c.txt\nrc=0\nd/a.txt\n0 0\n",
         "stderr": ""
       }
     },
@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} + ; echo rc=$? ; cd /",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} + ; echo rc=$? ; ( find d/a.txt d/b.txt -exec yes {} + | head -n1; echo \"${PIPESTATUS[@]}\" ) 2>/dev/null; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "got d/a.txt d/b.txt d/sub/c.txt\nrc=0\n",
+        "stdout": "got d/a.txt d/b.txt d/sub/c.txt\nrc=0\nd/a.txt d/b.txt\n1 0\n",
         "stderr": ""
       }
     },
@@ -168,10 +168,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec echo {} \\; -print -exec echo again {} \\; ; cd /",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec echo {} \\; -print -exec echo again {} \\; ; find d/a.txt d/b.txt -exec sh -c 'echo out \"$1\"; echo err \"$1\" >&2' sh {} \\; 2>&1; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "d/a.txt\nd/a.txt\nagain d/a.txt\n",
+        "stdout": "d/a.txt\nd/a.txt\nagain d/a.txt\nout d/a.txt\nerr d/a.txt\nout d/b.txt\nerr d/b.txt\n",
         "stderr": ""
       }
     },

@@ -18,8 +18,11 @@ from types import SimpleNamespace
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.machine.daytona import DaytonaMachine, sdk
-from tests.fixtures.machine import on
+from mirage.runtime.types import RunAnswer
+from mirage.types import PathSpec
+from tests.fixtures.machine import machine_answer, on
 
 
 class FakeProcess:
@@ -301,5 +304,21 @@ async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly():
     assert (result.exit_code, result.stdout, result.stderr) == (
         5,
         b"a\xff\x00b\r\n\xc3e\xfe\x00\r\n",
-        None,
+        b"",
     )
+
+
+# A program's run comes back joined into stdout, the wrapper's pid and
+# exit lines in it; they come off there (``joins_streams``), and the
+# status is the program's own.
+@pytest.mark.asyncio
+async def test_a_runs_own_lines_come_off_its_joined_answer():
+    runtime = DaytonaMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime.ensure_connected()
+    FakeClient.last.process = ShellProcess()
+    ran = await machine_answer(
+        runtime,
+        ["sh", "-c", "echo out; echo err >&2; exit 3"],
+        Context(cwd=PathSpec.from_str_path("/")),
+    )
+    assert ran == RunAnswer(3, b"out\nerr\n", b"")

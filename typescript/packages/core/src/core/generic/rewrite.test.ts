@@ -15,13 +15,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { materialize } from '../../io/types.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { ANY_WRITE, type ReplaceRequest, type WriteContext } from '../../cache/types.ts'
 import { publishRead, runWithWriteContext } from '../../cache/context.ts'
 import {
   appendBySpooledRewrite,
   appendByStreamedRewrite,
+  appendThroughSpool,
   pwriteByStreamedRewrite,
   truncateByRewrite,
 } from './rewrite.ts'
@@ -171,5 +172,57 @@ describe('a completed operation-owned read', () => {
     expect(write.mock.calls[0]?.[0].condition).toEqual(
       version === null ? ANY_WRITE : { kind: 'match', version },
     )
+  })
+})
+
+describe('appendThroughSpool', () => {
+  const enc = (value: string): Uint8Array => new TextEncoder().encode(value)
+  const streamedRead =
+    (store: Map<string, Uint8Array>, fails = false) =>
+    (): Promise<ByteSource> => {
+      async function* source(): AsyncGenerator<Uint8Array> {
+        await Promise.resolve()
+        for (const byte of store.get('f') ?? new Uint8Array()) yield Uint8Array.of(byte)
+        if (fails) throw enoent(PATH)
+      }
+      return Promise.resolve(source())
+    }
+
+  // The write empties the file before it pulls its body, as disk's and RAM's
+  // do: a base handed to it unstaged would read back nothing.
+  it('stages the base before a streamed write', async () => {
+    const store = new Map([['f', enc('0123456789')]])
+    const bodies: boolean[] = []
+    await appendThroughSpool(
+      streamedRead(store),
+      async (body) => {
+        store.set('f', new Uint8Array())
+        bodies.push(!(body instanceof Uint8Array))
+        store.set('f', await materialize(body))
+      },
+      enc('tail'),
+    )
+    expect(new TextDecoder().decode(store.get('f'))).toBe('0123456789tail')
+    expect(bodies).toEqual([true])
+  })
+
+  it('starts a missing file empty', async () => {
+    const written: string[] = []
+    await appendThroughSpool(
+      () => Promise.reject(enoent(PATH)),
+      async (body) => {
+        written.push(new TextDecoder().decode(await materialize(body)))
+      },
+      enc('tail'),
+    )
+    expect(written).toEqual(['tail'])
+  })
+
+  it('refuses a base it read only part of', async () => {
+    const write = vi.fn(() => Promise.resolve())
+    await expect(
+      appendThroughSpool(streamedRead(new Map([['f', enc('head')]]), true), write, enc('tail')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(write).not.toHaveBeenCalled()
   })
 })

@@ -19,10 +19,10 @@ import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
-import type { WorkspaceBinding } from '../runtime/binding.ts'
+import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MountType, RunStatus, ScanFacts } from './types.ts'
-import type { OutputFn, RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
@@ -129,11 +129,16 @@ export class PidLineFilter {
  * has exited (`runExitMark`) taken out, and the status the line gives
  * handed to `ended`. Only an ending that can still become the line is held;
  * everything else passes as it arrives, what the program left running
- * included. Mirrors Python's `ExitLineFilter`.
+ * included. The status is told once the bytes written with the line have
+ * been passed on, so a reader slow to take the program's last output (a
+ * transport that answers whole, the line inside it) never has the run let
+ * go while that output is still on its way. Mirrors Python's
+ * `ExitLineFilter`.
  */
 export class ExitLineFilter {
   private held = new Uint8Array()
   private passing = false
+  private status: number | null = null
 
   /**
    * @param sink receives the stream without the line.
@@ -154,7 +159,13 @@ export class ExitLineFilter {
       this.held = new Uint8Array()
       out = this.take(held)
     }
-    if (out.byteLength > 0) await this.sink(out)
+    try {
+      if (out.byteLength > 0) await this.sink(out)
+    } finally {
+      const status = this.status
+      this.status = null
+      if (status !== null) this.ended(status)
+    }
   }
 
   /** Pass on what is still held once the stream has ended. */
@@ -178,7 +189,7 @@ export class ExitLineFilter {
       const digits = end < 0 ? tail.byteLength : end
       if (digits > 0 && digits <= EXIT_DIGITS && tail[digits] === 0x0a) {
         this.passing = true
-        this.ended(Number(new TextDecoder().decode(tail.subarray(0, digits))))
+        this.status = Number(new TextDecoder().decode(tail.subarray(0, digits)))
         return concat([...out, rest.subarray(0, at), tail.subarray(digits + 1)])
       }
       if (digits === tail.byteLength && digits <= EXIT_DIGITS) {
@@ -193,32 +204,6 @@ export class ExitLineFilter {
     this.held = rest.slice(rest.byteLength - keep)
     return concat([...out, rest.subarray(0, rest.byteLength - keep)])
   }
-}
-
-/**
- * `data`, a stream an exec returned whole, with its exit line taken out
- * (`ExitLineFilter`), and its pid line too when `found` still waits for it
- * (`PidLineFilter`). Mirrors Python's `_without_run_lines`.
- *
- * @param data the stream.
- * @param found told what the pid line says; null once it is known.
- * @param search look for the pid line past the stream's start.
- * @param mark what the run's exit line starts with.
- */
-async function withoutRunLines(
-  data: Uint8Array,
-  found: ((report: RunStatus) => void) | null,
-  search: boolean,
-  mark: Uint8Array,
-): Promise<Uint8Array> {
-  const out: Uint8Array[] = []
-  const keep: OutputFn = (chunk) => Promise.resolve(void out.push(chunk))
-  const pidLine = found === null ? null : new PidLineFilter(keep, found, search)
-  const exitLine = new ExitLineFilter(pidLine?.write ?? keep, () => undefined, mark)
-  await exitLine.write(data)
-  await exitLine.finish()
-  await pidLine?.finish()
-  return concat(out)
 }
 
 /**
@@ -259,6 +244,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // refuses a line given any before it runs, and a program that reads a
   // process substitution, which would need feeding.
   readonly takesInput: boolean = true
+  // Whether the machine's exec hands stderr back joined into stdout
+  // (Daytona), so a run's pid and exit lines arrive on its stdout.
+  protected readonly joinsStreams: boolean = false
   // Set by a provider's connect that reached the machine; close hands it to `pausable` for the pause after.
   protected reached = false
   private pausable = false
@@ -351,14 +339,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     argv: readonly string[],
     ctx: Context,
     binding: WorkspaceBinding | null,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     await this.ensureConnected(ctx.signal)
-    const refusal = (await this.mounts?.validate(binding, ctx.cwd.virtual, ctx.signal)) ?? null
+    const refusal =
+      (await this.mounts?.validate(binding, ctx.cwd.virtual, errors, ctx.signal)) ?? null
     if (refusal !== null) return refusal
     const run = this.mounts?.guarded(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }
@@ -371,7 +360,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
     const nonce = crypto.randomUUID().replaceAll('-', '')
     const mark = runExitMark(nonce)
-    const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     const letGo = new AbortController()
     let settle: (code: number) => void = () => undefined
     const ended = new Promise<number>((resolve) => {
@@ -385,54 +373,32 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (report.started !== null)
         runner?.setMachinePid({ pid: report.pid, started: report.started, exited: null })
     }
-    const pidLine = new PidLineFilter(
-      errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
-      found,
-      true,
-    )
-    const exitLine = new ExitLineFilter(
-      pidLine.write,
-      (code) => {
-        settle(code)
-      },
-      mark,
-    )
+    const exited = (code: number): void => {
+      settle(code)
+    }
+    const pidLine = new PidLineFilter(errors, found, true)
+    const exitLine = new ExitLineFilter(pidLine.write, exited, mark)
+    const filters: (ExitLineFilter | PidLineFilter)[] = [exitLine, pidLine]
+    let sink = output
+    if (this.joinsStreams) {
+      const outPid = new PidLineFilter(output, found, false)
+      const outExit = new ExitLineFilter(outPid.write, exited, mark)
+      filters.push(outExit, outPid)
+      sink = outExit.write
+    }
     const execution = this.execArgv(
       runArgv(tag, nonce, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
-      output ?? ((data) => Promise.resolve(void kept[0].push(data))),
+      sink,
       exitLine.write,
       mergeSignals(ctx.signal, letGo.signal),
     )
     let done: RunResult
     try {
       done = await this.outcome(execution, ended, letGo, ctx.signal)
-      await exitLine.finish()
-      await pidLine.finish()
-      // An exec that returns its streams whole, or joined into stdout,
-      // brings the lines back with them.
-      if (done.stderr !== null && done.stderr.byteLength > 0)
-        done = {
-          ...done,
-          stderr: await withoutRunLines(
-            done.stderr,
-            reported.length === 0 ? found : null,
-            true,
-            mark,
-          ),
-        }
-      if (done.stdout.byteLength > 0)
-        done = {
-          ...done,
-          stdout: await withoutRunLines(
-            done.stdout,
-            reported.length === 0 ? found : null,
-            false,
-            mark,
-          ),
-        }
+      for (const filter of filters) await filter.finish()
     } catch (error) {
       if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
@@ -441,38 +407,19 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (!(error instanceof ConnectionLostError)) throw error
       logger.debug?.(`${String(this.machine)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
-      await exitLine.finish()
-      await pidLine.finish()
-      const said = new TextEncoder().encode(`mirage: ${String(this.machine)}: connection lost\n`)
-      done = {
-        stdout: error.stdout,
-        stderr: concat([error.stderr ?? new Uint8Array(), ...kept[1], said]),
-        exitCode: HANGUP_EXIT_CODE,
-      }
+      for (const filter of filters) await filter.finish()
+      await errors(new TextEncoder().encode(`mirage: ${String(this.machine)}: connection lost\n`))
+      done = { exitCode: HANGUP_EXIT_CODE }
     } finally {
       this.runs -= 1
-    }
-    done = {
-      stdout: done.stdout.byteLength > 0 ? done.stdout : concat(kept[0]),
-      stderr:
-        done.stderr !== null && done.stderr.byteLength > 0
-          ? done.stderr
-          : kept[1].length > 0
-            ? concat(kept[1])
-            : done.stderr,
-      exitCode: done.exitCode,
     }
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
     const lost =
       this.mounts === null ? [] : await abortable(this.mounts.land(ctx.signal), ctx.signal)
     if (lost.length === 0) return done
-    const said = new TextEncoder().encode(lost.map((line) => `${line}\n`).join(''))
-    return {
-      stdout: done.stdout,
-      stderr: concat([done.stderr ?? new Uint8Array(), said]),
-      exitCode: done.exitCode || 1,
-    }
+    await errors(new TextEncoder().encode(lost.map((line) => `${line}\n`).join('')))
+    return { exitCode: done.exitCode || 1 }
   }
 
   /**
@@ -500,7 +447,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)
     signal?.throwIfAborted()
-    return { stdout: new Uint8Array(), stderr: null, exitCode: code }
+    return { exitCode: code }
   }
 
   /**
@@ -513,15 +460,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * What a line that needs input answers on a machine that takes none
    * (`takesInput`): 126, with why. Mirrors Python's `input_refused`.
+   *
+   * @param errors where why is said.
    */
-  inputRefused(): RunResult {
-    return {
-      stdout: new Uint8Array(),
-      stderr: new TextEncoder().encode(
-        `mirage: ${this.machine.toString()}: the machine takes no input\n`,
-      ),
-      exitCode: CANNOT_EXECUTE_STATUS,
-    }
+  async inputRefused(errors: OutputFn): Promise<RunResult> {
+    await errors(
+      new TextEncoder().encode(`mirage: ${this.machine.toString()}: the machine takes no input\n`),
+    )
+    return { exitCode: CANNOT_EXECUTE_STATUS }
   }
 
   async check(): Promise<boolean> {
@@ -601,14 +547,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     try {
       await this.ensureConnected(signal)
       const done = await abortable(
-        this.execArgv(
-          ['/bin/sh', '-c', stopLine(tag, signum)],
-          null,
-          { ...this.config.env },
-          '/',
-          null,
-          null,
-          signal,
+        answerOf((output, errors) =>
+          this.execArgv(
+            ['/bin/sh', '-c', stopLine(tag, signum)],
+            null,
+            { ...this.config.env },
+            '/',
+            output,
+            errors,
+            signal,
+          ),
         ),
         signal,
       )
@@ -639,12 +587,12 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /** Run one of Mirage's own lines on the machine: its environment, at `/`. */
-  private setup(line: string, signal?: AbortSignal): Promise<RunResult> {
+  private setup(line: string, signal?: AbortSignal): Promise<RunAnswer> {
     return this.execLine(line, null, { ...this.config.env }, '/', signal)
   }
 
   /** Connect, then run one of Mirage's own lines, within `seconds` in all. */
-  private async connectedLine(line: string, seconds: number): Promise<RunResult> {
+  private async connectedLine(line: string, seconds: number): Promise<RunAnswer> {
     const deadline = AbortSignal.timeout(seconds * 1000)
     await this.ensureConnected(deadline)
     return abortable(this.setup(line, deadline), deadline)
@@ -719,8 +667,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param stdin the input, read as the program consumes it; null for none.
    * @param env the merged environment.
    * @param cwd the working directory, passed through verbatim.
-   * @param output receives stdout as it arrives, which the result then
-   *   leaves out; null, or a transport that cannot stream, returns it whole.
+   * @param output receives stdout as it arrives; a transport that gets it
+   *   whole writes it once.
    * @param errors the same for stderr.
    * @param signal stops the program.
    */
@@ -729,13 +677,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
+    output: OutputFn,
+    errors: OutputFn,
     signal?: AbortSignal,
   ): Promise<RunResult>
 
   /**
-   * Execute one shell line on the machine, as `/bin/sh -c`.
+   * Execute one of Mirage's own shell lines on the machine, as `/bin/sh
+   * -c`, and keep its answer whole for the caller.
    *
    * @param line the raw shell line.
    * @param stdin bytes piped into the line.
@@ -749,8 +698,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, null, signal)
+  ): Promise<RunAnswer> {
+    return answerOf((output, errors) =>
+      this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, output, errors, signal),
+    )
   }
 
   /**

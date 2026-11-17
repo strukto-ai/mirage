@@ -31,7 +31,7 @@ import {
   type LineExecutorMixin,
   type ProcessExecutorMixin,
 } from '../mixin.ts'
-import type { OutputFn, RunResult } from '../types.ts'
+import type { OutputFn, RunAnswer, RunResult } from '../types.ts'
 
 /**
  * Stream a process substitution into the named pipe on the machine that
@@ -44,7 +44,7 @@ async function feed(
   fifo: string,
   env: Record<string, string>,
   signal: AbortSignal,
-): Promise<RunResult> {
+): Promise<RunAnswer> {
   const quoted = shellQuote(fifo)
   return handle.execLine(
     `[ -p ${quoted} ] && exec cat > ${quoted}`,
@@ -185,16 +185,16 @@ export class RemoteRuntime
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
-    output?: OutputFn,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
     return this.handle().run(
       ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
       ctx,
       this.binding,
-      output ?? null,
-      errors ?? null,
+      output,
+      errors,
     )
   }
 
@@ -209,8 +209,8 @@ export class RemoteRuntime
     _paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output: OutputFn | undefined,
-    errors?: OutputFn,
+    output: OutputFn,
+    errors: OutputFn,
   ): Promise<RunResult> {
     const handle = this.handle()
     const env = { ...handle.config.env }
@@ -226,7 +226,7 @@ export class RemoteRuntime
     try {
       for (const [at, text] of texts.entries()) {
         if (ctx.vfs == null || !reads.has(text)) continue
-        if (!handle.takesInput) return handle.inputRefused()
+        if (!handle.takesInput) return await handle.inputRefused(errors)
         await handle.ensureConnected(ctx.signal)
         const made = await handle.execLine(
           fifoLine(crypto.randomUUID().replaceAll('-', ''), prefixes),
@@ -252,7 +252,7 @@ export class RemoteRuntime
           ),
         ])
       }
-      return await handle.run(argv, ctx, this.binding, output ?? null, errors ?? null)
+      return await handle.run(argv, ctx, this.binding, output, errors)
     } finally {
       await unfeed(handle, feeds, env, stop)
     }

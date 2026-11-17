@@ -26,8 +26,9 @@ import pytest
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.machine.program import FAKETIME_LIBRARIES, serve, unserve
+from mirage.runtime.binding import answer_of
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RunAnswer, RunResult
 from mirage.types import PathSpec
 
 
@@ -35,13 +36,29 @@ def _args(code: str, env: dict[str, str] | None = None, **fields):
     return Program(code=code, **fields), env
 
 
-async def _run(runtime: LocalRuntime, program: Program, **fields) -> RunResult:
-    return await runtime.interpret(None, program, Context(**fields))
+async def _run(runtime: LocalRuntime, program: Program, **fields) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.interpret(
+            None, program, Context(**fields), output, errors
+        )
+    )
 
 
-def _process(runtime: LocalRuntime, argv, cwd, stdin: bytes | None = None):
+async def _process(
+    runtime: LocalRuntime, argv, cwd, stdin: bytes | None = None
+) -> RunAnswer:
     ctx = Context(cwd=PathSpec.from_str_path(str(cwd)), env={}, stdin=stdin)
-    return runtime.run_process(None, [], list(argv), ctx, None)
+    return await answer_of(
+        lambda output, errors: runtime.run_process(
+            None, [], list(argv), ctx, output, errors
+        )
+    )
+
+
+async def _version(runtime: LocalRuntime) -> RunAnswer:
+    return await answer_of(
+        lambda output, errors: runtime.version({}, output, errors)
+    )
 
 
 @pytest.mark.asyncio
@@ -73,7 +90,7 @@ async def test_filesystem_operations(tmp_path, program, expected):
         )
         assert result.exit_code == 0, result.stderr
         assert result.stdout.decode() == expected
-        assert result.stderr is None
+        assert result.stderr == b""
     finally:
         await runtime.close()
 
@@ -121,7 +138,7 @@ def test_local_runs_on_the_host_interpreter(args, exit_code, stdout, stderr):
     result = asyncio.run(_run(LocalRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
-        assert result.stderr is None
+        assert result.stderr == b""
     else:
         assert stderr in result.stderr
 
@@ -185,7 +202,7 @@ def test_local_name():
 @pytest.mark.parametrize(
     "argv, cwd, exit_code, stdout, stderr",
     [
-        (("cksum",), "/", 0, b"2352138605 2\n", None),
+        (("cksum",), "/", 0, b"2352138605 2\n", b""),
         (
             ("no-such-program-xyz",),
             "/",
@@ -375,7 +392,7 @@ async def test_a_bare_home_found_through_an_empty_path_entry_runs(
     monkeypatch.chdir(tmp_path)
     runtime = LocalRuntime(config={"home": "mirage-probe"})
     monkeypatch.chdir("/")
-    result = await runtime.version({})
+    result = await _version(runtime)
     assert result.stdout == b"probe\n"
 
 
@@ -403,7 +420,7 @@ async def test_version_process_gets_none_of_the_session_environment(
     )
     probe.chmod(0o755)
     runtime = LocalRuntime(config={"home": str(probe)})
-    baseline = await runtime.version({})
+    baseline = await _version(runtime)
     expected = json.loads(baseline.stdout)
     assert expected["MIRAGE_TEST_VERSION_ENV"] is None
     ws = Workspace({"/": RAMVFS()}, mode=mode, machines=[runtime])
@@ -516,7 +533,16 @@ async def test_a_program_still_being_found_at_close_never_starts(tmp_path):
     runtime = LocalRuntime()
     ctx = Context(cwd=PathSpec.from_str_path(str(tmp_path)))
     run = asyncio.create_task(
-        runtime.execute([], ["sleep", "30"], ctx, kind="process")
+        answer_of(
+            lambda output, errors: runtime.execute(
+                [],
+                ["sleep", "30"],
+                ctx,
+                kind="process",
+                output=output,
+                errors=errors,
+            )
+        )
     )
     await asyncio.sleep(0)
     await runtime.close()
@@ -597,9 +623,10 @@ class RecordingLocalRuntime(LocalRuntime):
         super().__init__(**options)
         self.programs: list[Program] = []
 
-    async def interpret(self, engine, program, ctx):
+    async def interpret(self, engine, program, ctx, output, errors):
         self.programs.append(program)
-        return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
+        await output(b"ran\n")
+        return RunResult(exit_code=0)
 
 
 @pytest.mark.asyncio

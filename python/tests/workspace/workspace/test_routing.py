@@ -31,9 +31,8 @@ class _Box(MachineHandle):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        return RunResult(
-            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
-        )
+        await output(f"{self.name}\n".encode())
+        return RunResult(exit_code=0)
 
 
 def _box(name: str, *captures: str) -> _Box:

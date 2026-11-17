@@ -314,7 +314,7 @@ export async function runExitTrap(
       final = io.exitCode
   } catch (err) {
     if (err instanceof ExitSignal) {
-      stdout = err.stdout ?? new Uint8Array()
+      stdout = await materialize(err.stdout)
       stderr = err.stderr
       // A substitution bash cannot parse ends the action, not the status.
       final = err.refused ? status : err.exitCode
@@ -378,7 +378,7 @@ export async function endShell(
     if (err instanceof ExitSignal) {
       const cleanup = await runExitTrap(executeFn, session, err.containedCode, stdin, callStack)
       if (cleanup !== null) {
-        err.stdout = concat([err.stdout ?? new Uint8Array(), await cleanup.materializeStdout()])
+        err.stdout = asyncChain([err.stdout, cleanup.stdout])
         err.stderr = concat([err.stderr, await cleanup.materializeStderr()])
         err.exitCode = err.containedCode = cleanup.exitCode
       }

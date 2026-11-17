@@ -27,16 +27,21 @@ class AlphaRuntime(Runtime):
     name = "alpha"
     captures = ("python3", "python")
 
-    async def run(self, engine, paths, texts, ctx) -> RunResult:
-        return RunResult(stdout=b"alpha\n", stderr=None, exit_code=0)
+    async def run(
+        self, engine, paths, texts, ctx, output, errors
+    ) -> RunResult:
+        await output(b"alpha\n")
+        return RunResult(exit_code=0)
 
 
 class NodeRuntime(JsRuntime):
     name = "node-engine"
     captures = ("node",)
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 class OtherNodeRuntime(NodeRuntime):
@@ -46,8 +51,10 @@ class OtherNodeRuntime(NodeRuntime):
 class InProcessPy(PythonRuntime):
     name = "in-process-py"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    async def interpret(
+        self, engine, program: Program, ctx, output, errors
+    ) -> RunResult:
+        return RunResult(exit_code=0)
 
 
 def test_runtime_for_script_picks_by_machine_and_language():

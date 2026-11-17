@@ -233,11 +233,8 @@ function scriptOutput(
       // The interpreter is missing, not the program: 127, as the
       // interpreter command answers for the same runtime.
       if (!runtimeUnavailable(err)) throw err
-      return {
-        stdout: new Uint8Array(),
-        stderr: encodeText(`${prog}: ${err.message}\n`),
-        exitCode: NOT_FOUND_STATUS,
-      }
+      await errors(encodeText(`${prog}: ${err.message}\n`))
+      return { exitCode: NOT_FOUND_STATUS }
     } finally {
       await settle?.(runtime)
     }
