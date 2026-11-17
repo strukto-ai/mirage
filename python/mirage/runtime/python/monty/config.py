@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mirage.runtime.config import RuntimeConfig, memory_limit
 
@@ -25,9 +25,16 @@ class MontyConfig(RuntimeConfig):
         max_memory (str | int | None): the heap one run may use, spelled as
             sandlock spells its own (``10M``, ``1G``); a run that needs
             more raises ``MemoryError``. None for no cap.
+        url (str | None): a remote Monty server to run on instead of
+            local workers (``provider: monty_remote``); None runs locally.
+        api_key (str | None): the server's bearer token; None sends none.
     """
 
     max_memory: str | int | None = None
+    url: str | None = None
+    api_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         memory_limit(self.max_memory)
+        if self.api_key is not None and self.url is None:
+            raise ValueError("monty: api_key needs a url")

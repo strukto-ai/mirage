@@ -311,6 +311,7 @@ describe('buildEntry', () => {
     [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
+    [{ provider: 'monty_remote', url: 'https://m' }, 'MontyRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
     const [handle, runtime] = buildEntry('py', spec)
     expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])
@@ -331,6 +332,10 @@ describe('buildEntry', () => {
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
+    ['py', { provider: 'monty_remote' }, /names its url/],
+    ['py', { provider: 'monty_remote', url: 'https://m', runtime: 'monty' }, /not a runtime/],
+    ['py', { provider: 'in_process', runtime: 'monty', url: 'https://m' }, /monty_remote/],
+    ['py', { provider: 'in_process', runtime: 'monty', apiKey: 'k' }, /monty_remote/],
   ])('refuses what its provider does not run: %s %j', (name, spec, refusal) => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })
@@ -387,6 +392,11 @@ describe('registerRuntime', () => {
     expect(placement(built)).toEqual(['in_process', 'fake-second'])
     registerRuntime('fake-second', Other)
     expect(placement(built)).toEqual(['in_process', 'fake-second'])
+  })
+
+  it('puts a remote monty on its server', () => {
+    const remote = new MontyRuntime({ config: { url: 'https://m' } })
+    expect(placement(remote)).toEqual(['monty_remote', 'monty'])
   })
 })
 

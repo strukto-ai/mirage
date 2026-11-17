@@ -25,6 +25,7 @@ from mirage.runtime.constants import (
     IN_PROCESS,
     JS_GROUP,
     LANGUAGE_COMMANDS,
+    MONTY_REMOTE,
     PYTHON_GROUP,
     WHOLE_LINE,
 )
@@ -101,9 +102,9 @@ RUNTIME_HINTS: dict[str, str] = {
 }
 
 # The providers a ``machines:`` entry names for an engine of Mirage's
-# own rather than a machine it reaches: in its process, or as native
-# programs on its host.
-ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST)
+# own rather than a machine it reaches: in its process, as native
+# programs on its host, or as monty on a remote server.
+ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST, MONTY_REMOTE)
 
 # The runtimes a builtin provider runs no other way.
 _PLACED: dict[str, str] = {
@@ -135,7 +136,8 @@ def build_entry(
     provider builds the engine alone: ``in_process`` the one its
     ``runtime`` names, ``host`` the host's own programs, confined by
     sandlock when a ``sandbox`` block grants paths. The entry's other
-    keys are the engine's config.
+    keys are the engine's config. ``monty_remote`` builds monty on the
+    server its ``url`` names.
 
     Args:
         name (str): the entry's name, which the engine takes.
@@ -146,7 +148,9 @@ def build_entry(
         ValueError: the reserved name ``workspace`` or the workspace's
             own runtime, an engine its provider does not run, an
             ``in_process`` entry with no ``runtime``, a ``sandbox`` that
-            is not a mapping, or what ``build_machine`` refuses.
+            is not a mapping, a ``monty_remote`` entry with no ``url`` or
+            a remote server's keys on another, or what ``build_machine``
+            refuses.
     """
     if name == WorkspaceRuntime.name:
         raise ValueError(
@@ -173,6 +177,19 @@ def build_entry(
         cls = _runtime_for(
             name, provider, fields.pop("runtime", None), sandbox
         )
+        if provider == MONTY_REMOTE and fields.get("url") is None:
+            raise ValueError(
+                f"machine {name!r}: a {MONTY_REMOTE} machine names its url"
+            )
+        if (
+            provider != MONTY_REMOTE
+            and issubclass(cls, MontyRuntime)
+            and {"url", "api_key"} & set(fields)
+        ):
+            raise ValueError(
+                f"machine {name!r}: a remote monty server is provider"
+                f" {MONTY_REMOTE}, not {provider}"
+            )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
         if isinstance(runtime, WorkspaceRuntime):
@@ -199,7 +216,7 @@ def _runtime_for(
 
     Args:
         name (str): the entry's name, for the message.
-        provider (str): ``in_process`` or ``host``.
+        provider (str): ``in_process``, ``host`` or ``monty_remote``.
         runtime (str | type[Runtime] | None): the entry's ``runtime``: a
             registered name, a ``source:Class`` reference, or the class.
         sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
@@ -216,6 +233,13 @@ def _runtime_for(
                 f"machine {name!r}: a host runs its own programs, not a runtime"
             )
         return SandlockRuntime if sandbox is not None else LocalRuntime
+    if provider == MONTY_REMOTE:
+        if runtime is not None:
+            raise ValueError(
+                f"machine {name!r}: a {MONTY_REMOTE} machine runs monty,"
+                " not a runtime"
+            )
+        return MontyRuntime
     if runtime is None:
         raise ValueError(
             f"machine {name!r}: an {IN_PROCESS} machine names its runtime"
@@ -252,8 +276,9 @@ def placement(runtime: Runtime[Any]) -> tuple[str, str | None]:
     """The provider an engine runs on and the name it is registered
     under. An entry built from a ``machines:`` spec keeps the provider
     and the runtime name it was built with; any other engine is looked
-    up by its class. An engine registered under no name, such as a
-    class a ``source:Class`` reference loaded, runs in process.
+    up by its class, on the machine it names. An engine registered under
+    no name, such as a class a ``source:Class`` reference loaded, runs in
+    process.
 
     Args:
         runtime (Runtime): a workspace entry.
@@ -269,7 +294,9 @@ def placement(runtime: Runtime[Any]) -> tuple[str, str | None]:
         return spec["provider"], name
     if name is None:
         return IN_PROCESS, None
-    return _PLACED.get(name, IN_PROCESS), name
+    machine = runtime.machine
+    own = IN_PROCESS if machine is None else machine.provider
+    return _PLACED.get(name, own), name
 
 
 def split_machines(

@@ -22,7 +22,7 @@ import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import type { ProcessTraits } from '../../../execution/process/types.ts'
 import type { MachineName } from '../../../execution/types.ts'
-import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../../runtime/constants.ts'
+import { EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
@@ -50,7 +50,11 @@ export function handedTokens(
   traits: ProcessTraits,
   machine: MachineName | null,
 ): readonly string[] {
-  if (traits.wrappers.length === 0 || machine === null || machine.provider === IN_PROCESS)
+  if (
+    traits.wrappers.length === 0 ||
+    machine === null ||
+    WORKSPACE_PROVIDERS.includes(machine.provider)
+  )
     return tokens
   if (tokens[0]?.startsWith('-') === true) return [...traits.wrappers, '--', ...tokens]
   return [...traits.wrappers, ...tokens]

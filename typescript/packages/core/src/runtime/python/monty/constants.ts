@@ -37,6 +37,10 @@ export const SHARED_THREAD_SECONDS = 30
 // waits for one to come back.
 export const POOL_WORKERS = 4
 
+// Seconds a remote server may take to answer one turn: the pool's own default
+// of 10 would cut off a longer guest sleep, and none is refused.
+export const REMOTE_REQUEST_TIMEOUT = 60
+
 // A walk or glob reads its whole tree in one `Path.scan`, so these bound
 // what one call builds on the host: the entries a reply may hold, and how
 // deep a scan that follows links goes when it names no depth, since a

@@ -32,9 +32,11 @@ from mirage.resources.types import EntryKind
 from mirage.runtime.constants import (
     HOST,
     IN_PROCESS,
+    MONTY_REMOTE,
     SECRET_CONFIG_FIELDS,
 )
 from mirage.runtime.python.local import LocalRuntime
+from mirage.runtime.python.monty.config import MontyConfig
 from mirage.runtime.sandlock import SandlockRuntime
 from mirage.runtime.table import in_process_runtimes, runtime_class
 from mirage.server.resources.types import Field, FieldType, TypeTable
@@ -240,11 +242,16 @@ def cli_types() -> TypeTable:
     return dict(sorted(out.items()))
 
 
+# The keys only a ``monty_remote`` machine takes.
+_REMOTE_KEYS = frozenset({"url", "api_key"})
+
+
 def machine_types() -> TypeTable:
     """Every machine provider and engine provider, with its fields: an
     ``in_process`` machine's are those of each runtime it may run, none
-    required, and a ``host`` machine's include its ``sandbox`` block's as
-    ``sandbox.<field>`` in that group."""
+    required, a ``host`` machine's include its ``sandbox`` block's as
+    ``sandbox.<field>`` in that group, and a ``monty_remote`` machine's
+    are monty's with its ``url`` required."""
     captures = described("captures", ("list", None), False, False, None, None)
     engine: dict[str, Field] = {}
     for name in in_process_runtimes():
@@ -254,8 +261,13 @@ def machine_types() -> TypeTable:
             logger.debug("runtime %s is not installed: %s", name, e)
             continue
         for field in dataclass_fields(config):
+            if config is MontyConfig and field["name"] in _REMOTE_KEYS:
+                continue
             field["required"] = False
             engine.setdefault(field["name"], field)
+    remote = dataclass_fields(MontyConfig)
+    for field in remote:
+        field["required"] = field["name"] == "url"
     base = {f.name for f in dataclasses.fields(MachineConfig)}
     sandbox = [
         field
@@ -279,6 +291,7 @@ def machine_types() -> TypeTable:
             captures,
         ],
         HOST: [*dataclass_fields(LocalRuntime.config_cls), *sandbox, captures],
+        MONTY_REMOTE: [*remote, captures],
     }
     for provider in known_providers():
         try:

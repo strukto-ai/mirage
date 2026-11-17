@@ -19,7 +19,9 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import settle
+from mirage.execution.types import MachineName
 from mirage.runtime.config import RuntimeConfig, memory_limit
+from mirage.runtime.constants import MONTY_REMOTE
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
@@ -60,6 +62,10 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
     shared worker pool; a policy's own runtime keeps a pool of its own,
     since its programs judge the reads runs on the shared pool make and
     must not wait behind them.
+
+    A ``url`` runs the interpreter on that remote Monty server instead,
+    on a pool of the install's own, and its file and environment calls
+    still come back through the workspace dispatch.
     """
 
     name = "monty"
@@ -95,8 +101,24 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}
         self.shared = True
 
+    @property
+    def machine(self) -> MachineName | None:
+        """The ``monty_remote`` machine of its entry's name when it runs
+        on a remote server, else the ``in_process`` one."""
+        if self.config.url is None:
+            return super().machine
+        return MachineName(MONTY_REMOTE, self.name)
+
+    def _execution(self, shared: bool = False) -> MontyExecution:
+        return MontyExecution(
+            self._max_memory,
+            shared=shared,
+            url=self.config.url,
+            api_key=self.config.api_key,
+        )
+
     async def open_engine(self) -> MontyExecution:
-        return MontyExecution(self._max_memory, shared=self.shared)
+        return self._execution(self.shared)
 
     async def close_engine(self, engine: MontyExecution) -> None:
         await engine.close()
@@ -130,7 +152,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             await errors(notice)
         # A nested call must not queue behind a parent holding this pool.
         nested = ctx.processes is not None and ctx.processes.depth > 0
-        execution = MontyExecution(self._max_memory) if nested else engine
+        execution = self._execution() if nested else engine
         files = RuntimeFiles.of(ctx, self._binding)
         try:
             return await execution.run(

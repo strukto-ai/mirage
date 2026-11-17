@@ -18,7 +18,7 @@ import { CPUS } from '../../../../commands/builtin/constants.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { WORKSPACE_MACHINE } from '../../../../execution/process/constants.ts'
-import { IN_PROCESS } from '../../../../runtime/constants.ts'
+import { WORKSPACE_PROVIDERS } from '../../../../runtime/constants.ts'
 import type { ProcessTable } from '../../../../execution/process/table.ts'
 import type { MachineResources } from '../../../../execution/types.ts'
 import { type MemoryBudget, memoryBudget } from '../../../../io/memory.ts'
@@ -208,7 +208,9 @@ function workspaceRow(
  * `max_memory`. Mirrors Python's `_shown`.
  */
 function shown(res: MachineResources, options: FreeOptions): FreeOptions {
-  const inside = res.machine === WORKSPACE_MACHINE || res.machine.startsWith(`${IN_PROCESS}:`)
+  const inside =
+    res.machine === WORKSPACE_MACHINE ||
+    WORKSPACE_PROVIDERS.includes(res.machine.split(':', 1)[0] ?? '')
   return inside && res.memTotal === 0 ? { ...options, blank: true } : options
 }
 

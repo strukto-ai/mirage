@@ -25,7 +25,7 @@ from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import (
     ExecutionKind,
@@ -67,7 +67,7 @@ def handed_tokens(
     if (
         not traits.wrappers
         or machine is None
-        or machine.provider == IN_PROCESS
+        or machine.provider in WORKSPACE_PROVIDERS
     ):
         return tokens
     if tokens and tokens[0].startswith("-"):

@@ -52,6 +52,15 @@ export interface MontyFsBits {
 
 export interface MontyModuleLike extends MontyFsBits {
   Monty: { create(options?: Record<string, unknown>): Promise<MontyPoolLike> }
+  /** The gRPC pool; only the Node build has it. */
+  MontyRemote?: {
+    create(url: string, options?: Record<string, unknown>): Promise<MontyPoolLike>
+  }
+  /** The remote pool's refusals, each a lost or unreached server. */
+  MontyRefusedError?: new (...args: never[]) => Error
+  MontyConnectError?: new (...args: never[]) => Error
+  MontyDisconnectError?: new (...args: never[]) => Error
+  MontyShutdown?: new (...args: never[]) => Error
   MontySyntaxError: new (...args: never[]) => Error
   MontyRuntimeError: new (...args: never[]) => Error
   /** A worker-death error, the one shape run() maps to an exit code. */

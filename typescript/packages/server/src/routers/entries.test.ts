@@ -267,6 +267,25 @@ describe('entries router', () => {
     expect(e2b.on_pause).toMatchObject({ options: ['pause'], required: false })
   })
 
+  it('takes a url for a remote monty and seals its key', async () => {
+    const { app } = setup()
+    const machines = await types(app, '/v1/machines/types')
+    const fields = Object.fromEntries((machines.monty_remote ?? []).map((f) => [f.name, f]))
+    expect(Object.keys(fields).sort()).toEqual(['api_key', 'captures', 'max_memory', 'url'])
+    expect(fields.url?.required).toBe(true)
+    expect(fields.api_key?.secret).toBe(true)
+    const engine = (machines.in_process ?? []).map((f) => f.name)
+    expect(engine).not.toContain('url')
+    expect(engine).not.toContain('api_key')
+    const made = await call(app, 'POST', '/v1/machines', {
+      name: 'py',
+      type: 'monty_remote',
+      fields: { url: 'https://m', api_key: 'k' },
+    })
+    expect(made.status).toBe(201)
+    expect(made.body.config).toEqual({ url: 'https://m' })
+  })
+
   it('checks a machine against its field types', async () => {
     const { app } = setup()
     const made = await call(app, 'POST', '/v1/machines', {

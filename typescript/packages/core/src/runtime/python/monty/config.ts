@@ -20,7 +20,12 @@
  *     own (`10M`, `1G`) or a count of bytes; a run that needs more raises
  *     `MemoryError`.
  *     Absent or null for no cap.
+ *   url: a remote Monty server to run on instead of local workers
+ *     (`provider: monty_remote`); absent runs locally.
+ *   apiKey: the server's bearer token; absent sends none.
  */
 export interface MontyConfig {
   maxMemory?: string | number | null
+  url?: string
+  apiKey?: string
 }

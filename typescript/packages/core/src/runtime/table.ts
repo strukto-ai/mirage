@@ -25,6 +25,7 @@ import {
   IN_PROCESS,
   JS_GROUP,
   LANGUAGE_COMMANDS,
+  MONTY_REMOTE,
   PYTHON_GROUP,
   WHOLE_LINE,
 } from './constants.ts'
@@ -75,10 +76,10 @@ const RUNTIME_HINTS: Record<string, string> = {
 
 /**
  * The providers a `machines:` entry names for a runtime of Mirage's own
- * rather than a machine it reaches: in its process, or as native programs
- * on its host.
+ * rather than a machine it reaches: in its process, as native programs on
+ * its host, or as monty on a remote server.
  */
-const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST]
+const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST, MONTY_REMOTE]
 
 // Where each builtin runtime runs, when that is not in process. Null
 // prototype: names come from config.
@@ -164,12 +165,14 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * `runtime` names (a registered name, or a class a `source:Class` reference
  * loaded), `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
- * config. Mirrors Python's `build_entry`.
+ * config. `monty_remote` builds monty on the server its `url` names. Mirrors
+ * Python's `build_entry`.
  *
  * Throws:
  *   Error: the reserved name `workspace` or the workspace's own runtime, a
  *   runtime its provider does not run, an `in_process` entry with no
- *   `runtime`, a `sandbox` that is not a mapping, or what `buildMachine`
+ *   `runtime`, a `sandbox` that is not a mapping, a `monty_remote` entry with
+ *   no `url` or a remote server's keys on another, or what `buildMachine`
  *   refuses.
  */
 export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
@@ -193,6 +196,16 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       named as string | RuntimeClass | undefined,
       sandbox,
     )
+    if (provider === MONTY_REMOTE && (fields.url === undefined || fields.url === null))
+      throw new Error(`machine '${name}': a ${MONTY_REMOTE} machine names its url`)
+    if (
+      provider !== MONTY_REMOTE &&
+      (cls === MontyRuntime || cls.prototype instanceof MontyRuntime) &&
+      ('url' in fields || 'apiKey' in fields)
+    )
+      throw new Error(
+        `machine '${name}': a remote monty server is provider ${MONTY_REMOTE}, not ${String(provider)}`,
+      )
     const config = { ...fields, ...sandbox }
     runtime = new cls({
       ...(captures === undefined ? {} : { captures: captures as string[] }),
@@ -219,6 +232,11 @@ function runtimeFor(
       throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
   }
+  if (provider === MONTY_REMOTE) {
+    if (runtime !== undefined)
+      throw new Error(`machine '${name}': a ${MONTY_REMOTE} machine runs monty, not a runtime`)
+    return MontyRuntime
+  }
   if (runtime === undefined)
     throw new Error(`machine '${name}': an ${IN_PROCESS} machine names its runtime`)
   if (runtime === 'workspace')
@@ -242,9 +260,10 @@ export function inProcessRuntimes(): string[] {
 /**
  * The provider a runtime runs on and the name it is registered under. An
  * entry built from a `machines:` spec keeps the provider and the runtime
- * name it was built with; any other runtime is looked up by its class. A
- * runtime registered under no name, such as a class a `source:Class`
- * reference loaded, runs in process. Mirrors Python's `placement`.
+ * name it was built with; any other runtime is looked up by its class, on the
+ * machine it names. A runtime registered under no name, such as a class a
+ * `source:Class` reference loaded, runs in process. Mirrors Python's
+ * `placement`.
  */
 export function placement(runtime: Runtime): [string, string | null] {
   const spec = builtFrom(runtime)
@@ -254,7 +273,7 @@ export function placement(runtime: Runtime): [string, string | null] {
   const name = Object.keys(NAMED).find((key) => runtime.constructor === NAMED[key]) ?? null
   if (spec !== undefined) return [String(spec.provider), name]
   if (name === null) return [IN_PROCESS, null]
-  return [PLACED[name] ?? IN_PROCESS, name]
+  return [PLACED[name] ?? runtime.machine?.provider ?? IN_PROCESS, name]
 }
 
 /**

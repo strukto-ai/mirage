@@ -349,3 +349,23 @@ async def test_a_machine_keeps_its_credential_sealed(client):
     )
     assert r.status_code == 201, r.text
     assert r.json()["config"] == {"sandbox_id": "s1"}
+
+
+@pytest.mark.asyncio
+async def test_a_remote_monty_takes_a_url_and_seals_its_key(client):
+    machines = (await client.get("/v1/machines/types")).json()
+    fields = {f["name"]: f for f in machines["monty_remote"]}
+    assert set(fields) == {"url", "api_key", "max_memory", "captures"}
+    assert fields["url"]["required"] is True
+    assert fields["api_key"]["secret"] is True
+    assert not {"url", "api_key"} & {f["name"] for f in machines["in_process"]}
+    made = await client.post(
+        "/v1/machines",
+        json={
+            "name": "py",
+            "type": "monty_remote",
+            "fields": {"url": "https://m", "api_key": "k"},
+        },
+    )
+    assert made.status_code == 201, made.text
+    assert made.json()["config"] == {"url": "https://m"}

@@ -24,8 +24,14 @@ import { TZ_VAR } from '../../../utils/timezone.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mainFilename } from '../execution.ts'
-import { DEFAULT_PROG, LIMITS, POOL_WORKERS, SHARED_THREAD_SECONDS } from './constants.ts'
-import { displayError } from './errors.ts'
+import {
+  DEFAULT_PROG,
+  LIMITS,
+  POOL_WORKERS,
+  REMOTE_REQUEST_TIMEOUT,
+  SHARED_THREAD_SECONDS,
+} from './constants.ts'
+import { displayError, MontyUnavailableError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import {
   loadMontyModule,
@@ -187,7 +193,8 @@ export async function compileError(code: string): Promise<CompileError | null> {
 /**
  * Runs on pooled monty workers: the process's shared pool, or one of its own
  * for a run nested in another, which must not queue behind its parent's
- * worker.
+ * worker. With a `url` the workers are a remote server's, on a pool of the
+ * execution's own, so no run goes out on another workspace's key.
  */
 export class MontyExecution {
   private readonly name = 'monty'
@@ -195,17 +202,24 @@ export class MontyExecution {
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
+  private readonly shared: boolean
 
   /**
    * Args:
    *   maxMemory: the heap one run may use, in bytes; null for no cap.
-   *   shared: run on the process's shared pool.
+   *   shared: run on the process's shared pool; a remote execution never
+   *     does.
+   *   url: the remote server; null for local workers.
+   *   apiKey: the remote server's bearer token.
    */
   constructor(
     maxMemory: number | null = null,
-    private readonly shared = false,
+    shared = false,
+    private readonly url: string | null = null,
+    private readonly apiKey: string | null = null,
   ) {
     this.limits = maxMemory === null ? LIMITS : { ...LIMITS, maxMemory }
+    this.shared = shared && url === null
   }
 
   /**
@@ -250,7 +264,15 @@ export class MontyExecution {
         shared ? (binds ? left : SHARED_THREAD_SECONDS) : null,
         ctx.env,
       )
-      const session = await Promise.race([checkout, interruption.promise])
+      let session: MontySessionLike | typeof INTERRUPTED
+      try {
+        session = await Promise.race([checkout, interruption.promise])
+      } catch (caught) {
+        const note = this.remoteNote(await this.loadModule(), caught)
+        if (note === null) throw caught
+        await errors(ENC.encode(note))
+        return { exitCode: 1 }
+      }
       if (session === INTERRUPTED) {
         // A worker that arrives after the run was stopped goes straight back.
         void checkout
@@ -302,6 +324,25 @@ export class MontyExecution {
     } finally {
       interruption.dispose()
     }
+  }
+
+  /**
+   * The stderr line for a remote server that refused, could not be reached or
+   * was lost, or null for any other failure. Mirrors the remote clause of
+   * Python's `_feed`.
+   */
+  private remoteNote(module: MontyModuleLike, caught: unknown): string | null {
+    const remote = [
+      module.MontyRefusedError,
+      module.MontyConnectError,
+      module.MontyDisconnectError,
+      module.MontyShutdown,
+    ]
+    if (!remote.some((cls) => cls !== undefined && caught instanceof cls)) return null
+    const said = (caught as Error).message
+    // A gateway may echo the rejected bearer token in its status text.
+    const shown = this.apiKey ? said.replaceAll(this.apiKey, '<redacted>') : said
+    return `${this.name}: remote server: ${shown}\n`
   }
 
   // How a stopped run ends: past its deadline it throws, killed it exits 1.
@@ -391,7 +432,14 @@ export class MontyExecution {
   private async loadPool(): Promise<MontyPoolLike> {
     if (this.shared) return sharedPool.acquire()
     const module = await this.loadModule()
-    return module.Monty.create()
+    if (this.url === null) return module.Monty.create()
+    if (module.MontyRemote === undefined)
+      throw new MontyUnavailableError("monty_remote needs @pydantic/monty's Node build")
+    const key = this.apiKey
+    return module.MontyRemote.create(this.url, {
+      requestTimeout: REMOTE_REQUEST_TIMEOUT,
+      ...(key === null ? {} : { metadata: () => ({ authorization: `Bearer ${key}` }) }),
+    })
   }
 
   private async loadModule(): Promise<MontyModuleLike> {
@@ -471,6 +519,8 @@ export class MontyExecution {
       if (caught instanceof module.MontyCrashedError) {
         return [1, `${this.name}: worker ${caught.timedOut ? 'timed out' : 'crashed'}\n`]
       }
+      const note = this.remoteNote(module, caught)
+      if (note !== null) return [1, note]
       throw caught
     }
     return [0, '']

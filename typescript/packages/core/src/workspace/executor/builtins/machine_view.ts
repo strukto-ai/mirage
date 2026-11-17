@@ -21,7 +21,7 @@ import { WORKSPACE_MACHINE } from '../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../execution/process/table.ts'
 import type { MachineName, MachineResources } from '../../../execution/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { EXTERNAL_COMMANDS, IN_PROCESS } from '../../../runtime/constants.ts'
+import { EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS } from '../../../runtime/constants.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -49,13 +49,15 @@ export interface MachineScope {
 
 /**
  * Whether a process on `machine` is in a scope: a machine in it, or Mirage's
- * own, or an engine's in Mirage's process (`in_process`), unless the line
- * picked another machine. Mirrors Python's `in_scope`.
+ * own, or an engine's that reaches only the workspace (`in_process`,
+ * `monty_remote`), unless the line picked another machine. Mirrors Python's
+ * `in_scope`.
  */
 export function inScope(scope: MachineScope, machine: string): boolean {
   if (machine === WORKSPACE_MACHINE) return scope.workspace || !scope.picked
   if (scope.ids.includes(machine)) return true
-  return !scope.picked && machine.startsWith(`${IN_PROCESS}:`)
+  const provider = machine.split(':', 1)[0] ?? ''
+  return !scope.picked && WORKSPACE_PROVIDERS.includes(provider)
 }
 
 function reachOf(runtime: unknown): string {
@@ -72,7 +74,7 @@ function machineOf(runtime: unknown, host: string): string | null {
   const reach = reachOf(runtime)
   if (runtime == null || (reach !== 'process' && reach !== 'remote')) return null
   const found = (runtime as { machine: MachineName | null }).machine
-  if (found !== null) return found.provider === IN_PROCESS ? null : found.toString()
+  if (found !== null) return WORKSPACE_PROVIDERS.includes(found.provider) ? null : found.toString()
   return reach === 'process' ? host : null
 }
 
@@ -102,7 +104,7 @@ function defaultEngine(bindings: Record<string, unknown>, host: string): string 
   for (const runtime of [bindings[EXTERNAL_COMMANDS], ...Object.values(bindings)]) {
     if (runtime == null) continue
     const machine = (runtime as { machine?: MachineName | null }).machine
-    if (machine?.provider === IN_PROCESS) return machine.toString()
+    if (machine != null && WORKSPACE_PROVIDERS.includes(machine.provider)) return machine.toString()
     if (machineOf(runtime, host) !== null) return null
   }
   return null
@@ -181,7 +183,8 @@ function engineMachines(): string[] {
   const found: string[] = []
   for (const runtime of Object.values(getCurrentEvaluation()?.frame.routing?.bindings ?? {})) {
     const machine = (runtime as { machine?: MachineName | null } | null | undefined)?.machine
-    const shown = machine?.provider === IN_PROCESS ? machine.toString() : null
+    const shown =
+      machine != null && WORKSPACE_PROVIDERS.includes(machine.provider) ? machine.toString() : null
     if (shown !== null && !found.includes(shown)) found.push(shown)
   }
   return found

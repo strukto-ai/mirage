@@ -25,7 +25,7 @@ import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/w
 import { withinRequest } from '@struktoai/mirage-core/io/web/request'
 import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
-import { IN_PROCESS } from '@struktoai/mirage-core/runtime/constants'
+import { IN_PROCESS, MONTY_REMOTE } from '@struktoai/mirage-core/runtime/constants'
 import { runtimeClass, type MachineSpec } from '@struktoai/mirage-core/runtime/table'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
@@ -72,6 +72,29 @@ function refuseQuickJs(spec: MachineSpec): void {
   }
 }
 
+/**
+ * Refuse a remote Monty server: the Monty build Workers load has no remote
+ * client, which only its Node build carries.
+ */
+function refuseRemoteMonty(spec: MachineSpec): void {
+  const remote =
+    spec instanceof Runtime
+      ? spec.machine?.provider === MONTY_REMOTE
+      : !(spec instanceof MachineHandle) && spec.provider === MONTY_REMOTE
+  if (remote) {
+    throw new Error(
+      `provider '${MONTY_REMOTE}' does not run on Cloudflare Workers: Monty's remote client ` +
+        'needs the Node or Python SDK',
+    )
+  }
+}
+
+/** Refuse a machine this isolate cannot run. */
+function refuseOnWorkers(spec: MachineSpec): void {
+  refuseQuickJs(spec)
+  refuseRemoteMonty(spec)
+}
+
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through this package's VFS registry. */
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
@@ -85,7 +108,7 @@ export class Workspace extends CoreWorkspace {
   ) {
     refuseUnseenAddresses(options.network)
     const machines = options.machines ?? {}
-    ;(Array.isArray(machines) ? machines : Object.values(machines)).forEach(refuseQuickJs)
+    ;(Array.isArray(machines) ? machines : Object.values(machines)).forEach(refuseOnWorkers)
     super(mounts, options)
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()

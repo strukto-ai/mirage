@@ -21,6 +21,7 @@ from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import HOST
+from mirage.runtime.table import build_entry
 from mirage.runtime.types import RunResult, RuntimeReach
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
@@ -96,6 +97,8 @@ def test_mirages_own_is_in_scope_unless_another_machine_is_picked():
     assert not in_scope(MachineScope(("docker:a",), True), "mirage")
     assert in_scope(MachineScope((), True, True), "mirage")
     assert not in_scope(MachineScope((), True, True), "docker:a")
+    assert in_scope(MachineScope(("docker:a",)), "monty_remote:py")
+    assert not in_scope(MachineScope(("docker:a",), True), "monty_remote:py")
 
 
 def test_options_may_follow_operands():
@@ -204,6 +207,22 @@ async def test_an_engine_answers_as_the_workspace_never_as_the_server():
         )
         assert "in_process:engine" in await shown(ws, "free")
         assert await shown(ws, "uptime") == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_remote_monty_is_listed_as_an_engine():
+    _, remote = build_entry(
+        "py", {"provider": "monty_remote", "url": "http://127.0.0.1:1"}
+    )
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines=[ProcessReach(["hold"]), remote],
+    )
+    try:
+        assert "1  monty_remote:py\n" in await shown(ws, "nproc")
     finally:
         await ws.close()
 

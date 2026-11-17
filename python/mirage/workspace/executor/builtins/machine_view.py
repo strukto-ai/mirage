@@ -31,7 +31,7 @@ from mirage.execution.types import MachineResources
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WORKSPACE_PROVIDERS
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.workspace.executor.builtins.jobspec import names_machine
@@ -71,8 +71,9 @@ class MachineScope:
 
 def in_scope(scope: MachineScope, machine: str) -> bool:
     """Whether a process on ``machine`` is in a scope: a machine in it,
-    or Mirage's own, or an engine's in Mirage's process (``in_process``),
-    unless the line picked another machine.
+    or Mirage's own, or an engine's that reaches only the workspace
+    (``in_process``, ``monty_remote``), unless the line picked another
+    machine.
 
     Args:
         scope (MachineScope): the machines.
@@ -82,7 +83,8 @@ def in_scope(scope: MachineScope, machine: str) -> bool:
         return scope.workspace or not scope.picked
     if machine in scope.ids:
         return True
-    return not scope.picked and machine.startswith(f"{IN_PROCESS}:")
+    provider = machine.partition(":")[0]
+    return not scope.picked and provider in WORKSPACE_PROVIDERS
 
 
 def _reach_of(runtime: RuntimeIdentity | None) -> str:
@@ -108,7 +110,7 @@ def _machine_of(runtime: RuntimeIdentity | None, host: str) -> str | None:
         return None
     found = Runtime.require(runtime).machine
     if found is not None:
-        return None if found.provider == IN_PROCESS else str(found)
+        return None if found.provider in WORKSPACE_PROVIDERS else str(found)
     return host if reach == "process" else None
 
 
@@ -147,7 +149,7 @@ def _default_engine(
         if runtime is None:
             continue
         machine = Runtime.require(runtime).machine
-        if machine is not None and machine.provider == IN_PROCESS:
+        if machine is not None and machine.provider in WORKSPACE_PROVIDERS:
             return str(machine)
         if _machine_of(runtime, host) is not None:
             return None
@@ -246,7 +248,7 @@ def _engine_machines() -> list[str]:
         dict.fromkeys(
             str(machine)
             for machine in machines
-            if machine is not None and machine.provider == IN_PROCESS
+            if machine is not None and machine.provider in WORKSPACE_PROVIDERS
         )
     )
 

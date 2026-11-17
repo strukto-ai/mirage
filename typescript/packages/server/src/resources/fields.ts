@@ -19,7 +19,12 @@ import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
 import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { HOST, IN_PROCESS, SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
+import {
+  HOST,
+  IN_PROCESS,
+  MONTY_REMOTE,
+  SECRET_CONFIG_FIELDS,
+} from '@struktoai/mirage-core/runtime/constants'
 import {
   inProcessRuntimes,
   knownRuntimes,
@@ -178,19 +183,24 @@ function configTypes(configFields: ConfigFields): Field[] {
   return fields
 }
 
+// The keys only a `monty_remote` machine takes.
+const REMOTE_KEYS: readonly string[] = ['url', 'api_key']
+
 /**
  * Every machine provider and engine provider, with its fields: an
  * `in_process` machine's are those of each runtime it may run, none
- * required, and a host's where this host registers its own programs, its
- * `sandbox` block's as
- * `sandbox.<field>` in that group.
+ * required, a host's where this host registers its own programs, its
+ * `sandbox` block's as `sandbox.<field>` in that group, and a `monty_remote`
+ * machine's monty's with its `url` required.
  */
 function machineTypes(): TypeTable {
   const captures: Field = { name: 'captures', type: 'list', secret: false, required: false }
   const inProcess = inProcessRuntimes()
   const engine = new Map<string, Field>()
+  const monty = runtimeClass('monty')
   for (const name of inProcess) {
     for (const field of configTypes(runtimeClass(name).configFields)) {
+      if (runtimeClass(name) === monty && REMOTE_KEYS.includes(field.name)) continue
       if (!engine.has(field.name)) engine.set(field.name, { ...field, required: false })
     }
   }
@@ -198,6 +208,13 @@ function machineTypes(): TypeTable {
     [IN_PROCESS]: [
       { name: 'runtime', type: 'string', secret: false, required: true, options: inProcess },
       ...engine.values(),
+      captures,
+    ],
+    [MONTY_REMOTE]: [
+      ...configTypes(monty.configFields).map((field) => ({
+        ...field,
+        required: field.name === 'url',
+      })),
       captures,
     ],
   }
