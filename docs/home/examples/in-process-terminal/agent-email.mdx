@@ -1,81 +1,57 @@
 ---
 title: Agent Email
 icon: envelope
-description: An agent answers a customer's email with a report it builds from what the team posted in Slack, saves it as a draft, and sends only once a person approves, with no sandbox.
+description: An agent answers email with context scattered across the inbox, chat and shared files, and never sends a reply until a person approves it. Mirage sets up a managed virtual terminal for the task.
 ---
 
-import { Run } from "/snippets/run-block.jsx"
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "himalaya", name: "Mail", text: "reads the inbox, saves drafts" },
-    { cli: "/slack", name: "Slack", text: "reads #incidents and its files" },
-    { cli: "himalaya", name: "Mail", text: "sends, once a person approves", dir: "out" },
+    { cli: "himalaya", name: "Mail", icon: "mail", text: "inbox, drafts" },
+    { cli: "/slack", name: "Slack", logo: "/images/slack-logo.svg", text: "#incidents" },
+    { cli: "himalaya", name: "Mail", icon: "mail", text: "sends on approval" },
   ]}
   steps={[
-    { cmd: "himalaya envelope list && himalaya message read 1", cli: "himalaya", out: "Priya asks which appointments were hit" },
-    { cmd: "grep -h \"calendar sync\" /slack/channels/incidents__*/2026-11-16/chat.jsonl …", cli: "/slack", out: "the note and every customer's events" },
-    { cmd: "awk -F, 'NR == 1 || $1 == \"Northwind Health\"' \"$events\" > …", cli: "/slack", out: "a CSV of her 214 appointments" },
-    { cmd: "himalaya message reply 1 --attach \"$report\" --save Drafts", cli: "himalaya", out: "Message successfully saved" },
-    { cmd: "himalaya message reply 1 --attach \"$events\" --save Drafts", cli: "himalaya", out: "refused: other customers' data" },
-    { cmd: "himalaya message reply 1 --attach \"$report\" --send", cli: "himalaya", dir: "out", out: "waits for a person, then sends" },
-  ]}
-  extras={[
-    { text: "guard.py: the policy" },
-    { text: "/workspace in memory" },
+    { cmd: "himalaya message read 1", cli: "himalaya", out: "which appointments were hit?" },
+    { cmd: "grep -h \"calendar sync\" /slack/channels/incidents__*/…", cli: "/slack", out: "the note and the export" },
+    { cmd: "grep \"^Northwind Health,\" \"$events\" >> \"$report\"", cli: "/slack", out: "214 appointments" },
+    { cmd: "himalaya message reply 1 --attach \"$events\" …", cli: "himalaya", out: "refused: other customers' data" },
+    { cmd: "himalaya message reply 1 --attach \"$report\" --send", cli: "himalaya", out: "waits for a person" },
   ]}
 />
 
-A customer writes to support about a problem the team has already dealt
-with, and asks which of their appointments it hit. The answer is in Slack:
-an engineer posted what happened, with an export of the affected events for
-every customer. An agent reads the email, finds the note, builds a report
-of this customer's events only, and drafts the reply with the report
-attached. A person reads the draft and decides whether it goes out.
+An email agent reads what lands in an inbox, finds what it needs to answer,
+and drafts the reply. The answer is rarely in the email itself. It sits in a
+chat thread or a file someone shared, often with more in it than the reply
+should carry. The agent drafts, and a person decides what is sent.
 
-The agent runs in an
-[in-process terminal](/home/examples/in-process-terminal) inside one FastAPI
-or Express server:
-
-- **Mail:** [`himalaya`](/python/cli/himalaya) reads the support inbox and
-  saves replies to `Drafts` over IMAP, and sends over SMTP.
-- **Files:** `/slack` mounts [Slack](/python/vfs/slack) read-only, files
-  shared in a channel included, so the agent runs `awk` on the export
-  straight from `/slack`, without downloading it. `/workspace`, in
-  [memory](/home/setup/ram), holds the
-  reply's text and the report it builds.
-- **Policy:** the agent may draft as much as it likes. A
-  [policy](/home/policy/overview) on the server reads each attachment
-  before the reply runs, and refuses one that holds more than one
-  customer's data. It also refuses a reply to anyone but the sender, and
-  holds every send until a person approves it.
-
-The commands below are what the agent runs in its terminal. An engineer
-posted this in `#incidents`:
-
-```text
-Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
-Cause: an expired Google token on our side; no data was lost.
-Fix: token rotated, sync re-run for the window, every affected event is back.
-Affected events for all three customers attached. Share each customer only their own.
-                                                          📎 affected-events.csv
-```
-
-The export has one row per event, and the customer in the first column:
-
-```text
-customer,clinic,event_id,starts_at
-Harbor Dental,Ballard,evt_4101,2026-11-16T08:15:00Z
-Northwind Health,Tacoma,evt_4102,2026-11-16T08:45:00Z
-...
-```
+Email is reads and writes over scattered context, an inbox, chat and the
+files shared in it, and that is the work Mirage is built for. The agent
+reaches all of it from one terminal, with fewer tokens than calling the
+same services as MCP tools
+([VFS-Bench 1.0](https://agentvfs.org/benchmark/vfs-bench-1)). Its limits
+are fixed, one inbox to answer from and nothing sent without a person, and
+a managed terminal holds an agent to exactly that. Here it runs as an
+[in-process terminal](/home/examples/in-process-terminal) on a Mirage
+server, without a VM or sandbox.
 
 ## Setup
 
-You need a Slack bot, a mailbox and two keys for the server,
-`SLACK_BOT_TOKEN` and `MAIL_PASSWORD`. The server builds its workspace from
-`workspace.yaml` and judges every reply with `guard.py`.
+<CardGroup cols={3}>
+  <Card title="Mail" icon="envelope">
+    [`himalaya`](/python/cli/himalaya) reads the inbox, saves drafts and sends.
+  </Card>
+  <Card title="Files" icon="folder">
+    [Slack](/python/vfs/slack) is mounted read-only at `/slack`, files included.
+  </Card>
+  <Card title="Policy" icon="shield">
+    `guard.py` checks every reply and holds each send for a person.
+  </Card>
+</CardGroup>
+
+You need the `mirage` CLI, a Slack bot, a mailbox and two keys,
+`SLACK_BOT_TOKEN` and `MAIL_PASSWORD`.
 
 <AccordionGroup>
   <Accordion title="Slack and a mailbox">
@@ -121,22 +97,21 @@ You need a Slack bot, a mailbox and two keys for the server,
     EOF
     ```
 
-    The server needs two keys: `SLACK_BOT_TOKEN`, and `MAIL_PASSWORD`, which
-    can be anything for GreenMail.
+    `MAIL_PASSWORD` can be anything for GreenMail.
   </Accordion>
   <Accordion title="Installation">
     The policy runs on [Monty](/home/policy/scripts#runtimes), a small sandboxed
     Python interpreter:
 
     <Tabs>
-      <Tab title="FastAPI" icon="/images/python-logo.svg">
+      <Tab title="pip" icon="/images/python-logo.svg">
         ```bash
-        pip install 'mirage-ai[email,monty]' fastapi uvicorn
+        pip install 'mirage-ai[email,monty]'
         ```
       </Tab>
-      <Tab title="Express" icon="/images/typescript-logo.svg">
+      <Tab title="npm" icon="/images/typescript-logo.svg">
         ```bash
-        npm install @struktoai/mirage-node @pydantic/monty express
+        npm install -g @struktoai/mirage-cli @pydantic/monty
         ```
       </Tab>
     </Tabs>
@@ -178,7 +153,7 @@ You need a Slack bot, a mailbox and two keys for the server,
     profiles:
       support:
         commands:
-          allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, mkdir,
+          allow: [cd, pwd, echo, cat, ls, grep, jq, head, tail, wc, awk, cut, sort, uniq, mkdir,
                   himalaya envelope list, himalaya message read, himalaya message reply]
         policy:
           pre_command:
@@ -263,464 +238,161 @@ You need a Slack bot, a mailbox and two keys for the server,
         return None
     ```
   </Accordion>
-  <Accordion title="Server">
-    This is the server from the
-    [Overview](/home/examples/in-process-terminal#simple-server), built from
-    `workspace.yaml`, with two changes:
-
-    - `/sessions/{id}/run` also returns the policy's `decision`, so the agent
-      knows why a command was refused, and the ask's ID.
-    - `GET /asks` lists the sends waiting for a person, and `POST /asks/{id}`
-      approves or refuses one.
-
-    <Tabs>
-      <Tab title="FastAPI" icon="/images/python-logo.svg">
-        ```python app.py
-        from contextlib import asynccontextmanager
-
-        from fastapi import FastAPI
-        from pydantic import BaseModel
-
-        from mirage import Outcome, Workspace
-        from mirage.config import load_config, resolve_secrets
-
-        ws: Workspace
-
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            global ws
-            config = await resolve_secrets(load_config("workspace.yaml"))
-            ws = Workspace(**config.to_workspace_kwargs())
-            yield
-            await ws.close()
-
-
-        app = FastAPI(lifespan=lifespan)
-
-
-        class Run(BaseModel):
-            command: str
-
-
-        class Answer(BaseModel):
-            allow: bool
-
-
-        @app.post("/sessions/{session_id}")
-        async def create(session_id: str) -> None:
-            ws.create_session(session_id)
-
-
-        @app.post("/sessions/{session_id}/run")
-        async def run(session_id: str, body: Run) -> dict:
-            r = await ws.shell(body.command, session_id=session_id)
-            d = r.decision
-            return {
-                "stdout": await r.stdout_str(),
-                "stderr": await r.stderr_str(),
-                "exit_code": r.exit_code,
-                "decision": d and {"kind": d.kind, "reason": d.reason, "ask_id": d.ask_id},
-            }
-
-
-        @app.get("/asks")
-        async def asks() -> dict:
-            return {"items": [
-                {"id": a.id, "session_id": a.session_id, "command": " ".join([a.command, *a.argv]), "reason": a.reason}
-                for a in ws.decisions.pending()
-            ]}
-
-
-        @app.post("/asks/{ask_id}", status_code=204)
-        async def answer(ask_id: str, body: Answer) -> None:
-            await ws.decisions.answer(ask_id, Outcome.ALLOW if body.allow else Outcome.DENY)
-        ```
-
-        ```bash
-        export SLACK_BOT_TOKEN=xoxb-...
-        export MAIL_PASSWORD=any
-        uvicorn app:app --port 3000
-        ```
-      </Tab>
-      <Tab title="Express" icon="/images/typescript-logo.svg">
-        ```typescript app.mjs
-        import express from 'express'
-        import { Outcome, Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
-
-        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-        const ws = new Workspace(mounts, options)
-
-        const app = express()
-        app.use(express.json())
-
-        app.post('/sessions/:id', (req, res) => {
-          ws.createSession(req.params.id)
-          res.sendStatus(201)
-        })
-
-        app.post('/sessions/:id/run', async (req, res) => {
-          const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-          const d = r.decision
-          res.json({
-            stdout: r.stdoutText,
-            stderr: r.stderrText,
-            exitCode: r.exitCode,
-            decision: d && { kind: d.kind, reason: d.reason, ask_id: d.askId },
-          })
-        })
-
-        app.get('/asks', (req, res) => {
-          res.json({
-            items: ws.decisions.pending().map((a) => ({
-              id: a.id, session_id: a.sessionId, command: [a.command, ...a.argv].join(' '), reason: a.reason,
-            })),
-          })
-        })
-
-        app.post('/asks/:id', async (req, res) => {
-          await ws.decisions.answer(req.params.id, req.body.allow ? Outcome.ALLOW : Outcome.DENY)
-          res.sendStatus(204)
-        })
-
-        app.listen(3000, '127.0.0.1')
-        ```
-
-        ```bash
-        export SLACK_BOT_TOKEN=xoxb-...
-        export MAIL_PASSWORD=any
-        node app.mjs
-        ```
-      </Tab>
-    </Tabs>
-  </Accordion>
 </AccordionGroup>
 
-## Usage
-
-Create a terminal, and define `run`, which sends commands to it and prints
-what they print, then the policy's answer when there is one. It needs
-[`jq`](https://jqlang.org):
+Export the keys, create the workspace, and open a terminal for the agent:
 
 ```bash
-curl -X POST localhost:3000/sessions/a
-
-run() {
-  jq -Rs '{command: .}' |
-    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
-    jq -j '.stdout, .stderr, (.decision // empty | "[\(.kind)] \(.reason)\n")'
-}
+export SLACK_BOT_TOKEN=xoxb-... MAIL_PASSWORD=any
+mirage workspace create workspace.yaml --id support
+export MIRAGE_WORKSPACE=support
+mirage workspace session create -s agent
 ```
 
-The blocks titled **Agent terminal** below run in the terminal on the
-server, not in your shell. Their copy button adds the `run` call around the
-commands, as `run <<'SH'` … `SH`, so a pasted block runs there.
-Variables the agent sets, such as `$report`, stay set in the terminal for the next
-block.
+If the local server was already running, run `mirage daemon restart` so it
+reads the keys.
 
-Each step below starts with what the agent knows at that point and why it
-runs what it runs, then the commands, what they print, and what the agent
-learned.
+## Example
 
-## 1. Read the email
+A customer writes to the support inbox about a calendar sync failure the
+team already dealt with, and asks which of their appointments it hit. An
+engineer posted this in `#incidents`:
 
-The agent starts with only the support inbox. It lists what is waiting,
-then opens the new message to find out who wrote and what they need:
+> **Incident 2026-11-16:** calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.<br />
+> **Cause:** an expired Google token on our side; no data was lost.<br />
+> **Fix:** token rotated, sync re-run for the window, every affected event is back.<br />
+> Affected events for all three customers attached. Share each customer only their own.<br />
+> 📎 `affected-events.csv`
 
-- `himalaya envelope list` shows each message's ID, sender, subject and
-  date. `*` marks one nobody has read.
-- `himalaya message read 1` prints message 1 in full.
+The export has one row per event, with the customer first:
 
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya envelope list
-himalaya message read 1
-```
-</Run>
+| customer | clinic | event_id | starts_at |
+| --- | --- | --- | --- |
+| Harbor Dental | Ballard | evt_4101 | 2026-11-16T08:15:00Z |
+| Northwind Health | Tacoma | evt_4102 | 2026-11-16T08:45:00Z |
+| … | | | |
 
-```text
-┌────┬───────┬───────────────────────────────────────┬────────────┬────────────────────────┬───────┐
-│ ID ┆ FLAGS ┆ SUBJECT                               ┆ FROM       ┆ DATE                   ┆  SIZE │
-╞════╪═══════╪═══════════════════════════════════════╪════════════╪════════════════════════╪═══════╡
-│ 1  ┆ *     ┆ Our calendar sync failed this morning ┆ Priya Shah ┆ 2026-11-16 11:44+00:00 ┆ 525 B │
-└────┴───────┴───────────────────────────────────────┴────────────┴────────────────────────┴───────┘
-Date: Mon, 16 Nov 2026 11:44:26 +0000
-From: Priya Shah <priya@northwind.example>
-To: support@acme.example
-Subject: Our calendar sync failed this morning
+The agent runs each step in its terminal with `mirage shell -s agent`.
 
-[1] text/plain (191 B)
+<Steps>
+  <Step title="Read the email">
+    <CodeGroup>
+    ```bash Command
+    mirage shell -s agent -c 'himalaya envelope list'
+    mirage shell -s agent -c 'himalaya message read 1'
+    ```
+    ```text Output
+    ┌────┬───────┬───────────────────────────────────────┬────────────┬────────────────────────┬───────┐
+    │ ID ┆ FLAGS ┆ SUBJECT                               ┆ FROM       ┆ DATE                   ┆  SIZE │
+    ╞════╪═══════╪═══════════════════════════════════════╪════════════╪════════════════════════╪═══════╡
+    │ 1  ┆ *     ┆ Our calendar sync failed this morning ┆ Priya Shah ┆ 2026-11-16 11:44+00:00 ┆ 525 B │
+    └────┴───────┴───────────────────────────────────────┴────────────┴────────────────────────┴───────┘
+    Date: Mon, 16 Nov 2026 11:44:26 +0000
+    From: Priya Shah <priya@northwind.example>
+    To: support@acme.example
+    Subject: Our calendar sync failed this morning
 
-Hi, appointments were missing from our calendars this morning.
-What happened, did we lose any data, and which appointments were
-affected? Our clinics want to check them with patients.
+    [1] text/plain (191 B)
 
-Priya
-```
+    Hi, appointments were missing from our calendars this morning.
+    What happened, did we lose any data, and which appointments were
+    affected? Our clinics want to check them with patients.
 
-Priya Shah, at Northwind Health, asks three things: what happened to this
-morning's sync, whether any data was lost, and which appointments were
-affected. The email does not say, so the agent goes to find out.
+    Priya
+    ```
+    </CodeGroup>
+    Priya asks what happened, whether data was lost, and which appointments were hit.
+  </Step>
+  <Step title="Find the note and the export in Slack">
+    <CodeGroup>
+    ```bash Command
+    mirage shell -s agent -c 'grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text'
+    mirage shell -s agent -c 'events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*) && echo "$events"'
+    ```
+    ```text Output
+    Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
+    Cause: an expired Google token on our side; no data was lost.
+    Fix: token rotated, sync re-run for the window, every affected event is back.
+    Affected events for all three customers attached. Share each customer only their own.
+    /slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/affected-events__F0CHXFSUQSZ.csv
+    ```
+    </CodeGroup>
+    The note answers the first two questions. The export holds three customers.
+  </Step>
+  <Step title="Build a report of one customer">
+    <CodeGroup>
+    ```bash Command
+    mirage shell -s agent -c '
+    mkdir -p /workspace/outbox
+    report=/workspace/outbox/northwind-health-affected.csv
+    head -1 "$events" > "$report"
+    grep "^Northwind Health," "$events" >> "$report"
+    tail -n +2 "$report" | wc -l
+    tail -n +2 "$report" | cut -d, -f2 | sort | uniq -c'
+    ```
+    ```text Output
+    214
+         77 Bellevue
+         62 Everett
+         75 Tacoma
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Save the reply as a draft">
+    <CodeGroup>
+    ```bash Command
+    mirage shell -s agent -c 'cat > /workspace/reply.txt' <<'EOF'
+    Hi Priya,
 
-## 2. Find what happened
+    This morning from 06:10 to 07:40 UTC, calendar sync stopped because a
+    Google token on our side had expired. No data was lost: we rotated the
+    token, re-ran the sync for that window, and every event is back.
 
-The team posts incidents in `#incidents`, so the answer should be there.
-A Slack channel is a folder named after the channel and its ID, with a
-folder for each day: the day's messages in `chat.jsonl` and the files
-shared that day in `files/`. The email is dated 16 November and says "this
-morning", so the agent looks in that day's folder:
+    214 of your appointments, from today to Friday, did not sync in that
+    window: 77 at Bellevue, 75 at Tacoma and 62 at Everett. The attached CSV
+    lists each one with its clinic, event ID and start time, so your clinics
+    can check them with patients.
 
-- `grep "calendar sync"` searches for the customer's own words, and
-  `jq -r .text` prints only the text of each matching message.
-- The note says the affected events are attached, so `ls` finds the CSV in
-  the same day's `files/`. The agent keeps its path in `$events`.
+    Best,
+    Acme Support
+    EOF
+    mirage shell -s agent -c 'himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --save Drafts'
+    ```
+    ```text Output
+    Message successfully saved
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Mistakes are refused">
+    Each prints `himalaya: Permission denied` and the reason:
 
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text
-events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*)
-echo "$events"
-```
-</Run>
+    | The agent runs | Reason |
+    | --- | --- |
+    | `himalaya message reply 1 --save Drafts --cc ceo@other.example` | a reply goes only to the sender |
+    | `himalaya message reply 1 --save Drafts --attach "$events"` | attach only reports from /workspace/outbox/ |
+    | `himalaya message reply 1 --save Drafts --attach /workspace/outbox/all.csv`, a copy of the export | a report holds one customer's data |
+    | `himalaya message delete 1` | himalaya message delete is not allowed |
+  </Step>
+  <Step title="Send once a person approves">
+    ```mermaid
+    sequenceDiagram
+        participant A as Agent
+        participant M as Mirage
+        participant P as Person
+        A->>M: himalaya message reply 1 … --send
+        M-->>A: requires approval (ask 316ec6bc7e20)
+        P->>M: mirage workspace allow support 316ec6bc7e20
+        A->>M: the same command again
+        M-->>A: Message successfully saved and sent
+    ```
+    The person approves from their own terminal. The approval covers that one command.
 
-```text
-Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
-Cause: an expired Google token on our side; no data was lost.
-Fix: token rotated, sync re-run for the window, every affected event is back.
-Affected events for all three customers attached. Share each customer only their own.
-/slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/affected-events__F0CHXFSUQSZ.csv
-```
-
-The note answers the first two questions: an expired token stopped the
-sync from 06:10 to 07:40 UTC, and no data was lost. The export answers the
-third, but it holds three customers' events, and the note says to share
-each customer only their own.
-
-## 3. Build the report
-
-The agent reads the export from the Slack mount, without downloading it,
-and keeps only Northwind Health's rows:
-
-- `awk -F,` splits each line on commas. `NR == 1` keeps the header, and
-  `$1 == "Northwind Health"` keeps the rows whose first column is the
-  customer. The report goes to `/workspace/outbox/`, the one place
-  `guard.py` lets an attachment come from.
-- `tail -n +2 | wc -l` counts the rows under the header, to check them
-  against the note, and the last `awk` counts the events per clinic for the
-  reply.
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-mkdir -p /workspace/outbox
-report=/workspace/outbox/northwind-health-affected.csv
-awk -F, 'NR == 1 || $1 == "Northwind Health"' "$events" > "$report"
-head -4 "$report"
-tail -n +2 "$report" | wc -l
-awk -F, 'NR > 1 { n[$2]++ } END { for (c in n) print n[c], c }' "$report"
-```
-</Run>
-
-```text
-customer,clinic,event_id,starts_at
-Northwind Health,Tacoma,evt_4102,2026-11-16T08:45:00Z
-Northwind Health,Tacoma,evt_4103,2026-11-16T09:00:00Z
-Northwind Health,Tacoma,evt_4104,2026-11-16T09:15:00Z
-214
-75 Tacoma
-77 Bellevue
-62 Everett
-```
-
-The report holds Northwind Health's 214 events and nothing else, which
-the agent can now sum up by clinic in the reply.
-
-## 4. Draft the reply
-
-The agent has the answers, but sending is not its decision, so it writes
-the reply as a draft:
-
-- It writes the body to `/workspace/reply.txt`, in plain words for the
-  customer, so the draft and a later send use the same text.
-- `himalaya message reply 1` answers Priya's message, which sets the
-  recipient, the `Re:` subject and the thread headers. `--attach "$report"`
-  attaches the report it built. Before the command runs, `guard.py` opens
-  the report and finds one customer in it.
-- `--save Drafts`, without `--send`, only stores the message in `Drafts`
-  over IMAP. Nothing leaves the mailbox.
-- `himalaya envelope list -m Drafts` checks that the draft is there.
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-cat > /workspace/reply.txt <<'EOF'
-Hi Priya,
-
-This morning from 06:10 to 07:40 UTC, calendar sync stopped because a
-Google token on our side had expired. No data was lost: we rotated the
-token, re-ran the sync for that window, and every event is back.
-
-214 of your appointments, from today to Friday, did not sync in that
-window: 77 at Bellevue, 75 at Tacoma and 62 at Everett. The attached CSV
-lists each one with its clinic, event ID and start time, so your clinics
-can check them with patients.
-
-Best,
-Acme Support
-EOF
-himalaya message reply 1 --body-file /workspace/reply.txt \
-  --attach "$report" --save Drafts
-himalaya envelope list -m Drafts
-```
-</Run>
-
-```text
-Message successfully saved
-
-┌────┬───────┬───────────────────────────────────────────┬──────────────────────┬────────────────────────┬───────────┐
-│ ID ┆ FLAGS ┆ SUBJECT                                   ┆ FROM                 ┆ DATE                   ┆      SIZE │
-╞════╪═══════╪═══════════════════════════════════════════╪══════════════════════╪════════════════════════╪═══════════╡
-│ 1  ┆       ┆ Re: Our calendar sync failed this morning ┆ support@acme.example ┆ 2026-11-16 11:44+00:00 ┆ 13.95 KiB │
-└────┴───────┴───────────────────────────────────────────┴──────────────────────┴────────────────────────┴───────────┘
-```
-
-The reply, with the report attached, waits in `Drafts` for a person to
-read.
-
-## 5. What the policy refuses
-
-An agent can get things wrong: copy someone it should not, attach the raw
-export, build a report that lets other customers' rows through, or delete
-mail. Each of these is refused before it runs, even as a draft. The agent
-reads what a real terminal prints for a refused command, and `run` prints
-the reason the server returned.
-
-Copy someone else in:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya message reply 1 --save Drafts \
-  --cc ceo@other.example
-```
-</Run>
-
-```text
-himalaya: Permission denied
-[deny] a reply goes only to the sender
-```
-
-Attach the export straight from Slack:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya message reply 1 --save Drafts \
-  --attach "$events"
-```
-</Run>
-
-```text
-himalaya: Permission denied
-[deny] attach only reports from /workspace/outbox/
-```
-
-Copy the whole export into the outbox and attach it:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-cat "$events" > /workspace/outbox/all.csv
-himalaya message reply 1 --save Drafts \
-  --attach /workspace/outbox/all.csv
-```
-</Run>
-
-```text
-himalaya: Permission denied
-[deny] a report holds one customer's data
-```
-
-Delete the email:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya message delete 1
-```
-</Run>
-
-```text
-himalaya: Permission denied
-[deny] himalaya message delete is not allowed
-```
-
-The first three are `guard.py`; the third one it refused after reading the
-file. The last is the profile's allow list, which refuses the command
-before `guard.py` is asked. `Drafts` still holds only the reply from
-step 4.
-
-## 6. Ask to send
-
-The draft is ready, so the agent tries to send it: the same command, with
-`--send` in place of `--save Drafts`. `guard.py` answers with an ask, so the
-command does not run, and the server records it for a person:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya message reply 1 --body-file /workspace/reply.txt \
-  --attach "$report" --send
-```
-</Run>
-
-```text
-himalaya: Permission denied
-[pending] a person approves every send
-```
-
-## 7. A person approves
-
-A person reads the draft in `Drafts`, then lists the asks and approves this
-one. These two requests go to the server from outside the agent's terminal:
-
-```bash
-curl -s localhost:3000/asks
-```
-
-```json
-{
-  "items": [
-    {
-      "id": "316ec6bc7e20",
-      "session_id": "a",
-      "command": "himalaya message reply 1 --body-file /workspace/reply.txt --attach /workspace/outbox/northwind-health-affected.csv --send",
-      "reason": "a person approves every send"
-    }
-  ]
-}
-```
-
-The ask shows the command after expansion, so the person sees the exact
-file that will be attached, not `$report`. They approve it by its `id`, and
-the server answers `204` with no body:
-
-```bash
-curl -X POST localhost:3000/asks/316ec6bc7e20 \
-  -H 'content-type: application/json' -d '{"allow": true}'
-```
-
-## 8. Send
-
-The agent runs the same command again. The approval covers it, so this
-time it runs: `himalaya` sends over SMTP and keeps a copy in `Sent`:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-himalaya message reply 1 --body-file /workspace/reply.txt \
-  --attach "$report" --send
-```
-</Run>
-
-```text
-Message successfully saved and sent
-```
-
-The approval covered that one command. The next send asks again, and a
-refused ask leaves the draft where it is.
+    ```bash
+    mirage workspace list-asks
+    mirage workspace allow support 316ec6bc7e20
+    ```
+  </Step>
+</Steps>
 
 For the commands and flags `himalaya` supports, see
 [himalaya](/python/cli/himalaya). For more on asks, see
