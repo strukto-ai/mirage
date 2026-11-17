@@ -69,6 +69,7 @@ import {
 } from './admission.ts'
 import {
   innerLines,
+  programLines,
   innerReadable,
   readWord,
   readsOfTest,
@@ -513,7 +514,17 @@ async function* judgeWords(
     rulesOnly,
     occurrence.source,
   )
-  const inners = innerLines(name, words.slice(1))
+  // After a lost cd, a relative path names no file the pass can place.
+  const inners =
+    lost && !name.startsWith('/')
+      ? innerLines(name, words.slice(1))
+      : programLines(
+          words,
+          session,
+          registry,
+          namespace === null ? null : namespace.sessionLinks(session),
+          open,
+        )
   const refused =
     wholeLine && asked?.kind !== 'deny'
       ? lineDecision(
@@ -551,7 +562,7 @@ async function* judgeWords(
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
-  const named = name === 'command' ? inners[0]?.argv[0] : undefined
+  const named = name === 'command' || name.includes('/') ? inners[0]?.argv[0] : undefined
   const masked = named === undefined ? undefined : wordValue(named)
   let innerSession = session
   if (child !== null && typeof child !== 'string') {

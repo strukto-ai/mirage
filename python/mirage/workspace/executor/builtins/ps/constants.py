@@ -101,8 +101,8 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "pmem": ("%MEM", 4, True, "mem_percent"),
     "c": ("C", 2, True, "zero"),
     "cp": ("CP", 3, True, "zero"),
-    "ni": ("NI", 3, True, "zero"),
-    "nice": ("NI", 3, True, "zero"),
+    "ni": ("NI", 3, True, "nice"),
+    "nice": ("NI", 3, True, "nice"),
     "pri": ("PRI", 3, True, "pri"),
     "priority": ("PRI", 3, True, "priority"),
     "opri": ("PRI", 3, True, "opri"),
@@ -139,16 +139,18 @@ BAR = " |  "
 GAP = "    "
 
 
+# The priority columns procps derives from the niceness: PRI is 19 less
+# it, `priority` 20 more and `opri` 80 more, as debian:stable-slim prints.
+PRIORITY_BASE = 20
+OLD_PRIORITY_BASE = 80
+
 # The fixed answers for a runner: what procps prints for a process on no
-# terminal, never scheduled away from the default policy and priority.
+# terminal, never scheduled away from the default policy.
 FIXED = {
     "tpgid": "-1",
     "tty": "?",
     "zero": "0",
     "one": "1",
-    "pri": "19",
-    "priority": "20",
-    "opri": "80",
     "dash": "-",
     "cls": "TS",
 }

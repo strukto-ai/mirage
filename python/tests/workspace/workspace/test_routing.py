@@ -17,7 +17,6 @@ import pytest
 from mirage import Policy, Workspace
 from mirage.machine.handle import MachineHandle
 from mirage.policy import Ask, Deny, Outcome, Route
-from mirage.policy.types import Scope
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.types import RunResult
@@ -227,13 +226,13 @@ class _ProgramOnB(Policy):
 
 
 @pytest.mark.asyncio
-async def test_explain_places_a_wrapper_with_its_program():
+async def test_explain_places_a_wrapper_in_mirage_and_its_program_by_route():
     ws = _workspace(_ProgramOnB())
     try:
         said = await ws.explain("nohup hostname")
         commands = [node for node in _commands(said.node) if node.command]
         assert [(c.command, c.machine) for c in commands] == [
-            ("nohup", "b"),
+            ("nohup", ""),
             ("hostname", "b"),
         ]
     finally:
@@ -267,17 +266,15 @@ class _WrapperApart(Policy):
 
 
 @pytest.mark.asyncio
-async def test_explain_refuses_a_wrapper_whose_routes_disagree():
+async def test_explain_places_a_wrapper_s_program_by_its_own_route():
     ws = _workspace(_WrapperApart())
     try:
         said = await ws.explain("nohup hostname; echo after")
-        wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
+        nodes = {n.command: n for n in _commands(said.node) if n.command}
         run = await ws.shell("nohup hostname")
-        assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
-        assert wrapper.decision == run.decision
-        assert wrapper.stderr == await run.stderr_str()
-        echo = next(n for n in _commands(said.node) if n.command == "echo")
-        assert (echo.outcome, echo.exit_code) == (Outcome.ALLOW, 0)
+        assert (nodes["nohup"].machine, nodes["hostname"].machine) == ("", "b")
+        assert (run.exit_code, run.stdout) == (0, b"b\n")
+        assert nodes["echo"].outcome is Outcome.ALLOW
     finally:
         await ws.close()
 
@@ -317,23 +314,6 @@ async def test_explain_keeps_what_stops_a_wrapper_before_its_routes(
         assert nodes["nohup"].outcome is (
             outcome if command == "nohup" else Outcome.ALLOW
         )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_explain_refuses_disagreeing_routes_once_an_approval_is_given():
-    ws = _workspace(_Answers("nohup", Ask("sign-off")), _WrapperApart())
-    try:
-        first = await ws.shell("nohup hostname")
-        await ws.decisions.answer(
-            first.decision.ask_id, Outcome.ALLOW, Scope.SESSION
-        )
-        said = await ws.explain("nohup hostname")
-        wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
-        run = await ws.shell("nohup hostname")
-        assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
-        assert wrapper.decision == run.decision
     finally:
         await ws.close()
 
@@ -483,5 +463,30 @@ async def test_a_forked_shells_last_program_runs_as_the_shell():
             -1:
         ]
         assert line.parent == shell
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_a_captured_wrapper_whose_routes_disagree():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "a": _box("a", "nohup", "hostname"),
+            "b": _box("b", "nohup", "hostname"),
+        },
+        policies=[_WrapperApart()],
+    )
+    try:
+        said = await ws.explain("nohup hostname; echo after")
+        nodes = {n.command: n for n in _commands(said.node) if n.command}
+        run = await ws.shell("nohup hostname")
+        assert (nodes["nohup"].outcome, nodes["nohup"].exit_code) == (
+            Outcome.DENY,
+            126,
+        )
+        assert nodes["nohup"].decision == run.decision
+        assert nodes["echo"].outcome is Outcome.ALLOW
     finally:
         await ws.close()

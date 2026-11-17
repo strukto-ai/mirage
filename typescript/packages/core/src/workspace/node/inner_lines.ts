@@ -20,6 +20,10 @@ import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 import { readWrapper } from '../lookup/constants.ts'
+import { pathProgram } from '../lookup/lookup.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionState } from '../session/session.ts'
 
 /**
  * One word of a line as the gate reads it: `raw` as typed, `text` what
@@ -356,4 +360,26 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
     default:
       return []
   }
+}
+
+/**
+ * `innerLines` of a command, a `/usr/bin` path running its program on the
+ * words after it, as the plain path runs it (`/usr/bin/python3 -c 1` runs
+ * `python3 -c 1`). `links`, the session's, are followed to the file; null
+ * reads the path as typed. `open` keeps the operands a runtime appends
+ * (`xargs`) unread for the program. Mirrors Python's `program_lines`.
+ */
+export function programLines(
+  words: readonly Word[],
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceLinks | null = null,
+  open = false,
+): InnerLine[] {
+  const [first, ...args] = words
+  if (first === undefined) return []
+  const head = wordValue(first)
+  const program = pathProgram(head, session, registry, links)
+  if (program === null) return innerLines(head, args)
+  return [{ line: null, argv: [{ raw: program, text: program }, ...args], open }]
 }

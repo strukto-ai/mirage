@@ -13,26 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
-from mirage.commands.spec.help import render_help
-from mirage.commands.spec.shell import SHELL_SPECS
-from mirage.commands.spec.standard import version_line
-from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
+from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
-    DEFAULT_NICENESS,
     EXEC_WRAPPERS,
     INTERPRETER_NAMES,
     KEYWORDS,
-    LOWEST_PRIORITY,
     MACHINE_ONLY_BUILTINS,
     MACHINE_VIEW,
     NAMESPACE_COMMANDS,
@@ -41,14 +38,51 @@ from mirage.workspace.lookup.constants import (
     RUNNERS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
-    nice_adjustment,
     read_wrapper,
 )
-from mirage.workspace.lookup.types import Consumer, WrapperAnswer
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
+    from mirage.workspace.dispatcher.reader import NamespaceReader
     from mirage.workspace.mount import MountRegistry
+
+logger = logging.getLogger(__name__)
+
+
+def path_program(
+    word: str,
+    session: SessionState,
+    registry: "MountRegistry",
+    links: "NamespaceReader | None" = None,
+) -> str | None:
+    """The program a path-spelled command word runs through the
+    ``/usr/bin`` view (``/usr/bin/python3`` runs ``python3``); None for a
+    word naming no file the session's view lists, a link loop included.
+
+    Args:
+        word (str): the command word, as typed.
+        session (SessionState): the session (cwd, its programs).
+        registry (MountRegistry): mount registry (the view's mount).
+        links (NamespaceReader | None): the session's links, followed
+            to the file; None to read the word as typed.
+    """
+    if "/" not in word:
+        return None
+    target = resolve_path(word, session.cwd)
+    if links is not None:
+        try:
+            target = links.follow(target)
+        except CycleError as exc:
+            logger.debug("a link loop names no program: %s", exc)
+            return None
+    mount = registry.try_mount_for(target)
+    if mount is None or not isinstance(mount.vfs, BinViewVFS):
+        return None
+    name = registry.resolve(target)[1].strip("/")
+    if program(name, session, registry) is None:
+        return None
+    return name
 
 
 def is_tool(name: str, session: SessionState) -> bool:
@@ -144,8 +178,8 @@ def routed_consumer(
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[Consumer, RouteDecision[RuntimeIdentity] | None]:
-    """``lookup``'s answer, with a wrapper no Mirage layer owns bound to
-    the runtime that captures its program by name (``nice gcc``).
+    """``lookup``'s answer, with ``lscpu`` the session's own when it
+    picks the machines it answers for.
 
     Args:
         name (str): expanded command name.
@@ -162,14 +196,7 @@ def routed_consumer(
         and picks_machine(args)
     ):
         return Consumer.SESSION, routing
-    consumer = lookup(name, session, registry, routing)
-    if routing is None or not _outside_mirage(consumer):
-        return consumer, routing
-    program = _wrapped(name, args, routing.bindings)
-    if program is None:
-        return consumer, routing
-    bindings = {**routing.bindings, name: routing.bindings[program]}
-    return Consumer.EXTERNAL, dataclasses.replace(routing, bindings=bindings)
+    return lookup(name, session, registry, routing), routing
 
 
 def runs_on_machine(
@@ -180,8 +207,9 @@ def runs_on_machine(
 ) -> bool:
     """Whether a job's one program runs past the workspace, with a pid
     of its own there: what the executor answers when it runs the word,
-    so a wrapper or any program no layer of the workspace holds counts
-    as one a name captures does.
+    a wrapper's program for a wrapper Mirage runs (it execs its program
+    in place), and any program no layer of the workspace holds as one a
+    name captures.
 
     Args:
         registry (MountRegistry): mount registry (command registration).
@@ -191,21 +219,43 @@ def runs_on_machine(
         routing (RouteDecision): the line's placement.
     """
     head = str(words[0])
-    runtime = routing.bindings.get(head, routing.fallback)
     args = [word for word in words[1:] if word is not None]
-    if (
-        head not in routing.bindings
-        and len(args) == len(words) - 1
-        and mirage_program_at(head, args, session, registry, routing) is None
-    ):
-        consumer, placed = routed_consumer(
-            head, args, session, registry, routing
-        )
-        if consumer is Consumer.EXTERNAL and placed is not None:
-            runtime = placed.bindings.get(
-                head, placed.bindings.get(EXTERNAL_COMMANDS)
-            )
+    if len(args) == len(words) - 1:
+        head, args = _unwrapped(head, args, session, registry, routing)
+    if head in routing.bindings:
+        runtime = routing.bindings[head]
+    elif lookup(head, session, registry, routing) is Consumer.EXTERNAL:
+        runtime = routing.bindings.get(EXTERNAL_COMMANDS)
+    else:
+        runtime = routing.fallback
     return getattr(runtime, "reach", "workspace") != "workspace"
+
+
+def _unwrapped(
+    head: str,
+    args: list[str],
+    session: SessionState,
+    registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity],
+) -> tuple[str, list[str]]:
+    """The program a chain of wrappers Mirage runs comes to, and its
+    words: the command itself when it is no such wrapper, and a
+    ``/usr/bin`` path the program it names, as the plain path runs it.
+
+    Args:
+        head (str): the command name.
+        args (list[str]): its words.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        routing (RouteDecision): the line's placement, where a machine
+            that captures a wrapper by name runs it.
+    """
+    while runs_wrapper(head, args, session, registry, routing):
+        at = read_wrapper(head, args)[0]
+        if at is None:
+            break
+        head, args = args[at], args[at + 1 :]
+    return path_program(head, session, registry) or head, args
 
 
 def without_capture(
@@ -225,243 +275,36 @@ def without_capture(
     return dataclasses.replace(routing, bindings=bindings)
 
 
-def mirage_program_at(
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: "MountRegistry",
-    routing: RouteDecision[RuntimeIdentity] | None,
-) -> int | None:
-    """Where a wrapper's program stands in its words when Mirage runs
-    that program itself, without the wrapper (``nice grep``); None
-    otherwise.
-
-    Args:
-        name (str): expanded command name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
-        routing (RouteDecision | None): the line's placement.
-    """
-    bindings: Mapping[str, RuntimeIdentity | None] = (
-        routing.bindings if routing is not None else registry.runtime_bindings
-    )
-    if (
-        name not in PROGRAM_WRAPPERS
-        or name in bindings
-        or not _outside_mirage(lookup(name, session, registry, routing))
-        or _wrapped(name, args, bindings) is not None
-    ):
-        return None
-    at = read_wrapper(name, args)[0]
-    if at is None:
-        return None
-    inner = args[at]
-    if inner in PROGRAM_WRAPPERS:
-        deeper = mirage_program_at(
-            inner, args[at + 1 :], session, registry, routing
-        )
-        return None if deeper is None else at
-    if _outside_mirage(lookup(inner, session, registry, routing)):
-        return None
-    if inner in INTERPRETER_NAMES and not isinstance(
-        bindings.get(inner), LanguageRuntime
-    ):
-        return None
-    return at
-
-
-def wrapper_runs_outside(
+def runs_wrapper(
     name: str,
     args: Sequence[str],
     session: SessionState,
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> bool:
-    """Whether a wrapper goes to a runtime with its program under it
-    (``nohup python3`` on a machine), so Mirage never runs that program
-    itself.
+    """Whether Mirage runs a wrapper itself (``handle_wrapper``): one no
+    layer of the workspace holds (a function, a CLI, a mount's command)
+    and no machine captures by name, with a program to run, or one that
+    answers for itself without one (``nice`` alone prints the niceness).
 
     Args:
         name (str): expanded command name.
         args (Sequence[str]): its words, argv[0] excluded.
         session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
+        registry (MountRegistry): mount registry (CLIs, mount commands).
         routing (RouteDecision | None): the line's placement.
     """
-    return (
-        name in PROGRAM_WRAPPERS
-        and mirage_program_at(name, args, session, registry, routing) is None
-        and routed_consumer(name, args, session, registry, routing)[0]
-        is Consumer.EXTERNAL
+    bindings: Mapping[str, RuntimeIdentity | None] = (
+        routing.bindings if routing is not None else registry.runtime_bindings
     )
-
-
-def wrapper_refusal(
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: "MountRegistry",
-) -> tuple[int, str] | None:
-    """The status and stderr GNU's wrapper answers instead of running
-    its program: a bad option, or a word it cannot exec (``nice cd``).
-
-    Args:
-        name (str): a ``PROGRAM_WRAPPERS`` name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
-    """
-    grammar = PROGRAM_WRAPPERS[name]
-    at, error = read_wrapper(name, args)
-    if error is not None:
-        return grammar.status, error
-    if at is None:
-        return None
-    inner = args[at]
-    if inner not in PROGRAM_WRAPPERS and not execs(inner, session, registry):
-        return 127, grammar.missing.format(inner)
-    return None
-
-
-def _usage(name: str, line: str, status: int) -> WrapperAnswer:
-    return WrapperAnswer(
-        exit_code=status,
-        stderr=f"{line}\nTry '{name} --help' for more information.\n",
-    )
-
-
-def _help_word(args: Sequence[str]) -> str | None:
-    """The ``--help`` or ``--version`` a wrapper's options stopped at.
-
-    Args:
-        args (Sequence[str]): its words.
-    """
-    for word in args:
-        if word == "--" or not word.startswith("-"):
-            return None
-        if len(word) > 2 and "--help".startswith(word):
-            return "--help"
-        if len(word) > 2 and "--version".startswith(word):
-            return "--version"
-    return None
-
-
-def _niceness(args: Sequence[str]) -> WrapperAnswer:
-    """``nice`` followed down a chain of itself to the end: the niceness
-    it comes to, an adjustment with nothing to run refused.
-
-    Args:
-        args (Sequence[str]): the words after the outermost ``nice``.
-    """
-    level = 0
-    warned: list[str] = []
-    words = list(args)
-    while True:
-        at = read_wrapper("nice", words)[0]
-        adjustment = nice_adjustment(words[:at] if at is not None else words)
-        if at is None and adjustment is not None:
-            return _usage(
-                "nice", "nice: a command must be given with an adjustment", 125
-            )
-        if adjustment is not None and adjustment < 0:
-            warned.append("nice: cannot set niceness: Permission denied\n")
-        elif adjustment is not None:
-            level = min(level + adjustment, LOWEST_PRIORITY)
-        elif at is not None:
-            level = min(level + DEFAULT_NICENESS, LOWEST_PRIORITY)
-        if at is None:
-            break
-        words = words[at + 1 :]
-    return WrapperAnswer(stdout=f"{level}\n", stderr="".join(warned))
-
-
-def _ends_bare(args: Sequence[str]) -> bool:
-    """Whether a chain of ``nice`` ends with nothing left to run.
-
-    Args:
-        args (Sequence[str]): the words after the outermost ``nice``.
-    """
-    words = list(args)
-    while True:
-        at = read_wrapper("nice", words)[0]
-        if at is None:
-            return True
-        if words[at] != "nice":
-            return False
-        words = words[at + 1 :]
-
-
-def wrapper_answer(
-    name: str,
-    args: Sequence[str],
-    session: SessionState,
-    registry: "MountRegistry",
-) -> WrapperAnswer:
-    """What a wrapper does with no program it can hand to a Mirage layer:
-    refuse the line, say what it is, print the niceness, or run a path or
-    another wrapper through the shell.
-
-    Args:
-        name (str): a ``RUNNERS`` name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        session (SessionState): shell session (function table).
-        registry (MountRegistry): mount registry (command registration).
-    """
-    refused = wrapper_refusal(name, args, session, registry)
-    if refused is not None:
-        code, said = refused
-        return WrapperAnswer(exit_code=code, stderr=said)
-    at = read_wrapper(name, args)[0]
-    if at is not None:
-        if name == "nice" and args[at] == "nice" and _ends_bare(args):
-            return _niceness(args)
-        return WrapperAnswer(runs_from=at)
-    word = _help_word(args)
-    if word == "--version":
-        return WrapperAnswer(stdout=version_line(name).decode())
-    if word == "--help":
-        page = render_help(name, SHELL_SPECS[name], synopsis=SYNOPSES[name])
-        return WrapperAnswer(stdout=page)
-    if name == "nice":
-        return _niceness(args)
-    if name == "setsid":
-        return _usage(name, "setsid: no command specified", 1)
-    return _usage(name, f"{name}: missing operand", 125)
-
-
-def _outside_mirage(consumer: Consumer) -> bool:
-    """Whether no Mirage layer runs the command.
-
-    Args:
-        consumer (Consumer): ``lookup``'s answer.
-    """
-    return consumer in (Consumer.EXTERNAL, Consumer.UNKNOWN)
-
-
-def _wrapped(
-    name: str,
-    args: Sequence[str],
-    bindings: Mapping[str, RuntimeIdentity | None],
-) -> str | None:
-    """The program a wrapper runs, nested wrappers followed, when a
-    runtime captures it by name and runs it natively.
-
-    Args:
-        name (str): the wrapper's name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        bindings (Mapping[str, RuntimeIdentity | None]): the line's
-            command bindings.
-    """
     if name not in PROGRAM_WRAPPERS or name in bindings:
-        return None
-    at = read_wrapper(name, args)[0]
-    if at is None:
-        return None
-    inner = args[at]
-    if _is_native(bindings.get(inner), inner):
-        return inner
-    return _wrapped(inner, args[at + 1 :], bindings)
+        return False
+    if lookup(name, session, registry, routing) not in (
+        Consumer.UNKNOWN,
+        Consumer.EXTERNAL,
+    ):
+        return False
+    return name in RUNNERS or read_wrapper(name, args)[0] is not None
 
 
 def _layers(

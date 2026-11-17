@@ -3,7 +3,7 @@ import type { MachineName, MachinePid } from '../types.ts'
 import { settledWithin, SignalStop } from '../../utils/abort.ts'
 import { SIGTERM } from '../../shell/constants.ts'
 import { NEVER_TAKEN } from './constants.ts'
-import type { Process, ProcessRunner, ProcessUsage } from './types.ts'
+import type { Process, ProcessRunner, ProcessTraits, ProcessUsage } from './types.ts'
 
 /**
  * Runs a runner as the process it is, so what it records names it. The
@@ -193,6 +193,38 @@ export class ProcessHandle {
       command: command ?? this.current.command,
       fd: fd ?? this.current.fd ?? {},
       argv: argv.length > 0 ? argv : (this.current.argv ?? []),
+    })
+    this.tell()
+    return true
+  }
+
+  /**
+   * Run on as the program a wrapper that is a stage's or a job's one command
+   * runs in its place (`nohup sleep 3 &`), as a wrapper execs its program:
+   * its record names the program, with what the wrapper changed (its
+   * niceness, a group and session of its own), and it ignores what the
+   * wrapper made it ignore. It stays one command only while the program runs
+   * on in its place (`execs`: another wrapper, or a program a machine takes),
+   * so a shell the wrapper runs (`nice sh -c 'nohup a; b'`) keeps what its own
+   * commands' wrappers change to them. False for a runner started for more
+   * than one command, or a shell. Mirrors Python's `wrap`.
+   *
+   * @param traits what the wrappers around the program changed.
+   * @param command the program's words.
+   * @param execs whether the program runs on in its place.
+   */
+  wrap(traits: ProcessTraits, command: string, execs: boolean): boolean {
+    if (!this.oneCommand || this.current.parent === null) return false
+    this.oneCommand = execs
+    this.ignores = new Set([...this.ignores, ...traits.ignores])
+    this.programIgnores = new Set([...this.programIgnores, ...traits.ignores])
+    const pid = this.current.id.pid
+    this.current = Object.freeze({
+      ...this.current,
+      command,
+      niceness: traits.niceness,
+      group: traits.leads ? pid : this.current.group,
+      leader: traits.leads ? pid : (this.current.leader ?? null),
     })
     this.tell()
     return true

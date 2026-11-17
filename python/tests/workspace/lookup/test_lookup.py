@@ -18,6 +18,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
 from mirage.policy.types import AdmissionRules, CommandExplanation
@@ -40,7 +41,11 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import (
+    routed_consumer,
+    runs_on_machine,
+    runs_wrapper,
+)
 from mirage.workspace.session import SessionState
 
 
@@ -382,6 +387,10 @@ class _Box(Runtime, LineExecutorMixin):
         super().__init__(captures=captures)
         self.name = name
 
+    @property
+    def machine(self) -> MachineName:
+        return MachineName("ssh", self.name)
+
     async def run_line(self, engine, paths, texts, ctx):
         return RunResult(
             stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
@@ -417,7 +426,6 @@ def _commands(node) -> list[str]:
         (False, "nice gcc x.c", "docker"),
         (True, "make -j2", "e2b"),
         (True, "nice make", "e2b"),
-        (True, "nice", "e2b"),
         (True, "sudo gcc x.c", "e2b"),
     ],
 )
@@ -432,7 +440,7 @@ async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
         io = await ws.shell(line)
         assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
         said = await ws.explain(line)
-        assert _commands(said.node)[0] == runs
+        assert _commands(said.node)[-1] == runs
     finally:
         await ws.close()
 
@@ -544,7 +552,7 @@ async def test_command_past_a_wrapper_function_is_explained_as_it_runs():
         io = await ws.shell("command nice gcc x.c")
         assert await io.stdout_str() == "docker\n"
         said = await ws.explain("command nice gcc x.c")
-        assert _commands(said.node) == ["", "docker", "docker"]
+        assert _commands(said.node) == ["", "", "docker"]
         assert "nice" in ws.get_session(ws.default_session_id).functions
     finally:
         await ws.close()
@@ -595,16 +603,16 @@ async def test_a_wrapper_around_mirages_program_runs_it_in_mirage(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, out",
+    "line, code, out",
     [
-        ("foo() { echo hi; }; nice foo", "hi\n"),
-        ("nice python3 -c 1", "e2b\n"),
-        ("nice --help grep x", "e2b\n"),
-        ("ionice -p 1 grep x", "e2b\n"),
+        ("foo() { echo hi; }; nice foo", 0, "hi\n"),
+        ("nice", 0, "0\n"),
+        ("nice python3 -c 1", 127, ""),
+        ("ionice -p 1 grep x", 0, "e2b\n"),
     ],
 )
 async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
-    line, out
+    line, code, out
 ):
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -613,7 +621,7 @@ async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
     )
     try:
         io = await ws.shell(line)
-        assert (io.exit_code, await io.stdout_str()) == (0, out)
+        assert (io.exit_code, await io.stdout_str()) == (code, out)
     finally:
         await ws.close()
 
@@ -785,3 +793,43 @@ def test_lscpu_captured_by_name_stays_the_program():
     )
     consumer, _ = routed_consumer("lscpu", (), session, ws.registry, routing)
     assert consumer is Consumer.EXTERNAL
+
+
+def test_a_cli_named_like_a_wrapper_runs_as_the_cli():
+    session, ws = _fixture()
+    ws.register_cli(
+        "nice",
+        CLI(
+            spec=CommandSpec(
+                name="nice", subcommands=(CommandSpec(name="run"),)
+            ),
+            handlers={"run": CLIHandler(fn=_noop)},
+        ),
+    )
+    assert not runs_wrapper("nice", ["run"], session, ws._registry, None)
+    assert runs_wrapper("nohup", ["gcc"], session, ws._registry, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["nice", "gcc", "x.c"],
+        ["nice", "/usr/bin/gcc", "x.c"],
+        ["nohup", "nice", "/usr/bin/gcc", "x.c"],
+    ],
+)
+async def test_a_job_under_wrappers_waits_on_its_program_s_machine(words):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines=[_Box("docker", "gcc")],
+    )
+    try:
+        session = ws.get_session(ws.default_session_id)
+        routing = RouteDecision(
+            bindings=ws._registry.runtime_bindings, fallback=None
+        )
+        assert runs_on_machine(ws._registry, words, session, routing)
+    finally:
+        await ws.close()

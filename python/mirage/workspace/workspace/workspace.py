@@ -696,7 +696,7 @@ class Workspace:
             self._registry, self._runtime_binding, self.machine_table
         )
         self._runtimes.resolve(entries)
-        self._router = Router(self._registry, self._runtimes)
+        self._router = Router(self._registry, self._runtimes, self._namespace)
 
         self._start_installs(clis, specs)
         self.machine_table.hold_handles()

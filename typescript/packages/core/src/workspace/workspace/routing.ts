@@ -30,12 +30,14 @@ import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
 import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
-import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
+import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { type Judged, refusedWhereItStands, type Walked } from '../node/explain.ts'
-import { innerLines, type Word, wordValue } from '../node/inner_lines.ts'
+import { programLines, type Word, wordValue } from '../node/inner_lines.ts'
 import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
@@ -97,37 +99,50 @@ function wrappedPrograms(
   words: readonly Word[],
   occurrence: Occurrence,
   judged: readonly Judged[],
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceLinks,
 ): Judged[] {
-  const [first, ...rest] = words
-  if (first === undefined) return []
   const found: Judged[] = []
-  for (const inner of innerLines(wordValue(first), rest)) {
+  for (const inner of programLines(words, session, registry, links)) {
     if (inner.argv.length === 0) continue
     const place = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
     const held = judged.find((other) => sameOccurrence(other.occurrence, place))
-    if (held !== undefined) found.push(held, ...wrappedPrograms(inner.argv, place, judged))
+    if (held !== undefined)
+      found.push(held, ...wrappedPrograms(inner.argv, place, judged, session, registry, links))
   }
   return found
 }
 
 /** The judged commands a wrapper's run answers for; none for any other command. */
-function programsOf(one: Judged, judged: readonly Judged[]): Judged[] {
+function programsOf(
+  one: Judged,
+  judged: readonly Judged[],
+  registry: MountRegistry,
+  namespace: Namespace,
+): Judged[] {
   const command = one.judgment.command
-  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined) return []
+  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined || one.session === undefined)
+    return []
   return wrappedPrograms(
     [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
     one.occurrence,
     judged,
+    one.session,
+    registry,
+    namespace.sessionLinks(one.session),
   )
 }
 
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
+  private readonly namespace: Namespace
 
-  constructor(registry: MountRegistry, runtimes: Runtimes) {
+  constructor(registry: MountRegistry, runtimes: Runtimes, namespace: Namespace) {
     this.registry = registry
     this.runtimes = runtimes
+    this.namespace = namespace
   }
 
   async decide(
@@ -265,22 +280,18 @@ export class Router {
   }
 
   /**
-   * What the routes answering for a wrapper a runtime takes and for the
-   * programs its run judges come to, as its run settles them; null for any
-   * other command. Mirrors Python's `Router._wrapper_answer`.
+   * What the routes answering for a wrapper a machine captures by name and
+   * for the programs its run judges come to, as its run settles them: that
+   * machine runs them all as one process. Null for any other command, a
+   * wrapper Mirage runs included. Mirrors Python's `Router._wrapper_answer`.
    */
   private wrapperAnswer(
     one: Judged,
     placed: RouteDecision<Runtime>,
     programs: readonly Judged[],
   ): Deny | Route | null {
-    if (
-      one.ctx === undefined ||
-      one.session === undefined ||
-      !wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
-    ) {
-      return null
-    }
+    const command = one.judgment.command
+    if (!PROGRAM_WRAPPERS.has(command) || !Object.hasOwn(placed.bindings, command)) return null
     return agreed(
       [one, ...programs]
         .map((held) => commandRoute(held.judgment.answers))
@@ -307,14 +318,15 @@ export class Router {
   }
 
   /**
-   * A line's judged commands, each wrapper whose routes one run cannot honor
-   * refused at its own node, as its run refuses it. A wrapper or program its
+   * A line's judged commands, each wrapper a machine captures by name whose
+   * routes one run cannot honor refused at its own node, as its run refuses
+   * it. A wrapper or program its
    * gate stops keeps that answer: the run stops there before it compares
    * routes. Mirrors Python's `Router.refuse_disagreeing`.
    */
   refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
     return judged.map((one) => {
-      const programs = programsOf(one, judged)
+      const programs = programsOf(one, judged, this.registry, this.namespace)
       if (programs.length === 0) return one
       if ([one, ...programs].some((held) => held.judgment.exitCode !== 0)) return one
       const answer = this.wrapperAnswer(
@@ -333,7 +345,11 @@ export class Router {
    */
   placements(judged: readonly Judged[], decision: RouteDecision<Runtime>): (one: Judged) => string {
     return (one) =>
-      this.placementFor(one, this.outerPlaced(one, judged, decision), programsOf(one, judged))
+      this.placementFor(
+        one,
+        this.outerPlaced(one, judged, decision),
+        programsOf(one, judged, this.registry, this.namespace),
+      )
   }
 
   /**
@@ -364,9 +380,7 @@ export class Router {
     let decision = placed
     let fallback = placed.fallback
     if (one.ctx !== undefined && one.session !== undefined) {
-      if (mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed) !== null) {
-        return ''
-      }
+      if (runsWrapper(command, one.ctx.argv, one.session, this.registry, placed)) return ''
       const [consumer, rerouted] = routedConsumer(
         command,
         one.ctx.argv,

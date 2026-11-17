@@ -512,6 +512,7 @@ export function startShell(
       ignores: SHELL_IGNORED_SIGNALS,
       oneCommand,
       stdin,
+      traits: currentCaller().traits,
     })
   } catch (error) {
     if ((error as { code?: unknown }).code === 'EAGAIN')
@@ -788,6 +789,7 @@ export async function handleBackground(
       limit: session.processes.max,
       simple: oneProgram(left, session),
       program: programText(left, session),
+      traits: currentCaller().traits,
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

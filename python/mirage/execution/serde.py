@@ -76,7 +76,7 @@ def process_to_fields(record: Process) -> RecordFields:
             "exited": found.exited,
         }
     )
-    return {
+    fields: RecordFields = {
         "id": str(record.id),
         "session_id": record.session_id,
         "line": record.line.value if record.line is not None else None,
@@ -99,6 +99,11 @@ def process_to_fields(record: Process) -> RecordFields:
         "fd": {str(fd): pid for fd, pid in record.fd.items()},
         "argv": list(record.argv),
     }
+    if record.niceness:
+        fields["niceness"] = record.niceness
+    if record.leader is not None:
+        fields["leader"] = record.leader
+    return fields
 
 
 def process_from_fields(fields: RecordFields) -> Process:
@@ -135,4 +140,6 @@ def process_from_fields(fields: RecordFields) -> Process:
         stdin=fields.get("stdin"),
         fd={int(fd): pid for fd, pid in (fields.get("fd") or {}).items()},
         argv=tuple(fields.get("argv") or ()),
+        niceness=fields.get("niceness") or 0,
+        leader=fields.get("leader"),
     )

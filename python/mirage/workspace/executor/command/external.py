@@ -18,11 +18,14 @@ from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.config import Context
+from mirage.context import current_caller
 from mirage.errors.types import CommandTimeoutError
+from mirage.execution.process.types import ProcessTraits
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import (
     ExecutionKind,
@@ -43,6 +46,33 @@ from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
+
+
+def handed_tokens(
+    tokens: tuple[str, ...],
+    traits: ProcessTraits,
+    machine: MachineName | None,
+) -> tuple[str, ...]:
+    """The words a machine is handed for a program: on one with processes
+    of its own, the wrappers around the program first (``nice -n 5
+    gcc``), so they make their change there, with ``--`` before a program
+    named like an option; Mirage's own ``in_process`` machine keeps them
+    in the process it runs the program as.
+
+    Args:
+        tokens (tuple[str, ...]): the program's words.
+        traits (ProcessTraits): what the wrappers around it changed.
+        machine (MachineName | None): the machine that runs it.
+    """
+    if (
+        not traits.wrappers
+        or machine is None
+        or machine.provider == IN_PROCESS
+    ):
+        return tokens
+    if tokens and tokens[0].startswith("-"):
+        return (*traits.wrappers, "--", *tokens)
+    return (*traits.wrappers, *tokens)
 
 
 async def run_external(
@@ -76,6 +106,10 @@ async def run_external(
             ),
         )
     runtime = Runtime.require(entry)
+    tokens = handed_tokens(
+        argv.tokens, current_caller().traits, runtime.machine
+    )
+    command = shlex.join(tokens)
     # A runtime that runs an argv gets one; a line runtime gets the
     # program as one quoted line.
     process = isinstance(runtime, ProcessExecutorMixin)
@@ -104,7 +138,7 @@ async def run_external(
             result = await _execute_program(
                 runtime,
                 argv.name,
-                list(argv.tokens) if process else [],
+                list(tokens) if process else [],
                 ctx,
                 kind,
                 output,

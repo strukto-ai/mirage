@@ -24,6 +24,7 @@ import type {
   VfsExplanation,
 } from '../policy/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
+import { PLAIN_TRAITS, type ProcessTraits } from '../execution/process/types.ts'
 import type { ProcessId } from '../execution/types.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
@@ -144,6 +145,8 @@ export interface Caller {
   // The managed runner the call runs in, which its records name and whose
   // kill signal a native program it started receives.
   readonly process: ProcessHandle | null
+  // What the wrappers around the call changed for the process it runs as.
+  readonly traits: ProcessTraits
   // What preCommand judged the running command on, which a connection it
   // opens reports.
   readonly invocation: CommandContext | null
@@ -202,6 +205,7 @@ const UNBOUND: Caller = {
   declared: null,
   enclosing: null,
   process: null,
+  traits: PLAIN_TRAITS,
   invocation: null,
   vfsMount: null,
   streamed: [],
@@ -357,8 +361,24 @@ export function currentProcessId(): ProcessId | null {
 }
 
 /** Run `run` as the managed runner `process`. */
+/**
+ * Run `fn` as a wrapper's program: the process it runs as, and everything it
+ * starts, carries `traits`. Mirrors Python's `set_traits`.
+ */
+export function setTraits<T>(traits: ProcessTraits, fn: () => Promise<T>): Promise<T> {
+  return runChanged({ traits }, fn)
+}
+
+/**
+ * Run `run` as the managed runner `process`. A process that a `setsid`
+ * started leads its session from its start; what it starts joins that session
+ * through its record, so it leads none of its own. Mirrors Python's
+ * `run_as_process`.
+ */
 export function runAsProcess<T>(run: () => Promise<T>, process: ProcessHandle): Promise<T> {
-  return runWithCaller({ ...currentCaller(), process }, run)
+  const caller = currentCaller()
+  const traits = caller.traits.leads ? { ...caller.traits, leads: false } : caller.traits
+  return runWithCaller({ ...caller, process, traits }, run)
 }
 
 function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {

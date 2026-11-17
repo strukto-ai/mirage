@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from mirage.workspace.executor.builtins.umask import handle_umask
     from mirage.workspace.executor.builtins.unset import handle_unset
     from mirage.workspace.executor.builtins.whoami import handle_whoami
+    from mirage.workspace.executor.builtins.wrapper import handle_wrapper
     from mirage.workspace.executor.builtins.xargs import handle_xargs
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
@@ -148,6 +149,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.executor.builtins.umask": ("handle_umask",),
     "mirage.workspace.executor.builtins.unset": ("handle_unset",),
     "mirage.workspace.executor.builtins.whoami": ("handle_whoami",),
+    "mirage.workspace.executor.builtins.wrapper": ("handle_wrapper",),
     "mirage.workspace.executor.builtins.xargs": ("handle_xargs",),
     "mirage.workspace.executor.builtins.links": (
         "accepts_line",
@@ -222,6 +224,7 @@ __all__ = [
     "handle_umask",
     "handle_which",
     "handle_whoami",
+    "handle_wrapper",
     "handle_xargs",
     "interpret_escapes",
 ]

@@ -27,7 +27,7 @@ import {
   usageHint,
 } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { currentCaller, runAsProgram } from '../../../../context/session_context.ts'
 import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
@@ -396,6 +396,7 @@ export async function handleTimeout(
       ignores: SHELL_IGNORED_SIGNALS,
       ownGroup: !foreground,
       oneCommand: true,
+      traits: currentCaller().traits,
       run: async () => {
         // timeout execs its command, so a builtin that is also a program
         // answers as the program.

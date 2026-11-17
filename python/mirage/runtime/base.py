@@ -394,6 +394,7 @@ class Runtime(ABC, Generic[E]):
                 stdin=stdin,
                 fd=fd,
                 argv=argv,
+                traits=current_caller().traits,
             )
         except BlockingIOError:
             return RunResult(

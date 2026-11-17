@@ -14,6 +14,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.shell.helpers import get_text, literal_word
@@ -23,12 +24,18 @@ from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.lookup.constants import read_wrapper
+from mirage.workspace.lookup.lookup import path_program
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
     cond_leaves,
     cond_tokens,
 )
+
+if TYPE_CHECKING:
+    from mirage.workspace.dispatcher.reader import NamespaceReader
+    from mirage.workspace.mount import MountRegistry
+    from mirage.workspace.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,3 +414,30 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
     if head == "time":
         return _time_inner(args)
     return []
+
+
+def program_lines(
+    words: Sequence[Word],
+    session: "SessionState",
+    registry: "MountRegistry",
+    links: "NamespaceReader | None" = None,
+    open_: bool = False,
+) -> list[InnerLine]:
+    """``inner_lines`` of a command, a ``/usr/bin`` path running its
+    program on the words after it, as the plain path runs it
+    (``/usr/bin/python3 -c 1`` runs ``python3 -c 1``).
+
+    Args:
+        words (Sequence[Word]): the command, name first.
+        session (SessionState): the session (cwd, its programs).
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        links (NamespaceReader | None): the session's links, followed
+            to the file; None to read the path as typed.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read to the command (``xargs``), kept for its program.
+    """
+    head, args = words[0].value, words[1:]
+    program = path_program(head, session, registry, links)
+    if program is None:
+        return inner_lines(head, args)
+    return [InnerLine(argv=(Word(program, program), *args), open=open_)]

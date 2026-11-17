@@ -44,20 +44,18 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
-from mirage.workspace.lookup.lookup import (
-    mirage_program_at,
-    routed_consumer,
-    wrapper_runs_outside,
-)
+from mirage.workspace.lookup.lookup import routed_consumer, runs_wrapper
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.explain import (
     Judged,
     Walked,
     refused_where_it_stands,
 )
-from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.inner_lines import Word, program_lines
 from mirage.workspace.node.occurrence import argv_frame, whole_occurrence
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
@@ -86,6 +84,9 @@ def _wrapped_programs(
     words: Sequence[Word],
     occurrence: Occurrence,
     by_place: Mapping[Occurrence, Judged],
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
 ) -> list[Judged]:
     """The judged commands a wrapper's run answers for, as the run walks
     them: a shell line under the wrapper is the machine's to run, so what
@@ -95,9 +96,12 @@ def _wrapped_programs(
         words (Sequence[Word]): the wrapper's words, name first.
         occurrence (Occurrence): its place on the line.
         by_place (Mapping[Occurrence, Judged]): the line's judged commands.
+        session (SessionState): the session it was judged in.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        links (NamespaceReader): the session's links.
     """
     found: list[Judged] = []
-    for inner in inner_lines(words[0].value, words[1:]):
+    for inner in program_lines(words, session, registry, links):
         if not inner.argv:
             continue
         place = whole_occurrence(
@@ -106,12 +110,19 @@ def _wrapped_programs(
         held = by_place.get(place)
         if held is not None:
             found.append(held)
-            found.extend(_wrapped_programs(inner.argv, place, by_place))
+            found.extend(
+                _wrapped_programs(
+                    inner.argv, place, by_place, session, registry, links
+                )
+            )
     return found
 
 
 def _programs_of(
-    one: Judged, by_place: Mapping[Occurrence, Judged]
+    one: Judged,
+    by_place: Mapping[Occurrence, Judged],
+    registry: MountRegistry,
+    namespace: Namespace,
 ) -> list[Judged]:
     """The judged commands a wrapper's run answers for; none for any
     other command.
@@ -119,14 +130,23 @@ def _programs_of(
     Args:
         one (Judged): the command.
         by_place (Mapping[Occurrence, Judged]): the line's judged commands.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        namespace (Namespace): the link table.
     """
     command = one.judgment.command
-    if command not in PROGRAM_WRAPPERS or one.ctx is None:
+    if (
+        command not in PROGRAM_WRAPPERS
+        or one.ctx is None
+        or one.session is None
+    ):
         return []
     return _wrapped_programs(
         [Word(w, w) for w in (command, *one.ctx.argv)],
         one.occurrence,
         by_place,
+        one.session,
+        registry,
+        namespace.session_links(one.session),
     )
 
 
@@ -150,9 +170,11 @@ class Router:
         self,
         registry: MountRegistry,
         runtimes: Runtimes,
+        namespace: Namespace,
     ) -> None:
         self._registry = registry
         self._runtimes = runtimes
+        self._namespace = namespace
 
     async def decide(
         self,
@@ -377,26 +399,18 @@ class Router:
         decision: RouteDecision[RuntimeIdentity],
         programs: Sequence[Judged],
     ) -> Deny | Route | None:
-        """What the routes answering for a wrapper a runtime takes and
-        for the programs its run judges come to, as its run settles them;
-        None for any other command.
+        """What the routes answering for a wrapper a machine captures by
+        name and for the programs its run judges come to, as its run
+        settles them: that machine runs them all as one process. None for
+        any other command, a wrapper Mirage runs included.
 
         Args:
             one (Judged): the command.
             decision (RouteDecision): its placement, its own route in it.
             programs (Sequence[Judged]): the commands its run answers for.
         """
-        if (
-            one.ctx is None
-            or one.session is None
-            or not wrapper_runs_outside(
-                one.judgment.command,
-                one.ctx.argv,
-                one.session,
-                self._registry,
-                decision,
-            )
-        ):
+        command = one.judgment.command
+        if command not in PROGRAM_WRAPPERS or command not in decision.bindings:
             return None
         routes = [
             command_route(held.judgment.answers) for held in (one, *programs)
@@ -435,8 +449,9 @@ class Router:
         judged: Sequence[Judged],
         decision: RouteDecision[RuntimeIdentity],
     ) -> list[Judged]:
-        """A line's judged commands, each wrapper whose routes one run
-        cannot honor refused at its own node, as its run refuses it. A
+        """A line's judged commands, each wrapper a machine captures by
+        name whose routes one run cannot honor refused at its own node, as
+        its run refuses it. A
         wrapper or program its gate stops keeps that answer: the run
         stops there before it compares routes.
 
@@ -447,7 +462,9 @@ class Router:
         by_place = {one.occurrence: one for one in judged}
         kept: list[Judged] = []
         for one in judged:
-            programs = _programs_of(one, by_place)
+            programs = _programs_of(
+                one, by_place, self._registry, self._namespace
+            )
             answer = (
                 self._wrapper_answer(
                     one,
@@ -489,7 +506,7 @@ class Router:
             return self.placement_for(
                 one,
                 self._outer_placed(one, by_place, decision),
-                _programs_of(one, by_place),
+                _programs_of(one, by_place, self._registry, self._namespace),
             )
 
         return placed
@@ -535,15 +552,8 @@ class Router:
         command = one.judgment.command
         fallback = decision.fallback
         if one.ctx is not None and one.session is not None:
-            if (
-                mirage_program_at(
-                    command,
-                    one.ctx.argv,
-                    one.session,
-                    self._registry,
-                    decision,
-                )
-                is not None
+            if runs_wrapper(
+                command, one.ctx.argv, one.session, self._registry, decision
             ):
                 return ""
             consumer, rerouted = routed_consumer(

@@ -25,6 +25,7 @@ import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
 import * as stream from '../../rs/stream.ts'
 import { Runtime } from '../../runtime/base.ts'
+import { MachineName } from '../../execution/types.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import {
   LINE_EXECUTOR,
@@ -51,7 +52,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
-import { routedConsumer } from './lookup.ts'
+import { routedConsumer, runsOnMachine, runsWrapper } from './lookup.ts'
 import { buildRuntime } from '../../runtime/table.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
@@ -934,6 +935,10 @@ class Box extends Runtime implements LineExecutorMixin {
     super({ captures })
   }
 
+  override get machine(): MachineName {
+    return new MachineName('ssh', this.name)
+  }
+
   runLine(): Promise<RunResult> {
     return Promise.resolve({
       stdout: new TextEncoder().encode(`${this.name}\n`),
@@ -974,7 +979,6 @@ describe('a wrapper runs where the program it runs is captured', () => {
     [false, 'nice gcc x.c', 'docker'],
     [true, 'make -j2', 'e2b'],
     [true, 'nice make', 'e2b'],
-    [true, 'nice', 'e2b'],
     [true, 'sudo gcc x.c', 'e2b'],
   ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
     const entries: Runtime[] = [new Box('docker', 'gcc'), new Monty()]
@@ -984,7 +988,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
       const io = await ws.shell(line)
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
       const said = await ws.explain(line)
-      expect(machinesOf(said.node)[0]).toBe(runs)
+      expect(machinesOf(said.node).at(-1)).toBe(runs)
     } finally {
       await ws.close()
     }
@@ -1109,7 +1113,7 @@ describe('command past a wrapper function', () => {
       const io = await ws.shell('command nice gcc x.c')
       expect(new TextDecoder().decode(io.stdout)).toBe('docker\n')
       const said = await ws.explain('command nice gcc x.c')
-      expect(machinesOf(said.node)).toEqual(['', 'docker', 'docker'])
+      expect(machinesOf(said.node)).toEqual(['', '', 'docker'])
     } finally {
       await ws.close()
     }
@@ -1156,22 +1160,25 @@ describe("a wrapper around Mirage's program", () => {
   })
 
   it.each([
-    ['foo() { echo hi; }; nice foo', 'hi\n'],
-    ['nice python3 -c 1', 'e2b\n'],
-    ['nice --help grep x', 'e2b\n'],
-    ['ionice -p 1 grep x', 'e2b\n'],
-  ])('runs a function, and keeps its route otherwise: %s', async (line, out) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: [new Box('e2b', '@external')] },
-    )
-    try {
-      const io = await ws.shell(line)
-      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
-    } finally {
-      await ws.close()
-    }
-  })
+    ['foo() { echo hi; }; nice foo', 0, 'hi\n'],
+    ['nice', 0, '0\n'],
+    ['nice python3 -c 1', 127, ''],
+    ['ionice -p 1 grep x', 0, 'e2b\n'],
+  ] as [string, number, string][])(
+    'runs a function, and keeps its route otherwise: %s',
+    async (line, code, out) => {
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, machines: [new Box('e2b', '@external')] },
+      )
+      try {
+        const io = await ws.shell(line)
+        expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([code, out])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   it('is still refused by an allow list that leaves the wrapper out', async () => {
     const ws = mirageWorkspace(new Box('e2b', '@external'))
@@ -1275,5 +1282,38 @@ describe('lscpu, the view of the machines', () => {
       fallback: sandbox,
     } as never
     expect(routedConsumer('lscpu', [], session, ws.registry, routing)[0]).toBe(Consumer.EXTERNAL)
+  })
+})
+
+describe('a wrapper beside other layers', () => {
+  it('lets a CLI of its name run as the CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli(
+      'nice',
+      new CLI({
+        spec: new CommandSpec({ name: 'nice', subcommands: [new CommandSpec({ name: 'run' })] }),
+        handlers: { run: new CLIHandler({ fn: noopVerb }) },
+      }),
+    )
+    expect(runsWrapper('nice', ['run'], session, ws.registry, undefined)).toBe(false)
+    expect(runsWrapper('nohup', ['gcc'], session, ws.registry, undefined)).toBe(true)
+  })
+
+  it.each([
+    [['nice', 'gcc', 'x.c']],
+    [['nice', '/usr/bin/gcc', 'x.c']],
+    [['nohup', 'nice', '/usr/bin/gcc', 'x.c']],
+  ])("waits on its program's machine as a job: %j", async (words) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: [new Box('docker', 'gcc')] },
+    )
+    try {
+      const session = ws.getSession(ws.defaultSessionId)
+      const routing = { bindings: ws.registry.runtimeBindings, fallback: null } as never
+      expect(runsOnMachine(ws.registry, words, session, routing)).toBe(true)
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -84,6 +84,7 @@ from mirage.workspace.node.inner_lines import (
     InnerLine,
     Word,
     inner_lines,
+    program_lines,
     read_word,
     reads_of_test,
 )
@@ -582,7 +583,18 @@ async def _judge_words(
         rules_only=rules_only,
         line=occurrence.source,
     )
-    inners = inner_lines(name, words[1:])
+    # After a lost cd, a relative path names no file the pass can place.
+    inners = (
+        inner_lines(name, words[1:])
+        if lost and not name.startswith("/")
+        else program_lines(
+            words,
+            session,
+            registry,
+            None if namespace is None else namespace.session_links(session),
+            open_,
+        )
+    )
     refused = (
         _line_decision(
             name,
@@ -631,7 +643,7 @@ async def _judge_words(
         )
     elif name in ("sh", "bash") and inners:
         inner_session = session.new_shell()
-    elif name == "command" and inners and inners[0].argv:
+    elif (name == "command" or "/" in name) and inners and inners[0].argv:
         inner_session = session.fork()
         inner_session.functions.pop(inners[0].argv[0].value, None)
         inner_session.aliases.pop(inners[0].argv[0].value, None)

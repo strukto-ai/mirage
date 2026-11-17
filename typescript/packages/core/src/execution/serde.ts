@@ -76,6 +76,8 @@ export function processToFields(record: Process): RecordFields {
     stdin: record.stdin ?? null,
     fd: { ...record.fd },
     argv: [...(record.argv ?? [])],
+    ...(record.niceness ? { niceness: record.niceness } : {}),
+    ...(record.leader != null ? { leader: record.leader } : {}),
   }
 }
 
@@ -119,5 +121,9 @@ export function processFromFields(fields: RecordFields): Process {
       ),
     ),
     argv: (fields.argv as number[] | null | undefined) ?? [],
+    ...(typeof fields.niceness === 'number' && fields.niceness !== 0
+      ? { niceness: fields.niceness }
+      : {}),
+    ...(typeof fields.leader === 'number' ? { leader: fields.leader } : {}),
   }
 }

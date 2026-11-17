@@ -310,6 +310,7 @@ export abstract class Runtime<E = unknown> {
         stdin,
         fd,
         argv,
+        traits: currentCaller().traits,
       })
     } catch (error) {
       if ((error as { code?: unknown }).code !== 'EAGAIN') throw error

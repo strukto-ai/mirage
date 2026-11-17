@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import (
     AsyncIterator,
@@ -28,6 +29,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
+from mirage.execution.process.types import PLAIN_TRAITS, ProcessTraits
 from mirage.rs.document import from_units, units
 from mirage.rs.policy import visibility_matcher
 from mirage.shell.voice import use_voice
@@ -172,6 +174,8 @@ class Caller:
         process (ProcessHandle | None): the managed runner the call runs
             in, which its records name and whose kill signal a native
             program it started receives.
+        traits (ProcessTraits): what the wrappers around the call
+            changed for the process it runs as.
         invocation (CommandContext | None): what ``pre_command`` judged
             the running command on, which a connection it opens reports.
         vfs_mount (str | None): the prefix of the mount whose VFS serves
@@ -223,6 +227,7 @@ class Caller:
     declared: Limit | None = None
     enclosing: JobConsole | None = None
     process: ProcessHandle | None = None
+    traits: ProcessTraits = PLAIN_TRAITS
     invocation: CommandContext | None = None
     vfs_mount: str | None = None
     streamed: tuple[
@@ -353,17 +358,37 @@ def current_process_id() -> ProcessId | None:
     return process.record.id if process is not None else None
 
 
+def set_traits(traits: ProcessTraits) -> CallerToken:
+    """Run what follows as a wrapper's program: the process it runs as,
+    and everything it starts, carries ``traits``.
+
+    Args:
+        traits (ProcessTraits): the traits.
+    """
+    return _bind(traits=traits)
+
+
 async def run_as_process(
     run: Callable[[], Awaitable[T]],
     process: ProcessHandle,
 ) -> T:
-    """Run ``run`` as the managed runner ``process``.
+    """Run ``run`` as the managed runner ``process``. A process that a
+    ``setsid`` started leads its session from its start; what it starts
+    joins that session through its record, so it leads none of its own.
 
     Args:
         run (Callable[[], Awaitable[T]]): what runs in it.
         process (ProcessHandle): the managed runner it is.
     """
-    token = _bind(process=process)
+    traits = _caller.get().traits
+    token = _bind(
+        process=process,
+        traits=(
+            dataclasses.replace(traits, leads=False)
+            if traits.leads
+            else traits
+        ),
+    )
     try:
         return await run()
     finally:

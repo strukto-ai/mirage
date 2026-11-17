@@ -22,6 +22,7 @@ import type {
   CommandContext,
   CommandExplanation,
   Policy,
+  Route,
   ShellNode,
 } from '../../policy/index.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
@@ -1722,4 +1723,121 @@ describe('explain answers and the op form', () => {
       await ws.close()
     }
   })
+})
+
+class PythonOnC implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'python3' ? { kind: 'route', machine: 'c' } : null
+  }
+}
+
+const PATH_SPELLED = [
+  '/usr/bin/python3 -c 1',
+  'nice /usr/bin/python3 -c 1',
+  'nohup /usr/bin/python3 -c 1',
+]
+
+// The run runs /usr/bin/python3 as python3, so explain judges and places that
+// program as the run does.
+describe('a /usr/bin path', () => {
+  it.each(PATH_SPELLED)('is refused as its program: %s', async (line) => {
+    const w = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { m: { provider: 'in_process', runtime: 'monty' } },
+        profiles: { default: { commands: { deny: [{ reason: 'no', commands: ['python3'] }] } } },
+      },
+    )
+    open.push(w)
+    const said = await w.explain(line)
+    const ran = await w.shell(line)
+    expect([said.outcome, ran.exitCode]).toEqual([Outcome.DENY, 126])
+  })
+
+  it.each(PATH_SPELLED)('is placed as its program: %s', async (line) => {
+    const w = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          m: { provider: 'in_process', runtime: 'monty' },
+          c: { provider: 'in_process', runtime: 'monty', captures: ['python3'] },
+        },
+        policies: [new PythonOnC()],
+      },
+    )
+    open.push(w)
+    const said = await w.explain(line)
+    const placed = commands(said.node).map((c) => [c.command, c.machine])
+    expect(placed.at(-1)).toEqual(['python3', 'c'])
+    expect(placed.slice(0, -1).every(([, machine]) => machine === '')).toBe(true)
+  })
+})
+
+// A loop resolves to no file, so the run reports it and explain allows the
+// line, as for a path the /usr/bin view does not hold.
+describe('a link loop command', () => {
+  it.each(['/data/l1 x', 'nice /data/l1 x'])('names no program: %s', async (line) => {
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+    open.push(w)
+    await w.shell('ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2')
+    const said = await w.explain(line)
+    const ran = await w.shell(line)
+    expect([said.outcome, ran.exitCode]).toEqual([Outcome.ALLOW, 126])
+  })
+})
+
+describe('a /usr/bin path on a line the box runs whole', () => {
+  // The path runs the program, never a function of the same name, so an allow
+  // list holds over it on a line the box runs whole.
+  it('is judged past a function of its name', async () => {
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: [box],
+        routePolicy: (ctx) => (ctx.line.includes('grep()') ? 'workspace' : null),
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: SessionProfile({ commands: { allow: ['echo'] } }) })
+    await w.shell('grep() { echo hi; }', { sessionId: 's' })
+    const io = await w.shell('/usr/bin/grep x /data', { sessionId: 's' })
+    expect([io.exitCode, DEC.decode(io.stderr)]).toEqual([126, 'grep: Permission denied\n'])
+    expect(box.lines).toEqual([])
+  })
+
+  it('keeps the operands xargs appends unread', async () => {
+    const box = new LineBox()
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { deny: [{ reason: 'no', commands: ['echo forbidden'] }] },
+      }),
+    })
+    const bare = await w.shell('cat /data/f | xargs echo', { sessionId: 's' })
+    const io = await w.shell('cat /data/f | xargs /usr/bin/echo', { sessionId: 's' })
+    expect([io.exitCode, DEC.decode(io.stderr)]).toEqual([bare.exitCode, DEC.decode(bare.stderr)])
+    expect(bare.exitCode).toBe(126)
+    expect(box.lines).toEqual([])
+  })
+})
+
+// Read against the directory the pass last knew, ./python3 named the /usr/bin
+// program and refused a harmless script in /data.
+it('leaves a relative path after a cd the pass lost to the gate', async () => {
+  const w = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, machines: { m: { provider: 'in_process', runtime: 'monty' } } },
+  )
+  open.push(w)
+  w.createSession('s', {
+    profile: SessionProfile({ commands: { deny: [{ reason: 'no', commands: ['python3'] }] } }),
+  })
+  await w.shell("printf 'echo harmless\\n' > /data/python3; cd /usr/bin", { sessionId: 's' })
+  const io = await w.shell('cd "$(echo /data)" && ./python3', { sessionId: 's' })
+  expect([io.exitCode, DEC.decode(io.stdout)]).toEqual([0, 'harmless\n'])
 })

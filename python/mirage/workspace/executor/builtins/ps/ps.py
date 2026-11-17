@@ -22,6 +22,7 @@ from mirage.execution.job import JobTable
 from mirage.execution.process.types import (
     Process,
     ProcessState,
+    ProcessTraits,
     ProcessUsage,
 )
 from mirage.io import IOResult
@@ -40,6 +41,7 @@ from mirage.workspace.executor.builtins.jobspec import (
 )
 from mirage.workspace.executor.builtins.ps import constants
 from mirage.workspace.executor.builtins.ps.types import PsContext, PsOptions
+from mirage.workspace.lookup.constants import LOWEST_PRIORITY
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -245,10 +247,20 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     if fact == "machine":
         return info.shown_machine
     session = (
-        ctx.shell_pid
+        info.leader
+        if info.leader is not None
+        else ctx.shell_pid
         if info.session_id == ctx.session_id and ctx.shell_pid is not None
         else info.group or info.pid
     )
+    if fact == "nice":
+        return str(info.niceness)
+    if fact == "pri":
+        return str(LOWEST_PRIORITY - info.niceness)
+    if fact == "priority":
+        return str(constants.PRIORITY_BASE + info.niceness)
+    if fact == "opri":
+        return str(constants.OLD_PRIORITY_BASE + info.niceness)
     if fact == "pid":
         return str(info.shown_pid)
     if fact == "ppid":
@@ -316,11 +328,14 @@ def _as_bash_runs_them(
     running: Process | None,
     next_pid: int,
     last_on_line: bool,
+    traits: ProcessTraits,
 ) -> tuple[tuple[Process, ...], Process | None]:
     """The processes as bash runs them. A background pipeline's stages
     are its shell's children, with nothing between them, and ``ps`` is a
     program of its own: run last on a line, the shell replaced itself
-    with it; run before more of the line, it is the shell's child.
+    with it; run before more of the line, it is the shell's child. Its
+    own row carries what its wrappers changed (``nice ps``, ``setsid
+    ps``), as the program they exec.
 
     Args:
         listed (tuple[Process, ...]): the processes the view sees.
@@ -328,6 +343,7 @@ def _as_bash_runs_them(
         running (Process | None): the process running ``ps``.
         next_pid (int): the pid ``ps`` has as a child.
         last_on_line (bool): whether ``ps`` is run last on its line.
+        traits (ProcessTraits): what the wrappers around ``ps`` changed.
 
     Returns:
         tuple[tuple[Process, ...], Process | None]: the processes to
@@ -341,18 +357,38 @@ def _as_bash_runs_them(
         for info in listed
         if not info.stages
     )
-    if running is None or not any(c in running.command for c in ";&|\n"):
+    alone = running is not None and not any(
+        c in running.command for c in ";&|\n"
+    )
+    if running is None or (alone and not traits.wrappers):
         return rows, running
-    if last_on_line:
-        shown = replace(running, command=own)
+    if last_on_line or alone:
+        shown = _wearing(replace(running, command=own), traits)
         return tuple(shown if r.pid == shown.pid else r for r in rows), shown
-    child = replace(
-        running,
-        id=replace(running.id, pid=next_pid),
-        parent=running.pid,
-        command=own,
+    child = _wearing(
+        replace(
+            running,
+            id=replace(running.id, pid=next_pid),
+            parent=running.pid,
+            command=own,
+        ),
+        traits,
     )
     return (*rows, child), child
+
+
+def _wearing(info: Process, traits: ProcessTraits) -> Process:
+    """A row with what the wrappers around it changed.
+
+    Args:
+        info (Process): the row.
+        traits (ProcessTraits): the wrappers' traits.
+    """
+    if traits.leads:
+        return replace(
+            info, niceness=traits.niceness, group=info.pid, leader=info.pid
+        )
+    return replace(info, niceness=traits.niceness)
 
 
 def _forest(rows: list[Process]) -> list[tuple[Process, str]]:
@@ -427,7 +463,8 @@ async def handle_ps(
     sid = session_of(session)
     await job_table.processes.scan()
     every = options.all or not options.pids
-    runner = current_caller().process
+    caller = current_caller()
+    runner = caller.process
     node = session._line_node if session is not None else None
     listed, running = _as_bash_runs_them(
         job_table.processes.visible(sid, grants_of(session)),
@@ -435,6 +472,7 @@ async def handle_ps(
         runner.record if runner is not None else None,
         job_table.processes.last_pid + 1,
         node is not None and ends_line(node),
+        caller.traits,
     )
     rows = [
         info

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shellVoice } from '../../shell/voice.ts'
-import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
@@ -24,13 +23,11 @@ import {
   redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
-  runAsProgram,
   runWithCaller,
   runWithRedirectPaths,
   sessionAccess,
   syntaxHead,
 } from '../../context/session_context.ts'
-import { ensureStream } from '../../io/stream.ts'
 import { type ByteSource, type OutputState, IOResult, materialize } from '../../io/types.ts'
 import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -50,16 +47,15 @@ import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { DispatchFn, OutputFn, RouteDecision, RunResult } from '../../runtime/types.ts'
+import type { DispatchFn, RouteDecision } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { Channel, JobConsole } from '../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../execution/job/index.ts'
-import { shellJoin } from '../../shell/join.ts'
 import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -91,6 +87,7 @@ import {
   handleReadlink,
   handleSetfattr,
   handleTouch,
+  handleWrapper,
   operandFollow,
   prepareMv,
   stripLinkOperands,
@@ -105,15 +102,8 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { RUNNERS } from '../lookup/constants.ts'
-import {
-  lookup,
-  mirageProgramAt,
-  routedConsumer,
-  wrapperAnswer,
-  wrapperRefusal,
-  wrapperRunsOutside,
-} from '../lookup/lookup.ts'
+import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { lookup, routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -129,7 +119,7 @@ import {
 import { ExecutionNode } from '../types.ts'
 import { admit, Admitted, classifiedWords, type Refused } from './admission.ts'
 import { UNREADABLE_LINES } from './explain.ts'
-import { innerLines, type Word, wordValue } from './inner_lines.ts'
+import { programLines, type Word, wordValue } from './inner_lines.ts'
 import { argvFrame, claimantFor, evaluatedFrom, wholeOccurrence } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
 
@@ -1018,14 +1008,17 @@ async function runArgv(
       }
       try {
         place(admitted?.route ?? null)
-        // A wrapper a runtime takes starts its program where Mirage cannot,
-        // so the program is judged here, and where a policy places it the
-        // wrapper goes with it. One process runs them all, so every route
-        // answering for them has to agree.
+        // A wrapper a machine takes by name starts its program there, where
+        // Mirage never runs it, so the program is judged here, and where a
+        // policy places it the wrapper goes with it. One process runs them
+        // all, so every route answering for them has to agree.
         const gate = admitted
+        const placedLine = context.frame.routing
         if (
           gate !== null &&
-          wrapperRunsOutside(name, argv.args, session, registry, context.frame.routing)
+          PROGRAM_WRAPPERS.has(name) &&
+          placedLine !== undefined &&
+          Object.hasOwn(placedLine.bindings, name)
         ) {
           const verdict = await wrappedVerdict(
             [name, ...argv.args].map((w) => ({ raw: w, text: w })),
@@ -1184,59 +1177,6 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
   return lines.filter((line) => !spoken.has(line.trim()))
 }
 
-/** A console that hands each chunk a line writes on as it comes. */
-class Relay extends JobConsole {
-  constructor(
-    private readonly output: OutputFn,
-    private readonly errors: OutputFn,
-  ) {
-    super()
-  }
-
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    await (channel === Channel.STDOUT ? this.output : this.errors)(data)
-  }
-}
-
-/**
- * Run the program a wrapper runs, as a program, its output handed over as it
- * runs. Mirrors Python's `_run_program`.
- */
-function runProgram(
-  executeFn: ExecuteFn,
-  name: string,
-  line: string,
-  session: SessionState,
-  stdin: ByteSource | null,
-): RedirectResult {
-  const node = new ExecutionNode({ command: name })
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn,
-    signal: AbortSignal,
-  ): Promise<RunResult> => {
-    const ran = await runAsProgram(session, () =>
-      executeFn(line, {
-        sessionId: session.sessionId,
-        signal,
-        sink: new Relay(output, errors),
-        ...(stdin !== null ? { stdin } : {}),
-      }),
-    )
-    if (ran.stdout !== null) {
-      for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
-    }
-    const said = await ran.materializeStderr()
-    node.exitCode = ran.exitCode
-    return {
-      stdout: new Uint8Array(),
-      stderr: said.byteLength > 0 ? said : null,
-      exitCode: ran.exitCode,
-    }
-  }
-  const [stdout, io] = runOutput(run)
-  return [stdout, io, node]
-}
 /** A command the gate refused, as its run answers it. */
 function refused(command: string, verdict: Refused): RedirectResult {
   return [
@@ -1270,11 +1210,12 @@ function unreadable(name: string, session: SessionState): Refused | null {
 /**
  * The gate's answer on the programs a wrapper runs where Mirage cannot see
  * them run (`nohup python3` on a machine). What the words run is followed as
- * the line's pass follows it (`innerLines`): each program is admitted as
+ * the line's pass follows it (`programLines`): each program is admitted as
  * `env` and `timeout` have theirs admitted, at the place the pass judged it,
- * and a line the gate cannot read (`nohup /usr/bin/env`) is refused under an
+ * and a line the gate cannot read (`nohup /opt/bin/env`) is refused under an
  * allow list. The machine runs the program itself, so a function of its name
- * does not stand in for it. Returns the first refusal, else every route a
+ * does not stand in for it. A program spelled by its `/usr/bin` path is
+ * admitted under its name too, as the plain path admits it. Returns the first refusal, else every route a
  * policy answered for them.
  */
 async function wrappedVerdict(
@@ -1286,11 +1227,12 @@ async function wrappedVerdict(
   signal: AbortSignal | undefined,
   claimant: Claimant | null,
 ): Promise<Refused | Route[]> {
-  const [first, ...rest] = words
+  const [first] = words
   if (first === undefined) return []
   const head = wordValue(first)
   const routes: Route[] = []
-  for (const inner of innerLines(head, rest)) {
+  const links = namespace.sessionLinks(session)
+  for (const inner of programLines(words, session, registry, links)) {
     if (inner.argv.length === 0) {
       // shortcut: a line run under the box (`time sh -c`) is not judged.
       const unread = unreadable(head, session)
@@ -1429,19 +1371,16 @@ async function routeArgv(
     ]
   }
 
-  const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing)
-  if (at !== null) {
-    const refused = wrapperRefusal(name, argv.args, session, registry)
-    if (refused !== null) {
-      const [code, said] = refused
-      const err = encodeText(said)
-      return [
-        null,
-        new IOResult({ exitCode: code, stderr: err }),
-        new ExecutionNode({ command: name, exitCode: code, stderr: err }),
-      ]
-    }
-    return runProgram(executeFn, name, shellJoin(argv.args.slice(at)), session, stdin)
+  if (runsWrapper(name, argv.args, session, registry, context.frame.routing)) {
+    return handleWrapper(
+      executeFn,
+      name,
+      argv.args,
+      session,
+      registry,
+      stdin,
+      context.frame.routing,
+    )
   }
 
   const [consumer, routing] = routedConsumer(
@@ -1454,28 +1393,6 @@ async function routeArgv(
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
-  }
-
-  if (consumer === Consumer.UNKNOWN && RUNNERS.has(name)) {
-    const answer = wrapperAnswer(name, argv.args, session, registry)
-    if (answer.runsFrom !== null) {
-      return runProgram(
-        executeFn,
-        name,
-        shellJoin(argv.args.slice(answer.runsFrom)),
-        session,
-        stdin,
-      )
-    }
-    const err = encodeText(answer.stderr)
-    return [
-      answer.stdout === '' ? null : encodeText(answer.stdout),
-      new IOResult({
-        exitCode: answer.exitCode,
-        ...(err.byteLength > 0 ? { stderr: err } : {}),
-      }),
-      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
-    ]
   }
 
   // `--help` as a builtin's first word: bash answers it with the builtin's

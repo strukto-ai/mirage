@@ -432,6 +432,7 @@ SIGNAL_DESCRIPTIONS: dict[int, str] = {
 # The signals no report names when they end a job's last process: INT and
 # PIPE end it silently, TERM as "Terminated" alone in the foreground.
 UNREPORTED_SIGNALS = frozenset({2, 13})
+SIGHUP = 1
 SIGTERM = 15
 SIGKILL = 9
 SIGCHLD = 17

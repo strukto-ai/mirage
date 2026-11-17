@@ -32,7 +32,7 @@ import {
   runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
-import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
+import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 
 import { classifyParts } from './classify/index.ts'
 import { globOptions, resolveGlobs } from './globs.ts'
@@ -135,10 +135,7 @@ export async function expandArgv(
   // refuses a shell builtin's name.
   const typed = expanded.slice(consumed).map(unmarkGlobs)
   const [routed, routing] = routedConsumer(name, typed, session, registry, context.frame.routing)
-  const consumer =
-    routed === Consumer.UNKNOWN && mirageProgramAt(name, typed, session, registry, routing) !== null
-      ? Consumer.EXTERNAL
-      : routed
+  const consumer = runsWrapper(name, typed, session, registry, routing) ? Consumer.EXTERNAL : routed
   const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)

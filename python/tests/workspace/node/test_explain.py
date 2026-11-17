@@ -34,6 +34,7 @@ from mirage.policy import (
     CommandExplanation,
     Deny,
     Policy,
+    Route,
     ShellNode,
 )
 from mirage.policy.match import Outcome
@@ -1999,3 +2000,151 @@ async def test_explain_reads_a_scope_that_spells_a_byte_past_utf8():
         assert printf.words[-1].text == "'\udcff"
     finally:
         await workspace.close()
+
+
+class _PythonOnC(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="c") if ctx.command == "python3" else None
+
+
+PATH_SPELLED = [
+    "/usr/bin/python3 -c 1",
+    "nice /usr/bin/python3 -c 1",
+    "nohup /usr/bin/python3 -c 1",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", PATH_SPELLED)
+async def test_explain_refuses_a_usr_bin_path_as_its_program(line):
+    # The run runs /usr/bin/python3 as python3, so a rule on the name
+    # refuses the line in explain as it does when run.
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"m": {"provider": "in_process", "runtime": "monty"}},
+        profiles={
+            "default": {
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["python3"]}]
+                }
+            }
+        },
+    )
+    try:
+        said = await ws.explain(line)
+        ran = await ws.shell(line)
+        assert (said.outcome, ran.exit_code) == (Outcome.DENY, 126)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", PATH_SPELLED)
+async def test_explain_places_a_usr_bin_path_as_its_program(line):
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "m": {"provider": "in_process", "runtime": "monty"},
+            "c": {
+                "provider": "in_process",
+                "runtime": "monty",
+                "captures": ["python3"],
+            },
+        },
+        policies=[_PythonOnC()],
+    )
+    try:
+        said = await ws.explain(line)
+        placed = [(c.command, c.machine) for c in _commands(said.node)]
+        assert placed[-1] == ("python3", "c")
+        assert all(machine == "" for _, machine in placed[:-1])
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["/data/l1 x", "nice /data/l1 x"])
+async def test_a_link_loop_command_names_no_program(line):
+    # A loop resolves to no file, so the run reports it and explain allows
+    # the line, as for a path the /usr/bin view does not hold.
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    try:
+        await ws.shell("ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2")
+        said = await ws.explain(line)
+        ran = await ws.shell(line)
+        assert (said.outcome, ran.exit_code) == (Outcome.ALLOW, 126)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_is_judged_past_a_function_of_its_name():
+    # The path runs the program, never a function of the same name, so an
+    # allow list holds over it on a line the box runs whole.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines=[box],
+        route_policy=lambda ctx: "workspace" if "grep()" in ctx.line else None,
+    )
+    try:
+        ws.create_session("s", profile={"commands": {"allow": ["echo"]}})
+        await ws.shell("grep() { echo hi; }", session_id="s")
+        r = await ws.shell("/usr/bin/grep x /data", session_id="s")
+        assert (r.exit_code, r.stderr) == (126, b"grep: Permission denied\n")
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_keeps_the_operands_xargs_appends_unread():
+    box = _LineBox()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["echo forbidden"]}]
+                }
+            },
+        )
+        bare = await ws.shell("cat /data/f | xargs echo", session_id="s")
+        r = await ws.shell("cat /data/f | xargs /usr/bin/echo", session_id="s")
+        assert (r.exit_code, r.stderr) == (bare.exit_code, bare.stderr)
+        assert bare.exit_code == 126
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
+    # Read against the directory the pass last knew, ./python3 named the
+    # /usr/bin program and refused a harmless script in /data.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"m": {"provider": "in_process", "runtime": "monty"}},
+    )
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "no", "commands": ["python3"]}]
+                }
+            },
+        )
+        await ws.shell(
+            "printf 'echo harmless\\n' > /data/python3; cd /usr/bin",
+            session_id="s",
+        )
+        r = await ws.shell('cd "$(echo /data)" && ./python3', session_id="s")
+        assert (r.exit_code, r.stdout) == (0, b"harmless\n")
+    finally:
+        await ws.close()
