@@ -47,18 +47,31 @@ const DEC = new TextDecoder()
 
 describe('a job past its limit', () => {
   it('ends though a kill -STOP holds it', async () => {
+    // Cold preflight must not spend the launcher's budget before it creates
+    // a job; advance the unchanged deadline only once the job is held.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) } },
     )
     try {
-      await ws.shell('sleep 30 & p=$!; kill -STOP $p')
-      const job = await ws.jobTable.wait(1, ws.defaultSessionId)
+      expect((await ws.shell('sleep 30 & p=$!; kill -STOP $p')).exitCode).toBe(0)
+      expect(ws.jobTable.get(1, ws.defaultSessionId)?.process?.paused).toBe(true)
+      const waiting = ws.jobTable.wait(1, ws.defaultSessionId)
+      let ended = false
+      void waiting.then(() => {
+        ended = true
+      })
+      await vi.advanceTimersByTimeAsync(199)
+      expect(ended).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const job = await waiting
       expect(job.exitCode).toBe(124)
     } finally {
+      vi.useRealTimers()
       await ws.close()
     }
-  })
+  }, 10_000)
 
   it('ends while a reader holds its output', async () => {
     // Cold preflight must not spend the launcher's budget before it creates
