@@ -1,67 +1,49 @@
 ---
 title: Explain
-description: What the agent sees of policy, and how it asks what a line or a VFS call would do before running it.
+description: See what a line or a file call would do before running it, allowed, refused or waiting for approval.
 icon: lightbulb
 ---
 
-The agent meets policy two ways: the answer it reads when an action is
-refused, and explain, which says what a line or a VFS call would do
-without running it.
+Explain asks every policy about a line or a VFS call without running it, so
+an agent or a host sees the outcome first and can choose what to run.
+Nothing runs, nothing is written and no ask is spent.
 
-## What the agent reads
+## Example
 
-A refusal reads as a real terminal's. The reason travels beside it.
-
-| Refused | The agent reads |
-| --- | --- |
-| a line or a command | `rm: Permission denied`, exit 126 |
-| one path | the command's own error: `cat: /data/k: Permission denied`, exit 1 |
-| a write to a read-only mount | the command's own error: `rm: cannot remove '/data/a': Read-only file system`, exit 1 |
-| a VFS call | `EACCES` |
-| a variable write | `KEY: permission denied`, exit 1 |
-| an ask | the same as a deny, until a host approves; then the retry runs |
-| a hidden path, or a link that leads to one | `No such file or directory`, as if it did not exist |
-
-The reason is on the result's `decision`, never in stderr:
-
-```python
-r = await ws.shell("git push --force origin main")
-r.decision
-# PolicyDecision(kind='deny', reason='force pushes go through an operator', policy='NoForcePush', ask_id=None)
+```yaml
+profiles:
+  agent:
+    cwd: /data
+    commands:
+      deny: [rm]
+      ask: [curl]
 ```
 
-The [agent tools](/python/access/in-app#session-tools), which MCP and the
-agent adapters serve, add one line to their text: `policy denied: <reason>`,
-or `requires approval: <reason> (ask <id>)`. A hidden path adds nothing,
-here or in explain: the agent never learns it exists.
-
-### Which tools the agent gets
-
-`session.tools.names()` lists only the tools the session's profile leaves
-it: `shell` needs a command the allow list allows, `ls` and `grep`
-those commands, `write` and `edit` a mount the session may write. MCP,
-RPC and the agent adapters offer exactly those, so an agent is never
-offered a tool every call of which would be refused.
-
-## Explain
-
-Explain asks every policy about a line or a VFS call and returns their
-answer. Nothing runs, nothing is written and no ask is spent.
-
-```python
-explain = (await ws.session("agent")).explain
-line = await explain.shell("cat /data/keys/k")
-call = await explain.vfs.read("/data/keys/k")
+<CodeGroup>
+```python Python
+explain = (await ws.session("agent", profile="agent")).explain
+r = await explain.shell("rm a.txt")
+print(r.outcome, r.exit_code, r.stderr)  # deny 126 rm: Permission denied
 ```
 
-```typescript
-const explain = (await ws.session('agent')).explain
-const line = await explain.shell('cat /data/keys/k')
-const call = await explain.vfs.read('/data/keys/k')
+```typescript TypeScript
+const explain = (await ws.session('agent', { profile: 'agent' })).explain
+const r = await explain.shell('rm a.txt')
+console.log(r.outcome, r.exitCode, r.stderr) // deny 126 rm: Permission denied
 ```
+</CodeGroup>
 
-`explain.vfs` has the same 23 calls as `session.vfs`. An agent can ask
-too, through MCP, HTTP, RPC or the CLI:
+| Line | `outcome` | Running it would print |
+| --- | --- | --- |
+| `cat a.txt \| wc -l` | `allow` | its output |
+| `rm a.txt` | `deny` | `rm: Permission denied`, exit 126 |
+| `curl -s https://example.com` | `ask` | `curl: Permission denied`, exit 126, until a host approves |
+| `cat a.txt && rm a.txt` | `deny` | `rm: Permission denied`: the rule on `rm` stops the whole line, so `cat` never runs |
+
+`explain.vfs` takes the same calls as `session.vfs`:
+`await explain.vfs.read("/data/a.txt")`.
+
+## Where to ask
 
 | Entry point | A line | A VFS call |
 | --- | --- | --- |
@@ -71,85 +53,56 @@ too, through MCP, HTTP, RPC or the CLI:
 | [RPC](/home/access/rpc) | `shell` with `explain: true` | `vfs/<call>` with `explain: true` |
 | [CLI](/home/access/cli#run-lines-vfs-calls-and-tools) | `mirage shell -w ID -s SESSION -c LINE --explain` | `mirage workspace vfs CALL ARGS -w ID -s SESSION --explain` |
 
-Every entry point returns the same JSON schema. Explain reads the line only, so
-stdin, `cwd`, `runtime` and a background job are refused with it.
+Every entry point returns the same fields. Explain reads the line alone, so
+a request that also sends stdin, a `cwd` or a `machine` is refused.
 
-### What it evaluates
+## What comes back
 
-Explain stops before anything runs, evaluating only pre-execution checks:
-
-| Explained | Evaluates | Never evaluates |
-| --- | --- | --- |
-| A line | the profile's rules, `pre_execute`, `pre_command` | `pre_vfs`, every `post_` method |
-| A VFS call | the profile's rules, `pre_vfs` | every `post_` method |
-
-The `post_` methods need a result. A line's file calls reach `pre_vfs` only
-when the line runs; explain a specific VFS call to see its admission result
-without executing the line.
-
-### What comes back
-
-With a profile that denies `/data/keys/*`:
-
-```json
-{
-  "call": "read",
-  "paths": ["/data/keys/k"],
-  "outcome": "deny",
-  "reason": "keys stay sealed",
-  "source": "top",
-  "decision": {"kind": "deny", "reason": "keys stay sealed", "policy": "PermissionsPolicy", "ask_id": null},
-  "answers": [{"kind": "deny", "reason": "keys stay sealed", "policy": "PermissionsPolicy"}],
-  "error": "EACCES"
-}
-```
-
-| Field | Meaning |
+| Field | What it is |
 | --- | --- |
 | `outcome` | `allow`, `deny` or `ask` |
 | `reason` | the deciding answer's reason, or empty |
-| `source` | where the profile writes the rule (`top`, `mounts./runbook`, `commands.allow`); empty for a coded policy |
-| `answers` | every policy that answered, in order; a route names its `runtime` and its `reason`, empty when it gave none |
+| `source` | where the profile writes the rule (`top`, `commands.allow`); empty for a coded policy |
+| `answers` | every policy that answered, in order |
 | `decision` | the record the agent would get, or `null` |
-| `error` | a VFS call only: the error it would raise (`EACCES`, `EROFS`), or empty |
+| `exit_code`, `stderr` | a line: what the agent would read |
+| `node` | a line: the line as a tree, each command with its own `outcome`, `exit_code`, `stderr`, `words` and the `machine` that would run it |
+| `error` | a VFS call: the error it would raise (`EACCES`, `EROFS`), or empty |
 
-A line adds `exit_code` and `stderr`, what the agent would read, and
-`node`, the line as a tree of commands. Each command in the tree has its
-own `outcome`, `answers`, `exit_code`, `stderr`, `runtime` and `words`,
-the command line word by word as policies read it (see
-[Context](/home/policy/policies#context)). Under an `@line` runtime, every
-command's `runtime` names it. A program only `@external` takes (`make`, `gcc`) names the runtime
-that takes it.
+`mirage shell --explain` prints `node` as an indented tree, one command per
+row with its outcome.
 
-### A line
+## What it cannot see
 
-`mirage shell --explain` prints the tree:
+- `post_` methods, since nothing comes back to judge.
+- The file calls of a line, which happen only as it runs: explain the VFS
+  call itself to see its `pre_vfs` answer.
+- A `pre_command` answer shows on its command, and the line stays `allow`.
+- A hidden path explains like any path no rule names, so explain never
+  reveals it exists.
 
-```text
-cat /data/a | wc -l && echo $(cat /data/keys/k)  [deny, exit 1: keys stay sealed]
-  list: cat /data/a | wc -l && echo $(cat /data/keys/k)
-    pipeline: cat /data/a | wc -l
-      cat /data/a  [allow]
-      wc -l  [allow]
-    echo $(cat /data/keys/k)  [allow]
-      substitution: cat /data/keys/k
-        cat /data/keys/k  [deny, exit 1: keys stay sealed]  top
-```
+## When an action is refused
 
-The line's `outcome`, `exit_code` and `stderr` are what holds the whole
-line before any of it runs: a `pre_execute` answer, or a profile rule on
-any command, the first such command giving the line its answer. A refusal
-met only when its command runs shows on that command alone, and the line
-stays `allow`: a word missing from the allow list, and a policy's
-`pre_command` answer.
+A refusal reads as a real terminal's:
 
-```text
-rm /data/a; echo done  [allow, exit 0]
-  rm /data/a  [deny, exit 126]  commands.allow
-  echo done  [allow]
-```
+| Refused | The agent reads |
+| --- | --- |
+| a line or a command | `rm: Permission denied`, exit 126 |
+| one path | the command's own error: `cat: /data/k: Permission denied`, exit 1 |
+| a write to a read-only mount | `Read-only file system`, exit 1 |
+| a VFS call | `EACCES` |
+| an ask | the same as a deny, until a host approves; then the retry runs |
+| a hidden path | `No such file or directory` |
 
-### Limits
+The reason is on the result's `decision`, never in stderr. The
+[agent tools](/python/access/in-app#session-tools), which MCP and the agent
+adapters serve, add one line: `policy denied: <reason>`, or
+`requires approval: <reason> (ask <id>)`.
 
-- A hidden path explains like any path no rule names.
-- A policy that reads a file to decide still reads it.
+### Which tools the agent gets
+
+`session.tools.names()` lists only the tools the session's profile leaves
+it: `shell` needs a command the allow list allows, `ls` and `grep` those
+commands, `write` and `edit` a mount the session may write. MCP, RPC and the
+agent adapters offer exactly those, so an agent is never offered a tool every
+call of which would be refused.

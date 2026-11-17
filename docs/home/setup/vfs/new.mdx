@@ -139,7 +139,7 @@ start working; leave it out, and those commands answer
 | `files_containing`, `lines_containing` | [Search](/home/integration/search) for `grep` and `rg` from the service's own index |
 | `first_lines`, `last_lines`, `line_count`, `follow` | Fast `head`, `tail`, `wc -l` and `tail -f` ([Lines](/home/integration/lines)) |
 | `checksum`, `read_tree` | Fast `md5sum` and `sha256sum` ([Checksums](/home/integration/checksums)), and `find`, `du`, `ls -R` and `tree` ([Walks](/home/integration/walks)) |
-| `delta_hook` | [Notifications](/home/notifications/support) from the service's change feed |
+| `delta_hook` | [Notifications](/home/notifications#poll) from the service's change feed |
 
 Some commands fall back to simpler functions: `>>` without `append` reads the
 file and calls `write`, `cp` without `copy` reads and writes, `rm -r` without

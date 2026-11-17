@@ -1,0 +1,96 @@
+---
+title: VFS
+description: Admit, hold or refuse each file call with pre_vfs and post_vfs.
+icon: folder-open
+---
+
+`pre_vfs` runs before each VFS call and `post_vfs` after it, whoever makes
+the call: a command, a runtime's file API, a file tool, `session.vfs`, FUSE,
+FSKit or SFTP. TypeScript spells each method and field in camelCase (`preVfs`, `ctx.path`).
+
+| Method | Runs | Can return |
+| --- | --- | --- |
+| `pre_vfs` | before each VFS call, before any backend or cache I/O | Deny, Ask |
+| `post_vfs` | after each VFS call | Deny, Ask |
+
+A command or a file CLI that reads through `ctx.vfs` meets both. An account
+CLI, such as `gh` or `slack`, calls its service directly and makes no VFS
+call: [`pre_command`](/home/policy/command) judges it and
+[`pre_network`](/home/policy/network) its connections.
+
+## Context
+
+| Field | What it is |
+| --- | --- |
+| `call` | the call: its `name`, `effect` (read, write, metadata), `target`, and whether it `creates` or reaches the `subtree` |
+| `path` | the path it names |
+| `write` | whether it writes |
+| `result` | `post_vfs`: what came back |
+
+Every call a VFS marks reaches both methods, `read_tree`, `search` and `copy`
+too. Every `ctx` also carries the [session fields](/home/policy/policies#context).
+
+## pre_vfs
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import Deny, Policy, VfsContext
+
+class ReadOnlyReports(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
+        if ctx.write and ctx.path.virtual.startswith("/reports/"):
+            return Deny("reports are read-only")
+        return None
+```
+
+```typescript TypeScript
+const readOnlyReports: Policy = {
+  preVfs(ctx) {
+    return ctx.write && ctx.path.virtual.startsWith('/reports/')
+      ? { kind: 'deny', reason: 'reports are read-only' }
+      : null
+  },
+}
+```
+
+</CodeGroup>
+
+`session.vfs.write("/reports/q3.md", ...)` raises `EACCES`. The same
+policy refuses a command redirect (`echo x > /reports/q3.md`) and writes
+through runtime file APIs, FUSE, FSKit and SFTP.
+
+## post_vfs
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import Deny, Policy, VfsResultContext
+
+class NoKeysOut(Policy):
+    async def post_vfs(self, ctx: VfsResultContext) -> Deny | None:
+        if isinstance(ctx.result, bytes) and b"PRIVATE KEY" in ctx.result:
+            return Deny("holds a private key")
+        return None
+```
+
+```typescript TypeScript
+const noKeysOut: Policy = {
+  postVfs(ctx) {
+    const text = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : ''
+    return text.includes('PRIVATE KEY') ? { kind: 'deny', reason: 'holds a private key' } : null
+  },
+}
+```
+
+</CodeGroup>
+
+Reading a file that holds a private key with `session.vfs.read` raises
+`EACCES`; commands and runtime file reads meet the same check. Cached
+reads and retained handles are checked against current policy before
+returning their bytes or metadata. These checks do not fetch the retained
+value again. Bytes already delivered to a program remain in its memory.
+
+`post_vfs` can refuse a read but not shorten it: the file comes
+back whole or not at all. To cap how much a command prints, use
+`post_execute`.

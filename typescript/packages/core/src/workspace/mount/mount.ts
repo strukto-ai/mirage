@@ -1834,8 +1834,8 @@ export class MountEntry {
 
   /**
    * `caller` running on this mount: its records name this mount, its writes
-   * are checked against this mount's write context, its reads keep this
-   * mount's revision pins and a connection it opens names this mount.
+   * are checked against this mount's write context and its reads keep this
+   * mount's revision pins.
    * Mirrors Python's `MountEntry._on_mount`.
    */
   private onMount(caller: Caller): Caller {
@@ -1844,7 +1844,6 @@ export class MountEntry {
       recording: caller.recording === null ? null : { ...caller.recording, mountId: this.mountId },
       write: { prefix: this.prefix, context: this.writeContext() },
       revisions: { map: this.revisions.size > 0 ? this.revisions : null },
-      vfsMount: this.prefix,
     }
   }
 

@@ -1,121 +1,409 @@
 ---
 title: Scripts
-description: Write a policy as a program that runs sandboxed on monty or Python on wasm, takes the same context a coded policy reads, and returns its answer.
+description: Write a policy as a short Python program a profile names. It reads ctx as JSON and returns its answer.
 icon: code
 ---
 
-A policy can be a program instead of a class. A profile names a list of
-programs for each method it answers at, and the runtime each one runs on.
-A program defines a function named for the method, which takes the same
-`ctx` a [coded policy](/home/policy/policies) reads and returns its answer.
-Two places take a program:
+A policy can be a program instead of a class. A profile names programs for
+each method, and each program defines a function named for its method: it
+takes `ctx` as plain data and returns its answer as a dict. The methods and
+what each answer does are the same as a [coded policy's](/home/policy/policies).
 
-| Where | Asked | Answers |
-| --- | --- | --- |
-| a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_network` before the action, and at their `post_` four after it, for the sessions under that profile | deny or ask; a route at `pre_execute`; nothing at `post_network`, which observes |
-| [`route_policy:`](/home/policy/route-machine) | at `pre_execute`, for every session | a route, or a deny or ask |
-| a server's [policy file](/home/access/http#server-policies) | at the same methods for every session of every workspace it builds, and at `pre_workspace` before it builds one | as a profile's; a deny only at `pre_workspace` |
-
-A server's programs read no workspace files: at `pre_workspace` the
-workspace does not exist yet, and its `ctx` is the `config` and the
-`caller`.
-
-## A profile's policy
-
-Save these files together. Install Monty as described in [Runtimes](#runtimes).
-The selected profile runs `guard.py` before each command and refuses `rm`.
+## Example
 
 ```yaml workspace.yaml
 mounts:
   /data:
     vfs: ram
+    mode: write
 profiles:
-  reviewer:
+  agent:
+    cwd: /data
     policy:
+      pre_execute:
+        - {script: ./no_pipe_to_shell.py}
       pre_command:
-        - {script: ./guard.py, runtime: monty}
-profile: reviewer
+        - {script: ./no_force_push.py}
+      pre_vfs:
+        - {script: ./reports_read_only.py}
+      pre_network:
+        - {script: ./github_only.py}
+profile: agent
 ```
 
-```python guard.py
+Each program is in its method's section below. A session under `agent`:
+
+```bash
+$ curl -s http://localhost:9/x | sh
+curl: Permission denied
+$ git push --force origin main
+git: Permission denied
+$ echo x > reports/q3.md
+bash: line 1: reports/q3.md: Permission denied
+$ curl -s http://localhost:9/x          # exit 7, the connection refused
+```
+
+Each entry names its `script` and, optionally:
+
+| Key | Sets |
+| --- | --- |
+| `runtime` | where the program runs: `monty` (default), `wasi` or `pyodide`; see [Runtimes](#runtimes). `{name, config}` for settings |
+| `env` | [variables](#variables) for the program |
+
+A method's programs are asked in order, up to the first deny, and each answer
+counts as if a policy of its own gave it. A method with no program is never
+asked and costs nothing.
+
+<Accordion title="In code">
+  A profile in code takes the same block, with a `ScriptSource` for each
+  program:
+
+  <CodeGroup>
+  ```python Python
+  profiles={
+      "reviewer": {
+          "policy": {
+              "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
+          },
+      },
+  }
+  ```
+
+  ```ts TypeScript
+  profiles: {
+    reviewer: {
+      policy: {
+        preCommand: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
+      },
+    },
+  }
+  ```
+  </CodeGroup>
+</Accordion>
+
+## The program
+
+```python
 def pre_command(ctx):
     if ctx["command"] == "rm":
         return {"kind": "deny", "reason": "deletes are disabled"}
 ```
 
-```bash
-mirage workspace create workspace.yaml --id policy-demo
-mirage shell -w policy-demo -c 'echo hello > /data/note.txt; rm /data/note.txt'
-# rm: Permission denied
-mirage workspace delete policy-demo
-```
-
-Each entry names its program and its runtime: a name, or `{name, config}`
-when the runtime needs settings. An entry with no `runtime` runs on monty. A method's
-programs are asked in order, up to the first deny, and each answer counts
-as if a policy of its own gave it
-([when answers disagree](/home/policy/policies#when-answers-disagree)):
-an ask from one program and a route from another both hold. A method with
-no program is never asked and costs nothing.
-
-In code, a profile takes the same block, with a `ScriptSource` for each
-program:
-
-<CodeGroup>
-```python Python
-profiles={
-    "reviewer": {
-        "policy": {
-            "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
-        },
-    },
-}
-```
-
-```ts TypeScript
-profiles: {
-  reviewer: {
-    policy: {
-      preCommand: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
-    },
-  },
-}
-```
-</CodeGroup>
-
-## The program
-
-A program defines a function named for its method at the top level,
-`def pre_command(ctx)` at `pre_command`, and Mirage calls it after the
-program runs. A program without one refuses every action it is asked
-about, with the reason `defines no pre_command(ctx)`.
-
-- **Input:** `ctx`, the function's argument, as plain data. Mirage
-  carries it to the program in the environment variable
-  `MIRAGE_POLICY_CTX`, which is reserved; the session never sees it.
-  Beside it, Mirage passes only the entry's own [`env`](#variables): the
-  session's variables stay out of its environment. A runtime may add its
-  own, as wasi adds `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
-- **Session:** the program starts in the session's working directory, so
-  `os.getcwd()` is the session's. The session's variables are in
-  `ctx["env"]`, not in `os.environ`. An `import` never loads a module from
-  the session's directory.
-- **Answer:** what the function returns. `None` is no opinion. On monty the
-  function may be `async def`, to await [host functions](#host-functions).
+- **Input.** `ctx` is the function's argument. The same JSON is in the
+  `MIRAGE_POLICY_CTX` variable, and on `wasi` and `pyodide` also on stdin;
+  monty has no `sys.stdin`.
+- **Environment.** The program starts in the session's working directory.
+  The session's variables are in `ctx["env"]`, not `os.environ`, which holds
+  only `MIRAGE_POLICY_CTX` and the entry's own `env`.
+- **Answer.** What the function returns. On monty the function may be
+  `async def`, to await [host functions](#host-functions).
+- **stdout** carries the answer back as JSON, so a stray `print` fails the
+  program. Write debug lines to stderr.
 
 | Returns | Effect |
 | --- | --- |
 | `None` | no opinion |
 | `{"kind": "deny", "reason": "..."}` | refuses |
 | `{"kind": "ask", "reason": "..."}` | [asks the host](/home/policy/policies#asks) |
-| `{"kind": "route", "machine": "docker"}` | at `pre_execute` and `pre_command`: runs the line, or the command, on that machine |
+| `{"kind": "route", "machine": "box"}` | `pre_execute` and `pre_command` only: runs the line or the command on that [machine](/home/policy/route-machine) |
 
-A deny or an ask without a `reason` gets the default one. A route may give
-one too, which `explain` shows.
+A deny or an ask without a `reason` gets a default one. A program cannot
+return a `Limit`; a [coded policy](/home/policy/policies) can.
 
-Mirage prints the return value on stdout as JSON and reads it back there,
-so anything else the program prints on stdout, such as a debug line,
-fails it; write those to stderr.
+## Methods
+
+A program can answer at any of these. Each section below shows the `ctx` it
+gets.
+
+| Method | Asked | Can return |
+| --- | --- | --- |
+| [`pre_execute`](#pre_execute) | once per line, before it runs | deny, ask, route |
+| [`post_execute`](#post_execute) | once per line, after it ends | deny, ask |
+| [`pre_command`](#pre_command) | before each command or CLI | deny, ask, route |
+| [`post_command`](#post_command) | after each command | deny, ask |
+| [`pre_vfs`](#pre_vfs) | before each VFS call | deny, ask |
+| [`post_vfs`](#post_vfs) | after each VFS call | deny, ask |
+| [`pre_network`](#pre_network) | before each connection | deny, ask |
+| [`post_network`](#post_network) | after each connection | nothing: it observes |
+| [`pre_workspace`](#pre_workspace) | on a server, before it builds a workspace | deny |
+
+A `post_` method gets its `pre_` method's `ctx` plus what came back. It
+never undoes what ran: its deny or ask holds back what came back.
+
+## pre_execute
+
+Asked once per line, before any of it runs. For `cat notes.txt | wc -l` in
+`/data`:
+
+```json
+{
+  "line": "cat notes.txt | wc -l",
+  "commands": [
+    {"command": "cat", "argv": ["notes.txt"], "paths": ["/data/notes.txt"], "words": [...], ...},
+    {"command": "wc", "argv": ["-l"], "paths": [], "words": [...], ...}
+  ],
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `line` | the line the agent typed |
+| `commands` | each command of the line, as [`pre_command`](#pre_command) gets it, with its own `env` |
+
+A command's own `NAME=value` prefix is in its entry's `env` only: for
+`GPU=1 python3 train.py`, only `python3` has `GPU`. Words only the run can
+expand (`$X`) are not resolved yet.
+
+```python no_pipe_to_shell.py
+def pre_execute(ctx):
+    names = {c["command"] for c in ctx["commands"]}
+    if names & {"curl", "wget"} and names & {"sh", "bash"}:
+        return {"kind": "deny", "reason": "download-and-run is disabled"}
+```
+
+### post_execute
+
+Asked once the line ends. It adds:
+
+```json
+{
+  "exit_code": 0,
+  "output": "2\n",
+  "results": {
+    "op": "|", "exit_code": 0, "stderr": "",
+    "children": [
+      {"command": "cat /data/notes.txt", "exit_code": 0, "stderr": "", "records": [...]},
+      {"command": "wc -l", "exit_code": 0, "stderr": ""}
+    ]
+  },
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `exit_code`, `output` | how the line ended and what it printed |
+| `results` | the line as a tree: each node's exit code and stderr, and each command's `records` |
+
+A deny drops the output: exit 126 and a refusal record.
+
+## pre_command
+
+Asked before each command or CLI, nested ones included. For `cat notes.txt`:
+
+```json
+{
+  "command": "cat",
+  "argv": ["notes.txt"],
+  "line": "cat notes.txt | wc -l",
+  "words": [
+    {"text": "cat", "kind": "name", "option": null, "path": null},
+    {"text": "notes.txt", "kind": "operand", "option": null, "path": "/data/notes.txt"}
+  ],
+  "paths": ["/data/notes.txt"],
+  "tokens": ["cat", "notes.txt"],
+  "program": ["cat"],
+  "tool": true,
+  "walks": false,
+  "write": false,
+  "subtree": false,
+  "move_target": null,
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `command` | the program's name |
+| `argv` | the words after the name, raw: flags are not parsed yet |
+| `line` | the line it was parsed from |
+| `words`, `paths`, `walks` | each word with its kind and path, and every path it reaches; see [Command](/home/policy/command#context) |
+| `tokens`, `program` | the words as a profile rule reads them, and the head that names what runs: a CLI's verb path joins its name |
+| `tool` | whether allow lists govern it |
+| `write` | whether the command may change state |
+| `subtree` | whether it moves or removes a whole tree (`rm`, `rmdir`, `mv`) |
+| `move_target` | the directory a `cp -t` or `mv -t` names, or `null` |
+
+```python no_force_push.py
+def pre_command(ctx):
+    if ctx["command"] == "git" and ctx["argv"][:1] == ["push"] and "--force" in ctx["argv"]:
+        return {"kind": "deny", "reason": "force pushes go through an operator"}
+```
+
+### post_command
+
+Asked after each command, once its output drained. It adds:
+
+```json
+{
+  "exit_code": 0,
+  "stderr": "",
+  "records": [
+    {"op": "read", "path": "/data/notes.txt", "source": "ram", "bytes": 4, "duration_ms": 0, ...}
+  ],
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `exit_code`, `stderr` | how the command ended |
+| `records` | each call it made: `op`, `path`, `source` (the VFS), `bytes` and timing |
+
+A deny sets its exit code to 126, so `&&` and `pipefail` stop there. Output
+already sent stays sent.
+
+## pre_vfs
+
+Asked before each VFS call: a command's file calls, `session.vfs`, a
+runtime's file API, FUSE and SFTP. `cat notes.txt` makes a `stat`, then a
+`read`:
+
+```json
+{
+  "call": {"name": "stat", "effect": "metadata", "target": "any", "creates": false, "subtree": false},
+  "path": "/data/notes.txt",
+  "write": false,
+  "prefix": "/data/",
+  "mode": "write",
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `call` | the call: `name`, `effect` (`read`, `write`, `metadata`), `target`, and whether it `creates` or reaches the `subtree` |
+| `path` | the path it names |
+| `write` | whether it writes |
+| `prefix`, `mode` | the mount that owns the path, and that mount's mode |
+
+```python reports_read_only.py
+def pre_vfs(ctx):
+    if ctx["write"] and ctx["path"].startswith("/data/reports/"):
+        return {"kind": "deny", "reason": "reports are read-only"}
+```
+
+### post_vfs
+
+Asked after each VFS call. It adds `result`, what the call returned. For the
+`stat` above:
+
+```json
+{
+  "result": {"name": "notes.txt", "size": 4, "type": "file", "modified": "2026-11-17T12:15:43.694168Z", ...},
+  ...
+}
+```
+
+A deny drops the result with `EACCES`; the call itself is not undone.
+
+## pre_network
+
+Asked before each connection carries a byte, whoever opens it. For
+`git clone https://github.com/strukto-ai/mirage /repo/mirage`:
+
+```json
+{
+  "host": "github.com",
+  "address": "172.182.252.133",
+  "port": 443,
+  "command": "git",
+  "program": ["git", "clone"],
+  "words": [
+    {"text": "git", "kind": "name", "option": null, "path": null},
+    {"text": "clone", "kind": "subcommand", "option": null, "path": null},
+    {"text": "https://github.com/strukto-ai/mirage", "kind": "operand", "option": null, "path": null},
+    {"text": "/repo/mirage", "kind": "operand", "option": null, "path": "/repo/mirage"}
+  ],
+  "line": "git clone https://github.com/strukto-ai/mirage /repo/mirage",
+  ...
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `host` | the name the program asked for; empty for a bare address |
+| `address`, `port` | where the connection goes |
+| `command`, `program`, `words`, `line` | the command that opened it, as `pre_command` reads it |
+
+The URL, method and status are not there: under HTTPS only the program and
+the server see them. To refuse a clone by its size, look the repository up
+from the URL in `words`: a program on monty has no network, so it asks a
+[host function](#host-functions), as the
+[coded example](/home/policy/network#example-refuse-a-large-clone) asks
+GitHub's API.
+
+```python github_only.py
+def pre_network(ctx):
+    if ctx["host"] != "github.com" and not ctx["host"].endswith(".github.com"):
+        return {"kind": "deny", "reason": f"{ctx['host'] or ctx['address']} is not allowed"}
+```
+
+### post_network
+
+Asked once the connection is over, however it ended. It adds:
+
+```json
+{
+  "bytes_sent": 171,
+  "bytes_received": 99,
+  "seconds": 0.0079,
+  "ended": "closed",
+  ...
+}
+```
+
+`ended` is `closed`, `refused` (by a later policy), `limit` or `error`. A
+program here observes, for a log or a running count, and returns
+nothing.
+
+## pre_workspace
+
+Only a server's [policy file](/home/access/http#server-policies) asks it,
+before a create, clone or load builds anything or reads a secret. Its `ctx`
+holds no session:
+
+```json
+{
+  "config": {"mounts": {"/data": {"vfs": "disk", "config": {"root": "/srv/data"}}}},
+  "caller": {"session": null, "account": "alice"}
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `config` | the config as the caller wrote it: a create's whole config, a clone's or a load's override, secrets still pointers |
+| `caller` | `account`, the account the request signed in as, or `null` |
+
+```python no_disk.py
+def pre_workspace(ctx):
+    mounts = ctx["config"].get("mounts") or {}
+    if any(block.get("vfs") == "disk" for block in mounts.values()):
+        return {"kind": "deny", "reason": "disk mounts are not offered here"}
+```
+
+A deny answers the request with 403 and its reason. See
+[Workspace](/home/policy/workspace).
+
+## Every ctx
+
+Every `ctx` but `pre_workspace`'s also carries the session:
+
+```json
+{
+  "session_id": "agent",
+  "cwd": "/data",
+  "env": {"PWD": "/data", "TEAM": "core"},
+  "profile": "agent",
+  "mounts": ["/.bash_history", "/data", "/dev", "/usr/bin"],
+  "caller": {"session": {"session_id": "agent", "cwd": "/data"}, "account": null}
+}
+```
+
+`mounts` lists the mount roots the session can see. The agent sets `cwd`,
+`env` and what a command says; [what the agent controls](/home/policy/policies#what-the-agent-controls)
+says which fields a program can trust.
 
 ## Variables
 
@@ -179,78 +467,13 @@ refused. A function may take as long as it needs, within the program's 10
 seconds, and programs calling functions run side by side rather than one at
 a time.
 
-## ctx
-
-Every field a coded policy reads, under the Python names, as plain data.
-For `cat notes.txt | wc -l` in `/data`, `pre_execute` gets:
-
-```json
-{
-  "line": "cat notes.txt | wc -l",
-  "commands": [
-    {
-      "command": "cat",
-      "line": "cat notes.txt | wc -l",
-      "words": [
-        {"text": "cat", "kind": "name", "option": null, "path": null},
-        {"text": "notes.txt", "kind": "operand", "option": null, "path": "/data/notes.txt"}
-      ],
-      "paths": ["/data/notes.txt"],
-      "walks": false,
-      "argv": ["notes.txt"],
-      "env": {"PWD": "/data", "TEAM": "core", "OLDPWD": "/"},
-      ...
-    },
-    {"command": "wc", "words": [...], "paths": [], ...}
-  ],
-  "session_id": "agent",
-  "cwd": "/data",
-  "env": {"PWD": "/data", "TEAM": "core", "OLDPWD": "/"},
-  "profile": "reviewer",
-  "mounts": ["/.bash_history", "/data", "/dev", "/usr/bin"],
-  "caller": {"session": {"session_id": "agent", "cwd": "/data"}}
-}
-```
-
-Each entry of `commands` has the `env` that command runs with, its own
-`NAME=value` prefix included: for `GPU=1 python3 train.py`, only the
-`python3` entry has `GPU`. `pre_command` gets one entry of `commands`, with
-the session fields beside it:
-
-| Method | `ctx` holds |
-| --- | --- |
-| `pre_execute` | `line`, `commands` |
-| `pre_command` | `line`, `command`, `words`, `paths`, `walks` |
-| `pre_vfs` | `call` (`name`, `effect`, `target`, `creates`, `subtree`), `path`, `write` |
-| `pre_network` | `host`, `address`, `port`, `command`, `program`, `words`, `line`, `mount` |
-
-A `post_` method gets its `pre_` method's `ctx` plus what came back:
-
-| Method | adds |
-| --- | --- |
-| `post_execute` | `exit_code`, `output`, `results` |
-| `post_command` | `exit_code`, `stderr`, `records` |
-| `post_vfs` | `result` |
-| `post_network` | `bytes_sent`, `bytes_received`, `seconds`, `ended` |
-
-Every `ctx` also has `session_id`, `cwd`, `env`, `profile`, `mounts`, the
-mount roots the session can see, and `caller`, whose `session` holds the
-`session_id` and `cwd` a coded policy reads off `ctx.caller`. The agent
-sets most of these fields;
-[what the agent controls](/home/policy/policies#what-the-agent-controls)
-says which ones a program can trust.
-
 ## Files and the session
 
-A program reads the workspace as the session it judges for:
-
-- `open()`, `os.listdir()` and `os.stat()` go through the workspace. A
-  hidden path does not exist, path rules apply, and a write is refused
-  (`EROFS`).
-- Its own reads are not judged again by its profile's `pre_vfs` or `post_vfs`.
-
-So a program can judge a file by what is in it. This one disables `rm`, and
-a Python script whose code deletes files:
+A program reads the workspace as the session it judges: `open()`,
+`os.listdir()` and `os.stat()` go through the workspace, a hidden path does
+not exist, and a write is refused (`EROFS`). Its own reads are not judged
+again. So a program can judge a file by what is in it. This one refuses
+`rm`, and a Python script whose code deletes files:
 
 ```python guard.py
 def deletes(path):
@@ -268,53 +491,7 @@ def pre_command(ctx):
         return {"kind": "deny", "reason": "deleting files is disabled"}
 ```
 
-The script reads the code as text, so it stops the usual calls, not every way
-Python can delete a file. A rule that must always hold belongs in a
-[coded policy](/home/policy/policies), which judges each file call itself.
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    from pathlib import Path
-
-    from mirage import MountMode, Workspace
-    from mirage.runtime.types import ScriptSource
-    from mirage.vfs.s3 import S3Config, S3VFS
-
-    ws = Workspace(
-        {"/s3": (S3VFS(S3Config(bucket="my-bucket")), MountMode.WRITE)},
-        profiles={
-            "analyst": {
-                "policy": {
-                    "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
-                },
-            },
-        },
-        profile="analyst",
-    )
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import { readFileSync } from 'node:fs'
-    import { MountMode, S3VFS, ScriptSource, Workspace } from '@struktoai/mirage-node'
-
-    const ws = new Workspace(
-      { '/s3': [new S3VFS({ bucket: 'my-bucket' }), MountMode.WRITE] },
-      {
-        profiles: {
-          analyst: {
-            policy: {
-              preCommand: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
-            },
-          },
-        },
-        profile: 'analyst',
-      },
-    )
-    ```
-  </Tab>
-</Tabs>
+With it as the session's `pre_command` program:
 
 ```console
 $ cat /s3/clean.py
@@ -326,17 +503,26 @@ $ python3 /s3/clean.py
 python3: Permission denied
 ```
 
+The program reads the code as text, so it stops the usual calls, not every
+way Python can delete a file. A rule that must always hold belongs in a
+[coded policy](/home/policy/policies), which judges each file call itself.
+
 ## When a program fails
 
 A program that defines no function for its method, exits non-zero, runs
 past 10 seconds, returns anything but an answer its method can give, or
 names a runtime that cannot run here refuses the action. The reason names
 the profile and what went wrong, such as `profile 'reviewer' policy exited
-1`, and the program's stderr goes to the log. Silence on failure would let through exactly what the policy is
-there to judge.
+1`, and the program's stderr goes to the log. Failing open would let
+through exactly what the policy is there to judge.
 
-`route_policy:` is a deployment setting, so the same mistakes fail the
-line with a routing error instead.
+## Where programs go
+
+| Where | Asked |
+| --- | --- |
+| a profile's `policy:` | at the methods it names, for the sessions under that profile |
+| [`route_policy:`](/home/policy/route-machine) | at `pre_execute`, for every session; a failure fails the line with a routing error |
+| a server's [policy file](/home/access/http#server-policies) | at the same methods for every workspace it builds, and at [`pre_workspace`](#pre_workspace) before it builds one |
 
 ## Runtimes
 

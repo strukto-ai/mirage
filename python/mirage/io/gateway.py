@@ -203,7 +203,6 @@ class _Ticket:
 def _opened(address: str, port: int) -> NetworkContext:
     caller = current_caller()
     invocation = caller.invocation
-    mount = caller.vfs_mount or ""
     return NetworkContext(
         host=named(address, port),
         address=address,
@@ -212,7 +211,6 @@ def _opened(address: str, port: int) -> NetworkContext:
         program=invocation.program if invocation is not None else (),
         words=invocation.words if invocation is not None else (),
         line=invocation.line if invocation is not None else "",
-        mount=mount.rstrip("/") or mount,
         session_id="" if caller.session is None else caller.session.session_id,
     )
 

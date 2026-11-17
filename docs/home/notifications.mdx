@@ -1,76 +1,191 @@
 ---
-title: Overview
-sidebarTitle: Overview
-description: Notify agents when files or directories change in the virtual filesystem.
+title: Notifications
+description: Tell agents when files or directories change in the virtual filesystem.
 icon: bell
 ---
 
-Notifications tell an agent when files or directories change in the virtual
-filesystem. For example, a teammate edits a report in connected storage, and
-your agent receives the report's virtual path and what happened to it.
+Notifications tell an agent when a file or directory changes in the virtual
+filesystem: a teammate edits a report in Box, and the agent gets
+`update /box/report.csv`.
 
-## How it works
+1. The application receives a change from the service, or asks it for one.
+2. It reports the change with `ws.notify()`, which also drops Mirage's cached
+   copy of that path.
+3. The agent receives it from `ws.events()`.
 
-1. Your application receives a service notification or checks for changes.
-2. It reports each change to Mirage with `ws.notify()`.
-3. The agent receives it through `ws.events()`.
-
-Your application connects the service's notifications to Mirage. Subscribing
-with `ws.events()` alone does not start a file watcher or check the service.
+`ws.events()` alone watches nothing: the application connects the service, by
+[push](#push) or [poll](#poll).
 
 ## Listen for changes
-
-Here, `ws` is your workspace with a VFS connected at `/data`. This listens for
-changes anywhere under that path:
 
 <CodeGroup>
 ```python Python
 async for change in ws.events("/data"):
-    print(f"Event: {change.kind.value}")
-    print(f"Virtual path: {change.path.virtual}")
+    print(f"{change.kind.value}: {change.path.virtual}")
 ```
 
 ```typescript TypeScript
 for await (const change of ws.events('/data')) {
-  console.log(`Event: ${change.kind}`)
-  console.log(`Virtual path: ${change.path.virtual}`)
+  console.log(`${change.kind}: ${change.path.virtual}`)
 }
 ```
 </CodeGroup>
 
-For example, after your application reports an edit to `report.csv`, the listener prints:
-
-```text Output
-Event: update
-Virtual path: /data/report.csv
+```text
+update: /data/report.csv
 ```
 
-`update` means the existing file's contents or metadata changed.
-
-To listen to fewer files, change the path:
-
-| Path | Notifications received |
+| Path | Receives |
 | --- | --- |
-| `/data/reports` | Changes anywhere inside the reports directory |
-| `/data/*.csv` | Changes to CSV files directly inside `/data` |
-| `["/data/reports", "/data/config.json"]` | Changes under reports or to the config file |
+| `/data` | every change under `/data` |
+| `/data/*.csv` | changes to CSV files directly inside `/data` |
+| `["/data/reports", "/data/config.json"]` | changes under `reports` or to `config.json` |
 
-## Notification types
-
-Each notification includes the virtual path and what happened:
-
-| Event | Meaning |
+| Kind | Meaning |
 | --- | --- |
-| `create` | A file or directory was added |
-| `update` | Its contents or metadata changed |
-| `delete` | It was removed |
-| `move` | It was renamed or moved; the notification also includes its previous path |
-| `unknown` | Something changed, but the details are unavailable; check the path again |
+| `create` | a file or directory was added |
+| `update` | its contents or metadata changed |
+| `delete` | it was removed |
+| `move` | it was renamed or moved; the change also carries its previous path |
+| `unknown` | something changed but the service gave no details; read the path again |
 
-## Connect your VFS
+## Push
 
-- **Push:** Receive changes from a webhook, stream or external file watcher. See the [Disk, S3 and GitHub examples](/home/notifications/support#push-examples).
-- **Poll:** Fetch changes from a service. See the [Dropbox, Box and Google Drive examples](/home/notifications/support#poll-examples).
+The service sends each change: a webhook, a stream or a file watcher. A hook
+turns its payload into changes for `ws.notify()`:
 
-[VFS Notifications](/home/notifications/support) lists the supported services,
-Python and TypeScript functions, and how to report a change with `ws.notify()`.
+<CodeGroup>
+```python Python
+from mirage.core.s3.events import S3EventHook
+from mirage.types import PathSpec
+
+hook = S3EventHook(vfs.accessor)
+root = PathSpec.from_str_path("/s3", "")
+for record in payload["Records"]:
+    for change in await hook.to_events(root, record["eventName"], record):
+        await ws.notify(change)
+```
+
+```typescript TypeScript
+import { PathSpec } from '@struktoai/mirage-node'
+import { S3EventHook } from '@struktoai/mirage-core/core/s3/events'
+
+const hook = new S3EventHook(vfs.accessor)
+const root = PathSpec.fromStrPath('/s3', '')
+for (const record of payload.Records) {
+  for (const change of await hook.toEvents(root, record.eventName, record)) {
+    await ws.notify(change)
+  }
+}
+```
+</CodeGroup>
+
+| VFS | Service | Hook (`to_events`, `toEvents`) |
+| --- | --- | --- |
+| <Icon icon="hard-drive" size={14} /> [Disk](/home/setup/disk) | File watchers: [watchdog](https://github.com/gorakhargosh/watchdog), [chokidar](https://github.com/paulmillr/chokidar) | `DiskEventHook` |
+| <img noZoom src="/images/s3-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[S3](/home/setup/s3) | [Event Notifications](https://docs.aws.amazon.com/AmazonS3/latest/userguide/EventNotifications.html) | `S3EventHook` |
+| <img noZoom src="/images/github-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GitHub](/home/setup/github) | [Push webhooks](https://docs.github.com/en/webhooks/webhook-events-and-payloads#push) | `GitHubEventHook` |
+| <img noZoom src="/images/nextcloud-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Nextcloud](/home/setup/nextcloud) | [Webhook listeners](https://docs.nextcloud.com/server/latest/admin_manual/webhook_listeners/index.html) | `NextcloudEventHook` |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MongoDB](/home/setup/mongodb) | [Change streams](https://www.mongodb.com/docs/manual/changestreams/) | `MongoDBEventHook` |
+| <img noZoom src="/images/mongodb-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GridFS](/home/setup/gridfs) | [Change streams](https://www.mongodb.com/docs/manual/changestreams/) on `<bucket>.files` | `GridFSEventHook` |
+| <img noZoom src="/images/slack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Slack](/home/setup/slack) | [Events API](https://docs.slack.dev/apis/events-api/) | `SlackEventHook` |
+| <img noZoom src="/images/redis-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Redis](/home/setup/redis) | [Keyspace notifications](https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/) | `RedisEventHook` |
+| <img noZoom src="/images/discord-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Discord](/home/setup/discord) | [Gateway events](https://docs.discord.com/developers/events/gateway-events) | `DiscordEventHook` |
+| <img noZoom src="/images/linear-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Linear](/home/setup/linear) | [Webhooks](https://linear.app/developers/webhooks) | `LinearEventHook` |
+| <img noZoom src="/images/trello-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Trello](/home/setup/trello) | [Webhooks](https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/) | `TrelloEventHook` |
+| <img noZoom src="/images/notion-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Notion](/home/setup/notion) | [Webhooks](https://developers.notion.com/reference/webhooks) | `NotionEventHook` |
+| <Icon icon="envelope" size={14} /> [Email](/home/setup/email) | [IMAP IDLE](https://datatracker.ietf.org/doc/html/rfc2177) | `EmailEventHook` |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/home/setup/box) | [Events API](https://developer.box.com/guides/events/user-events/polling), read by a long poll | `BoxEventHook` |
+
+## Poll
+
+The VFS asks the service what changed since a checkpoint. The first `pull`,
+with no checkpoint, returns none and records where to start:
+
+<CodeGroup>
+```python Python
+import asyncio
+
+from mirage.types import PathSpec
+
+hook = vfs.delta_hook()
+root = PathSpec.from_str_path("/box", "")
+checkpoint = (await hook.pull(root, None)).checkpoint
+while True:
+    await asyncio.sleep(5)
+    result = await hook.pull(root, checkpoint)
+    for change in result.changes:
+        await ws.notify(change)
+    checkpoint = result.checkpoint
+```
+
+```typescript TypeScript
+import { setTimeout as delay } from 'node:timers/promises'
+import { PathSpec } from '@struktoai/mirage-node'
+
+const hook = vfs.deltaHook()
+const root = PathSpec.fromStrPath('/box', '')
+let checkpoint = (await hook.pull(root, null)).checkpoint
+for (;;) {
+  await delay(5000)
+  const result = await hook.pull(root, checkpoint)
+  for (const change of result.changes) await ws.notify(change)
+  checkpoint = result.checkpoint
+}
+```
+</CodeGroup>
+
+| VFS | Service |
+| --- | --- |
+| <img noZoom src="/images/airtable-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Airtable](/home/setup/airtable) | [Webhooks API](https://airtable.com/developers/web/api/webhooks-overview) |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/home/setup/box) | [Long-poll events](https://developer.box.com/guides/events/user-events/polling) |
+| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/home/setup/dropbox) | [Webhooks or long polling](https://docs.dropboxapi.com/dropbox-api/docs/detecting-changes) |
+| <img noZoom src="/images/gmail-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gmail](/home/setup/google) | [Pub/Sub notifications](https://developers.google.com/workspace/gmail/api/guides/push) |
+| <img noZoom src="/images/gcal-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Calendar](/home/setup/gcal) | [Push notifications](https://developers.google.com/workspace/calendar/api/guides/push) |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive, Docs, Sheets, Slides](/home/setup/google) | [Drive notifications](https://developers.google.com/workspace/drive/api/guides/push) |
+| <Icon icon="microsoft" size={14} /> [OneDrive](/home/setup/onedrive) | [Microsoft Graph notifications](https://learn.microsoft.com/en-us/graph/change-notifications-overview) |
+| <Icon icon="microsoft" size={14} /> [SharePoint](/home/setup/sharepoint) | [Microsoft Graph notifications](https://learn.microsoft.com/en-us/graph/change-notifications-overview) |
+
+Any other VFS: the application detects the change itself and calls
+`ws.notify()`.
+
+## Examples
+
+| VFS | Kind | Code | Needs |
+| --- | --- | --- | --- |
+| <Icon icon="hard-drive" size={14} /> [Disk](/home/setup/disk) | Push | [disk.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/disk.py), [disk.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/disk.ts) | nothing; it edits temporary local files |
+| <img noZoom src="/images/s3-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[S3](/home/setup/s3) | Push | [s3.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/s3.py), [s3.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/s3.ts) | `S3_BUCKET` and a saved S3 notification JSON file |
+| <img noZoom src="/images/github-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[GitHub](/home/setup/github) | Push | [github.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/github.py), [github.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/github.ts) | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` (`owner/repo`) and a saved push webhook JSON file; `GITHUB_REF` defaults to `main` |
+| <img noZoom src="/images/dropbox-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Dropbox](/home/setup/dropbox) | Poll | [dropbox.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/dropbox.py), [dropbox.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/dropbox.ts) | `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` |
+| <img noZoom src="/images/box-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Box](/home/setup/box) | Poll | [box.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/box.py), [box.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/box.ts) | `BOX_ACCESS_TOKEN` |
+| <img noZoom src="/images/gdrive-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Google Drive](/home/setup/google) | Poll | [gdrive.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/gdrive.py), [gdrive.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/gdrive.ts) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
+
+<CodeGroup>
+```bash Python
+./python/.venv/bin/python examples/python/notifications/push/disk.py
+```
+
+```bash TypeScript
+pnpm -C examples/typescript exec tsx notifications/push/disk.ts
+```
+</CodeGroup>
+
+The Disk example edits files behind Mirage, reports each change, and reads
+again:
+
+```text
+$ cat /data/reports/q1.txt
+first quarter
+create: /data/reports/q3.txt
+update: /data/reports/q1.txt
+delete: /data/reports/q2.txt
+$ cat /data/reports/q1.txt
+first quarter, revised
+$ ls /data/reports
+q1.txt
+q3.txt
+```
+
+The S3 and GitHub examples read a saved payload and start no webhook server.
+Dropbox waits on a long poll; Box and Google Drive check every five seconds
+until Ctrl-C.

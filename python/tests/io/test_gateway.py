@@ -305,7 +305,7 @@ class _Remote(RAMVFS):
 
 
 @pytest.mark.asyncio
-async def test_a_mount_connection_names_its_mount_and_command(port):
+async def test_a_mount_connection_names_its_command(port):
     watch = _Watch()
     ws = Workspace({"/remote": _Remote(port)})
     ws.policies.add(watch)
@@ -313,9 +313,7 @@ async def test_a_mount_connection_names_its_mount_and_command(port):
         assert (await ws.shell("ls /remote")).exit_code == 0
     finally:
         await ws.close()
-    assert [(c.mount, c.command, c.port) for c in watch.asked] == [
-        ("/remote", "ls", port)
-    ]
+    assert [(c.command, c.port) for c in watch.asked] == [("ls", port)]
     await _settled(watch.ended, 1)
     assert [e.ended for e in watch.ended] == ["closed"]
 
@@ -443,7 +441,7 @@ async def test_a_file_stream_keeps_its_egress_past_the_op(port):
         assert b"".join([chunk async for chunk in stream]) == b"ab"
     finally:
         await ws.close()
-    assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]
+    assert [c.port for c in watch.asked] == [port]
 
 
 @pytest.mark.asyncio
@@ -507,7 +505,7 @@ async def test_a_follow_stream_keeps_its_egress_past_the_op(port):
         assert [chunk async for chunk in stream] == [b"a\n", b"b\n"]
     finally:
         await ws.close()
-    assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]
+    assert [c.port for c in watch.asked] == [port]
 
 
 class _Cleanup:
@@ -554,4 +552,4 @@ async def test_a_follow_close_runs_as_the_stream_owner(port):
         await stream.aclose()
     finally:
         await ws.close()
-    assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]
+    assert [c.port for c in watch.asked] == [port]

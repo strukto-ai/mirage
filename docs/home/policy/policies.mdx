@@ -1,6 +1,7 @@
 ---
 title: Policies
-description: Mirage provides a powerful, scriptable policy layer that controls every command, CLI and POSIX call in the virtual terminal, and can even choose the underlying runtime.
+sidebarTitle: Overview
+description: Write a policy class that refuses, holds, caps or routes each line, command, file call and connection in the virtual terminal.
 icon: gavel
 ---
 
@@ -9,7 +10,7 @@ does. Before an action runs, and again once it returns, the policy gets
 the full context: the line, each command with its expanded arguments, the
 paths it touches, the session, and what came back. It then lets the
 action through (`None`), refuses it, asks a host, caps its output, or
-chooses the underlying runtime.
+picks the machine that runs it.
 
 <CodeGroup>
 
@@ -60,12 +61,10 @@ ws.policies.remove(noForcePush)
 
 ## Lifecycle
 
-A policy implements any of eight methods, in pairs. The `pre_` method runs
-before an action, while the `post_` method runs after it with the same context
-and the execution result. A `post_` hook cannot undo executed actions. It can
-inspect results and return `Deny` or `Ask`; only `post_execute` can also return
-`Limit` to cap output. These responses do not replace returned output or
-suppress existing error text.
+A policy implements any of nine methods: four pairs, plus `pre_workspace`
+on a server. A `pre_` method runs before an action; a `post_` method runs
+after it, with the same context and what came back. A `post_` method never
+undoes what ran: its Deny or Ask holds back what came back.
 
 ```mermaid
 flowchart LR
@@ -86,24 +85,17 @@ flowchart LR
     Run -. any client in the line .-> PN
 ```
 
-| Python | TypeScript | Runs | Can return |
-| --- | --- | --- | --- |
-| `pre_execute` | `preExecute` | once per line, before any of it runs | Deny, Ask, Route |
-| `pre_command` | `preCommand` | before each command or CLI, once the line is parsed and expanded | Deny, Ask, Route |
-| `post_command` | `postCommand` | after each command, once its output drained | Deny, Ask |
-| `post_execute` | `postExecute` | once per line, after it ends | Deny, Ask, Limit |
-| `pre_vfs` | `preVfs` | before each VFS call, including command and runtime file operations | Deny, Ask |
-| `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
-| `pre_network` | `preNetwork` | before a connection the workspace opens carries any byte | Deny, Ask, Limit |
-| `post_network` | `postNetwork` | once that connection is over, however it ended | nothing; it observes |
-| `pre_workspace` | `preWorkspace` | on a server, before a create, clone or load builds anything | Deny |
-
-| What | Example | Covered by |
+| Methods | Run | Can return |
 | --- | --- | --- |
-| A line | `cat /data/a.txt && rm /data/b` | `pre_execute`, `post_execute` |
-| A command or CLI | `rm /data/b` | `pre_command`, `post_command` |
-| A VFS call | `session.vfs.read("/data/a.txt")` | `pre_vfs`, `post_vfs` |
-| A connection | `curl https://api.example.com/x`, a CLI's API call, a mount's read | `pre_network`, `post_network` |
+| [`pre_execute`, `post_execute`](/home/policy/line) | once per line, before and after it | Deny, Ask or Route before; Deny, Ask or Limit after |
+| [`pre_command`, `post_command`](/home/policy/command) | before and after each command or CLI | Deny, Ask or Route before; Deny or Ask after |
+| [`pre_vfs`, `post_vfs`](/home/policy/vfs) | before and after each VFS call | Deny or Ask |
+| [`pre_network`, `post_network`](/home/policy/network) | before a connection carries any byte, and once it is over | Deny, Ask or Limit before; nothing after |
+| [`pre_workspace`](/home/policy/workspace) | on a server, before a create, clone or load builds anything | Deny |
+
+TypeScript spells each method in camelCase (`preExecute`).
+
+Every entry point reaches the same methods:
 
 | Entry point | Sends |
 | --- | --- |
@@ -115,32 +107,11 @@ flowchart LR
 | `mirage workspace vfs`, HTTP `/vfs/<call>`, RPC `vfs/<call>` | a VFS call |
 | FUSE, FSKit, SFTP | a VFS call |
 
-File policies also apply when a command or file-based CLI uses `ctx.vfs`.
-An account CLI calls its service directly, so command policy authorizes
-that API operation; it has no VFS path to check. Its writes invalidate
-caches for the mounts reached by that account. A policy's own file reads
-remain exempt from coded file hooks to avoid recursion.
-
 ## Context
 
-Each method gets one argument, `ctx`. Every `ctx` carries the session,
-plus what its method is about, and a `post_` method adds what came back.
-TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
-
-| Methods | What it is about | `post_` adds |
-| --- | --- | --- |
-| `pre_execute`, `post_execute` | `line` and `commands`: every command of the line | `exit_code`, `output`, `results` |
-| `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
-| `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
-| `pre_network`, `post_network` | `host`, `address`, `port`, and who opened it: `command`, `program`, `words`, `line`, `mount` | `bytes_sent`, `bytes_received`, `seconds`, `ended` |
-| `pre_workspace` | `config`: the config as the caller wrote it, secrets still pointers | |
-
-`pre_command` is `pre_execute` narrowed to one command: each entry of
-`ctx.commands` is the context `pre_command` gets for that command, read
-before the line runs, so a word only the run can expand (`$X`) is not
-resolved there yet.
-
-Every `ctx` also carries:
+Each method gets one argument, `ctx`: what its method is about, on that
+method's page, plus the session. TypeScript spells the fields in camelCase
+(`ctx.sessionId`). Every `ctx` carries:
 
 | Field | What it is |
 | --- | --- |
@@ -148,47 +119,6 @@ Every `ctx` also carries:
 | `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
 | `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied |
 | `caller` | who makes the call (a `PolicyCaller`), a frozen copy: `caller.session` is the session above, with its `session_id` and `cwd` when the method was asked, and `caller.account` the account a server holds the workspace for (the one its requests sign in as), null outside a server or without accounts |
-
-`words` is the command line word by word, after expansion. Each word has
-a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or
-`redirect`), the `option` a value belongs to, and the `path` it names.
-For `tar -cf a.tar -C /mnt /data`:
-
-| `text` | `kind` | `option` | `path` |
-| --- | --- | --- | --- |
-| `tar` | `name` | | |
-| `-cf` | `option` | | |
-| `a.tar` | `value` | `-cf` | `/a.tar` |
-| `-C` | `option` | | |
-| `/mnt` | `value` | `-C` | `/mnt` |
-| `/data` | `operand` | | `/data` |
-
-An option typed with its value attached stays one word. Its `option` is
-the option without the value, and its `path` is the value's path. For
-`grep --file=pats.txt notes.txt` typed under `/data`:
-
-| `text` | `kind` | `option` | `path` |
-| --- | --- | --- | --- |
-| `grep` | `name` | | |
-| `--file=pats.txt` | `option` | `--file` | `/data/pats.txt` |
-| `notes.txt` | `operand` | | `/data/notes.txt` |
-
-`option` is the option as typed, so an abbreviation (`--fil`) or another
-spelling of the same option (`-f`) does not match a test on `--file`. To
-guard a file, test `path` or `paths`.
-
-- `paths` is every path the command reaches, flat: its words' paths, the
-  targets of links it names, and the working directory a bare `ls` reads.
-- `line` is the line the command was parsed from: the line the agent
-  typed, or for `eval`, `$( )` and a function body, that text.
-- `results` is the line's execution tree: a node per command with its
-  exit code, stderr and records.
-- `records` are the calls a command made, one dict each: `op`, `path`,
-  `source`, `bytes` and timing.
-- `call` is the function called: its `name`, `effect` (read, write,
-  metadata), `target`, and whether it `creates` or reaches the `subtree`.
-  Every function a VFS marks reaches `pre_vfs` and `post_vfs`:
-  `read_tree`, `search` and `copy` too.
 
 A method only reads. A write it makes through Mirage is refused (`EROFS`
 for a file, `EACCES` for a variable), and its reads are not judged again.
@@ -218,304 +148,12 @@ marked with `readonly NAME` itself.
 A policy written as a program, on monty or Python on wasm, gets the same
 `ctx` as JSON: see [Scripts](/home/policy/scripts).
 
-## Examples
-
-### pre_execute
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import Policy, Route, RouteContext
-
-class JobsOnTheBox(Policy):
-    async def pre_execute(self, ctx: RouteContext) -> Route | None:
-        paths = [p.virtual for c in ctx.commands for p in c.paths]
-        if any(p.startswith("/jobs/") for p in paths):
-            return Route(machine="box")
-        return None
-```
-
-```typescript TypeScript
-const jobsOnTheBox: Policy = {
-  preExecute(ctx) {
-    const jobs = ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/')))
-    return jobs ? { kind: 'route', machine: 'box' } : null
-  },
-}
-```
-
-</CodeGroup>
-
-`python3 /jobs/train.py` runs on the workspace's `box`
-[machine](/home/setup/machine/overview). See
-[Route Machine](/home/policy/route-machine).
-
-### post_execute
-
-<CodeGroup>
-
-```python Python
-from mirage import Limit
-from mirage.policy import ExecuteResultContext, Policy
-
-class FirstHundredLines(Policy):
-    async def post_execute(self, ctx: ExecuteResultContext) -> Limit:
-        return Limit(max_lines=100)
-```
-
-```typescript TypeScript
-const firstHundredLines: Policy = {
-  postExecute() {
-    return new Limit({ maxLines: 100 })
-  },
-}
-```
-
-</CodeGroup>
-
-A longer output stops at 100 lines, and stderr says
-`output truncated at limit (100 lines); ...`. A Deny here drops the
-output: exit 126 and a decision record.
-
-### pre_command
-
-`NoForcePush`, at the top of this page.
-
-A machine that takes a line whole (`@line`) expands its words itself, so a
-method reads them as typed. While a `pre_command` method is installed, in code
-or in the session's profile, such a line exits 126 when it holds a word only
-the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
-line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
-the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
-
-### post_command
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import CommandResultContext, Deny, Policy
-
-class NoSecretsShown(Policy):
-    async def post_command(self, ctx: CommandResultContext) -> Deny | None:
-        if any(r.get("path", "").startswith("/vault/") for r in ctx.records):
-            return Deny("vault reads need an operator")
-        return None
-```
-
-```typescript TypeScript
-const noSecretsShown: Policy = {
-  postCommand(ctx) {
-    const vault = ctx.records.some((r) => typeof r.path === 'string' && r.path.startsWith('/vault/'))
-    return vault ? { kind: 'deny', reason: 'vault reads need an operator' } : null
-  },
-}
-```
-
-</CodeGroup>
-
-`cat /vault/k && echo next` exits 126 with `cat: Permission denied`, and
-`echo` does not run. Output already sent stays sent. A runtime that takes
-a line whole runs its commands itself, so no result comes back to judge:
-while a `post_command` method is installed, such a line is refused.
-
-### pre_vfs
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import Deny, Policy, VfsContext
-
-class ReadOnlyReports(Policy):
-    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
-        if ctx.write and ctx.path.virtual.startswith("/reports/"):
-            return Deny("reports are read-only")
-        return None
-```
-
-```typescript TypeScript
-const readOnlyReports: Policy = {
-  preVfs(ctx) {
-    return ctx.write && ctx.path.virtual.startsWith('/reports/')
-      ? { kind: 'deny', reason: 'reports are read-only' }
-      : null
-  },
-}
-```
-
-</CodeGroup>
-
-`session.vfs.write("/reports/q3.md", ...)` raises `EACCES`. The same
-policy refuses a command redirect (`echo x > /reports/q3.md`) and writes
-through runtime file APIs, FUSE, FSKit and SFTP.
-
-### post_vfs
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import Deny, Policy, VfsResultContext
-
-class NoKeysOut(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Deny | None:
-        if isinstance(ctx.result, bytes) and b"PRIVATE KEY" in ctx.result:
-            return Deny("holds a private key")
-        return None
-```
-
-```typescript TypeScript
-const noKeysOut: Policy = {
-  postVfs(ctx) {
-    const text = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : ''
-    return text.includes('PRIVATE KEY') ? { kind: 'deny', reason: 'holds a private key' } : null
-  },
-}
-```
-
-</CodeGroup>
-
-Reading a file that holds a private key with `session.vfs.read` raises
-`EACCES`; commands and runtime file reads meet the same check. Cached
-reads and retained handles are checked against current policy before
-returning their bytes or metadata. These checks do not fetch the retained
-value again. Bytes already delivered to a program remain in its memory.
-
-`post_vfs` can refuse a read but not shorten it: the file comes
-back whole or not at all. To cap how much a command prints, use
-`post_execute`.
-
 ### Variables
 
 A variable write reaches no method: a variable does nothing until a
 command, a file call or a connection uses it, and each of those methods
 reads the session (`ctx.session`, and a command's `env`), so a rule about
 a value goes in the method that uses it.
-
-### pre_network and post_network
-
-`pre_network` runs once for each connection the workspace opens, before it
-carries any byte, whoever opens it: `curl`, `wget` or `git`, a builtin or
-installed CLI, a mount's VFS, a runtime or an SDK in the process. The
-workspace's [`network`](/home/configuration/workspace#network) lists judge it first,
-and a connection they refuse reaches no policy. The context says where it
-goes (`host`, empty for a bare address; `address`; `port`) and who opened
-it: `command`, `program` and `words` as `pre_command` reads them, `line`,
-and `mount`, the prefix of the mount whose VFS opened it. URL, method and
-status are not in it: under https only the program and the server see
-them.
-
-A `pre_network` answer refuses the connection (Deny, or Ask, since a
-running command cannot wait on a question) or caps it: a `Limit` cuts it
-once it carries `max_bytes`, sent and received together, or stays open
-`timeout_seconds`. The tightest Limit among the policies wins. A refused or
-cut connection is reset, so the program reads a broken connection, never a
-clean end: `curl` exits 7 for a refusal.
-
-`post_network` runs once the connection is over, once for each policy
-whose `pre_network` let it through, however it ended: `ended` is `closed`,
-`refused` (by a later policy), `limit` or `error`, with `bytes_sent`,
-`bytes_received` and `seconds`. It observes only. A client that keeps a
-connection open and sends on it again is judged once, as it opens. When the
-address a program asked for does not answer, each other address its lookup
-gave is a connection of its own, judged before it is tried. A socket the
-program bound itself before connecting cannot pass the gateway, so while a
-policy listens it is refused.
-
-Together the two hold a workspace to a byte budget:
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import (
-    Deny,
-    Limit,
-    NetworkContext,
-    NetworkResultContext,
-    Policy,
-)
-
-class Budget(Policy):
-    def __init__(self, total: int) -> None:
-        self.left = total
-
-    async def pre_network(self, ctx: NetworkContext) -> Deny | Limit:
-        if self.left <= 0:
-            return Deny("the egress budget is spent")
-        return Limit(max_bytes=self.left, timeout_seconds=300)
-
-    async def post_network(self, ctx: NetworkResultContext) -> None:
-        self.left -= ctx.bytes_sent + ctx.bytes_received
-```
-
-```typescript TypeScript
-let left = 500_000_000
-const budget: Policy = {
-  preNetwork() {
-    if (left <= 0) return { kind: 'deny', reason: 'the egress budget is spent' }
-    return new Limit({ maxBytes: left, timeoutSeconds: 300 })
-  },
-  postNetwork(ctx) {
-    left -= ctx.bytesSent + ctx.bytesReceived
-    return null
-  },
-}
-```
-
-</CodeGroup>
-
-A `host` machine, which starts a process on this machine, would
-connect around the gateway, so while a policy judges connections it refuses
-to run. A program on a [machine](/home/setup/machine/overview) connects from
-that machine, and no policy sees its connections.
-
-In a browser a page sees no socket: `fetch` is judged by host name with an
-empty `address`, and the counts are the bodies' bytes. While a policy
-listens for connections, a request whose upload passes the Limit, or whose
-size a page cannot know (a form, a stream), is refused before it is sent; a
-redirect the page would follow is refused, since it goes where no policy
-saw; and a `WebSocket` is refused, since its handshake cannot wait for an
-answer.
-
-### pre_workspace
-
-Only a server asks `pre_workspace`, with the policies it was started with
-(see [Server policies](/home/access/http#server-policies)). It sees the
-config before any mount is built or any secret is read: a create's whole
-config, a clone's or a load's `override`. `ctx` carries `config` and
-`caller` only.
-
-<CodeGroup>
-
-```python Python
-from mirage.policy import Deny, Policy, WorkspaceContext
-
-class NoHostFiles(Policy):
-    async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
-        mounts = ctx.config.get("mounts") or {}
-        if any(block.get("vfs") == "disk" for block in mounts.values()):
-            return Deny("disk mounts are not offered here")
-        if "machines" in ctx.config:
-            return Deny("machines are set by the operator")
-        return None
-```
-
-```typescript TypeScript
-const noHostFiles: Policy = {
-  preWorkspace(ctx) {
-    const mounts = (ctx.config.mounts ?? {}) as Record<string, { vfs?: string }>
-    if (Object.values(mounts).some((block) => block.vfs === 'disk')) {
-      return { kind: 'deny', reason: 'disk mounts are not offered here' }
-    }
-    if ('machines' in ctx.config) {
-      return { kind: 'deny', reason: 'machines are set by the operator' }
-    }
-    return null
-  },
-}
-```
-
-</CodeGroup>
-
-The create answers 403 with the reason, and nothing is built.
 
 ## Answers
 
@@ -532,7 +170,7 @@ TypeScript returns `{ kind: 'deny', reason }`, with
 `path` for a path, `{ kind: 'ask', reason }`,
 `{ kind: 'route', machine }` and `new Limit({ maxLines })`. A method that
 raises refuses too. What the agent reads for each is on
-[Explain](/home/policy/explain#what-the-agent-reads).
+[Explain](/home/policy/explain#when-an-action-is-refused).
 
 ## Asks
 
@@ -568,7 +206,7 @@ held, and the approved retry runs it again.
 - A policy may give several answers at once, a tuple in Python or an
   array in TypeScript; each counts as if a policy of its own gave it.
 
-## Examples on GitHub
+## Examples
 
 [policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/policy/policy.py)
 and

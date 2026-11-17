@@ -127,7 +127,7 @@ fields first or use a key that manages the collection.
   by point id, or `<name>__<id>` with `name_field`.
 - Fields take dotted payload paths, such as `group_by: [metadata.source]`, and
   `basename_fields` keeps only the last path segment of a value.
-- The [`search` CLI](/python/cli/search) ranks points by meaning. It needs an
+- The `search` CLI ranks points by meaning. It needs an
   `embed` hook (Python and TypeScript) or `cloud_inference: true`, where the
   cluster embeds the query with `embedding_model`; with neither it refuses the
   query. The stored vectors must come from the same model.

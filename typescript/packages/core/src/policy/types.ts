@@ -770,8 +770,6 @@ export interface NetworkContext {
   words?: readonly CommandWord[]
   /** The line the command runs in; empty outside one. */
   line?: string
-  /** The prefix of the mount whose VFS opened it; empty when no mount did. */
-  mount?: string
   sessionId?: string
   /** The session, read only. */
   session?: SessionView

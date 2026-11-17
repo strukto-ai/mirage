@@ -17,7 +17,6 @@ import type { Policies } from '../policy/policies.ts'
 import { OutputStream } from './stream.ts'
 import type { NetworkContext } from '../policy/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import { rstripSlash } from '../utils/slash.ts'
 import { type NetworkRule, runWithNetwork } from './network.ts'
 
 /**
@@ -126,13 +125,12 @@ export function liveEgress(): readonly Egress[] {
 
 /**
  * The context a connection to `address` on `port`, opened for `host`,
- * reports: the command, the mount and the session of the call opening it.
+ * reports: the command and the session of the call opening it.
  * Mirrors Python's `_opened`.
  */
 export function opened(host: string, address: string, port: number): NetworkContext {
   const caller = currentCaller()
   const invocation = caller.invocation
-  const mount = caller.vfsMount ?? ''
   return {
     host,
     address,
@@ -141,7 +139,6 @@ export function opened(host: string, address: string, port: number): NetworkCont
     program: invocation?.program ?? [],
     words: invocation?.words ?? [],
     line: invocation?.line ?? '',
-    mount: rstripSlash(mount) || mount,
     sessionId: caller.session?.sessionId ?? '',
   }
 }

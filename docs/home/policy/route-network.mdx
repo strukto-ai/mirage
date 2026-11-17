@@ -30,7 +30,7 @@ A second workspace on the same server can route `localhost:5003` to
   too. Over HTTPS, the service's certificate must still match the address
   the agent typed.
 - [`allowed_domains`, `denied_domains`](/home/configuration/workspace#network) and
-  [`pre_network`](/home/policy/policies#pre_network-and-post_network)
+  [`pre_network`](/home/policy/network)
   policies check where the route goes, not the address the agent typed.
 - `host` machines don't run in a workspace with routes, and
   programs on a [machine](/home/setup/machine/overview) aren't routed.

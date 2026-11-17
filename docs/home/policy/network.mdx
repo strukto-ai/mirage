@@ -1,0 +1,170 @@
+---
+title: Network
+description: Refuse, cap and count each connection with pre_network and post_network.
+icon: globe
+---
+
+TypeScript spells each method and field in camelCase (`preNetwork`, `ctx.bytesSent`).
+
+| Method | Runs | Can return |
+| --- | --- | --- |
+| `pre_network` | before a connection the workspace opens carries any byte | Deny, Ask, Limit |
+| `post_network` | once that connection is over, however it ended | nothing; it observes |
+
+## How it applies
+
+`pre_network` runs before each connection carries a byte, whoever opens it:
+`curl`, `git`, a CLI, a mount's VFS, a runtime or an SDK. The workspace's
+[`network`](/home/configuration/workspace#network) lists judge it first, and
+a connection they refuse reaches no policy.
+
+| `pre_network` returns | The connection |
+| --- | --- |
+| Deny or Ask | is refused: `curl` exits 7. A running command cannot wait, so an Ask refuses too |
+| `Limit(max_bytes=, timeout_seconds=)` | is cut once it carries that many bytes, sent and received, or stays open that long. The tightest Limit wins |
+
+| Field | What it is |
+| --- | --- |
+| `host`, `address`, `port` | where it goes; `host` is empty for a bare address |
+| `command`, `program`, `words`, `line` | the command that opened it |
+| `bytes_sent`, `bytes_received`, `seconds`, `ended` | `post_network`: how it went. `ended` is `closed`, `refused`, `limit` or `error` |
+
+The URL is not there: under HTTPS only the program and the server see it.
+`post_network` runs once the connection is over, for each policy that let it
+through, and only observes.
+
+## Example: refuse a large clone
+
+`ctx.words` holds the URL a `git clone` names, so a policy can look the
+repository up before a byte of the clone moves, and refuse one past 96 MB:
+
+<CodeGroup>
+
+```python Python
+import asyncio
+import json
+import re
+import urllib.request
+
+from mirage.policy import Deny, NetworkContext, Policy
+
+CAP = 96 * 1024 * 1024
+REPO = re.compile(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$")
+
+
+def repo_bytes(name: str) -> int:
+    with urllib.request.urlopen(f"https://api.github.com/repos/{name}") as r:
+        return json.load(r)["size"] * 1024
+
+
+class CloneSize(Policy):
+    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
+        if ctx.program[:2] != ("git", "clone"):
+            return None
+        for word in ctx.words:
+            found = REPO.match(word.text)
+            if found and await asyncio.to_thread(repo_bytes, found[1]) > CAP:
+                return Deny(f"{found[1]} is over 96 MB")
+        return None
+```
+
+```typescript TypeScript
+import type { Policy } from '@struktoai/mirage-node'
+
+const CAP = 96 * 1024 * 1024
+const REPO = /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/
+
+async function repoBytes(name: string): Promise<number> {
+  const r = await fetch(`https://api.github.com/repos/${name}`)
+  if (!r.ok) throw new Error(`repository lookup failed: ${String(r.status)}`)
+  const { size } = (await r.json()) as { size?: unknown }
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
+    throw new Error('repository lookup returned no size')
+  }
+  return size * 1024
+}
+
+const cloneSize: Policy = {
+  async preNetwork(ctx) {
+    if (ctx.program?.[0] !== 'git' || ctx.program[1] !== 'clone') return null
+    for (const word of ctx.words ?? []) {
+      const found = REPO.exec(word.text)
+      if (found?.[1] && (await repoBytes(found[1])) > CAP) {
+        return { kind: 'deny', reason: `${found[1]} is over 96 MB` }
+      }
+    }
+    return null
+  },
+}
+```
+
+</CodeGroup>
+
+GitHub reports `strukto-ai/mirage` at 151 MB, so its clone is refused before
+it starts:
+
+```bash
+$ git clone https://github.com/strukto-ai/mirage /repo/mirage
+Cloning into '/repo/mirage'...
+fatal: unable to access 'https://github.com/strukto-ai/mirage/': Failed to connect to github.com port 443
+$ echo $?
+128
+```
+
+The reason is on the result's `decision`: `strukto-ai/mirage is over 96 MB`.
+
+A lookup that fails raises, and a policy that raises refuses, so a
+rate-limited lookup never lets a clone through.
+
+## Example: a byte budget
+
+Together the two hold a workspace to a byte budget:
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import (
+    Deny,
+    Limit,
+    NetworkContext,
+    NetworkResultContext,
+    Policy,
+)
+
+class Budget(Policy):
+    def __init__(self, total: int) -> None:
+        self.left = total
+
+    async def pre_network(self, ctx: NetworkContext) -> Deny | Limit:
+        if self.left <= 0:
+            return Deny("the egress budget is spent")
+        return Limit(max_bytes=self.left, timeout_seconds=300)
+
+    async def post_network(self, ctx: NetworkResultContext) -> None:
+        self.left -= ctx.bytes_sent + ctx.bytes_received
+```
+
+```typescript TypeScript
+let left = 500_000_000
+const budget: Policy = {
+  preNetwork() {
+    if (left <= 0) return { kind: 'deny', reason: 'the egress budget is spent' }
+    return new Limit({ maxBytes: left, timeoutSeconds: 300 })
+  },
+  postNetwork(ctx) {
+    left -= ctx.bytesSent + ctx.bytesReceived
+    return null
+  },
+}
+```
+
+</CodeGroup>
+
+## Machines and browsers
+
+- A program on a [machine](/home/setup/machine/overview) connects from that
+  machine, and no policy sees its connections. A `host` machine would
+  connect around the gateway, so it refuses to run while a policy listens.
+- In a browser, `fetch` is judged by host name with an empty `address`. A
+  request whose size the page cannot know (a form, a stream), a redirect
+  and a `WebSocket` are refused while a policy listens.

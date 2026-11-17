@@ -43,6 +43,12 @@ function writeBehindMirage(root: string): [string, { src_path: string }][] {
   ]
 }
 
+async function run(ws: Workspace, line: string): Promise<void> {
+  const result = await ws.shell(line)
+  console.log(`$ ${line}`)
+  process.stdout.write(result.stdoutText)
+}
+
 async function main(): Promise<void> {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-disk-events-'))
   seed(tmp)
@@ -52,24 +58,15 @@ async function main(): Promise<void> {
   const hook = new DiskEventHook(vfs.accessor)
   const root = PathSpec.fromStrPath(MOUNT, '')
 
-  let result = await ws.shell(`cat ${MOUNT}/reports/q1.txt`)
-  console.log(`read before: '${result.stdoutText.trim()}'`)
-
-  console.log('\nfile changes:')
+  await run(ws, `cat ${MOUNT}/reports/q1.txt`)
   for (const [eventType, payload] of writeBehindMirage(tmp)) {
     for (const change of await hook.toEvents(root, eventType, payload)) {
-      console.log(`  ${change.kind.padEnd(6)} ${change.path.virtual}`)
       await ws.notify(change)
+      console.log(`${change.kind}: ${change.path.virtual}`)
     }
   }
-
-  // notify invalidates the caches for the changed path and its ancestor
-  // listings before delivering, so a read after an event can never serve
-  // pre-change bytes.
-  result = await ws.shell(`cat ${MOUNT}/reports/q1.txt`)
-  console.log(`\nread after notify: '${result.stdoutText.trim()}'`)
-  result = await ws.shell(`ls ${MOUNT}/reports`)
-  console.log(`listing: ${result.stdoutText.split(/\s+/).filter(Boolean).join(' ')}`)
+  await run(ws, `cat ${MOUNT}/reports/q1.txt`)
+  await run(ws, `ls ${MOUNT}/reports`)
 
   await ws.close()
   rmSync(tmp, { recursive: true, force: true })

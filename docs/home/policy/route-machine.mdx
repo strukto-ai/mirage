@@ -1,18 +1,24 @@
 ---
 title: Route Machine
-description: Choose which machine runs each command line.
+description: Run each line or command on the machine that fits it, chosen by a policy.
 icon: route
 ---
 
-Your agent types into one shell. A machine is what runs a program: an
-`in_process` machine runs Python on Monty inside Mirage, and a `docker` machine
-runs programs in a container. A route policy looks at each line and picks the
-machine for it, or names `workspace` to keep the line in Mirage itself.
+An agent types into one shell, and a [machine](/home/setup/machine/overview)
+runs its programs. Without a route, each program goes to the first machine
+whose `captures` name it. A route picks by what the line does instead: a
+quick Python snippet stays on Monty inside Mirage, a training job goes to the
+GPU, and each agent gets its own container. The agent types the same
+commands either way.
 
-## Example
+The [Multi-machine Terminal](/home/examples/multi-machine-terminal) example
+routes each Python command across four machines by the library its code
+uses.
 
-Run small Python snippets on Monty, the training jobs under `/jobs/` on a
-CPU container, and the GPU jobs on a GPU container:
+## Route a line
+
+`pre_execute` places a whole line. Here the jobs under `/jobs/` run on a CPU
+container, the GPU jobs on a GPU container, and everything else on Monty:
 
 ```yaml
 mode: exec
@@ -40,57 +46,46 @@ def pre_execute(ctx):
         return {"kind": "route", "machine": "box"}
 ```
 
-Now `python3 /jobs/gpu/train.py` runs in `my-gpu`, `python3 /jobs/train.py`
-runs in `my-box`, and `cat data.csv | python3 -c "..."` stays on Monty.
+`python3 /jobs/gpu/train.py` runs in `my-gpu`, `python3 /jobs/train.py` in
+`my-box`, and `cat data.csv | python3 -c "..."` stays on Monty. A line that
+names no machine runs where `captures` sends it.
 
-Without a route, each command goes to the first machine in `machines` that
-captures it. Here that is `py` for `python3`.
-
-## What the script returns
-
-| Return | What happens |
-| --- | --- |
-| `{"kind": "route", "machine": "box"}` | `box` runs every command it captures; the rest stay where they are |
-| `{"kind": "route", "machine": "box", "reason": "..."}` | the same, and `ws.explain(line)` shows the reason |
-| `{"kind": "route", "machine": "workspace"}` | machines that take whole lines (`@line`) are skipped; a command only they capture is refused |
-| `None` | no opinion: the first machine that captures each command runs it |
-| `{"kind": "deny", "reason": "..."}` | the line is refused |
-
-A route to a machine that is not under `machines:` fails the line with a
-routing error.
-
-The script gets the line, each command with its words and paths, and the
-session. It runs on Monty unless the block names another runtime, and
-has 10 seconds. If it fails, times out or returns anything else, the line
-fails with a routing error. See [Scripts](/home/policy/scripts) for
-everything it can read.
-
-## One machine per session
-
-`ctx["session_id"]` tells the script whose line it is, so each agent can
-get its own machine:
-
-```yaml
-mode: exec
-machines:
-  alice:
-    provider: docker
-    container: alice-box
-  bob:
-    provider: docker
-    container: bob-box
-route_policy: {script: ./route.py, runtime: monty}
-```
+`route_policy` answers for every session. To give each agent its own
+machine, route by the session:
 
 ```python route.py
 def pre_execute(ctx):
     return {"kind": "route", "machine": ctx["session_id"]}
 ```
 
+## Route a command
+
+`pre_command` places one command, so the rest of the line stays where it
+is: in `ls; python3 train.py`, only `python3` moves. As a profile's program,
+it routes that profile's sessions:
+
+```yaml
+profiles:
+  agent:
+    policy:
+      pre_command:
+        - {script: ./route.py}
+```
+
+```python route.py
+def pre_command(ctx):
+    if ctx["command"].startswith("python") and "torch" in " ".join(ctx["argv"]):
+        return {"kind": "route", "machine": "gpu", "reason": "PyTorch trains on the GPU"}
+```
+
+The Multi-machine Terminal's
+[route.py](/home/examples/multi-machine-terminal#routing) also reads the
+script a command runs, to route `python3 train.py` by its imports.
+
 ## In code
 
-`route_policy` also takes a function. It returns a machine name, a `Route`,
-or nothing:
+`route_policy` also takes a function, which returns a machine name or
+nothing:
 
 <CodeGroup>
 
@@ -116,33 +111,18 @@ const ws = new Workspace(mounts, {
 
 </CodeGroup>
 
-To pick the machine for one line yourself, pass it to the call:
-`ws.shell(line, machine="gpu")`, or `{ machine: 'gpu' }` in TypeScript.
-
-A [policy](/home/policy/policies) in code can return `Route(machine=...)`
-too. At `pre_command` it moves one command: in `ls; python3 train.py`, only
-`python3` goes to the machine. Behind `nohup`, `nice`, `setsid`, `stdbuf` or
-`ionice`, the program goes where its own route sends it, and a route on the
-wrapper places what has none.
-
-## Rules
-
-- A refused line never runs anywhere. A deny beats any route.
-- If two policies pick different machines, the line is refused.
-- Lines inside a line (`$( )`, `eval`, `source`, `xargs`) run where the
-  outer line runs.
-- On a machine that takes whole lines, a word only the machine can expand
-  (`$cmd`, `cur?`) is refused while something would read it: any
-  [`pre_command` policy](/home/policy/policies#pre_command), any profile rule
-  for a command name, and a rule that reads arguments for an argument.
-- `ws.explain(line)` shows which machine each command would run on.
+A [policy class](/home/policy/policies) returns `Route(machine=...)` from
+[`pre_execute`](/home/policy/line#pre_execute) or
+[`pre_command`](/home/policy/command), and a caller can name the machine for
+one line: `ws.shell(line, machine="gpu")`, or `{ machine: 'gpu' }` in
+TypeScript. [Explain](/home/policy/explain) shows the machine each command
+would run on.
 
 ## Ask a model
 
 A route script can ask an LLM where a line should run. Scripts on Monty have
 no network, so the model call is a
-[host function](/home/policy/scripts#host-functions). Its answer counts
-against the script's 10 seconds. See the example in
+[host function](/home/policy/scripts#host-functions). See the example in
 [Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
 and
 [TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing).

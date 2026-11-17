@@ -544,17 +544,13 @@ def main() -> int:
             "new",
             "mcp",
         }
-        if documented != set(BUILTIN_CLI_SPECS):
+        listed = set(BUILTIN_CLI_SPECS) - UNLISTED
+        if documented != listed:
             raise SystemExit(
                 f"{language} CLI pages disagree with the registry: "
-                f"{documented ^ set(BUILTIN_CLI_SPECS)}"
+                f"{documented ^ listed}"
             )
         pages[directory / "index.mdx"] = [(catalog(language), commands_block)]
-        for name in sorted(UNLISTED):
-            pages[directory / f"{name}.mdx"] = [
-                (reference(cli_spec_for(name)), commands_block),
-                (license_block(name), license),
-            ]
     pages[ROOT / "docs/home/setup/clis.mdx"] = [
         (catalog("home/setup"), commands_block)
     ]

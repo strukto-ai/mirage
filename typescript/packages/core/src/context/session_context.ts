@@ -150,8 +150,6 @@ export interface Caller {
   // What preCommand judged the running command on, which a connection it
   // opens reports.
   readonly invocation: CommandContext | null
-  // The prefix of the mount whose VFS serves the call, null outside one.
-  readonly vfsMount: string | null
   // The descriptions the redirects around the call write as their commands
   // write, each with what an op that reaches its file runs first: it commits
   // what went in and keeps the rest for the command's end.
@@ -207,7 +205,6 @@ const UNBOUND: Caller = {
   process: null,
   traits: PLAIN_TRAITS,
   invocation: null,
-  vfsMount: null,
   streamed: [],
   outputFile: null,
 }

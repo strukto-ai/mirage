@@ -175,8 +175,6 @@ class Caller:
             changed for the process it runs as.
         invocation (CommandContext | None): what ``pre_command`` judged
             the running command on, which a connection it opens reports.
-        vfs_mount (str | None): the prefix of the mount whose VFS serves
-            the call, None outside one.
         streamed (tuple[tuple[FileDescription,
             Callable[[], Awaitable[None]]], ...]): the descriptions the
             redirects around the call write as their commands write,
@@ -226,7 +224,6 @@ class Caller:
     process: ProcessHandle | None = None
     traits: ProcessTraits = PLAIN_TRAITS
     invocation: CommandContext | None = None
-    vfs_mount: str | None = None
     streamed: tuple[
         tuple[FileDescription, Callable[[], Awaitable[None]]], ...
     ] = ()
