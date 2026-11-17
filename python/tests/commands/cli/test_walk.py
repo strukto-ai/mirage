@@ -919,3 +919,34 @@ def test_walk_names_each_word_it_consumes_and_the_path_it_carries(argv, words):
         (w.kind.value, w.option, w.path.virtual if w.path else None)
         for w in result.words
     ] == words
+
+
+def _nested_base_tree() -> CommandSpec:
+    base = Argument("-C", type="path", default=".")
+    return CommandSpec(
+        name="r",
+        operand_base="-C",
+        arguments=(base,),
+        subcommands=(
+            CommandSpec(
+                name="mid",
+                operand_base="-C",
+                arguments=(base,),
+                subcommands=(CommandSpec(name="leaf"),),
+            ),
+        ),
+    )
+
+
+def test_walk_chains_a_directory_change_across_groups():
+    argv = ["-C", "a", "mid", "-C", "b", "leaf"]
+    result = walk("r", _nested_base_tree(), argv, "/w")
+    assert [b.virtual for b in result.operand_bases] == ["/w/a", "/w/a/b"]
+    assert [w.path.virtual if w.path else None for w in result.words] == [
+        None,
+        "/w/a",
+        None,
+        None,
+        "/w/a/b",
+        None,
+    ]

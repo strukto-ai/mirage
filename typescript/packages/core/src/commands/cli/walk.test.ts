@@ -887,33 +887,52 @@ it('matches longer short spellings before fixed-width prefixes', () => {
   expect(result.groupFlags).toEqual({ '-name': 'plain', '-number': '3' })
 })
 
-describe('walk value paths', () => {
-  function basedTree(): CommandSpec {
-    const pair = (): Argument =>
-      new Argument('--pair', {
-        nargs: 2,
-        type: 'path',
-        valueTypes: ['str', 'path'],
-        action: 'extend',
-      })
-    return new CommandSpec({
-      name: 'r',
-      operandBase: '-C',
-      arguments: [
-        new Argument('-C', { type: 'path', default: '.' }),
-        new Argument('--dir', { type: 'path' }),
-        pair(),
-      ],
-      subcommands: [
-        new CommandSpec({
-          name: 'mid',
-          arguments: [pair()],
-          subcommands: [new CommandSpec({ name: 'leaf' })],
-        }),
-      ],
-    })
-  }
+function pairArgument(): Argument {
+  return new Argument('--pair', {
+    nargs: 2,
+    type: 'path',
+    valueTypes: ['str', 'path'],
+    action: 'extend',
+  })
+}
 
+function basedTree(): CommandSpec {
+  return new CommandSpec({
+    name: 'r',
+    operandBase: '-C',
+    arguments: [
+      new Argument('-C', { type: 'path', default: '.' }),
+      new Argument('--dir', { type: 'path' }),
+      pairArgument(),
+    ],
+    subcommands: [
+      new CommandSpec({
+        name: 'mid',
+        arguments: [pairArgument()],
+        subcommands: [new CommandSpec({ name: 'leaf' })],
+      }),
+    ],
+  })
+}
+
+function nestedBaseTree(): CommandSpec {
+  const base = new Argument('-C', { type: 'path', default: '.' })
+  return new CommandSpec({
+    name: 'r',
+    operandBase: '-C',
+    arguments: [base],
+    subcommands: [
+      new CommandSpec({
+        name: 'mid',
+        operandBase: '-C',
+        arguments: [base],
+        subcommands: [new CommandSpec({ name: 'leaf' })],
+      }),
+    ],
+  })
+}
+
+describe('walk value paths', () => {
   it.each([
     [
       ['-C', 'a', '-Cb', 'mid', 'leaf'],
@@ -960,5 +979,18 @@ describe('walk value paths', () => {
   ])('names each word it consumes and the path it carries: %j', (argv, words) => {
     const result = walk('r', basedTree(), argv, '/w')
     expect(result.words.map((w) => [w.kind, w.option, w.path?.virtual ?? null])).toEqual(words)
+  })
+
+  it('chains a directory change across groups', () => {
+    const result = walk('r', nestedBaseTree(), ['-C', 'a', 'mid', '-C', 'b', 'leaf'], '/w')
+    expect(result.operandBases.map((b) => b.virtual)).toEqual(['/w/a', '/w/a/b'])
+    expect(result.words.map((w) => w.path?.virtual ?? null)).toEqual([
+      null,
+      '/w/a',
+      null,
+      null,
+      '/w/a/b',
+      null,
+    ])
   })
 })

@@ -605,12 +605,12 @@ function resolveGroupPaths(
     const value = flags[cs.baseDest]
     if (typeof value === 'string') {
       const values: [string, number | null][] = typed
-        .filter(([name, , slot]) => name === cs.baseDest && !paths.has(slot))
+        .filter(([name]) => name === cs.baseDest)
         .map(([, word, slot]) => [word, slot])
       let scope = PathSpec.fromStrPath('.', undefined, cwd)
       for (const [word, slot] of values.length > 0 ? values : [[value, null] as const]) {
         scope = PathSpec.fromStrPath(word || '.', undefined, scope)
-        bases.push(scope)
+        if (slot === null || !paths.has(slot)) bases.push(scope)
         if (slot !== null) paths.set(slot, scope)
       }
       flags[cs.baseDest] = scope

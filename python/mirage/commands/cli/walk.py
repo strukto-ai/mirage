@@ -727,12 +727,13 @@ def _resolve_group_paths(
             values: list[tuple[str, int | None]] = [
                 (word, slot)
                 for name, word, slot in typed
-                if name == cs.base_dest and slot not in paths
+                if name == cs.base_dest
             ]
             scope = PathSpec.from_str_path(".", cwd=cwd)
             for word, slot in values or [(value, None)]:
                 scope = PathSpec.from_str_path(word or ".", cwd=scope)
-                bases.append(scope)
+                if slot is None or slot not in paths:
+                    bases.append(scope)
                 if slot is not None:
                     paths[slot] = scope
             flags[cs.base_dest] = scope
