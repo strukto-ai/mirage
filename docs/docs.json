@@ -133,26 +133,18 @@
                     ]
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "group": "Configuration",
-            "pages": [
-              "home/configuration",
-              "home/configuration/server",
-              "home/configuration/workspace",
-              "home/configuration/session",
-              {
-                "group": "Service Credentials",
-                "icon": "key",
-                "pages": [
-                  "home/service-credentials",
-                  "home/service-credentials/aws-secrets-manager",
-                  "home/service-credentials/1password"
-                ]
               },
-              "home/limits"
+              {
+                "group": "Configuration",
+                "icon": "sliders",
+                "pages": [
+                  "home/configuration",
+                  "home/configuration/server",
+                  "home/configuration/workspace",
+                  "home/configuration/session",
+                  "home/limits"
+                ]
+              }
             ]
           },
           {
@@ -306,6 +298,14 @@
               "home/policy/explain",
               "home/policy/route-machine",
               "home/policy/route-network"
+            ]
+          },
+          {
+            "group": "Service Credentials",
+            "pages": [
+              "home/service-credentials",
+              "home/service-credentials/aws-secrets-manager",
+              "home/service-credentials/1password"
             ]
           },
           {

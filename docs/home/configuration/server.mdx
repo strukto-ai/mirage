@@ -12,15 +12,15 @@ which each workspace sets for itself.
 Each setting comes from the first of these that sets it:
 
 1. An option, for a [Python](/python/access/server) or
-   [TypeScript](/typescript/access/server) server you start in code, or the
+   [TypeScript](/typescript/access/server) server started in code, or the
    [Cloudflare app](/typescript/cloudflare-quickstart).
 2. Its environment variable, such as `MIRAGE_MAX_SESSIONS`.
 3. Its key in the `[daemon]` section of `~/.mirage/config.toml`.
 
-A server you start in code takes `idle_grace_seconds` only as an option
+A server started in code takes `idle_grace_seconds` only as an option
 (`idleGraceSeconds` in TypeScript); its default is `30`. `port`, `workers` and
-`worker_type` are only for `mirage daemon`: in code, you serve the app
-yourself.
+`worker_type` are only for `mirage daemon`: in code, the host program serves
+the app.
 
 The Cloudflare app has no `config.toml`. It reads only the sign-in settings
 and the six ceilings, `max_workspaces` to `max_env`, from options or the
@@ -73,18 +73,23 @@ Each key's environment variable is `MIRAGE_` and the key in capitals:
 | `jwt_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | see [Log in](/home/access/cli#log-in) |
 
-Two keys are for the CLI, not the server. They tell `mirage` how to reach
-the server on this machine, its `local` context:
+## CLI keys
 
-- `url`, or `MIRAGE_DAEMON_URL`: `http://127.0.0.1:PORT`.
-  `mirage login URL` adds another server.
-- `auth_token`, or `MIRAGE_TOKEN`: the token it sends. See
-  [Log in](/home/access/cli#log-in).
+`config.toml` also holds two keys the server ignores. The `mirage` CLI reads
+them to reach the server on this machine:
 
-The server's own token is `MIRAGE_AUTH_TOKEN`, else `~/.mirage/auth_token`. It
-has no key in `config.toml`. See
-[Configure authentication](/home/access/http#configure-authentication).
+| Key | Environment variable | Default |
+| --- | --- | --- |
+| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT` |
+| `auth_token` | `MIRAGE_TOKEN` | the token in `~/.mirage/auth_token` |
 
-`MIRAGE_HOME` sets the folder Mirage keeps its files in, `~/.mirage` by
-default: `config.toml`, `state/`, `snapshots/`, the daemon's log and the rest.
-It has no key in `config.toml`, because that file lives inside it.
+To reach another server, run `mirage login URL`. See [Log in](/home/access/cli#log-in).
+
+## Outside config.toml
+
+Two settings are only environment variables:
+
+| Variable | Sets | Default |
+| --- | --- | --- |
+| `MIRAGE_AUTH_TOKEN` | The token the server accepts. See [Configure authentication](/home/access/http#configure-authentication). | `~/.mirage/auth_token` |
+| `MIRAGE_HOME` | The folder Mirage keeps its files in: `config.toml`, `state/`, `snapshots/` and the daemon's log. It cannot be a key, since `config.toml` lives inside it. | `~/.mirage` |
