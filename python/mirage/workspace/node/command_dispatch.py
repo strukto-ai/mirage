@@ -1547,11 +1547,20 @@ async def _route_argv(
             argv, stdin, session, registry, routing, sink
         )
 
+    # A function of a builtin's or a namespace program's name runs in
+    # its place (`timeout() { ...; }`), as bash finds a function first;
+    # the arms below are the builtin's and the program's.
+    shadowed = consumer is Consumer.FUNCTION
+
     # ── `--help` as a builtin's first word ─────
     # bash answers it with the builtin's help and status 2 before the
     # builtin reads its options, the job builtins included. A program
     # run (`find -exec printf --help`) is the program's own, not this.
-    if argv.args[:1] == ("--help",) and not is_program_invocation(session):
+    if (
+        argv.args[:1] == ("--help",)
+        and not shadowed
+        and not is_program_invocation(session)
+    ):
         answered = flag_help(name)
         if answered is not None:
             return answered
@@ -1561,7 +1570,7 @@ async def _route_argv(
     # takes the whole invocation, so the arms live beside their workers
     # (builtins/<word>/) rather than here. Job builtins and the
     # interpreters are not in the table; they route below.
-    builtin = BUILTINS.get(name)
+    builtin = None if shadowed else BUILTINS.get(name)
     if builtin is not None:
         try:
             return await builtin(
@@ -1606,8 +1615,12 @@ async def _route_argv(
     # to it reaches what ``chmod -R`` walks into, not only its operands.
     made = made_by_command(dispatch)
 
-    program = await _run_namespace_program(
-        name, namespace, made, registry, session, operands, stdin
+    program = (
+        None
+        if shadowed
+        else await _run_namespace_program(
+            name, namespace, made, registry, session, operands, stdin
+        )
     )
     if program is not None:
         return program

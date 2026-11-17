@@ -272,4 +272,23 @@ describe('handleCommandBuiltin run mode', () => {
     expect(maskedDuringCall).toBe(true)
     expect(session.functions.cat).toBe(fnBody)
   })
+
+  it.each([
+    ['echo', true],
+    ['timeout', true],
+    ['cd', false],
+    ['unset', false],
+  ] as const)('masks a %s function where it shadows the builtin: %s', async (name, masked) => {
+    const session = makeSession()
+    const fnBody = `${name}() { :; }`
+    session.functions[name] = fnBody
+    let maskedDuringCall = false
+    const shell = vi.fn(() => {
+      maskedDuringCall = !(name in session.functions)
+      return Promise.resolve(new IOResult())
+    })
+    await handleCommandBuiltin(shell, [name], session, makeRegistry())
+    expect(maskedDuringCall).toBe(masked)
+    expect(session.functions[name]).toBe(fnBody)
+  })
 })

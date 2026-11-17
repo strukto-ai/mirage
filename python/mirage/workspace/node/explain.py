@@ -87,6 +87,7 @@ from mirage.workspace.node.inner_lines import (
     program_lines,
     read_word,
     reads_of_test,
+    runs_function,
 )
 from mirage.workspace.node.occurrence import (
     Frame,
@@ -585,7 +586,9 @@ async def _judge_words(
     )
     # After a lost cd, a relative path names no file the pass can place.
     inners = (
-        inner_lines(name, words[1:])
+        []
+        if runs_function(name, session, registry)
+        else inner_lines(name, words[1:])
         if lost and not name.startswith("/")
         else program_lines(
             words,

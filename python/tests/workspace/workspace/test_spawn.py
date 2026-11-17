@@ -130,7 +130,9 @@ async def test_spawn_uses_programs_and_exported_environment():
             SpawnRequest(("printenv", "PARENT"), env={"PARENT": "child"})
         ).communicate()
         assert result.stdout == b"child\n"
-        assert (await ws.shell('printf %s "$PARENT"')).stdout == b"outer"
+        assert (
+            await ws.shell('command printf %s "$PARENT"')
+        ).stdout == b"outer"
         result = await ws.spawn(
             SpawnRequest(
                 ("sh", "-c", "printf out; printf err >&2"), merge_stderr=True

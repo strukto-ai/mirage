@@ -39,7 +39,7 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.constants import (
     BASH_BUILTINS,
     KEYWORDS,
-    SHELL_NAMES,
+    SHELL_ONLY_BUILTINS,
 )
 from mirage.workspace.lookup.lookup import without_capture
 from mirage.workspace.mount import MountRegistry
@@ -164,8 +164,8 @@ async def _past_functions(
     alias``), a reserved word (``command time``) and an assignment
     (``command X=5``). Any other head goes as typed. A shadowing
     function is masked in the session for the inner run while builtins
-    and mount commands still resolve; a function never shadows a
-    builtin, so one named like a builtin stays.
+    and mount commands still resolve; a function never shadows the
+    shell's own words, so one named like one stays.
 
     Args:
         cmd (str): the builtin that runs them, named on the node.
@@ -187,14 +187,15 @@ async def _past_functions(
     ):
         rest = shell_join(words[1:])
         inner = single_quote(inner_name) + (f" {rest}" if rest else "")
-    # A function never shadows a bash builtin mirage runs, so one of such
-    # a name stays for the builtin to read or remove (`builtin unset -f
-    # unset`); an interpreter's (`python3`) is still masked. Function
-    # bodies are never None, so popping with a None default lets `is not
-    # None` mean "a shadowing function was masked" for restore.
+    # A function never shadows the shell's own words, so one of such a
+    # name stays for the builtin to read or remove (`builtin unset -f
+    # unset`); one of a builtin that is also a program (`echo`,
+    # `timeout`) is masked. Function bodies are never None, so popping
+    # with a None default lets `is not None` mean "a shadowing function
+    # was masked" for restore.
     saved_fn = (
         None
-        if inner_name in BASH_BUILTINS and inner_name in SHELL_NAMES
+        if inner_name in SHELL_ONLY_BUILTINS
         else session.functions.pop(inner_name, None)
     )
     placement = {} if routing is None else {"routing_decision": routing}

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../commands/spec/compile.ts'
+import { isProgramInvocation } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -82,13 +83,13 @@ export function pathProgram(
  * `cat` leaves no `echo` and no `cd`. Two kinds of word are not,
  * because neither is a name the list could hold: a path being executed
  * (its lines are each checked as they run), and the agent's own
- * function where the function is what runs, which in this shell means
- * a name no builtin owns (builtins shadow functions), and its body's
- * lines each pass the gate themselves.
+ * function where the function is what runs, which is any name but the
+ * shell's own words (cd, export), and its body's lines each pass the
+ * gate themselves.
  */
-export function isTool(name: string, session: SessionState): boolean {
+export function isTool(name: string, session: SessionState, registry: MountRegistry): boolean {
   if (name.includes('/')) return false
-  return !(name in session.functions && !SHELL_NAMES.has(name))
+  return lookup(name, session, registry) !== Consumer.FUNCTION
 }
 
 /**
@@ -254,6 +255,24 @@ export function runsWrapper(
 }
 
 /**
+ * Whether a function of the name runs ahead of every other layer.
+ *
+ * bash finds a function before a builtin or a file on PATH, so one
+ * shadows `timeout`, `env` or `echo` there. The shell's own words
+ * (`SHELL_ONLY_BUILTINS`: cd, export, type) still beat one here, though
+ * bash lets a function shadow those too. A program run
+ * (`timeout 1 sleep 0`) is not one either: the program is exec'd and never
+ * sees a function (`layers` puts it last there).
+ */
+function functionFirst(name: string, session: SessionState): boolean {
+  return (
+    Object.hasOwn(session.functions, name) &&
+    !SHELL_ONLY_BUILTINS.has(name) &&
+    !isProgramInvocation(session)
+  )
+}
+
+/**
  * Yield every layer holding the name, most-preferred first.
  *
  * The one place precedence is written down: `lookup` reads the first
@@ -276,6 +295,14 @@ function* layers(
   const bound = Object.hasOwn(bindings, name) ? bindings[name] : undefined
   const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
+  const first = functionFirst(name, session)
+  // A program run execs the program, so a function answers only a name no
+  // other layer holds (`timeout 1 f`).
+  const last = Object.hasOwn(session.functions, name) && !first && isProgramInvocation(session)
+  if (first) {
+    found = true
+    yield Consumer.FUNCTION
+  }
   if (SHELL_NAMES.has(name) && (!MACHINE_ONLY_BUILTINS.has(name) || runsPrograms(bindings))) {
     found = true
     yield (native || refused) && CAPTURABLE_BUILTINS.has(name)
@@ -286,7 +313,7 @@ function* layers(
     found = true
     yield Consumer.NAMESPACE
   }
-  if (Object.hasOwn(session.functions, name)) {
+  if (Object.hasOwn(session.functions, name) && !first && !last) {
     found = true
     yield Consumer.FUNCTION
   }
@@ -301,6 +328,10 @@ function* layers(
   if (ROUTED_COMMANDS.has(name) || registry.mountForCommand(runsAs(name, registry)) !== null) {
     found = true
     yield Consumer.MOUNT
+  }
+  if (last) {
+    found = true
+    yield Consumer.FUNCTION
   }
   const fallback = Object.hasOwn(bindings, EXTERNAL_COMMANDS)
     ? bindings[EXTERNAL_COMMANDS]
@@ -317,9 +348,10 @@ function* layers(
 /**
  * Route a command name to the layer that consumes it.
  *
- * Order mirrors dispatch precedence: shell builtins shadow functions,
- * functions shadow installed CLIs, CLIs shadow mount commands, and a
- * name nobody registers is UNKNOWN (command not found). Install-time
+ * Order mirrors dispatch precedence: a function shadows every name but
+ * the shell's own words (cd, export), builtins shadow installed CLIs,
+ * CLIs shadow mount commands, and a name nobody registers is UNKNOWN
+ * (command not found). Install-time
  * collision rules keep the CLI arm honest: a CLI may not take a shell
  * builtin's or a general command's name, so the only shadowing a CLI
  * can actually exert is over a mount-specific custom command.
@@ -329,9 +361,9 @@ function* layers(
  * operand paths for mounts:
  *
  *     Consumer   Example              Resolved by          Words
+ *     FUNCTION   deploy() {..}        session.functions    shell-expanded
  *     SESSION    cd, echo, export     name in SHELL_NAMES  shell-expanded
  *     NAMESPACE  ln -s, readlink      NAMESPACE_COMMANDS   shell-expanded
- *     FUNCTION   deploy() {..}        session.functions    shell-expanded
  *     CLI        slack message send   registry.clis        shell-expanded
  *     MOUNT      grep, cat, du        operand paths        pushdown
  *     UNKNOWN    bogus                nobody               untouched, 127

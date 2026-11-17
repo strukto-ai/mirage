@@ -586,7 +586,7 @@ async def gate(
         The context, the chain's answer (the first Deny, else the first
         Ask) and every answer it came from.
     """
-    tool = intrinsic or is_tool(name, session)
+    tool = intrinsic or is_tool(name, session, registry)
     env = env_snapshot(session)
     tokens, program = program_tokens(registry, name, args, session.cwd, env)
     implied = (
@@ -878,7 +878,7 @@ def _word_hints(
     if joined in TEST_NAMES:
         return file_operands(joined, line[1:]), None
     consumer = lookup(joined, session, registry)
-    if joined in session.functions or not (
+    if consumer is Consumer.FUNCTION or not (
         word_policy(consumer) is WordPolicy.MOUNT
         or consumer is Consumer.EXTERNAL
         or joined in INTERPRETER_NAMES

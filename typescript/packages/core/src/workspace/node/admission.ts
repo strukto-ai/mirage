@@ -521,7 +521,7 @@ export async function gate(
   rulesOnly = false,
   line = '',
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask | Route)[]]> {
-  const tool = intrinsic || isTool(name, session)
+  const tool = intrinsic || isTool(name, session, registry)
   const env = envSnapshot(session)
   const [tokens, program] = programTokens(
     registry,
@@ -756,7 +756,7 @@ function wordHints(
   // the hints reach no runtime word, since the line runs as typed, so
   // there is nothing to lose by reading them all.
   if (
-    Object.hasOwn(session.functions, joined) ||
+    consumer === Consumer.FUNCTION ||
     !(
       wordPolicy(consumer) === WordPolicy.MOUNT ||
       consumer === Consumer.EXTERNAL ||

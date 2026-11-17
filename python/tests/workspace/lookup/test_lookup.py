@@ -18,6 +18,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
+from mirage.context import reset_caller, set_program_invocation
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
@@ -35,6 +36,7 @@ from mirage.workspace.lookup import (
     SHELL_CONSUMERS,
     Consumer,
     execs,
+    is_tool,
     lookup,
     lookup_all,
     program,
@@ -123,10 +125,48 @@ def test_function_routes_function():
     assert lookup("greet", session, ws._registry) is Consumer.FUNCTION
 
 
-def test_builtin_shadows_function():
+def test_function_shadows_a_builtin_that_is_a_program():
     session, ws = _fixture()
-    session.functions["echo"] = "echo() { :; }"
-    assert lookup("echo", session, ws._registry) is Consumer.SESSION
+    for name in ("echo", "timeout", "env", "sleep", "ps", "ln"):
+        session.functions[name] = f"{name}() {{ :; }}"
+        assert lookup(name, session, ws._registry) is Consumer.FUNCTION
+    assert lookup_all("timeout", session, ws._registry) == [
+        Consumer.FUNCTION,
+        Consumer.SESSION,
+    ]
+
+
+def test_shell_word_shadows_function():
+    session, ws = _fixture()
+    for name in ("cd", "export", "type", "kill"):
+        session.functions[name] = f"{name}() {{ :; }}"
+        assert lookup(name, session, ws._registry) is not Consumer.FUNCTION
+    assert lookup_all("cd", session, ws._registry) == [
+        Consumer.SESSION,
+        Consumer.FUNCTION,
+    ]
+
+
+def test_a_program_run_answers_with_the_program_past_a_function():
+    session, ws = _fixture()
+    registry = ws._registry
+    for name in ("sleep", "chmod", "cat", "greet"):
+        session.functions[name] = f"{name}() {{ :; }}"
+    token = set_program_invocation(session)
+    try:
+        assert lookup("sleep", session, registry) is Consumer.SESSION
+        assert lookup("chmod", session, registry) is Consumer.MOUNT
+        assert lookup_all("cat", session, registry) == [
+            Consumer.MOUNT,
+            Consumer.FUNCTION,
+        ]
+        assert lookup("greet", session, registry) is Consumer.FUNCTION
+        assert is_tool("cat", session, registry)
+        assert not is_tool("greet", session, registry)
+    finally:
+        reset_caller(token)
+    assert lookup("sleep", session, registry) is Consumer.FUNCTION
+    assert not is_tool("cat", session, registry)
 
 
 def test_function_shadows_mount_command():

@@ -861,7 +861,11 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
     )
   }
-  if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
+  if (
+    JOB_BUILTINS.has(cmdName) &&
+    jobTable !== null &&
+    lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
+  ) {
     const textParts = parts.map((p) =>
       typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,
     )
@@ -882,8 +886,13 @@ export async function handleCommand(
     }
   }
 
+  // Shell functions, where one is what the name runs (a program run execs
+  // the program instead).
   const funcBody = session.functions[cmdName]
-  if (funcBody !== undefined) {
+  if (
+    funcBody !== undefined &&
+    lookup(cmdName, session, registry, context.frame.routing ?? undefined) === Consumer.FUNCTION
+  ) {
     if (parser === undefined) throw new Error('function invocation requires a parse scope')
     return runShellFunction(
       executeNode,

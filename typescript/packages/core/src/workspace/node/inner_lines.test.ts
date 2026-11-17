@@ -19,11 +19,16 @@ import { NodeType as NT } from '../../shell/types.ts'
 import {
   innerLines,
   innerReadable,
+  programLines,
   readWord,
   readsOfTest,
   wordValue,
   type Word,
 } from './inner_lines.ts'
+import { runAsProgram } from '../../context/session_context.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { SessionState } from '../session/session.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { parse } from '../../shell/parse/parse.ts'
 
 // Mirrors python/tests/workspace/node/test_inner_lines.py.
@@ -178,5 +183,25 @@ describe('readsOfTest', () => {
     assert(test)
     const got = readsOfTest(test).map((read) => [read.words.map(wordValue), read.stated])
     expect(got).toEqual(reads)
+  })
+})
+
+describe('programLines', () => {
+  it.each([
+    [['timeout', '1', 'rm', '/x']],
+    [['env', 'rm', '/x']],
+    [['xargs', 'rm']],
+    [['sh', '-c', 'rm /x']],
+  ])('runs nothing under a shadowing function: %j', async (texts) => {
+    const ws = new Workspace({ '/': new RAMVFS() })
+    const session = new SessionState({ sessionId: 't' })
+    const head = texts[0] ?? ''
+    expect(programLines(words(...texts), session, ws.registry)).not.toEqual([])
+    session.functions[head] = `${head}() { :; }`
+    expect(programLines(words(...texts), session, ws.registry)).toEqual([])
+    await runAsProgram(session, () => {
+      expect(programLines(words(...texts), session, ws.registry)).not.toEqual([])
+      return Promise.resolve()
+    })
   })
 })

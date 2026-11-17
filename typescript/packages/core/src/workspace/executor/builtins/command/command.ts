@@ -32,7 +32,7 @@ import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
-import { BASH_BUILTINS, KEYWORDS, SHELL_NAMES } from '../../../lookup/constants.ts'
+import { BASH_BUILTINS, KEYWORDS, SHELL_ONLY_BUILTINS } from '../../../lookup/constants.ts'
 import { withoutCapture } from '../../../lookup/lookup.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
@@ -152,15 +152,12 @@ async function pastFunctions(
     KEYWORDS.has(innerName) ||
     (aliasesOn(session) && sessionEntry(session.aliases, innerName) !== undefined)
   const inner = quoted ? singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`) : shellJoin(words)
-  // A function never shadows a bash builtin mirage runs, so one of such a name
-  // stays for the builtin to read or remove (`builtin unset -f unset`); an
-  // interpreter's (`python3`) is still masked. Function bodies are never
-  // undefined, so a defined captured value means a shadowing function was
-  // masked and must be restored after the run.
-  const savedFn =
-    BASH_BUILTINS.has(innerName) && SHELL_NAMES.has(innerName)
-      ? undefined
-      : session.functions[innerName]
+  // A function never shadows the shell's own words, so one of such a name
+  // stays for the builtin to read or remove (`builtin unset -f unset`); one of
+  // a builtin that is also a program (`echo`, `timeout`) is masked. Function
+  // bodies are never undefined, so a defined captured value means a shadowing
+  // function was masked and must be restored after the run.
+  const savedFn = SHELL_ONLY_BUILTINS.has(innerName) ? undefined : session.functions[innerName]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   if (savedFn !== undefined) delete session.functions[innerName]
   try {

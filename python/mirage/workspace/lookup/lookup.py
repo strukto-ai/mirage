@@ -18,6 +18,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
+from mirage.context.session_context import is_program_invocation
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -85,24 +86,27 @@ def path_program(
     return name
 
 
-def is_tool(name: str, session: SessionState) -> bool:
+def is_tool(
+    name: str, session: SessionState, registry: "MountRegistry"
+) -> bool:
     """Whether a command word is a tool the allow lists govern.
 
     Every named command is a subject, shell builtins included: an allow
     list stating ``cat`` leaves no ``echo`` and no ``cd``. Two kinds of
     word are not, because neither is a name the list could hold: a path
     being executed (its lines are each checked as they run), and the
-    agent's own function where the function is what runs, which in this
-    shell means a name no builtin owns (builtins shadow functions), and
-    its body's lines each pass the gate themselves.
+    agent's own function where the function is what runs, which is any
+    name but the shell's own words (cd, export), and its body's lines
+    each pass the gate themselves.
 
     Args:
         name (str): expanded command name.
         session (SessionState): the shell session running the line.
+        registry (MountRegistry): mount registry (command registration).
     """
     if "/" in name:
         return False
-    return not (name in session.functions and name not in SHELL_NAMES)
+    return lookup(name, session, registry) is not Consumer.FUNCTION
 
 
 def runs_programs(
@@ -307,6 +311,27 @@ def runs_wrapper(
     return name in RUNNERS or read_wrapper(name, args)[0] is not None
 
 
+def _function_first(name: str, session: SessionState) -> bool:
+    """Whether a function of the name runs ahead of every other layer.
+
+    bash finds a function before a builtin or a file on PATH, so one
+    shadows ``timeout``, ``env`` or ``echo`` there. The shell's own words
+    (``SHELL_ONLY_BUILTINS``: cd, export, type) still beat one here,
+    though bash lets a function shadow those too. A program run
+    (``timeout 1 sleep 0``) is not one either: the program is exec'd
+    and never sees a function (``_layers`` puts it last there).
+
+    Args:
+        name (str): expanded command name.
+        session (SessionState): shell session (function table).
+    """
+    return (
+        name in session.functions
+        and name not in SHELL_ONLY_BUILTINS
+        and not is_program_invocation(session)
+    )
+
+
 def _layers(
     name: str,
     session: SessionState,
@@ -336,6 +361,17 @@ def _layers(
     bound = bindings.get(name)
     native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
+    first = _function_first(name, session)
+    # A program run execs the program, so a function answers only a
+    # name no other layer holds (``timeout 1 f``).
+    last = (
+        name in session.functions
+        and not first
+        and is_program_invocation(session)
+    )
+    if first:
+        found = True
+        yield Consumer.FUNCTION
     if name in SHELL_NAMES and (
         name not in MACHINE_ONLY_BUILTINS or runs_programs(bindings)
     ):
@@ -348,7 +384,7 @@ def _layers(
     if name in NAMESPACE_COMMANDS:
         found = True
         yield Consumer.NAMESPACE
-    if name in session.functions:
+    if name in session.functions and not first and not last:
         found = True
         yield Consumer.FUNCTION
     if registry.clis.get(name) is not None:
@@ -363,6 +399,9 @@ def _layers(
     ):
         found = True
         yield Consumer.MOUNT
+    if last:
+        found = True
+        yield Consumer.FUNCTION
     fallback = bindings.get(EXTERNAL_COMMANDS)
     fallback_native = isinstance(
         fallback, (LineExecutorMixin, ProcessExecutorMixin)
@@ -379,9 +418,10 @@ def lookup(
 ) -> Consumer:
     """Route a command name to the layer that consumes it.
 
-    Order mirrors dispatch precedence: shell builtins shadow functions,
-    functions shadow installed CLIs, CLIs shadow mount commands, and a
-    name nobody registers is UNKNOWN (command not found). Install-time
+    Order mirrors dispatch precedence: a function shadows every name but
+    the shell's own words (cd, export), builtins shadow installed CLIs,
+    CLIs shadow mount commands, and a name nobody registers is UNKNOWN
+    (command not found). Install-time
     collision rules keep the CLI arm honest: a CLI may not take a shell
     builtin's or a general command's name, so the only shadowing a CLI
     can actually exert is over a mount-specific custom command.
@@ -391,9 +431,9 @@ def lookup(
     layers, operand paths for mounts::
 
         Consumer   Example              Resolved by          Words
+        FUNCTION   deploy() {..}        session.functions    shell-expanded
         SESSION    cd, echo, export     name in SHELL_NAMES  shell-expanded
         NAMESPACE  ln -s, readlink      NAMESPACE_COMMANDS   shell-expanded
-        FUNCTION   deploy() {..}        session.functions    shell-expanded
         CLI        slack message send   registry.clis        shell-expanded
         MOUNT      grep, cat, du        operand paths        pushdown
         UNKNOWN    bogus                nobody               untouched, 127

@@ -1018,7 +1018,12 @@ async def handle_command(
     )
 
     # Job builtins
-    if cmd_name in JOB_BUILTINS and job_table is not None:
+    if (
+        cmd_name in JOB_BUILTINS
+        and job_table is not None
+        and lookup(cmd_name, session, registry, context.frame.routing)
+        is not Consumer.FUNCTION
+    ):
         text_parts = [
             (p.raw_path or p.virtual) if isinstance(p, PathSpec) else p
             for p in parts
@@ -1058,8 +1063,13 @@ async def handle_command(
             view,
         )
 
-    # Shell functions
-    if cmd_name in session.functions:
+    # Shell functions, where one is what the name runs (a program run
+    # execs the program instead)
+    if (
+        cmd_name in session.functions
+        and lookup(cmd_name, session, registry, context.frame.routing)
+        is Consumer.FUNCTION
+    ):
         return await run_shell_function(
             execute_node,
             cmd_name,

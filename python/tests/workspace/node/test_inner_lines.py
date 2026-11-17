@@ -14,16 +14,21 @@
 
 import pytest
 
+from mirage.context import reset_caller, set_program_invocation
 from mirage.shell.helpers import get_parts
 from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from mirage.workspace.node.inner_lines import (
     InnerLine,
     Word,
     inner_lines,
+    program_lines,
     read_word,
     reads_of_test,
 )
+from mirage.workspace.session import SessionState
 
 
 def _words(*texts: str) -> list[Word]:
@@ -176,3 +181,25 @@ def test_a_test_is_read_as_the_tests_the_gate_admits(line, reads):
         for r in reads_of_test(stack[-1])
     ]
     assert got == reads
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        ("timeout", "1", "rm", "/x"),
+        ("env", "rm", "/x"),
+        ("xargs", "rm"),
+        ("sh", "-c", "rm /x"),
+    ],
+)
+def test_program_lines_run_nothing_under_a_shadowing_function(words):
+    ws = Workspace({"/": RAMVFS()})
+    session = SessionState(session_id="t")
+    assert program_lines(_words(*words), session, ws._registry)
+    session.functions[words[0]] = f"{words[0]}() {{ :; }}"
+    assert program_lines(_words(*words), session, ws._registry) == []
+    token = set_program_invocation(session)
+    try:
+        assert program_lines(_words(*words), session, ws._registry)
+    finally:
+        reset_caller(token)
