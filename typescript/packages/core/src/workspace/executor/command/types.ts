@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FlagValue } from '../../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import type { WordChoices } from '../../../commands/spec/word_choice.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { CommandWord, HandOff } from '../../../policy/types.ts'
@@ -109,4 +109,22 @@ export interface LineReading {
   readonly supplied: readonly PathSpec[]
   readonly tokens: readonly string[]
   readonly program: readonly string[]
+}
+
+/**
+ * How a CLI leaf's words are parsed, the one setting the run and a
+ * policy's reading of the line share.
+ *
+ * spec: the grammar to parse with: the leaf, with the injected `--help`
+ * or a script's pass-through rest. mirageHelp: whether the injected
+ * `--help` is mirage's to answer. unknownIsOperand: whether an undeclared
+ * dashed word is an operand; under the cobra dialect it is an error.
+ * abbreviations: git's full long-option table for the verb, which
+ * resolves an abbreviated long option; undefined for any other program.
+ */
+export interface LeafParse {
+  readonly spec: CommandSpec
+  readonly mirageHelp: boolean
+  readonly unknownIsOperand: boolean
+  readonly abbreviations: readonly string[] | undefined
 }

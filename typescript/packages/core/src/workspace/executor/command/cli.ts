@@ -46,6 +46,7 @@ import type { MountEntry } from '../../mount/mount.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
+import type { LeafParse } from './types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForScript } from '../../../runtime/routing/decide.ts'
 import { execNode } from './run.ts'
@@ -98,6 +99,26 @@ function parseSpecFor(
   if (!grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help')))
     return [grammar, false]
   return [listedNode(grammar, style), true]
+}
+
+/**
+ * How the run parses a CLI leaf's words, which a policy's reading of the
+ * line parses with too, so both see the same options.
+ *
+ * The dialect is the root's: under cobra an undeclared dashed word is an
+ * error and no long option abbreviates. git resolves an abbreviated long
+ * option against the verb's own full table (parse-options), and its
+ * revision walkers take whole words only.
+ */
+export function leafParse(cli: CLI, leaf: CommandSpec, path: readonly string[]): LeafParse {
+  const [spec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
+  return {
+    spec,
+    mirageHelp,
+    unknownIsOperand: cli.spec.usageStyle !== UsageStyle.COBRA,
+    abbreviations:
+      cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(path.join(' ')) ?? []) : undefined,
+  }
 }
 
 /**
@@ -370,26 +391,22 @@ export async function walkLeaf(
   if (handler === undefined) throw new Error(`cli '${prog}': missing handler`)
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const [parseSpec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
-
+  const grammar = leafParse(cli, leaf, result.path)
+  const { spec: parseSpec, mirageHelp } = grammar
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
   const style = cli.spec.usageStyle
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
-  // git resolves an abbreviated long option against the verb's own full table
-  // (parse-options), and its revision walkers take whole words only.
-  const abbreviations =
-    cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? []) : undefined
   const parsed = parseFlags(
     [...result.argv],
     parseSpec,
     prog,
     session.cwd,
     envSnapshot(session),
-    style !== UsageStyle.COBRA,
-    abbreviations,
+    grammar.unknownIsOperand,
+    grammar.abbreviations,
   )
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {

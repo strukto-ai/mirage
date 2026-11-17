@@ -484,6 +484,30 @@ async def test_a_dash_or_an_empty_value_names_no_file(line: str):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, words",
+    [
+        (
+            "git for-each-ref --fo x.txt",
+            (("--fo", "option", None), ("x.txt", "value", "--fo")),
+        ),
+        (
+            "git reflog --help x.txt",
+            (("--help", "option", None), ("x.txt", "operand", None)),
+        ),
+    ],
+)
+async def test_a_leaf_word_reads_as_the_run_parses_it(
+    line: str, words: tuple[tuple[str, str, str | None], ...]
+):
+    ctx = await _seen_by_policy(line)
+    assert (
+        tuple((w.text, w.kind, w.option) for w in ctx.words[-len(words) :])
+        == words
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_dash_led_group_value_is_a_value():
     ctx = await _seen_by_policy("git -C -x log")
     word = next(w for w in ctx.words if w.text == "-x")

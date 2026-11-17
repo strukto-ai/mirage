@@ -24,6 +24,7 @@ import { followPaths } from '../builtins/links/links.ts'
 import { toScope } from '../builtins/scope.ts'
 import { SLASH_KEEPS_LAST } from '../../lookup/index.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
+import { leafParse } from './cli.ts'
 import { commandTree } from './routing.ts'
 import type { LineReading } from './types.ts'
 
@@ -79,8 +80,17 @@ export function readLine(
   let grammar: Grammar[]
   let program: string[]
   let tokens: string[]
-  if (result !== null && result.leaf !== null) {
-    const leaf = parseCommand(result.leaf, [...result.argv], cwd, name, env, true)
+  if (tree !== null && result !== null && result.leaf !== null) {
+    const rules = leafParse(tree, result.leaf, result.path)
+    const leaf = parseCommand(
+      rules.spec,
+      [...result.argv],
+      cwd,
+      name,
+      env,
+      rules.unknownIsOperand,
+      rules.abbreviations,
+    )
     grammar = [
       ...result.words.map((w): Grammar => [w.kind, w.option, w.path, null]),
       ...leafGrammar(leaf, result.argv, cwd, true),

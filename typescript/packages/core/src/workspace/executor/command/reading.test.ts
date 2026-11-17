@@ -415,6 +415,26 @@ describe('what a policy sees', () => {
     },
   )
 
+  it.each([
+    [
+      'git for-each-ref --fo x.txt',
+      [
+        ['--fo', 'option', null],
+        ['x.txt', 'value', '--fo'],
+      ],
+    ],
+    [
+      'git reflog --help x.txt',
+      [
+        ['--help', 'option', null],
+        ['x.txt', 'operand', null],
+      ],
+    ],
+  ] as const)('a leaf word reads as the run parses it: %s', async (line, words) => {
+    const seen = (await seenByPolicy(line)).words ?? []
+    expect(seen.slice(-words.length).map((w) => [w.text, w.kind, w.option])).toEqual(words)
+  })
+
   it('a dash-led group value is a value', async () => {
     const ctx = await seenByPolicy('git -C -x log')
     const word = ctx.words?.find((w) => w.text === '-x')

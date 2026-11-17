@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -64,6 +64,7 @@ from mirage.workspace.executor.command.handler import (
     run_handler,
 )
 from mirage.workspace.executor.command.run import exec_node
+from mirage.workspace.executor.command.types import LeafParse
 from mirage.workspace.files import Files
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace.probe import miss_condition, path_stat
@@ -103,6 +104,35 @@ def parse_spec_for(
     ):
         return leaf, False
     return listed_node(leaf, style), True
+
+
+def leaf_parse(cli: CLI, leaf: CommandSpec, path: Sequence[str]) -> LeafParse:
+    """How the run parses a CLI leaf's words, which a policy's reading
+    of the line parses with too, so both see the same options.
+
+    The dialect is the root's: under cobra an undeclared dashed word is
+    an error and no long option abbreviates. git resolves an abbreviated
+    long option against the verb's own full table (parse-options), and
+    its revision walkers take whole words only.
+
+    Args:
+        cli (CLI): the installed CLI.
+        leaf (CommandSpec): the leaf its walk resolved.
+        path (Sequence[str]): the canonical verb path to the leaf.
+    """
+    spec, mirage_help = parse_spec_for(
+        leaf, cli.spec.usage_style, owns_argv(cli)
+    )
+    return LeafParse(
+        spec,
+        mirage_help,
+        cli.spec.usage_style is not UsageStyle.COBRA,
+        (
+            GIT_LONG_OPTIONS.get(" ".join(path), ())
+            if cli.spec.name == "git"
+            else None
+        ),
+    )
 
 
 def _select_runtime(
@@ -442,32 +472,22 @@ async def walk_leaf(
     # argparse add_help, minus the two nodes that answer for themselves
     # (parse_spec_for). No injected --version: that is a GNU coreutils
     # convention, not an argparse one.
-    parse_spec, mirage_help = parse_spec_for(
-        leaf, cli.spec.usage_style, owns_argv(cli)
-    )
-
+    grammar = leaf_parse(cli, leaf, result.path)
+    parse_spec, mirage_help = grammar.spec, grammar.mirage_help
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
     style = cli.spec.usage_style
     # The environment goes into the parse, not on top of it: an option
     # declaring one is coerced, choice-checked, path-resolved and
     # credited against required exactly as a typed value is.
-    # git resolves an abbreviated long option against the verb's own full
-    # table (parse-options), and its revision walkers take whole words
-    # only.
-    abbreviations = (
-        GIT_LONG_OPTIONS.get(" ".join(result.path), ())
-        if cli.spec.name == "git"
-        else None
-    )
     parsed = parse_flags(
         list(result.argv),
         parse_spec,
         prog,
         session.cwd,
         env=env_snapshot(session),
-        unknown_is_operand=style is not UsageStyle.COBRA,
-        abbreviations=abbreviations,
+        unknown_is_operand=grammar.unknown_is_operand,
+        abbreviations=grammar.abbreviations,
     )
     if mirage_help and parsed.flag_kwargs.get("help") is True:
         help_text = encode_text(node_help(prog, parse_spec, style=style))

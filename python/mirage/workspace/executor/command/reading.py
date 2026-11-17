@@ -25,6 +25,7 @@ from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
+from mirage.workspace.executor.command.cli import leaf_parse
 from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.lookup import SLASH_KEEPS_LAST
@@ -73,7 +74,8 @@ def read_line(
 
     A command tree (an installed CLI's, or a mount's) is walked as its
     run walks it: the walk names its verbs, group options and their
-    values, and the leaf's grammar its own words. Any other command's
+    values, and the leaf's grammar its own words, parsed with the run's
+    own settings (``leaf_parse``). Any other command's
     words are read off its own spec, and a command no spec describes
     reads a dashed word as an option and anything else as an operand.
     A word's path is the classifier's, which carries the mount and the
@@ -103,14 +105,16 @@ def read_line(
     )
     supplied: list[PathSpec] = []
     grammar: list[Grammar]
-    if result is not None and result.leaf is not None:
+    if tree is not None and result is not None and result.leaf is not None:
+        rules = leaf_parse(tree, result.leaf, result.path)
         leaf = parse_command(
-            result.leaf,
+            rules.spec,
             list(result.argv),
             cwd,
             name,
             env,
-            unknown_is_operand=True,
+            unknown_is_operand=rules.unknown_is_operand,
+            abbreviations=rules.abbreviations,
         )
         grammar = [
             *((w.kind, w.option, w.path, None) for w in result.words),
