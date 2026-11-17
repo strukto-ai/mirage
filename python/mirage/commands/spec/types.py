@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Literal, TypeAlias
+from typing import Literal, NamedTuple, TypeAlias
 
 from mirage.types import PathSpec
 
@@ -107,6 +107,26 @@ class WordKind(StrEnum):
 # Public boolean flags declare action="store_true" or action="count".
 # Numeric values are validated; path values enter virtual path resolution.
 ValueType = Literal["bool", "str", "int", "float", "path"]
+
+
+class Attached(NamedTuple):
+    """A value typed onto its option word (``--file=x``, ``-fx``, ``-cfx``).
+
+    Args:
+        slot (int): the option word's position in argv.
+        option (str): the option as typed, without the value or its
+            ``=`` (``--file``, ``-f``, ``-cf``).
+        value (str): the value as typed.
+        base (str): the directory a PATH value resolves against.
+        kind (ValueType | None): the value's declared type.
+    """
+
+    slot: int
+    option: str
+    value: str
+    base: str
+    kind: ValueType | None
+
 
 ArgumentAction = Literal["store", "store_true", "count", "append", "extend"]
 Nargs: TypeAlias = int | Literal["?", "*", "+", "REMAINDER"] | None

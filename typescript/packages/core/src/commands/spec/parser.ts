@@ -58,6 +58,7 @@ import { flagOccurrences } from './flag_view.ts'
 import { expandOldStyle } from './oldstyle.ts'
 import {
   type Argument,
+  type Attached,
   type CommandSpec,
   type ParsedFlagValue,
   type ValueType,
@@ -138,10 +139,9 @@ export class ParsedArgs {
   // read as an option, VALUE for an option's detached value, OPERAND for an
   // argument, null for a word the scan never reads.
   readonly wordRoles: (WordKind | null)[]
-  // Each PATH value typed onto its option word (`--file=x`, `-fx`): the
-  // option word's position, the value as typed and the directory it
-  // resolves against. `wordPaths` reads it.
-  readonly attachedPaths: [number, string, string][]
+  // Each value typed onto its option word (`--file=x`, `-fx`), in scan
+  // order. `wordPaths` reads the PATH ones.
+  readonly attached: Attached[]
   // PATH values no word typed, which a default or the environment
   // supplied, resolved.
   readonly suppliedPathValues: string[]
@@ -203,7 +203,7 @@ export class ParsedArgs {
           | 'wordKinds'
           | 'wordBases'
           | 'wordRoles'
-          | 'attachedPaths'
+          | 'attached'
           | 'suppliedPathValues'
           | 'invalidOptions'
           | 'ambiguousOptions'
@@ -231,7 +231,7 @@ export class ParsedArgs {
     this.wordKinds = init.wordKinds ?? []
     this.wordBases = init.wordBases ?? []
     this.wordRoles = init.wordRoles ?? []
-    this.attachedPaths = init.attachedPaths ?? []
+    this.attached = init.attached ?? []
     this.suppliedPathValues = init.suppliedPathValues ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
@@ -607,7 +607,7 @@ export function parseCommand(
   let base = cwd
   const wordBases: (string | null)[] = new Array<string | null>(argv.length).fill(null)
   const rawBases: string[] = []
-  const attachedPaths: [number, string, string][] = []
+  const typedOnto: Attached[] = []
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
@@ -732,14 +732,23 @@ export function parseCommand(
     return detached + 1
   }
 
-  // Keep a PATH value typed onto its option word, with the directory it
-  // resolves against: the operand base for the base option itself (`-C a
-  // -Cb` is `a/b`), else the cwd, as a detached value of the same option
-  // resolves.
+  // Keep a value typed onto its option word, with the option as typed and
+  // the directory a PATH value resolves against: the operand base for the
+  // base option itself (`-C a -Cb` is `a/b`), else the cwd, as a detached
+  // value of the same option resolves.
   const recordAttached = (spelling: string, value: string, kind?: ValueType): void => {
-    if ((kind ?? cs.kindOf.get(spelling)) !== 'path') return
+    const slot = scanOrigins[i] ?? -1
+    const word = argv[slot] ?? ''
+    const typed =
+      value !== '' && word.endsWith(value) ? word.slice(0, word.length - value.length) : word
     const moves = cs.baseDest !== null && cs.destOf(spelling) === cs.baseDest
-    attachedPaths.push([scanOrigins[i] ?? -1, value, moves ? base : cwd])
+    typedOnto.push({
+      slot,
+      option: typed.endsWith('=') ? typed.slice(0, -1) : typed,
+      value,
+      base: moves ? base : cwd,
+      kind: kind ?? cs.kindOf.get(spelling) ?? null,
+    })
   }
 
   while (i < scanArgv.length) {
@@ -1366,7 +1375,7 @@ export function parseCommand(
     wordKinds,
     wordBases,
     wordRoles,
-    attachedPaths,
+    attached: typedOnto,
     suppliedPathValues,
   })
   if (parses !== undefined) {
@@ -1400,7 +1409,10 @@ export function wordPaths(
       typed.push([slot, word, parsed.wordBases[slot] ?? cwd])
   })
   const paths: (PathSpec | null)[] = new Array<PathSpec | null>(argv.length).fill(null)
-  for (const [slot, value, against] of [...typed, ...parsed.attachedPaths]) {
+  const attached = parsed.attached
+    .filter((a) => a.kind === 'path')
+    .map((a): [number, string, string] => [a.slot, a.value, a.base])
+  for (const [slot, value, against] of [...typed, ...attached]) {
     if (value !== '' && value !== '-') paths[slot] = PathSpec.fromStrPath(value, undefined, against)
   }
   return paths
