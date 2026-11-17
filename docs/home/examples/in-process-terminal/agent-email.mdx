@@ -8,9 +8,8 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "himalaya", name: "Mail", icon: "mail", text: "inbox, drafts" },
-    { cli: "/slack", name: "Slack", logo: "/images/slack-logo.svg", text: "#incidents" },
-    { cli: "himalaya", name: "Mail", icon: "mail", text: "sends on approval" },
+    { cli: "himalaya", name: "Email", icon: "mail" },
+    { cli: "/slack", name: "Slack", logo: "/images/slack-logo.svg" },
   ]}
   steps={[
     { cmd: "himalaya message read 1", cli: "himalaya", out: "which appointments were hit?" },
@@ -40,13 +39,13 @@ server, without a VM or sandbox.
 
 <CardGroup cols={3}>
   <Card title="Mail" icon="envelope">
-    [`himalaya`](/python/cli/himalaya) reads the inbox, saves drafts and sends.
+    [`himalaya`](/python/cli/himalaya), an email CLI, reads the inbox, saves drafts and sends.
   </Card>
   <Card title="Files" icon="folder">
     [Slack](/python/vfs/slack) is mounted read-only at `/slack`, files included.
   </Card>
   <Card title="Policy" icon="shield">
-    `guard.py` checks every reply and holds each send for a person.
+    A policy script, `guard.py`, checks every reply and holds each send for a person.
   </Card>
 </CardGroup>
 
@@ -244,19 +243,21 @@ Export the keys, create the workspace, and open a terminal for the agent:
 
 ```bash
 export SLACK_BOT_TOKEN=xoxb-... MAIL_PASSWORD=any
+mirage daemon restart
 mirage workspace create workspace.yaml --id support
 export MIRAGE_WORKSPACE=support
 mirage workspace session create -s agent
 ```
 
-If the local server was already running, run `mirage daemon restart` so it
-reads the keys.
+The local server reads the keys when it starts, so `mirage daemon restart`
+stops a server that started without them.
 
 ## Example
 
-A customer writes to the support inbox about a calendar sync failure the
-team already dealt with, and asks which of their appointments it hit. An
-engineer posted this in `#incidents`:
+A customer emails the support inbox about a calendar sync failure the team
+already dealt with, and asks which of their appointments it hit. The answer
+is in Slack, where an engineer posted this in the `#incidents` channel with
+a CSV of every customer's affected events:
 
 > **Incident 2026-11-16:** calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.<br />
 > **Cause:** an expired Google token on our side; no data was lost.<br />
@@ -264,7 +265,7 @@ engineer posted this in `#incidents`:
 > Affected events for all three customers attached. Share each customer only their own.<br />
 > 📎 `affected-events.csv`
 
-The export has one row per event, with the customer first:
+The CSV has one row per event, with the customer first:
 
 | customer | clinic | event_id | starts_at |
 | --- | --- | --- | --- |
@@ -272,99 +273,45 @@ The export has one row per event, with the customer first:
 | Northwind Health | Tacoma | evt_4102 | 2026-11-16T08:45:00Z |
 | … | | | |
 
-The agent runs each step in its terminal with `mirage shell -s agent`.
+These are the commands the agent runs, in the `agent` terminal Setup
+created. Your agent sends each one with `mirage shell -s agent`, or through
+[MCP](/home/access/mcp).
 
 <Steps>
   <Step title="Read the email">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -s agent -c 'himalaya envelope list'
-    mirage shell -s agent -c 'himalaya message read 1'
+    The new email is message 1 in the inbox.
+
+    ```bash
+    himalaya message read 1
     ```
-    ```text Output
-    ┌────┬───────┬───────────────────────────────────────┬────────────┬────────────────────────┬───────┐
-    │ ID ┆ FLAGS ┆ SUBJECT                               ┆ FROM       ┆ DATE                   ┆  SIZE │
-    ╞════╪═══════╪═══════════════════════════════════════╪════════════╪════════════════════════╪═══════╡
-    │ 1  ┆ *     ┆ Our calendar sync failed this morning ┆ Priya Shah ┆ 2026-11-16 11:44+00:00 ┆ 525 B │
-    └────┴───────┴───────────────────────────────────────┴────────────┴────────────────────────┴───────┘
-    Date: Mon, 16 Nov 2026 11:44:26 +0000
-    From: Priya Shah <priya@northwind.example>
-    To: support@acme.example
-    Subject: Our calendar sync failed this morning
-
-    [1] text/plain (191 B)
-
-    Hi, appointments were missing from our calendars this morning.
-    What happened, did we lose any data, and which appointments were
-    affected? Our clinics want to check them with patients.
-
-    Priya
-    ```
-    </CodeGroup>
-    Priya asks what happened, whether data was lost, and which appointments were hit.
+    Priya Shah, at Northwind Health, asks which appointments the sync failure hit.
   </Step>
-  <Step title="Find the note and the export in Slack">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -s agent -c 'grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text'
-    mirage shell -s agent -c 'events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*) && echo "$events"'
+  <Step title="Find the note in Slack">
+    A Slack channel is a folder under `/slack`, with the day's messages and the files shared that day.
+
+    ```bash
+    grep "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl
     ```
-    ```text Output
-    Incident 2026-11-16: calendar sync failed 06:10–07:40 UTC for Northwind Health, Harbor Dental and Lakeside Physio.
-    Cause: an expired Google token on our side; no data was lost.
-    Fix: token rotated, sync re-run for the window, every affected event is back.
-    Affected events for all three customers attached. Share each customer only their own.
-    /slack/channels/incidents__C0CJ1LE89NV/2026-11-16/files/affected-events__F0CHXFSUQSZ.csv
-    ```
-    </CodeGroup>
-    The note answers the first two questions. The export holds three customers.
+    The engineer's note. The agent keeps the attached CSV's path as `$events`.
   </Step>
-  <Step title="Build a report of one customer">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -s agent -c '
-    mkdir -p /workspace/outbox
-    report=/workspace/outbox/northwind-health-affected.csv
-    head -1 "$events" > "$report"
+  <Step title="Keep only this customer's rows">
+    The agent copies the CSV's header and Northwind Health's rows into a report, `$report`, in `/workspace/outbox/`.
+
+    ```bash
     grep "^Northwind Health," "$events" >> "$report"
-    tail -n +2 "$report" | wc -l
-    tail -n +2 "$report" | cut -d, -f2 | sort | uniq -c'
     ```
-    ```text Output
-    214
-         77 Bellevue
-         62 Everett
-         75 Tacoma
-    ```
-    </CodeGroup>
+    214 appointments: 77 at Bellevue, 75 at Tacoma and 62 at Everett.
   </Step>
   <Step title="Save the reply as a draft">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -s agent -c 'cat > /workspace/reply.txt' <<'EOF'
-    Hi Priya,
+    The agent writes the reply to `/workspace/reply.txt`, then saves it with the report attached.
 
-    This morning from 06:10 to 07:40 UTC, calendar sync stopped because a
-    Google token on our side had expired. No data was lost: we rotated the
-    token, re-ran the sync for that window, and every event is back.
-
-    214 of your appointments, from today to Friday, did not sync in that
-    window: 77 at Bellevue, 75 at Tacoma and 62 at Everett. The attached CSV
-    lists each one with its clinic, event ID and start time, so your clinics
-    can check them with patients.
-
-    Best,
-    Acme Support
-    EOF
-    mirage shell -s agent -c 'himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --save Drafts'
+    ```bash
+    himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --save Drafts
     ```
-    ```text Output
-    Message successfully saved
-    ```
-    </CodeGroup>
+    The draft waits in `Drafts`. Nothing has been sent.
   </Step>
   <Step title="Mistakes are refused">
-    Each prints `himalaya: Permission denied` and the reason:
+    If the agent copies someone in, attaches the raw CSV, or deletes mail, the command is refused before it runs. Each prints `himalaya: Permission denied` and the reason:
 
     | The agent runs | Reason |
     | --- | --- |
@@ -385,14 +332,56 @@ The agent runs each step in its terminal with `mirage shell -s agent`.
         A->>M: the same command again
         M-->>A: Message successfully saved and sent
     ```
-    The person approves from their own terminal. The approval covers that one command.
+    A person approves from their own terminal, with the ask ID the refusal printed, and the same command then sends:
 
     ```bash
-    mirage workspace list-asks
     mirage workspace allow support 316ec6bc7e20
     ```
   </Step>
 </Steps>
+
+<Accordion title="Full commands">
+  Each line runs in the agent's terminal with `mirage shell -s agent`, which
+  keeps variables such as `$report` from one call to the next.
+
+  ```bash
+  mirage shell -s agent -c 'himalaya envelope list'
+  mirage shell -s agent -c 'himalaya message read 1'
+  mirage shell -s agent -c 'grep -h "calendar sync" /slack/channels/incidents__*/2026-11-16/chat.jsonl | jq -r .text'
+  mirage shell -s agent -c 'events=$(ls -d /slack/channels/incidents__*/2026-11-16/files/affected-events__*) && echo "$events"'
+  mirage shell -s agent -c '
+  mkdir -p /workspace/outbox
+  report=/workspace/outbox/northwind-health-affected.csv
+  head -1 "$events" > "$report"
+  grep "^Northwind Health," "$events" >> "$report"
+  tail -n +2 "$report" | wc -l
+  tail -n +2 "$report" | cut -d, -f2 | sort | uniq -c'
+  mirage shell -s agent -c 'cat > /workspace/reply.txt' <<'EOF'
+  Hi Priya,
+
+  This morning from 06:10 to 07:40 UTC, calendar sync stopped because a
+  Google token on our side had expired. No data was lost: we rotated the
+  token, re-ran the sync for that window, and every event is back.
+
+  214 of your appointments, from today to Friday, did not sync in that
+  window: 77 at Bellevue, 75 at Tacoma and 62 at Everett. The attached CSV
+  lists each one with its clinic, event ID and start time, so your clinics
+  can check them with patients.
+
+  Best,
+  Acme Support
+  EOF
+  mirage shell -s agent -c 'himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --save Drafts'
+  mirage shell -s agent -c 'himalaya message reply 1 --save Drafts --cc ceo@other.example'
+  mirage shell -s agent -c 'himalaya message reply 1 --save Drafts --attach "$events"'
+  mirage shell -s agent -c 'cat "$events" > /workspace/outbox/all.csv && himalaya message reply 1 --save Drafts --attach /workspace/outbox/all.csv'
+  mirage shell -s agent -c 'himalaya message delete 1'
+  mirage shell -s agent -c 'himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --send'
+  mirage workspace list-asks
+  mirage workspace allow support ASK_ID
+  mirage shell -s agent -c 'himalaya message reply 1 --body-file /workspace/reply.txt --attach "$report" --send'
+  ```
+</Accordion>
 
 For the commands and flags `himalaya` supports, see
 [himalaya](/python/cli/himalaya). For more on asks, see

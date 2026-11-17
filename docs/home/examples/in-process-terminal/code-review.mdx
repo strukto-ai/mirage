@@ -8,9 +8,9 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "gh", name: "GitHub", logo: "/images/github-logo.svg", invert: true, text: "reads, then comments" },
-    { cli: "/repo", name: "Repository", icon: "folder", text: "read-only clone" },
-    { cli: "grep", name: "Unix tools", icon: "terminal", text: "grep, sed, awk, jq" },
+    { cli: "gh", name: "GitHub", logo: "/images/github-logo.svg", invert: true },
+    { cli: "/repo", name: "Repository", icon: "folder" },
+    { cli: "grep", name: "Unix tools", icon: "terminal" },
   ]}
   steps={[
     { cmd: "gh pr view 880 --json title,state …", cli: "gh", out: "MERGED, fixes #879" },
@@ -40,32 +40,36 @@ server, without a VM or sandbox.
 
 ## Setup
 
-- **Files:** `/repo`, a clone of the repository in [memory](/home/setup/ram),
-  cloned once and shared by every review, and
-  `/workspace`, in memory, for the review the agent writes.
-- **CLIs:** [`gh`](/python/cli/gh) calls GitHub's API with a token the server
-  holds, and [`git`](/python/cli/git) clones the repository with no `git`
-  program on the host.
-- **Policy:** a [session profile](/home/configuration/session) in
-  `workspace.yaml` makes `/repo` read-only for the agent and lets it run only
-  the commands a review needs. It can comment on a pull request, never merge
-  or change one.
+<CardGroup cols={3}>
+  <Card title="Files" icon="folder">
+    `/repo`, a clone of the repository in memory, read-only. `/workspace` for the review the agent writes.
+  </Card>
+  <Card title="CLIs" icon="terminal">
+    [`gh`](/python/cli/gh) calls GitHub with a token the Mirage server holds. [`git`](/python/cli/git) clones the repository.
+  </Card>
+  <Card title="Policy" icon="shield">
+    A [session profile](/home/configuration/session) and `guard.py` let the agent run only review commands. It can comment, never merge.
+  </Card>
+</CardGroup>
 
-You need the `mirage` CLI and a GitHub token that can read public
-repositories, `GITHUB_TOKEN`. [GitHub](/home/setup/github) says how to create
-one.
+You need the `mirage` CLI and a GitHub token, `GITHUB_TOKEN`, that can read
+the repository and comment on its pull requests.
+[GitHub](/home/setup/github) says how to create one.
 
 <AccordionGroup>
   <Accordion title="Installation">
+    The policy runs on [Monty](/home/policy/scripts#runtimes), a small sandboxed
+    Python interpreter:
+
     <Tabs>
       <Tab title="pip" icon="/images/python-logo.svg">
         ```bash
-        pip install mirage-ai
+        pip install 'mirage-ai[monty]'
         ```
       </Tab>
       <Tab title="npm" icon="/images/typescript-logo.svg">
         ```bash
-        npm install -g @struktoai/mirage-cli
+        npm install -g @struktoai/mirage-cli @pydantic/monty
         ```
       </Tab>
     </Tabs>
@@ -102,6 +106,9 @@ one.
             mode: read
         commands:
           allow: [cd, pwd, echo, ls, cat, head, tail, grep, sed, awk, wc, sort, uniq, find, jq, git, gh pr view, gh pr diff, gh pr checks, gh issue view, gh pr comment]
+        policy:
+          pre_command:
+            - {script: ./guard.py}
     ```
 
     - `mounts` in the profile makes `/repo` read-only for the agent. The clone
@@ -111,6 +118,22 @@ one.
       pull request, its issue and CI, and `gh pr comment` to post the review.
       `gh pr merge`, `gh pr edit` and `gh api` are refused.
   </Accordion>
+  <Accordion title="guard.py">
+    An allow rule matches the start of a command, so `gh pr comment` alone
+    would also let the agent pick another repository with `-R` or delete a
+    comment with `--delete-last`. `guard.py` sees the command after the shell
+    has expanded it, and accepts a comment only in one form:
+
+    ```python guard.py
+    def pre_command(ctx):
+        words = [w["text"] for w in ctx["words"]]
+        if words[:3] != ["gh", "pr", "comment"]:
+            return None
+        if len(words) == 6 and words[3].isdigit() and words[4:] == ["--body-file", "/workspace/review.md"]:
+            return None
+        return {"kind": "deny", "reason": "comment only as gh pr comment N --body-file /workspace/review.md"}
+    ```
+  </Accordion>
 </AccordionGroup>
 
 Create the workspace, clone ky into `/repo` at the commit pull request 880
@@ -118,14 +141,15 @@ merged as, and open a terminal for the agent under the `reviewer` profile:
 
 ```bash
 export GITHUB_TOKEN=<your token>
+mirage daemon restart
 mirage workspace create workspace.yaml --id review
 export MIRAGE_WORKSPACE=review
 mirage shell -c 'git clone -q https://github.com/sindresorhus/ky.git /repo && git -C /repo checkout -q --detach 0bda554d448c1b57c17a5c18114432c02465d467'
 mirage workspace session create -s agent -p reviewer
 ```
 
-The local server reads `GITHUB_TOKEN` when it starts. If it was already
-running, run `mirage daemon restart` after the export. To review your own
+The local server reads `GITHUB_TOKEN` when it starts, so `mirage daemon
+restart` stops a server that started without it. To review your own
 repository, change the clone's URL and commit, and the `repo` of `gh` in
 `workspace.yaml`.
 
@@ -133,107 +157,93 @@ repository, change the clone's URL and commit, and the `repo` of `gh` in
 
 The agent reviews
 [pull request 880](https://github.com/sindresorhus/ky/pull/880) of
-[ky](https://github.com/sindresorhus/ky), which fixes how `ky.extend()`
-replaces an `AbortSignal`. Each command runs in its terminal, the `agent`
-session, which starts in `/repo`.
+[ky](https://github.com/sindresorhus/ky), a small HTTP client on GitHub. The
+pull request fixes how `ky.extend()` replaces an `AbortSignal`.
 
-### 1. Read the pull request with `gh`
+These are the commands the agent runs, in the `agent` terminal Setup
+created, which starts in `/repo`. Your agent sends each one with
+`mirage shell -s agent`, or through [MCP](/home/access/mcp).
 
-`gh` reads the pull request, the issue it fixes and CI, with the token the
-server holds:
+<Steps>
+  <Step title="Read the pull request and its issue">
+    `gh` reads GitHub with the token the Mirage server holds.
 
-```bash
-mirage shell -s agent -c 'gh pr view 880 --json title,state,closingIssuesReferences --jq ".title, .state, .closingIssuesReferences[0].number"'
-mirage shell -s agent -c 'gh issue view 879 --json body --jq .body | grep null'
-mirage shell -s agent -c 'gh pr checks 880 --json bucket --jq ".[].bucket" | sort | uniq -c'
-```
+    ```bash
+    gh pr view 880 --json title,state,closingIssuesReferences …
+    gh issue view 879 --json body --jq .body | grep null
+    ```
+    The pull request is merged and fixes issue #879, which says `undefined` and `null` should both reset the signal.
+  </Step>
+  <Step title="Read the code around the change">
+    The repository is a read-only clone at `/repo`, so `sed` reads it like any file.
 
-```text
-Fix `signal` replacement when extending instances
-MERGED
-879
-Similarly, passing `{signal: undefined}` or `{signal: null}` in `.extend()` does not remove parent signals from being combined via `AbortSignal.any()`.
-Unwrap `replaceState` before the `key === 'signal'` branch and handle `isReplace` / `undefined` / `null` to reset the accumulated `signals` array.
-      6 pass
-```
+    ```bash
+    sed -n 312,317p source/utils/merge.ts
+    ```
+    The fix handles `undefined`, but a `null` still keeps the parent's signal.
+  </Step>
+  <Step title="Check the tests and CI">
+    ```bash
+    gh pr diff 880 | grep "^+test("
+    gh pr checks 880 … | sort | uniq -c
+    ```
+    Three new tests, none for `null`. All 6 checks pass.
+  </Step>
+  <Step title="Write and post the review">
+    The agent writes a score, a diagram of the change and a note on `merge.ts:228` to `/workspace/review.md`, then posts it.
 
-### 2. Read the code with Unix tools
+    ```bash
+    gh pr comment 880 --body-file /workspace/review.md
+    ```
+    The review is a comment on the pull request, the one write the profile allows.
+  </Step>
+  <Step title="Everything else is refused">
+    The profile and `guard.py` are checked before each command, and `/repo` is read-only. Each prints `Permission denied` or the file system's error, and the reason:
 
-`sed` and `grep` read the clone in `/repo` and the diff, like files on disk:
+    | The agent runs | Reason |
+    | --- | --- |
+    | `rm -rf /repo/source` | rm is not allowed |
+    | `echo hi >> /repo/readme.md` | Read-only file system |
+    | `gh pr merge 880` | gh pr merge is not allowed |
+    | `gh pr comment 880 -R other/repo --body-file /workspace/review.md` | comment only as gh pr comment N --body-file /workspace/review.md |
+    | `curl https://example.com` | curl is not allowed |
+  </Step>
+</Steps>
 
-```bash
-mirage shell -s agent -c 'sed -n 312,317p source/utils/merge.ts'
-mirage shell -s agent -c 'gh pr diff 880 | grep "^+test("'
-```
+<Accordion title="Full commands">
+  Each line runs in the agent's terminal with `mirage shell -s agent`.
 
-```text
-	if (signals.length > 0) {
-		if (signals.length === 1) {
-			returnValue.signal = signals[0];
-		} else if (supportsAbortSignal) {
-			returnValue.signal = AbortSignal.any(signals);
-		} else {
-+test('ky.extend() with replaceOption replaces signal instead of merging', async t => {
-+test('ky.extend() with signal set to undefined removes parent signal', async t => {
-+test('signal option handling does not affect nested JSON properties', async t => {
-```
+  ````bash
+  mirage shell -s agent -c 'gh pr view 880 --json title,state,closingIssuesReferences --jq ".title, .state, .closingIssuesReferences[0].number"'
+  mirage shell -s agent -c 'gh issue view 879 --json body --jq .body | grep null'
+  mirage shell -s agent -c 'sed -n 312,317p source/utils/merge.ts'
+  mirage shell -s agent -c 'gh pr diff 880 | grep "^+test("'
+  mirage shell -s agent -c 'gh pr checks 880 --json bucket --jq ".[].bucket" | sort | uniq -c'
+  mirage shell -s agent -c 'cat > /workspace/review.md' <<'MD'
+  ## Confidence score: 4/5
 
-The fix resets the signals on a `replaceOption` or `undefined`. The issue
-names `null` too, but a `null` still keeps the parent's signal, and no test
-covers it.
+  Safe to merge. `replaceOption(signal)` and `signal: undefined` now drop the
+  signals an instance inherits. One gap: `signal: null`, which #879 also
+  names, still keeps them.
 
-### 3. Write and post the review
+  ```mermaid
+  flowchart TD
+      A["extend({signal: value})"] --> B{"replaceOption(...) or undefined?"}
+      B -- yes --> C["drop inherited signals"]
+      B -- no --> D{"an AbortSignal?"}
+      C --> D
+      D -- yes --> E["add it to the signals"]
+      D -- no --> F["merge as a plain option"]
+      E --> G["AbortSignal.any(signals)"]
+      F --> G
+  ```
 
-The agent writes the review to `/workspace` and posts it with
-`gh pr comment`, the one write its profile allows:
-
-````bash
-mirage shell -s agent -c 'cat > /workspace/review.md' <<'MD'
-## Confidence score: 4/5
-
-Safe to merge. `replaceOption(signal)` and `signal: undefined` now drop the
-signals an instance inherits. One gap: `signal: null`, which #879 also
-names, still keeps them.
-
-```mermaid
-flowchart TD
-    A["extend({signal: value})"] --> B{"replaceOption(...) or undefined?"}
-    B -- yes --> C["drop inherited signals"]
-    B -- no --> D{"an AbortSignal?"}
-    C --> D
-    D -- yes --> E["add it to the signals"]
-    D -- no --> F["merge as a plain option"]
-    E --> G["AbortSignal.any(signals)"]
-    F --> G
-```
-
-**P2, `source/utils/merge.ts:228`:** clear the signals on `null` too, and
-add a test.
-MD
-mirage shell -s agent -c 'gh pr comment 880 --body-file /workspace/review.md'
-````
-
-### 4. What the profile refuses
-
-The profile is checked before each command, and the mount mode on every
-write:
-
-```bash
-mirage shell -s agent -c 'rm -rf /repo/source'
-mirage shell -s agent -c 'echo hi >> /repo/readme.md'
-mirage shell -s agent -c 'gh pr merge 880'
-mirage shell -s agent -c 'curl https://example.com'
-```
-
-```text
-rm: Permission denied
-policy denied: rm is not allowed
-bash: line 1: /repo/readme.md: Read-only file system
-gh: Permission denied
-policy denied: gh pr merge is not allowed
-curl: Permission denied
-policy denied: curl is not allowed
-```
+  **P2, `source/utils/merge.ts:228`:** clear the signals on `null` too, and
+  add a test.
+  MD
+  mirage shell -s agent -c 'gh pr comment 880 --body-file /workspace/review.md'
+  ````
+</Accordion>
 
 See [Session Profiles](/home/configuration/session) for the rules a profile
 takes, and [Policy](/home/policy/overview) for checks a list cannot express.

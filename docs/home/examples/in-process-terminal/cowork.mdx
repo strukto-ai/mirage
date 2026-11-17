@@ -8,11 +8,10 @@ import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "/slack", name: "Slack", logo: "/images/slack-logo.svg", text: "#deals-won" },
-    { cli: "/gdrive", name: "Drive", logo: "/images/gdrive-logo.svg", text: "tracker, template" },
-    { cli: "gws", name: "Docs, Sheets", logo: "/images/gdocs-logo.svg", text: "plan, tracker row" },
-    { cli: "ntn", name: "Notion", logo: "/images/notion-logo.svg", text: "project page" },
-    { cli: "slack", name: "Slack", logo: "/images/slack-logo.svg", text: "thread reply" },
+    { cli: ["/slack", "slack"], name: "Slack", logo: "/images/slack-logo.svg" },
+    { cli: "/gdrive", name: "Google Drive", logo: "/images/gdrive-logo.svg" },
+    { cli: "gws", name: "Docs and Sheets", logo: "/images/gdocs-logo.svg" },
+    { cli: "ntn", name: "Notion", logo: "/images/notion-logo.svg" },
   ]}
   steps={[
     { cmd: "grep -h \"Deal won\" /slack/channels/deals-won__*/…", cli: "/slack", out: "Northwind Health, 120 seats" },
@@ -43,13 +42,13 @@ server, without a VM or sandbox.
 
 <CardGroup cols={3}>
   <Card title="Files" icon="folder">
-    [Slack](/python/vfs/slack) and [Google Drive](/python/vfs/gdrive) are mounted read-only, Sheets and Docs as JSON files.
+    [Slack](/python/vfs/slack) at `/slack` and [Google Drive](/python/vfs/gdrive) at `/gdrive`, read-only. A Sheet or Doc is a JSON file.
   </Card>
   <Card title="CLIs" icon="terminal">
-    [`gws`](/python/cli/gws), [`ntn`](/python/cli/ntn) and [`slack`](/python/cli/slack) make every change.
+    [`gws`](/python/cli/gws) writes Docs and Sheets, [`ntn`](/python/cli/ntn) Notion and [`slack`](/python/cli/slack) Slack.
   </Card>
   <Card title="Credentials" icon="key">
-    Five keys the server holds. The agent never sees them.
+    Five keys the Mirage server holds. The agent never sees them.
   </Card>
 </CardGroup>
 
@@ -158,151 +157,132 @@ Export the keys and create the workspace:
 ```bash
 export SLACK_BOT_TOKEN=xoxb-... NOTION_API_KEY=ntn_...
 export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
+mirage daemon restart
 mirage workspace create workspace.yaml --id onboarding
 export MIRAGE_WORKSPACE=onboarding
 ```
 
-If the local server was already running, run `mirage daemon restart` so it
-reads the keys.
+The local server reads the keys when it starts, so `mirage daemon restart`
+stops a server that started without them.
 
 ## Example
 
-In this example, a deal closes and the CRM posts it to `#deals-won`. The
-agent starts the onboarding. It picks an account manager, fills in a plan,
-adds a row to the tracker, opens a project in Notion and tells the team. The
-CRM posted this:
+In this example, a deal closes and the CRM posts it to the `#deals-won`
+channel in Slack. The agent starts the onboarding. It picks an account
+manager from a tracker in Google Sheets, fills in a plan in Google Docs,
+adds the customer to the tracker, opens a project in Notion and replies to
+the team in Slack. The CRM posted this in Slack:
 
 > **Deal won:** Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
 
-The agent runs each step in its terminal with `mirage shell`, which keeps
-variables such as `$plan` from one call to the next.
+These are the commands the agent runs, in the terminal Setup created. Your
+agent sends each one with `mirage shell`, or through
+[MCP](/home/access/mcp).
 
 <Steps>
   <Step title="Read the deal from Slack">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c 'ls /slack/channels | grep ^deals-won__'
-    mirage shell -c 'grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r .ts,.text'
+    A Slack channel is a folder under `/slack`, with a folder for each day.
+
+    ```bash
+    grep "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl
     ```
-    ```text Output
-    deals-won__C0CJ1LE89NV
-    1794815580.678919
-    Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
-    ```
-    </CodeGroup>
+    It finds Northwind Health, 120 seats, starting 2026-12-01.
   </Step>
-  <Step title="Pick the account manager from the tracker">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c 'jq -r "[.sheets[0].data[0].rowData[1:][].values | {m: .[3].formattedValue, s: (.[1].formattedValue | tonumber)}]
-      | group_by(.m)[] | [(map(.s) | add), .[0].m] | @tsv" "/gdrive/Onboarding/Onboarding tracker.gsheet.json" | sort -n'
+  <Step title="Pick the account manager">
+    The tracker Sheet is a JSON file under `/gdrive`, so `jq` adds up the seats each manager has.
+
+    ```bash
+    jq … "/gdrive/Onboarding/Onboarding tracker.gsheet.json" | sort -n
     ```
-    ```text Output
-    60	Mei Chen
-    65	Dana Lee
-    85	Omar Haddad
-    ```
-    </CodeGroup>
     Mei Chen has the fewest seats, so the deal goes to her.
   </Step>
-  <Step title="Copy the plan template and fill it in">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c '
-    template=$(jq -r .documentId "/gdrive/Onboarding/Onboarding plan template.gdoc.json")
-    plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
-      --json "{\"name\": \"Onboarding plan: Northwind Health\"}" | jq -r .id)
-    echo "$plan"'
-    mirage shell -c 'cat > /workspace/fill.json' <<'JSON'
-    {"requests": [
-      {"replaceAllText": {"containsText": {"text": "{{customer}}", "matchCase": true}, "replaceText": "Northwind Health"}},
-      {"replaceAllText": {"containsText": {"text": "{{seats}}", "matchCase": true}, "replaceText": "120"}},
-      {"replaceAllText": {"containsText": {"text": "{{start}}", "matchCase": true}, "replaceText": "2026-12-01"}},
-      {"replaceAllText": {"containsText": {"text": "{{manager}}", "matchCase": true}, "replaceText": "Mei Chen"}},
-      {"replaceAllText": {"containsText": {"text": "{{champion}}", "matchCase": true}, "replaceText": "Priya Shah"}},
-      {"replaceAllText": {"containsText": {"text": "{{goal}}", "matchCase": true}, "replaceText": "Move clinic scheduling off spreadsheets"}},
-      {"replaceAllText": {"containsText": {"text": "{{kickoff}}", "matchCase": true}, "replaceText": "2026-12-08"}}
-    ]}
-    JSON
-    mirage shell -c 'gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" | jq -c "[.replies[].replaceAllText.occurrencesChanged]"'
-    mirage shell -c 'jq -j ".tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content // empty" "/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json"'
+  <Step title="Write the plan">
+    `gws` copies the plan template Doc and fills in its placeholders.
+
+    ```bash
+    gws drive files copy …
+    gws docs documents batchUpdate …
     ```
-    ```text Output
-    14LWyxpM1xtNXYYUHdCxDgJFgmb5AfWyvMKPNrHp76_Y
-    [1,1,1,1,2,1,1]
-    Onboarding plan: Northwind Health
-
-    Seats: 120
-    Start date: 2026-12-01
-    Account manager: Mei Chen
-
-    Goal
-    Move clinic scheduling off spreadsheets
-
-    Stakeholders
-    Priya Shah, champion
-
-    Milestones
-    Kickoff call by 2026-12-08
-    Week 1: admin accounts and SSO
-    Week 2: import data and train the first team
-    Week 4: adoption review with Priya Shah
-    ```
-    </CodeGroup>
-    The copy lands in the template's folder, and the agent reads it back through `/gdrive`.
+    The new plan sits next to the template in Drive.
   </Step>
-  <Step title="Add a row to the tracker">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c '
-    tracker=$(jq -r .spreadsheetId "/gdrive/Onboarding/Onboarding tracker.gsheet.json")
-    gws sheets append --spreadsheet "$tracker" \
-      --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
-      jq -r .updates.updatedRange'
+  <Step title="Add the customer to the tracker">
+    ```bash
+    gws sheets append …
     ```
-    ```text Output
-    Sheet1!A6:E6
-    ```
-    </CodeGroup>
+    A new row with the customer, seats, start date, manager and plan link.
   </Step>
   <Step title="Open a project in Notion">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c 'cat > /workspace/page.json' <<'JSON'
-    {
-      "parent": {"workspace": true},
-      "properties": {"title": {"title": [{"type": "text", "text": {"content": "Onboarding: Northwind Health"}}]}},
-      "children": [
-        {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "120 seats, start 2026-12-01. Account manager: Mei Chen. Champion: Priya Shah."}}]}},
-        {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "Onboarding plan", "link": {"url": "https://docs.google.com/document/d/14LWyxpM1xtNXYYUHdCxDgJFgmb5AfWyvMKPNrHp76_Y"}}}]}},
-        {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "Kickoff checklist"}}]}},
-        {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Kickoff call with Priya Shah by 2026-12-08"}}], "checked": false}},
-        {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Admin accounts and SSO"}}], "checked": false}},
-        {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Import data and train the first team"}}], "checked": false}},
-        {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Adoption review in week 4"}}], "checked": false}}
-      ]
-    }
-    JSON
-    mirage shell -c 'project=$(ntn api v1/pages -d "$(cat /workspace/page.json)" | jq -r .url) && echo "$project"'
+    The agent writes the page to a file, puts in the plan's link, and `ntn` creates it.
+
+    ```bash
+    ntn api v1/pages -d "$(sed "s|PLAN_URL|…$plan|" /workspace/page.json)"
     ```
-    ```text Output
-    https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8984c1
-    ```
-    </CodeGroup>
+    A project page with a link to the plan and a kickoff checklist.
   </Step>
-  <Step title="Tell the team in the deal's thread">
-    <CodeGroup>
-    ```bash Command
-    mirage shell -c 'slack send-message --channel C0CJ1LE89NV --thread-ts 1794815580.678919 \
-      --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
-      jq -c "{ok, thread_ts: .message.thread_ts}"'
+  <Step title="Tell the team">
+    `slack` replies in the thread of the CRM's message.
+
+    ```bash
+    slack send-message --thread-ts … --text "Onboarding started …"
     ```
-    ```text Output
-    {"ok":true,"thread_ts":"1794815580.678919"}
-    ```
-    </CodeGroup>
+    The team has the owner, the plan and the project in one reply.
   </Step>
 </Steps>
+
+<Accordion title="Full commands">
+  Each line runs in the agent's terminal with `mirage shell`, which keeps
+  variables such as `$plan` from one call to the next.
+
+  ```bash
+  mirage shell -c 'channel=$(ls /slack/channels | grep ^deals-won__ | sed "s/.*__//") && echo "$channel"'
+  mirage shell -c 'deal=$(grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r .ts) && echo "$deal"'
+  mirage shell -c 'grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r .text'
+  mirage shell -c 'jq -r "[.sheets[0].data[0].rowData[1:][].values | {m: .[3].formattedValue, s: (.[1].formattedValue | tonumber)}]
+    | group_by(.m)[] | [(map(.s) | add), .[0].m] | @tsv" "/gdrive/Onboarding/Onboarding tracker.gsheet.json" | sort -n'
+  mirage shell -c '
+  template=$(jq -r .documentId "/gdrive/Onboarding/Onboarding plan template.gdoc.json")
+  plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
+    --json "{\"name\": \"Onboarding plan: Northwind Health\"}" | jq -r .id)
+  echo "$plan"'
+  mirage shell -c 'cat > /workspace/fill.json' <<'JSON'
+  {"requests": [
+    {"replaceAllText": {"containsText": {"text": "{{customer}}", "matchCase": true}, "replaceText": "Northwind Health"}},
+    {"replaceAllText": {"containsText": {"text": "{{seats}}", "matchCase": true}, "replaceText": "120"}},
+    {"replaceAllText": {"containsText": {"text": "{{start}}", "matchCase": true}, "replaceText": "2026-12-01"}},
+    {"replaceAllText": {"containsText": {"text": "{{manager}}", "matchCase": true}, "replaceText": "Mei Chen"}},
+    {"replaceAllText": {"containsText": {"text": "{{champion}}", "matchCase": true}, "replaceText": "Priya Shah"}},
+    {"replaceAllText": {"containsText": {"text": "{{goal}}", "matchCase": true}, "replaceText": "Move clinic scheduling off spreadsheets"}},
+    {"replaceAllText": {"containsText": {"text": "{{kickoff}}", "matchCase": true}, "replaceText": "2026-12-08"}}
+  ]}
+  JSON
+  mirage shell -c 'gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" | jq -c "[.replies[].replaceAllText.occurrencesChanged]"'
+  mirage shell -c 'jq -j ".tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content // empty" "/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json"'
+  mirage shell -c '
+  tracker=$(jq -r .spreadsheetId "/gdrive/Onboarding/Onboarding tracker.gsheet.json")
+  gws sheets append --spreadsheet "$tracker" \
+    --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
+    jq -r .updates.updatedRange'
+  mirage shell -c 'cat > /workspace/page.json' <<'JSON'
+  {
+    "parent": {"workspace": true},
+    "properties": {"title": {"title": [{"type": "text", "text": {"content": "Onboarding: Northwind Health"}}]}},
+    "children": [
+      {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "120 seats, start 2026-12-01. Account manager: Mei Chen. Champion: Priya Shah."}}]}},
+      {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "Onboarding plan", "link": {"url": "PLAN_URL"}}}]}},
+      {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "Kickoff checklist"}}]}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Kickoff call with Priya Shah by 2026-12-08"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Admin accounts and SSO"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Import data and train the first team"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Adoption review in week 4"}}], "checked": false}}
+    ]
+  }
+  JSON
+  mirage shell -c 'project=$(ntn api v1/pages -d "$(sed "s|PLAN_URL|https://docs.google.com/document/d/$plan|" /workspace/page.json)" | jq -r .url) && echo "$project"'
+  mirage shell -c 'slack send-message --channel "$channel" --thread-ts "$deal" \
+    --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
+    jq -c "{ok, thread_ts: .message.thread_ts}"'
+  ```
+</Accordion>
 
 The deal now has an owner, a plan, a row in the tracker and a project. The
 agent read every input as a file and made each change through the CLI for

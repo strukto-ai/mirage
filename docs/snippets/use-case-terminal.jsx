@@ -38,7 +38,8 @@ export const UseCaseTerminal = ({ services, steps }) => {
   }, [])
 
   const active = pos.step < steps.length ? steps[pos.step].cli : null
-  const state = (service) => (!active ? "" : active === service.cli ? " uct-on" : " uct-off")
+  const lit = (service) => active !== null && [].concat(service.cli).includes(active)
+  const state = (service) => (!active ? "" : lit(service) ? " uct-on" : " uct-off")
   const tokens = (text) => {
     const out = []
     let command = true
@@ -147,14 +148,11 @@ export const UseCaseTerminal = ({ services, steps }) => {
                 {icons[service.icon]}
               </svg>
             )}
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{service.name}</div>
-              {service.text && <div className="uct-muted text-xs">{service.text}</div>}
-            </div>
+            <div className="min-w-0 text-sm font-medium">{service.name}</div>
           </div>,
           <div
             key={index + "-wire"}
-            className={"uct-wire" + (active === service.cli ? " uct-on" : "")}
+            className={"uct-wire" + (lit(service) ? " uct-on" : "")}
             style={{ "--uct-row": index + 2 }}
             aria-hidden="true"
           >
