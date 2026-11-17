@@ -18,7 +18,7 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { keepPolicyNames } from './policy.ts'
-import { header, resolveWorkspace, useWorkspace } from './settings.ts'
+import { header, resolveWorkspace } from './settings.ts'
 import { emit, fail, formatAge, formatTable, handleList, handleResponse } from './output.ts'
 import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
 
@@ -430,18 +430,6 @@ export function registerWorkspaceCommands(program: Command): Command {
         (await handleResponse(await c.request('GET', path))) as WorkspaceDetail,
         formatWorkspaceDetail,
       )
-    })
-
-  ws.command('use')
-    .description("Make a workspace the current context's, for the commands that take -w.")
-    .argument('<id>', 'Workspace id')
-    .action(async (id: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      await handleResponse(await c.request('GET', `/v1/workspaces/${encodeURIComponent(id)}`))
-      useWorkspace(c.settings.context, id)
-      header(`using ${id}`, c.settings.context)
-      emit({ workspace: id }, () => `Using workspace ${id}.`)
     })
 
   ws.command('delete')

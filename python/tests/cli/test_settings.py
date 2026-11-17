@@ -420,11 +420,7 @@ def test_a_remote_context_gets_its_login_never_config_tokens(home):
     assert settings.login.access_token == "from-login"
 
 
-def test_the_workspace_is_the_flag_then_env_then_the_context(
-    home, monkeypatch
-):
-    write_context("local", Context(workspace="kept"))
-    assert resolve_workspace(None) == "kept"
+def test_the_workspace_is_the_flag_then_env(home, monkeypatch):
     monkeypatch.setenv("MIRAGE_WORKSPACE", "env")
     assert resolve_workspace(None) == "env"
     assert resolve_workspace("flag") == "flag"
@@ -433,7 +429,7 @@ def test_the_workspace_is_the_flag_then_env_then_the_context(
 def test_no_workspace_selected_gives_a_hint(home):
     done = CliRunner().invoke(app, ["shell", "-c", "true"])
     assert done.exit_code == 2
-    assert "run `mirage workspace use <id>` or pass -w" in done.output
+    assert "pass -w or set MIRAGE_WORKSPACE" in done.output
 
 
 def test_a_context_gone_mid_command_is_refused_not_sent_local(

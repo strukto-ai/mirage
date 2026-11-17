@@ -1,4 +1,4 @@
-export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The agent reads and writes", terminal = "Runs in one terminal", server = "its own server, or a library in your app" }) => {
+export const UseCaseTerminal = ({ services, steps }) => {
   const [pos, setPos] = useState({ step: steps.length, chars: 0, output: true })
 
   useEffect(() => {
@@ -15,14 +15,14 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
           step = 0
           chars = 0
           tick()
-        }, 3500)
+        }, 2000)
         return
       }
       const cmd = steps[step].cmd
       if (chars < cmd.length) {
         chars += 1
         setPos({ step, chars, output: false })
-        timer = setTimeout(tick, 26)
+        timer = setTimeout(tick, 12)
         return
       }
       setPos({ step, chars, output: true })
@@ -30,19 +30,16 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
         step += 1
         chars = 0
         tick()
-      }, 1500)
+      }, 1000)
     }
     setPos({ step: 0, chars: 0, output: false })
-    timer = setTimeout(tick, 700)
+    timer = setTimeout(tick, 300)
     return () => clearTimeout(timer)
   }, [])
 
-  const running = pos.step < steps.length && pos.output ? steps[pos.step].cli : null
-  const typing = pos.step < steps.length ? steps[pos.step].cli : null
-  const flow = (service) => {
-    const step = pos.step < steps.length ? steps[pos.step] : null
-    return (step && step.cli === service.cli && step.dir) || service.dir || "in"
-  }
+  const active = pos.step < steps.length ? steps[pos.step].cli : null
+  const lit = (service) => active !== null && [].concat(service.cli).includes(active)
+  const state = (service) => (!active ? "" : lit(service) ? " uct-on" : " uct-off")
   const tokens = (text) => {
     const out = []
     let command = true
@@ -70,6 +67,12 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
       </span>
     ))
 
+  const icons = {
+    folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+    terminal: <path d="M4 17l6-5-6-5M12 19h8" />,
+    mail: <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm-2 2 9 6 9-6" />,
+  }
+
   return (
     <div className="use-case-terminal not-prose my-6 rounded-2xl">
       <style>{`
@@ -86,19 +89,14 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
         .use-case-terminal .uct-box { background: var(--uct-surface); border: 1px solid var(--uct-edge); }
         .use-case-terminal .uct-muted { color: var(--uct-muted); }
         .use-case-terminal .uct-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+        .use-case-terminal .uct-brand { order: -2; margin-bottom: 2px; }
         .use-case-terminal .uct-server { order: -1; }
         .use-case-terminal .uct-wire { display: none; }
-        .use-case-terminal .uct-card { transition: border-color .25s; }
+        .use-case-terminal .uct-card { transition: opacity .3s, border-color .3s; }
         .use-case-terminal .uct-card.uct-on { border-color: var(--uct-on); }
-        .use-case-terminal .uct-chip { border: 1px solid var(--uct-edge); color: var(--uct-muted); transition: color .25s, border-color .25s; }
-        .use-case-terminal .uct-chip.uct-on { border-color: var(--uct-on); color: var(--uct-on); }
-        .use-case-terminal .uct-wire-line { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--uct-edge); transition: border-color .25s; }
+        .use-case-terminal .uct-card.uct-off { opacity: .55; }
+        .use-case-terminal .uct-wire-line { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--uct-edge); transition: border-color .3s; }
         .use-case-terminal .uct-wire.uct-on .uct-wire-line { border-color: var(--uct-on); }
-        .use-case-terminal .uct-dot { position: absolute; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 9999px; background: var(--uct-on); opacity: 0; }
-        .use-case-terminal .uct-wire.uct-on.uct-in .uct-dot { animation: uct-in .7s linear infinite; }
-        .use-case-terminal .uct-wire.uct-on.uct-out .uct-dot { animation: uct-out .7s linear infinite; }
-        @keyframes uct-in { 0% { left: 0; opacity: 1; } 100% { left: calc(100% - 6px); opacity: 1; } }
-        @keyframes uct-out { 0% { left: calc(100% - 6px); opacity: 1; } 100% { left: 0; opacity: 1; } }
         .use-case-terminal .uct-bar { border-bottom: 1px solid var(--uct-edge); }
         .use-case-terminal .uct-light { width: 8px; height: 8px; border-radius: 9999px; border: 1px solid var(--uct-edge); }
         .use-case-terminal .uct-prompt { color: var(--uct-accent); }
@@ -118,62 +116,58 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
         .use-case-terminal .uct-dark-only { display: none; }
         html.dark .use-case-terminal .uct-dark-only { display: block; }
         html.dark .use-case-terminal .uct-light-only { display: none; }
-        .use-case-terminal .uct-none { display: flex; flex-direction: column; gap: 2px; border: 1px dashed var(--uct-edge); }
-        .use-case-terminal .uct-none-name { white-space: nowrap; text-decoration: line-through; }
+        html.dark .use-case-terminal .uct-invert { filter: invert(1); }
+        .use-case-terminal .uct-logo { width: 18px; height: 18px; flex: none; color: var(--uct-muted); }
         @media (min-width: 640px) {
           .use-case-terminal { padding: 36px 28px; }
           .use-case-terminal .uct-grid {
-            grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.75fr);
+            grid-template-columns: minmax(0, 1fr) 48px minmax(0, 2fr);
             grid-auto-rows: auto;
             align-items: center;
             column-gap: 0;
           }
-          .use-case-terminal .uct-head { grid-column: 1; grid-row: 1; }
-          .use-case-terminal .uct-server { order: 0; grid-column: 3; grid-row: 1 / span var(--uct-span); align-self: stretch; }
+          .use-case-terminal .uct-server { order: 0; grid-column: 3; grid-row: 2 / span var(--uct-span); align-self: stretch; display: flex; flex-direction: column; }
+          .use-case-terminal .uct-term { flex: 1; }
+          .use-case-terminal .uct-brand { order: 0; grid-column: 3; grid-row: 1; margin-bottom: 10px; }
           .use-case-terminal .uct-wire { display: block; position: relative; height: 12px; grid-column: 2; grid-row: var(--uct-row); }
           .use-case-terminal .uct-card { grid-column: 1; grid-row: var(--uct-row); }
-          .use-case-terminal .uct-none { flex-direction: row; align-items: center; gap: 12px; }
         }
       `}</style>
 
       <div className="uct-grid">
-        <div className="uct-head uct-muted mb-1 text-xs font-medium">{reads}</div>
         {services.map((service, index) => [
           <div
-            key={service.cli + "-card"}
-            className={"uct-card uct-box rounded-lg px-3 py-2" + (running === service.cli ? " uct-on" : "")}
+            key={index + "-card"}
+            className={"uct-card uct-box flex items-center gap-2.5 rounded-lg px-3 py-2" + state(service)}
             style={{ "--uct-row": index + 2 }}
           >
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-sm font-medium">{service.name}</span>
-              <span className={"uct-chip rounded px-1.5 font-mono text-xs" + (typing === service.cli ? " uct-on" : "")}>
-                {service.cli}
-              </span>
-            </div>
-            <div className="uct-muted mt-0.5 text-xs">
-              {service.text || (service.dir === "out" ? "writes " : "reads ") + service.detail}
-            </div>
+            {service.logo ? (
+              <img src={service.logo} alt="" className={"uct-logo" + (service.invert ? " uct-invert" : "")} />
+            ) : (
+              <svg className="uct-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {icons[service.icon]}
+              </svg>
+            )}
+            <div className="min-w-0 text-sm font-medium">{service.name}</div>
           </div>,
           <div
-            key={service.cli + "-wire"}
-            className={"uct-wire " + (flow(service) === "out" ? "uct-out" : "uct-in") + (running === service.cli ? " uct-on" : "")}
+            key={index + "-wire"}
+            className={"uct-wire" + (lit(service) ? " uct-on" : "")}
             style={{ "--uct-row": index + 2 }}
             aria-hidden="true"
           >
             <div className="uct-wire-line" />
-            <div className="uct-dot" />
           </div>,
         ])}
 
-        <div className="uct-server uct-box rounded-xl p-3" style={{ "--uct-span": services.length + 1 }}>
-          <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <img src="/logo/light.svg" alt="mirage" className="uct-light-only" style={{ height: 18, width: "auto" }} />
-            <img src="/logo/dark.svg" alt="mirage" className="uct-dark-only" style={{ height: 18, width: "auto" }} />
-            <span className="text-sm font-medium">{terminal}</span>
-            <span className="uct-muted text-xs">{server}</span>
-          </div>
-          <div className="uct-box overflow-hidden rounded-lg">
-            <div className="uct-bar flex items-center gap-1.5 px-3 py-1.5">
+        <div className="uct-brand">
+          <img src="/logo/light.svg" alt="mirage" className="uct-light-only" style={{ height: 32, width: "auto" }} />
+          <img src="/logo/dark.svg" alt="mirage" className="uct-dark-only" style={{ height: 32, width: "auto" }} />
+        </div>
+
+        <div className="uct-server" style={{ "--uct-span": services.length }}>
+          <div className="uct-term uct-box overflow-hidden rounded-lg">
+            <div className="uct-bar flex items-center gap-1.5 px-3 py-2">
               <span className="uct-light" />
               <span className="uct-light" />
               <span className="uct-light" />
@@ -199,24 +193,7 @@ export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The age
               })}
             </div>
           </div>
-          {extras.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {extras.map((extra) => (
-                <span
-                  key={extra.text}
-                  className={"uct-chip rounded px-1.5 font-mono text-xs" + (extra.cli && running === extra.cli ? " uct-on" : "")}
-                >
-                  {extra.text}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
-      </div>
-
-      <div className="uct-none mt-4 rounded-lg px-3 py-2">
-        <span className="uct-none-name uct-muted text-sm">Sandbox, container or VM</span>
-        <span className="uct-muted text-xs">Not needed: the terminal runs inside the server process.</span>
       </div>
     </div>
   )

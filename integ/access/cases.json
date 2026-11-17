@@ -669,7 +669,7 @@
   "remote_never_spawns": "1 not started",
   "remote_gets_no_token_file": "no token sent",
   "shell_exit_status": "3 3",
-  "workspace_use": "current\n",
+  "workspace_env": "current\n",
   "context_list": "local *spare",
   "context_once": "0 *local spare",
   "context_delete": "*local",

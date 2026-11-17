@@ -33,7 +33,7 @@ from mirage.cli.output import (
     handle_response,
 )
 from mirage.cli.policy import keep_policy_names
-from mirage.cli.settings import header, resolve_workspace, use_workspace
+from mirage.cli.settings import header, resolve_workspace
 from mirage.cli.vfs import WORKSPACE
 from mirage.utils.yaml import parse_yaml
 
@@ -385,27 +385,6 @@ def get_cmd(
             path += "?verbose=true"
         r = client.request("GET", path)
     emit(handle_response(r), human=_format_workspace_detail)
-
-
-@app.command("use")
-def use_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-) -> None:
-    """Make a workspace the current context's, for the commands that
-    take ``-w``."""
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "GET", f"/v1/workspaces/{quote(workspace_id, safe='')}"
-        )
-        context = client.settings.context
-    handle_response(r)
-    use_workspace(context, workspace_id)
-    header(f"using {workspace_id}", context)
-    emit(
-        {"workspace": workspace_id},
-        human=lambda d: f"Using workspace {workspace_id}.",
-    )
 
 
 @app.command("delete")

@@ -83,13 +83,10 @@ class Context:
             the daemon's port.
         team (str | None): the team the login acts for, if the server
             names one.
-        workspace (str | None): the workspace commands use when given
-            none.
     """
 
     url: str = ""
     team: str | None = None
-    workspace: str | None = None
 
 
 def _write_owner_only(path: Path, text: str) -> None:

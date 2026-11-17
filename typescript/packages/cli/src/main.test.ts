@@ -74,7 +74,6 @@ describe('mirage CLI program', () => {
         'start',
         'stop',
         'tools',
-        'use',
         'vfs',
         'vfs-md',
         'skill-md',

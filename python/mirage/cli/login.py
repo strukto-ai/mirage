@@ -56,7 +56,6 @@ from mirage.cli.credentials import (
 )
 from mirage.cli.output import emit, fail, format_table
 from mirage.cli.settings import (
-    current_workspace,
     default_local_url,
     header,
     is_local_url,
@@ -383,7 +382,6 @@ def team_of(url: str, token: str) -> str | None:
 def save_context(name: str, url: str, login: Login | None) -> None:
     """Keep a context for ``url`` and make it current.
 
-    It keeps its workspace while it points at the same server.
     ``local`` keeps no URL when ``url`` is the one it follows anyway.
 
     Args:
@@ -392,7 +390,6 @@ def save_context(name: str, url: str, login: Login | None) -> None:
         login (Login | None): the login, when the server has one.
     """
     team = team_of(url, login.access_token) if login else None
-    kept = read_context(name)
     stored = url
     if name == LOCAL and url == default_local_url(
         read_daemon_table(mirage_home())
@@ -400,13 +397,7 @@ def save_context(name: str, url: str, login: Login | None) -> None:
         stored = ""
     write_context(
         name,
-        Context(
-            url=stored,
-            team=team,
-            workspace=kept.workspace
-            if kept is not None and kept.url == stored
-            else None,
-        ),
+        Context(url=stored, team=team),
     )
     write_current(name)
 
@@ -462,8 +453,8 @@ def logout_cmd() -> None:
 
 
 def whoami_cmd() -> None:
-    """Print the current context: its server, team, user and
-    workspace, and when to log in again."""
+    """Print the current context: its server, team and user, and when
+    to log in again."""
     url = load_daemon_settings().url.rstrip("/")
     name = current_name()
     context = read_context(name)
@@ -485,7 +476,6 @@ def whoami_cmd() -> None:
             "user": token_claims(login.access_token).get("sub")
             if login
             else None,
-            "workspace": current_workspace(),
             "renew_by": renew,
         },
         human=lambda row: "\n".join(
@@ -507,21 +497,19 @@ def list_cmd() -> None:
                 "name": name,
                 "url": entry.url or local_url(table),
                 "team": entry.team,
-                "workspace": entry.workspace,
                 "current": name == current,
             }
         )
     emit(
         rows,
         human=lambda items: format_table(
-            ["", "NAME", "URL", "TEAM", "WORKSPACE"],
+            ["", "NAME", "URL", "TEAM"],
             [
                 [
                     "*" if r["current"] else "",
                     r["name"],
                     r["url"],
                     r["team"] or "",
-                    r["workspace"] or "",
                 ]
                 for r in items
             ],

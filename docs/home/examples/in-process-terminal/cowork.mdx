@@ -1,68 +1,63 @@
 ---
 title: Cowork
 icon: users
-description: An agent kicks off a new customer's onboarding from a won deal in Slack, with Google Drive, Docs, Sheets and Notion, with no sandbox.
+description: An agent does a team's cross-tool work from context scattered across chat, documents and spreadsheets, and makes each change only through the service's own CLI. Mirage sets up a managed virtual terminal for the task.
 ---
 
-import { Run } from "/snippets/run-block.jsx"
 import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
 <UseCaseTerminal
   services={[
-    { cli: "/slack", name: "Slack", text: "reads #deals-won as files" },
-    { cli: "/gdrive", name: "Google Drive", text: "reads the tracker and the plan template as files" },
-    { cli: "gws", name: "Google Docs and Sheets", text: "copies the plan, fills it, adds a row", dir: "out" },
-    { cli: "ntn", name: "Notion", text: "opens the project page", dir: "out" },
-    { cli: "slack", name: "Slack", text: "replies in the deal's thread", dir: "out" },
+    { cli: ["/slack", "slack"], name: "Slack", logo: "/images/slack-logo.svg" },
+    { cli: "/gdrive", name: "Google Drive", logo: "/images/gdrive-logo.svg" },
+    { cli: "gws", name: "Docs and Sheets", logo: "/images/gdocs-logo.svg" },
+    { cli: "ntn", name: "Notion", logo: "/images/notion-logo.svg" },
   ]}
   steps={[
-    { cmd: "grep -h \"Deal won\" /slack/channels/deals-won__*/2026-11-16/chat.jsonl …", cli: "/slack", out: "Northwind Health, 120 seats" },
-    { cmd: "jq … '/gdrive/Onboarding/Onboarding tracker.gsheet.json' | sort -n", cli: "/gdrive", out: "Mei Chen has the fewest seats" },
-    { cmd: "gws drive files copy … && gws docs documents batchUpdate …", cli: "gws", dir: "out", out: "the plan, filled in" },
-    { cmd: "gws sheets append --spreadsheet \"$tracker\" …", cli: "gws", dir: "out", out: "Sheet1!A6:E6" },
-    { cmd: "ntn api v1/pages -d \"$(cat /workspace/page.json)\"", cli: "ntn", dir: "out", out: "a project page with a checklist" },
-    { cmd: "slack send-message --thread-ts 1794815580.678919 …", cli: "slack", dir: "out", out: "the team has the links" },
-  ]}
-  extras={[
-    { text: "/workspace in memory" },
+    { cmd: "grep -h \"Deal won\" /slack/channels/deals-won__*/…", cli: "/slack", out: "Northwind Health, 120 seats" },
+    { cmd: "jq … \"/gdrive/Onboarding/Onboarding tracker.gsheet.json\" | sort -n", cli: "/gdrive", out: "Mei Chen has the fewest" },
+    { cmd: "gws docs documents batchUpdate …", cli: "gws", out: "the plan, filled in" },
+    { cmd: "gws sheets append --spreadsheet \"$tracker\" …", cli: "gws", out: "a row in the tracker" },
+    { cmd: "ntn api v1/pages -d \"$(cat /workspace/page.json)\"", cli: "ntn", out: "a project page" },
+    { cmd: "slack send-message --thread-ts …", cli: "slack", out: "the team has the links" },
   ]}
 />
 
-When a deal closes, the CRM posts it to a Slack channel, and someone in
-customer success starts the onboarding by hand: picks an account manager,
-copies the plan template, fills it in, adds the customer to the tracker,
-opens a project and tells the team. An agent does the same, starting from
-the CRM's message. A cron job, or an event from Slack, can start it.
+A cowork agent picks up the work a team does by hand across its tools.
+Something lands in chat, and someone opens three other apps to act on it.
+They copy names, fill in a template, update a tracker and tell the team
+where everything is. The agent does the same, from the same message.
 
-A job this small needs no VM or sandbox. It runs in an
-[in-process terminal](/home/examples/in-process-terminal) inside one
-FastAPI or Express server:
-
-- **Files:** `/slack` and `/gdrive` mount [Slack](/python/vfs/slack) and
-  [Google Drive](/python/vfs/gdrive) read-only, so the agent reads messages,
-  Sheets and Docs with `grep` and `jq`. `/workspace`, in
-  [memory](/home/setup/ram), holds its scratch files.
-- **CLIs:** [`gws`](/python/cli/gws) writes to Docs and Sheets,
-  [`ntn`](/python/cli/ntn) to Notion and [`slack`](/python/cli/slack) to
-  Slack. Every change goes through a CLI; the mounts never write.
-- **Credentials:** five keys the server holds, and the agent never sees. The
-  agent finds every channel, folder and file by name.
-
-The commands below are what the agent runs in its terminal. The CRM posted
-this to `#deals-won`:
-
-```text
-Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
-```
+Cowork is reads and writes over scattered context, chat, documents,
+spreadsheets and a project tool, and that is the work Mirage is built for.
+The agent reaches all of it from one terminal, with fewer tokens than
+calling the same services as MCP tools
+([VFS-Bench 1.0](https://agentvfs.org/benchmark/vfs-bench-1)). Its scope is
+known up front, a few things to read and a few changes to make, which is
+where a managed terminal fits. Here it runs as an
+[in-process terminal](/home/examples/in-process-terminal) on a Mirage
+server, without a VM or sandbox.
 
 ## Setup
 
-You need Slack, Google and Notion accounts, two files in Drive, and five
-keys for the server. The server builds its workspace from `workspace.yaml`.
+<CardGroup cols={3}>
+  <Card title="Files" icon="folder">
+    [Slack](/python/vfs/slack) at `/slack` and [Google Drive](/python/vfs/gdrive) at `/gdrive`, read-only. A Sheet or Doc is a JSON file.
+  </Card>
+  <Card title="CLIs" icon="terminal">
+    [`gws`](/python/cli/gws) writes Docs and Sheets, [`ntn`](/python/cli/ntn) Notion and [`slack`](/python/cli/slack) Slack.
+  </Card>
+  <Card title="Credentials" icon="key">
+    Five keys the Mirage server holds. The agent never sees them.
+  </Card>
+</CardGroup>
+
+You need the `mirage` CLI, Slack, Google and Notion accounts, two files in
+Drive, and five keys.
 
 <AccordionGroup>
   <Accordion title="Accounts and files">
-    Set up three accounts, and give the server five keys:
+    Set up three accounts, and export five keys:
 
     | Service | Set up | Keys |
     | --- | --- | --- |
@@ -100,14 +95,14 @@ keys for the server. The server builds its workspace from `workspace.yaml`.
   </Accordion>
   <Accordion title="Installation">
     <Tabs>
-      <Tab title="FastAPI" icon="/images/python-logo.svg">
+      <Tab title="pip" icon="/images/python-logo.svg">
         ```bash
-        pip install mirage-ai fastapi uvicorn
+        pip install mirage-ai
         ```
       </Tab>
-      <Tab title="Express" icon="/images/typescript-logo.svg">
+      <Tab title="npm" icon="/images/typescript-logo.svg">
         ```bash
-        npm install @struktoai/mirage-node express
+        npm install -g @struktoai/mirage-cli
         ```
       </Tab>
     </Tabs>
@@ -155,292 +150,143 @@ keys for the server. The server builds its workspace from `workspace.yaml`.
           api_key: {from: env, key: NOTION_API_KEY}
     ```
   </Accordion>
-  <Accordion title="Server">
-    This is the server from the
-    [Overview](/home/examples/in-process-terminal#simple-server), built from
-    `workspace.yaml`. Set the five keys in its environment before you start it.
-
-    <Tabs>
-      <Tab title="FastAPI" icon="/images/python-logo.svg">
-        ```python app.py
-        from contextlib import asynccontextmanager
-
-        from fastapi import FastAPI
-        from pydantic import BaseModel
-
-        from mirage import Workspace
-        from mirage.config import load_config, resolve_secrets
-
-        ws: Workspace
-
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            global ws
-            config = await resolve_secrets(load_config("workspace.yaml"))
-            ws = Workspace(**config.to_workspace_kwargs())
-            yield
-            await ws.close()
-
-
-        app = FastAPI(lifespan=lifespan)
-
-
-        class Run(BaseModel):
-            command: str
-
-
-        @app.post("/sessions/{session_id}")
-        async def create(session_id: str) -> None:
-            ws.create_session(session_id)
-
-
-        @app.post("/sessions/{session_id}/run")
-        async def run(session_id: str, body: Run) -> dict:
-            r = await ws.shell(body.command, session_id=session_id)
-            return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
-        ```
-
-        ```bash
-        uvicorn app:app --port 3000
-        ```
-      </Tab>
-      <Tab title="Express" icon="/images/typescript-logo.svg">
-        ```typescript app.mjs
-        import express from 'express'
-        import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
-
-        const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-        const ws = new Workspace(mounts, options)
-
-        const app = express()
-        app.use(express.json())
-
-        app.post('/sessions/:id', (req, res) => {
-          ws.createSession(req.params.id)
-          res.sendStatus(201)
-        })
-
-        app.post('/sessions/:id/run', async (req, res) => {
-          const r = await ws.shell(req.body.command, { sessionId: req.params.id })
-          res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
-        })
-
-        app.listen(3000, '127.0.0.1')
-        ```
-
-        ```bash
-        node app.mjs
-        ```
-      </Tab>
-    </Tabs>
-  </Accordion>
 </AccordionGroup>
 
-## Usage
-
-Create a terminal, and define `run`, which sends commands to it and prints
-what they print. It needs [`jq`](https://jqlang.org):
+Export the keys and create the workspace:
 
 ```bash
-curl -X POST localhost:3000/sessions/a
-
-run() {
-  jq -Rs '{command: .}' |
-    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
-    jq -j '.stdout, .stderr'
-}
+export SLACK_BOT_TOKEN=xoxb-... NOTION_API_KEY=ntn_...
+export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
+mirage daemon restart
+mirage workspace create workspace.yaml --id onboarding
+export MIRAGE_WORKSPACE=onboarding
 ```
 
-The blocks titled **Agent terminal** below run in the terminal on the
-server, not in your shell. Their copy button adds the `run` call around the
-commands, as `run <<'SH'` … `SH`, so a pasted block runs there.
-Variables the agent sets, such as `$plan`, stay set in the terminal for the next
-block.
+The local server reads the keys when it starts, so `mirage daemon restart`
+stops a server that started without them.
 
-## 1. Read the deal
+## Example
 
-A Slack channel is a folder named after the channel and its ID, with a
-folder for each day and the day's messages in `chat.jsonl`. The agent
-finds today's deal and its timestamp, which it replies to at the end:
+In this example, a deal closes and the CRM posts it to the `#deals-won`
+channel in Slack. The agent starts the onboarding. It picks an account
+manager from a tracker in Google Sheets, fills in a plan in Google Docs,
+adds the customer to the tracker, opens a project in Notion and replies to
+the team in Slack. The CRM posted this in Slack:
 
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-ls /slack/channels | grep '^deals-won__'
-grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r '"\(.ts) \(.text)"'
-```
-</Run>
+> **Deal won:** Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
 
-```text
-deals-won__C0CJ1LE89NV
-1794815580.678919 Deal won: Northwind Health · 120 seats · start 2026-12-01 · champion Priya Shah (priya@northwind.example) · goal: move clinic scheduling off spreadsheets
-```
+These are the commands the agent runs, in the terminal Setup created. Your
+agent sends each one with `mirage shell`, or through [MCP](/home/access/mcp), the
+[HTTP API](/home/access/http), [RPC](/home/access/rpc) or [SSH](/home/access/ssh).
 
-## 2. Pick the account manager
+<Steps>
+  <Step title="Read the deal from Slack">
+    A Slack channel is a folder under `/slack`, with a folder for each day.
 
-Drive's folders are directories, and a Sheet is a `.gsheet.json` file, the
-Sheets API's view of it with every cell. The agent adds up the seats each
-account manager already has:
+    ```bash
+    grep "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl
+    ```
+    It finds Northwind Health, 120 seats, starting 2026-12-01.
+  </Step>
+  <Step title="Pick the account manager">
+    The tracker Sheet is a JSON file under `/gdrive`, so `jq` adds up the seats each manager has.
 
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-ls /gdrive/Onboarding
-jq -r '[.sheets[0].data[0].rowData[1:][] | {manager: .values[3].formattedValue, seats: (.values[1].formattedValue | tonumber)}]
-  | group_by(.manager) | map("\(map(.seats) | add) \(.[0].manager)") | .[]' '/gdrive/Onboarding/Onboarding tracker.gsheet.json' | sort -n
-```
-</Run>
+    ```bash
+    jq … "/gdrive/Onboarding/Onboarding tracker.gsheet.json" | sort -n
+    ```
+    Mei Chen has the fewest seats, so the deal goes to her.
+  </Step>
+  <Step title="Write the plan">
+    `gws` copies the plan template Doc and fills in its placeholders.
 
-```text
-Onboarding plan template.gdoc.json
-Onboarding tracker.gsheet.json
-60 Mei Chen
-65 Dana Lee
-85 Omar Haddad
-```
+    ```bash
+    gws drive files copy …
+    gws docs documents batchUpdate …
+    ```
+    The new plan sits next to the template in Drive.
+  </Step>
+  <Step title="Add the customer to the tracker">
+    ```bash
+    gws sheets append …
+    ```
+    A new row with the customer, seats, start date, manager and plan link.
+  </Step>
+  <Step title="Open a project in Notion">
+    The agent writes the page to a file, puts in the plan's link, and `ntn` creates it.
 
-Mei Chen has the fewest seats, so Northwind Health goes to her.
+    ```bash
+    ntn api v1/pages -d "$(sed "s|PLAN_URL|…$plan|" /workspace/page.json)"
+    ```
+    A project page with a link to the plan and a kickoff checklist.
+  </Step>
+  <Step title="Tell the team">
+    `slack` replies in the thread of the CRM's message.
 
-## 3. Write the plan
+    ```bash
+    slack send-message --thread-ts … --text "Onboarding started …"
+    ```
+    The team has the owner, the plan and the project in one reply.
+  </Step>
+</Steps>
 
-The agent copies the template into the folder. The IDs `gws` needs come
-from the files themselves: a Doc's `documentId` is in its `.gdoc.json`, and
-the folder's from a Drive search:
+<Accordion title="Full commands">
+  Each line runs in the agent's terminal with `mirage shell`, which keeps
+  variables such as `$plan` from one call to the next.
 
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-template=$(jq -r .documentId '/gdrive/Onboarding/Onboarding plan template.gdoc.json')
-folder=$(gws drive files list --params '{"q": "name = '\''Onboarding'\'' and mimeType = '\''application/vnd.google-apps.folder'\''", "fields": "files(id)"}' | jq -r '.files[0].id')
-plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
-  --json "{\"name\": \"Onboarding plan: Northwind Health\", \"parents\": [\"$folder\"]}" | jq -r .id)
-echo "$plan"
-```
-</Run>
+  ```bash
+  mirage shell -c 'channel=$(ls /slack/channels | grep ^deals-won__ | sed "s/.*__//") && echo "$channel"'
+  mirage shell -c 'deal=$(grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r .ts) && echo "$deal"'
+  mirage shell -c 'grep -h "Deal won" /slack/channels/deals-won__*/2026-11-16/chat.jsonl | jq -r .text'
+  mirage shell -c 'jq -r "[.sheets[0].data[0].rowData[1:][].values | {m: .[3].formattedValue, s: (.[1].formattedValue | tonumber)}]
+    | group_by(.m)[] | [(map(.s) | add), .[0].m] | @tsv" "/gdrive/Onboarding/Onboarding tracker.gsheet.json" | sort -n'
+  mirage shell -c '
+  template=$(jq -r .documentId "/gdrive/Onboarding/Onboarding plan template.gdoc.json")
+  plan=$(gws drive files copy --params "{\"fileId\": \"$template\", \"fields\": \"id\"}" \
+    --json "{\"name\": \"Onboarding plan: Northwind Health\"}" | jq -r .id)
+  echo "$plan"'
+  mirage shell -c 'cat > /workspace/fill.json' <<'JSON'
+  {"requests": [
+    {"replaceAllText": {"containsText": {"text": "{{customer}}", "matchCase": true}, "replaceText": "Northwind Health"}},
+    {"replaceAllText": {"containsText": {"text": "{{seats}}", "matchCase": true}, "replaceText": "120"}},
+    {"replaceAllText": {"containsText": {"text": "{{start}}", "matchCase": true}, "replaceText": "2026-12-01"}},
+    {"replaceAllText": {"containsText": {"text": "{{manager}}", "matchCase": true}, "replaceText": "Mei Chen"}},
+    {"replaceAllText": {"containsText": {"text": "{{champion}}", "matchCase": true}, "replaceText": "Priya Shah"}},
+    {"replaceAllText": {"containsText": {"text": "{{goal}}", "matchCase": true}, "replaceText": "Move clinic scheduling off spreadsheets"}},
+    {"replaceAllText": {"containsText": {"text": "{{kickoff}}", "matchCase": true}, "replaceText": "2026-12-08"}}
+  ]}
+  JSON
+  mirage shell -c 'gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" | jq -c "[.replies[].replaceAllText.occurrencesChanged]"'
+  mirage shell -c 'jq -j ".tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content // empty" "/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json"'
+  mirage shell -c '
+  tracker=$(jq -r .spreadsheetId "/gdrive/Onboarding/Onboarding tracker.gsheet.json")
+  gws sheets append --spreadsheet "$tracker" \
+    --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
+    jq -r .updates.updatedRange'
+  mirage shell -c 'cat > /workspace/page.json' <<'JSON'
+  {
+    "parent": {"workspace": true},
+    "properties": {"title": {"title": [{"type": "text", "text": {"content": "Onboarding: Northwind Health"}}]}},
+    "children": [
+      {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "120 seats, start 2026-12-01. Account manager: Mei Chen. Champion: Priya Shah."}}]}},
+      {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "Onboarding plan", "link": {"url": "PLAN_URL"}}}]}},
+      {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "Kickoff checklist"}}]}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Kickoff call with Priya Shah by 2026-12-08"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Admin accounts and SSO"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Import data and train the first team"}}], "checked": false}},
+      {"type": "to_do", "to_do": {"rich_text": [{"type": "text", "text": {"content": "Adoption review in week 4"}}], "checked": false}}
+    ]
+  }
+  JSON
+  mirage shell -c 'project=$(ntn api v1/pages -d "$(sed "s|PLAN_URL|https://docs.google.com/document/d/$plan|" /workspace/page.json)" | jq -r .url) && echo "$project"'
+  mirage shell -c 'slack send-message --channel "$channel" --thread-ts "$deal" \
+    --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
+    jq -c "{ok, thread_ts: .message.thread_ts}"'
+  ```
+</Accordion>
 
-```text
-14LWyxpM1xtNXYYUHdCxDgJFgmb5AfWyvMKPNrHp76_Y
-```
-
-Then it fills in the copy, one `replaceAllText` request for each
-placeholder, in a single Docs API call. The kickoff is five business days
-after the start:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-jq -n '{requests: ({
-  "{{customer}}": "Northwind Health", "{{seats}}": "120", "{{start}}": "2026-12-01",
-  "{{manager}}": "Mei Chen", "{{champion}}": "Priya Shah",
-  "{{goal}}": "Move clinic scheduling off spreadsheets", "{{kickoff}}": "2026-12-08"
-} | to_entries | map({replaceAllText: {containsText: {text: .key, matchCase: true}, replaceText: .value}}))}' > /workspace/fill.json
-gws docs documents batchUpdate --params "{\"documentId\": \"$plan\"}" --json "$(cat /workspace/fill.json)" |
-  jq -c '[.replies[].replaceAllText.occurrencesChanged]'
-```
-</Run>
-
-```text
-[1,1,1,1,2,1,1]
-```
-
-Each placeholder was found, and `{{champion}}` twice. The agent reads the
-plan back through `/gdrive`, where a Doc is a `.gdoc.json` file and its text
-is in the first tab:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-jq -r '[.tabs[0].documentTab.body.content[]?.paragraph?.elements[]?.textRun?.content] | join("")' \
-  '/gdrive/Onboarding/Onboarding plan: Northwind Health.gdoc.json'
-```
-</Run>
-
-```text
-Onboarding plan: Northwind Health
-
-Seats: 120
-Start date: 2026-12-01
-Account manager: Mei Chen
-
-Goal
-Move clinic scheduling off spreadsheets
-
-Stakeholders
-Priya Shah, champion
-
-Milestones
-Kickoff call by 2026-12-08
-Week 1: admin accounts and SSO
-Week 2: import data and train the first team
-Week 4: adoption review with Priya Shah
-```
-
-## 4. Add it to the tracker
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-tracker=$(jq -r .spreadsheetId '/gdrive/Onboarding/Onboarding tracker.gsheet.json')
-gws sheets append --spreadsheet "$tracker" \
-  --json-values "[[\"Northwind Health\", \"120\", \"2026-12-01\", \"Mei Chen\", \"https://docs.google.com/document/d/$plan\"]]" |
-  jq -r .updates.updatedRange
-```
-</Run>
-
-```text
-Sheet1!A6:E6
-```
-
-## 5. Open a project in Notion
-
-The agent builds the page, a summary, a link to the plan and the kickoff
-checklist, and creates it in Notion. Its parent is the workspace, so the
-page goes at the top level and there is no page to share with the
-integration first:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-jq -n --arg plan "https://docs.google.com/document/d/$plan" '
-def text($s): [{type: "text", text: {content: $s}}];
-def todo($s): {type: "to_do", to_do: {rich_text: text($s), checked: false}};
-{
-  parent: {workspace: true},
-  properties: {title: {title: text("Onboarding: Northwind Health")}},
-  children: [
-    {type: "paragraph", paragraph: {rich_text: text("120 seats, start 2026-12-01. Account manager: Mei Chen. Champion: Priya Shah.")}},
-    {type: "paragraph", paragraph: {rich_text: [{type: "text", text: {content: "Onboarding plan", link: {url: $plan}}}]}},
-    {type: "heading_2", heading_2: {rich_text: text("Kickoff checklist")}},
-    todo("Kickoff call with Priya Shah by 2026-12-08"),
-    todo("Admin accounts and SSO"),
-    todo("Import data and train the first team"),
-    todo("Adoption review in week 4")
-  ]
-}' > /workspace/page.json
-project=$(ntn api v1/pages -d "$(cat /workspace/page.json)" | jq -r .url)
-echo "$project"
-```
-</Run>
-
-```text
-https://app.notion.com/p/Onboarding-Northwind-Health-41a958f3c46d81a7bf04dcb3dd8984c1
-```
-
-## 6. Tell the team
-
-Last, the agent replies in the deal's thread with who owns it and where
-everything is. The channel ID is the end of its folder's name:
-
-<Run>
-```bash Agent terminal · copies as run <<'SH'
-channel=$(ls /slack/channels | grep '^deals-won__' | sed 's/.*__//')
-slack send-message --channel "$channel" --thread-ts 1794815580.678919 \
-  --text "Onboarding started. Account manager: Mei Chen. Kickoff by 2026-12-08. Plan: https://docs.google.com/document/d/$plan · Project: $project" |
-  jq -c '{ok, thread_ts: .message.thread_ts}'
-```
-</Run>
-
-```text
-{"ok":true,"thread_ts":"1794815580.678919"}
-```
-
-The deal now has an owner, a plan, a row in the tracker and a project, and
-the team has the links in Slack. The agent read every input as a file and
-made five changes, each through the CLI for its service.
+The deal now has an owner, a plan, a row in the tracker and a project. The
+agent read every input as a file and made each change through the CLI for
+its service.
 
 For the commands and flags each CLI supports, see [gws](/python/cli/gws),
 [ntn](/python/cli/ntn) and [slack](/python/cli/slack). For the file layouts,

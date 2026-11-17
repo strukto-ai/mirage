@@ -50,14 +50,7 @@ import {
   type Login,
 } from './credentials.ts'
 import { emit, fail, formatTable } from './output.ts'
-import {
-  currentWorkspace,
-  defaultLocalUrl,
-  header,
-  isLocalUrl,
-  loadDaemonSettings,
-  localUrl,
-} from './settings.ts'
+import { defaultLocalUrl, header, isLocalUrl, loadDaemonSettings, localUrl } from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -301,20 +294,14 @@ async function teamOf(url: string, token: string): Promise<string | null> {
 }
 
 /**
- * Keep a context for `url` and make it current. It keeps its workspace
- * while it points at the same server; `local` keeps no URL when `url` is
- * the one it follows anyway.
+ * Keep a context for `url` and make it current; `local` keeps no URL when
+ * `url` is the one it follows anyway.
  */
 async function saveContext(name: string, url: string, login: Login | null): Promise<void> {
   const team = login !== null ? await teamOf(url, login.access_token) : null
   const table = readDaemonTable(mirageHome(process.env))
-  const kept = readContext(name)
   const stored = name === LOCAL && url === defaultLocalUrl(table) ? '' : url
-  writeContext(name, {
-    url: stored,
-    team,
-    workspace: kept?.url === stored ? kept.workspace : null,
-  })
+  writeContext(name, { url: stored, team })
   writeCurrent(name)
 }
 
@@ -364,9 +351,7 @@ export function registerLoginCommands(program: Command): void {
     })
   program
     .command('whoami')
-    .description(
-      'Print the current context: its server, team, user and workspace, and when to log in again.',
-    )
+    .description('Print the current context: its server, team and user, and when to log in again.')
     .action(() => {
       const url = rstripSlash(loadDaemonSettings().url)
       const name = currentName()
@@ -379,7 +364,6 @@ export function registerLoginCommands(program: Command): void {
           url,
           team: readContext(name)?.team ?? null,
           user: typeof account === 'string' ? account : null,
-          workspace: currentWorkspace(),
           renew_by:
             login !== null ? new Date(renewBy(login) * 1000).toISOString().slice(0, 10) : null,
         },
@@ -395,7 +379,6 @@ interface ContextRow {
   name: string
   url: string
   team: string | null
-  workspace: string | null
   current: boolean
 }
 
@@ -416,14 +399,13 @@ export function registerContextCommands(program: Command): void {
           name,
           url: entry.url !== '' ? entry.url : localUrl(table),
           team: entry.team,
-          workspace: entry.workspace,
           current: name === current,
         }
       })
       emit(rows, (items) =>
         formatTable(
-          ['', 'NAME', 'URL', 'TEAM', 'WORKSPACE'],
-          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '', r.workspace ?? '']),
+          ['', 'NAME', 'URL', 'TEAM'],
+          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '']),
         ),
       )
     })
