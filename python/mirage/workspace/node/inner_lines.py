@@ -24,7 +24,8 @@ from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.lookup.constants import read_wrapper
-from mirage.workspace.lookup.lookup import path_program
+from mirage.workspace.lookup.lookup import lookup, path_program
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
@@ -437,7 +438,27 @@ def program_lines(
             cannot read to the command (``xargs``), kept for its program.
     """
     head, args = words[0].value, words[1:]
+    if runs_function(head, session, registry):
+        return []
     program = path_program(head, session, registry, links)
     if program is None:
         return inner_lines(head, args)
     return [InnerLine(argv=(Word(program, program), *args), open=open_)]
+
+
+def runs_function(
+    head: str, session: "SessionState", registry: "MountRegistry"
+) -> bool:
+    """Whether a function of the head's name runs instead of it, so the
+    words it was given run nothing: the function's own lines each pass
+    the gate as they run (``timeout() { :; }; timeout 1 rm x``).
+
+    Args:
+        head (str): the command name, as the gate reads it.
+        session (SessionState): the session (its functions).
+        registry (MountRegistry): mount registry (command registration).
+    """
+    return (
+        head in session.functions
+        and lookup(head, session, registry) is Consumer.FUNCTION
+    )

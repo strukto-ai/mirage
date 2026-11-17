@@ -36,6 +36,7 @@ from mirage.workspace.lookup import (
     SHELL_CONSUMERS,
     Consumer,
     execs,
+    is_tool,
     lookup,
     lookup_all,
     program,
@@ -146,17 +147,26 @@ def test_shell_word_shadows_function():
     ]
 
 
-def test_a_program_run_answers_with_the_builtin_past_a_function():
+def test_a_program_run_answers_with_the_program_past_a_function():
     session, ws = _fixture()
-    session.functions["sleep"] = "sleep() { :; }"
-    session.functions["greet"] = "greet() { :; }"
+    registry = ws._registry
+    for name in ("sleep", "chmod", "cat", "greet"):
+        session.functions[name] = f"{name}() {{ :; }}"
     token = set_program_invocation(session)
     try:
-        assert lookup("sleep", session, ws._registry) is Consumer.SESSION
-        assert lookup("greet", session, ws._registry) is Consumer.FUNCTION
+        assert lookup("sleep", session, registry) is Consumer.SESSION
+        assert lookup("chmod", session, registry) is Consumer.MOUNT
+        assert lookup_all("cat", session, registry) == [
+            Consumer.MOUNT,
+            Consumer.FUNCTION,
+        ]
+        assert lookup("greet", session, registry) is Consumer.FUNCTION
+        assert is_tool("cat", session, registry)
+        assert not is_tool("greet", session, registry)
     finally:
         reset_caller(token)
-    assert lookup("sleep", session, ws._registry) is Consumer.FUNCTION
+    assert lookup("sleep", session, registry) is Consumer.FUNCTION
+    assert not is_tool("cat", session, registry)
 
 
 def test_function_shadows_mount_command():

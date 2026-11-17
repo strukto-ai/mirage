@@ -87,9 +87,9 @@ export function pathProgram(
  * shell's own words (cd, export), and its body's lines each pass the
  * gate themselves.
  */
-export function isTool(name: string, session: SessionState): boolean {
+export function isTool(name: string, session: SessionState, registry: MountRegistry): boolean {
   if (name.includes('/')) return false
-  return !functionFirst(name, session)
+  return lookup(name, session, registry) !== Consumer.FUNCTION
 }
 
 /**
@@ -261,14 +261,14 @@ export function runsWrapper(
  * shadows `timeout`, `env` or `echo` there. The shell's own words
  * (`SHELL_ONLY_BUILTINS`: cd, export, type) still beat one here, though
  * bash lets a function shadow those too. A program run
- * (`timeout 1 sleep 0`) execs the program, which never sees a function,
- * so a builtin or namespace command of the name answers it.
+ * (`timeout 1 sleep 0`) is not one either: the program is exec'd and never
+ * sees a function (`layers` puts it last there).
  */
 function functionFirst(name: string, session: SessionState): boolean {
   return (
     Object.hasOwn(session.functions, name) &&
     !SHELL_ONLY_BUILTINS.has(name) &&
-    !((SHELL_NAMES.has(name) || NAMESPACE_COMMANDS.has(name)) && isProgramInvocation(session))
+    !isProgramInvocation(session)
   )
 }
 
@@ -296,6 +296,9 @@ function* layers(
   const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
   const first = functionFirst(name, session)
+  // A program run execs the program, so a function answers only a name no
+  // other layer holds (`timeout 1 f`).
+  const last = Object.hasOwn(session.functions, name) && !first && isProgramInvocation(session)
   if (first) {
     found = true
     yield Consumer.FUNCTION
@@ -310,7 +313,7 @@ function* layers(
     found = true
     yield Consumer.NAMESPACE
   }
-  if (Object.hasOwn(session.functions, name) && !first) {
+  if (Object.hasOwn(session.functions, name) && !first && !last) {
     found = true
     yield Consumer.FUNCTION
   }
@@ -325,6 +328,10 @@ function* layers(
   if (ROUTED_COMMANDS.has(name) || registry.mountForCommand(runsAs(name, registry)) !== null) {
     found = true
     yield Consumer.MOUNT
+  }
+  if (last) {
+    found = true
+    yield Consumer.FUNCTION
   }
   const fallback = Object.hasOwn(bindings, EXTERNAL_COMMANDS)
     ? bindings[EXTERNAL_COMMANDS]

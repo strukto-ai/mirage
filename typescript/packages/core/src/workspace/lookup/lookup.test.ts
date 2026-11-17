@@ -45,6 +45,7 @@ import { Workspace } from '../workspace/workspace.ts'
 import {
   Consumer,
   execs,
+  isTool,
   lineFacts,
   lookup,
   lookupAll,
@@ -144,16 +145,23 @@ describe('lookup', () => {
     expect(lookupAll('cd', session, ws.registry)).toEqual([Consumer.SESSION, Consumer.FUNCTION])
   })
 
-  it('a program run answers with the builtin past a function', async () => {
+  it('a program run answers with the program past a function', async () => {
     const { session, ws } = fixture()
-    session.functions.sleep = 'sleep() { :; }'
-    session.functions.greet = 'greet() { :; }'
+    const registry = ws.registry
+    for (const name of ['sleep', 'chmod', 'cat', 'greet']) {
+      session.functions[name] = `${name}() { :; }`
+    }
     await runAsProgram(session, () => {
-      expect(lookup('sleep', session, ws.registry)).toBe(Consumer.SESSION)
-      expect(lookup('greet', session, ws.registry)).toBe(Consumer.FUNCTION)
+      expect(lookup('sleep', session, registry)).toBe(Consumer.SESSION)
+      expect(lookup('chmod', session, registry)).toBe(Consumer.MOUNT)
+      expect(lookupAll('cat', session, registry)).toEqual([Consumer.MOUNT, Consumer.FUNCTION])
+      expect(lookup('greet', session, registry)).toBe(Consumer.FUNCTION)
+      expect(isTool('cat', session, registry)).toBe(true)
+      expect(isTool('greet', session, registry)).toBe(false)
       return Promise.resolve()
     })
-    expect(lookup('sleep', session, ws.registry)).toBe(Consumer.FUNCTION)
+    expect(lookup('sleep', session, registry)).toBe(Consumer.FUNCTION)
+    expect(isTool('cat', session, registry)).toBe(false)
   })
 
   it('function shadows a mount command', () => {

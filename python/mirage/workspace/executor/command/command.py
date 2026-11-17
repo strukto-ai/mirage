@@ -1063,8 +1063,13 @@ async def handle_command(
             view,
         )
 
-    # Shell functions
-    if cmd_name in session.functions:
+    # Shell functions, where one is what the name runs (a program run
+    # execs the program instead)
+    if (
+        cmd_name in session.functions
+        and lookup(cmd_name, session, registry, context.frame.routing)
+        is Consumer.FUNCTION
+    ):
         return await run_shell_function(
             execute_node,
             cmd_name,

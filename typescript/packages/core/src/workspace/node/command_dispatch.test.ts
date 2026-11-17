@@ -811,9 +811,34 @@ describe('a function named like a builtin that is a program', () => {
     ['timeout() { echo fn; }; timeout --help', 'fn\n'],
     ['timeout() { echo fn; }; command timeout 1 echo x', 'x\n'],
     ['sleep() { echo fn; }; timeout 1 sleep 0', ''],
+    [
+      'echo x > /data/f; chmod() { echo fn; }; timeout 1 chmod 600 /data/f; stat -c %a /data/f',
+      '600\n',
+    ],
+    ['echo x > /data/f; cat() { echo fn; }; xargs cat <<< /data/f', 'x\n'],
     ['cd() { echo fn; }; cd /data; pwd', '/data\n'],
   ])('runs as bash runs it: %s', async (line, stdout) => {
     const r = await makeWs().shell(line)
     expect([text(r.stdout), r.exitCode]).toEqual([stdout, 0])
+  })
+})
+
+describe('a function named like a builtin that runs other words', () => {
+  it.each([
+    ['timeout', 'timeout 1 rm /data/f'],
+    ['env', 'env rm /data/f'],
+    ['xargs', 'echo /data/f | xargs rm'],
+    ['sh', "sh -c 'rm /data/f'"],
+  ])('runs none of them: %s', async (fn, line) => {
+    const ws = makeWs()
+    ws.createSession('s')
+    await ws.shell(`echo x > /data/f; ${fn}() { :; }`, { sessionId: 's' })
+    ws.getSession('s').commands = {
+      allow: null,
+      ask: [],
+      deny: [{ reason: 'no rm', commands: ['rm'] }],
+    }
+    expect((await ws.shell(line, { sessionId: 's' })).exitCode).toBe(0)
+    expect((await ws.shell('command timeout 1 rm /data/f', { sessionId: 's' })).exitCode).toBe(126)
   })
 })

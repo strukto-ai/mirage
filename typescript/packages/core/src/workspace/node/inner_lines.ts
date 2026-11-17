@@ -20,7 +20,8 @@ import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 import { readWrapper } from '../lookup/constants.ts'
-import { pathProgram } from '../lookup/lookup.ts'
+import { lookup, pathProgram } from '../lookup/lookup.ts'
+import { Consumer } from '../lookup/types.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
@@ -379,7 +380,23 @@ export function programLines(
   const [first, ...args] = words
   if (first === undefined) return []
   const head = wordValue(first)
+  if (runsFunction(head, session, registry)) return []
   const program = pathProgram(head, session, registry, links)
   if (program === null) return innerLines(head, args)
   return [{ line: null, argv: [{ raw: program, text: program }, ...args], open }]
+}
+
+/**
+ * Whether a function of the head's name runs instead of it, so the words it
+ * was given run nothing: the function's own lines each pass the gate as they
+ * run (`timeout() { :; }; timeout 1 rm x`).
+ */
+export function runsFunction(
+  head: string,
+  session: SessionState,
+  registry: MountRegistry,
+): boolean {
+  return (
+    Object.hasOwn(session.functions, head) && lookup(head, session, registry) === Consumer.FUNCTION
+  )
 }

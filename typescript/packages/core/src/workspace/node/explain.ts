@@ -73,6 +73,7 @@ import {
   innerReadable,
   readWord,
   readsOfTest,
+  runsFunction,
   wordValue,
   type InnerLine,
   type Word,
@@ -515,8 +516,9 @@ async function* judgeWords(
     occurrence.source,
   )
   // After a lost cd, a relative path names no file the pass can place.
-  const inners =
-    lost && !name.startsWith('/')
+  const inners = runsFunction(name, session, registry)
+    ? []
+    : lost && !name.startsWith('/')
       ? innerLines(name, words.slice(1))
       : programLines(
           words,

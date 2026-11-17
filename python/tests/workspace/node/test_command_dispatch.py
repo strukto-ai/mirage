@@ -19,7 +19,7 @@ from mirage.execution.types import MachineName
 from mirage.io.types import materialize
 from mirage.machine.handle import MachineHandle
 from mirage.policy import CommandExplanation, Deny, Route, ShellNode
-from mirage.policy.types import Outcome, Scope
+from mirage.policy.types import AdmissionRules, CommandRule, Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS, IN_PROCESS
 from mirage.runtime.language import LanguageRuntime
@@ -856,9 +856,43 @@ async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
         ("timeout() { echo fn; }; timeout --help", b"fn\n"),
         ("timeout() { echo fn; }; command timeout 1 echo x", b"x\n"),
         ("sleep() { echo fn; }; timeout 1 sleep 0", b""),
+        (
+            "echo x > /data/f; chmod() { echo fn; }; "
+            "timeout 1 chmod 600 /data/f; stat -c %a /data/f",
+            b"600\n",
+        ),
+        (
+            "echo x > /data/f; cat() { echo fn; }; xargs cat <<< /data/f",
+            b"x\n",
+        ),
         ("cd() { echo fn; }; cd /data; pwd", b"/data\n"),
     ],
 )
 async def test_a_function_shadows_a_builtin_that_is_a_program(line, stdout):
     r = await _ws().shell(line)
     assert (await materialize(r.stdout), r.exit_code) == (stdout, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "function, line",
+    [
+        ("timeout", "timeout 1 rm /data/f"),
+        ("env", "env rm /data/f"),
+        ("xargs", "echo /data/f | xargs rm"),
+        ("sh", "sh -c 'rm /data/f'"),
+    ],
+)
+async def test_a_function_runs_no_words_the_builtin_would_have_run(
+    function, line
+):
+    ws = _ws()
+    ws.create_session("s")
+    await ws.shell(f"echo x > /data/f; {function}() {{ :; }}", session_id="s")
+    ws.get_session("s").commands = AdmissionRules(
+        deny=(CommandRule(reason="no rm", commands=("rm",)),)
+    )
+    r = await ws.shell(line, session_id="s")
+    assert r.exit_code == 0
+    refused = await ws.shell("command timeout 1 rm /data/f", session_id="s")
+    assert refused.exit_code == 126

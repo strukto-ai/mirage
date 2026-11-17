@@ -886,8 +886,13 @@ export async function handleCommand(
     }
   }
 
+  // Shell functions, where one is what the name runs (a program run execs
+  // the program instead).
   const funcBody = session.functions[cmdName]
-  if (funcBody !== undefined) {
+  if (
+    funcBody !== undefined &&
+    lookup(cmdName, session, registry, context.frame.routing ?? undefined) === Consumer.FUNCTION
+  ) {
     if (parser === undefined) throw new Error('function invocation requires a parse scope')
     return runShellFunction(
       executeNode,

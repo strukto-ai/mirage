@@ -86,7 +86,9 @@ def path_program(
     return name
 
 
-def is_tool(name: str, session: SessionState) -> bool:
+def is_tool(
+    name: str, session: SessionState, registry: "MountRegistry"
+) -> bool:
     """Whether a command word is a tool the allow lists govern.
 
     Every named command is a subject, shell builtins included: an allow
@@ -100,10 +102,11 @@ def is_tool(name: str, session: SessionState) -> bool:
     Args:
         name (str): expanded command name.
         session (SessionState): the shell session running the line.
+        registry (MountRegistry): mount registry (command registration).
     """
     if "/" in name:
         return False
-    return not _function_first(name, session)
+    return lookup(name, session, registry) is not Consumer.FUNCTION
 
 
 def runs_programs(
@@ -315,8 +318,8 @@ def _function_first(name: str, session: SessionState) -> bool:
     shadows ``timeout``, ``env`` or ``echo`` there. The shell's own words
     (``SHELL_ONLY_BUILTINS``: cd, export, type) still beat one here,
     though bash lets a function shadow those too. A program run
-    (``timeout 1 sleep 0``) execs the program, which never sees a
-    function, so a builtin or namespace command of the name answers it.
+    (``timeout 1 sleep 0``) is not one either: the program is exec'd
+    and never sees a function (``_layers`` puts it last there).
 
     Args:
         name (str): expanded command name.
@@ -325,10 +328,7 @@ def _function_first(name: str, session: SessionState) -> bool:
     return (
         name in session.functions
         and name not in SHELL_ONLY_BUILTINS
-        and not (
-            (name in SHELL_NAMES or name in NAMESPACE_COMMANDS)
-            and is_program_invocation(session)
-        )
+        and not is_program_invocation(session)
     )
 
 
@@ -362,6 +362,13 @@ def _layers(
     native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
     first = _function_first(name, session)
+    # A program run execs the program, so a function answers only a
+    # name no other layer holds (``timeout 1 f``).
+    last = (
+        name in session.functions
+        and not first
+        and is_program_invocation(session)
+    )
     if first:
         found = True
         yield Consumer.FUNCTION
@@ -377,7 +384,7 @@ def _layers(
     if name in NAMESPACE_COMMANDS:
         found = True
         yield Consumer.NAMESPACE
-    if name in session.functions and not first:
+    if name in session.functions and not first and not last:
         found = True
         yield Consumer.FUNCTION
     if registry.clis.get(name) is not None:
@@ -392,6 +399,9 @@ def _layers(
     ):
         found = True
         yield Consumer.MOUNT
+    if last:
+        found = True
+        yield Consumer.FUNCTION
     fallback = bindings.get(EXTERNAL_COMMANDS)
     fallback_native = isinstance(
         fallback, (LineExecutorMixin, ProcessExecutorMixin)
