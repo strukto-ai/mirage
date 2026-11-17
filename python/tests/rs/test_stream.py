@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import sys
@@ -10,7 +11,13 @@ from mirage._rs import Stream, StreamError
 from mirage.concurrency.worker import Worker
 from mirage.io.spool import ByteSpool
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import Served, open_stream, run_stream, serve_requests
+from mirage.rs.stream import (
+    Served,
+    close_stream,
+    open_stream,
+    run_stream,
+    serve_requests,
+)
 from mirage.types import JsonValue
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
@@ -48,6 +55,54 @@ def test_one_stream_reads_one_input_after_another():
         assert not stream.done()
         assert stream.finish() == count
         assert stream.status() == status
+
+
+@pytest.mark.asyncio
+async def test_closed_wrapper_keeps_terminal_results_without_native_owner():
+    stream = open_stream(
+        "grep", {"patterns": ["*a"], "syntax": "extended", "count": True}
+    )
+    stream.begin({"label": "in"})
+    stream.feed(b"b\n")
+    assert stream.finish() == b"0\n"
+    await close_stream(stream)
+    await close_stream(stream)
+    assert not stream.live
+    assert stream.status() == 1
+    assert stream.take_stderr() == b"grep: warning: * at start of expression\n"
+    assert stream.take_stderr() == b""
+    with pytest.raises(RuntimeError, match="stream is closed"):
+        stream.feed(b"a\n")
+
+
+@pytest.mark.asyncio
+async def test_close_settles_retirement_despite_repeated_cancellation(
+    monkeypatch,
+):
+    stream = open_stream("base64", DECODE)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def retirement(*_):
+        entered.set()
+        await release.wait()
+        assert stream.live
+        calls.append("drained")
+        yield b""
+
+    monkeypatch.setattr(stream, "cancel", lambda: True)
+    monkeypatch.setattr("mirage.rs.stream._drained", retirement)
+    closing = asyncio.create_task(close_stream(stream))
+    await entered.wait()
+    closing.cancel()
+    await asyncio.sleep(0)
+    closing.cancel()
+    again = asyncio.create_task(close_stream(stream))
+    release.set()
+    await asyncio.gather(closing, again)
+    assert calls == ["drained"]
+    assert not stream.live
 
 
 def test_a_stream_of_one_input_refuses_another():
