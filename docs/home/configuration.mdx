@@ -1,19 +1,47 @@
 ---
 title: Overview
-description: Where each Mirage setting lives, from the server down to one session.
+description: Mirage's configuration is YAML, or the same fields sent through the API.
 icon: sliders
 ---
 
-Mirage settings live at three levels. A server runs workspaces, and each
-workspace runs sessions.
+Mirage's configuration is plain data. Write it as YAML and hand it to the
+`mirage` CLI, or send the same fields as JSON to the [server API](/api/reference).
+Both take one schema. The CLI fills in `${NAME}` and resolves script paths
+before it sends a config; the API takes it as written. See
+[Values and paths](/home/configuration/workspace#values-and-paths).
 
-| Level | What it sets | Where you set it |
-| --- | --- | --- |
-| [Server](/home/configuration/server) | Port, sign-in, rate limits, and the ceilings every workspace stays under | `~/.mirage/config.toml`, `MIRAGE_*` environment variables, or server options in code |
-| [Workspace](/home/configuration/workspace) | Mounts, CLIs, runtimes, network, limits, and where state and caches live | `workspace.yaml`, or `Workspace(...)` in code |
-| [Session](/home/configuration/session) | What one session can run and see, and its own limits, network, `cwd` and `env` | A profile under `profiles` in `workspace.yaml`, which a session names when it starts |
+<CodeGroup>
+```yaml workspace.yaml
+mounts:
+  /data: { vfs: ram, mode: write }
+profiles:
+  reader:
+    mounts:
+      /data: { mode: read }
+```
+```bash CLI
+mirage workspace create workspace.yaml --id demo
+```
+```bash API
+curl -s http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $MIRAGE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id": "demo", "config": {"mounts": {"/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"reader": {"mounts": {"/data": {"mode": "read"}}}}}}'
+```
+</CodeGroup>
 
-Limits can be set at all three levels. See [Limits](/home/limits).
+## Levels
 
-Credentials for mounts, CLIs and machines, and environment variables, are on
+Settings live at three levels. A server runs workspaces, and each workspace
+runs sessions.
+
+| Level | What it sets | In a file | Through the API |
+| --- | --- | --- | --- |
+| [Server](/home/configuration/server) | Port, sign-in, rate limits, and the ceilings every workspace stays under | `~/.mirage/config.toml` or `MIRAGE_*` environment variables | Read when the server starts |
+| [Workspace](/home/configuration/workspace) | Mounts, CLIs, runtimes, network, limits, and where state and caches live | `workspace.yaml` | `POST /v1/workspaces` with `config` |
+| [Session](/home/configuration/session) | What one session can run and see, and its own limits, network, `cwd` and `env` | A profile under `profiles` in `workspace.yaml` | `PUT /v1/workspaces/{id}/profiles/{name}`, then `PATCH` a session to switch it |
+
+In an app, `Workspace(...)` takes the same workspace config in code.
+Limits can be set at all three levels; see [Limits](/home/limits). A config
+never holds a secret, only a pointer to one; see
 [Service Credentials](/home/service-credentials).

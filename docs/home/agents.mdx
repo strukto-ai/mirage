@@ -1,21 +1,21 @@
 ---
 title: Agents
 sidebarTitle: Overview
-description: Give your agent a controllable, scriptable and managed Mirage virtual terminal.
+description: Give an agent a controllable, scriptable and managed Mirage virtual terminal.
 icon: robot
 ---
 
 ## Access
 
-These connections work independently of your agent's programming language.
+Every connection goes to one Mirage server, so they all see the same workspaces and sessions. Most use its HTTP port, 8765 by default.
 
-| Connection | What the agent gets |
-| --- | --- |
-| [MCP](/home/access/mcp) | Shell and file tools through an MCP client. |
-| [FUSE](/home/setup/fuse) | A VFS exposed by your own app as a folder its existing file tools can read and write. |
-| [SSH](/home/access/ssh) | A remote shell, plus file access through SFTP, SCP or SSHFS. |
-| [HTTP](/home/access/http) or [RPC](/home/access/rpc) | An API for running commands and working with files. |
-| [CLI](/home/access/cli) | Workspace access through `mirage` commands. |
+| Connection | What the agent gets | Reaches the server through |
+| --- | --- | --- |
+| <img noZoom src="/images/mcp-icon.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[MCP](/home/access/mcp) | A shell and six file tools through an MCP client. | the HTTP port |
+| <Icon icon="folder-open" size={14} /> [FUSE](/home/setup/fuse) | The workspace as a local folder, for the agent's own file tools. | a folder the server mounts |
+| <img noZoom src="/images/ssh-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[SSH](/home/access/ssh) | A remote shell, plus file access through SFTP, SCP or SSHFS. | its own SSH port |
+| <Icon icon="globe" size={14} /> [HTTP](/home/access/http) or <Icon icon="brackets-curly" size={14} /> [RPC](/home/access/rpc) | An API for running commands and working with files. | the HTTP port |
+| <Icon icon="terminal" size={14} /> [CLI](/home/access/cli) | `mirage` commands for workspaces and sessions, and `mirage-bash` as a shell. | the HTTP port |
 
 ## Supported agents
 
@@ -25,44 +25,46 @@ Run the agent as it is, on a workspace the `mirage` CLI creates.
 
 | Agent | Shell | MCP | SSH | FUSE |
 | --- | :-: | :-: | :-: | :-: |
-| [Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ |
-| [Codex](/home/agents/codex) | | ✓ | ✓ | ✓ |
-| [Grok Build](/home/agents/grok-build) | | ✓ | | ✓ |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | | ✓ | ✓ | ✓ |
+| <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Grok Build](/home/agents/grok-build) | | ✓ | | ✓ |
 
 - **Shell**: the agent's own shell is [`mirage-bash`](/home/access/cli#mirage-bash), so every command it runs goes to the workspace.
-- **MCP**: the agent adds Mirage's seven tools, from its plugin or `mirage mcp`.
+- **MCP**: the agent gets Mirage's seven tools beside its own, from its plugin or `mirage mcp`.
 - **SSH**: the agent's own tools run in the workspace.
 - **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
+
+Codex can also run in the workspace from a remote harness, through [exec-server forward](/home/agents/codex#exec-server-forward).
 
 Or load Mirage into the agent as a TypeScript plugin, which replaces its own file and shell tools:
 
 | Agent | Plugin |
 | --- | --- |
-| [Pi Coding Agent](/typescript/agents/pi) | `@struktoai/mirage-pi` |
-| [Pi Durable](/typescript/agents/pi-durable) | `@struktoai/mirage-pi-durable` |
-| [OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` |
-| [DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
+| <img noZoom src="/images/pi-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Pi Coding Agent](/typescript/agents/pi) | `@struktoai/mirage-pi` |
+| <img noZoom src="/images/pi-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Pi Durable](/typescript/agents/pi-durable) | `@struktoai/mirage-pi-durable` |
+| <img noZoom src="/images/opencode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` |
+| <img noZoom src="/images/deepseek-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
 
 ### Agent frameworks
 
 | Framework | Python | TypeScript |
 | --- | --- | --- |
-| Claude Agent SDK | [Guide](/python/agents/claude-agent-sdk) | [Guide](/typescript/agents/claude-agent-sdk) |
-| OpenAI Agents SDK | [Guide](/python/agents/openai-agents) | [Guide](/typescript/agents/openai) |
-| LangChain Deep Agents | [Guide](/python/agents/langchain) | [Guide](/typescript/agents/langchain) |
-| Agno | [Guide](/python/agents/agno) | — |
-| Pydantic AI | [Guide](/python/agents/pydantic-ai) | — |
-| Haystack | [Guide](/python/agents/haystack) | — |
-| Vercel AI SDK | — | [Guide](/typescript/agents/vercel) |
-| Mastra | — | [Guide](/typescript/agents/mastra) |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude Agent SDK | [Guide](/python/agents/claude-agent-sdk) | [Guide](/typescript/agents/claude-agent-sdk) |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenAI Agents SDK | [Guide](/python/agents/openai-agents) | [Guide](/typescript/agents/openai) |
+| <img noZoom src="/images/langchain-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />LangChain Deep Agents | [Guide](/python/agents/langchain) | [Guide](/typescript/agents/langchain) |
+| <img noZoom src="/images/agno-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Agno | [Guide](/python/agents/agno) | |
+| <img noZoom src="/images/pydantic-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Pydantic AI | [Guide](/python/agents/pydantic-ai) | |
+| <img noZoom src="/images/haystack-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Haystack | [Guide](/python/agents/haystack) | |
+| <img noZoom src="/images/vercel-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Vercel AI SDK | | [Guide](/typescript/agents/vercel) |
+| <img noZoom src="/images/mastra-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Mastra | | [Guide](/typescript/agents/mastra) |
 
 ### Hosted agents
 
 | Service | Python | TypeScript |
 | --- | --- | --- |
-| OpenAI Agents API | [Guide](/python/agents/openai-agents-api) | [Guide](/typescript/agents/openai-agents-api) |
-| Claude Managed Agents | [Guide](/python/agents/claude-managed-agents) | [Guide](/typescript/agents/claude-managed-agents) |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenAI Agents API | [Guide](/python/agents/openai-agents-api) | [Guide](/typescript/agents/openai-agents-api) |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude Managed Agents | [Guide](/python/agents/claude-managed-agents) | [Guide](/typescript/agents/claude-managed-agents) |
 
-For an agent you build yourself, use the [Python](/python/access/in-app) or
+For a custom agent, use the [Python](/python/access/in-app) or
 [TypeScript](/typescript/access/in-app) workspace API. [Session profiles](/home/configuration/session)
 control what each session can see and do.
