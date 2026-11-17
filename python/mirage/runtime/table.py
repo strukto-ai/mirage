@@ -25,8 +25,8 @@ from mirage.runtime.constants import (
     IN_PROCESS,
     JS_GROUP,
     LANGUAGE_COMMANDS,
-    MONTY_REMOTE,
     PYTHON_GROUP,
+    REMOTE,
     WHOLE_LINE,
 )
 from mirage.runtime.js.quickjs import QuickJsRuntime
@@ -103,8 +103,8 @@ RUNTIME_HINTS: dict[str, str] = {
 
 # The providers a ``machines:`` entry names for an engine of Mirage's
 # own rather than a machine it reaches: in its process, as native
-# programs on its host, or as monty on a remote server.
-ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST, MONTY_REMOTE)
+# programs on its host, or on a remote server.
+ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, HOST, REMOTE)
 
 # The runtimes a builtin provider runs no other way.
 _PLACED: dict[str, str] = {
@@ -136,8 +136,8 @@ def build_entry(
     provider builds the engine alone: ``in_process`` the one its
     ``runtime`` names, ``host`` the host's own programs, confined by
     sandlock when a ``sandbox`` block grants paths. The entry's other
-    keys are the engine's config. ``monty_remote`` builds monty on the
-    server its ``url`` names.
+    keys are the engine's config. ``remote`` builds the runtime it names,
+    monty for now, on the server its ``url`` or Logfire ``api_key`` names.
 
     Args:
         name (str): the entry's name, which the engine takes.
@@ -148,7 +148,7 @@ def build_entry(
         ValueError: the reserved name ``workspace`` or the workspace's
             own runtime, an engine its provider does not run, an
             ``in_process`` entry with no ``runtime``, a ``sandbox`` that
-            is not a mapping, a ``monty_remote`` entry with no ``url`` or
+            is not a mapping, a ``remote`` entry with no server to reach or
             a remote server's keys on another, or what ``build_machine``
             refuses.
     """
@@ -177,18 +177,19 @@ def build_entry(
         cls = _runtime_for(
             name, provider, fields.pop("runtime", None), sandbox
         )
-        if provider == MONTY_REMOTE and fields.get("url") is None:
+        if provider == REMOTE and fields.keys().isdisjoint({"url", "api_key"}):
             raise ValueError(
-                f"machine {name!r}: a {MONTY_REMOTE} machine names its url"
+                f"machine {name!r}: a {REMOTE} machine names its url, or a"
+                " Logfire api_key that names its region"
             )
         if (
-            provider != MONTY_REMOTE
+            provider != REMOTE
             and issubclass(cls, MontyRuntime)
             and {"url", "api_key"} & set(fields)
         ):
             raise ValueError(
                 f"machine {name!r}: a remote monty server is provider"
-                f" {MONTY_REMOTE}, not {provider}"
+                f" {REMOTE}, not {provider}"
             )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
@@ -216,7 +217,7 @@ def _runtime_for(
 
     Args:
         name (str): the entry's name, for the message.
-        provider (str): ``in_process``, ``host`` or ``monty_remote``.
+        provider (str): ``in_process``, ``host`` or ``remote``.
         runtime (str | type[Runtime] | None): the entry's ``runtime``: a
             registered name, a ``source:Class`` reference, or the class.
         sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
@@ -233,11 +234,15 @@ def _runtime_for(
                 f"machine {name!r}: a host runs its own programs, not a runtime"
             )
         return SandlockRuntime if sandbox is not None else LocalRuntime
-    if provider == MONTY_REMOTE:
-        if runtime is not None:
+    if provider == REMOTE:
+        if runtime is None:
             raise ValueError(
-                f"machine {name!r}: a {MONTY_REMOTE} machine runs monty,"
-                " not a runtime"
+                f"machine {name!r}: a {REMOTE} machine names its runtime"
+            )
+        if runtime not in (MontyRuntime.name, MontyRuntime):
+            raise ValueError(
+                f"machine {name!r}: a {REMOTE} machine runs monty, not"
+                f" {runtime!r}"
             )
         return MontyRuntime
     if runtime is None:

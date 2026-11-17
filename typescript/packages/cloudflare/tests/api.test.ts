@@ -366,11 +366,14 @@ describe('the server API in workerd', () => {
     expect(JSON.stringify(named.json)).toContain("runtime 'quickjs' does not run on Cloudflare")
     const remote = await call('POST', '/v1/workspaces', {
       id: 'remote',
-      config: { ...config, machines: { py: { provider: 'monty_remote', url: 'https://m' } } },
+      config: {
+        ...config,
+        machines: { py: { provider: 'remote', runtime: 'monty', url: 'https://m' } },
+      },
     })
     expect(remote.status).toBe(400)
     expect(JSON.stringify(remote.json)).toContain(
-      "provider 'monty_remote' does not run on Cloudflare Workers",
+      "provider 'remote' does not run on Cloudflare Workers",
     )
   })
 

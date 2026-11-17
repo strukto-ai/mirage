@@ -8,7 +8,8 @@
       "world": {
         "machines": {
           "py": {
-            "provider": "monty_remote",
+            "provider": "remote",
+            "runtime": "monty",
             "url": "${MONTY_REMOTE_URL}"
           }
         },
@@ -68,7 +69,8 @@
       "world": {
         "machines": {
           "py": {
-            "provider": "monty_remote",
+            "provider": "remote",
+            "runtime": "monty",
             "url": "${MONTY_REMOTE_URL}"
           }
         },
@@ -108,7 +110,8 @@
       "world": {
         "machines": {
           "py": {
-            "provider": "monty_remote",
+            "provider": "remote",
+            "runtime": "monty",
             "url": "http://127.0.0.1:1"
           }
         }

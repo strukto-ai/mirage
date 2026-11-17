@@ -246,12 +246,12 @@ function echoContainer(): RelayedContainer {
 async function addRemoteMonty(): Promise<Response> {
   const ws = new Workspace({ '/': new RAMVFS() })
   try {
-    ws.addMachine('py', { provider: 'monty_remote', url: 'https://m' })
+    ws.addMachine('py', { provider: 'remote', runtime: 'monty', url: 'https://m' })
     return new Response('added')
   } catch (err) {
     const refused =
       err instanceof Error &&
-      err.message.startsWith("provider 'monty_remote' does not run on Cloudflare Workers")
+      err.message.startsWith("provider 'remote' does not run on Cloudflare Workers")
     return new Response(refused ? 'refused' : 'failed')
   } finally {
     await ws.close()

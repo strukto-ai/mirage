@@ -25,7 +25,7 @@ import {
   IN_PROCESS,
   JS_GROUP,
   LANGUAGE_COMMANDS,
-  MONTY_REMOTE,
+  REMOTE,
   PYTHON_GROUP,
   WHOLE_LINE,
 } from './constants.ts'
@@ -77,9 +77,9 @@ const RUNTIME_HINTS: Record<string, string> = {
 /**
  * The providers a `machines:` entry names for a runtime of Mirage's own
  * rather than a machine it reaches: in its process, as native programs on
- * its host, or as monty on a remote server.
+ * its host, or on a remote server.
  */
-const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST, MONTY_REMOTE]
+const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, HOST, REMOTE]
 
 // Where each builtin runtime runs, when that is not in process. Null
 // prototype: names come from config.
@@ -165,14 +165,14 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * `runtime` names (a registered name, or a class a `source:Class` reference
  * loaded), `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
- * config. `monty_remote` builds monty on the server its `url` names. Mirrors
- * Python's `build_entry`.
+ * config. `remote` builds the runtime it names, monty for now, on the server
+ * its `url` or Logfire `apiKey` names. Mirrors Python's `build_entry`.
  *
  * Throws:
  *   Error: the reserved name `workspace` or the workspace's own runtime, a
  *   runtime its provider does not run, an `in_process` entry with no
- *   `runtime`, a `sandbox` that is not a mapping, a `monty_remote` entry with
- *   no `url` or a remote server's keys on another, or what `buildMachine`
+ *   `runtime`, a `sandbox` that is not a mapping, a `remote` entry with no
+ *   server to reach or a remote server's keys on another, or what `buildMachine`
  *   refuses.
  */
 export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
@@ -196,15 +196,17 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       named as string | RuntimeClass | undefined,
       sandbox,
     )
-    if (provider === MONTY_REMOTE && (fields.url === undefined || fields.url === null))
-      throw new Error(`machine '${name}': a ${MONTY_REMOTE} machine names its url`)
+    if (provider === REMOTE && !('url' in fields) && !('apiKey' in fields))
+      throw new Error(
+        `machine '${name}': a ${REMOTE} machine names its url, or a Logfire api_key that names its region`,
+      )
     if (
-      provider !== MONTY_REMOTE &&
+      provider !== REMOTE &&
       (cls === MontyRuntime || cls.prototype instanceof MontyRuntime) &&
       ('url' in fields || 'apiKey' in fields)
     )
       throw new Error(
-        `machine '${name}': a remote monty server is provider ${MONTY_REMOTE}, not ${String(provider)}`,
+        `machine '${name}': a remote monty server is provider ${REMOTE}, not ${String(provider)}`,
       )
     const config = { ...fields, ...sandbox }
     runtime = new cls({
@@ -232,9 +234,11 @@ function runtimeFor(
       throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
   }
-  if (provider === MONTY_REMOTE) {
-    if (runtime !== undefined)
-      throw new Error(`machine '${name}': a ${MONTY_REMOTE} machine runs monty, not a runtime`)
+  if (provider === REMOTE) {
+    if (runtime === undefined)
+      throw new Error(`machine '${name}': a ${REMOTE} machine names its runtime`)
+    if (runtime !== 'monty' && runtime !== MontyRuntime)
+      throw new Error(`machine '${name}': a ${REMOTE} machine runs monty, not '${String(runtime)}'`)
     return MontyRuntime
   }
   if (runtime === undefined)

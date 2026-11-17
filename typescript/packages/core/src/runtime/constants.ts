@@ -27,18 +27,17 @@ export const HOST = 'host'
 export const IN_PROCESS = 'in_process'
 
 /**
- * The provider of a Monty interpreter on a remote server, whose file and
- * environment calls come back to Mirage's process. Mirrors Python's
- * MONTY_REMOTE.
+ * The provider of a runtime on a remote server, whose file and environment
+ * calls come back to Mirage's process. Mirrors Python's REMOTE.
  */
-export const MONTY_REMOTE = 'monty_remote'
+export const REMOTE = 'remote'
 
 /**
  * The providers whose runs have no machine of their own to show: their
  * programs reach nothing but the workspace, as Mirage's own process does.
  * Mirrors Python's WORKSPACE_PROVIDERS.
  */
-export const WORKSPACE_PROVIDERS: readonly string[] = [IN_PROCESS, MONTY_REMOTE]
+export const WORKSPACE_PROVIDERS: readonly string[] = [IN_PROCESS, REMOTE]
 
 /** The machines a script CLI may run on: those whose runtime Mirage hands the script to. */
 export const SCRIPT_MACHINES: readonly string[] = [IN_PROCESS, HOST]

@@ -2229,7 +2229,10 @@ jobs:
                 + [(.world.machines // {})[] | (.runtime // .provider)])[]; . == $r))' "$f" >/dev/null
             }
             if named wasi; then wasi_suites+=("$n"); fi
-            if named monty_remote; then relay_suites+=("$n"); fi
+            # A remote machine reaches the Monty relay CI starts.
+            if jq -e 'any(.cases[]?; any((.world.machines // {})[]; .provider == "remote"))' "$f" >/dev/null; then
+              relay_suites+=("$n")
+            fi
             if named docker || named ssh; then box_suites+=("$n"); fi
             # The ssh backend mounts the ssh runtime's box over SFTP.
             if [[ " $backends " == *" ssh "* ]]; then

@@ -46,13 +46,13 @@ HOST: Final = "host"
 # The provider of the machine that is Mirage's own process.
 IN_PROCESS: Final = "in_process"
 
-# The provider of a Monty interpreter on a remote server, whose file and
-# environment calls come back to Mirage's process.
-MONTY_REMOTE: Final = "monty_remote"
+# The provider of a runtime on a remote server, whose file and environment
+# calls come back to Mirage's process.
+REMOTE: Final = "remote"
 
 # The providers whose runs have no machine of their own to show: their
 # programs reach nothing but the workspace, as Mirage's own process does.
-WORKSPACE_PROVIDERS: Final = (IN_PROCESS, MONTY_REMOTE)
+WORKSPACE_PROVIDERS: Final = (IN_PROCESS, REMOTE)
 
 # The machines a script CLI may run on: those whose runtime Mirage hands
 # the script to.

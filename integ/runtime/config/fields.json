@@ -56,16 +56,17 @@
       }
     },
     {
-      "id": "monty_remote_names_its_url",
+      "id": "remote_names_its_url",
       "world": {
         "machines": {
           "py": {
-            "provider": "monty_remote"
+            "provider": "remote",
+            "runtime": "monty"
           }
         }
       },
       "build_error": {
-        "contains": "a monty_remote machine names its url"
+        "contains": "a remote machine names its url"
       }
     },
     {
@@ -80,7 +81,7 @@
         }
       },
       "build_error": {
-        "contains": "a remote monty server is provider monty_remote"
+        "contains": "a remote monty server is provider remote"
       }
     }
   ]

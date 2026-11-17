@@ -246,7 +246,10 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
         ({"provider": "host"}, "LocalRuntime"),
         ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
         ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
-        ({"provider": "monty_remote", "url": "https://m"}, "MontyRuntime"),
+        (
+            {"provider": "remote", "runtime": "monty", "url": "https://m"},
+            "MontyRuntime",
+        ),
     ],
 )
 def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
@@ -288,25 +291,31 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
         ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
         ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
         ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),
-        ("py", {"provider": "monty_remote"}, "names its url"),
         (
             "py",
-            {
-                "provider": "monty_remote",
-                "url": "https://m",
-                "runtime": "monty",
-            },
-            "not a runtime",
+            {"provider": "remote", "url": "https://m"},
+            "names its runtime",
+        ),
+        (
+            "py",
+            {"provider": "remote", "runtime": "quickjs", "url": "https://m"},
+            "runs monty",
+        ),
+        ("py", {"provider": "remote", "runtime": "monty"}, "names its url"),
+        (
+            "py",
+            {"provider": "remote", "runtime": "monty", "api_key": "k"},
+            "needs a url",
         ),
         (
             "py",
             {"provider": "in_process", "runtime": "monty", "url": "https://m"},
-            "monty_remote",
+            "provider remote",
         ),
         (
             "py",
             {"provider": "in_process", "runtime": "monty", "api_key": "k"},
-            "monty_remote",
+            "provider remote",
         ),
     ],
 )
@@ -413,7 +422,7 @@ def test_placement_keeps_the_name_an_entry_was_built_with():
 
 def test_placement_puts_a_remote_monty_on_its_server():
     remote = MontyRuntime(config={"url": "https://m"})
-    assert placement(remote) == ("monty_remote", "monty")
+    assert placement(remote) == ("remote", "monty")
 
 
 class Named(Runtime):

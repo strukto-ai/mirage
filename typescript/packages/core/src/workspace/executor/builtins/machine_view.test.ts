@@ -137,8 +137,8 @@ describe('machine view', () => {
     const own = { ids: [], picked: true, several: false, workspace: true, engines: [] }
     expect(inScope(own, 'mirage')).toBe(true)
     expect(inScope(own, 'docker:a')).toBe(false)
-    expect(inScope(one, 'monty_remote:py')).toBe(true)
-    expect(inScope({ ...one, picked: true }, 'monty_remote:py')).toBe(false)
+    expect(inScope(one, 'remote:py')).toBe(true)
+    expect(inScope({ ...one, picked: true }, 'remote:py')).toBe(false)
   })
 
   it('reads options that follow operands', () => {
@@ -225,13 +225,17 @@ describe('an engine', () => {
   })
 
   it('lists a remote monty as an engine', async () => {
-    const [, remote] = buildEntry('py', { provider: 'monty_remote', url: 'http://127.0.0.1:1' })
+    const [, remote] = buildEntry('py', {
+      provider: 'remote',
+      runtime: 'monty',
+      url: 'http://127.0.0.1:1',
+    })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, machines: [new ProcessReach(), remote] },
     )
     try {
-      expect(await shown(ws, 'nproc')).toContain('1  monty_remote:py\n')
+      expect(await shown(ws, 'nproc')).toContain('1  remote:py\n')
     } finally {
       await ws.close()
     }

@@ -1,9 +1,9 @@
 # monty_remote
 
-Monty on a remote server (`provider: monty_remote`). The suite runs against
-`integ/server/monty_remote/relay.py`, monty's own gRPC relay, which bridges
-each session to a local `monty subprocess`; `MONTY_REMOTE_URL` names it, and
-the suite is skipped without it.
+Monty on a remote server (`provider: remote`, `runtime: monty`). The suite runs
+against `integ/server/monty_remote/relay.py`, monty's own gRPC relay, which
+bridges each session to a local `monty subprocess`; `MONTY_REMOTE_URL` names it,
+and the suite is skipped without it.
 
 | File          | Pins                                                                                                                                                        |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |

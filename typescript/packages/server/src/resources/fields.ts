@@ -22,7 +22,7 @@ import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import {
   HOST,
   IN_PROCESS,
-  MONTY_REMOTE,
+  REMOTE,
   SECRET_CONFIG_FIELDS,
 } from '@struktoai/mirage-core/runtime/constants'
 import {
@@ -183,15 +183,15 @@ function configTypes(configFields: ConfigFields): Field[] {
   return fields
 }
 
-// The keys only a `monty_remote` machine takes.
+// The keys only a `remote` machine takes.
 const REMOTE_KEYS: readonly string[] = ['url', 'api_key']
 
 /**
  * Every machine provider and engine provider, with its fields: an
  * `in_process` machine's are those of each runtime it may run, none
  * required, a host's where this host registers its own programs, its
- * `sandbox` block's as `sandbox.<field>` in that group, and a `monty_remote`
- * machine's monty's with its `url` required.
+ * `sandbox` block's as `sandbox.<field>` in that group, and a `remote`
+ * machine's the runtime it names and monty's.
  */
 function machineTypes(): TypeTable {
   const captures: Field = { name: 'captures', type: 'list', secret: false, required: false }
@@ -210,11 +210,9 @@ function machineTypes(): TypeTable {
       ...engine.values(),
       captures,
     ],
-    [MONTY_REMOTE]: [
-      ...configTypes(monty.configFields).map((field) => ({
-        ...field,
-        required: field.name === 'url',
-      })),
+    [REMOTE]: [
+      { name: 'runtime', type: 'string', secret: false, required: true, options: ['monty'] },
+      ...configTypes(monty.configFields),
       captures,
     ],
   }

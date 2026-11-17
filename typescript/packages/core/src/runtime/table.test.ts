@@ -311,7 +311,7 @@ describe('buildEntry', () => {
     [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
-    [{ provider: 'monty_remote', url: 'https://m' }, 'MontyRuntime'],
+    [{ provider: 'remote', runtime: 'monty', url: 'https://m' }, 'MontyRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
     const [handle, runtime] = buildEntry('py', spec)
     expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])
@@ -332,10 +332,12 @@ describe('buildEntry', () => {
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
-    ['py', { provider: 'monty_remote' }, /names its url/],
-    ['py', { provider: 'monty_remote', url: 'https://m', runtime: 'monty' }, /not a runtime/],
-    ['py', { provider: 'in_process', runtime: 'monty', url: 'https://m' }, /monty_remote/],
-    ['py', { provider: 'in_process', runtime: 'monty', apiKey: 'k' }, /monty_remote/],
+    ['py', { provider: 'remote', url: 'https://m' }, /names its runtime/],
+    ['py', { provider: 'remote', runtime: 'quickjs', url: 'https://m' }, /runs monty/],
+    ['py', { provider: 'remote', runtime: 'monty' }, /names its url/],
+    ['py', { provider: 'remote', runtime: 'monty', apiKey: 'k' }, /needs a url/],
+    ['py', { provider: 'in_process', runtime: 'monty', url: 'https://m' }, /provider remote/],
+    ['py', { provider: 'in_process', runtime: 'monty', apiKey: 'k' }, /provider remote/],
   ])('refuses what its provider does not run: %s %j', (name, spec, refusal) => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })
@@ -396,7 +398,7 @@ describe('registerRuntime', () => {
 
   it('puts a remote monty on its server', () => {
     const remote = new MontyRuntime({ config: { url: 'https://m' } })
-    expect(placement(remote)).toEqual(['monty_remote', 'monty'])
+    expect(placement(remote)).toEqual(['remote', 'monty'])
   })
 })
 

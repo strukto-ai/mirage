@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.errors import FsCondition
 from mirage.runtime.constants import sdk_install_hint
 
@@ -37,6 +39,15 @@ POOL_WORKERS = 4
 # Seconds a remote server may take to answer one turn: the pool's own
 # default of 10 would cut off a longer guest sleep, and none is refused.
 REMOTE_REQUEST_TIMEOUT = 60.0
+
+# Logfire's Agent Sandboxes server for each region a project key names.
+LOGFIRE_REGIONS = {
+    "us": "https://logfire-us.pydantic.dev",
+    "eu": "https://logfire-eu.pydantic.dev",
+}
+
+# A Logfire project key, pylf_v<version>_<region>_<secret>.
+LOGFIRE_KEY = re.compile(r"pylf_v\d+_([a-z]+)_")
 
 # A walk or glob reads its whole tree in one `Path.scan`, so these bound
 # what one call builds on the host: the entries a reply may hold, and how

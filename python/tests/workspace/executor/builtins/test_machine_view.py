@@ -97,8 +97,8 @@ def test_mirages_own_is_in_scope_unless_another_machine_is_picked():
     assert not in_scope(MachineScope(("docker:a",), True), "mirage")
     assert in_scope(MachineScope((), True, True), "mirage")
     assert not in_scope(MachineScope((), True, True), "docker:a")
-    assert in_scope(MachineScope(("docker:a",)), "monty_remote:py")
-    assert not in_scope(MachineScope(("docker:a",), True), "monty_remote:py")
+    assert in_scope(MachineScope(("docker:a",)), "remote:py")
+    assert not in_scope(MachineScope(("docker:a",), True), "remote:py")
 
 
 def test_options_may_follow_operands():
@@ -214,7 +214,12 @@ async def test_an_engine_answers_as_the_workspace_never_as_the_server():
 @pytest.mark.asyncio
 async def test_a_remote_monty_is_listed_as_an_engine():
     _, remote = build_entry(
-        "py", {"provider": "monty_remote", "url": "http://127.0.0.1:1"}
+        "py",
+        {
+            "provider": "remote",
+            "runtime": "monty",
+            "url": "http://127.0.0.1:1",
+        },
     )
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -222,7 +227,7 @@ async def test_a_remote_monty_is_listed_as_an_engine():
         machines=[ProcessReach(["hold"]), remote],
     )
     try:
-        assert "1  monty_remote:py\n" in await shown(ws, "nproc")
+        assert "1  remote:py\n" in await shown(ws, "nproc")
     finally:
         await ws.close()
 

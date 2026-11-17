@@ -72,7 +72,7 @@ class MachineScope:
 def in_scope(scope: MachineScope, machine: str) -> bool:
     """Whether a process on ``machine`` is in a scope: a machine in it,
     or Mirage's own, or an engine's that reaches only the workspace
-    (``in_process``, ``monty_remote``), unless the line picked another
+    (``in_process``, ``remote``), unless the line picked another
     machine.
 
     Args:

@@ -14,7 +14,7 @@
 
 import type { Context } from '../../../commands/config.ts'
 import { MachineName } from '../../../execution/types.ts'
-import { MONTY_REMOTE } from '../../constants.ts'
+import { REMOTE } from '../../constants.ts'
 import { PythonRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import {
@@ -25,7 +25,7 @@ import {
 } from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice } from '../flags.ts'
-import type { MontyConfig } from './config.ts'
+import { remoteUrl, type MontyConfig } from './config.ts'
 import { MontyExecution } from './execution.ts'
 
 /**
@@ -57,9 +57,9 @@ import { MontyExecution } from './execution.ts'
  * policy's own runtime keeps a pool of its own, since its programs judge the
  * reads runs on the shared pool make and must not wait behind them.
  *
- * A `url` runs the interpreter on that remote Monty server instead, on a
- * pool of the install's own, and its file and environment calls still come
- * back through the workspace dispatch.
+ * A `url`, or a Logfire `apiKey` that names its region, runs the interpreter
+ * on that remote Monty server instead, on a pool of the install's own, and its
+ * file and environment calls still come back through the workspace dispatch.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
   static override readonly configFields: ConfigFields = {
@@ -82,29 +82,26 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {}
   shared = true
   private readonly maxMemory: number | null
+  private readonly url: string | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
     super(options, MontyRuntime.configFields)
     this.maxMemory = memoryLimit(this.config.maxMemory)
-    if (this.config.apiKey !== undefined && this.config.url === undefined)
-      throw new Error('monty: apiKey needs a url')
+    this.url = remoteUrl(this.config)
+    if (this.config.apiKey !== undefined && this.url === null)
+      throw new Error('monty: apiKey needs a url, unless it is a Logfire key from a known region')
   }
 
   /**
-   * The `monty_remote` machine of its entry's name when it runs on a remote
+   * The `remote` machine of its entry's name when it runs on a remote
    * server, else the `in_process` one.
    */
   override get machine(): MachineName | null {
-    return this.config.url === undefined ? super.machine : new MachineName(MONTY_REMOTE, this.name)
+    return this.url === null ? super.machine : new MachineName(REMOTE, this.name)
   }
 
   private execution(shared = false): MontyExecution {
-    return new MontyExecution(
-      this.maxMemory,
-      shared,
-      this.config.url ?? null,
-      this.config.apiKey ?? null,
-    )
+    return new MontyExecution(this.maxMemory, shared, this.url, this.config.apiKey ?? null)
   }
 
   protected override openEngine(): Promise<MontyExecution> {

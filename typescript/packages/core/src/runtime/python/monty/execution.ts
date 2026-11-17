@@ -434,7 +434,7 @@ export class MontyExecution {
     const module = await this.loadModule()
     if (this.url === null) return module.Monty.create()
     if (module.MontyRemote === undefined)
-      throw new MontyUnavailableError("monty_remote needs @pydantic/monty's Node build")
+      throw new MontyUnavailableError("a remote monty needs @pydantic/monty's Node build")
     const key = this.apiKey
     return module.MontyRemote.create(this.url, {
       requestTimeout: REMOTE_REQUEST_TIMEOUT,

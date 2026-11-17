@@ -22,7 +22,7 @@ from mirage.execution.process.session import SessionProcesses
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.runtime.binding import answer_of
 from mirage.runtime.python import MontyRuntime
-from mirage.runtime.python.monty.config import MontyConfig
+from mirage.runtime.python.monty.config import MontyConfig, remote_url
 from mirage.runtime.python.monty.constants import REMOTE_REQUEST_TIMEOUT
 from mirage.runtime.types import Program, RunAnswer
 from mirage.types import MountMode, PathSpec
@@ -441,7 +441,7 @@ def remote(monkeypatch):
 async def test_a_remote_entry_runs_on_a_remote_pool_of_its_own(
     remote, key, metadata
 ):
-    entry = {"provider": "monty_remote", "url": _URL, **key}
+    entry = {"provider": "remote", "runtime": "monty", "url": _URL, **key}
     spaces = [
         Workspace(
             {"/d": RAMVFS()}, mode=MountMode.EXEC, machines={"py": dict(entry)}
@@ -486,14 +486,16 @@ async def test_ps_shows_a_remote_run_on_its_own_machine(remote):
     ws = Workspace(
         {"/d": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"py": {"provider": "monty_remote", "url": _URL}},
+        machines={
+            "py": {"provider": "remote", "runtime": "monty", "url": _URL}
+        },
     )
     try:
         said = await ws.shell(
             "python3 -c 'import time; time.sleep(1)' &"
             " sleep 0.3; ps -o machine=; wait"
         )
-        assert "monty_remote:py" in said.stdout.decode().split()
+        assert "remote:py" in said.stdout.decode().split()
     finally:
         await ws.close()
 
@@ -505,7 +507,8 @@ async def test_a_server_out_of_reach_exits_1_on_one_line():
         mode=MountMode.EXEC,
         machines={
             "py": {
-                "provider": "monty_remote",
+                "provider": "remote",
+                "runtime": "monty",
                 "url": "http://127.0.0.1:1",
                 "api_key": "s3cret",
             }
@@ -521,10 +524,51 @@ async def test_a_server_out_of_reach_exits_1_on_one_line():
     assert told.count("\n") == 1 and "s3cret" not in told
 
 
-def test_a_key_needs_a_url_and_never_prints():
-    with pytest.raises(ValueError, match="api_key needs a url"):
-        MontyConfig(api_key="k")
+@pytest.mark.parametrize(
+    ("given", "url"),
+    [
+        ({"api_key": "pylf_v2_us_k"}, "https://logfire-us.pydantic.dev"),
+        ({"api_key": "pylf_v1_eu_k"}, "https://logfire-eu.pydantic.dev"),
+        ({"url": _URL, "api_key": "pylf_v2_us_k"}, _URL),
+        ({"url": _URL}, _URL),
+        ({}, None),
+    ],
+)
+def test_a_server_is_its_url_else_a_logfire_keys_region(given, url):
+    assert remote_url(MontyConfig(**given)) == url
+
+
+@pytest.mark.parametrize("key", ["k", "pylf_v2_zz_k"])
+def test_a_key_that_names_no_known_region_needs_a_url(key):
+    with pytest.raises(ValueError, match="needs a url"):
+        MontyConfig(api_key=key)
+
+
+def test_a_key_never_prints():
     assert "s3cret" not in repr(MontyConfig(url=_URL, api_key="s3cret"))
+
+
+@pytest.mark.asyncio
+async def test_a_logfire_key_alone_reaches_its_region(remote):
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "py": {
+                "provider": "remote",
+                "runtime": "monty",
+                "api_key": "pylf_v2_eu_k",
+            }
+        },
+    )
+    try:
+        said = await ws.shell("python3 -c 'print(1)'")
+    finally:
+        await ws.close()
+    assert said.stdout == b"1\n"
+    assert [url for url, _ in remote.asked] == [
+        "https://logfire-eu.pydantic.dev"
+    ]
 
 
 class _Denied(Exception):

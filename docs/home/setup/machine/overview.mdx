@@ -12,7 +12,7 @@ runs its own commands (`grep`, `cat`, pipes, redirects) itself; `python3`,
 | Machine | Runs | SDK |
 | --- | --- | --- |
 | [In Process](/home/setup/machine/in_process) | Python or JavaScript on a [runtime](/home/setup/runtime/overview), inside Mirage | both |
-| [Monty Remote](/home/setup/runtime/monty#remote-server) | Python on a remote Monty server, with files and environment from Mirage | Python, Node |
+| [Remote](/home/setup/runtime/monty#remote-server) | Python on a remote Monty server (`runtime: monty`), with files and environment from Mirage | Python, Node |
 | [Host](/home/setup/machine/host) | programs installed on the host, confined by a `sandbox` on Linux | Python, Node |
 | A [provider](#providers) | programs installed on a container, VM, cloud sandbox or SSH host you already have | Python, Node; E2B also in the browser |
 
@@ -37,7 +37,7 @@ machines:
     mount_type: ssh
 ```
 
-Each entry names its `provider`: `in_process`, `host`, `monty_remote` or a
+Each entry names its `provider`: `in_process`, `host`, `remote` or a
 [provider](#providers). The entry's other keys are its settings, snake_case in
 YAML for both SDKs; a key it does not take is refused.
 
@@ -79,7 +79,7 @@ another machine capturing it exits 126.
 
 | Machine | Default `captures` |
 | --- | --- |
-| `in_process` with Monty, WASI or Pyodide, `monty_remote`, `host` | `@python` |
+| `in_process` with Monty, WASI or Pyodide, `remote` with Monty, `host` | `@python` |
 | `in_process` with QuickJS | `@js` |
 | `host` with a `sandbox`, a provider | `@external` |
 

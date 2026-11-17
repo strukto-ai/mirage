@@ -50,7 +50,7 @@ export interface MachineScope {
 /**
  * Whether a process on `machine` is in a scope: a machine in it, or Mirage's
  * own, or an engine's that reaches only the workspace (`in_process`,
- * `monty_remote`), unless the line picked another machine. Mirrors Python's
+ * `remote`), unless the line picked another machine. Mirrors Python's
  * `in_scope`.
  */
 export function inScope(scope: MachineScope, machine: string): boolean {

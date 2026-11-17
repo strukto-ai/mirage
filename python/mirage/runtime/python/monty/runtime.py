@@ -21,11 +21,11 @@ from mirage.commands.config import Context
 from mirage.concurrency.limiter import settle
 from mirage.execution.types import MachineName
 from mirage.runtime.config import RuntimeConfig, memory_limit
-from mirage.runtime.constants import MONTY_REMOTE
+from mirage.runtime.constants import REMOTE
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
-from mirage.runtime.python.monty.config import MontyConfig
+from mirage.runtime.python.monty.config import MontyConfig, remote_url
 from mirage.runtime.python.monty.constants import MISSING_PACKAGE_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
@@ -63,9 +63,10 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
     since its programs judge the reads runs on the shared pool make and
     must not wait behind them.
 
-    A ``url`` runs the interpreter on that remote Monty server instead,
-    on a pool of the install's own, and its file and environment calls
-    still come back through the workspace dispatch.
+    A ``url``, or a Logfire ``api_key`` that names its region, runs the
+    interpreter on that remote Monty server instead, on a pool of the
+    install's own, and its file and environment calls still come back
+    through the workspace dispatch.
     """
 
     name = "monty"
@@ -98,22 +99,23 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             raise ImportError(MISSING_PACKAGE_HINT)
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
+        self._url = remote_url(self.config)
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}
         self.shared = True
 
     @property
     def machine(self) -> MachineName | None:
-        """The ``monty_remote`` machine of its entry's name when it runs
-        on a remote server, else the ``in_process`` one."""
-        if self.config.url is None:
+        """The ``remote`` machine of its entry's name when it runs on a
+        remote server, else the ``in_process`` one."""
+        if self._url is None:
             return super().machine
-        return MachineName(MONTY_REMOTE, self.name)
+        return MachineName(REMOTE, self.name)
 
     def _execution(self, shared: bool = False) -> MontyExecution:
         return MontyExecution(
             self._max_memory,
             shared=shared,
-            url=self.config.url,
+            url=self._url,
             api_key=self.config.api_key,
         )
 

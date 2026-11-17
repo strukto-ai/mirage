@@ -41,6 +41,15 @@ export const POOL_WORKERS = 4
 // of 10 would cut off a longer guest sleep, and none is refused.
 export const REMOTE_REQUEST_TIMEOUT = 60
 
+// Logfire's Agent Sandboxes server for each region a project key names.
+export const LOGFIRE_REGIONS: Readonly<Record<string, string>> = {
+  us: 'https://logfire-us.pydantic.dev',
+  eu: 'https://logfire-eu.pydantic.dev',
+}
+
+// A Logfire project key, pylf_v<version>_<region>_<secret>.
+export const LOGFIRE_KEY = /^pylf_v\d+_([a-z]+)_/
+
 // A walk or glob reads its whole tree in one `Path.scan`, so these bound
 // what one call builds on the host: the entries a reply may hold, and how
 // deep a scan that follows links goes when it names no depth, since a
