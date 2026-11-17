@@ -17,7 +17,7 @@ import importlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextvars import Context
 from typing import Any, TypeVar
 
@@ -35,10 +35,11 @@ from mirage.machine.constants import (
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
     SSHFS_HINT,
-    SSHFS_LOG_PREFIX,
+    SSHFS_LOG_NAME,
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
+    machine_dir_line,
     mount_field,
 )
 from mirage.machine.types import MachinePipe, MountType
@@ -133,10 +134,9 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
 def served_prefixes(prefixes: Iterable[str]) -> list[str]:
     """The prefixes ssh serves a machine: its top prefixes but ``/tmp``.
 
-    ``/tmp`` stays the machine's own. The machine keeps its sockets,
-    temporary files and Mirage's own run reports there, and a user who is
-    not root cannot mount over it. A mount under ``/tmp`` is still served
-    at its own path.
+    ``/tmp`` stays the machine's own. The machine keeps its sockets and
+    temporary files there, and a user who is not root cannot mount over
+    it. A mount under ``/tmp`` is still served at its own path.
 
     Args:
         prefixes (Iterable[str]): the mount prefixes the session sees.
@@ -719,10 +719,9 @@ class MachineMounts:
             nothing new served; None once in step, or with a mount of the
             machine's own gone, which ``validate`` refuses.
         """
+        served = served_prefixes(binding.resolver.prefixes())
         visible = frozenset(
-            await self._mountable(
-                files, served_prefixes(binding.resolver.prefixes())
-            )
+            await self._mountable(files, served)
             if self._mount_type != "fuse"
             else ()
         )
@@ -797,12 +796,14 @@ class MachineMounts:
             server = pipe_server()
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._provider}: {SSHFS_HINT}")
+            folder = await self._folder(served)
             try:
                 for prefix in new:
                     await self._serve(
                         server(files, session, self._lend),
                         prefix,
                         present,
+                        folder,
                     )
             except BaseException:
                 await self._unmount()
@@ -850,11 +851,27 @@ class MachineMounts:
             )
         return found.exit_code == 0
 
+    async def _folder(self, prefixes: Sequence[str]) -> str:
+        """Mirage's folder on the machine (``machine_dir_line``), where
+        each sshfs keeps its log: resolved once, so every look at a log
+        finds the one sshfs wrote.
+
+        Args:
+            prefixes (Sequence[str]): the workspace prefixes the machine
+                has at the same paths.
+        """
+        found = await self._run(machine_dir_line(prefixes) + 'printf %s "$d"')
+        folder = said(found.stdout)
+        if found.exit_code != 0 or not folder:
+            raise RuntimeError(f"{self._provider}: {said(found.stderr)}")
+        return folder
+
     async def _serve(
         self,
         server: Any,
         prefix: str,
         present: dict[str, tuple[str, str]],
+        folder: str,
     ) -> None:
         self._under[prefix] = present.get(prefix)
         old, kind = present.get(prefix, ("", ""))
@@ -876,13 +893,13 @@ class MachineMounts:
                 f"{self._provider}: cannot make {prefix} in the machine: "
                 f"{said(made.stderr)}"
             )
-        log = single_quote(f"{SSHFS_LOG_PREFIX}_{uuid.uuid4().hex}.log")
+        log = single_quote(f"{folder}/{SSHFS_LOG_NAME}-{uuid.uuid4().hex}.log")
         self._serves += 1
         source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
         pipe = await self._open_pipe(
-            f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} {path} "
-            f"2>{log}"
+            f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} "
+            f"{path} 2>{log}"
         )
         context = Context()
         context.run(SERVED_BY.set, self._machine)

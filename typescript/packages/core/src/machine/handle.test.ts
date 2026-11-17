@@ -20,17 +20,23 @@ import { Workspace } from '../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
-import { MachineHandle, PidLineFilter } from './handle.ts'
+import { ExitLineFilter, MachineHandle, PidLineFilter } from './handle.ts'
 import { concat } from '../utils/bytes.ts'
 import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
+  FIFO_NAME,
   faketimeProbe,
+  fifoLine,
   isRun,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
+  RUN_DRAIN_SECONDS,
+  RUN_EXIT_MARK,
   RUN_PID_HOLD,
   RUN_PID_MARK,
+  RUN_PROGRAM_AT,
+  runExitMark,
   runTag,
   stopLine,
 } from './constants.ts'
@@ -49,7 +55,7 @@ const DEC = new TextDecoder()
 
 // The argv a sandbox runs, as the line the fakes answer.
 function lineOf(argv: readonly string[]): string {
-  const run = isRun(argv) ? argv.slice(7) : argv
+  const run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
   return run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
 }
 
@@ -107,8 +113,25 @@ class FifoBox extends RecordingMachine {
   ): Promise<RunResult> {
     const data = stdin === null ? null : await materialize(stdin)
     if (line.includes('rm -f') && this.lost) throw new Error('gone')
-    return super.execLine(line, data, env, cwd)
+    const done = await super.execLine(line, data, env, cwd)
+    if (!line.includes('mkfifo')) return done
+    return { ...done, stdout: ENC.encode(`/home/u/.mirage/fd-${named(line)}`) }
   }
+}
+
+// The name a line making a named pipe (`fifoLine`) gives it.
+function named(line: string): string {
+  const marker = `"$d/${FIFO_NAME}-`
+  return line.slice(line.lastIndexOf(marker) + marker.length).split('"')[0] ?? ''
+}
+
+// The one line that made a named pipe, and the path the box answered.
+function fifoOf(lines: readonly string[]): [string, string] {
+  const made = lines.filter((line) => line.includes('mkfifo'))
+  expect(made).toHaveLength(1)
+  const line = made[0] ?? ''
+  expect(line).toBe(fifoLine(named(line), ['/data']))
+  return [line, `/home/u/.mirage/fd-${named(line)}`]
 }
 
 // A box whose connection drops while it runs `train`.
@@ -807,7 +830,7 @@ describe('PidLineFilter', () => {
     ]
     expect(await filtered(chunks, true)).toEqual([
       'Defaulted container\nerr\n',
-      [{ pid: 812, started: 99, exitCode: null }],
+      [{ pid: 812, started: 99 }],
     ])
   })
 
@@ -815,7 +838,7 @@ describe('PidLineFilter', () => {
   // once, and a line further in is the program's own.
   it('gives up the pid line from stdout only at its start', async () => {
     const head = new Uint8Array([...RUN_PID_MARK, ...ENC.encode('7 1\nout')])
-    expect(await filtered([head], false)).toEqual(['out', [{ pid: 7, started: 1, exitCode: null }]])
+    expect(await filtered([head], false)).toEqual(['out', [{ pid: 7, started: 1 }]])
     const late = new Uint8Array([...ENC.encode('x'), ...RUN_PID_MARK, ...ENC.encode('7 1\n')])
     expect(await filtered([late], false)).toEqual([DEC.decode(late), []])
   })
@@ -828,6 +851,144 @@ describe('PidLineFilter', () => {
     expect(await filtered([ENC.encode(big), ENC.encode('!')], true)).toEqual([`${big}!`, []])
   })
 })
+
+const MARK = runExitMark('n1')
+
+async function exited(chunks: readonly Uint8Array[]): Promise<[string, number[]]> {
+  const out: Uint8Array[] = []
+  const codes: number[] = []
+  const line = new ExitLineFilter(
+    (chunk) => Promise.resolve(void out.push(chunk)),
+    (code) => codes.push(code),
+    MARK,
+  )
+  for (const chunk of chunks) await line.write(chunk)
+  await line.finish()
+  return [out.map((chunk) => DEC.decode(chunk)).join(''), codes]
+}
+
+describe('ExitLineFilter', () => {
+  // The exit line can arrive in pieces; it comes out and its status is told,
+  // and what the program left running writes after it passes.
+  it('takes the exit line out and gives the status', async () => {
+    const chunks = [
+      ENC.encode('err\n'),
+      MARK.subarray(0, 4),
+      new Uint8Array([...MARK.subarray(4), ...ENC.encode('4')]),
+      ENC.encode('2\nlater\n'),
+    ]
+    expect(await exited(chunks)).toEqual(['err\nlater\n', [42]])
+  })
+
+  // A mark with no status line after it is the program's own, and so is a
+  // piece of one the stream ends on.
+  it("leaves a mark without a status line as the program's own", async () => {
+    const own = `x${DEC.decode(MARK)}abc\n`
+    expect(await exited([ENC.encode(own)])).toEqual([own, []])
+    const long = `${DEC.decode(MARK)}1234\n`
+    expect(await exited([ENC.encode(long)])).toEqual([long, []])
+    const piece = `y${DEC.decode(MARK.subarray(0, 3))}`
+    expect(await exited([ENC.encode(piece)])).toEqual([piece, []])
+  })
+
+  // Only the run's own word makes a line its exit: a program that writes the
+  // mark itself, with another word or none, ends nothing.
+  it("leaves an exit line without the run's own word as the program's", async () => {
+    const forged = `${DEC.decode(RUN_EXIT_MARK)}0\n${DEC.decode(runExitMark('other'))}0\n`
+    expect(await exited([ENC.encode(forged)])).toEqual([forged, []])
+  })
+})
+
+// A box whose program exits while what it left running holds the exec open.
+class LeftOpenBox extends RecordingMachine {
+  protected override async execArgv(
+    argv: readonly string[],
+    _stdin: ByteSource | null,
+    _env: Record<string, string>,
+    _cwd: string,
+    _output?: OutputFn | null,
+    errors?: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors?.(new Uint8Array([...mark, ...ENC.encode('3\n')]))
+    return new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(new Error('let go'))
+      })
+    })
+  }
+}
+
+// A program that exits while what it left running holds the exec open ends
+// with the status its exit line gave, without waiting for the exec.
+it('ends a run on its exit line while the exec stays open', async () => {
+  const box = new LeftOpenBox({ captures: ['train'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('train')
+    expect(io.exitCode).toBe(3)
+    expect(DEC.decode(await materialize(io.stderr))).toBe('')
+  } finally {
+    await ws.close()
+  }
+}, 5000)
+
+// A box whose program, once stopped, exits 0 by its own trap while the exec
+// takes longer than the drain to answer the stop.
+class SlowStopBox extends RecordingMachine {
+  started = false
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    _output?: OutputFn | null,
+    errors?: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd)
+    this.started = true
+    await new Promise<void>((resolve) => {
+      signal?.addEventListener('abort', () => {
+        resolve()
+      })
+    })
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors?.(new Uint8Array([...mark, ...ENC.encode('0\n')]))
+    await new Promise((resolve) => setTimeout(resolve, (RUN_DRAIN_SECONDS + 0.3) * 1000))
+    throw new DOMException('execute aborted', 'AbortError')
+  }
+}
+
+// A run a kill stopped ends as stopped, even when its program says it exited
+// 0 while the stop is still under way.
+it('ends a stopped run as stopped whatever its program said meanwhile', async () => {
+  const box = new SlowStopBox()
+  const abort = new AbortController()
+  const ctx = {
+    stdin: null,
+    flags: { c: 'train' },
+    env: {},
+    cwd: PathSpec.fromStrPath('/'),
+    signal: abort.signal,
+  }
+  const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'train',
+    cwd: ctx.cwd,
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
+  })
+  await vi.waitFor(() => {
+    expect(box.started).toBe(true)
+  })
+  expect(runner.terminate(2)).toBe(true)
+  expect((await runner.join()).exit).toBe(130)
+}, 5000)
 
 // A box that writes the run's pid line as its wrapper would: on stderr when
 // its streams are apart, at the start of a joined stdout returned whole.
@@ -885,9 +1046,7 @@ it('turns a substitution a program names into a pipe on its machine', async () =
     await ws.close()
   }
   const lines = box.execs.map(([line]) => line)
-  const made = lines.find((line) => line.startsWith('mkfifo ')) ?? ''
-  const fifo = made.slice('mkfifo -m 600 '.length)
-  expect(fifo.startsWith('/tmp/.mirage-fd-')).toBe(true)
+  const [made, fifo] = fifoOf(lines)
   const ran = lines.indexOf(`node read.js ${fifo} /dev/fd/9 /dev/fd/62`)
   expect(lines.indexOf('connect')).toBeLessThan(lines.indexOf(made))
   expect(lines.indexOf(made)).toBeLessThan(ran)
@@ -909,9 +1068,7 @@ it("pipes a call's substitution to its function's program", async () => {
     await ws.close()
   }
   const lines = box.execs.map(([line]) => line)
-  const fifo = (lines.find((line) => line.startsWith('mkfifo ')) ?? '').slice(
-    'mkfifo -m 600 '.length,
-  )
+  const [, fifo] = fifoOf(lines)
   expect(lines).toContain(`node read.js ${fifo}`)
 })
 

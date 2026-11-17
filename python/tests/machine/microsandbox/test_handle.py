@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,7 @@ from mirage.commands.config import Context
 from mirage.machine.constants import (
     EXEC_PRELUDE,
     run_argv,
-    run_status_path,
+    run_exit_mark,
 )
 from mirage.machine.microsandbox import MicrosandboxMachine
 from mirage.machine.microsandbox.constants import own_session
@@ -32,6 +33,19 @@ from mirage.machine.registry import build_machine
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_runtime
+
+
+# A run's program leads a session of its own, and still gets its words
+# unchanged and says how it ended.
+def test_a_program_in_a_session_of_its_own_runs_as_given():
+    program = ("sh", "-c", 'printf "%s|" "$@"; exit 4', "sh", "a b", "")
+    done = subprocess.run(
+        own_session(run_argv("t", "n1", program)),
+        capture_output=True,
+        check=False,
+    )
+    assert (done.returncode, done.stdout) == (4, b"a b||")
+    assert done.stderr.endswith(run_exit_mark("n1") + b"4\n")
 
 
 @pytest.mark.asyncio
@@ -162,9 +176,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 EXEC_PRELUDE,
                 "sh",
                 "/work",
-                *own_session(
-                    run_argv("run", run_status_path("run"), (), words)
-                ),
+                *own_session(run_argv("run", "run", words)),
             ],
             stdin,
         ),
@@ -423,7 +435,6 @@ async def test_a_later_workspace_that_never_ran_leaves_the_sandbox_alone(
     msb = _msb(monkeypatch)
     machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
     await machine.connect()
-    machine._spent = ["/tmp/report"]
     await machine.close()
     await machine.close()
     await machine.pause()
@@ -463,17 +474,6 @@ async def test_a_probe_close_on_another_loop_skipped_marks_nothing(
     await machine.close()
     await machine.pause()
     assert ["pause", "sb", "--quiet"] not in msb.calls
-
-
-@pytest.mark.asyncio
-async def test_close_never_resumes_a_sandbox_paused_meanwhile(monkeypatch):
-    msb = _msb(monkeypatch)
-    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
-    await machine.connect()
-    msb.state = "Paused"
-    machine._spent = ["/tmp/report"]
-    await machine.close()
-    assert [call[0] for call in msb.calls] == ["status", "status"]
 
 
 def _asks(**config) -> bool:

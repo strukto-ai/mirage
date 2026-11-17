@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawnSync } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
-import { EXEC_PRELUDE, runArgv, runStatusPath } from '@struktoai/mirage-core/machine/constants'
+import { EXEC_PRELUDE, runArgv, runExitMark } from '@struktoai/mirage-core/machine/constants'
 import { ownSession } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
@@ -30,6 +31,17 @@ async function* piped(): AsyncIterable<Uint8Array> {
   await Promise.resolve()
   yield ENC.encode('input')
 }
+
+// A run's program leads a session of its own, and still gets its words
+// unchanged and says how it ended.
+it('runs a program in a session of its own as given', () => {
+  const argv = ownSession(
+    runArgv('t', 'n1', ['sh', '-c', 'printf "%s|" "$@"; exit 4', 'sh', 'a b', '']),
+  )
+  const done = spawnSync(argv[0] ?? '', argv.slice(1))
+  expect([done.status, done.stdout.toString()]).toEqual([4, 'a b||'])
+  expect(done.stderr.toString().endsWith(`${DEC.decode(runExitMark('n1'))}4\n`)).toBe(true)
+})
 
 /** `msb` answering status with `state` and failing the verbs in `refusals`. */
 function fakeMsb(state = 'Running'): {
@@ -114,7 +126,6 @@ describe('MicrosandboxMachine pause', () => {
     const msb = fakeMsb()
     const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
     await machine.connect()
-    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
     await machine.close()
     await machine.close()
     await machine.pause()
@@ -137,15 +148,6 @@ describe('MicrosandboxMachine pause', () => {
     await closing
     await machine.pause()
     expect(msb.calls.at(-1)).toEqual(['pause', 'sb', '--quiet'])
-  })
-  it('never resumes on close a sandbox paused meanwhile', async () => {
-    const msb = fakeMsb()
-    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
-    await machine.connect()
-    msb.state = 'Paused'
-    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
-    await machine.close()
-    expect(msb.calls.map((call) => call[0])).toEqual(['status', 'status'])
   })
   it('stops a resume on the caller signal', async () => {
     const msb = fakeMsb('Paused')
@@ -285,7 +287,7 @@ describe('MicrosandboxMachine', () => {
             EXEC_PRELUDE,
             'sh',
             '/work',
-            ...ownSession(runArgv('runid', runStatusPath('runid'), [], words)),
+            ...ownSession(runArgv('runid', 'runid', words)),
           ],
           input,
         ],

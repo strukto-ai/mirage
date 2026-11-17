@@ -54,9 +54,8 @@ class MachineProcess:
     ticks after boot on a machine, epoch seconds on the host), which
     tells it apart from a later process given the same pid, ``args``
     its arguments, space separated, ``state`` the letter ``ps`` shows for
-    it, ``program`` the pid of the program its run reported, None while
-    it has reported none, and ``usage`` what the scan read of its use of
-    the machine, None where it read nothing.
+    it, and ``usage`` what the scan read of its use of the machine, None
+    where it read nothing.
     """
 
     tag: str
@@ -65,5 +64,4 @@ class MachineProcess:
     started: float
     args: str
     state: str = "R"
-    program: int | None = None
     usage: ProcessUsage | None = None

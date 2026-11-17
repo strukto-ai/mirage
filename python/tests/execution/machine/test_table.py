@@ -23,7 +23,13 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineName, MachinePid
-from mirage.machine.constants import CHECK_LINE, CHECK_MARK
+from mirage.machine.constants import (
+    CHECK_LINE,
+    CHECK_MARK,
+    RUN_PID_MARK,
+    RUN_PROGRAM_AT,
+    run_tag,
+)
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -31,7 +37,7 @@ from mirage.vfs.ram import RAMVFS
 
 
 def _tag(argv):
-    return argv[5].partition("=")[2]
+    return run_tag(argv)
 
 
 class _Box(MachineHandle):
@@ -98,20 +104,22 @@ class _Sleeper(MachineHandle):
     async def connect(self) -> None:
         return None
 
+    # Whether a run's wrapper says its program's pid on stderr.
+    reports = True
+
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         tag = _tag(argv)
         self.rows = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[7:])),
+            MachineProcess(
+                tag, self.base, 1, 100.0, " ".join(argv[RUN_PROGRAM_AT:])
+            ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "train 2"),
         ]
+        if self.reports and errors is not None:
+            await errors(RUN_PID_MARK + f"{self.base} 100\n".encode())
         await self.ended.wait()
         self.rows = []
         return RunResult(stdout=b"", stderr=None, exit_code=self.code)
-
-    async def exec_line(self, line, stdin, env, cwd):
-        return RunResult(
-            stdout=f"{self.base} 100\n".encode(), stderr=None, exit_code=0
-        )
 
     async def status(self, workspace):
         return [r for r in self.rows if r.tag.startswith(f"{workspace}:")]
@@ -187,17 +195,18 @@ async def test_a_scan_shows_what_a_program_started_on_its_machine():
 
 
 class _Unreported(_Sleeper):
-    """A box whose runs report no pid (nothing could write there)."""
+    """A box whose runs report no pid (nothing could read ``/proc``)."""
 
-    async def exec_line(self, line, stdin, env, cwd):
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+    reports = False
 
 
 @pytest.mark.asyncio
 async def test_a_signal_reaches_a_program_no_scan_placed_by_its_tag(
     monkeypatch,
 ):
-    monkeypatch.setattr("mirage.machine.handle.RUN_START_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "mirage.workspace.executor.background.RUN_START_WAIT_SECONDS", 0.01
+    )
     box = _Unreported("a")
     ws = _sleepers(a=box)
     try:
@@ -822,9 +831,13 @@ class _Shared(_Sleeper):
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         tag = _tag(argv)
         self.rows_of[self.name] = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[7:])),
+            MachineProcess(
+                tag, self.base, 1, 100.0, " ".join(argv[RUN_PROGRAM_AT:])
+            ),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "child"),
         ]
+        if errors is not None:
+            await errors(RUN_PID_MARK + f"{self.base} 100\n".encode())
         await self.ended.wait()
         self.rows_of.pop(self.name, None)
         return RunResult(stdout=b"", stderr=None, exit_code=143)

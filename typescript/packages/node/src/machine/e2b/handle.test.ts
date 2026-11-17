@@ -34,9 +34,9 @@ import {
   PROCESS,
   RUN_WRAPPER,
   encodeOutput,
+  RUN_PROGRAM_AT,
   isRun,
   runArgv,
-  runStatusPath,
   stopLine,
   wrapLine,
 } from '@struktoai/mirage-core/machine/constants'
@@ -350,7 +350,7 @@ describe('E2BMachine', () => {
       [
         encodeOutput(
           wrapLine(
-            runArgv('runid', runStatusPath('runid'), [], ['/bin/sh', '-c', 'wc -l | cat']),
+            runArgv('runid', 'runid', ['/bin/sh', '-c', 'wc -l | cat']),
             { E: '1' },
             '/workspace',
           ),
@@ -705,7 +705,7 @@ class MountingE2BMachine extends FakedE2BMachine {
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
-    const inner = isRun(argv) ? argv.slice(7) : argv
+    const inner = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     const run = inner[2] === MOUNT_GUARD ? inner.slice(inner.indexOf('--', 5) + 1) : inner
     return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
   }
@@ -713,7 +713,8 @@ class MountingE2BMachine extends FakedE2BMachine {
   override execLine(line: string): Promise<RunResult> {
     this.lines.push(line)
     const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
-    const stdout = line === 'cat /proc/mounts' ? rows : ''
+    const stdout =
+      line === 'cat /proc/mounts' ? rows : line.startsWith('d=$(PATH=') ? '/home/user/.mirage' : ''
     return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
   }
 

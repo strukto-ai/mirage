@@ -572,18 +572,15 @@ function foundKey(machine: MachineName, row: MachineProcess): string {
 }
 
 /**
- * The program of a run: the process its report names, else the one carrying
- * its tag whose parent carries none, the one already known while it still
- * shows, else the first to start. A program that has gone is none of what it
- * left running.
+ * The program of a run: the one carrying its tag whose parent carries none,
+ * the one already known while it still shows, else the first to start. A
+ * program that has gone is none of what it left running.
  */
 function programRow(
   run: readonly MachineProcess[],
   pids: ReadonlySet<number>,
   known: MachinePid | null,
 ): MachineProcess | null {
-  const reported = run[0]?.program ?? null
-  if (reported !== null) return run.find((row) => row.pid === reported) ?? null
   const roots = run.filter((row) => !pids.has(row.ppid))
   if (known !== null) return roots.find((row) => row.pid === known.pid) ?? null
   return roots.reduce<MachineProcess | null>(

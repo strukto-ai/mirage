@@ -110,8 +110,9 @@ call names the machine. See [Pause](/home/setup/machine/overview#pause).
 ## Notes
 
 - Stopping or closing the workspace leaves the sandbox running.
-- Piped input is uploaded to a temporary file in the sandbox and read as
-  stdin.
+- Daytona's exec takes no input, so a line given piped input, or a program
+  that reads a `<(...)`, exits 126 before it runs, with
+  `mirage: daytona:<name>: the machine takes no input`.
 - Output comes back as the program wrote it, binary included: the
   sandbox base64-encodes it on the way out, so the image needs `dd` and
   `base64` (Debian, Ubuntu and Alpine images have both), and output

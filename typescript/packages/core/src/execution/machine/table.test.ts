@@ -13,10 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
+import {
+  CHECK_LINE,
+  CHECK_MARK,
+  RUN_PID_MARK,
+  RUN_PROGRAM_AT,
+  runTag,
+} from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -38,7 +44,7 @@ vi.mock('../../machine/constants.ts', async (importOriginal) => ({
 const DEC = new TextDecoder()
 
 function tagOf(argv: readonly string[]): string {
-  return (argv[5] ?? '').split('=')[1] ?? ''
+  return runTag(argv)
 }
 
 class Box extends MachineHandle {
@@ -99,6 +105,8 @@ class Sleeper extends MachineHandle {
   rows: MachineProcess[] = []
   readonly sent: [string | MachinePid, number][] = []
   code = 143
+  // Whether a run's wrapper says its program's pid on stderr.
+  reports = true
   private end: () => void = () => undefined
   private readonly stopped = new Promise<void>((resolve) => {
     this.end = resolve
@@ -125,14 +133,21 @@ class Sleeper extends MachineHandle {
     _env: Record<string, string>,
     _cwd: string,
     _output: unknown,
-    _errors: unknown,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const tag = tagOf(argv)
     this.rows = [
-      { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(7).join(' ') },
+      { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(RUN_PROGRAM_AT).join(' ') },
       { tag, pid: this.base + 1, ppid: this.base, started: 101, args: 'train 2' },
     ]
+    if (this.reports && errors !== null)
+      await errors(
+        new Uint8Array([
+          ...RUN_PID_MARK,
+          ...new TextEncoder().encode(`${String(this.base)} 100\n`),
+        ]),
+      )
     await Promise.race([
       this.stopped,
       new Promise<void>((resolve) => {
@@ -143,11 +158,6 @@ class Sleeper extends MachineHandle {
     ])
     this.rows = []
     return { stdout: new Uint8Array(), stderr: null, exitCode: this.code }
-  }
-
-  override execLine(): Promise<RunResult> {
-    const stdout = new TextEncoder().encode(`${String(this.base)} 100\n`)
-    return Promise.resolve({ stdout, stderr: null, exitCode: 0 })
   }
 
   override status(workspace: string): Promise<MachineProcess[]> {
@@ -162,11 +172,9 @@ class Sleeper extends MachineHandle {
   }
 }
 
-/** A box whose runs report no pid, as when nothing could write there. */
+/** A box whose runs report no pid, as when nothing could read `/proc`. */
 class Unreported extends Sleeper {
-  override execLine(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
-  }
+  override reports = false
 }
 
 /** A box whose runs start a child and exit before any scan. */

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isRun } from '@struktoai/mirage-core/machine/constants'
+import { RUN_PROGRAM_AT, isRun } from '@struktoai/mirage-core/machine/constants'
 import type { PauseAction } from '@struktoai/mirage-core/machine/types'
 
 export const MICROSANDBOX_HINT =
@@ -28,8 +28,6 @@ export const ON_PAUSE: readonly PauseAction[] = ['pause']
 /** What `msb pause` says of a sandbox already gone. */
 export const SANDBOX_GONE = 'sandbox not found'
 export const INSPECT_TIMEOUT_SECONDS = 10
-
-const RUN_PROGRAM_AT = 7
 
 /**
  * msb ends the session of an exec whose client goes, and a run's exec is let

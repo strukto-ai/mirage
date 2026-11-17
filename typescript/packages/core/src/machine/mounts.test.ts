@@ -35,7 +35,13 @@ import type { MachinePipe, MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { isRun, MOUNT_GUARD, SSHFS_OPTIONS, UNMOUNT_WAIT_SECONDS } from './constants.ts'
+import {
+  isRun,
+  MOUNT_GUARD,
+  RUN_PROGRAM_AT,
+  SSHFS_OPTIONS,
+  UNMOUNT_WAIT_SECONDS,
+} from './constants.ts'
 import {
   killLine,
   mountTable,
@@ -111,7 +117,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    let run = isRun(argv) ? argv.slice(7) : argv
+    let run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     if (run[2] === MOUNT_GUARD) {
       const checked = this.runGuard(run)
       if (checked.exitCode !== 0) return checked
@@ -203,6 +209,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
         stderr: null,
         exitCode: this.running.has(source) ? 0 : 1,
       })
+    }
+    if (line.startsWith('d=$(PATH=')) {
+      return Promise.resolve({ stdout: ENC.encode('/home/u/.mirage'), stderr: null, exitCode: 0 })
     }
     if (line === 'command -v sshfs') {
       return Promise.resolve({

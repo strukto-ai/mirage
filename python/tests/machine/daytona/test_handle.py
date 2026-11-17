@@ -13,15 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.machine.constants import encode_output, wrap_line
 from mirage.machine.daytona import DaytonaMachine, sdk
-from mirage.machine.daytona.constants import stdin_redirect
 from tests.fixtures.machine import on
 
 
@@ -192,26 +189,38 @@ async def test_api_key_reaches_the_client(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_exec_line_redirects_stdin_through_a_file():
+async def test_a_line_given_input_is_refused_before_it_runs():
     runtime = DaytonaMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
     result = await runtime.exec_line(
         "wc -l", b"a\nb\n", {"E": "1"}, "/workspace"
     )
-    assert result.exit_code == 0
-    assert result.stderr is None
-    sandbox = FakeClient.last
-    [path] = sandbox.fs.files
-    # Unique per invocation, so concurrent stdin lines never collide.
-    assert path.startswith("/tmp/.mirage_stdin_")
-    assert sandbox.fs.files[path] == b"a\nb\n"
-    command, cwd, env = sandbox.process.calls[0]
-    wrapped = wrap_line(("/bin/sh", "-c", "wc -l"), {"E": "1"}, "/workspace")
-    assert command == stdin_redirect(
-        encode_output(wrapped, combined=True), path
+    assert result.exit_code == 126
+    assert (
+        result.stderr == b"mirage: daytona:box: the machine takes no input\n"
     )
-    assert f"rm -f {path}" in command
-    assert (cwd, env) == (None, None)
+    sandbox = FakeClient.last
+    assert (sandbox.fs.files, sandbox.process.calls) == ({}, [])
+
+
+# A program that reads a process substitution needs its pipe fed, which
+# takes input: refused before anything reaches the sandbox.
+@pytest.mark.asyncio
+async def test_a_program_reading_a_substitution_is_refused_before_it_runs():
+    runtime = DaytonaMachine(
+        "box", config={"sandbox_id": "sb-77", "captures": ["node"]}
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(runtime))
+    try:
+        result = await ws.shell("node read.js <(echo data)")
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            126,
+            b"",
+            b"mirage: daytona:box: the machine takes no input\n",
+        )
+    finally:
+        await ws.close()
+    assert FakeClient.fetched == []
 
 
 @pytest.mark.asyncio
@@ -279,29 +288,18 @@ class ShellProcess:
         )
 
 
-class LocalFs(FakeFs):
-    async def upload_file(self, data, path):
-        await super().upload_file(data, path)
-        Path(path).write_bytes(data)
-
-
 # Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
-# unchanged, stderr in the one combined stream, with the program's status,
-# with or without piped input.
+# unchanged, stderr in the one combined stream, with the program's status.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stdin", [None, b"in\xff\x00"])
-async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
-    stdin,
-):
+async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly():
     runtime = DaytonaMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
     FakeClient.last.process = ShellProcess()
-    FakeClient.last.fs = LocalFs()
     line = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; "
-    line += "cat; exit 5" if stdin is not None else "exit 5"
-    result = await runtime.exec_line(line, stdin, {}, "/")
+    line += "exit 5"
+    result = await runtime.exec_line(line, None, {}, "/")
     assert (result.exit_code, result.stdout, result.stderr) == (
         5,
-        b"a\xff\x00b\r\n\xc3e\xfe\x00\r\n" + (stdin or b""),
+        b"a\xff\x00b\r\n\xc3e\xfe\x00\r\n",
         None,
     )

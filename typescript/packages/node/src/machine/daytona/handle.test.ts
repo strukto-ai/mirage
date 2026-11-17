@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
-import { writeFile } from 'node:fs/promises'
-import { stdinRedirect } from './constants.ts'
-import { encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -142,7 +139,7 @@ describe('DaytonaMachine', () => {
     expect(FakeClient.configs[0]).toEqual({ apiKey: 'k-123' })
   })
 
-  it('redirects stdin through an uploaded file', async () => {
+  it('refuses a line given input before it runs', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
     const result = await runtime.execLine(
@@ -151,22 +148,12 @@ describe('DaytonaMachine', () => {
       { E: '1' },
       '/workspace',
     )
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBeNull()
-    const sandbox = FakeClient.last ?? new FakeMachine('started')
-    const [path] = [...sandbox.fs.files.keys()]
-    // Unique per invocation, so concurrent stdin lines never collide.
-    expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
-    expect(DEC.decode(sandbox.fs.files.get(path ?? ''))).toBe('a\nb\n')
-    const [command, cwd, env] = sandbox.process.calls[0] ?? ['', undefined, undefined]
-    expect(command).toBe(
-      stdinRedirect(
-        encodeOutput(wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/workspace'), true),
-        path ?? '',
-      ),
+    expect(result.exitCode).toBe(126)
+    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
+      'mirage: daytona:box: the machine takes no input\n',
     )
-    expect(command).toContain(`rm -f ${path ?? ''}`)
-    expect([cwd, env]).toEqual([undefined, undefined])
+    const sandbox = FakeClient.last ?? new FakeMachine('started')
+    expect([sandbox.fs.files.size, sandbox.process.calls]).toEqual([0, []])
   })
 
   it('close releases the client, never the machine', async () => {
@@ -189,6 +176,24 @@ const RESTRICTIONS: SessionProfile[] = [
   { commands: { deny: [{ paths: ['/data/secret'], reason: 'x' }] } },
   { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
 ]
+
+// A program that reads a process substitution needs its pipe fed, which takes
+// input: refused before anything reaches the sandbox.
+it('refuses a program reading a substitution before it runs', async () => {
+  const runtime = makeRuntime({ sandboxId: 'sb-77', captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(runtime) })
+  try {
+    const result = await ws.shell('node read.js <(echo data)')
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      126,
+      '',
+      'mirage: daytona:box: the machine takes no input\n',
+    ])
+    expect(FakeClient.fetched).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
 
 it.each(RESTRICTIONS)('refuses every line under a session restriction', async (profile) => {
   const runtime = makeRuntime({ sandboxId: 'sb-77' })
@@ -231,34 +236,21 @@ class ShellProcess {
   }
 }
 
-class LocalFs extends FakeFs {
-  override async uploadFile(data: Buffer, path: string): Promise<void> {
-    await super.uploadFile(data, path)
-    await writeFile(path, data)
-  }
-}
-
 // Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
-// unchanged, stderr in the one combined stream, with the program's status,
-// with or without piped input.
+// unchanged, stderr in the one combined stream, with the program's status.
 describe('DaytonaMachine output bytes', () => {
-  it.each([{ stdin: null }, { stdin: new Uint8Array([0x69, 0x6e, 0xff, 0x00]) }])(
-    'returns arbitrary bytes and the exit code exactly (stdin: $stdin)',
-    async ({ stdin }) => {
-      const runtime = makeRuntime()
-      await runtime.connect()
-      Object.assign(FakeClient.last ?? {}, { process: new ShellProcess(), fs: new LocalFs() })
-      const line =
-        "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; " +
-        (stdin === null ? 'exit 5' : 'cat; exit 5')
-      const result = await runtime.execLine(line, stdin, {}, '/')
-      expect([result.exitCode, [...result.stdout], result.stderr]).toEqual([
-        5,
-        [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3, 0x65, 0xfe, 0x00, 0x0d, 0x0a, ...(stdin ?? [])],
-        null,
-      ])
-    },
-  )
+  it('returns arbitrary bytes and the exit code exactly', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    Object.assign(FakeClient.last ?? {}, { process: new ShellProcess() })
+    const line = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; exit 5"
+    const result = await runtime.execLine(line, null, {}, '/')
+    expect([result.exitCode, [...result.stdout], result.stderr]).toEqual([
+      5,
+      [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3, 0x65, 0xfe, 0x00, 0x0d, 0x0a],
+      null,
+    ])
+  })
 })
 
 async function reached(): Promise<FakedDaytonaMachine> {

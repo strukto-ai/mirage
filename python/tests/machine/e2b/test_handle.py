@@ -37,10 +37,10 @@ from mirage.io.types import materialize
 from mirage.machine.constants import (
     MOUNT_GUARD,
     PROCESS,
+    RUN_PROGRAM_AT,
     encode_output,
     is_run,
     run_argv,
-    run_status_path,
     stop_line,
     wrap_line,
 )
@@ -267,12 +267,7 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
         (
             encode_output(
                 wrap_line(
-                    run_argv(
-                        "run",
-                        run_status_path("run"),
-                        (),
-                        ("/bin/sh", "-c", "wc -l | cat"),
-                    ),
+                    run_argv("run", "run", ("/bin/sh", "-c", "wc -l | cat")),
                     {"E": "1"},
                     "/workspace",
                 )
@@ -645,7 +640,7 @@ class MountingE2BMachine(E2BMachine):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
-            argv = argv[7:]
+            argv = argv[RUN_PROGRAM_AT:]
         if argv[2:3] == (MOUNT_GUARD,):
             argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
@@ -658,7 +653,13 @@ class MountingE2BMachine(E2BMachine):
             f"{source} {p} {t} rw 0 0\n"
             for p, (source, t) in self.table.items()
         )
-        stdout = rows if line == "cat /proc/mounts" else ""
+        stdout = (
+            rows
+            if line == "cat /proc/mounts"
+            else "/home/user/.mirage"
+            if line.startswith("d=$(PATH=")
+            else ""
+        )
         return RunResult(stdout=stdout.encode(), stderr=None, exit_code=0)
 
     async def open_pipe(self, command):

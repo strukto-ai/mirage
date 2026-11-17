@@ -714,19 +714,16 @@ def _reached(processes: ProcessTable, machine: MachineName) -> MachineName:
 def _program_row(
     run: list[MachineProcess], pids: set[int], known: MachinePid | None
 ) -> MachineProcess | None:
-    """The program of a run: the process its report names, else the one
-    carrying its tag whose parent carries none, the one already known
-    while it still shows, else the first to start. A program that has
-    gone is none of what it left running.
+    """The program of a run: the one carrying its tag whose parent
+    carries none, the one already known while it still shows, else the
+    first to start. A program that has gone is none of what it left
+    running.
 
     Args:
         run (list[MachineProcess]): the run's processes.
         pids (set[int]): their pids.
         known (MachinePid | None): the program's machine pid, as known.
     """
-    reported = run[0].program if run else None
-    if reported is not None:
-        return next((row for row in run if row.pid == reported), None)
     roots = [row for row in run if row.ppid not in pids]
     if known is not None:
         return next((row for row in roots if row.pid == known.pid), None)

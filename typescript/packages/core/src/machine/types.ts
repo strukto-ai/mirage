@@ -20,14 +20,12 @@ import type { PipeWriter } from '../runtime/types.ts'
  * `both` serves from the host what the machine does not mount itself.
  */
 /**
- * What a run has reported on its machine (`RUN_WRAPPER`): its program's pid
- * and start in clock ticks, null until it starts, and its exit status, null
- * until it exits. Mirrors Python's `RunStatus`.
+ * What a run's pid line says (`RUN_WRAPPER`): its program's pid and start in
+ * clock ticks, null when the line gives none. Mirrors Python's `RunStatus`.
  */
 export interface RunStatus {
-  readonly pid: number | null
+  readonly pid: number
   readonly started: number | null
-  readonly exitCode: number | null
 }
 
 export type MountType = 'ssh' | 'fuse' | 'both'

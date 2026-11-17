@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '@struktoai/mirage-core/commands/config'
-import { CHECK_LINE, EXEC_PRELUDE, isRun } from '@struktoai/mirage-core/machine/constants'
+import {
+  CHECK_LINE,
+  EXEC_PRELUDE,
+  RUN_PROGRAM_AT,
+  isRun,
+} from '@struktoai/mirage-core/machine/constants'
 import { ContainerMachine } from '@struktoai/mirage-core/machine/cloudflare_container/handle'
 import { RelayContainer } from '@struktoai/mirage-core/machine/cloudflare_container/relay'
 import type {
@@ -168,7 +173,7 @@ class ScriptedContainer implements RelayedContainer {
     if (this.down !== null) throw this.down
     await this.held
     let inner = cmd[2] === EXEC_PRELUDE ? cmd.slice(5) : cmd
-    if (isRun(inner)) inner = inner.slice(7)
+    if (isRun(inner)) inner = inner.slice(RUN_PROGRAM_AT)
     const line = inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
     const program =
       line === CHECK_LINE

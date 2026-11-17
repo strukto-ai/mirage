@@ -39,10 +39,11 @@ import {
   MOUNT_WAIT_SECONDS,
   PIPE_SERVER_HINT,
   SSHFS_HINT,
-  SSHFS_LOG_PREFIX,
+  SSHFS_LOG_NAME,
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
   UNMOUNT_WAIT_SECONDS,
+  machineDirLine,
   mountField,
 } from './constants.ts'
 
@@ -126,9 +127,9 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
 
 /**
  * The prefixes ssh serves a machine: its top prefixes but `/tmp`, which
- * stays the machine's own. The machine keeps its sockets, temporary files
- * and Mirage's own run reports there, and a user who is not root cannot
- * mount over it. A mount under `/tmp` is still served at its own path.
+ * stays the machine's own. The machine keeps its sockets and temporary
+ * files there, and a user who is not root cannot mount over it. A mount
+ * under `/tmp` is still served at its own path.
  */
 export function servedPrefixes(prefixes: Iterable<string>): string[] {
   return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
@@ -631,10 +632,8 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const visible =
-      this.mountType === 'fuse'
-        ? []
-        : await this.mountable(files, servedPrefixes(binding.resolver.prefixes()))
+    const served = servedPrefixes(binding.resolver.prefixes())
+    const visible = this.mountType === 'fuse' ? [] : await this.mountable(files, served)
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
     if (
@@ -699,12 +698,14 @@ export class MachineMounts {
       if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
         throw new Error(`${this.provider}: ${SSHFS_HINT}`)
       }
+      const folder = await this.folder(served, signal)
       try {
         for (const prefix of fresh) {
           await this.serve(
             make(files, session, (op) => this.lend(op)),
             prefix,
             present,
+            folder,
             signal,
           )
         }
@@ -750,10 +751,26 @@ export class MachineMounts {
     return found.exitCode === 0
   }
 
+  /**
+   * Mirage's folder on the machine (`machineDirLine`), where each sshfs keeps
+   * its log: resolved once, so every look at a log finds the one sshfs wrote.
+   * Mirrors Python's `MachineMounts._folder`.
+   *
+   * @param prefixes the workspace prefixes the machine has at the same paths.
+   * @param signal stops the line.
+   */
+  private async folder(prefixes: readonly string[], signal?: AbortSignal): Promise<string> {
+    const found = await this.run(machineDirLine(prefixes) + 'printf %s "$d"', signal)
+    const folder = said(found.stdout)
+    if (found.exitCode !== 0 || !folder) throw new Error(`${this.provider}: ${said(found.stderr)}`)
+    return folder
+  }
+
   private async serve(
     server: PipeServer,
     prefix: string,
     present: ReadonlyMap<string, [string, string]>,
+    folder: string,
     signal?: AbortSignal,
   ): Promise<void> {
     this.under.set(prefix, JSON.stringify(present.get(prefix) ?? null))
@@ -772,7 +789,9 @@ export class MachineMounts {
         `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
       )
     }
-    const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
+    const log = singleQuote(
+      `${folder}/${SSHFS_LOG_NAME}-${crypto.randomUUID().replaceAll('-', '')}.log`,
+    )
     this.serves += 1
     const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
@@ -892,7 +911,11 @@ export class MachineMounts {
     }
   }
 
-  /** Remove the helper's setup log; keeping it only costs a file. */
+  /**
+   * Remove the helper's setup log; keeping it only costs a file.
+   *
+   * @param log the quoted log path in the machine.
+   */
   private async dropLog(log: string): Promise<void> {
     try {
       const removed = await this.run(`rm -f -- ${log}`)
