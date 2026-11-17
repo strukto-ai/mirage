@@ -580,6 +580,36 @@ async def test_follow_streams_a_backend_with_no_range_past_what_it_showed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sized", [True, False], ids=["sized", "unsized"])
+async def test_follow_streams_a_ranged_poll_a_chunk_at_a_time(sized):
+    # A backend that reads windows answers a poll with what the file
+    # gained, which goes out as it is read, never joined first.
+    fs = _Growing({"/d/log": b"a\n"}, sized=sized)
+    stream, io = await _tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+    )
+    big = b"x" * (3 * CHUNK_SIZE) + b"\n"
+
+    async def grow() -> None:
+        await asyncio.sleep(0.06)
+        fs.data["/d/log"] += big
+        await asyncio.sleep(0.08)
+        fs.data["/d/log"] = b"z\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.3)
+    await grower
+    assert b"".join(chunks) == b"a\n" + big + b"z\n"
+    assert io.stderr == b"tail: /d/log: file truncated\n"
+    assert max(len(chunk) for chunk in chunks) <= CHUNK_SIZE
+
+
+@pytest.mark.asyncio
 async def test_follow_reads_only_the_end_of_a_file_for_its_first_print():
     fs = _Growing({"/d/log": b"x" * (8 << 20) + b"\nlast\n"})
     stream, _ = await _tail_generic(

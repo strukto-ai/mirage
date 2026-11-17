@@ -622,30 +622,56 @@ async def _polled_read(
             yield part
 
 
+async def _advancing(
+    source: ByteSource, box: list[int]
+) -> AsyncGenerator[bytes, None]:
+    """``source`` a chunk at a time, the position ``box`` holds moved
+    past each chunk handed on.
+
+    Args:
+        source (ByteSource): what a poll read.
+        box (list[int]): one slot, the position.
+    """
+    async with aclosing(chunks(source)) as parts:
+        async for part in parts:
+            box[0] += len(part)
+            yield part
+
+
 async def _gained(
-    read_range: ReadStreamFn, io: IOResult, p: PathSpec, pos: int
-) -> tuple[bytes, int]:
-    """What a size-unknown file gained past ``pos``, read from there, and
-    where the next poll starts. A read that finds nothing at a position
-    the file no longer reaches, its byte before ``pos`` gone too, means
-    it was truncated, which is noted and read from the start.
+    read_range: ReadStreamFn, io: IOResult, p: PathSpec, box: list[int]
+) -> AsyncGenerator[bytes, None]:
+    """What a size-unknown file gained past the position ``box`` holds,
+    read from there as it comes, leaving there where the next poll
+    starts. A read that finds nothing at a position the file no longer
+    reaches, its byte before the position gone too, means it was
+    truncated, which is noted and read from the start.
 
     Args:
         read_range (ReadStreamFn): the backend's byte window.
         io (IOResult): the result a truncation notice lands on.
         p (PathSpec): the file.
-        pos (int): how far the previous poll read.
+        box (list[int]): one slot, how far the previous poll read.
     """
-    data = await materialize(read_range(p, offset=pos, size=None))
+    pos = box[0]
+    async with aclosing(
+        _advancing(read_range(p, offset=pos, size=None), box)
+    ) as gained:
+        async for part in gained:
+            yield part
     if (
-        not data
-        and pos
-        and not await materialize(read_range(p, offset=pos - 1, size=1))
+        box[0] > pos
+        or not pos
+        or await materialize(read_range(p, offset=pos - 1, size=1))
     ):
-        _note(io, f"tail: {p.raw_path}: file truncated\n")
-        data = await materialize(read_range(p, offset=0, size=None))
-        pos = 0
-    return data, pos + len(data)
+        return
+    _note(io, f"tail: {p.raw_path}: file truncated\n")
+    box[0] = 0
+    async with aclosing(
+        _advancing(read_range(p, offset=0, size=None), box)
+    ) as whole:
+        async for part in whole:
+            yield part
 
 
 async def _catch_up(
@@ -656,14 +682,14 @@ async def _catch_up(
     size: int | None,
     box: list[int],
 ) -> AsyncGenerator[bytes, None]:
-    """What a followed file gained past the position ``box`` holds,
-    leaving there where the next poll starts. Where the backend reads
-    windows, a size-unknown file is read from that position
-    (``_gained``) and a sized one in the window it grew by; elsewhere the
-    file is read whole as a stream, the bytes already shown skipped and
-    the rest printed as they come (``_past``), so a poll holds a chunk
-    rather than the file, and a size-unknown file is measured by that
-    same read. A file shorter than the position was truncated, which is
+    """What a followed file gained past the position ``box`` holds, as
+    it is read, leaving there where the next poll starts. Where the
+    backend reads windows, a size-unknown file is read from that
+    position (``_gained``) and a sized one in the window it grew by;
+    elsewhere the file is read whole as a stream, the bytes already
+    shown skipped (``_past``), and a size-unknown file is measured by
+    that same read. Either way a poll holds a chunk, never what the file
+    gained. A file shorter than the position was truncated, which is
     noted and read from the start.
 
     Args:
@@ -677,39 +703,34 @@ async def _catch_up(
             past the bytes yielded.
     """
     pos = box[0]
-    if read_range is not None:
-        if size is None:
-            data, box[0] = await _gained(read_range, io, p, pos)
-        else:
-            if size < pos:
-                _note(io, f"tail: {p.raw_path}: file truncated\n")
-                pos = box[0] = 0
-            data = (
-                await materialize(read_range(p, offset=pos, size=size - pos))
-                if size > pos
-                else b""
-            )
-            box[0] = pos + len(data)
-        if data:
-            yield data
+    if read_range is not None and size is None:
+        async with aclosing(_gained(read_range, io, p, box)) as gained:
+            async for part in gained:
+                yield part
         return
-    if size is None:
+    if read_range is None and size is None:
         seen = [0]
-        async with aclosing(_past(read, p, pos, None, seen)) as rest:
+        async with aclosing(
+            _advancing(_past(read, p, pos, None, seen), box)
+        ) as rest:
             async for part in rest:
-                box[0] += len(part)
                 yield part
         if seen[0] >= pos:
             return
         size = seen[0]
+    assert size is not None
     if size < pos:
         _note(io, f"tail: {p.raw_path}: file truncated\n")
         pos = box[0] = 0
     if size <= pos:
         return
-    async with aclosing(_past(read, p, pos, size - pos, [0])) as rest:
+    window = (
+        read_range(p, offset=pos, size=size - pos)
+        if read_range is not None
+        else _past(read, p, pos, size - pos, [0])
+    )
+    async with aclosing(_advancing(window, box)) as rest:
         async for part in rest:
-            box[0] += len(part)
             yield part
 
 

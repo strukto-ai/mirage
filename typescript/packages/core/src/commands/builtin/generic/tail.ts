@@ -141,38 +141,53 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
   })
 }
 
-// What a size-unknown file gained past `pos`, read from there, and where
-// the next poll starts. A read that finds nothing at a position the file no
-// longer reaches, its byte before `pos` gone too, means it was truncated,
-// which is noted and read from the start. Mirrors Python's `_gained`.
-async function gained(
+/**
+ * `source` a chunk at a time, the position `box` holds moved past each chunk
+ * handed on. Mirrors Python's `_advancing`.
+ */
+async function* advancing(source: ByteSource, box: { end: number }): AsyncGenerator<Uint8Array> {
+  for await (const part of chunks(source)) {
+    box.end += part.byteLength
+    yield part
+  }
+}
+
+/**
+ * What a size-unknown file gained past the position `box` holds, read from
+ * there as it comes, leaving there where the next poll starts. A read that
+ * finds nothing at a position the file no longer reaches, its byte before
+ * the position gone too, means it was truncated, which is noted and read
+ * from the start. Mirrors Python's `_gained`.
+ */
+async function* gained(
   readRange: ReadStreamFn<[PathSpec, number, number | null]>,
   io: IOResult,
   p: PathSpec,
-  pos: number,
-): Promise<[Uint8Array, number]> {
-  let start = pos
-  let data = await materialize(readRange(p, start, null))
+  box: { end: number },
+): AsyncGenerator<Uint8Array> {
+  const start = box.end
+  yield* advancing(readRange(p, start, null), box)
   if (
-    data.byteLength === 0 &&
-    start > 0 &&
-    (await materialize(readRange(p, start - 1, 1))).byteLength === 0
-  ) {
-    note(io, `tail: ${p.rawPath}: file truncated\n`)
-    start = 0
-    data = await materialize(readRange(p, 0, null))
-  }
-  return [data, start + data.byteLength]
+    box.end > start ||
+    start === 0 ||
+    (await materialize(readRange(p, start - 1, 1))).byteLength > 0
+  )
+    return
+  note(io, `tail: ${p.rawPath}: file truncated\n`)
+  box.end = 0
+  yield* advancing(readRange(p, 0, null), box)
 }
 
-// What a followed file gained past the position `box` holds, leaving there
-// where the next poll starts. Where the backend reads windows, a size-unknown
-// file is read from that position (`gained`) and a sized one in the window it
-// grew by; elsewhere the file is read whole as a stream, the bytes already
-// shown skipped and the rest printed as they come (`past`), so a poll holds a
-// chunk rather than the file, and a size-unknown file is measured by that same
-// read. A file shorter than the position was truncated, which is noted and
-// read from the start. Mirrors Python's `_catch_up`.
+/**
+ * What a followed file gained past the position `box` holds, as it is read,
+ * leaving there where the next poll starts. Where the backend reads windows,
+ * a size-unknown file is read from that position (`gained`) and a sized one
+ * in the window it grew by; elsewhere the file is read whole as a stream, the
+ * bytes already shown skipped (`past`), and a size-unknown file is measured
+ * by that same read. Either way a poll holds a chunk, never what the file
+ * gained. A file shorter than the position was truncated, which is noted and
+ * read from the start. Mirrors Python's `_catch_up`.
+ */
 async function* catchUp(
   stream: ReadStreamFn,
   readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
@@ -182,28 +197,14 @@ async function* catchUp(
   box: { end: number },
 ): AsyncGenerator<Uint8Array> {
   let start = box.end
-  if (readRange !== null) {
-    let data: Uint8Array
-    if (size === null) {
-      ;[data, box.end] = await gained(readRange, io, p, start)
-    } else {
-      if (size < start) {
-        note(io, `tail: ${p.rawPath}: file truncated\n`)
-        start = 0
-      }
-      data = size > start ? await materialize(readRange(p, start, size - start)) : new Uint8Array()
-      box.end = start + data.byteLength
-    }
-    if (data.byteLength > 0) yield data
+  if (readRange !== null && size === null) {
+    yield* gained(readRange, io, p, box)
     return
   }
   let length = size
   if (length === null) {
     const seen = { end: 0 }
-    for await (const part of past(stream, p, start, null, seen)) {
-      box.end += part.byteLength
-      yield part
-    }
+    yield* advancing(past(stream, p, start, null, seen), box)
     if (seen.end >= start) return
     length = seen.end
   }
@@ -212,10 +213,12 @@ async function* catchUp(
     start = box.end = 0
   }
   if (length <= start) return
-  for await (const part of past(stream, p, start, length - start, { end: 0 })) {
-    box.end += part.byteLength
-    yield part
-  }
+  yield* advancing(
+    readRange !== null
+      ? readRange(p, start, length - start)
+      : past(stream, p, start, length - start, { end: 0 }),
+    box,
+  )
 }
 
 /**

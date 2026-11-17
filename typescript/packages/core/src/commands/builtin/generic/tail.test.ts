@@ -356,6 +356,41 @@ describe('tail -f', () => {
     },
   )
 
+  it.each([true, false])('streams a ranged poll a chunk at a time (sized %s)', async (sized) => {
+    // A backend that reads windows answers a poll with what the file
+    // gained, which goes out as it is read, never joined first.
+    const fs = new Growing(new Map(), sized)
+    fs.set('/d/log', 'a\n')
+    const abort = new AbortController()
+    const [stream, io] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const big = 'x'.repeat(3 * CHUNK_SIZE) + '\n'
+    const pieces: number[] = []
+    const watched = (async function* () {
+      for await (const chunk of stream) {
+        pieces.push(chunk.byteLength)
+        yield chunk
+      }
+    })()
+    const grower = (async () => {
+      await sleep(60)
+      fs.append('/d/log', big)
+      await sleep(80)
+      fs.set('/d/log', 'z\n')
+    })()
+    const text = await drainFor(watched, 300, abort)
+    await grower
+    expect(text).toBe('a\n' + big + 'z\n')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
+    expect(Math.max(...pieces)).toBeLessThanOrEqual(CHUNK_SIZE)
+  })
+
   it('reads only the end of a file for its first print', async () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'x'.repeat(8 << 20) + '\nlast\n')
