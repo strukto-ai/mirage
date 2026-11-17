@@ -4,6 +4,8 @@ icon: /images/google-logo.svg
 description: Set up the Google Workspace CLI with Python or TypeScript.
 ---
 
+import Reference from '/snippets/cli/gws.mdx'
+
 Mirage implements a subset of the [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli).
 
 Create OAuth credentials in [Google Workspace setup](/home/setup/google), then
@@ -36,3 +38,5 @@ Forms is CLI-only. Enable the Google Forms API and grant
 `https://www.googleapis.com/auth/forms.body` to create or edit forms. Reading
 responses needs `https://www.googleapis.com/auth/forms.responses.readonly`.
 Creating forms inside a configured folder also needs the Drive API and scope.
+
+<Reference />

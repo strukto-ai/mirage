@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import * as Node from '@struktoai/mirage-node'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 const DOCS = new URL('../../docs/typescript/cli/', import.meta.url)
+const SNIPPETS = new URL('../../docs/snippets/cli/', import.meta.url)
 const START = '{/* BEGIN GENERATED CLI COMMANDS */}'
 const END = '{/* END GENERATED CLI COMMANDS */}'
 
@@ -44,7 +45,8 @@ assert.deepEqual(
 
 for (const cli of specs) {
   const spec = cli.spec
-  const path = new URL(`${spec.name}.mdx`, DOCS)
+  const snippet = new URL(`${spec.name}.mdx`, SNIPPETS)
+  const path = existsSync(snippet) ? snippet : new URL(`${spec.name}.mdx`, DOCS)
   const text = readFileSync(path, 'utf8')
   assert.equal(text.split(START).length, 2, `Missing or repeated marker: ${fileURLToPath(path)}`)
   assert.equal(text.split(END).length, 2, `Missing or repeated marker: ${fileURLToPath(path)}`)

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import argparse
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ END = "{/* END GENERATED CLI COMMANDS */}"
 LICENSE_START = "{/* BEGIN GENERATED CLI LICENSE */}"
 LICENSE_END = "{/* END GENERATED CLI LICENSE */}"
 REPO = "https://github.com/strukto-ai/mirage/blob/main"
+SECTIONS = ["Supported commands", "Usage", "Behavior", "License"]
 
 
 @dataclass(frozen=True)
@@ -450,7 +452,7 @@ def main() -> int:
                 f"{documented ^ set(BUILTIN_CLI_SPECS)}"
             )
         pages[directory / "index.mdx"] = [(catalog(language), commands_block)]
-        for name in sorted(BUILTIN_CLI_SPECS):
+        for name in sorted(UNLISTED):
             pages[directory / f"{name}.mdx"] = [
                 (reference(cli_spec_for(name)), commands_block),
                 (license_block(name), license),
@@ -458,6 +460,27 @@ def main() -> int:
     pages[ROOT / "docs/home/setup/clis.mdx"] = [
         (catalog("home/setup"), commands_block)
     ]
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
+        missing = [
+            str(page.relative_to(ROOT))
+            for page in (
+                ROOT / "docs/python/cli" / f"{name}.mdx",
+                ROOT / "docs/typescript/cli" / f"{name}.mdx",
+                ROOT / "docs/home/setup/cli" / f"{name}.mdx",
+            )
+            if f"import Reference from '/snippets/cli/{name}.mdx'"
+            not in page.read_text()
+            or "<Reference />" not in page.read_text()
+        ]
+        if missing:
+            raise SystemExit(
+                f"Render /snippets/cli/{name}.mdx with <Reference />: "
+                + ", ".join(missing)
+            )
+        pages[ROOT / "docs/snippets/cli" / f"{name}.mdx"] = [
+            (reference(cli_spec_for(name)), commands_block),
+            (license_block(name), license),
+        ]
     stale = []
     for path, blocks in pages.items():
         text = path.read_text()
@@ -468,6 +491,14 @@ def main() -> int:
             stale.append(str(path.relative_to(ROOT)))
             if not args.check:
                 path.write_text(updated)
+    for name in sorted(set(BUILTIN_CLI_SPECS) - UNLISTED):
+        snippet = ROOT / "docs/snippets/cli" / f"{name}.mdx"
+        found = re.findall(r"^## (.+)$", snippet.read_text(), re.M)
+        if found != SECTIONS:
+            raise SystemExit(
+                f"{snippet.relative_to(ROOT)} has sections {found}; "
+                f"a CLI reference has {SECTIONS}"
+            )
     if args.check and stale:
         raise SystemExit(
             "Stale CLI docs; run python/.venv/bin/python scripts/gen_cli_docs.py:\n"

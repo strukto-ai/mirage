@@ -1,0 +1,79 @@
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `discord <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `discord send` | Send a message to a channel |
+| `discord read` | Read the most recent messages of a channel |
+| `discord edit` | Edit a message the bot authored |
+| `discord delete` | Delete a message |
+| `discord react` | Add an emoji reaction to a message |
+| `discord reactions` | List the reactions on a message |
+| `discord pin-message` | Pin a message to its channel |
+| `discord unpin-message` | Remove a pin from a message |
+| `discord list-pins` | List a channel's pinned messages |
+| `discord search` | Search a guild's messages by content |
+| `discord thread-create` | Create a thread, standalone or from a message |
+| `discord poll` | Post a poll message to a channel |
+| `discord members` | List a guild's members, optionally filtered |
+| `discord server-info` | Fetch a guild's metadata |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+### Messages
+
+```bash
+discord read --channel 1256522563555819574 --limit 20
+discord send --channel 1256522563555819574 --text "Release is ready"
+discord send --channel 1256522563555819574 --text "A reply" --reply-to 1489887688978075769
+discord send --channel 1256522563555819574 --text "Spoken reply" --file /data/reply.wav
+discord edit --channel 1256522563555819574 --message 1489887688978075769 --text "Updated"
+discord delete --channel 1256522563555819574 --message 1489887688978075769
+```
+
+`edit` works only on messages authored by the bot. Channel, guild and message
+arguments are Discord snowflake IDs; `send --file` reads a workspace path and
+attaches it.
+
+### Threads, polls and search
+
+```bash
+discord react --channel 1256522563555819574 --message 1489887688978075769 --emoji "👍"
+discord reactions --channel 1256522563555819574 --message 1293847561029384756
+discord pin-message --channel 1256522563555819574 --message 1293847561029384756
+discord list-pins --channel 1256522563555819574
+discord unpin-message --channel 1256522563555819574 --message 1293847561029384756
+discord thread-create --channel 1256522563555819574 --message 1489887688978075769 --name "Release review"
+discord poll --channel 1256522563555819574 --question "Ship today?" --answer Yes --answer Tomorrow --duration 24
+discord server-info --guild 1256522563555819574
+discord members --guild 1256522563555819574 --query alice
+discord search --guild 1256522563555819574 --query deploy --channel 1256522563555819574
+```
+
+Omit `--message` on `thread-create` to create a standalone thread. Repeat
+`--answer` for each poll option; `--multiselect` allows multiple choices.
+Responses are JSON.
+
+## Behavior
+
+The optional [Discord VFS](/home/setup/discord) exposes the guild's
+channels and messages as files. Use the IDs in its `name__id` path segments
+with the CLI. Registration remains independent of the mount, and command
+policy controls service writes.
+
+Only the listed actions are implemented.
+
+{/* BEGIN GENERATED CLI LICENSE */}
+## License
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [OpenClaw](https://github.com/openclaw/openclaw) | Action names | [MIT](https://github.com/openclaw/openclaw/blob/main/LICENSE) |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+{/* END GENERATED CLI LICENSE */}

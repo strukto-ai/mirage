@@ -4,6 +4,8 @@ description: "Supported Hugging Face Hub commands for downloads, commits, reposi
 icon: /images/huggingface-logo.svg
 ---
 
+import Reference from '/snippets/cli/hf.mdx'
+
 Download Hugging Face Hub files into the workspace and upload files or directories as a single commit. Mirage also supports repository creation, tags and file deletion using the [official `hf` vocabulary](https://github.com/huggingface/huggingface_hub).
 
 ## Setup
@@ -23,98 +25,4 @@ ws.register_cli("hf", HF, config)
 No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
-{/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
-
-Run `hf <command> --help` for the supported flags and operands.
-This list is generated from Mirage's registered command tree.
-
-| Command | Description |
-| --- | --- |
-| `hf auth whoami` | Find out which huggingface.co account you are logged in as |
-| `hf auth list` | List all stored access tokens |
-| `hf repo create` | Create a new repo on huggingface.co |
-| `hf repo tag create` | Create a tag for a repo |
-| `hf repo tag list` | List tags for a repo |
-| `hf repo tag delete` | Delete a tag from a repo |
-| `hf repo-files delete` | Delete files from a repo on the Hub |
-| `hf download` | Download files from the Hub |
-| `hf upload` | Upload a file or a folder to the Hub. Recommended for single-commit uploads |
-| `hf env` | Print information about the environment |
-| `hf version` | Print information about the hf version |
-{/* END GENERATED CLI COMMANDS */}
-
-## Download, edit and upload
-
-```bash
-hf auth whoami
-hf download acme/model config.json --local-dir /work
-sed -i 's/1024/2048/' /work/config.json
-hf upload acme/model /work/config.json config.json --commit-message 'Widen the model'
-```
-
-`/work` must be a writable workspace mount. Each upload is one commit,
-including all files selected from a directory. `--repo-type` selects models,
-datasets or spaces; `--revision` selects a branch, tag or commit.
-
-Local paths resolve against the shell's working directory. With no source,
-`hf upload acme/model` reads `./model`. Downloads, uploads and cache files
-use workspace operations rather than the host filesystem.
-
-## Repositories and tags
-
-```bash
-hf repo create acme/new-model --private
-hf repo tag create acme/model v1.0
-hf repo tag list acme/model
-hf repo tag delete acme/model v1.0
-hf repo-files delete acme/model '*.tmp'
-```
-
-For spaces, use `--repo-type space` and `--space_sdk`. `--exist-ok` accepts
-an existing repository. Deleting matching files creates one commit.
-
-## Select files and cache downloads
-
-`--include`, `--exclude`, `--delete` and `repo-files delete` use Hub glob
-semantics: `*` crosses `/`, `[!a]` negates a character class, and a trailing
-`/` names a folder. Directory uploads exclude `.git` and `.cache/huggingface`.
-Single-file uploads ignore the include/exclude/delete filters with warnings.
-
-Deletion globs match the remote listing; `--delete` is relative to the upload
-destination and spares files re-added by the same commit. `.gitattributes`
-is never deleted. An empty change is skipped with a warning.
-
-Without `--local-dir`, downloads use the cache layout under `--cache-dir`:
-
-```text
-models--acme--model/
-  blobs/<etag>
-  refs/main
-  snapshots/<sha>/config.json -> ../../blobs/<etag>
-```
-
-A branch or tag download writes its ref; a commit-pinned download does not.
-`--force-download` refetches a blob. Relative cache paths, including
-`HF_HUB_CACHE` and `HF_HOME`, resolve against the session's working directory.
-
-## VFS and limits
-
-The [model](/python/vfs/hf_models), [dataset](/python/vfs/hf_datasets) and
-[space](/python/vfs/hf_spaces) VFS adapters expose remote repository files
-without creating a local checkout. They are read-only. Use a writable mount
-for editing and `hf upload` to choose the commit boundary.
-
-There is no interactive `auth login` or `auth logout`; the registered config
-supplies the token. Only the listed commands are implemented.
-
-{/* BEGIN GENERATED CLI LICENSE */}
-## License
-
-| Project | Role in Mirage | License |
-| --- | --- | --- |
-| [huggingface_hub](https://github.com/huggingface/huggingface_hub) 1.16.4 | Upstream CLI; its repository file filters are adapted | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/licenses/third_party/huggingface_hub.txt) |
-| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
-
-See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
-{/* END GENERATED CLI LICENSE */}
+<Reference />

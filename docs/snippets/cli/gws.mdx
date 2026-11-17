@@ -1,0 +1,144 @@
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `gws <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `gws drive files list` | GET /files (Google drive API passthrough) |
+| `gws drive files get` | GET /files/&#123;fileId&#125; (Google drive API passthrough) |
+| `gws drive files create` | POST /files (Google drive API passthrough) |
+| `gws drive files update` | PATCH /files/&#123;fileId&#125; (Google drive API passthrough) |
+| `gws drive files copy` | POST /files/&#123;fileId&#125;/copy (Google drive API passthrough) |
+| `gws drive files delete` | DELETE /files/&#123;fileId&#125; (Google drive API passthrough) |
+| `gws drive files export` | GET /files/&#123;fileId&#125;/export (Google drive API passthrough) |
+| `gws drive permissions create` | POST /files/&#123;fileId&#125;/permissions (Google drive API passthrough) |
+| `gws drive permissions list` | GET /files/&#123;fileId&#125;/permissions (Google drive API passthrough) |
+| `gws drive permissions delete` | DELETE /files/&#123;fileId&#125;/permissions/&#123;permissionId&#125; (Google drive API passthrough) |
+| `gws sheets spreadsheets get` | GET /spreadsheets/&#123;spreadsheetId&#125; (Google sheets API passthrough) |
+| `gws sheets spreadsheets create` | POST /spreadsheets (Google sheets API passthrough) |
+| `gws sheets spreadsheets batchUpdate` | POST /spreadsheets/&#123;spreadsheetId&#125;:batchUpdate (Google sheets API passthrough) |
+| `gws sheets read` | Read a cell range. Aliases: `+read`. |
+| `gws sheets write` | Overwrite a range with 2D values |
+| `gws sheets append` | Append rows after a range. Aliases: `+append`. |
+| `gws docs documents get` | GET /documents/&#123;documentId&#125; (Google docs API passthrough) |
+| `gws docs documents create` | POST /documents (Google docs API passthrough) |
+| `gws docs documents batchUpdate` | POST /documents/&#123;documentId&#125;:batchUpdate (Google docs API passthrough) |
+| `gws docs write` | Append text to a document. Aliases: `+write`. |
+| `gws slides presentations get` | GET /presentations/&#123;presentationId&#125; (Google slides API passthrough) |
+| `gws slides presentations create` | POST /presentations (Google slides API passthrough) |
+| `gws slides presentations batchUpdate` | POST /presentations/&#123;presentationId&#125;:batchUpdate (Google slides API passthrough) |
+| `gws calendar calendarList list` | GET /users/me/calendarList (Google calendar API passthrough) |
+| `gws calendar calendars get` | GET /calendars/&#123;calendarId&#125; (Google calendar API passthrough) |
+| `gws calendar events list` | GET /calendars/&#123;calendarId&#125;/events (Google calendar API passthrough) |
+| `gws calendar events get` | GET /calendars/&#123;calendarId&#125;/events/&#123;eventId&#125; (Google calendar API passthrough) |
+| `gws calendar events insert` | POST /calendars/&#123;calendarId&#125;/events (Google calendar API passthrough) |
+| `gws calendar events patch` | PATCH /calendars/&#123;calendarId&#125;/events/&#123;eventId&#125; (Google calendar API passthrough) |
+| `gws calendar events delete` | DELETE /calendars/&#123;calendarId&#125;/events/&#123;eventId&#125; (Google calendar API passthrough) |
+| `gws calendar freebusy query` | POST /freeBusy (Google calendar API passthrough) |
+| `gws forms forms create` | POST /forms (Google forms API passthrough) |
+| `gws forms forms get` | GET /forms/&#123;formId&#125; (Google forms API passthrough) |
+| `gws forms forms batchUpdate` | POST /forms/&#123;formId&#125;:batchUpdate (Google forms API passthrough) |
+| `gws forms forms responses list` | GET /forms/&#123;formId&#125;/responses (Google forms API passthrough) |
+| `gws forms forms responses get` | GET /forms/&#123;formId&#125;/responses/&#123;responseId&#125; (Google forms API passthrough) |
+| `gws gmail users drafts create` | POST /users/&#123;userId&#125;/drafts (Google gmail API passthrough) |
+| `gws gmail users drafts delete` | DELETE /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users drafts get` | GET /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users drafts list` | GET /users/&#123;userId&#125;/drafts (Google gmail API passthrough) |
+| `gws gmail users drafts send` | POST /users/&#123;userId&#125;/drafts/send (Google gmail API passthrough) |
+| `gws gmail users drafts update` | PUT /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users labels list` | GET /users/&#123;userId&#125;/labels (Google gmail API passthrough) |
+| `gws gmail users messages list` | GET /users/&#123;userId&#125;/messages (Google gmail API passthrough) |
+| `gws gmail users messages get` | GET /users/&#123;userId&#125;/messages/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users messages send` | POST /users/&#123;userId&#125;/messages/send (Google gmail API passthrough) |
+| `gws gmail users messages trash` | POST /users/&#123;userId&#125;/messages/&#123;id&#125;/trash (Google gmail API passthrough) |
+| `gws gmail users messages attachments get` | GET /users/&#123;userId&#125;/messages/&#123;messageId&#125;/attachments/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail send` | Send a new email via Gmail. Aliases: `+send`. |
+| `gws gmail read` | Fetch one Gmail message as processed JSON (same shape as cat &lt;path&gt;.gmail.json). Aliases: `+read`. |
+| `gws gmail reply` | Reply to the sender of a Gmail message (excludes CC). Aliases: `+reply`. |
+| `gws gmail reply-all` | Reply to a Gmail message including all recipients (To+CC). Aliases: `+reply-all`. |
+| `gws gmail forward` | Forward a Gmail message to a new recipient. Aliases: `+forward`. |
+| `gws gmail triage` | List message summaries (id, from, subject, date, snippet) for a Gmail search query. Aliases: `+triage`. |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+### Call an API method
+
+```bash
+gws drive files list --params '{"pageSize":10}'
+gws gmail users messages get --params '{"userId":"me","id":"MESSAGE_ID"}'
+gws drive permissions create --params '{"fileId":"FILE_ID"}' --json '{"role":"reader","type":"anyone"}'
+gws sheets spreadsheets create --json '{"properties":{"title":"Q3 planning"}}'
+```
+
+The form is `gws SERVICE RESOURCE METHOD`. `--params` supplies URL path and
+query parameters; `--json` supplies the body. Methods return the API response
+as compact JSON. Lists follow `nextPageToken` by default and print multiple
+pages as NDJSON. Use `--page-limit N` to stop early. Export methods can return
+raw bytes instead of JSON.
+
+The supported methods are the registered subset above, not every method in
+Google's Discovery documents.
+
+### Use helpers
+
+```bash
+gws gmail triage --query 'is:unread' --max 10
+gws gmail +triage --query 'is:unread' --max 10
+gws gmail read --id MESSAGE_ID
+gws gmail send --to user@example.com --subject Hello --body 'Hi there'
+gws gmail reply --message-id MESSAGE_ID --body 'Thanks'
+gws sheets read --spreadsheet SHEET_ID --range 'Sheet1!A1:C10'
+gws sheets append --spreadsheet SHEET_ID --values 'alice,42'
+gws docs write --document DOC_ID --text 'New paragraph'
+gws docs write --document DOC_ID --tab TAB_ID --text 'Into this tab'
+```
+
+Helpers omit the upstream CLI's `+` prefix: use `gws docs write`, not
+`gws docs +write`. `--tab` is Mirage's addition for document tabs.
+
+### Choose a document tab
+
+`gws docs documents get --params '{"documentId":"DOC_ID"}'` returns the
+legacy body of the first tab. Add `"includeTabsContent":true` to receive
+`tabs[].documentTab`, including nested `childTabs`, instead of that flat body.
+Mounted `.gdoc.json` files always use the tab-aware shape.
+
+`docs write` appends to the first tab unless `--tab` selects another one.
+A raw `batchUpdate` follows the API's defaults: `replaceAllText` without a
+tab restriction can affect every tab.
+
+## Behavior
+
+The CLI can share `GoogleConfig` with Google's VFS adapters. Each registration
+owns its config and requires no mount. Setting `folder_id` (`folderId` in
+TypeScript) changes **creation placement**, not which files the CLI may read:
+
+- Drive `files create` and `copy` default `parents` to that folder.
+- An explicit `parents` array wins, including an empty array.
+- Docs, Sheets and Slides creation is followed by a Drive move into the folder.
+  These are separate requests, so a failed move can leave the new file created.
+- Injected placement requests include Shared Drive support.
+
+Reads still reach the whole account allowed by the credential. Use command
+policy to restrict operations; a mounted folder is not a CLI access boundary.
+
+Mirage registers a fixed command subset; upstream builds commands from
+Google Discovery at runtime. Folder placement and helper spelling also differ,
+and the host config supplies credentials instead of an interactive login.
+Mirage paginates list methods by default; upstream requires `--page-all`.
+Parser refusals use Mirage's declared command style, so upstream exit codes
+and diagnostics are not a blanket compatibility promise.
+
+{/* BEGIN GENERATED CLI LICENSE */}
+## License
+
+| Project | Role in Mirage | License |
+| --- | --- | --- |
+| [gws](https://github.com/googleworkspace/cli) | Upstream CLI | [Apache-2.0](https://github.com/googleworkspace/cli/blob/main/LICENSE) |
+| [Mirage](https://github.com/strukto-ai/mirage) | Command implementation | [Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE) |
+
+See [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
+{/* END GENERATED CLI LICENSE */}
