@@ -29,7 +29,7 @@ import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, machineBindingsFor, routed, wholeLineRuntime } from '../../runtime/table.ts'
-import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { INTERPRETER_NAMES, PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { routedConsumer, runsWrapper } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
@@ -393,8 +393,10 @@ export class Router {
 
   /**
    * The machine that serves a command under a decision that places each
-   * command on its own, as `placementFor` answers it. Mirrors Python's
-   * `Router._serving`.
+   * command on its own, as `placementFor` answers it: a name a machine
+   * captures runs there only when Mirage hands it over, as a program or an
+   * interpreter, so a shell word such as `echo`, a function or an installed
+   * CLI stays in Mirage. Mirrors Python's `Router._serving`.
    */
   private serving(one: Judged, placed: RouteDecision<Runtime>): string {
     const command = one.judgment.command
@@ -410,7 +412,13 @@ export class Router {
         placed,
       )
       decision = rerouted ?? placed
-      if (consumer === Consumer.EXTERNAL && !command.includes('/')) {
+      if (
+        consumer !== Consumer.EXTERNAL &&
+        !(consumer === Consumer.SESSION && INTERPRETER_NAMES.has(command))
+      ) {
+        return ''
+      }
+      if (!command.includes('/')) {
         fallback = Object.hasOwn(decision.bindings, EXTERNAL_COMMANDS)
           ? (decision.bindings[EXTERNAL_COMMANDS] ?? null)
           : null

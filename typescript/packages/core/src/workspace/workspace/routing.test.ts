@@ -287,6 +287,38 @@ describe('routing on machines', () => {
     }
   })
 
+  it('moves nothing for a route to a capturer of a word Mirage keeps', async () => {
+    let ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: box('a', '@line'), b: box('b', 'echo') },
+        policies: [new Answers('echo', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      const said = await ws.shell('echo hi')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'a\n'])
+    } finally {
+      await ws.close()
+    }
+    ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { b: box('b', 'echo') },
+        policies: [new Answers('echo', { kind: 'route', machine: 'b' })],
+      },
+    )
+    try {
+      expect(DEC.decode((await ws.shell('echo hi')).stdout)).toBe('hi\n')
+      const said = await ws.explain('echo hi')
+      expect([...commands(said.node)].map((c) => c.machine)).toEqual([''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('keeps a route to where a line run whole runs', async () => {
     let ws = whole(new OnA())
     try {

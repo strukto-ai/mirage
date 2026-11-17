@@ -45,7 +45,10 @@ from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
 from mirage.workspace.dispatcher.reader import NamespaceReader
-from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
+from mirage.workspace.lookup.constants import (
+    INTERPRETER_NAMES,
+    PROGRAM_WRAPPERS,
+)
 from mirage.workspace.lookup.lookup import routed_consumer, runs_wrapper
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
@@ -570,7 +573,10 @@ class Router:
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
         """The machine that serves a command under a decision that places
-        each command on its own, as ``placement_for`` answers it.
+        each command on its own, as ``placement_for`` answers it: a name
+        a machine captures runs there only when Mirage hands it over, as
+        a program or an interpreter, so a shell word such as ``echo``, a
+        function or an installed CLI stays in Mirage.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -588,7 +594,11 @@ class Router:
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = rerouted or decision
-            if consumer is Consumer.EXTERNAL and "/" not in command:
+            if consumer is not Consumer.EXTERNAL and not (
+                consumer is Consumer.SESSION and command in INTERPRETER_NAMES
+            ):
+                return ""
+            if "/" not in command:
                 fallback = decision.bindings.get(EXTERNAL_COMMANDS)
         serving = decision.bindings.get(command, fallback)
         if not isinstance(serving, Runtime) or isinstance(
