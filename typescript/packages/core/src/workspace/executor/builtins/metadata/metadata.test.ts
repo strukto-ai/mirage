@@ -316,6 +316,16 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     },
   )
 
+  it('touch reports a file it did not make going before its times', async () => {
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' }, new RemovedBeforeTimesRAMVFS())
+    expect(await run(ws, 'touch /data/new.txt /data/f.txt; echo "s=$?"')).toEqual([
+      0,
+      's=1\n',
+      "touch: cannot touch '/data/f.txt': No such file or directory\n",
+    ])
+    await ws.close()
+  })
+
   it('touch lets a timeout on upload end the line', async () => {
     const [ws] = makeOverlayWs({}, new RejectingRAMVFS(new CommandTimeoutError('write', 1)))
     const [code, out] = await run(ws, 'touch /data/new.txt; echo after')

@@ -172,3 +172,15 @@ async def test_touch_says_nothing_when_its_new_file_goes_before_its_times(
     vfs = _RemovedBeforeTimesRAMVFS()
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     assert await _run(ws, f'{line}; echo "s=$?"') == (0, "s=0\n", "")
+
+
+@pytest.mark.asyncio
+async def test_touch_reports_a_file_it_did_not_make_going_before_its_times():
+    vfs = _RemovedBeforeTimesRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    assert await _run(ws, 'touch /data/new.txt /data/f.txt; echo "s=$?"') == (
+        0,
+        "s=1\n",
+        "touch: cannot touch '/data/f.txt': No such file or directory\n",
+    )
