@@ -276,6 +276,6 @@ export function argparseHelp(
     for (const [label, description] of table)
       lines.push(`  ${label.padEnd(width)}  ${description}`.trimEnd())
   }
-  if (spec.epilog) lines.push('', spec.epilog.replace(/\n+$/, ''))
+  if (spec.epilog) lines.push('', rstripNewlines(spec.epilog))
   return lines.join('\n') + '\n'
 }
