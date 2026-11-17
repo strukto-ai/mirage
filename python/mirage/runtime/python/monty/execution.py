@@ -273,9 +273,18 @@ class MontyExecution:
                 the host functions the program may call by name.
         """
         prints = _Prints(output, errors)
-        code, note = await self._feed(
-            program, cwd, fs, prints, external_lookup
-        )
+        try:
+            code, note = await self._feed(
+                program, cwd, fs, prints, external_lookup
+            )
+        except (
+            pydantic_monty.MontyRefusedError,
+            pydantic_monty.MontyConnectError,
+            pydantic_monty.MontyDisconnectError,
+            pydantic_monty.MontyShutdown,
+        ) as exc:
+            code = 1
+            note = f"{self.name}: remote server: {self._error_message(exc)}\n".encode()
         if note:
             await errors(note)
         return RunResult(exit_code=code)
@@ -390,18 +399,13 @@ class MontyExecution:
         except pydantic_monty.MontyCrashedError as exc:
             reason = "timed out" if exc.timed_out else "crashed"
             return 1, f"{self.name}: worker {reason}\n".encode()
-        except (
-            pydantic_monty.MontyRefusedError,
-            pydantic_monty.MontyConnectError,
-            pydantic_monty.MontyDisconnectError,
-            pydantic_monty.MontyShutdown,
-        ) as exc:
-            said = str(exc)
-            # A gateway may echo the rejected bearer token in its status text.
-            if self._api_key:
-                said = said.replace(self._api_key, "<redacted>")
-            return 1, f"{self.name}: remote server: {said}\n".encode()
         return 0, b""
+
+    def _error_message(self, exc: Exception) -> str:
+        said = str(exc)
+        if self._api_key:
+            said = said.replace(self._api_key, "<redacted>")
+        return re.sub(r"\r\n?|\n", " ", said)
 
     async def close(self) -> None:
         # A pool still being opened must be awaited before teardown, or
@@ -413,7 +417,8 @@ class MontyExecution:
                 self._pool = await self._pool_task
             except Exception as exc:
                 logger.debug(
-                    "monty pool being opened at close failed: %s", exc
+                    "monty pool being opened at close failed: %s",
+                    self._error_message(exc),
                 )
         self._pool_task = None
         if self._pool is not None:

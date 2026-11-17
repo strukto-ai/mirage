@@ -928,7 +928,7 @@ describe('a remote monty', () => {
     const real = await vi.importActual<typeof MontyModule>('@pydantic/monty')
     const [, rt] = buildEntry('py', { provider: 'monty_remote', url: URL, apiKey: 's3cret' })
     ;((await (rt as MontyRuntime).engine()) as unknown as { pool: unknown }).pool = {
-      checkout: () => Promise.reject(new real.MontyRefusedError('denied: Bearer s3cret')),
+      checkout: () => Promise.reject(new real.MontyRefusedError('denied:\r\nBearer s3cret')),
       close: () => Promise.resolve(),
     }
     try {

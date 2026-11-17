@@ -278,7 +278,10 @@ export class MontyExecution {
         void checkout
           .then((late) => late.close())
           .catch((err: unknown) => {
-            console.debug('monty: a checkout that arrived after its run stopped failed', err)
+            console.debug(
+              'monty: a checkout that arrived after its run stopped failed',
+              this.errorMessage(err),
+            )
           })
         return this.interrupted(interruption, ctx)
       }
@@ -329,7 +332,7 @@ export class MontyExecution {
   /**
    * The stderr line for a remote server that refused, could not be reached or
    * was lost, or null for any other failure. Mirrors the remote clause of
-   * Python's `_feed`.
+   * Python's `run`.
    */
   private remoteNote(module: MontyModuleLike, caught: unknown): string | null {
     const remote = [
@@ -339,10 +342,14 @@ export class MontyExecution {
       module.MontyShutdown,
     ]
     if (!remote.some((cls) => cls !== undefined && caught instanceof cls)) return null
-    const said = (caught as Error).message
+    return `${this.name}: remote server: ${this.errorMessage(caught)}\n`
+  }
+
+  private errorMessage(caught: unknown): string {
+    const said = caught instanceof Error ? caught.message : String(caught)
     // A gateway may echo the rejected bearer token in its status text.
     const shown = this.apiKey ? said.replaceAll(this.apiKey, '<redacted>') : said
-    return `${this.name}: remote server: ${shown}\n`
+    return shown.replace(/\r\n?|\n/g, ' ')
   }
 
   // How a stopped run ends: past its deadline it throws, killed it exits 1.
@@ -405,7 +412,7 @@ export class MontyExecution {
       try {
         this.pool = await this.poolPromise
       } catch (err) {
-        console.debug('monty: the pool being opened at close failed', err)
+        console.debug('monty: the pool being opened at close failed', this.errorMessage(err))
       }
     }
     this.poolPromise = null
