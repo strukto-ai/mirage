@@ -2123,6 +2123,7 @@ jobs:
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
       MIRAGE_WASI_HOME: /tmp/cpython-wasi
       MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
+      MIRAGE_INTEG_DOCKER_SECOND_CONTAINER: mirage-integ-runtime-second-box
       # The ssh box publishes port 2222, which the ssh runtime's entry and
       # the ssh backend both pin (env placeholders expand as strings only).
       MIRAGE_INTEG_SSH_HOST: 127.0.0.1
@@ -2395,6 +2396,14 @@ jobs:
             'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs >/dev/null &&
              mkdir -p /boxdata && mount -t tmpfs tmpfs /boxdata && echo box > /boxdata/own.txt'
           echo "MIRAGE_INTEG_BOX_MOUNTS=1" >> "$GITHUB_ENV"
+          # A second container, a pid namespace of its own whose next pid a
+          # case sets, so two machines run a program under the same pid.
+          # /proc/sys must be writable, and docker's default AppArmor profile
+          # refuses writes under /proc/sys/kernel past shm*.
+          docker run -d --name "$MIRAGE_INTEG_DOCKER_SECOND_CONTAINER" \
+            --cap-add SYS_ADMIN --security-opt systempaths=unconfined \
+            --security-opt apparmor:unconfined \
+            debian:trixie-slim sleep infinity
 
       - name: Start the ssh sandbox host (user-provisioned)
         if: env.NEEDS_SSH == '1'

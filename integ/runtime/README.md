@@ -134,6 +134,7 @@ that way.
 | `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
 | `MONGODB_URI`                                | `backend/mongodb.json`                              |
 | `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
+| `MIRAGE_INTEG_DOCKER_SECOND_CONTAINER`       | `sandbox/captures.json`: a pid two machines share   |
 | `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
 | `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
 | `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |

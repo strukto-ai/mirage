@@ -102,7 +102,8 @@ RUNTIMES='{
 # `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
 # merged over `expect`, and the world runs the runtime on a machine of its
 # name, from its table entry with the case's `entry` laid over it, beside the
-# case's `also_machines`, each capturing what `also_entries` names for it.
+# case's `also_machines`, each capturing what `also_entries` names for it,
+# with that entry's `config` laid over its own.
 # INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
@@ -151,7 +152,8 @@ runtime_variants() {
       | ({($r): $spec}
          + ([($c.also_machines // [])[] | {key: ., value: ({provider: $r} + $config + {captures: []})}]
            | from_entries)
-         | reduce ($c.also_entries // [])[] as $e (.; .[$e.machine].captures = $e.captures))
+         | reduce ($c.also_entries // [])[] as $e
+             (.; .[$e.machine] += ($e.config // {}) | .[$e.machine].captures = $e.captures))
         as $machines
       | $c + {
           id: ($c.id + "@" + $r),
