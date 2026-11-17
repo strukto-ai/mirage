@@ -585,6 +585,9 @@ impl Merger {
                 }
                 self.writing = Some((index, pos, hi));
                 if done {
+                    if let Some(previous) = &mut self.previous {
+                        crate::release_capacity(previous);
+                    }
                     self.inputs[index].consume(hi, self.separator);
                     self.writing = None;
                     work += 1;

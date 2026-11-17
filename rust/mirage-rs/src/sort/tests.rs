@@ -1,7 +1,7 @@
 use serde_json::{Value as Json, json};
 
 use super::options::scan;
-use crate::{drain_all, open, run};
+use crate::{Stream, drain_all, open, run};
 
 fn config(mode: &str, keys: &str, extra: &str) -> String {
     format!(
@@ -760,6 +760,58 @@ fn a_unique_merge_keeps_the_first_of_a_key_equal_series() {
     assert_eq!(merged(&typed, &[&["x 1"], &["a 1"]]), ["x 1"]);
     let typed = [("ignore_case", ""), ("unique", "")];
     assert_eq!(merged(&typed, &[&["b"], &["B"]]), ["b"]);
+}
+
+#[test]
+fn a_unique_merge_releases_a_giant_previous_record_after_small_records() {
+    let keys = WHOLE.replace(r#""numeric":false"#, r#""numeric":true"#);
+    let cfg =
+        config("merge", &keys, r#", "inputs":1"#).replace(r#""unique":false"#, r#""unique":true"#);
+    let super::Config::Merge { compare, .. } = serde_json::from_str(&cfg).unwrap() else {
+        unreachable!();
+    };
+    let mut stream = super::Merger {
+        compare,
+        separator: b'\n',
+        inputs: vec![super::Input::default()],
+        previous: None,
+        paused: false,
+        selection: super::Selection::default(),
+        writing: None,
+        comparison: super::Comparison::default(),
+    };
+    let mut capacity = 0;
+    for digit in ['9', '8'] {
+        let record = format!(
+            "-{}\n",
+            digit.to_string().repeat(crate::constants::KEPT * 8)
+        );
+        let mut out = Vec::new();
+        for piece in record.as_bytes().chunks(crate::PIECE) {
+            stream.feed(piece, &mut out).unwrap();
+            drain_all(&mut stream, &mut out);
+        }
+        assert_eq!(out, record.as_bytes());
+        let current = stream.previous.as_ref().unwrap().capacity();
+        assert!(current >= record.len() - 1);
+        if capacity != 0 {
+            assert_eq!(current, capacity);
+        }
+        capacity = current;
+    }
+    let mut out = Vec::new();
+    stream.feed(b"1\n1\n2\n", &mut out).unwrap();
+    drain_all(&mut stream, &mut out);
+    assert_eq!(out, b"1\n2\n");
+    let previous = stream.previous.as_ref().unwrap();
+    assert_eq!(previous, b"2");
+    assert!(previous.capacity() <= crate::constants::KEPT * 4);
+    capacity = previous.capacity();
+    out.clear();
+    stream.feed(b"3\n", &mut out).unwrap();
+    drain_all(&mut stream, &mut out);
+    assert_eq!(out, b"3\n");
+    assert_eq!(stream.previous.as_ref().unwrap().capacity(), capacity);
 }
 
 /// What `-R` makes of `list` when the host draws `drawn`, with the other
