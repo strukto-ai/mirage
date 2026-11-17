@@ -250,6 +250,15 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
             {"provider": "remote", "runtime": "monty", "url": "https://m"},
             "MontyRuntime",
         ),
+        (
+            {
+                "provider": "remote",
+                "runtime": "monty",
+                "url": None,
+                "api_key": "pylf_v2_us_k",
+            },
+            "MontyRuntime",
+        ),
     ],
 )
 def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):

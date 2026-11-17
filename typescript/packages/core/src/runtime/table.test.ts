@@ -312,6 +312,7 @@ describe('buildEntry', () => {
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
     [{ provider: 'remote', runtime: 'monty', url: 'https://m' }, 'MontyRuntime'],
+    [{ provider: 'remote', runtime: 'monty', url: null, apiKey: 'pylf_v2_us_k' }, 'MontyRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
     const [handle, runtime] = buildEntry('py', spec)
     expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])

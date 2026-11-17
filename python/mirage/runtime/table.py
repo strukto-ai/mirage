@@ -189,7 +189,11 @@ def build_entry(
             )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
-        if provider == REMOTE and remote_url(runtime.config) is None:
+        if (
+            provider == REMOTE
+            and isinstance(runtime, MontyRuntime)
+            and remote_url(runtime.config) is None
+        ):
             raise ValueError(
                 f"machine {name!r}: a {REMOTE} machine names its url, or a"
                 " Logfire api_key that names its region"

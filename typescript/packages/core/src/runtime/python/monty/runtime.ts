@@ -88,7 +88,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
     super(options, MontyRuntime.configFields)
     this.maxMemory = memoryLimit(this.config.maxMemory)
     this.url = remoteUrl(this.config)
-    if (this.config.apiKey !== undefined && this.url === null)
+    if (typeof this.config.apiKey === 'string' && this.url === null)
       throw new Error('monty: apiKey needs a url, unless it is a Logfire key from a known region')
   }
 
