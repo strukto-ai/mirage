@@ -691,6 +691,30 @@ it.each([
   }
 })
 
+class RemoteBox extends Box {
+  override readonly name: string = 'remote'
+}
+
+it('a wrapper goes with its program routed off an in_process machine', async () => {
+  const near = new InProcessBox(['gcc'])
+  const far = new RemoteBox(['gcc'])
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: [near, far],
+      policies: [new Routes({ gcc: { kind: 'route', machine: 'remote' } })],
+    },
+  )
+  try {
+    const io = await ws.shell('nohup gcc x.c')
+    expect(io.exitCode).toBe(0)
+    expect([near.ran, far.ran]).toEqual([[], [['nohup', 'gcc', 'x.c']]])
+  } finally {
+    await ws.close()
+  }
+})
+
 it('a wrapper over an in_process external program is dropped', async () => {
   const box = new InProcessBox()
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })

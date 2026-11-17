@@ -171,7 +171,7 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr_contains": "native-tool: Permission denied\n"
+            "stderr": "native-tool: Permission denied\n"
           }
         },
         {
@@ -1006,7 +1006,7 @@
       ]
     },
     {
-      "id": "external_wrapper_routes_on_in_process_machines_never_disagree",
+      "id": "external_wrapper_routes_that_disagree_refuse",
       "world": {
         "machines": {
           "processbox": {
@@ -1048,8 +1048,9 @@
         {
           "command": "nohup native-tool a",
           "expect": {
-            "exit": 0,
-            "stdout": "box:native-tool a\n"
+            "exit": 126,
+            "stdout": "",
+            "stderr": "nohup: Permission denied\n"
           }
         },
         {

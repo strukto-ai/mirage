@@ -62,6 +62,7 @@ from mirage.policy import (
 )
 from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
@@ -1621,18 +1622,32 @@ async def _route_argv(
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
-        named = wrapper_program_words(
-            name, argv.args, session, registry, links
+        entry = routing.bindings.get(
+            name, routing.bindings.get(EXTERNAL_COMMANDS)
         )
+        named = wrapper_program_words(
+            name,
+            argv.args,
+            session,
+            registry,
+            None if entry is None else entry.machine,
+            links,
+        )
+        cut = len(argv.args) + 1 - len(named)
         argv = dataclasses.replace(
             argv,
-            args=tuple(named),
+            name=named[0],
+            args=tuple(named[1:]),
             operands=tuple(
                 op if word == typed else word
                 for op, word, typed in zip(
-                    argv.operands, named, argv.args, strict=True
+                    argv.operands[cut:],
+                    named[1:],
+                    argv.args[cut:],
+                    strict=True,
                 )
             ),
+            prefix=argv.prefix if cut == 0 else (),
         )
         return await run_external(
             argv, stdin, session, registry, routing, sink

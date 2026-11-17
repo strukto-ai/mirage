@@ -185,32 +185,6 @@ function isNative(runtime: Runtime | null | undefined, name: string): boolean {
 }
 
 /**
- * The machine that runs a name as a program, by its own capture or the
- * external one; null when Mirage runs it, nothing does, or a route took the
- * name off its machine. Mirrors Python's `_program_machine`.
- */
-function programMachine(
-  name: string,
-  session: SessionState,
-  registry: MountRegistry,
-  routing: RouteDecision<Runtime> | undefined,
-): MachineName | null {
-  const bindings = routing?.bindings ?? registry.runtimeBindings
-  let serving = Object.hasOwn(bindings, name) ? (bindings[name] ?? null) : null
-  if (serving === null) {
-    if (
-      Object.hasOwn(bindings, name) ||
-      lookup(name, session, registry, routing) !== Consumer.EXTERNAL
-    )
-      return null
-    serving = bindings[EXTERNAL_COMMANDS] ?? null
-  } else if (!isNative(serving, name)) {
-    return null
-  }
-  return serving === null ? null : serving.machine
-}
-
-/**
  * `lookup`'s answer, with a wrapper no Mirage layer owns bound to the
  * runtime that captures its program by name (`nice gcc`). Mirrors Python's
  * `routed_consumer`.
@@ -233,7 +207,7 @@ export function routedConsumer(
     return [Consumer.SESSION, routing]
   const consumer = lookup(name, session, registry, routing)
   if (routing === undefined || !outsideMirage(consumer)) return [consumer, routing]
-  const program = wrapped(name, args, session, registry, routing, links)
+  const program = wrapped(name, args, routing.bindings, session, registry, links)
   if (program === null) return [consumer, routing]
   const bindings = Object.assign(
     Object.create(null) as Record<string, Runtime | null>,
@@ -263,22 +237,26 @@ export function withoutCapture(
 }
 
 /**
- * A wrapper's words with each program it runs that a `/usr/bin` path spells
- * named instead (`nice /usr/bin/gcc` hands `nice gcc`), as the plain path
- * runs that program by name: a runtime cannot read a workspace link. A name
- * the wrapper would read as an option keeps its path. Mirrors Python's
- * `wrapper_program_words`.
+ * The words a command hands the machine that runs it, name first: each
+ * program a wrapper runs that a `/usr/bin` path spells named instead (`nice
+ * /usr/bin/gcc` hands `nice gcc`), as the plain path runs that program by
+ * name, since a machine cannot read a workspace link; a name the wrapper
+ * would read as an option keeps its path. Mirage's own `in_process` machine
+ * has no process for a wrapper to change, so it gets the program's words
+ * alone (`gcc x.c`). Mirrors Python's `wrapper_program_words`.
  */
 export function wrapperProgramWords(
   name: string,
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  machine: MachineName | null,
   links: NamespaceLinks | null = null,
 ): string[] {
-  const words = [...args]
+  const words = [name, ...args]
   let head = name
-  let start = 0
+  let start = 1
+  let program = 0
   while (PROGRAM_WRAPPERS.has(head)) {
     const [found] = readWrapper(head, words.slice(start))
     if (found === null) break
@@ -286,17 +264,17 @@ export function wrapperProgramWords(
     const word = words[at] ?? ''
     head = pathProgram(word, session, registry, links) ?? word
     if (!head.startsWith('-')) words[at] = head
+    program = at
     start = at + 1
   }
+  if (machine !== null && machine.provider === IN_PROCESS) return words.slice(program)
   return words
 }
 
 /**
  * Where a wrapper's program stands in its words when Mirage runs that
- * program itself, without the wrapper: one of Mirage's commands (`nice
- * grep`) or a program of Mirage's own `in_process` machine, which has no
- * process for the wrapper to change. null otherwise. Mirrors Python's
- * `mirage_program_at`.
+ * program itself, without the wrapper (`nice grep`); null otherwise. Mirrors
+ * Python's `mirage_program_at`.
  */
 export function mirageProgramAt(
   name: string,
@@ -311,7 +289,7 @@ export function mirageProgramAt(
     !PROGRAM_WRAPPERS.has(name) ||
     Object.hasOwn(bindings, name) ||
     !outsideMirage(lookup(name, session, registry, routing)) ||
-    wrapped(name, args, session, registry, routing, links) !== null
+    wrapped(name, args, bindings, session, registry, links) !== null
   )
     return null
   const [at] = readWrapper(name, args)
@@ -322,13 +300,9 @@ export function mirageProgramAt(
     const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing, links)
     return deeper === null ? null : at
   }
-  const machine = programMachine(inner, session, registry, routing)
-  if (machine === null) {
-    if (outsideMirage(lookup(inner, session, registry, routing))) return null
-  } else if (machine.provider !== IN_PROCESS) {
+  if (outsideMirage(lookup(inner, session, registry, routing))) return null
+  if (INTERPRETER_NAMES.has(inner) && !((bindings[inner] ?? null) instanceof LanguageRuntime))
     return null
-  }
-  if (INTERPRETER_NAMES.has(inner) && (bindings[inner] ?? null) === null) return null
   return at
 }
 
@@ -462,30 +436,26 @@ function outsideMirage(consumer: Consumer): boolean {
 }
 
 /**
- * The program a wrapper runs, nested wrappers followed, when a machine past
- * Mirage's own process captures it by name, so the wrapper goes there with
- * it; a word spelled by its `/usr/bin` path is that program, as the plain
- * path runs it. `links`, the session's, are followed to it; null reads the
- * word as typed.
+ * The program a wrapper runs, nested wrappers followed, when a runtime
+ * captures it by name and runs it natively; a word spelled by its
+ * `/usr/bin` path is that program, as the plain path runs it. `links`, the
+ * session's, are followed to it; null reads the word as typed.
  */
 function wrapped(
   name: string,
   args: readonly string[],
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
   session: SessionState,
   registry: MountRegistry,
-  routing: RouteDecision<Runtime> | undefined,
   links: NamespaceLinks | null,
 ): string | null {
-  const bindings = routing?.bindings ?? registry.runtimeBindings
   if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return null
   const [at] = readWrapper(name, args)
   if (at === null) return null
   const word = args[at] ?? ''
   const inner = pathProgram(word, session, registry, links) ?? word
-  const machine = programMachine(inner, session, registry, routing)
-  if (Object.hasOwn(bindings, inner) && machine !== null && machine.provider !== IN_PROCESS)
-    return inner
-  return wrapped(inner, args.slice(at + 1), session, registry, routing, links)
+  if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
+  return wrapped(inner, args.slice(at + 1), bindings, session, registry, links)
 }
 
 /**

@@ -669,6 +669,28 @@ async def test_a_wrapper_over_an_in_process_machines_program_is_dropped(line):
         await ws.close()
 
 
+class RemoteGccBox(Box):
+    name = "remote"
+    captures = ("gcc",)
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_goes_with_its_program_routed_off_an_in_process_machine():
+    near, far = InProcessGccBox(), RemoteGccBox()
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines=[near, far],
+        policies=[Routes({"gcc": Route(machine="remote")})],
+    )
+    try:
+        r = await ws.shell("nohup gcc x.c")
+        assert r.exit_code == 0
+        assert (near.ran, far.ran) == ([], [["nohup", "gcc", "x.c"]])
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_wrapper_over_an_in_process_external_program_is_dropped():
     box = InProcessBox()

@@ -47,6 +47,7 @@ import {
 } from '../../policy/index.ts'
 import { agreed } from '../../policy/policies.ts'
 import type { EntryGate } from '../../policy/types.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
@@ -1465,12 +1466,24 @@ async function routeArgv(
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    const named = wrapperProgramWords(name, argv.args, session, registry, links)
+    const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
+    const entry = routing.bindings[key] ?? null
+    const named = wrapperProgramWords(
+      name,
+      argv.args,
+      session,
+      registry,
+      entry === null ? null : entry.machine,
+      links,
+    )
+    const cut = argv.args.length + 1 - named.length
+    const args = named.slice(1)
+    const typed = argv.args.slice(cut)
     const handed = new Argv(
-      argv.name,
-      named,
-      argv.operands.map((op, i) => (named[i] === argv.args[i] ? op : (named[i] ?? op))),
-      argv.prefix,
+      named[0] ?? name,
+      args,
+      argv.operands.slice(cut).map((op, i) => (args[i] === typed[i] ? op : (args[i] ?? op))),
+      cut === 0 ? argv.prefix : [],
     )
     return runExternal(handed, stdin, session, registry, routing, signal, sink)
   }
