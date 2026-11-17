@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
 use crate::number;
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::{Stream, StreamError, constants::OUTPUT, latin1_list, parse_config};
 
 const INTMAX: u64 = i64::MAX as u64;

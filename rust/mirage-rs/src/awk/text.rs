@@ -1071,3 +1071,7 @@ mod string_tests {
         }
     }
 }
+
+pub(super) fn no_memory() -> Vec<u8> {
+    b"awk: out of memory".to_vec()
+}

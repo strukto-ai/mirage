@@ -35,8 +35,9 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
 from mirage.workspace.expand import argv as argv_module
-from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
+from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup_all
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS
+from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.session import SessionState
 
 

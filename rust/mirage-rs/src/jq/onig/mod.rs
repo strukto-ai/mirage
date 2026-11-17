@@ -5,13 +5,15 @@ mod class;
 mod compile;
 mod exec;
 mod fold;
+mod node;
 mod parse;
 #[cfg(test)]
 mod tests;
 
 use self::compile::{Inst, Program, Unit};
 use self::exec::{Best, Machine, Mode};
-use self::parse::{Anchor, Flags};
+use self::node::Anchor;
+use self::parse::Flags;
 use crate::regex::Step;
 
 pub(crate) use self::exec::Region;

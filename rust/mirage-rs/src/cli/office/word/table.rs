@@ -6,10 +6,10 @@
 use super::super::node::{Node, Value};
 use super::super::tree::{E, W, is_on, on_off};
 use super::super::units::{half_points, hex_color};
+use super::doc::Word;
 use super::{
-    Word, is_digits, is_int, jsn, num_text, num_value, para_segment, pct_width, read_border,
-    row_cells, safe_width, sdt_segment, shading_canonical, shading_theme, t_text, table_rows,
-    w_child, w_val,
+    is_digits, is_int, jsn, num_text, num_value, para_segment, pct_width, read_border, row_cells,
+    safe_width, sdt_segment, shading_canonical, shading_theme, t_text, table_rows, w_child, w_val,
 };
 
 const LOOK_BITS: [(&str, u32); 6] = [

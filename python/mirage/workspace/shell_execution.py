@@ -208,7 +208,7 @@ class ShellExecution:
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
+        _exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
         await self.aclose()

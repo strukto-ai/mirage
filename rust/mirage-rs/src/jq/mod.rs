@@ -1,7 +1,9 @@
 mod builtin;
 mod check;
 mod compile;
+mod config;
 mod eval;
+mod fault;
 mod format;
 mod host;
 mod lalr;
@@ -24,9 +26,3 @@ pub(crate) use eval::open as open_eval;
 pub(crate) use link::open as open_link;
 pub(crate) use main::open as open_main;
 pub(crate) use options::open as open_options;
-
-#[derive(Default, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub(super) struct BeginConfig {
-    pub(super) discard: bool,
-}

@@ -9,7 +9,7 @@
 use serde_json::{Value as Json, json};
 
 use super::key::{Compare, Key, Mods};
-use crate::scan::{OPERAND, Typed, Values, unknown};
+use crate::scan_grammar::{OPERAND, Typed, Values, unknown};
 use crate::{StreamError, number, quoted};
 
 /// The ordering letters a KEYDEF takes after a position.

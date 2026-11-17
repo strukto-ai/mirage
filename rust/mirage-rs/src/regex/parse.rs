@@ -1057,6 +1057,18 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// A byte that is no part of a character, which only a literal match of
+/// that same byte may take; in a set one matches nothing.
+pub(crate) fn has_raw_byte(ast: &Ast) -> bool {
+    let raw = |unit: &Unit| matches!(unit, Unit::Byte(_));
+    match ast {
+        Ast::Unit(unit) => raw(unit),
+        Ast::Group(_, inner) | Ast::Repeat(inner, _, _) => has_raw_byte(inner),
+        Ast::Concat(items) | Ast::Alternate(items) => items.iter().any(has_raw_byte),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

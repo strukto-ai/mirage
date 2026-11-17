@@ -7,7 +7,7 @@
 
 use fancy_regex::Regex;
 
-use super::super::Fail;
+use super::super::errors::Fail;
 use super::super::node::{Node, Value};
 use super::super::tree::{A, C, E, P, outer_xml};
 use super::super::units::hex_color;

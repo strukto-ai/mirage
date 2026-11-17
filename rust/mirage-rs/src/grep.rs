@@ -7,7 +7,7 @@ use serde_json::Value as Json;
 use crate::constants::MAX_HELD;
 use crate::number;
 use crate::regex::{Options, Regex, STEPS, Step, Syntax};
-use crate::scan::{self, Typed, Values};
+use crate::scan_grammar::{self, Typed, Values};
 use crate::{Stream, StreamError, parse_config, quoted};
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -203,7 +203,7 @@ const USAGE: &str =
 /// the max count, which the hosts send alone after their matcher check. A scalar option typed twice is read at its
 /// last occurrence, except that every `-d` and `-D` word is checked.
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
-    let latest = scan::latest(options);
+    let latest = scan_grammar::latest(options);
     let mut binary = "binary";
     let mut contexts: [Option<u64>; 3] = [None; 3];
     let mut directories = "read";
@@ -227,7 +227,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             | "directories"
             | "devices"
             | "max_count" => {}
-            _ => return Err(scan::unknown("grep", name)),
+            _ => return Err(scan_grammar::unknown("grep", name)),
         }
     }
     for (name, raw) in &latest {

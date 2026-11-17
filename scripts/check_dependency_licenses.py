@@ -109,6 +109,7 @@ ALIASES = {
 # One-line License fields that name a license in words.
 PROSE = {
     "3-Clause BSD License": "BSD-3-Clause",
+    "Apache 2.0": "Apache-2.0",
     "Apache License 2.0": "Apache-2.0",
     "Apache License, Version 2.0": "Apache-2.0",
     "BSD 3-Clause OR Apache-2.0": "BSD-3-Clause OR Apache-2.0",
@@ -279,12 +280,14 @@ def step(dep: dict[str, Any], path: str) -> Step:
 
 
 def closure(lock: dict[str, Any]) -> dict[tuple[str, str], str]:
-    """Every registry release the project's runtime and extras reach.
+    """Every registry release the project's runtime, extras and dependency
+    groups reach.
 
     Maps each name and locked version to one path to it from the project,
-    led by the extra that brings it in, so a failure says why the package
-    is there. A package locked at several versions is reached at each one
-    a dependency names. The dev group never ships and is not walked.
+    led by the extra or group that brings it in, so a failure says why the
+    package is there. A package locked at several versions is reached at
+    each one a dependency names. A group never ships, but its tools run on
+    every contributor's machine and in CI, so they answer to the same rule.
     """
     packages: dict[str, list[dict[str, Any]]] = {}
     for entry in lock["package"]:
@@ -298,6 +301,9 @@ def closure(lock: dict[str, Any]) -> dict[tuple[str, str], str]:
     for group in sorted(groups, key=lambda group: (group == "all", group)):
         for dep in groups[group]:
             stack.append(step(dep, f"[{group}] {dep['name']}"))
+    for group, deps in sorted(project.get("dev-dependencies", {}).items()):
+        for dep in deps:
+            stack.append(step(dep, f"[{group} group] {dep['name']}"))
     stack.reverse()
     reached: dict[tuple[str, str], str] = {}
     walked: set[tuple[str, str, str]] = set()
@@ -361,7 +367,7 @@ def python_packages() -> list[Package]:
 
 
 def npm_packages(report: pathlib.Path) -> list[Package]:
-    """`pnpm licenses list --json --prod`, read from a file."""
+    """`pnpm licenses list --json`, read from a file."""
     data = json.loads(report.read_text())
     out: list[Package] = []
     for license, entries in data.items():
@@ -417,7 +423,7 @@ def load_exceptions() -> list[Exemption]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Fail when a shipped dependency is not permissively licensed."
+        description="Fail when a dependency is not permissively licensed."
     )
     parser.add_argument(
         "--python", action="store_true", help="check python/uv.lock"
@@ -426,7 +432,7 @@ def main() -> int:
         "--npm",
         type=pathlib.Path,
         metavar="REPORT",
-        help="check a `pnpm licenses list --json --prod` report",
+        help="check a `pnpm licenses list --json` report",
     )
     args = parser.parse_args()
     if not args.python and args.npm is None:

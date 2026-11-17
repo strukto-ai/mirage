@@ -3,7 +3,7 @@
 
 use super::client::{Account, Result, github_request_response, value};
 use super::json::{Json, Obj};
-use super::repo::{RepoRef, graphql_data};
+use super::repo::{RepoRef, graphql_data, mutate};
 
 fn path(target: &RepoRef, tail: &str) -> String {
     format!("/repos/{}/{}/pulls{tail}", target.owner, target.repo)
@@ -306,4 +306,33 @@ pub(crate) async fn status_contexts(
         return value(format!("no checks reported on the '{branch}' branch"));
     }
     Ok(contexts)
+}
+
+pub(crate) async fn close_pull(account: &Account, id: &str) -> Result<()> {
+    let mut input = Obj::new();
+    input.set("pullRequestId", id);
+    mutate(
+        account,
+        "PullRequestClose",
+        "ClosePullRequestInput",
+        "closePullRequest",
+        "pullRequest{id}",
+        input,
+    )
+    .await
+    .map(|_| ())
+}
+
+pub(crate) async fn reopen_pull(account: &Account, id: &str) -> Result<Obj> {
+    let mut input = Obj::new();
+    input.set("pullRequestId", id);
+    mutate(
+        account,
+        "PullRequestReopen",
+        "ReopenPullRequestInput",
+        "reopenPullRequest",
+        "pullRequest{id}",
+        input,
+    )
+    .await
 }

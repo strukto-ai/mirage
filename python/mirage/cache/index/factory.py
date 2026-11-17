@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
@@ -21,9 +21,6 @@ from mirage.cache.index.store import IndexCacheStore
 from mirage.utils.clock import Clock
 from mirage.utils.ids import IdSource
 from mirage.utils.loader import optional_attr
-
-if TYPE_CHECKING:
-    from mirage.cache.index.redis import RedisIndexCacheStore
 
 
 def build_index(
@@ -57,7 +54,7 @@ def build_index(
     if config is None:
         return RAMIndexCacheStore(ttl=ttl, clock=clock)
     if isinstance(config, RedisIndexConfig):
-        redis_store: type[RedisIndexCacheStore] = optional_attr(
+        redis_store: Callable[..., IndexCacheStore] = optional_attr(
             "mirage.cache.index.redis:RedisIndexCacheStore",
             "redis",
             "RedisIndexConfig",

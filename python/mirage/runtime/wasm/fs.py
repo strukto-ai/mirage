@@ -514,7 +514,7 @@ class WasiFs:
         length: int,
         oflags: int,
         rights_base: int,
-        rights_inherit: int,
+        _rights_inherit: int,
         fdflags: int,
         out: int,
     ) -> int:
@@ -1010,11 +1010,11 @@ class WasiFs:
     def path_link(
         self,
         caller: "wasmtime.Caller",
-        old_dirfd: int,
-        old_flags: int,
+        _old_dirfd: int,
+        _old_flags: int,
         old_ptr: int,
         old_length: int,
-        new_dirfd: int,
+        _new_dirfd: int,
         new_ptr: int,
         new_length: int,
     ) -> int:

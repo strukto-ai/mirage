@@ -1,55 +1,9 @@
-use super::heredoc::Body;
-use super::tree::{SourceMap, Tree};
+use super::heredoc_body::Body;
+use super::tree::{Deferred, Heredoc, SourceMap, Tree};
 
 /// How deep the expansions a heredoc body holds may nest before the
 /// rest of it is read as text.
 const MAX_NESTING: usize = 128;
-
-/// A heredoc the line reads, folded into the tree's source as a `<`
-/// redirect from a double-quoted word that holds its body.
-#[derive(Debug, Clone)]
-pub struct Heredoc {
-    /// Where its `<` stands in the tree's source.
-    pub at: usize,
-    /// Where its `<<` stands in the line as typed.
-    pub operator: usize,
-    /// Where its delimiter word ends in the line as typed.
-    pub word_end: usize,
-    /// The delimiter word as typed.
-    pub word: Vec<u8>,
-    pub delimiter: Vec<u8>,
-    /// A quoted delimiter: the body is not expanded.
-    pub quoted: bool,
-    /// `<<-`: its lines lose their leading tabs.
-    pub dash: bool,
-    /// Where the body starts in the line as typed.
-    pub body_start: usize,
-    /// Past its delimiter line, or the end of the line as typed.
-    pub end: usize,
-    /// The body as bash reads it.
-    pub body: Vec<u8>,
-    /// Whether the delimiter line ended it, not the end of the input.
-    pub terminated: bool,
-    /// The line bash names the heredoc by when the input ends inside it.
-    pub line: usize,
-    /// The line bash's reader stands on when the input ends inside it.
-    pub eof_line: usize,
-    /// Where expanding the body fails, if it does.
-    pub deferred: Option<Deferred>,
-}
-
-/// Where expanding a heredoc's body fails: bash reads a `$( )` there that
-/// does not parse, or a `$( )` or `${` or backtick it leaves open, only as
-/// it expands the body.
-#[derive(Debug, Clone, Copy)]
-pub struct Deferred {
-    /// Where in the body the construct opens; the rest is folded in as
-    /// text.
-    pub at: usize,
-    /// The row the body starts on in the line as typed, which bash counts
-    /// a substitution's lines in it from.
-    pub row: usize,
-}
 
 /// A span of the line, the text that takes its place with where each of
 /// its bytes came from, and the heredoc whose `<` the text starts with.
@@ -67,7 +21,7 @@ pub(super) struct Lowered {
 /// lines it read leave the place they stood. `bodies` are every read, in
 /// the order bash makes them; a heredoc read twice, pending across an
 /// array's newline, gets its last.
-pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
+pub(super) fn lower(data: &[u8], bodies: &[Body], parses: fn(&[u8]) -> bool) -> Lowered {
     let mut read: Vec<(Heredoc, &[usize])> = Vec::with_capacity(bodies.len());
     for body in bodies {
         let line = match read.last() {
@@ -113,7 +67,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
         {
             continue;
         }
-        let (replacement, places, deferred) = quoted_body(data, heredoc, offsets);
+        let (replacement, places, deferred) = quoted_body(data, heredoc, offsets, parses);
         edits.push((
             heredoc.operator,
             heredoc.word_end,
@@ -177,6 +131,7 @@ fn quoted_body(
     data: &[u8],
     heredoc: &Heredoc,
     offsets: &[usize],
+    parses: fn(&[u8]) -> bool,
 ) -> (Vec<u8>, SourceMap, Option<Deferred>) {
     let body = &heredoc.body;
     let mut out = vec![b'<', b'"'];
@@ -200,7 +155,7 @@ fn quoted_body(
             } else if byte == b'\\' && matches!(body.get(index + 1), Some(b'$' | b'`' | b'\\')) {
                 end = Some(index + 2);
             }
-            if fails(body, index, end) {
+            if fails(body, index, end, parses) {
                 deferred = Some(Deferred {
                     at: index,
                     row: newlines(&data[..heredoc.body_start.min(data.len())]),
@@ -231,14 +186,14 @@ fn quoted_body(
 /// Whether expanding the construct that opens at `at` in an unquoted body,
 /// and closes at `end`, fails: a `$( )`, `${` or backtick left open, or a
 /// `$( )` whose commands do not parse.
-fn fails(body: &[u8], at: usize, end: Option<usize>) -> bool {
+fn fails(body: &[u8], at: usize, end: Option<usize>, parses: fn(&[u8]) -> bool) -> bool {
     let substitution =
         body[at] == b'$' && body.get(at + 1) == Some(&b'(') && body.get(at + 2) != Some(&b'(');
     let opened =
         substitution || body[at] == b'`' || body[at] == b'$' && body.get(at + 1) == Some(&b'{');
     match end {
         None => opened,
-        Some(end) => substitution && super::parse(&body[at..end]).error.is_some(),
+        Some(end) => substitution && !parses(&body[at..end]),
     }
 }
 

@@ -17,7 +17,6 @@ import base64
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from mirage.context.session_context import get_current_session
 from mirage.shell.bytes import encode_text
@@ -37,9 +36,7 @@ from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 from mirage.workspace.mount.registry import MountRegistry
-
-if TYPE_CHECKING:
-    from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.session import SessionState
 
 
 class NodeMetaKey(StrEnum):
@@ -228,7 +225,7 @@ class Namespace:
         return reader
 
     def session_links(
-        self, session: "SessionState | None" = None
+        self, session: SessionState | None = None
     ) -> NamespaceReader:
         """The link table as one session sees it (``NamespaceReader``),
         the one every reader above the dispatcher follows a link through:

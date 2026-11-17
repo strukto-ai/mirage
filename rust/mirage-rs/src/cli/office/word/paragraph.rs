@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use super::super::node::{Node, Value};
 use super::super::tree::{E, M, Tree, W, is_on, on_off, outer_xml};
 use super::super::units::{f2, half_points, hex_color, word_line_spacing, word_spacing};
+use super::doc::Word;
 use super::{
-    Word, all_runs, clip, color_with_theme_tail, complex_script, fill_unknown, is_digits, is_int,
+    all_runs, clip, color_with_theme_tail, complex_script, fill_unknown, is_digits, is_int,
     is_math_wrapper, jsn, math_text, num_text, num_value, packed_field, para_id, para_segment,
     paragraph_text, read_border, shading_canonical, t_text, w_child, w_val,
 };

@@ -7,16 +7,12 @@ use super::compile;
 use super::format::{self, Formatter};
 use super::host::{Host, Message, Reply, Request};
 use super::link::{DEFAULT_SEARCH, Linked};
+use super::meter::Limits;
 use super::meter::{self, Charge, Meter};
+use super::meter::{BLOCKS, BYTES, ITEMS, MEMORY, STEPS};
 use super::time::{Clock, Zone};
 use super::value::{Dumping, Key, Object, Parsing, Value, parse_json};
-use super::vm::{Halt, Limits, Next, Program, Raise, Vm};
-
-pub(super) const STEPS: u64 = 1 << 16;
-pub(super) const BLOCKS: usize = 1 << 20;
-pub(super) const ITEMS: usize = 1 << 24;
-pub(super) const BYTES: usize = 1 << 28;
-pub(super) const MEMORY: usize = 1 << 30;
+use super::vm::{Halt, Next, Program, Raise, Vm};
 const RETIRE: usize = 1 << 14;
 
 pub(crate) const OUTPUT: u8 = 1;

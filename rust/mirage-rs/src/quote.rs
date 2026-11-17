@@ -137,6 +137,29 @@ fn escape(c: Option<char>, bytes: &[u8], out: &mut Vec<u8>) {
     }
 }
 
+/// A word as gnulib's `quote()` writes it in the C locale, the quotes
+/// left to the message: named C escapes, `\'` and `\\`, every other byte
+/// outside the printable ASCII range as three octal digits.
+pub(crate) fn quoted(text: &[u8]) -> String {
+    let mut out = String::new();
+    for &byte in text {
+        match byte {
+            7 => out.push_str("\\a"),
+            8 => out.push_str("\\b"),
+            b'\t' => out.push_str("\\t"),
+            b'\n' => out.push_str("\\n"),
+            11 => out.push_str("\\v"),
+            12 => out.push_str("\\f"),
+            b'\r' => out.push_str("\\r"),
+            b'\'' => out.push_str("\\'"),
+            b'\\' => out.push_str("\\\\"),
+            32..=126 => out.push(char::from(byte)),
+            _ => out.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    out
+}
+
 pub(crate) fn shell_quoted(text: &[u8]) -> Vec<u8> {
     shell(text, false, true)
 }

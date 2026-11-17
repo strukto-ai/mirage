@@ -1,7 +1,7 @@
-use super::heredoc::Body;
+use super::heredoc_body::Body;
 use super::lex::{is_blank, is_space, is_word};
 use super::lower::lower;
-use super::tree::{Refusal, Said, Syn, Tree, lay_out, place_comments};
+use super::tree::{Heredoc, Refusal, Said, Syn, Tree, lay_out, place_comments};
 
 /// How deep constructs may nest before the parser refuses the line, so a
 /// hostile line cannot run the host out of stack.
@@ -150,7 +150,7 @@ pub(super) struct Budget {
     pub work: std::cell::Cell<usize>,
     pub scans: std::cell::Cell<usize>,
     pub ends: std::cell::RefCell<
-        std::collections::BTreeMap<usize, (usize, Vec<super::heredoc::Pending>)>,
+        std::collections::BTreeMap<usize, (usize, Vec<super::heredoc_body::Pending>)>,
     >,
 }
 
@@ -188,10 +188,10 @@ pub(super) struct Parser<'a> {
     /// Whether a backtick closes the innermost substitution.
     pub in_backtick: bool,
     /// Heredocs whose bodies start after the next newline.
-    pub pending: Vec<super::heredoc::Pending>,
+    pub pending: Vec<super::heredoc_body::Pending>,
     /// The heredocs each read of bodies took, with their places in
     /// `pending`, for a reset to put back.
-    pub taken: Vec<Vec<(usize, super::heredoc::Pending)>>,
+    pub taken: Vec<Vec<(usize, super::heredoc_body::Pending)>>,
     /// The heredoc bodies read so far, in the order bash reads them.
     pub bodies: Vec<Body>,
     /// Each substitution closed with heredocs opened inside still to
@@ -215,17 +215,17 @@ pub(super) struct Parser<'a> {
     /// What this parse and its look aheads have spent.
     pub budget: &'a Budget,
     /// How the line is read.
-    pub options: &'a super::Options,
+    pub options: &'a Options,
 }
 
 /// Parse a whole program as bash reads it: each heredoc's body folded
 /// into its line as a `<` redirect from a double-quoted word, then the
 /// line continuations dropped. The tree reads that text; its offsets map
 /// it back to `source`.
-pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
+pub(super) fn parse(source: &[u8], options: &Options) -> Tree {
     // Whether the line as typed ends in a newline, or in a backslash that
     // continues onto nothing, decides on every pass whether its end is one.
-    let ended = source.ends_with(b"\n") || super::heredoc::ends_escaped(source);
+    let ended = source.ends_with(b"\n") || super::heredoc_body::ends_escaped(source);
     let first = parse_pass(source, options, ended);
     let bodies = &first.bodies;
     if bodies.is_empty() {
@@ -254,7 +254,7 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
             (!fresh.is_empty()).then_some((*close, fresh))
         })
         .collect();
-    let lowered = lower(source, bodies);
+    let lowered = lower(source, bodies, parses);
     let pass = parse_pass(&lowered.source, options, ended);
     joined(
         lowered.source,
@@ -275,18 +275,18 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
 fn joined(
     text: Vec<u8>,
     mut pass: Pass,
-    options: &super::Options,
+    options: &Options,
     ended: bool,
     mut offsets: super::tree::SourceMap,
-    mut heredocs: Vec<super::lower::Heredoc>,
+    mut heredocs: Vec<Heredoc>,
     mut closes: Vec<(usize, Vec<usize>)>,
     source: &[u8],
 ) -> Tree {
     let mut dropped = continuations(&text, &pass);
     // bash -c keeps a backslash ending the input unless it continues a
     // line that started in single quotes.
-    let kept = super::heredoc::ends_escaped(source)
-        && !(super::heredoc::ends_escaped(&text) && dropped.last() == Some(&(text.len() - 1)));
+    let kept = super::heredoc_body::ends_escaped(source)
+        && !(super::heredoc_body::ends_escaped(&text) && dropped.last() == Some(&(text.len() - 1)));
     let text = if dropped.is_empty() {
         text
     } else {
@@ -323,7 +323,7 @@ fn joined(
         // light only now: fold its body in as the first pass folds the
         // others, its places in the line as typed.
         while !pass.bodies.is_empty() {
-            let lowered = lower(&text, &pass.bodies);
+            let lowered = lower(&text, &pass.bodies, parses);
             let start = |at: usize| offsets.at(at.min(text.len()));
             let end = |at: usize| {
                 at.checked_sub(1)
@@ -410,7 +410,7 @@ fn joined(
 
 /// Where bash's quote of the line holding `at` starts when a heredoc's
 /// delimiter line inside a substitution goes on past the delimiter: there.
-fn resumed(source: &[u8], heredocs: &[super::lower::Heredoc], at: usize) -> Option<usize> {
+fn resumed(source: &[u8], heredocs: &[Heredoc], at: usize) -> Option<usize> {
     heredocs
         .iter()
         .map(|heredoc| heredoc.end)
@@ -444,7 +444,7 @@ struct Pass {
     error: Option<Fail>,
 }
 
-fn parse_pass(source: &[u8], options: &super::Options, ended: bool) -> Pass {
+fn parse_pass(source: &[u8], options: &Options, ended: bool) -> Pass {
     let budget = Budget::default();
     let mut parser = Parser::new(source, &budget, options);
     parser.ended = ended;
@@ -480,13 +480,7 @@ fn parse_pass(source: &[u8], options: &super::Options, ended: bool) -> Pass {
 /// line, and bash reads on from the next, where a later refusal's status
 /// wins, but for one that ends inside a quote or pair after an earlier
 /// one.
-fn refusals(
-    source: &[u8],
-    options: &super::Options,
-    ended: bool,
-    kept: bool,
-    first: Fail,
-) -> Refusal {
+fn refusals(source: &[u8], options: &Options, ended: bool, kept: bool, first: Fail) -> Refusal {
     let mut found = vec![first];
     while let Some(last) = found.last().filter(|last| last.status == 1 && !last.eof) {
         let Some(newline) = memchr::memchr(b'\n', &source[last.end.min(source.len())..]) else {
@@ -550,7 +544,7 @@ fn said(source: &[u8], newlines: &[usize], kept: bool, fail: &Fail) -> Vec<Said>
     // bash -c reads a line after a backslash ending the input, and after a
     // line continuation ending a word there.
     let glued = |text: &[u8]| {
-        super::heredoc::ends_escaped(text)
+        super::heredoc_body::ends_escaped(text)
             && text
                 .iter()
                 .rev()
@@ -760,7 +754,7 @@ fn scan_verbatim(source: &[u8], mut at: usize, spans: &mut Vec<(usize, usize)>) 
 
 impl<'a> Parser<'a> {
     /// A parser at the start of `s`, spending from `budget`.
-    pub(super) fn new(s: &'a [u8], budget: &'a Budget, options: &'a super::Options) -> Self {
+    pub(super) fn new(s: &'a [u8], budget: &'a Budget, options: &'a Options) -> Self {
         Self {
             s,
             i: 0,
@@ -924,7 +918,7 @@ impl Parser<'_> {
             Err(fail) => return fail,
         };
         // bash -c names the backslash it keeps at the end doubled.
-        if end == self.s.len() && super::heredoc::ends_escaped(self.s) {
+        if end == self.s.len() && super::heredoc_body::ends_escaped(self.s) {
             token.push(b'\\');
         }
         let newline = token == b"\n";
@@ -1235,7 +1229,7 @@ impl Parser<'_> {
             return fail;
         };
         let start = memchr::memchr(b'\n', &self.s[at..]).map_or(self.s.len(), |i| at + i + 1);
-        let end = super::heredoc::bodies_end(self.s, start, &mut self.pending.clone());
+        let end = super::heredoc_body::bodies_end(self.s, start, &mut self.pending.clone());
         fail.anchor(index, end.saturating_sub(1));
         fail
     }
@@ -1533,4 +1527,29 @@ impl Parser<'_> {
         self.leave();
         Ok(Syn::node("negated_command", children))
     }
+}
+
+/// How a line is read: the names the shell expands as aliases, each a
+/// command where a command starts, as bash expands it before it reads a
+/// reserved word; and whether extglob's pattern groups are on, which a
+/// `[[` pattern reads either way.
+#[derive(Debug, Clone)]
+pub struct Options {
+    pub aliases: Vec<Vec<u8>>,
+    pub extglob: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            aliases: Vec::new(),
+            extglob: true,
+        }
+    }
+}
+
+/// Whether `source` parses under the default options: the test a `$( )`
+/// in an unquoted heredoc body takes while the body is lowered.
+fn parses(source: &[u8]) -> bool {
+    parse(source, &Options::default()).error.is_none()
 }

@@ -17,7 +17,7 @@ mod substring;
 mod tests;
 mod tilde;
 
-pub use fields::{Field, ifs_joiner, join, marked, splat, split_fields};
+pub use fields::{Chunk, Field, Piece, ifs_joiner, join, marked, splat, split_fields};
 
 use std::future::Future;
 
@@ -30,54 +30,6 @@ pub(super) use super::voiced;
 use super::write::{Fault, Writer};
 use super::{Diagnostic, Signal};
 use crate::shell::Tree;
-
-/// One stretch of an expanded word: its text, whether quoting made its
-/// glob characters literal, and whether field splitting reads it, which
-/// only an unquoted expansion's value is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Piece {
-    pub text: Vec<u8>,
-    pub quoted: bool,
-    pub split: bool,
-}
-
-/// A word's pieces, and the boundary between two elements of a splat
-/// (`$@`, `${a[@]}`), which reads as its joiner where nothing splits.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Chunk {
-    Piece(Piece),
-    Break(Vec<u8>),
-}
-
-impl Chunk {
-    /// Text as typed outside quotes: live, never split.
-    pub fn literal(text: impl Into<Vec<u8>>) -> Self {
-        Chunk::Piece(Piece {
-            text: text.into(),
-            quoted: false,
-            split: false,
-        })
-    }
-
-    /// Text quoting protects: literal, never split.
-    pub fn quoted(text: impl Into<Vec<u8>>) -> Self {
-        Chunk::Piece(Piece {
-            text: text.into(),
-            quoted: true,
-            split: false,
-        })
-    }
-
-    /// An expansion's value: literal inside double quotes, otherwise
-    /// split and globbed.
-    pub fn value(text: impl Into<Vec<u8>>, quoted: bool) -> Self {
-        Chunk::Piece(Piece {
-            text: text.into(),
-            quoted,
-            split: !quoted,
-        })
-    }
-}
 
 /// A command substitution's run: its output, its stderr, which joins the
 /// statement's, and its status, which `$?` reads next.
@@ -701,4 +653,35 @@ fn discard(voice: &[u8], message: &str) -> Fault {
 
 fn bad_subscript(voice: &[u8], p: &Braces) -> Fault {
     discard(voice, &format!("{}: bad array subscript\n", reference(p)))
+}
+
+impl<H: Host> Expander<'_, H> {
+    /// A word in a command's argument list: its pieces, its tilde prefix
+    /// expanded, split into fields on IFS.
+    pub async fn fields(&mut self, node: usize) -> Result<Vec<Field>, Fault> {
+        if matches!(self.kind(node), "concatenation" | "brace_expression")
+            && self.shell.option("braceexpand")
+        {
+            if let Some(words) = self.brace_words(node).await? {
+                let mut out = Vec::new();
+                for mut chunks in words {
+                    self.tilde(&mut chunks);
+                    out.extend(self.split(&chunks).await?);
+                }
+                return Ok(out);
+            }
+        }
+        let mut chunks = self.chunks(node, false).await?;
+        self.tilde(&mut chunks);
+        self.assignment_tildes(&mut chunks);
+        self.split(&chunks).await
+    }
+
+    /// Split a word's pieces into fields on the shell's IFS, pausing as a
+    /// long value is scanned.
+    async fn split(&mut self, chunks: &[Chunk]) -> Result<Vec<Field>, Fault> {
+        let (host, shell) = (&mut *self.host, &*self.shell);
+        let pause = &mut async || host.pause(shell).await;
+        split_fields(chunks, shell.ifs(), shell.utf8(), pause).await
+    }
 }

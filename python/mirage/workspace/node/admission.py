@@ -95,7 +95,6 @@ from mirage.workspace.lookup import (
     WordPolicy,
     is_tool,
     line_facts,
-    lookup,
     runs_as,
     word_policy,
 )
@@ -103,6 +102,7 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     WRITING_PROGRAMS,
 )
+from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (

@@ -7,7 +7,7 @@ use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
 use super::debug;
 use super::io::{Failure, Feed, Input, Io, Line, LineReader, Notes, read_error};
-use super::script::{Address, Command, Part, Program, Subst, Translit};
+use super::program::{Address, Command, Part, Program, Subst, Translit};
 use super::text::{Refusal, absolute, convert, list, resolve, unit};
 use crate::constants::{FLUSH, KEPT, MAX_HELD};
 

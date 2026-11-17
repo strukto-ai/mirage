@@ -7,7 +7,7 @@
 
 use serde_json::Value as Json;
 
-use crate::scan::{self, Typed, Values};
+use crate::scan_grammar::{self, Typed, Values};
 use crate::{StreamError, rg_input};
 
 const SORT_KEYS: [&str; 5] = ["path", "modified", "accessed", "created", "none"];
@@ -83,10 +83,10 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
         .iter()
         .find(|(name, _)| !NAMES.contains(&name.as_str()))
     {
-        return Err(scan::unknown("rg", name));
+        return Err(scan_grammar::unknown("rg", name));
     }
-    let latest = scan::latest(options);
-    let last = |name: &str| scan::last(options, name);
+    let latest = scan_grammar::latest(options);
+    let last = |name: &str| scan_grammar::last(options, name);
     let winner = |names: &[&str]| {
         latest
             .iter()

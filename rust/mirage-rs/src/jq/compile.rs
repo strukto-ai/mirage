@@ -4,12 +4,14 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use super::builtin::{self, Cfunc, Fault};
+use super::builtin::{self, Cfunc};
 use super::check::{self, Scope, with};
+use super::fault::Fault;
 use super::link::{self, Body, Dep, Linked, Unit};
+use super::meter::Limits;
 use super::syntax::{self, Ast, BinOp, Def, Parsed, Pattern, PatternKey, Update};
 use super::value::{Object, Value};
-use super::vm::{Bytecode, ClosureRef, Limits, Op, Program, Target, Var};
+use super::vm::{Bytecode, ClosureRef, Op, Program, Target, Var};
 
 const PRELUDE: &str = include_str!("builtin.jq");
 

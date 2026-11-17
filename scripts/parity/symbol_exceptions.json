@@ -809,7 +809,6 @@
   },
   "config": {
    "python_only": {
-    "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
     "build_mcp_clis": "Python's to_workspace_kwargs is sync, so the MCP servers a config names are listed in this separate async step after resolve_secrets; the TypeScript buildCliEntries is async and awaits mcpCli inline."
    },
    "typescript_only": {
@@ -1787,7 +1786,9 @@
   },
   "machine/cloudflare_container/constants": {
    "typescript_only": {
-    "NO_WEBSOCKET": "TypeScript reaches a relay through the runtime's own WebSocket, which core alone on Node 20 lacks; Python's client always has aiohttp."
+    "NO_WEBSOCKET": "TypeScript reaches a relay through the runtime's own WebSocket, which core alone on Node 20 lacks; Python's client always has aiohttp.",
+    "RELAY_HEARTBEAT_SECONDS": "The relay is a Worker, so only TypeScript runs it and speaks on its quiet sockets; Python is only its client.",
+    "RELAY_TOKEN": "The relay is a Worker, so only TypeScript runs it and reads its secret; Python is only its client and sends the token it is given."
    }
   },
   "machine/cloudflare_container/handle": {

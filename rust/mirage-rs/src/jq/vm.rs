@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use super::builtin::{
-    self, Cfunc, Containing, Deleting, Fault, Indexing, Sorting, Splitting, Subtracting,
+    self, Cfunc, Containing, Deleting, Indexing, Sorting, Splitting, Subtracting,
 };
+use super::fault::{Fault, fail};
 use super::host::{self, Answer, Host, Messaging, Reply};
+use super::meter::Limits;
 use super::meter::{Charge, Meter};
 use super::parse::Decoding;
 use super::regex::Matching;
@@ -314,9 +316,7 @@ impl Pending {
                 }
                 None => None,
             },
-            Pending::Parse(decoding) => decoding
-                .run(budget)
-                .map(|result| result.map_err(builtin::fail)),
+            Pending::Parse(decoding) => decoding.run(budget).map(|result| result.map_err(fail)),
             Pending::Subtract(subtracting) => subtracting.run(budget),
             Pending::Split(splitting) => splitting.run(budget, limits.items),
             Pending::Index(indexing) => indexing.run(budget, limits.items),
@@ -326,19 +326,6 @@ impl Pending {
             Pending::Read(_) => unreachable!("a document reader is retired outside the VM"),
         }
     }
-}
-
-/// Limits one run is held to.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Limits {
-    /// Stack blocks (values, frames, fork points) alive at once.
-    pub(crate) blocks: usize,
-    /// Elements one array may hold.
-    pub(crate) items: usize,
-    /// Bytes one string may hold.
-    pub(crate) bytes: usize,
-    /// Bytes of values the run may hold alive at once.
-    pub(crate) memory: usize,
 }
 
 /// One run of a program over one input. Every piece of state jq keeps in

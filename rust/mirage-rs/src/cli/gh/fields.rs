@@ -542,3 +542,41 @@ pub(crate) async fn read_rest(
     }
     Ok(node)
 }
+
+/// A label list sorted as gh's view sorts one, ignoring case.
+pub(crate) fn sorted_labels(row: &Json) -> String {
+    let mut names: Vec<String> = row
+        .get("labels")
+        .items()
+        .iter()
+        .map(|label| label.get("name").text().to_owned())
+        .collect();
+    names.sort_by_key(|name| name.to_lowercase());
+    names.join(", ")
+}
+
+pub(crate) fn assignee_list(row: &Json) -> String {
+    row.get("assignees")
+        .items()
+        .iter()
+        .map(|person| person.get("login").text().to_owned())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub(crate) fn project_list(row: &Json) -> String {
+    row.get("projectItems")
+        .items()
+        .iter()
+        .map(|item| {
+            let status = item.get("status").get("name").text();
+            let column = if status.is_empty() {
+                "No Status"
+            } else {
+                status
+            };
+            format!("{} ({column})", item.get("title").text())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}

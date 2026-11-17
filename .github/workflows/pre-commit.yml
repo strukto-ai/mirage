@@ -82,13 +82,15 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile
 
-      # What the wheel's runtime and extras reach (uv.lock, licenses from
-      # PyPI) and what the workspace installs for production (pnpm's own
-      # report) is permissive, or named with a reason in
-      # licenses/dependency_exceptions.toml. rust/deny.toml gates Rust.
+      # What the wheel's runtime, extras and dev group reach (uv.lock,
+      # licenses from PyPI) and everything the workspace installs, its
+      # devDependencies too (pnpm's own report), is permissive, or named
+      # with a reason in licenses/dependency_exceptions.toml. The tools that
+      # only build and test Mirage run on every contributor's machine, so
+      # they answer to the same rule. rust/deny.toml gates Rust.
       - name: Dependency licenses
         run: |
-          (cd typescript && pnpm licenses list --json --prod) > "$RUNNER_TEMP/npm-licenses.json"
+          (cd typescript && pnpm licenses list --json) > "$RUNNER_TEMP/npm-licenses.json"
           python3 scripts/check_dependency_licenses.py --python --npm "$RUNNER_TEMP/npm-licenses.json"
 
       - name: Published packages carry the license
@@ -220,13 +222,27 @@ jobs:
       # (accessor, cache, core, utils, view, vfs) never import commands or
       # the workspace; no command or CLI module imports a VFS object (a
       # VFS module, the mount table, the caches); a CLI imports only its
-      # own service's client; and neither host has an import cycle.
-      # The excused edges and all cycles, including type-only and deferred
-      # imports, are a ratchet like the two above.
-      - name: Import direction
+      # own service's client; neither host has an import cycle, counting
+      # type-only and deferred imports and the package __init__ an import
+      # runs; no Python module but a package barrel imports a Mirage
+      # module under TYPE_CHECKING; and the Rust crates' module cycles
+      # only shrink.
+      # The excused edges and the cycle counts are a ratchet like the two
+      # above.
+      - name: Import direction and cycles (Python, TypeScript, Rust)
         run: |
           ./python/.venv/bin/python scripts/check_import_direction.py --selftest
           ./python/.venv/bin/python scripts/check_import_direction.py --strict
+
+      # Python's twin of knip: vulture over python/mirage, with the tests,
+      # integ, examples and scripts as callers. A name a framework reaches
+      # (a route, a protocol hook, a name in a table) is excused by file
+      # with its reason in dead_code_exceptions.json, and an excuse nothing
+      # needs fails like a new finding.
+      - name: Dead code (Python)
+        run: |
+          ./python/.venv/bin/python scripts/check_dead_code.py --selftest
+          ./python/.venv/bin/python scripts/check_dead_code.py --strict
 
       # Same ratchet, applied to battery coverage: a backend that cannot pass
       # a case is normally just deleted from its `targets`, which turns a

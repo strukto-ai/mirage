@@ -197,7 +197,8 @@ from mirage.workspace.executor.statement import (
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
 from mirage.workspace.files import Files, WorkspaceFiles
-from mirage.workspace.lookup import lookup, program, program_note, programs
+from mirage.workspace.lookup import program, program_note, programs
+from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -1812,7 +1813,7 @@ class Workspace:
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
+        _exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
         unpatch_process(self._patched)

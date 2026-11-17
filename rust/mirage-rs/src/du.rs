@@ -9,7 +9,7 @@
 use serde_json::Value as Json;
 
 use crate::number::{self, BLANKS};
-use crate::scan::{Typed, Values, unknown};
+use crate::scan_grammar::{Typed, Values, unknown};
 use crate::word::{self, Choice};
 use crate::{StreamError, byte_text, quoted};
 

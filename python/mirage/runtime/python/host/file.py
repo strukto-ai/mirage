@@ -16,8 +16,8 @@ import codecs
 import errno
 import io
 import os
-from collections.abc import Callable
-from typing import IO, TYPE_CHECKING, Any, cast
+from collections.abc import Buffer, Callable
+from typing import IO, Any, cast
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
@@ -25,8 +25,6 @@ from mirage.runtime.files import Descriptor
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.python.host.syscall import syscall
 
-if TYPE_CHECKING:
-    from _typeshed import ReadableBuffer, WriteableBuffer
 # `io.open`'s own sentinel for "whatever the platform default is". It is
 # not a codec name, and pathlib passes it for every `read_text()` on an
 # interpreter that is not in UTF-8 mode (which is any interpreter whose
@@ -142,13 +140,13 @@ class HandleRaw(io.RawIOBase):
         self._check()
         return self._fd
 
-    def readinto(self, buffer: "WriteableBuffer") -> int:
+    def readinto(self, buffer: Buffer) -> int:
         self._check(reading=True)
         chunk = syscall(self._handle.read)(len(memoryview(buffer)))
         memoryview(buffer).cast("B")[: len(chunk)] = chunk
         return len(chunk)
 
-    def write(self, data: "ReadableBuffer") -> int:
+    def write(self, data: Buffer) -> int:
         self._check(reading=False)
         payload = bytes(data)
         if self._closing and self._handle.files.held:

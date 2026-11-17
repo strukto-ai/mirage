@@ -6,7 +6,7 @@
 use serde_json::Value as Json;
 
 use crate::number;
-use crate::scan::{Typed, Values, last, unknown};
+use crate::scan_grammar::{Typed, Values, last, unknown};
 use crate::{StreamError, quoted};
 
 /// The size letters head and tail take after a byte count.

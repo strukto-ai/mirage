@@ -1,6 +1,6 @@
 use serde_json::{Value as Json, json};
 
-use super::wildcard;
+use super::format::wildcard;
 use crate::host::Host;
 
 fn run(host: &mut Host, kind: &str, config: Json) -> (i32, String, String) {

@@ -4,6 +4,7 @@ mod hir;
 pub(crate) mod parse;
 pub(crate) mod posix;
 mod search;
+mod step;
 pub(crate) mod stream;
 
 use regex_automata::nfa::thompson::{self, WhichCaptures};
@@ -11,28 +12,15 @@ use regex_automata::util::look::LookMatcher;
 use regex_automata::{Anchored, Input, MatchKind, hybrid, meta};
 use regex_syntax::hir::Hir;
 
+use self::backtrack::splits_char;
 pub(crate) use self::backtrack::unit_at;
 use self::backtrack::{Program, Scratch, Shape};
 use self::hir::Lower;
-use self::parse::{Ast, Dialect, TOO_BIG, Unit};
+use self::parse::has_raw_byte;
+use self::parse::{Ast, Dialect, TOO_BIG};
+pub(crate) use self::search::RecordScan;
+pub(crate) use self::step::Step;
 use crate::pcre::{self, Pcre};
-
-/// What a search that may run out of steps comes back with.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Step<T> {
-    Done(T),
-    /// Out of steps: the same call again resumes the search.
-    Paused,
-}
-
-impl<T> Step<T> {
-    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Step<U> {
-        match self {
-            Step::Done(value) => Step::Done(f(value)),
-            Step::Paused => Step::Paused,
-        }
-    }
-}
 
 /// The work one `feed`, `drain` or `finish` may do, under a millisecond of
 /// it: a step is a backtracking instruction or a byte searched. A search
@@ -82,87 +70,6 @@ pub(crate) struct Automata {
     longest: Option<(hybrid::dfa::DFA, hybrid::dfa::Cache)>,
 }
 
-/// Incremental separator detection; exact POSIX extent selection remains with Posix.
-pub(crate) struct RecordScan {
-    dfa: hybrid::dfa::DFA,
-    cache: hybrid::dfa::Cache,
-    state: Option<hybrid::LazyStateID>,
-    at: usize,
-    anchored: bool,
-}
-
-impl RecordScan {
-    pub(crate) fn reset(&mut self, at: usize, anchored: bool) {
-        self.state = None;
-        self.at = at;
-        self.anchored = anchored;
-    }
-    pub(crate) fn scan(
-        &mut self,
-        bytes: &[u8],
-        last: bool,
-        budget: &mut u64,
-    ) -> Result<Step<bool>, ()> {
-        let mut state = match self.state {
-            Some(state) => state,
-            None => self
-                .dfa
-                .start_state_forward(
-                    &mut self.cache,
-                    &Input::new(bytes)
-                        .span(self.at..bytes.len())
-                        .anchored(if self.anchored {
-                            Anchored::Yes
-                        } else {
-                            Anchored::No
-                        }),
-                )
-                .map_err(|_| ())?,
-        };
-        while self.at < bytes.len() {
-            if *budget == 0 {
-                self.state = Some(state);
-                return Ok(Step::Paused);
-            }
-            *budget -= 1;
-            state = self
-                .dfa
-                .next_state(&mut self.cache, state, bytes[self.at])
-                .map_err(|_| ())?;
-            self.at += 1;
-            if state.is_quit() {
-                return Err(());
-            }
-            let settled = if self.anchored && state.is_match() {
-                let clears = self.cache.clear_count();
-                let eoi = self
-                    .dfa
-                    .next_eoi_state(&mut self.cache, state)
-                    .map_err(|_| ())?;
-                if self.cache.clear_count() != clears {
-                    return Err(());
-                }
-                !eoi.is_match()
-            } else {
-                false
-            };
-            if if self.anchored {
-                state.is_dead() || settled
-            } else {
-                state.is_match()
-            } {
-                self.state = Some(state);
-                return Ok(Step::Done(true));
-            }
-        }
-        self.state = Some(state);
-        if last {
-            return Ok(Step::Done(true));
-        }
-        Ok(Step::Done(false))
-    }
-}
-
 /// The automata for the patterns they run and the backtracker for the
 /// rest.
 struct Engine {
@@ -205,26 +112,6 @@ pub(crate) struct Compiled {
     pub(crate) regex: Regex,
     /// What GNU grep warns about the list, in order.
     pub(crate) warnings: Vec<&'static str>,
-}
-
-/// A byte that is no part of a character, which only a literal match of
-/// that same byte may take; in a set one matches nothing.
-pub(crate) fn has_raw_byte(ast: &Ast) -> bool {
-    let raw = |unit: &Unit| matches!(unit, Unit::Byte(_));
-    match ast {
-        Ast::Unit(unit) => raw(unit),
-        Ast::Group(_, inner) | Ast::Repeat(inner, _, _) => has_raw_byte(inner),
-        Ast::Concat(items) | Ast::Alternate(items) => items.iter().any(has_raw_byte),
-        _ => false,
-    }
-}
-
-/// Whether `pos` falls inside a UTF-8 character of `hay`.
-pub(crate) fn splits_char(hay: &[u8], pos: usize) -> bool {
-    (pos.saturating_sub(3)..pos).any(|start| {
-        unit_at(hay, start, hay.len(), true)
-            .is_some_and(|(unit, len)| matches!(unit, Unit::Char(_)) && start + len > pos)
-    })
 }
 
 impl Automata {

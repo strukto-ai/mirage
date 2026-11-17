@@ -1,7 +1,9 @@
-# Shipped dependencies whose license scripts/check_dependency_licenses.py
-# cannot pass on its own. Each entry holds for the license expression it
-# names: when a release changes it, the check fails again until the entry
-# is reviewed. `name` may be a glob, for packages published per platform.
+# Dependencies whose license scripts/check_dependency_licenses.py cannot
+# pass on its own: what ships, and the tools that only build and test it,
+# which run on every contributor's machine and in CI. Each entry holds for
+# the license expression it names: when a release changes it, the check
+# fails again until the entry is reviewed. `name` may be a glob, for
+# packages published per platform.
 #
 # LicenseRef-Unknown means the package metadata names no license, so the
 # license below was read from the locked release's own files. An entry
@@ -22,6 +24,24 @@ name = "protobuf-py-ext"
 license = "LicenseRef-Unknown"
 version = "0.6.0"
 reason = "Apache-2.0: bufbuild/protobuf-py's LICENSE at its 0.6.0 release commit 31342760dd7673273200b0f24e290680827fd203; the package metadata names no license. Reached through the e2b extra."
+
+[[python]]
+name = "lupa"
+license = "LicenseRef-Unknown"
+version = "2.8"
+reason = "MIT: Lupa's own and the bundled Lua's MIT notices in the 2.8 wheel's LICENSE.txt; the metadata says only 'MIT style'. The dev group, through fakeredis[lua]."
+
+[[python]]
+name = "mypy-extensions"
+license = "LicenseRef-Unknown"
+version = "1.1.0"
+reason = "MIT: the LICENSE in the 1.1.0 wheel, whose METADATA says License-Expression: MIT, a field PyPI's JSON leaves out. The dev group, through mypy."
+
+[[npm]]
+name = "spawndamnit"
+license = "LicenseRef-Unknown"
+version = "3.0.1"
+reason = "MIT: the LICENSE in the 3.0.1 package; its package.json says only 'SEE LICENSE IN LICENSE'. A devDependency, through @changesets/cli."
 
 # --- weak copyleft, accepted as unmodified, separately installed packages ---
 
@@ -49,6 +69,26 @@ reason = "File-level copyleft in part, used unmodified as a separate package. A 
 name = "tqdm"
 license = "MPL-2.0 AND MIT"
 reason = "File-level copyleft in part, used unmodified as a separate package. Reached through the lancedb, mem0, openai, qdrant and sandbox extras."
+
+[[python]]
+name = "pathspec"
+license = "MPL-2.0"
+reason = "File-level copyleft, used unmodified as a separate package. The dev group, through mypy."
+
+[[npm]]
+name = "lightningcss*"
+license = "MPL-2.0"
+reason = "File-level copyleft, used unmodified as a separate package, prebuilt per platform. A devDependency, through vite under vitest."
+
+[[npm]]
+name = "pyodide"
+license = "MPL-2.0"
+reason = "File-level copyleft, used unmodified as a separate package. An optional peer of @struktoai/mirage-core for its Pyodide runtime, which Mirage neither bundles nor installs; core and the examples install it only for their own tests."
+
+[[npm]]
+name = "@img/sharp-libvips-*"
+license = "LGPL-3.0-or-later"
+reason = "Weak copyleft: libvips, prebuilt per platform and loaded unmodified as a shared library by sharp. A devDependency only, through wrangler > miniflare in @struktoai/mirage-cloudflare; nothing Mirage ships includes it."
 
 [[npm]]
 name = "@anthropic-ai/claude-agent-sdk*"
