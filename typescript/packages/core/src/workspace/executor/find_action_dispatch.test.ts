@@ -381,3 +381,60 @@ describe('find -execdir, -fprint, -quit and -files0-from', () => {
     }
   })
 })
+
+describe('-exec streams its children output', () => {
+  async function lines(line: string): Promise<[string, string, number]> {
+    const ws = shellWs()
+    try {
+      await ws.shell('mkdir -p /d && touch /d/a /d/b', { sessionId: 's' })
+      const r = await ws.shell(line, { sessionId: 's' })
+      return [r.stdoutText, r.stderrText, r.exitCode]
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('stops at a reader that stops', async () => {
+    // head closing its input ends find there: the child it was reading
+    // stops, and no later child runs, as `cat a b | head -n1` never opens
+    // b. GNU's find goes on and loses each later child to SIGPIPE; its own
+    // status stays 0.
+    expect(
+      await lines(
+        `find /d/a /d/b -exec sh -c 'echo "$1" >> /ran; yes "$1"' sh {} \\; | head -n1; echo "\${PIPESTATUS[@]}"; cat /ran`,
+      ),
+    ).toEqual(['/d/a\n0 0\n/d/a\n', '', 0])
+  })
+
+  it('fails find on a batch cut short', async () => {
+    // A batch the reader cut short died of SIGPIPE, which fails find as
+    // GNU's does (findutils 4.10 exits 1).
+    expect(
+      await lines('find /d/a /d/b -exec yes {} + | head -n1; echo "${PIPESTATUS[@]}"'),
+    ).toEqual(['/d/a /d/b\n1 0\n', '', 0])
+  })
+
+  it("says a child's stderr after its own output", async () => {
+    // Each child's stderr goes out after its stdout and before the next
+    // child's, as GNU's children write straight to find's streams.
+    expect(
+      await lines(`find /d/a /d/b -exec sh -c 'echo out "$1"; echo err "$1" >&2' sh {} \\; 2>&1`),
+    ).toEqual(['out /d/a\nerr /d/a\nout /d/b\nerr /d/b\n', '', 0])
+  })
+
+  it('keeps rows and children in order', async () => {
+    // find's own rows and a child's output keep the order they were made
+    // in, though the child's output streams past the rows held.
+    expect(
+      await lines('find /d/a /d/b -print -exec echo ran {} \\; -fprint /dev/stderr 2>&1'),
+    ).toEqual(['/d/a\nran /d/a\n/d/a\n/d/b\nran /d/b\n/d/b\n', '', 0])
+  })
+
+  it('stops -files0-from at a reader that stops', async () => {
+    expect(
+      await lines(
+        `printf '/d/a\\0/d/b\\0' | find -files0-from - -exec sh -c 'echo "$1" >> /ran; yes "$1"' sh {} \\; | head -n1; cat /ran`,
+      ),
+    ).toEqual(['/d/a\n/d/a\n', '', 0])
+  })
+})

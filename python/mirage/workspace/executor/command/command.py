@@ -103,6 +103,7 @@ from mirage.workspace.executor.command.routing import (
 from mirage.workspace.executor.command.run import (
     exec_node,
     find_start_points,
+    follow_settled,
     nested_shell,
     run_on_mount,
     scalar_find_flags,
@@ -232,7 +233,8 @@ async def _finish_find(
     and hands them back as ``io.records``; the actions run here
     over all of them together, so a batched ``-exec {} +`` is one
     invocation across every start point, as GNU's is, and a per-match
-    action runs in start-point order.
+    action runs in start-point order. They run as the rows returned are
+    read, and ``io`` settles as those end (``_apply_find_actions``).
 
     Args:
         stdout (ByteSource | None): the rendered rows.
@@ -251,7 +253,7 @@ async def _finish_find(
             stat ``-ls`` renders after a ``-delete``.
     """
     session = context.session
-    stdout, action_err, action_exit = await _apply_find_actions(
+    return await _apply_find_actions(
         stdout,
         io,
         expr,
@@ -271,13 +273,6 @@ async def _finish_find(
         stdin=stdin,
         starts=starts,
     )
-    warned = b"".join(encode_text(f"{line}\n") for line in expr.warnings)
-    if warned or action_err:
-        existing = await materialize(io.stderr) if io.stderr else b""
-        io.stderr = warned + existing + action_err
-    if io.exit_code == 0:
-        io.exit_code = action_exit
-    return stdout
 
 
 async def fill_tree_env(
@@ -787,6 +782,7 @@ async def _run_single_mount(
             )
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
+            follow_settled(node, io)
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing

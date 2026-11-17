@@ -113,7 +113,14 @@ import {
   routableScopes,
   routedOperands,
 } from './routing.ts'
-import { execNode, findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
+import {
+  execNode,
+  findStartPoints,
+  followSettled,
+  nestedShell,
+  runOnMount,
+  type RunOnMountCtx,
+} from './run.ts'
 import { type ExecuteNodeFn, type ParsedCommand } from './types.ts'
 
 // One handler per JOB_BUILTINS member but ps, which also takes the workspace
@@ -166,7 +173,9 @@ const MACHINE_HANDLERS: Record<
  * cross-mount operand) only selects rows and hands them back as
  * `io.records`; the actions run here over all of them together, so
  * a batched `-exec {} +` is one invocation across every start point, as
- * GNU's is, and a per-match action runs in start-point order.
+ * GNU's is, and a per-match action runs in start-point order. They run as
+ * the rows returned are read, and `io` settles as those end
+ * (`applyFindActions`).
  */
 async function finishFind(
   stdout: ByteSource | null,
@@ -183,31 +192,17 @@ async function finishFind(
   signal: AbortSignal | undefined,
 ): Promise<ByteSource | null> {
   const session = context.session
-  const [newStdout, actionErr, actionExit] = await applyFindActions(
-    stdout,
-    io,
-    expr,
-    registry,
-    session.cwd,
-    {
-      ...(executeFn !== undefined ? { executeFn } : {}),
-      session,
-      vfs,
-      statPath,
-      dispatch,
-      identity: identityFrom(sessionView(session, context.frame.diagnostics)),
-      stdin,
-      starts,
-      ...(signal !== undefined ? { signal } : {}),
-    },
-  )
-  const warned = expr.warnings.map((line) => encodeText(`${line}\n`))
-  if (warned.length > 0 || actionErr.length > 0) {
-    const existing = await materialize(io.stderr)
-    io.stderr = concat([...warned, existing, actionErr])
-  }
-  if (io.exitCode === 0) io.exitCode = actionExit
-  return newStdout
+  return applyFindActions(stdout, io, expr, registry, session.cwd, {
+    ...(executeFn !== undefined ? { executeFn } : {}),
+    session,
+    vfs,
+    statPath,
+    dispatch,
+    identity: identityFrom(sessionView(session, context.frame.diagnostics)),
+    stdin,
+    starts,
+    ...(signal !== undefined ? { signal } : {}),
+  })
 }
 
 /**
@@ -535,6 +530,7 @@ async function runCrossMount(
     )
     csExec.exitCode = csIo.exitCode
     csExec.stderr = await csIo.materializeStderr()
+    followSettled(csExec, csIo)
   }
   if (csParsed.warnings.length > 0) {
     const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
@@ -653,6 +649,7 @@ async function runSingleMount(
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
+      followSettled(fanNode, fanIo)
     }
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)

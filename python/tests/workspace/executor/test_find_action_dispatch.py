@@ -1210,3 +1210,80 @@ async def test_execdir_fprint_quit_and_files0_from(line, stdout, stderr, code):
     # rows by directory reads, mirage by name.
     ws = await _exec_ws()
     assert await _run_line(ws, line) == (stdout, stderr, code)
+
+
+# ── -exec streams its children's output ────────────────────────
+
+
+async def _stream_ws() -> Workspace:
+    ws = _ws()
+    ws.create_session("s")
+    await ws.shell("mkdir -p /d && touch /d/a /d/b", session_id="s")
+    return ws
+
+
+async def _lines(ws: Workspace, line: str) -> tuple[str, str, int]:
+    io = await asyncio.wait_for(ws.shell(line, session_id="s"), 30)
+    return await io.stdout_str(), await io.stderr_str(), io.exit_code
+
+
+@pytest.mark.asyncio
+async def test_exec_stops_at_a_reader_that_stops() -> None:
+    # head closing its input ends find there: the child it was reading
+    # stops, and no later child runs, as `cat a b | head -n1` never
+    # opens b. GNU's find goes on and loses each later child to
+    # SIGPIPE; its own status stays 0.
+    ws = await _stream_ws()
+    line = (
+        'find /d/a /d/b -exec sh -c \'echo "$1" >> /ran; yes "$1"\' sh {} '
+        r'\; | head -n1; echo "${PIPESTATUS[@]}"; cat /ran'
+    )
+    assert await _lines(ws, line) == ("/d/a\n0 0\n/d/a\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_batch_cut_short_fails_find() -> None:
+    # A batch the reader cut short died of SIGPIPE, which fails find as
+    # GNU's does (findutils 4.10 exits 1).
+    ws = await _stream_ws()
+    line = 'find /d/a /d/b -exec yes {} + | head -n1; echo "${PIPESTATUS[@]}"'
+    assert await _lines(ws, line) == ("/d/a /d/b\n1 0\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_child_stderr_follows_its_own_output() -> None:
+    # Each child's stderr goes out after its stdout and before the next
+    # child's, as GNU's children write straight to find's streams.
+    ws = await _stream_ws()
+    line = (
+        'find /d/a /d/b -exec sh -c \'echo out "$1"; echo err "$1" >&2\' '
+        r"sh {} \; 2>&1"
+    )
+    assert await _lines(ws, line) == (
+        "out /d/a\nerr /d/a\nout /d/b\nerr /d/b\n",
+        "",
+        0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_exec_keeps_rows_and_children_in_order() -> None:
+    # find's own rows and a child's output keep the order they were
+    # made in, though the child's output streams past the rows held.
+    ws = await _stream_ws()
+    line = r"find /d/a /d/b -print -exec echo ran {} \; -fprint /dev/stderr"
+    assert await _lines(ws, line + " 2>&1") == (
+        "/d/a\nran /d/a\n/d/a\n/d/b\nran /d/b\n/d/b\n",
+        "",
+        0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_files0_from_stops_at_a_reader_that_stops() -> None:
+    ws = await _stream_ws()
+    line = (
+        "printf '/d/a\\0/d/b\\0' | find -files0-from - -exec sh -c "
+        '\'echo "$1" >> /ran; yes "$1"\' sh {} \\; | head -n1; cat /ran'
+    )
+    assert await _lines(ws, line) == ("/d/a\n/d/a\n", "", 0)
