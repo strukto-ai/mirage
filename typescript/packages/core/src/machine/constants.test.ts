@@ -22,15 +22,38 @@ import {
   MOUNT_GUARD,
   PROCESS,
   NOT_RUNNING_STATUS,
+  RUN_EXIT_MARK,
+  RUN_PROGRAM_AT,
   SSHFS_OPTIONS,
   TOOLS_PATH,
   decodeOutput,
   mountField,
+  runArgv,
+  runTag,
   stopLine,
   wrapLine,
 } from './constants.ts'
 
 const PRELUDE = `/bin/sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
+
+// A run's wrapper hands its program the words and the tag unchanged, and says
+// how the program ended on stderr after all the program wrote.
+it('gives a run its words and says how its program ended', () => {
+  const program = [
+    'sh',
+    '-c',
+    `printf "%s|" "$@" "$${PROCESS}"; echo err >&2; exit 3`,
+    'sh',
+    'a b',
+    '',
+  ]
+  const argv = runArgv('w:7', program)
+  expect([argv.slice(RUN_PROGRAM_AT), runTag(argv)]).toEqual([program, 'w:7'])
+  const done = spawnSync(argv[0] ?? '', argv.slice(1))
+  expect([done.status, done.stdout.toString()]).toEqual([3, 'a b||w:7|'])
+  const mark = new TextDecoder().decode(RUN_EXIT_MARK)
+  expect(done.stderr.toString().endsWith(`err\n${mark}3\n`)).toBe(true)
+})
 
 describe('wrapLine', () => {
   it('dresses cwd, env, and the argv', () => {

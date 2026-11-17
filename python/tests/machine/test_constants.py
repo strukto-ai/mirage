@@ -23,10 +23,14 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
+    RUN_EXIT_MARK,
+    RUN_PROGRAM_AT,
     SSHFS_OPTIONS,
     TOOLS_PATH,
     decode_output,
     mount_field,
+    run_argv,
+    run_tag,
     stop_line,
     wrap_line,
 )
@@ -66,6 +70,24 @@ def test_the_wrapped_argv_reaches_the_program_unchanged(tmp_path):
         check=False,
     )
     assert (done.returncode, done.stdout) == (0, b"[a b]\n[$(x)]\n[]\n")
+
+
+# A run's wrapper hands its program the words and the tag unchanged, and
+# says how the program ended on stderr after all the program wrote.
+def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
+    program = (
+        "sh",
+        "-c",
+        f'printf "%s|" "$@" "${PROCESS}"; echo err >&2; exit 3',
+        "sh",
+        "a b",
+        "",
+    )
+    argv = run_argv("w:7", program)
+    assert (argv[RUN_PROGRAM_AT:], run_tag(argv)) == (program, "w:7")
+    done = subprocess.run(argv, capture_output=True, check=False)
+    assert (done.returncode, done.stdout) == (3, b"a b||w:7|")
+    assert done.stderr.endswith(b"err\n" + RUN_EXIT_MARK + b"3\n")
 
 
 def test_a_path_without_sh_still_runs_the_line(tmp_path):

@@ -235,6 +235,10 @@ export const RUN_WRAPPER =
   'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
   's=$?; printf "\\036mirage-exit %s\\n" "$s" >&6; exit "$s"'
 
+// Where a run's program starts in what `runArgv` builds: past
+// `/bin/sh -c RUN_WRAPPER sh` and the tag's assignment.
+export const RUN_PROGRAM_AT = 5
+
 // The marks ahead of the pid line and the exit line the wrapper writes on
 // stderr, a record separator first so no program's output starts with it.
 export const RUN_PID_MARK = new TextEncoder().encode('\x1emirage-pid ')
@@ -425,7 +429,7 @@ export function isRun(argv: readonly string[]): boolean {
 
 /** The tag a program's run carries (`runArgv`). Mirrors Python's `run_tag`. */
 export function runTag(argv: readonly string[]): string {
-  return (argv[4] ?? '').slice(PROCESS.length + 1)
+  return (argv[RUN_PROGRAM_AT - 1] ?? '').slice(PROCESS.length + 1)
 }
 
 /**

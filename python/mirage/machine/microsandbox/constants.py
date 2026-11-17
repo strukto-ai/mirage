@@ -12,10 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.constants import is_run
+from mirage.machine.constants import RUN_PROGRAM_AT, is_run
 from mirage.machine.types import PauseAction
-
-RUN_PROGRAM_AT = 7
 
 MICROSANDBOX_HINT = (
     "the microsandbox machine needs `msb` on PATH "

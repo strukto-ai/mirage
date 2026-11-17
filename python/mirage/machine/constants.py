@@ -253,6 +253,10 @@ RUN_WRAPPER = (
     's=$?; printf "\\036mirage-exit %s\\n" "$s" >&6; exit "$s"'
 )
 
+# Where a run's program starts in what ``run_argv`` builds: past
+# ``/bin/sh -c RUN_WRAPPER sh`` and the tag's assignment.
+RUN_PROGRAM_AT = 5
+
 # The marks ahead of the pid line and the exit line the wrapper writes on
 # stderr, a record separator first so no program's output starts with it.
 RUN_PID_MARK = b"\x1emirage-pid "
@@ -458,7 +462,7 @@ def run_tag(argv: Sequence[str]) -> str:
     Args:
         argv (Sequence[str]): what ``run_argv`` built.
     """
-    return argv[4].partition("=")[2]
+    return argv[RUN_PROGRAM_AT - 1].partition("=")[2]
 
 
 def scan_line(workspace: str) -> str:

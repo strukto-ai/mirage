@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.machine.constants import (
     EXEC_PRELUDE,
+    RUN_EXIT_MARK,
     run_argv,
 )
 from mirage.machine.microsandbox import MicrosandboxMachine
@@ -31,6 +33,17 @@ from mirage.machine.registry import build_machine
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_runtime
+
+
+# A run's program leads a session of its own, and still gets its words
+# unchanged and says how it ended.
+def test_a_program_in_a_session_of_its_own_runs_as_given():
+    program = ("sh", "-c", 'printf "%s|" "$@"; exit 4', "sh", "a b", "")
+    done = subprocess.run(
+        own_session(run_argv("t", program)), capture_output=True, check=False
+    )
+    assert (done.returncode, done.stdout) == (4, b"a b||")
+    assert done.stderr.endswith(RUN_EXIT_MARK + b"4\n")
 
 
 @pytest.mark.asyncio
