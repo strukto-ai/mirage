@@ -92,6 +92,73 @@
       ]
     },
     {
+      "id": "a_pid_two_machines_share_names_a_machine",
+      "note": "Two containers can each run a program under the same pid. The second machine's container sets its next pid to the first one's, so kill refuses the bare pid as bash refuses an ambiguous job spec, and -m names the machine.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "dash"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'exec sleep 30' & p=$!",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "x=$((p - 1)); n=0; q=; until [ \"$q\" = \"$p\" ] || [ $n -ge 8 ]; do dash -c 'echo \"$1\" > /proc/sys/kernel/ns_last_pid' dash \"$x\"; dash -c 'exec sleep 31' & q=$!; if [ \"$q\" != \"$p\" ]; then kill \"$q\"; wait \"$q\" 2>/dev/null; x=$((x - q + p)); fi; n=$((n + 1)); done; [ \"$q\" = \"$p\" ] && echo same",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "same\n"
+          }
+        },
+        {
+          "command": "kill $p; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\n",
+            "stderr_contains": ": ambiguous job spec\n"
+          }
+        },
+        {
+          "command": "kill -m second $p; wait -m second $p; echo rc=$?; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=143\nMACHINE\ndocker:docker\nmirage\n"
+          }
+        },
+        {
+          "command": "kill $p; wait $p; echo rc=$?; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=143\nMACHINE\nmirage\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "each_machine_takes_a_remote_entry_of_its_own",
       "runtimes": [
         "docker"

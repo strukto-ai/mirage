@@ -223,7 +223,7 @@ interface Case {
   runtimes?: string[]
   runtime?: string
   also_machines?: string[]
-  also_entries?: { machine: string; captures: string[] }[]
+  also_entries?: { machine: string; captures: string[]; config?: Record<string, unknown> }[]
   backends?: string[]
   backend?: string
   requires?: string[]
@@ -1494,7 +1494,8 @@ const MACHINE_PROVIDERS = new Set([
  * runtime's machine takes its name and runs it from its `RUNTIME_ENTRY`,
  * the case's `entry` captures and config laid over it. A machine
  * provider's variant adds the case's `also_machines`, each capturing what
- * an `also_entries` entry names for it and nothing else. Mirrors run.py
+ * an `also_entries` entry names for it and nothing else, that entry's
+ * `config` laid over its own, such as another container. Mirrors run.py
  * `_machines`.
  */
 function machinesFor(runtime: string, testCase: Case): Record<string, Record<string, unknown>> {
@@ -1514,7 +1515,9 @@ function machinesFor(runtime: string, testCase: Case): Record<string, Record<str
     machines[name] = { provider: runtime, ...config, captures: [] }
   for (const entry of testCase.also_entries ?? []) {
     const also = machines[entry.machine]
-    if (also !== undefined) also.captures = entry.captures
+    if (also === undefined) continue
+    Object.assign(also, entry.config)
+    also.captures = entry.captures
   }
   return machines
 }
