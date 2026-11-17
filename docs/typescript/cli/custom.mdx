@@ -103,7 +103,6 @@ adds an incident service the handlers change.
 | --- | --- | --- |
 | Leaf | `arguments` and a `CLIHandler` | Path and text operands, and parsed flags on `ctx` |
 | Group | `subcommands`, and options its leaves inherit | No handler; Mirage runs the leaf the line names |
-| Script CLI | `CLI.script` and a machine | The raw argv, stdin and environment |
 
 - In `arguments`, a dashed name such as `--by` declares an option and a bare
   name such as `INCIDENT_ID` declares a positional. Declare a file operand
@@ -291,50 +290,6 @@ After `pager-eng login`, `echo $PAGER_ACCOUNT` prints `engineering`. If
 `pager-eng login: PAGER_ACCOUNT: readonly variable`. To run another command
 from a handler, use `await ctx.shell(line)`; see [`Context`](#context).
 
-## Install it
-
-`ws.registerCli(name, cli, config)` installs a CLI under `name`. The agent
-types that name, `pager-eng`, not the spec's name, `pager`.
-
-To install a CLI from workspace YAML, register its spec first, then load the
-workspace:
-
-```typescript
-import { registerCliSpec } from '@struktoai/mirage-node'
-
-registerCliSpec(PAGER)
-```
-
-```yaml
-clis:
-  pager-eng:
-    cli: pager
-    machine: in_process
-    config:
-      account: engineering
-```
-
-`cli:` can also point at `./file.mjs:ATTR` or a package reference such as
-`my-clis/specs:PAGER`; a relative file resolves next to the YAML file.
-
-- A `.js` file follows its nearest `package.json` `type`; `.mjs` is always a
-  module.
-- A `.ts` file runs through Node's type stripping, not compilation, so build
-  first if it uses syntax that needs transforming.
-- TypeScript has no entry points like Python's. Use a package reference, or
-  call `registerCliSpec` from your code.
-
-Registration follows these rules:
-
-- A registered name or a builtin wins over a file or package reference.
-- Registering a name another registration or a builtin already holds fails.
-- Only your code can install or remove a CLI. The shell has no `install`
-  command, so an agent can't remove one. A shell function can still shadow
-  a CLI, as in bash; refuse that with a `preCommand` policy.
-
-See [CLI entries](/home/configuration/workspace#cli-entries) for every
-`clis` key.
-
 ### On a mount
 
 A typed CLI registered on a mount runs its subcommands there, with the
@@ -425,6 +380,53 @@ the workspace loads.
 Pyodide, Monty and QuickJS read and write workspace files but have no network
 and no Node builtins. Use the Node-only `machine: host` to run the host's own
 interpreter when the script needs more.
+
+## Install it
+
+`ws.registerCli(name, cli, config)` installs a typed or script CLI under
+`name`. The agent types that name, `pager-eng`, not the spec's name, `pager`.
+
+To install a typed CLI from workspace YAML, register its spec first, then
+load the workspace:
+
+```typescript
+import { registerCliSpec } from '@struktoai/mirage-node'
+
+registerCliSpec(PAGER)
+```
+
+```yaml
+clis:
+  pager-eng:
+    cli: pager
+    machine: in_process
+    config:
+      account: engineering
+```
+
+A script CLI needs no registration: its entry names the file with `script:`,
+as in [Script CLIs](#script-clis).
+
+`cli:` can also point at `./file.mjs:ATTR` or a package reference such as
+`my-clis/specs:PAGER`; a relative file resolves next to the YAML file.
+
+- A `.js` file follows its nearest `package.json` `type`; `.mjs` is always a
+  module.
+- A `.ts` file runs through Node's type stripping, not compilation, so build
+  first if it uses syntax that needs transforming.
+- TypeScript has no entry points like Python's. Use a package reference, or
+  call `registerCliSpec` from your code.
+
+Registration follows these rules:
+
+- A registered name or a builtin wins over a file or package reference.
+- Registering a name another registration or a builtin already holds fails.
+- Only your code can install or remove a CLI. The shell has no `install`
+  command, so an agent can't remove one. A shell function can still shadow
+  a CLI, as in bash; refuse that with a `preCommand` policy.
+
+See [CLI entries](/home/configuration/workspace#cli-entries) for every
+`clis` key.
 
 ## Snapshots and credentials
 
