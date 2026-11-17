@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.core.gdrive.set_attrs import set_attrs
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
 from tests.fixtures.gdrive_api import StubDrive, install_drive
 
@@ -49,3 +50,21 @@ async def test_an_mtime_becomes_the_modified_time(
     )
     assert [call.args[1] for call in patched.await_args_list] == sent
     assert got == residual
+
+
+@pytest.mark.parametrize(
+    ("status", "raised"),
+    [(404, FileNotFoundError), (403, PermissionError), (500, GoogleApiError)],
+)
+@pytest.mark.asyncio
+async def test_a_failed_patch_answers_by_its_status(
+    gdrive_accessor, status, raised, monkeypatch
+):
+    patched = AsyncMock(
+        side_effect=GoogleApiError("File not found: f1.", status)
+    )
+    install_drive(monkeypatch, StubDrive(patch_file=patched))
+    with pytest.raises(raised):
+        await set_attrs(
+            gdrive_accessor, PathSpec.from_str_path("/a.txt"), ROW, mtime=MTIME
+        )

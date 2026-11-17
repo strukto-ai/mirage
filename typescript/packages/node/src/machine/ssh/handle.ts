@@ -174,19 +174,19 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
         }
         signal?.addEventListener('abort', abort, { once: true })
         let code: number | null = null
-        const pending = [Promise.resolve(), Promise.resolve()]
-        // A channel's chunks go to its sink as they arrive, the channel
-        // paused until each is taken.
-        const deliver = (source: Readable, sink: OutputFn, at: number) => {
+        // ssh2 closes stdout and stderr separately as each one drains.
+        // A paused reader may still have buffered bytes when the other closes.
+        const deliver = async (source: Readable, sink: OutputFn): Promise<void> => {
+          let pending = Promise.resolve()
           source.on('data', (chunk: Buffer) => {
             source.pause()
-            pending[at] = sink(chunk).then(() => {
+            pending = sink(chunk).then(() => {
               if (!state.done) source.resume()
             }, fail)
           })
+          await once(source, 'close')
+          await pending
         }
-        deliver(stream, output, 0)
-        deliver(stream.stderr, errors, 1)
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
             c ??
@@ -194,19 +194,19 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
               ? 128 + constants.signals[`SIG${signalName.replace(/^SIG/, '')}` as NodeJS.Signals]
               : null)
         })
-        stream.on('close', () => {
+        stream.once('close', () => {
           state.closed = true
-          void Promise.all(pending).then(() => {
-            if (state.done) return
-            state.done = true
-            signal?.removeEventListener('abort', abort)
-            if (code === null) {
-              rejectFn(new ConnectionLostError('the channel closed with no exit status'))
-              return
-            }
-            resolveFn({ exitCode: code })
-          })
         })
+        void Promise.all([deliver(stream, output), deliver(stream.stderr, errors)]).then(() => {
+          if (state.done) return
+          state.done = true
+          signal?.removeEventListener('abort', abort)
+          if (code === null) {
+            rejectFn(new ConnectionLostError('the channel closed with no exit status'))
+            return
+          }
+          resolveFn({ exitCode: code })
+        }, fail)
         stream.on('error', fail)
         const drained = (): Promise<void> =>
           new Promise((resolve) => {

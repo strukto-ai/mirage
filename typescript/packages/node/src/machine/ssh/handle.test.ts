@@ -18,6 +18,8 @@ import { tmpdir, userInfo } from 'node:os'
 import type * as Os from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
+import { setImmediate } from 'node:timers/promises'
 import ssh2 from 'ssh2'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
@@ -267,7 +269,7 @@ describe('SSHMachine', () => {
 
 // One exec channel whose command runs until something kills it.
 class HungChannel extends EventEmitter {
-  readonly stderr = new EventEmitter()
+  readonly stderr = new PassThrough()
   readonly signals: string[] = []
   closed = false
 
@@ -286,6 +288,12 @@ class HungChannel extends EventEmitter {
   close(): void {
     this.closed = true
   }
+
+  finish(): void {
+    this.stderr.end()
+    this.emit('end')
+    this.emit('close')
+  }
 }
 
 class HungRuntime extends SSHMachine {
@@ -303,8 +311,8 @@ class HungRuntime extends SSHMachine {
     Object.assign(this, { client })
   }
 
-  line(command: string, signal: AbortSignal, tagged = false): Promise<unknown> {
-    return this.ssh(command, null, ignore, ignore, signal, tagged)
+  line(command: string, signal: AbortSignal, tagged = false, errors = ignore): Promise<RunResult> {
+    return this.ssh(command, null, ignore, errors, signal, tagged)
   }
 }
 
@@ -352,7 +360,7 @@ describe('SSHMachine cancellation', () => {
     const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
     const running = runtime.line('true', new AbortController().signal)
     await started
-    runtime.channel.emit('close')
+    runtime.channel.finish()
     await expect(running).rejects.toBeInstanceOf(ConnectionLostError)
   })
 
@@ -366,8 +374,26 @@ describe('SSHMachine cancellation', () => {
     const running = runtime.line('true', new AbortController().signal)
     await started
     runtime.channel.emit('exit', code, signalName)
-    runtime.channel.emit('close')
+    runtime.channel.finish()
     await expect(running).resolves.toMatchObject({ exitCode })
+  })
+
+  it('delivers buffered stderr before returning the exit status', async () => {
+    const runtime = new HungRuntime()
+    const seen: Uint8Array[] = []
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('tool', new AbortController().signal, false, async (bytes) => {
+      await setImmediate()
+      seen.push(bytes)
+    })
+    await started
+    runtime.channel.stderr.write(Buffer.from('first'))
+    const tail = Buffer.from([0xfe, 0, 13, 10])
+    runtime.channel.stderr.write(tail)
+    runtime.channel.emit('exit', 5)
+    runtime.channel.finish()
+    expect((await running).exitCode).toBe(5)
+    expect(Buffer.concat(seen)).toEqual(Buffer.concat([Buffer.from('first'), tail]))
   })
 
   it('closes its channel and stops listening when the channel fails', async () => {

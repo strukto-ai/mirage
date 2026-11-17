@@ -148,15 +148,15 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
 
         feeding = asyncio.create_task(feed(stdin, write, end, exited.is_set))
 
-        async def wait_exit() -> Any:
-            result = await process.wait(check=False)
+        async def wait_exit() -> None:
+            # wait() collects unread output. The two readers own those bytes.
+            await process.wait_closed()
             exited.set()
             if not feeding.done():
                 feeding.cancel()
-            return result
 
         try:
-            _, _, _, result = await asyncio.gather(
+            await asyncio.gather(
                 read_into(process.stdout, output),
                 read_into(process.stderr, errors),
                 feeding,
@@ -175,10 +175,9 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 feeding.cancel()
             await asyncio.gather(feeding, return_exceptions=True)
             process.close()
-        await process.wait_closed()
-        if result.returncode is None:
+        code = process.returncode
+        if code is None:
             raise ConnectionLostError("the channel closed with no exit status")
-        code = result.returncode
         return RunResult(exit_code=128 - code if code < 0 else code)
 
     async def open_pipe(self, command: str) -> MachinePipe:
