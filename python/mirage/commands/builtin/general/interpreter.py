@@ -56,8 +56,10 @@ def run_output(
     and a whole line all answer through here. The run starts when its
     output is first read and writes stdout into a bounded pipe, so a
     reader that falls behind holds the program back and the output is
-    never held whole; a transport that gets its answer whole wrote it
-    through the same sink. The status settles on the result as the
+    never held whole. A read takes everything the pipe holds, as a
+    kernel pipe's does, so a run of small writes costs its reader one
+    wake. A transport that gets its answer whole wrote it through the
+    same sink. The status settles on the result as the
     output ends (``IOResult.output``), and so does the stderr the run
     wrote when no ``errors`` takes it, after what the result already
     held. A reader that stops early stops the run, which then exits 141,
@@ -130,14 +132,18 @@ def run_output(
     async def close() -> None:
         nonlocal closing
         if closing is None:
-            closing = asyncio.create_task(finalize())
+            closing = asyncio.Task(
+                finalize(), loop=asyncio.get_running_loop(), eager_start=True
+            )
         await closing
 
     async def output() -> AsyncIterator[bytes]:
         nonlocal task
-        task = asyncio.create_task(execute())
+        task = asyncio.Task(
+            execute(), loop=asyncio.get_running_loop(), eager_start=True
+        )
         try:
-            async for chunk in pipe.stream():
+            async for chunk in pipe.stream(joined=True):
                 yield chunk
         finally:
             await close()
@@ -182,12 +188,14 @@ def line_output(
 
     async def program(output: OutputFn, errors: OutputFn) -> RunResult:
         ran = await run(Relay(output, errors))
-        async with aclosing(chunks(ran.stdout or b"")) as returned:
-            async for chunk in returned:
-                await output(chunk)
-        async with aclosing(chunks(ran.stderr or b"")) as said:
-            async for chunk in said:
-                await errors(chunk)
+        if ran.stdout:
+            async with aclosing(chunks(ran.stdout)) as returned:
+                async for chunk in returned:
+                    await output(chunk)
+        if ran.stderr:
+            async with aclosing(chunks(ran.stderr)) as said:
+                async for chunk in said:
+                    await errors(chunk)
         return RunResult(exit_code=max(ran.exit_code, least))
 
     return run_output(program)

@@ -45,8 +45,10 @@ import {
  * interpreter commands, a script CLI, a program a runtime captured and a
  * whole line all answer through here. The run starts when its output is
  * first read and writes stdout into a bounded pipe, so a reader that falls
- * behind holds the program back and the output is never held whole; a
- * transport that gets its answer whole wrote it through the same sink. The
+ * behind holds the program back and the output is never held whole. A read
+ * takes everything the pipe holds, as a kernel pipe's does, so a run of
+ * small writes costs its reader one wake. A transport that gets its answer
+ * whole wrote it through the same sink. The
  * status settles on the result as the output ends (`IOResult.output`), and
  * so does the stderr the run wrote when no `errors` takes it, after what the
  * result already held. A reader that stops early stops the run,
@@ -142,7 +144,7 @@ export function runOutput(
     task = execute()
     void task.catch(() => undefined)
     try {
-      yield* pipe.stream()
+      yield* pipe.stream(true)
     } finally {
       await close()
     }
@@ -182,8 +184,8 @@ export function lineOutput(
 ): [OutputStream, IOResult] {
   return runOutput(async (output, errors, signal) => {
     const ran = await run(new Relay(output, errors), signal)
-    for await (const chunk of chunks(ran.stdout ?? new Uint8Array())) await output(chunk)
-    for await (const chunk of chunks(ran.stderr ?? new Uint8Array())) await errors(chunk)
+    if (ran.stdout !== null) for await (const chunk of chunks(ran.stdout)) await output(chunk)
+    if (ran.stderr !== null) for await (const chunk of chunks(ran.stderr)) await errors(chunk)
     return { exitCode: Math.max(ran.exitCode, least) }
   })
 }

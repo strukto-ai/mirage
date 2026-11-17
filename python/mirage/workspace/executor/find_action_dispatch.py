@@ -48,10 +48,11 @@ from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import ebusy, enoent, enotempty, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.cooperative import CHUNK_SIZE, chunks
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.stream import (
     OutputStream,
     SharedStdin,
+    close_quietly,
     ensure_stream,
     materialize,
 )
@@ -899,13 +900,17 @@ async def _apply_find_actions(
                 yield b"".join(parts)
 
     async def ran(run: IOResult) -> AsyncGenerator[bytes, None]:
-        async with aclosing(flushed()) as rows:
-            async for chunk in rows:
-                yield chunk
+        if held:
+            async with aclosing(flushed()) as rows:
+                async for chunk in rows:
+                    yield chunk
         if run.stdout is not None:
-            async with aclosing(chunks(run.stdout)) as output:
+            output = ensure_stream(run.stdout)
+            try:
                 async for chunk in output:
                     yield chunk
+            finally:
+                await close_quietly(output)
         put(Channel.STDERR, await materialize(run.stderr))
 
     async def walk() -> AsyncGenerator[bytes, None]:

@@ -34,7 +34,7 @@ import { depthFirstOrder, modifiedTs } from '../../core/generic/find.ts'
 import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
 import { ebusy, enoent, enotempty, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
-import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { ensureStream, OutputStream, SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize, OutputState } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -708,8 +708,8 @@ export async function applyFindActions(
     }
   }
   async function* ran(run: IOResult): AsyncGenerator<Uint8Array> {
-    yield* flushed()
-    if (run.stdout !== null) for await (const chunk of chunks(run.stdout)) yield chunk
+    if (held.length > 0) yield* flushed()
+    if (run.stdout !== null) yield* ensureStream(run.stdout)
     put(Channel.STDERR, await materialize(run.stderr))
   }
   async function* walk(): AsyncGenerator<Uint8Array> {
