@@ -180,10 +180,9 @@ For a provider, finish its page's **Connecting the workspace** steps first.
 
 ### The machine's own files
 
-A workspace with machines mounts `/tmp` and `/dev/shm` as the machines' own
-folders, and any other path can be marked `"@local"`, such as a repository
-the machine image holds. A file Mirage writes there is the file the
-machine's programs read:
+A workspace with machines shows the machines' own `/tmp` and `/dev/shm`, and
+`/tmp: "@gpu"` picks one machine's. A file Mirage writes there is the file
+the machine's programs read:
 
 ```bash
 cat > /tmp/fix.py << 'EOF'
@@ -257,7 +256,7 @@ there yourself. Once connected, run the shared
   stderr names the file, as `docker: /data/big.bin: Disk quota exceeded`,
   and a command that would exit 0 exits 1.
 - The root mount and `/dev` are not served, nor a path the machine holds
-  itself: `/tmp`, `/dev/shm` and each `"@local"` path show the machine's own
+  itself: `/tmp` and `/dev/shm` show the machine's own
   files ([Machine files](/home/setup/machine/local)), so they stay its own.
 
 Mirage refuses to run a program when it cannot enforce the session's file

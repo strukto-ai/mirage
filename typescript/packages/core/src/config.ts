@@ -69,7 +69,7 @@ import { coerceWritePolicy } from './workspace/mount/write_policy.ts'
 import type { WorkspaceStateStore } from './workspace/store/base.ts'
 import type { WorkspaceOptions } from './workspace/workspace/workspace.ts'
 import type { BaseVFS } from './vfs/base.ts'
-import { LOCAL } from './vfs/machine/constants.ts'
+import { MACHINE_MARK } from './vfs/machine/constants.ts'
 
 function coerceMountMode(value: string | undefined, fallback: MountMode): MountMode {
   if (value === undefined) return fallback
@@ -729,16 +729,48 @@ export function checkWorkspaceConfig(
   ) {
     throw new Error('config requires a `mounts` mapping')
   }
-  // "@local" is the machine VFS over every machine at the prefix, as
+  // "@<machine>" is the machine VFS over that machine at the prefix, as
   // Python's `WorkspaceConfig._v_mounts` reads it.
   interpolated.mounts = Object.fromEntries(
     Object.entries(mounts).map(([prefix, block]) => [
       prefix,
-      block === LOCAL ? { vfs: VFSName.MACHINE, config: { root: norm(prefix) } } : block,
+      typeof block === 'string' && block.startsWith(MACHINE_MARK)
+        ? {
+            vfs: VFSName.MACHINE,
+            config: { root: norm(prefix), machines: [block.slice(MACHINE_MARK.length)] },
+          }
+        : block,
     ]),
   )
+  checkMountMachines(interpolated)
   validateConfigKeys(interpolated)
   return interpolated
+}
+
+/**
+ * A machine mount names machines the document defines, wherever in it they
+ * sit; one without a `machines:` block gets its machines from the caller,
+ * which checks them when it binds. Mirrors Python's
+ * `WorkspaceConfig._v_mount_machines`.
+ *
+ * @param config the document, its mounts already expanded.
+ * @throws a machine mount naming a machine the document lacks.
+ */
+function checkMountMachines(config: Record<string, unknown>): void {
+  const machines = config.machines
+  if (!isPlainObject(machines) || !isPlainObject(config.mounts)) return
+  const names = Object.keys(machines)
+  const known = names.map((m) => `'${m}'`).join(', ') || 'none'
+  for (const [prefix, block] of Object.entries(config.mounts)) {
+    if (!isPlainObject(block) || block.vfs !== VFSName.MACHINE || !isPlainObject(block.config))
+      continue
+    const listed: unknown[] = Array.isArray(block.config.machines) ? block.config.machines : []
+    const chosen = block.config.default_machine ?? block.config.defaultMachine
+    for (const name of [...listed, ...(chosen === undefined ? [] : [chosen])]) {
+      if (typeof name !== 'string' || !names.includes(name))
+        throw new Error(`mount '${prefix}': no machine '${String(name)}' (machines: ${known})`)
+    }
+  }
 }
 
 export function loadWorkspaceConfig(

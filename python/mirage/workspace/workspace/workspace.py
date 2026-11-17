@@ -596,10 +596,10 @@ class Workspace:
         self._events = EventManager(self._registry)
 
         # The machines come first: a workspace with machines mounts their
-        # own /tmp and /dev/shm, and "@local" names their files.
+        # own /tmp and /dev/shm, and "@<machine>" names one's files.
         handles, entries = split_machines(machines)
         specs = normalize_mounts(
-            local_mounts(mounts, bool(handles)),
+            local_mounts(mounts, list(handles)),
             mode,
             self._read_default,
             index,

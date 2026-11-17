@@ -23,7 +23,7 @@ import { MountMode, VFSName, WritePolicy, type Limit, type ReadSpec } from '../.
 import { norm, normDir } from '../../utils/path.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
-import { LOCAL, LOCAL_PREFIXES } from '../../vfs/machine/constants.ts'
+import { LOCAL_PREFIXES, MACHINE_MARK } from '../../vfs/machine/constants.ts'
 import { MachineVFS } from '../../vfs/machine/machine.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
@@ -43,19 +43,19 @@ export interface WriteDefaults {
 }
 
 /**
- * The mount table with each `"@local"` entry a machine mount over every
- * machine at that prefix, and, in a workspace with machines, `/tmp` and
- * `/dev/shm` so too unless a mount claims them. Mirrors Python's
+ * The mount table with each `"@<machine>"` entry that machine's own files
+ * at the prefix, and, in a workspace with machines, `/tmp` and `/dev/shm`
+ * every machine's own unless a mount claims them. Mirrors Python's
  * `local_mounts`.
  *
  * @param mounts the constructor mapping.
- * @param machines whether the workspace has machines.
- * @throws an `"@local"` entry in a workspace without machines, or a string
- *   that is not `"@local"`.
+ * @param machines the workspace's machine names.
+ * @throws a string that is not `"@<machine>"`, or names a machine the
+ *   workspace lacks.
  */
 export function localMounts(
   mounts: Record<string, MountSpec | string>,
-  machines: boolean,
+  machines: readonly string[],
 ): Record<string, MountSpec> {
   const table: Record<string, MountSpec> = {}
   for (const [prefix, value] of Object.entries(mounts)) {
@@ -63,14 +63,18 @@ export function localMounts(
       table[prefix] = value
       continue
     }
-    if (value !== LOCAL)
+    const name = value.startsWith(MACHINE_MARK) ? value.slice(MACHINE_MARK.length) : ''
+    if (name === '')
       throw new Error(
-        `mount '${prefix}': '${value}' is not a VFS; the one string a mount takes is '${LOCAL}'`,
+        `mount '${prefix}': '${value}' is not a VFS; a string names a machine, as '${MACHINE_MARK}<machine>'`,
       )
-    if (!machines) throw new Error(`mount '${prefix}': ${LOCAL} needs a workspace with machines`)
-    table[prefix] = machineMount(norm(prefix))
+    if (!machines.includes(name)) {
+      const known = machines.map((m) => `'${m}'`).join(', ') || 'none'
+      throw new Error(`mount '${prefix}': no machine '${name}' (machines: ${known})`)
+    }
+    table[prefix] = machineMount(norm(prefix), name)
   }
-  if (machines) {
+  if (machines.length > 0) {
     const claimed = new Set(Object.keys(table).map((prefix) => norm(prefix)))
     for (const prefix of LOCAL_PREFIXES) {
       if (!claimed.has(prefix)) table[prefix] = machineMount(prefix)
@@ -85,9 +89,12 @@ export function localMounts(
  * `machine_mount`.
  *
  * @param root the path on each machine, the same as the prefix.
+ * @param machine the one machine whose files it shows; null for every
+ *   machine.
  */
-export function machineMount(root: string): Mount {
-  return new Mount(new MachineVFS({ root }), { vfsRef: VFSName.MACHINE })
+export function machineMount(root: string, machine: string | null = null): Mount {
+  const config = machine === null ? { root } : { root, machines: [machine] }
+  return new Mount(new MachineVFS(config), { vfsRef: VFSName.MACHINE })
 }
 
 /**

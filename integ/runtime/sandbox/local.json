@@ -227,7 +227,7 @@
     {
       "id": "a_machine_mount_at_its_own_path",
       "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
-      "note": "A machine mount whose root is its prefix, as \"@local\" spells it, shows the machine's files at the same path, and a cwd there is the machine's.",
+      "note": "A machine mount whose root is its prefix, as \"@<machine>\" spells it, shows the machine's files at the same path, and a cwd there is the machine's.",
       "runtimes": [
         "docker",
         "e2b",

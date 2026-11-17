@@ -1183,7 +1183,7 @@ describe('MachineMounts', () => {
   it('fails loud on a local path under a served prefix', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(
-      { '/': new RAMVFS(), '/data': new RAMVFS(), '/data/native': '@local' },
+      { '/': new RAMVFS(), '/data': new RAMVFS(), '/data/native': `@${sandbox.name}` },
       { mode: MountMode.WRITE, profiles: { agent: { paths: { hide: [] } } }, ...on(sandbox) },
     )
     const agent = await ws.session('agent', { profile: 'agent' })

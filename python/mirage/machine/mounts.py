@@ -138,7 +138,7 @@ def served_prefixes(
     holds itself.
 
     A machine mount of the machine's own files at the path they have
-    there (``/tmp``, ``"@local"``) stays the machine's: serving it would
+    there (``/tmp``, ``"@<machine>"``) stays the machine's: serving it would
     cover the very files it shows. A mount under one is still served at
     its own path.
 

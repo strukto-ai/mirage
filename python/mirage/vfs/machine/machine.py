@@ -62,9 +62,9 @@ class MachineVFS(BaseVFS):
     On several machines each op picks where it acts: a name is read,
     removed or renamed on the machine holding it, a new name lands on the
     machine running the command's program, else on ``default_machine``,
-    and a directory lists every machine's entries once. ``"@local"`` in a
-    mount table is this VFS over every machine at the same path, so
-    Mirage and a machine's programs name a file the same way.
+    and a directory lists every machine's entries once. ``"@<machine>"``
+    in a mount table is this VFS over that machine at the same path, so
+    Mirage and the machine's programs name a file the same way.
     """
 
     accessor: MachineAccessor

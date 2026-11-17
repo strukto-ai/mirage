@@ -81,7 +81,7 @@ from mirage.utils.loader import load_attr, optional_attr
 from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
-from mirage.vfs.machine.constants import LOCAL
+from mirage.vfs.machine.constants import MACHINE_MARK
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.mount.read_policy import (
@@ -732,16 +732,19 @@ class WorkspaceConfig(BaseModel):
     @field_validator("mounts", mode="before")
     @classmethod
     def _v_mounts(cls, v: Any) -> Any:
-        # "@local" is the machine VFS over every machine at the prefix.
+        # "@<machine>" is the machine VFS over that machine at the prefix.
         if not isinstance(v, dict):
             return v
         return {
             prefix: (
                 {
                     "vfs": VFSName.MACHINE.value,
-                    "config": {"root": norm(prefix)},
+                    "config": {
+                        "root": norm(prefix),
+                        "machines": [block.removeprefix(MACHINE_MARK)],
+                    },
                 }
-                if block == LOCAL
+                if isinstance(block, str) and block.startswith(MACHINE_MARK)
                 else block
             )
             for prefix, block in v.items()
@@ -812,6 +815,29 @@ class WorkspaceConfig(BaseModel):
             self.profiles or {}
         ):
             raise ValueError(f"unknown profile {self.profile!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _v_mount_machines(self) -> "WorkspaceConfig":
+        # A machine mount names machines the document defines, wherever
+        # in it they sit; one without a `machines:` block gets its
+        # machines from the caller, which checks them when it binds.
+        if self.machines is None:
+            return self
+        known = ", ".join(repr(m) for m in self.machines) or "none"
+        for prefix, block in self.mounts.items():
+            if block.vfs != VFSName.MACHINE.value:
+                continue
+            chosen = block.config.get("default_machine")
+            for name in [
+                *(block.config.get("machines") or ()),
+                *([chosen] if chosen is not None else []),
+            ]:
+                if name not in self.machines:
+                    raise ValueError(
+                        f"mount {prefix!r}: no machine {name!r} "
+                        f"(machines: {known})"
+                    )
         return self
 
     def to_workspace_kwargs(

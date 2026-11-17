@@ -6,8 +6,8 @@ description: Mount a machine's own files from Python.
 
 `MachineVFS` shows the files of the workspace's machines at a prefix, reached
 through the exec each machine's handle already holds. A workspace with
-machines mounts `/tmp` and `/dev/shm` this way, and `"@local"` mounts any
-other path; see [Machine files](/home/setup/machine/local).
+machines mounts `/tmp` and `/dev/shm` this way, and `"@<machine>"` picks one
+machine's; see [Machine files](/home/setup/machine/local).
 
 ## Configure
 
@@ -16,25 +16,21 @@ from mirage import MountMode, Workspace
 from mirage.vfs.machine import MachineVFS, MachineVFSConfig
 
 ws = Workspace(
-    {
-        "/testbed": "@local",
-        "/gpu": MachineVFS(MachineVFSConfig(machines=("gpu",), root="/")),
-    },
+    {"/tmp": MachineVFS(MachineVFSConfig(machines=("gpu",), root="/tmp"))},
     mode=MountMode.WRITE,
     machines={
-        "sandbox": {"provider": "docker", "container": "task-001499"},
+        "cpu": {"provider": "docker", "container": "my-sandbox"},
         "gpu": {"provider": "ssh", "host": "gpu.example.com"},
     },
 )
-result = await ws.shell("ls /gpu/models && grep -rn TODO /testbed/src")
+result = await ws.shell("ls /tmp")
 print(await result.stdout_str())
 await ws.close()
 ```
 
-`"@local"` at a prefix is `MachineVFS(MachineVFSConfig(root=prefix))` over
-every machine. A machine mount needs a workspace with machines, and a name in
-`machines` or `default_machine` that is none of them is refused when the
-workspace is built.
+`"/tmp": "@gpu"` is the same mount, written short. A machine mount needs a
+workspace with machines, and a name in `machines` or `default_machine` that
+is none of them is refused when the workspace is built.
 
 ### Fields
 

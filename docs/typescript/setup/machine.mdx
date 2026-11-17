@@ -6,8 +6,8 @@ description: Mount a machine's own files from Node.
 
 `MachineVFS` shows the files of the workspace's machines at a prefix, reached
 through the exec each machine's handle already holds. A workspace with
-machines mounts `/tmp` and `/dev/shm` this way, and `'@local'` mounts any
-other path; see [Machine files](/home/setup/machine/local).
+machines mounts `/tmp` and `/dev/shm` this way, and `'@<machine>'` picks one
+machine's; see [Machine files](/home/setup/machine/local).
 
 ## Install
 
@@ -21,27 +21,23 @@ npm install @struktoai/mirage-node
 import { MachineVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  {
-    '/testbed': '@local',
-    '/gpu': new MachineVFS({ machines: ['gpu'], root: '/' }),
-  },
+  { '/tmp': new MachineVFS({ machines: ['gpu'], root: '/tmp' }) },
   {
     mode: MountMode.WRITE,
     machines: {
-      sandbox: { provider: 'docker', container: 'task-001499' },
+      cpu: { provider: 'docker', container: 'my-sandbox' },
       gpu: { provider: 'ssh', host: 'gpu.example.com' },
     },
   },
 )
-const result = await ws.shell('ls /gpu/models && grep -rn TODO /testbed/src')
+const result = await ws.shell('ls /tmp')
 console.log(result.stdoutText)
 await ws.close()
 ```
 
-`'@local'` at a prefix is `new MachineVFS({ root: prefix })` over every
-machine. A machine mount needs a workspace with machines, and a name in
-`machines` or `defaultMachine` that is none of them is refused when the
-workspace is built.
+`'/tmp': '@gpu'` is the same mount, written short. A machine mount needs a
+workspace with machines, and a name in `machines` or `defaultMachine` that
+is none of them is refused when the workspace is built.
 
 ### Fields
 

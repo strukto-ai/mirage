@@ -128,7 +128,7 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
 /**
  * The prefixes ssh serves a machine: its top prefixes but those it holds
  * itself. A machine mount of the machine's own files at the path they have
- * there (`/tmp`, `"@local"`) stays the machine's: serving it would cover the
+ * there (`/tmp`, `"@<machine>"`) stays the machine's: serving it would cover the
  * very files it shows. A mount under one is still served at its own path.
  *
  * @param prefixes the mount prefixes the session sees.

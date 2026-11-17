@@ -444,10 +444,10 @@ export class Workspace {
     )
     this.cache = buildFileCache(options.cache, this.clock, this.wsId)
     // The machines come first: a workspace with machines mounts their own
-    // /tmp and /dev/shm, and "@local" names their files.
+    // /tmp and /dev/shm, and "@<machine>" names one's files.
     const [handles, entries] = splitMachines(options.machines)
     const normalized = normalizeMounts(
-      localMounts(mounts, Object.keys(handles).length > 0),
+      localMounts(mounts, Object.keys(handles)),
       this.readDefault,
       index,
       {

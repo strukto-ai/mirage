@@ -1172,7 +1172,7 @@ async def test_a_mount_of_its_own_under_a_served_prefix_fails_loud():
 async def test_a_local_path_under_a_served_prefix_fails_loud():
     sandbox = FakeMachine("ssh")
     ws = Workspace(
-        {"/": RAMVFS(), "/data": RAMVFS(), "/data/native": "@local"},
+        {"/": RAMVFS(), "/data": RAMVFS(), "/data/native": f"@{sandbox.name}"},
         mode=MountMode.WRITE,
         profiles={"agent": {"paths": {"hide": []}}},
         **on(sandbox),

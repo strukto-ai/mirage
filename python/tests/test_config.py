@@ -32,15 +32,45 @@ def test_workspace_body_limit_does_not_allow_unknown_siblings():
         )
 
 
-def test_at_local_is_the_machine_vfs_at_its_own_path():
+def test_a_machine_mount_names_a_machine_the_document_defines():
+    machines = {"gpu": {"provider": "docker", "container": "c"}}
     config = WorkspaceConfig.model_validate(
-        {"mounts": {"/testbed/": "@local", "/data": {"vfs": "ram"}}}
+        {"mounts": {"/tmp": "@gpu"}, "machines": machines}
     )
-    block = config.mounts["/testbed/"]
-    assert (block.vfs, block.config) == ("machine", {"root": "/testbed"})
-    mount = config.to_workspace_kwargs()["mounts"]["/testbed/"]
-    assert (mount.vfs.name, mount.vfs.config.root, mount.vfs_ref) == (
-        "machine",
-        "/testbed",
-        "machine",
+    assert config.mounts["/tmp"].config["machines"] == ["gpu"]
+    with pytest.raises(
+        ValueError, match="no machine 'cpu' \\(machines: 'gpu'\\)"
+    ):
+        WorkspaceConfig.model_validate(
+            {"mounts": {"/tmp": "@cpu"}, "machines": machines}
+        )
+    with pytest.raises(ValueError, match="no machine 'cpu'"):
+        WorkspaceConfig.model_validate(
+            {
+                "mounts": {
+                    "/tmp": {
+                        "vfs": "machine",
+                        "config": {"root": "/tmp", "default_machine": "cpu"},
+                    }
+                },
+                "machines": machines,
+            }
+        )
+
+
+def test_at_machine_is_that_machine_s_files_at_its_own_path():
+    config = WorkspaceConfig.model_validate(
+        {"mounts": {"/tmp/": "@gpu", "/data": {"vfs": "ram"}}}
     )
+    block = config.mounts["/tmp/"]
+    assert (block.vfs, block.config) == (
+        "machine",
+        {"root": "/tmp", "machines": ["gpu"]},
+    )
+    mount = config.to_workspace_kwargs()["mounts"]["/tmp/"]
+    assert (
+        mount.vfs.name,
+        mount.vfs.config.root,
+        mount.vfs.config.machines,
+        mount.vfs_ref,
+    ) == ("machine", "/tmp", ("gpu",), "machine")

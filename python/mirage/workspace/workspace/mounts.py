@@ -14,7 +14,7 @@
 
 import asyncio
 import inspect
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import partial
 
 from mirage.cache.file.io import mutation_lock
@@ -34,7 +34,7 @@ from mirage.utils.path import norm, norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.machine.config import MachineVFSConfig
-from mirage.vfs.machine.constants import LOCAL, LOCAL_PREFIXES
+from mirage.vfs.machine.constants import LOCAL_PREFIXES, MACHINE_MARK
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
@@ -82,34 +82,36 @@ def check_vfs(prefix: str, vfs: BaseVFS) -> None:
 
 
 def local_mounts(
-    mounts: Mapping[str, VFSMount | str], machines: bool
+    mounts: Mapping[str, VFSMount | str], machines: Sequence[str]
 ) -> dict[str, VFSMount]:
-    """The mount table with each ``"@local"`` entry a machine mount over
-    every machine at that prefix, and, in a workspace with machines,
-    ``/tmp`` and ``/dev/shm`` so too unless a mount claims them.
+    """The mount table with each ``"@<machine>"`` entry that machine's own
+    files at the prefix, and, in a workspace with machines, ``/tmp`` and
+    ``/dev/shm`` every machine's own unless a mount claims them.
 
     Args:
         mounts (Mapping[str, VFSMount | str]): the constructor mapping.
-        machines (bool): whether the workspace has machines.
+        machines (Sequence[str]): the workspace's machine names.
 
     Raises:
-        ValueError: an ``"@local"`` entry in a workspace without machines,
-            or a string that is not ``"@local"``.
+        ValueError: a string that is not ``"@<machine>"``, or names a
+            machine the workspace lacks.
     """
     table: dict[str, VFSMount] = {}
     for prefix, value in mounts.items():
         if isinstance(value, str):
-            if value != LOCAL:
+            name = value.removeprefix(MACHINE_MARK)
+            if name == value or not name:
                 raise ValueError(
-                    f"mount {prefix!r}: {value!r} is not a VFS; "
-                    f"the one string a mount takes is {LOCAL!r}"
+                    f"mount {prefix!r}: {value!r} is not a VFS; a string "
+                    f"names a machine, as {MACHINE_MARK + '<machine>'!r}"
                 )
-            if not machines:
+            if name not in machines:
+                known = ", ".join(repr(m) for m in machines) or "none"
                 raise ValueError(
-                    f"mount {prefix!r}: {LOCAL} needs a workspace with "
-                    "machines"
+                    f"mount {prefix!r}: no machine {name!r} "
+                    f"(machines: {known})"
                 )
-            value = machine_mount(norm(prefix))
+            value = machine_mount(norm(prefix), name)
         table[prefix] = value
     if machines:
         claimed = {norm(prefix) for prefix in table}
@@ -119,16 +121,19 @@ def local_mounts(
     return table
 
 
-def machine_mount(root: str) -> Mount:
+def machine_mount(root: str, machine: str | None = None) -> Mount:
     """The machines' own files at ``root``, recorded as the registry's
     ``machine`` VFS, so a snapshot rebuilds the mount from its config.
 
     Args:
         root (str): the path on each machine, the same as the prefix.
+        machine (str | None): the one machine whose files it shows; None
+            for every machine.
     """
-    return Mount(
-        vfs=MachineVFS(MachineVFSConfig(root=root)), vfs_ref=VFSName.MACHINE
+    config = MachineVFSConfig(
+        root=root, machines=None if machine is None else (machine,)
     )
+    return Mount(vfs=MachineVFS(config), vfs_ref=VFSName.MACHINE)
 
 
 def bind_machine_mounts(

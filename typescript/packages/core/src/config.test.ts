@@ -30,14 +30,29 @@ describe('workspace max_body_bytes', () => {
   })
 })
 
-describe('@local', () => {
-  it('is the machine VFS at its own path', async () => {
+describe('@<machine>', () => {
+  it('names a machine the document defines, wherever it sits', () => {
+    const machines = { gpu: { provider: 'docker', container: 'c' } }
+    const config = loadWorkspaceConfig({ mounts: { '/tmp': '@gpu' }, machines })
+    expect(config.mounts['/tmp']?.config).toEqual({ root: '/tmp', machines: ['gpu'] })
+    expect(() => loadWorkspaceConfig({ mounts: { '/tmp': '@cpu' }, machines })).toThrow(
+      "no machine 'cpu' (machines: 'gpu')",
+    )
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/tmp': { vfs: 'machine', config: { root: '/tmp', default_machine: 'cpu' } } },
+        machines,
+      }),
+    ).toThrow("no machine 'cpu'")
+  })
+
+  it("is that machine's files at its own path", async () => {
     const config = loadWorkspaceConfig({
-      mounts: { '/testbed/': '@local', '/data': { vfs: 'ram' } },
+      mounts: { '/tmp/': '@gpu', '/data': { vfs: 'ram' } },
     })
-    const block = config.mounts['/testbed/']
-    expect([block?.vfs, block?.config]).toEqual(['machine', { root: '/testbed' }])
-    const vfs = await buildVfs(block?.vfs ?? '', block?.config ?? {})
-    expect([vfs.name, (vfs as MachineVFS).config.root]).toEqual(['machine', '/testbed'])
+    const block = config.mounts['/tmp/']
+    expect([block?.vfs, block?.config]).toEqual(['machine', { root: '/tmp', machines: ['gpu'] }])
+    const vfs = (await buildVfs(block?.vfs ?? '', block?.config ?? {})) as MachineVFS
+    expect([vfs.name, vfs.config.root, vfs.config.machines]).toEqual(['machine', '/tmp', ['gpu']])
   })
 })

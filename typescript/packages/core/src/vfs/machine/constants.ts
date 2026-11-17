@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// A mount table's short spelling of a machine mount over every machine at
-// the prefix it is given, so Mirage and the machines' programs name a file
-// the same way.
-export const LOCAL = '@local'
+// A mount table names one machine's own files at the same path by the
+// machine's name after this mark (`"/tmp": "@gpu"`), so Mirage and the
+// machine's programs name a file the same way.
+export const MACHINE_MARK = '@'
 
 // The paths a workspace with machines mounts that way unless a mount claims
 // them: where programs keep their scratch files.

@@ -148,10 +148,16 @@ async def test_rm_r_removes_a_directory_on_every_machine():
 
 
 @pytest.mark.asyncio
-async def test_at_local_shows_the_machines_files_at_the_same_path():
-    a = FakeFiles({"/srv/app/main.py": b"x"})
-    ws = two(a, FakeFiles(), mounts={"/srv": "@local"})
-    assert await run(ws, "ls /srv/app") == (0, "main.py\n", "")
+async def test_at_machine_shows_that_machine_s_files_at_the_same_path():
+    a = FakeFiles({"/tmp/a.txt": b"a"})
+    b = FakeFiles({"/tmp/b.txt": b"b"})
+    ws = two(a, b, mounts={"/tmp": "@b"})
+    assert await run(ws, "ls /tmp") == (0, "b.txt\n", "")
+    await run(ws, "echo new > /tmp/new.txt")
+    assert ("/tmp/new.txt" in a.files, b.files["/tmp/new.txt"]) == (
+        False,
+        b"new\n",
+    )
     await ws.close()
 
 
@@ -164,9 +170,13 @@ async def test_a_machine_tree_mounts_at_another_prefix():
     await ws.close()
 
 
-def test_at_local_needs_machines():
-    with pytest.raises(ValueError, match="@local needs a workspace"):
-        Workspace({"/srv": "@local"})
+def test_at_machine_names_one_of_the_workspace_s_machines():
+    with pytest.raises(
+        ValueError, match="no machine 'gpu' \\(machines: none\\)"
+    ):
+        Workspace({"/tmp": "@gpu"})
+    with pytest.raises(ValueError, match="a string names a machine"):
+        Workspace({"/tmp": "local"})
     with pytest.raises(ValueError, match="needs a workspace with machines"):
         Workspace({"/box": MachineVFS(MachineVFSConfig())})
 

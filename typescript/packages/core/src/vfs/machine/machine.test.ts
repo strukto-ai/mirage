@@ -135,11 +135,13 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it("shows the machines' files at the same path for @local", async () => {
-    const ws = two(new FakeFiles({ '/srv/app/main.py': 'x' }), new FakeFiles(), {
-      '/srv': '@local',
-    })
-    expect(await run(ws, 'ls /srv/app')).toEqual([0, 'main.py\n', ''])
+  it("shows one machine's files at the same path for @<machine>", async () => {
+    const a = new FakeFiles({ '/tmp/a.txt': 'a' })
+    const b = new FakeFiles({ '/tmp/b.txt': 'b' })
+    const ws = two(a, b, { '/tmp': '@b' })
+    expect(await run(ws, 'ls /tmp')).toEqual([0, 'b.txt\n', ''])
+    await run(ws, 'echo new > /tmp/new.txt')
+    expect(['/tmp/new.txt' in texts(a), texts(b)['/tmp/new.txt']]).toEqual([false, 'new\n'])
     await ws.close()
   })
 
@@ -150,8 +152,9 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it('needs machines for @local', () => {
-    expect(() => new Workspace({ '/srv': '@local' })).toThrow('@local needs a workspace')
+  it("names one of the workspace's machines with @<machine>", () => {
+    expect(() => new Workspace({ '/tmp': '@gpu' })).toThrow("no machine 'gpu' (machines: none)")
+    expect(() => new Workspace({ '/tmp': 'local' })).toThrow('a string names a machine')
     expect(() => new Workspace({ '/box': new MachineVFS({}) })).toThrow(
       'needs a workspace with machines',
     )

@@ -4,10 +4,11 @@ icon: hard-drive
 description: A machine's own files at a prefix, so Mirage and the machine's programs share them.
 ---
 
-A machine keeps files of its own: scratch files in `/tmp`, a repository its
-image holds, a model a program downloaded. The `machine` VFS shows them at a
-prefix, reached through the exec Mirage already holds for the machine. Nothing
-is copied, served or installed.
+When your agent's commands run on a machine (a container, a sandbox, a
+server over ssh), the programs there keep scratch files in `/tmp`. Mirage
+shows that same `/tmp` in the workspace, so a file the agent writes from
+Mirage's shell is the file the machine's programs read, and a file a
+program leaves behind is one the agent can open:
 
 ```bash
 cat > /tmp/fix.py << 'EOF'
@@ -17,14 +18,14 @@ python3 /tmp/fix.py
 # patched
 ```
 
-Mirage's `cat` writes `/tmp/fix.py` on the machine, and the machine's `python3`
-reads it there.
+Mirage's `cat` writes `/tmp/fix.py` on the machine, and the machine's
+`python3` reads it there. Nothing is copied or synced: the file lives on the
+machine. `/dev/shm` works the same way.
 
-## Connect
+## Set up
 
-A workspace with machines mounts `/tmp` and `/dev/shm` this way unless a
-mount claims them. Mark any other path with `"@local"`: the machines' own
-files at that same path.
+There is nothing to turn on. Give the workspace a machine and `/tmp` is that
+machine's:
 
 <Tabs>
   <Tab title="YAML" icon="file-code">
@@ -32,16 +33,7 @@ files at that same path.
     machines:
       sandbox:
         provider: docker
-        container: task-001499
-        captures: [python, git, pip, bash]
-
-    mounts:
-      /testbed: "@local"
-      /gpu:
-        vfs: machine
-        config:
-          machines: [sandbox]
-          root: /
+        container: my-sandbox
     ```
   </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -49,18 +41,14 @@ files at that same path.
     from mirage import MountMode, Workspace
 
     ws = Workspace(
-        {"/testbed": "@local"},
+        {},
         mode=MountMode.WRITE,
-        machines={
-            "sandbox": {
-                "provider": "docker",
-                "container": "task-001499",
-                "captures": ["python", "git", "pip", "bash"],
-            }
-        },
+        machines={"sandbox": {"provider": "docker", "container": "my-sandbox"}},
     )
-    result = await ws.shell("cd /testbed && git status --short")
+    await ws.shell("echo hello > /tmp/note.txt")
+    result = await ws.shell("python3 -c 'print(open(\"/tmp/note.txt\").read())'")
     print(await result.stdout_str())
+    # hello
     await ws.close()
     ```
   </Tab>
@@ -69,41 +57,99 @@ files at that same path.
     import { MountMode, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
-      { '/testbed': '@local' },
+      {},
       {
         mode: MountMode.WRITE,
-        machines: {
-          sandbox: {
-            provider: 'docker',
-            container: 'task-001499',
-            captures: ['python', 'git', 'pip', 'bash'],
-          },
-        },
+        machines: { sandbox: { provider: 'docker', container: 'my-sandbox' } },
       },
     )
-    const result = await ws.shell('cd /testbed && git status --short')
+    await ws.shell('echo hello > /tmp/note.txt')
+    const result = await ws.shell(`python3 -c 'print(open("/tmp/note.txt").read())'`)
     console.log(result.stdoutText)
+    // hello
     await ws.close()
     ```
   </Tab>
 </Tabs>
 
-`"@local"` needs a workspace with machines. A workspace without machines keeps
-no `/tmp` mount of its own.
+A workspace without machines has no `/tmp` of its own. A mount you put at
+`/tmp` yourself (`/tmp: {vfs: ram}`) replaces the machine's.
+
+## Pick the machine
+
+With several machines, `/tmp` shows all of their `/tmp` files together (see
+[Several machines](#several-machines)). To show one machine's `/tmp`, name it
+with `@`:
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    machines:
+      cpu:
+        provider: docker
+        container: my-sandbox
+      gpu:
+        provider: ssh
+        host: gpu.example.com
+
+    mounts:
+      /tmp: "@gpu"
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    ws = Workspace(
+        {"/tmp": "@gpu"},
+        mode=MountMode.WRITE,
+        machines={
+            "cpu": {"provider": "docker", "container": "my-sandbox"},
+            "gpu": {"provider": "ssh", "host": "gpu.example.com"},
+        },
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const ws = new Workspace(
+      { '/tmp': '@gpu' },
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          cpu: { provider: 'docker', container: 'my-sandbox' },
+          gpu: { provider: 'ssh', host: 'gpu.example.com' },
+        },
+      },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+The name must be one under `machines:`, wherever that section sits in the
+file. Anything else stops the workspace from starting, with the names it
+knows:
+
+```text
+mount '/tmp': no machine 'gpus' (machines: 'cpu', 'gpu')
+```
+
+`"@gpu"` is short for a `machine` mount block, which also takes these fields:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `machines` | every machine | Whose files the mount shows |
-| `root` | `/` | The path on each machine that becomes the mount root |
-| `default_machine` | the machine running programs nothing in Mirage resolves, else the first | Where a new name lands when the command writing it runs no program on a machine |
+| `machines` | every machine | Whose `/tmp` the mount shows |
+| `root` | `/` | The folder on each machine the mount shows |
+| `default_machine` | the machine running your programs, else the first | Where a new file lands when no program on a machine writes it |
 
 ## Where a command runs
 
-A workspace with `/testbed` and `/tmp` on one machine and `/data` in RAM:
+A command that only touches `/tmp` runs on the machine itself, in one go,
+and prints exactly what the machine's own tools print. A command that also
+reaches the rest of the workspace runs in Mirage, which still reads and
+writes each `/tmp` file on its machine. With one machine and `/data` in RAM:
 
 ```mermaid
 flowchart LR
-    G["grep -rn TODO /testbed"] -- "every path on the machine" --> R
+    G["grep -rn TODO /tmp/repo"] -- "every path on the machine" --> R
     X["find . | xargs grep -l x"] -- "xargs feeds no input" --> R
     V["/tmp/venv/bin/python -V"] -- "a program the machine holds" --> R
     L["ln -s a.py /tmp/link"] -- "a link in the machine's folder" --> R
