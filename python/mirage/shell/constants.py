@@ -24,7 +24,7 @@ from mirage.shell.types import (
 
 # A word that reads as itself in an argument list: no quoting, expansion,
 # glob, brace or tilde character, ASCII only. Its fields are its text, so
-# no shell is framed or asked to expand it.
+# the shell is framed as for any word but not asked to expand it.
 PLAIN_WORD = re.compile(rb"[A-Za-z0-9_./:%+,=@-]+")
 PLAIN_WORD_TYPES = frozenset(
     {NodeType.WORD, NodeType.COMMAND_NAME, NodeType.NUMBER}

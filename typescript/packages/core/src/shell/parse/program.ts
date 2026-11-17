@@ -87,6 +87,7 @@ export class ParsedProgram {
     if (this.references === 0) {
       const borrowed = this.parsedRoot?.borrowed
       if (borrowed instanceof ShellTreeNode) borrowed.tree.dispose()
+      for (const node of this.nodes.values()) node.forget()
       this.nodes = new Map()
       this.parsedRoot = undefined
       this.sourceOffsets = undefined
@@ -134,6 +135,12 @@ export class ProgramNode implements ShellNode {
   private get node(): ShellNode {
     this.program.check()
     return this.borrowed
+  }
+  /** Drop the wrappers it keeps, as its program's final release does. */
+  forget(): void {
+    this.up = undefined
+    this.all = undefined
+    this.named = undefined
   }
   get heredoc() {
     return this.node.heredoc

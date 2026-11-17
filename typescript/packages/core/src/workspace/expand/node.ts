@@ -177,12 +177,12 @@ export async function expand(
     if (mode === 'fields') return [markGlobs(text)]
     return mode === 'pattern' ? [[text, true]] : text
   }
+  const session = context.session
+  frame(session, callStack)
   if (mode === 'fields' && PLAIN_WORD_TYPES.has(word.type)) {
     const text = word.text
     if (PLAIN_WORD.test(text)) return [text]
   }
-  const session = context.session
-  frame(session, callStack)
   const task = session.vars.shell.expand(node, mode)
   const host = new ExpandHost(context, executeFn, callStack, word)
   return drive(task, host, context.frame.diagnostics)
