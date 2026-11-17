@@ -1,6 +1,9 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import aclosing, suppress
+from dataclasses import replace
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -14,6 +17,7 @@ from mirage.commands.builtin.generic.tail import (
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import eacces, efbig, enoent
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import close_quietly
@@ -31,6 +35,7 @@ from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
+from mirage.workspace.files import Files
 from tests.e2e.s3_mock import patch_s3_multi
 
 
@@ -508,6 +513,70 @@ async def test_follow_reads_a_size_unknown_file_from_where_it_left_off():
     assert b"".join(chunks) == b"a\nb\nz\n"
     assert io.stderr == b"tail: /d/log: file truncated\n"
     assert fs.whole_reads == 1
+
+
+class _Streamed(_Growing):
+    """A fake with no ranged read whose whole read is a stream of
+    ``CHUNK_SIZE`` pieces, and a dispatcher over it that records what each
+    poll asks for."""
+
+    def __init__(
+        self, data: dict[str, bytes | None], sized: bool = True
+    ) -> None:
+        super().__init__(data, sized)
+        self.asked: list[dict] = []
+
+    async def read(self, p: PathSpec) -> AsyncIterator[bytes]:
+        self.whole_reads += 1
+        body = self.data[p.virtual]
+        for at in range(0, len(body), CHUNK_SIZE):
+            await asyncio.sleep(0)
+            yield body[at : at + CHUNK_SIZE]
+
+    async def dispatch(self, name: str, p: PathSpec, **kwargs):
+        if name == "stat":
+            return await self.stat(p), IOResult()
+        self.asked.append(kwargs)
+        return self.read(p), IOResult()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sized", [True, False], ids=["sized", "unsized"])
+@pytest.mark.parametrize("dispatched", [False, True], ids=["bare", "dispatch"])
+async def test_follow_streams_a_backend_with_no_range_past_what_it_showed(
+    sized, dispatched
+):
+    # With no ranged read a poll reads the file whole, but as a stream it
+    # skips through: what it prints comes a chunk at a time, never the
+    # file joined, and a truncation is still noticed.
+    fs = _Streamed({"/d/log": b"a\n"}, sized=sized)
+    ctx = _follow_opts()
+    if dispatched:
+        ctx = replace(
+            ctx, vfs=cast(Files, SimpleNamespace(dispatch=fs.dispatch))
+        )
+    stream, io = await _tail_generic(
+        _paths("/d/log"), [], ctx, fs.stat, fs.read
+    )
+    big = b"x" * (3 * CHUNK_SIZE) + b"\n"
+
+    async def grow() -> None:
+        await asyncio.sleep(0.06)
+        fs.data["/d/log"] += big
+        await asyncio.sleep(0.08)
+        fs.data["/d/log"] = b"z\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.3)
+    await grower
+    assert b"".join(chunks) == b"a\n" + big + b"z\n"
+    assert io.stderr == b"tail: /d/log: file truncated\n"
+    assert max(len(chunk) for chunk in chunks) <= CHUNK_SIZE
+    assert all(
+        ask == {"filetype": None, "direct": True, "stream": True}
+        for ask in fs.asked
+    )
+    assert len(fs.asked) == (fs.whole_reads - 1 if dispatched else 0)
 
 
 @pytest.mark.asyncio
