@@ -210,9 +210,10 @@ print(config["greeting"], *argv[1:])
 | WASI (Python), Pyodide (TypeScript), `host` machine | `sys.argv` | `sys.stdin` |
 | QuickJS | `scriptArgs` | `std.in` |
 
-Monty, WASI, Pyodide and QuickJS read and write workspace files but have no
-network and no extra packages. `machine: host` runs the host's own
-interpreter when the script needs more.
+Monty, WASI and QuickJS read and write workspace files but have no network
+and no extra packages. Pyodide loads packages, and in a browser its worker
+keeps `fetch`; see its [containment](/typescript/runtime/pyodide#containment).
+`machine: host` runs the host's own interpreter when the script needs more.
 
 ## Install it
 

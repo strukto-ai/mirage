@@ -80,33 +80,38 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Change the working directory.
   <Expandable title="4 flags">
     <ResponseField name="-L">
-      keep symbolic links in the new path (the default)
+      Keep symbolic links in the new path (the default).
     </ResponseField>
     <ResponseField name="-P">
-      resolve symbolic links in the new path
+      Resolve symbolic links in the new path.
     </ResponseField>
     <ResponseField name="-e">
-      with -P, fail when the new path cannot be resolved
+      With -P, fail when the new path cannot be resolved.
     </ResponseField>
     <ResponseField name="-@">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
   </Expandable>
 </ResponseField>
 <ResponseField name="pwd">
+  Print the working directory.
   <Expandable title="2 flags">
-    <ResponseField name="-P" />
-    <ResponseField name="-L" />
+    <ResponseField name="-L">
+      Print it as reached, symbolic links kept (the default).
+    </ResponseField>
+    <ResponseField name="-P">
+      Print it with symbolic links resolved.
+    </ResponseField>
   </Expandable>
 </ResponseField>
 <ResponseField name="umask">
   Print or set the file mode creation mask.
   <Expandable title="2 flags">
     <ResponseField name="-p">
-      print the mask in a reusable form
+      Print the mask in a reusable form.
     </ResponseField>
     <ResponseField name="-S">
-      print the mask symbolically
+      Print the mask symbolically.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -114,13 +119,13 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Put variables in the environment of the commands it runs.
   <Expandable title="3 flags">
     <ResponseField name="-f">
-      each NAME is a shell function
+      Each NAME is a shell function.
     </ResponseField>
     <ResponseField name="-n">
-      take the export mark off each NAME
+      Take the export mark off each NAME.
     </ResponseField>
     <ResponseField name="-p">
-      print every exported variable in a reusable form
+      Print every exported variable in a reusable form.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -128,13 +133,13 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Remove variables and functions.
   <Expandable title="3 flags">
     <ResponseField name="-f">
-      each NAME is a function
+      Each NAME is a function.
     </ResponseField>
     <ResponseField name="-v">
-      each NAME is a variable
+      Each NAME is a variable.
     </ResponseField>
     <ResponseField name="-n">
-      remove the reference NAME itself, not what it names
+      Remove the reference NAME itself, not what it names.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -142,46 +147,46 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Set variables and their attributes.
   <Expandable title="14 flags">
     <ResponseField name="-a">
-      make each NAME an indexed array
+      Make each NAME an indexed array.
     </ResponseField>
     <ResponseField name="-A">
-      make each NAME an associative array
+      Make each NAME an associative array.
     </ResponseField>
     <ResponseField name="-f">
-      act on functions only; with -p, print their definitions
+      Act on functions only; with -p, print their definitions.
     </ResponseField>
     <ResponseField name="-F">
-      print function names only
+      Print function names only.
     </ResponseField>
     <ResponseField name="-g">
-      make NAME global even inside a function
+      Make NAME global even inside a function.
     </ResponseField>
     <ResponseField name="-i">
-      make each NAME an integer, assigned arithmetically
+      Make each NAME an integer, assigned arithmetically.
     </ResponseField>
     <ResponseField name="-I">
-      inside a function, start from an outer variable's attributes
+      Inside a function, start from an outer variable's attributes.
     </ResponseField>
     <ResponseField name="-l">
-      lowercase each value as it is assigned
+      Lowercase each value as it is assigned.
     </ResponseField>
     <ResponseField name="-n">
-      make NAME a reference to the variable its value names
+      Make NAME a reference to the variable its value names.
     </ResponseField>
     <ResponseField name="-p">
-      print each NAME with its attributes and value
+      Print each NAME with its attributes and value.
     </ResponseField>
     <ResponseField name="-r">
-      make each NAME read-only
+      Make each NAME read-only.
     </ResponseField>
     <ResponseField name="-t">
-      give each NAME the trace attribute
+      Give each NAME the trace attribute.
     </ResponseField>
     <ResponseField name="-u">
-      uppercase each value as it is assigned
+      Uppercase each value as it is assigned.
     </ResponseField>
     <ResponseField name="-x">
-      export each NAME
+      Export each NAME.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -189,46 +194,46 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Set variables and their attributes; the same as `declare'.
   <Expandable title="14 flags">
     <ResponseField name="-a">
-      make each NAME an indexed array
+      Make each NAME an indexed array.
     </ResponseField>
     <ResponseField name="-A">
-      make each NAME an associative array
+      Make each NAME an associative array.
     </ResponseField>
     <ResponseField name="-f">
-      act on functions only; with -p, print their definitions
+      Act on functions only; with -p, print their definitions.
     </ResponseField>
     <ResponseField name="-F">
-      print function names only
+      Print function names only.
     </ResponseField>
     <ResponseField name="-g">
-      make NAME global even inside a function
+      Make NAME global even inside a function.
     </ResponseField>
     <ResponseField name="-i">
-      make each NAME an integer, assigned arithmetically
+      Make each NAME an integer, assigned arithmetically.
     </ResponseField>
     <ResponseField name="-I">
-      inside a function, start from an outer variable's attributes
+      Inside a function, start from an outer variable's attributes.
     </ResponseField>
     <ResponseField name="-l">
-      lowercase each value as it is assigned
+      Lowercase each value as it is assigned.
     </ResponseField>
     <ResponseField name="-n">
-      make NAME a reference to the variable its value names
+      Make NAME a reference to the variable its value names.
     </ResponseField>
     <ResponseField name="-p">
-      print each NAME with its attributes and value
+      Print each NAME with its attributes and value.
     </ResponseField>
     <ResponseField name="-r">
-      make each NAME read-only
+      Make each NAME read-only.
     </ResponseField>
     <ResponseField name="-t">
-      give each NAME the trace attribute
+      Give each NAME the trace attribute.
     </ResponseField>
     <ResponseField name="-u">
-      uppercase each value as it is assigned
+      Uppercase each value as it is assigned.
     </ResponseField>
     <ResponseField name="-x">
-      export each NAME
+      Export each NAME.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -239,16 +244,16 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Make variables read-only.
   <Expandable title="4 flags">
     <ResponseField name="-a">
-      each NAME is an indexed array
+      Each NAME is an indexed array.
     </ResponseField>
     <ResponseField name="-A">
-      each NAME is an associative array
+      Each NAME is an associative array.
     </ResponseField>
     <ResponseField name="-f">
-      each NAME is a shell function
+      Each NAME is a shell function.
     </ResponseField>
     <ResponseField name="-p">
-      print every read-only variable in a reusable form
+      Print every read-only variable in a reusable form.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -256,64 +261,64 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Set shell options and positional parameters.
   <Expandable title="20 flags">
     <ResponseField name="-a">
-      export every variable that is assigned
+      Export every variable that is assigned.
     </ResponseField>
     <ResponseField name="-b">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-e">
-      leave the shell when a command fails
+      Leave the shell when a command fails.
     </ResponseField>
     <ResponseField name="-f">
-      turn off pathname expansion
+      Turn off pathname expansion.
     </ResponseField>
     <ResponseField name="-h">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-k">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-m">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-n">
-      read commands without running them
+      Read commands without running them.
     </ResponseField>
     <ResponseField name="-o <name>">
-      turn on the option called NAME
+      Turn on the option called NAME.
     </ResponseField>
     <ResponseField name="-p">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-t">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-u">
-      treat an unset variable as an error
+      Treat an unset variable as an error.
     </ResponseField>
     <ResponseField name="-v">
-      print each line as it is read
+      Print each line as it is read.
     </ResponseField>
     <ResponseField name="-x">
-      print each command as it runs
+      Print each command as it runs.
     </ResponseField>
     <ResponseField name="-B">
-      turn on brace expansion
+      Turn on brace expansion.
     </ResponseField>
     <ResponseField name="-C">
-      refuse to overwrite files with `>'
+      Refuse to overwrite files with `>'.
     </ResponseField>
     <ResponseField name="-E">
-      pass the ERR trap on to functions
+      Pass the ERR trap on to functions.
     </ResponseField>
     <ResponseField name="-H">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-P">
-      resolve symbolic links when changing directory
+      Resolve symbolic links when changing directory.
     </ResponseField>
     <ResponseField name="-T">
-      pass the RETURN trap on to functions
+      Pass the RETURN trap on to functions.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -321,65 +326,79 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Set and unset shell options.
   <Expandable title="5 flags">
     <ResponseField name="-o">
-      each OPTNAME is an option of `set -o'
+      Each OPTNAME is an option of `set -o'.
     </ResponseField>
     <ResponseField name="-p">
-      print in a reusable form
+      Print in a reusable form.
     </ResponseField>
     <ResponseField name="-q">
-      print nothing; the status tells
+      Print nothing; the status tells.
     </ResponseField>
     <ResponseField name="-s">
-      turn each OPTNAME on
+      Turn each OPTNAME on.
     </ResponseField>
     <ResponseField name="-u">
-      turn each OPTNAME off
+      Turn each OPTNAME off.
     </ResponseField>
   </Expandable>
 </ResponseField>
 <ResponseField name="echo">
-  <Expandable title="2 flags">
-    <ResponseField name="-n" />
-    <ResponseField name="-e" />
+  Write the arguments to standard output.
+  <Expandable title="3 flags">
+    <ResponseField name="-n">
+      Leave out the final newline.
+    </ResponseField>
+    <ResponseField name="-e">
+      Interpret backslash escapes such as \n and \t.
+    </ResponseField>
+    <ResponseField name="-E">
+      Leave backslash escapes as written (the default).
+    </ResponseField>
   </Expandable>
 </ResponseField>
 <ResponseField name="printf">
+  Print arguments under the control of a format.
+  <Expandable title="1 flag">
+    <ResponseField name="-v <var>">
+      Store the output in VAR instead of printing it.
+    </ResponseField>
+  </Expandable>
 </ResponseField>
 <ResponseField name="read">
   Read one line and split it into fields.
   <Expandable title="11 flags">
     <ResponseField name="-a <array>">
-      assign the fields to ARRAY, from index 0
+      Assign the fields to ARRAY, from index 0.
     </ResponseField>
     <ResponseField name="-d <delim>">
-      read up to DELIM rather than a newline
+      Read up to DELIM rather than a newline.
     </ResponseField>
     <ResponseField name="-e">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-i <text>">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-n <nchars>">
-      stop after NCHARS characters or at the delimiter
+      Stop after NCHARS characters or at the delimiter.
     </ResponseField>
     <ResponseField name="-N <nchars>">
-      read exactly NCHARS characters
+      Read exactly NCHARS characters.
     </ResponseField>
     <ResponseField name="-p <prompt>">
-      print PROMPT on standard error first
+      Print PROMPT on standard error first.
     </ResponseField>
     <ResponseField name="-r">
-      take backslashes literally
+      Take backslashes literally.
     </ResponseField>
     <ResponseField name="-s">
-      accepted, with no effect
+      Accepted, with no effect.
     </ResponseField>
     <ResponseField name="-t <timeout>">
-      give up after TIMEOUT seconds
+      Give up after TIMEOUT seconds.
     </ResponseField>
     <ResponseField name="-u <fd>">
-      read from file descriptor FD
+      Read from file descriptor FD.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -387,28 +406,28 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Read lines into an indexed array.
   <Expandable title="8 flags">
     <ResponseField name="-d <delim>">
-      end each line at DELIM rather than at a newline
+      End each line at DELIM rather than at a newline.
     </ResponseField>
     <ResponseField name="-n <count>">
-      read at most COUNT lines; 0 reads them all
+      Read at most COUNT lines; 0 reads them all.
     </ResponseField>
     <ResponseField name="-O <origin>">
-      store the first line at index ORIGIN rather than 0
+      Store the first line at index ORIGIN rather than 0.
     </ResponseField>
     <ResponseField name="-s <count>">
-      skip the first COUNT lines
+      Skip the first COUNT lines.
     </ResponseField>
     <ResponseField name="-t">
-      drop the delimiter from the end of each line
+      Drop the delimiter from the end of each line.
     </ResponseField>
     <ResponseField name="-u <fd>">
-      read from file descriptor FD rather than standard input
+      Read from file descriptor FD rather than standard input.
     </ResponseField>
     <ResponseField name="-C <callback>">
-      run CALLBACK every QUANTUM lines
+      Run CALLBACK every QUANTUM lines.
     </ResponseField>
     <ResponseField name="-c <quantum>">
-      how many lines go between CALLBACK runs; 5000 by default
+      How many lines go between CALLBACK runs; 5000 by default.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -416,28 +435,28 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Read lines into an indexed array; the same as `mapfile'.
   <Expandable title="8 flags">
     <ResponseField name="-d <delim>">
-      end each line at DELIM rather than at a newline
+      End each line at DELIM rather than at a newline.
     </ResponseField>
     <ResponseField name="-n <count>">
-      read at most COUNT lines; 0 reads them all
+      Read at most COUNT lines; 0 reads them all.
     </ResponseField>
     <ResponseField name="-O <origin>">
-      store the first line at index ORIGIN rather than 0
+      Store the first line at index ORIGIN rather than 0.
     </ResponseField>
     <ResponseField name="-s <count>">
-      skip the first COUNT lines
+      Skip the first COUNT lines.
     </ResponseField>
     <ResponseField name="-t">
-      drop the delimiter from the end of each line
+      Drop the delimiter from the end of each line.
     </ResponseField>
     <ResponseField name="-u <fd>">
-      read from file descriptor FD rather than standard input
+      Read from file descriptor FD rather than standard input.
     </ResponseField>
     <ResponseField name="-C <callback>">
-      run CALLBACK every QUANTUM lines
+      Run CALLBACK every QUANTUM lines.
     </ResponseField>
     <ResponseField name="-c <quantum>">
-      how many lines go between CALLBACK runs; 5000 by default
+      How many lines go between CALLBACK runs; 5000 by default.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -507,7 +526,7 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Run a command in place of the shell, or redirect the shell.
   <Expandable title="1 flag">
     <ResponseField name="-c">
-      run COMMAND with an empty environment
+      Run COMMAND with an empty environment.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -515,7 +534,7 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Define or print aliases.
   <Expandable title="1 flag">
     <ResponseField name="-p">
-      print every alias in a form the shell can read back
+      Print every alias in a form the shell can read back.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -523,7 +542,7 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Remove aliases.
   <Expandable title="1 flag">
     <ResponseField name="-a">
-      remove every alias
+      Remove every alias.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -540,10 +559,10 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Run commands when the shell meets signals or events.
   <Expandable title="2 flags">
     <ResponseField name="-l">
-      not supported
+      Not supported.
     </ResponseField>
     <ResponseField name="-p">
-      print the traps that are set
+      Print the traps that are set.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -563,7 +582,7 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Report how long a pipeline takes.
   <Expandable title="1 flag">
     <ResponseField name="-p">
-      print the times in the portable format
+      Print the times in the portable format.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -571,13 +590,13 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Run a command, passing over shell functions, or describe it.
   <Expandable title="3 flags">
     <ResponseField name="-p">
-      search a default PATH that finds the standard tools
+      Search a default PATH that finds the standard tools.
     </ResponseField>
     <ResponseField name="-v">
-      print the word or path the shell would run
+      Print the word or path the shell would run.
     </ResponseField>
     <ResponseField name="-V">
-      describe in words what the shell would run
+      Describe in words what the shell would run.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -585,19 +604,19 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Tell how the shell would run a name.
   <Expandable title="5 flags">
     <ResponseField name="-a">
-      every place NAME is found, not only the first
+      Every place NAME is found, not only the first.
     </ResponseField>
     <ResponseField name="-f">
-      pass over shell functions
+      Pass over shell functions.
     </ResponseField>
     <ResponseField name="-p">
-      print the file NAME runs, if it is one
+      Print the file NAME runs, if it is one.
     </ResponseField>
     <ResponseField name="-P">
-      print the file NAME would run, searching PATH
+      Print the file NAME would run, searching PATH.
     </ResponseField>
     <ResponseField name="-t">
-      print one word: alias, keyword, function, builtin or file
+      Print one word: alias, keyword, function, builtin or file.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -608,13 +627,13 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Show how to use the shell's own commands.
   <Expandable title="3 flags">
     <ResponseField name="-d">
-      print each command's one-line summary
+      Print each command's one-line summary.
     </ResponseField>
     <ResponseField name="-m">
-      print each command's help as a manual page
+      Print each command's help as a manual page.
     </ResponseField>
     <ResponseField name="-s">
-      print each command's synopsis only
+      Print each command's synopsis only.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -622,19 +641,19 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Show the manual page of a command.
   <Expandable title="5 flags">
     <ResponseField name="-a, --all">
-      show every page that matches PAGE
+      Show every page that matches PAGE.
     </ResponseField>
     <ResponseField name="-f, --whatis">
-      print the summary line of each PAGE
+      Print the summary line of each PAGE.
     </ResponseField>
     <ResponseField name="-k, --apropos">
-      search the names and summaries of every page
+      Search the names and summaries of every page.
     </ResponseField>
     <ResponseField name="-?, -h, --help">
-      print this list
+      Print this list.
     </ResponseField>
     <ResponseField name="--usage">
-      print the usage line
+      Print the usage line.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -642,28 +661,28 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Print or change the command history.
   <Expandable title="8 flags">
     <ResponseField name="-c">
-      clear the history
+      Clear the history.
     </ResponseField>
     <ResponseField name="-d <offset>">
-      delete the entry at OFFSET; below 0, from the end
+      Delete the entry at OFFSET; below 0, from the end.
     </ResponseField>
     <ResponseField name="-a">
-      accepted, with no effect: the history file is the list
+      Accepted, with no effect: the history file is the list.
     </ResponseField>
     <ResponseField name="-n">
-      accepted, with no effect: the history file is the list
+      Accepted, with no effect: the history file is the list.
     </ResponseField>
     <ResponseField name="-r">
-      accepted, with no effect: the history file is the list
+      Accepted, with no effect: the history file is the list.
     </ResponseField>
     <ResponseField name="-w">
-      accepted, with no effect: the history file is the list
+      Accepted, with no effect: the history file is the list.
     </ResponseField>
     <ResponseField name="-p">
-      print each ARG, with no history expansion
+      Print each ARG, with no history expansion.
     </ResponseField>
     <ResponseField name="-s">
-      add the ARGs to the history as one entry
+      Add the ARGs to the history as one entry.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -671,19 +690,19 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   List the shell's jobs.
   <Expandable title="5 flags">
     <ResponseField name="-l">
-      add each job's process ID
+      Add each job's process ID.
     </ResponseField>
     <ResponseField name="-n">
-      only jobs whose state changed since last reported
+      Only jobs whose state changed since last reported.
     </ResponseField>
     <ResponseField name="-p">
-      print process IDs only
+      Print process IDs only.
     </ResponseField>
     <ResponseField name="-r">
-      running jobs only
+      Running jobs only.
     </ResponseField>
     <ResponseField name="-s">
-      stopped jobs only
+      Stopped jobs only.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -691,16 +710,16 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Wait for jobs and return their status.
   <Expandable title="4 flags">
     <ResponseField name="-f">
-      wait until each ID ends, not only until it changes state
+      Wait until each ID ends, not only until it changes state.
     </ResponseField>
     <ResponseField name="-n">
-      wait for the next job to end and return its status
+      Wait for the next job to end and return its status.
     </ResponseField>
     <ResponseField name="-m <machine>">
-      the machine the IDs are on
+      The machine the IDs are on.
     </ResponseField>
     <ResponseField name="-p <var>">
-      store in VAR the ID whose status is returned
+      Store in VAR the ID whose status is returned.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -708,16 +727,16 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Send a signal to processes or jobs.
   <Expandable title="4 flags">
     <ResponseField name="-s <sig>">
-      the signal to send, by name
+      The signal to send, by name.
     </ResponseField>
     <ResponseField name="-n <sig>">
-      the signal to send, by number
+      The signal to send, by number.
     </ResponseField>
     <ResponseField name="-l">
-      list the signal names, or name the numbers given
+      List the signal names, or name the numbers given.
     </ResponseField>
     <ResponseField name="-m <machine>">
-      the machine the IDs are on
+      The machine the IDs are on.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -725,13 +744,13 @@ Expand a builtin to see every flag it takes; `help NAME` prints its help.
   Remove jobs from the shell's job table.
   <Expandable title="3 flags">
     <ResponseField name="-a">
-      remove every job
+      Remove every job.
     </ResponseField>
     <ResponseField name="-h">
-      keep the job, but do not hang it up when the shell exits
+      Keep the job, but do not hang it up when the shell exits.
     </ResponseField>
     <ResponseField name="-r">
-      remove running jobs only
+      Remove running jobs only.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -824,7 +843,7 @@ and `ps -p` take either kind.
       when a child shell (`bash -c`, a script, `( )`, a pipeline stage, `$( )`,
       a job) ends, or `set -e` or a fatal expansion error ends the shell. `$?`
       starts at the ending status and stays it unless the cleanup calls
-      `exit N`.
+      `exit N` or fails under `set -e`.
     - `trap 'commands' ERR` runs where `set -e` would end the shell, and
       `trap 'commands' RETURN` as a function or sourced file returns. A
       function runs its caller's `ERR` and `RETURN` actions only under

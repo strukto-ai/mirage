@@ -18,9 +18,9 @@ from pathlib import Path
 
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.help import flag_rows
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.shell import SHELL_SPECS
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 
 ROOT = Path(__file__).resolve().parent.parent
 CORE = ROOT / "docs/home/core"
@@ -37,6 +37,37 @@ UNSPECIFIED = {
     "sh": "The options of `bash`",
     "which": "`-a`",
 }
+
+# Forms a spec cannot hold: find's actions take a program ending in `;`
+# or `+`, which the expression parser reads before the spec.
+EXTRA_FLAGS = {
+    "find": (
+        (
+            "-exec <command> ;",
+            "Run a command on each path, `{}` standing for it.",
+        ),
+        ("-exec <command> {} +", "Run a command once on many paths."),
+        ("-execdir <command> ;", "Run a command from each path's directory."),
+        ("-execdir <command> {} +", "Run a command once per directory."),
+    ),
+}
+# Where a spec's help, written for the upstream program, promises more
+# than Mirage does.
+NOTES = {
+    "mount": (
+        "Mounting is refused, as for an unprivileged user: mounts come from "
+        "the configuration. `-t` filters the list"
+    ),
+}
+FLAG_HELP = {
+    ("curl", "-F"): (
+        "Send one URL-encoded text field; a repeated `-F` keeps the last, and "
+        "multipart uploads are unsupported."
+    ),
+}
+
+Row = tuple[str, str]
+GrammarKey = tuple[tuple[Row, ...], str] | str
 
 
 @dataclass(frozen=True)
@@ -257,19 +288,77 @@ SECTIONS = (
 )
 
 
-def spec_of(name: str) -> CommandSpec | None:
+def spec_of(name: str, builtin: bool = False) -> CommandSpec | None:
     """Find the grammar a command parses with, or None for one with none.
 
     Args:
         name (str): The command.
+        builtin (bool): Prefer the shell builtin's grammar, which a name
+            such as `printf` or `echo` runs as in a line.
     """
-    if name in SPECS:
-        return SPECS[name]
-    if name in SHELL_SPECS:
-        return SHELL_SPECS[name]
+    tables = (SHELL_SPECS, SPECS) if builtin else (SPECS, SHELL_SPECS)
+    for table in tables:
+        if name in table:
+            return table[name]
     if name == "search":
         return cli_spec_for(name).spec
     return None
+
+
+def value_name(opt: Argument) -> str:
+    """The placeholder of an option's value.
+
+    Args:
+        opt (Argument): The value-taking option.
+    """
+    if opt.metavar is not None:
+        return opt.metavar
+    return "path" if opt.type == "path" else "text"
+
+
+def label(opt: Argument) -> str:
+    """An option's spellings as they are typed: an optional value attached
+    with `=` (long) or directly (short), or not at all where the short form
+    takes none.
+
+    Args:
+        opt (Argument): The option.
+    """
+    if opt.action in ("store_true", "count"):
+        return ", ".join(opt.names)
+    value = f"<{value_name(opt)}>"
+    if opt.nargs == "?":
+        spelled = []
+        for name in opt.names:
+            if name.startswith("--"):
+                spelled.append(f"{name}[={value}]")
+            elif opt.short_value:
+                spelled.append(f"{name}[{value}]")
+            else:
+                spelled.append(name)
+        return ", ".join(spelled)
+    if opt.value_types:
+        return f"{', '.join(opt.names)} <name> {value}"
+    count = opt.nargs if isinstance(opt.nargs, int) else 1
+    return ", ".join(opt.names) + f" {value}" * count
+
+
+def rows_of(name: str, spec: CommandSpec) -> list[Row]:
+    """A command's flags as (spelling, help), with the forms its spec
+    cannot hold and the help Mirage's behavior corrects.
+
+    Args:
+        name (str): The command.
+        spec (CommandSpec): Its grammar.
+    """
+    rows = [
+        (
+            label(opt),
+            sentence(FLAG_HELP.get((name, opt.names[0]), opt.help or "")),
+        )
+        for opt in compile_spec(spec).options
+    ]
+    return rows + list(EXTRA_FLAGS.get(name, ()))
 
 
 def escape(text: str) -> str:
@@ -286,6 +375,19 @@ def escape(text: str) -> str:
     )
 
 
+def sentence(text: str) -> str:
+    """One help line as a sentence: capitalized, with a final period.
+
+    Args:
+        text (str): The help, as a spec words it.
+    """
+    text = text.strip()
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "?", "!")) else text + "."
+
+
 def summary(spec: CommandSpec | None) -> str:
     """The first line of a spec's description, as a sentence.
 
@@ -298,22 +400,27 @@ def summary(spec: CommandSpec | None) -> str:
     return first if first.endswith(".") else first + "."
 
 
-def field(names: tuple[str, ...], purpose: str) -> list[str]:
+def field(
+    names: tuple[str, ...], purpose: str, builtin: bool = False
+) -> list[str]:
     """Render commands that share flags as one field with its flag tree.
 
     Args:
         names (tuple[str, ...]): Commands with the same grammar.
         purpose (str): What they do; empty takes the spec's description.
+        builtin (bool): Whether they are documented as shell builtins.
     """
-    spec = spec_of(names[0])
+    spec = spec_of(names[0], builtin)
     text = purpose.rstrip(".") + "." if purpose else summary(spec)
+    if names[0] in NOTES:
+        text = f"{text} {NOTES[names[0]]}."
     lines = [f'<ResponseField name="{", ".join(names)}">']
     if text:
         lines.append(f"  {escape(text)}")
     if spec is None:
         lines.append(f"  Options: {UNSPECIFIED[names[0]]}.")
     else:
-        rows = flag_rows(spec)
+        rows = rows_of(names[0], spec)
         if rows:
             label = "1 flag" if len(rows) == 1 else f"{len(rows)} flags"
             lines.append(f'  <Expandable title="{label}">')
@@ -330,18 +437,21 @@ def field(names: tuple[str, ...], purpose: str) -> list[str]:
     return lines
 
 
-def same_grammar(names: tuple[str, ...]) -> list[tuple[str, ...]]:
+def same_grammar(
+    names: tuple[str, ...], builtin: bool = False
+) -> list[tuple[str, ...]]:
     """Group a row's commands by identical flags, keeping their order.
 
     Args:
         names (tuple[str, ...]): The row's commands.
+        builtin (bool): Whether they are documented as shell builtins.
     """
     groups: list[tuple[str, ...]] = []
-    keys: list[object] = []
+    keys: list[GrammarKey] = []
     for name in names:
-        spec = spec_of(name)
-        key = (
-            (tuple(flag_rows(spec)), summary(spec))
+        spec = spec_of(name, builtin)
+        key: GrammarKey = (
+            (tuple(rows_of(name, spec)), summary(spec))
             if spec is not None
             else name
         )
@@ -362,9 +472,10 @@ def block(section: Section) -> str:
     """
     start, end = markers(section)
     lines = [start]
+    builtin = section.page == "shell"
     for names, purpose in section.rows:
-        for group in same_grammar(names):
-            lines += field(group, purpose)
+        for group in same_grammar(names, builtin):
+            lines += field(group, purpose, builtin)
     return "\n".join([*lines, end])
 
 

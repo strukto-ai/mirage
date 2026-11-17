@@ -15,88 +15,88 @@ Commands for structured data, encodings, checksums and archives, beside the
   Query and transform a stream of JSON values.
   <Expandable title="28 flags">
     <ResponseField name="-n, --null-input">
-      Use null as the single input value
+      Use null as the single input value.
     </ResponseField>
     <ResponseField name="-R, --raw-input">
-      Read each line as a string instead of JSON
+      Read each line as a string instead of JSON.
     </ResponseField>
     <ResponseField name="-s, --slurp">
-      Read all inputs into one array
+      Read all inputs into one array.
     </ResponseField>
     <ResponseField name="-c, --compact-output">
-      Compact instead of pretty-printed output
+      Compact instead of pretty-printed output.
     </ResponseField>
     <ResponseField name="-r, --raw-output">
-      Output strings without quotes or escapes
+      Output strings without quotes or escapes.
     </ResponseField>
     <ResponseField name="--raw-output0">
-      Implies -r and writes NUL after each output
+      Implies -r and writes NUL after each output.
     </ResponseField>
     <ResponseField name="-j, --join-output">
-      Implies -r and writes no trailing newline
+      Implies -r and writes no trailing newline.
     </ResponseField>
     <ResponseField name="-a, --ascii-output">
-      Escape non-ASCII characters in output
+      Escape non-ASCII characters in output.
     </ResponseField>
     <ResponseField name="-S, --sort-keys">
-      Sort object keys on output
+      Sort object keys on output.
     </ResponseField>
     <ResponseField name="-e, --exit-status">
-      Set the exit status from the last output
+      Set the exit status from the last output.
     </ResponseField>
     <ResponseField name="--tab">
-      Indent with tabs
+      Indent with tabs.
     </ResponseField>
     <ResponseField name="--indent <text>">
-      Indent with n spaces (max 7)
+      Indent with n spaces (max 7).
     </ResponseField>
     <ResponseField name="--stream-errors">
-      Read as --stream does, a parse error as one more event
+      Read as --stream does, a parse error as one more event.
     </ResponseField>
     <ResponseField name="-L, --library-path <text>">
-      Add a directory to the module search list
+      Add a directory to the module search list.
     </ResponseField>
     <ResponseField name="-C, --color-output">
-      Accepted; output stays plain
+      Accepted; output stays plain.
     </ResponseField>
     <ResponseField name="-M, --monochrome-output">
-      Disable colored output (already the default)
+      Disable colored output (already the default).
     </ResponseField>
     <ResponseField name="--unbuffered">
-      Accepted for compatibility; output is one buffer
+      Accepted for compatibility; output is one buffer.
     </ResponseField>
     <ResponseField name="-f, --from-file <path>">
-      Read the filter from a file
+      Read the filter from a file.
     </ResponseField>
     <ResponseField name="--stream">
-      Read each input as its [path, leaf] events
+      Read each input as its [path, leaf] events.
     </ResponseField>
     <ResponseField name="--seq">
-      Read and write RS-delimited JSON text sequences
+      Read and write RS-delimited JSON text sequences.
     </ResponseField>
     <ResponseField name="--arg <name> <text>">
-      Set $name to a string value
+      Set $name to a string value.
     </ResponseField>
     <ResponseField name="--argjson <name> <text>">
-      Set $name to a JSON value
+      Set $name to a JSON value.
     </ResponseField>
     <ResponseField name="--rawfile <name> <path>">
-      Set $name to a file's contents
+      Set $name to a file's contents.
     </ResponseField>
     <ResponseField name="--slurpfile <name> <path>">
-      Set $name to a file's documents, as an array
+      Set $name to a file's documents, as an array.
     </ResponseField>
     <ResponseField name="--args">
-      Read the remaining operands as positional string values
+      Read the remaining operands as positional string values.
     </ResponseField>
     <ResponseField name="--jsonargs">
-      Read the remaining operands as positional JSON values
+      Read the remaining operands as positional JSON values.
     </ResponseField>
     <ResponseField name="-h, --help">
-      Show this help and exit
+      Show this help and exit.
     </ResponseField>
     <ResponseField name="-V, --version">
-      Show version information and exit
+      Show version information and exit.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -173,11 +173,11 @@ Commands for structured data, encodings, checksums and archives, beside the
     <ResponseField name="-N <text>" />
     <ResponseField name="--read-bytes <text>" />
     <ResponseField name="-S <text>" />
-    <ResponseField name="--strings <text>" />
+    <ResponseField name="--strings[=<text>]" />
     <ResponseField name="-t, --format <text>" />
     <ResponseField name="-v, --output-duplicates" />
-    <ResponseField name="-w <text>" />
-    <ResponseField name="--width <text>" />
+    <ResponseField name="-w[<text>]" />
+    <ResponseField name="--width[=<text>]" />
     <ResponseField name="--endian <text>" />
     <ResponseField name="--traditional" />
     <ResponseField name="-a" />
@@ -461,10 +461,10 @@ Commands for structured data, encodings, checksums and archives, beside the
     <ResponseField name="-n, --rcs" />
     <ResponseField name="-c" />
     <ResponseField name="-C <text>" />
-    <ResponseField name="--context <text>" />
+    <ResponseField name="--context[=<text>]" />
     <ResponseField name="-u" />
     <ResponseField name="-U <text>" />
-    <ResponseField name="--unified <text>" />
+    <ResponseField name="--unified[=<text>]" />
     <ResponseField name="-y, --side-by-side" />
     <ResponseField name="-W, --width <text>" />
     <ResponseField name="--left-column" />
@@ -474,7 +474,7 @@ Commands for structured data, encodings, checksums and archives, beside the
     <ResponseField name="-t, --expand-tabs" />
     <ResponseField name="-T, --initial-tab" />
     <ResponseField name="-L, --label <text>" />
-    <ResponseField name="--color <text>" />
+    <ResponseField name="--color[=<text>]" />
     <ResponseField name="-q, --brief" />
     <ResponseField name="-r, --recursive" />
     <ResponseField name="-N, --new-file" />

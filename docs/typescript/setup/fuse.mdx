@@ -85,7 +85,7 @@ Each mount picks its own `backend`:
 | `workspace` (default) | only inside Mirage | everywhere |
 | `fuse` | also a folder, through FUSE | Linux, macOS |
 | `fskit` | also a folder, through FSKit with no kernel extension; read-mostly | macOS 15.4+ |
-| `nfs` | also a folder, read-only, through the OS's NFS client and no FUSE install | Linux (as root) and macOS |
+| `nfs` | also a folder, read-only, through the OS's NFS client and no FUSE install; a file of unknown size reads as empty | Linux (as root) and macOS |
 
 ```yaml
 mounts:
@@ -110,8 +110,9 @@ mounts:
 
 - **Files of unknown size.** Slack, Linear, Trello and other API-backed
   mounts cannot size a file without fetching it, so it stats as 0 bytes until
-  something opens it, like a `/proc` file. `cat`, `grep`, `cp` and `wc -c`
-  read it in full. `ls -l`, `du` and `find -size` show 0 until it is opened,
+  something opens it, like a `/proc` file. Over `fuse`, `cat`, `grep`, `cp`
+  and `wc -c` read it in full; over `nfs` and `fskit` it reads as empty, so
+  Mirage warns when such a mount uses them. `ls -l`, `du` and `find -size` show 0 until it is opened,
   and `tar` or `rsync` copy it empty. Mirage never fetches content during
   `stat`, which would cost one API call per file on every `ls -l`.
 - **Symlinks.** Links made with `ln -s`, in the Mirage Shell or in the

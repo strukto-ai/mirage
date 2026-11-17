@@ -39,7 +39,7 @@ declared when the workspace is built:
 ```python
 from mirage.runtime.python import WasiRuntime
 
-await ws.remove_machine("monty")
+await ws.remove_machine("py")
 ws.add_machine("py", WasiRuntime(config={"home": "/opt/cpython-wasi"}))
 ```
 

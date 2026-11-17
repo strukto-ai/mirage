@@ -42,7 +42,7 @@ out, and `engines()` lists them. A machine provider's machine, such as
 docker, is declared when the workspace is built:
 
 ```ts
-await ws.removeMachine('monty')
+await ws.removeMachine('py')
 ws.addMachine('py', { provider: 'in_process', runtime: 'pyodide' })
 ```
 
