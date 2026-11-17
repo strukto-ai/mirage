@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import asyncio
+
 import pytest
 
 from mirage.commands.cli.builtin.himalaya import HIMALAYA
@@ -357,8 +359,6 @@ def test_a_tree_reads_its_verb_path_and_keeps_the_rest_raw():
             ("log", "subcommand", None),
         ]
     finally:
-        import asyncio
-
         asyncio.run(ws.close())
 
 
