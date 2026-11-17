@@ -18,6 +18,7 @@ import { singleQuote } from '../../utils/quote.ts'
 import { GREP } from './constants.ts'
 import type { RunFn } from './types.ts'
 import { joinRoot } from './utils.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * The grep that lists the files under `scopes` holding `text`.
@@ -62,7 +63,7 @@ export async function filesContaining(
   if (out.length > 0 && out[out.length - 1] !== 0) return null
   const [first] = under
   if (first === undefined) return []
-  const base = root.replace(/\/+$/, '')
+  const base = rstripSlash(root)
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const hits: PathSpec[] = []
   let start = 0

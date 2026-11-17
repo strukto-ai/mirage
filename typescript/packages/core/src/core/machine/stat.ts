@@ -21,6 +21,7 @@ import { parseTree, treeCommand } from '../posix/stat.ts'
 import type { TreeRow } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
 import { checked, remote } from './utils.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * A machine's entry as `stat` renders it: its kind, mode, times and owners
@@ -98,7 +99,7 @@ export async function stat(
   machine: string,
   path: PathSpec,
 ): Promise<FileStat> {
-  const last = path.mountPath.replace(/\/+$/, '').split('/').pop() ?? ''
+  const last = rstripSlash(path.mountPath).split('/').pop() ?? ''
   const name = last === '' ? '/' : last
   return rowStat(name, await statRow(accessor, machine, path))
 }

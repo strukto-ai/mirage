@@ -27,6 +27,7 @@ import type { Argv } from '../expand/argv.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * The machine mount showing `path` at the same path on its machines, with no
@@ -55,7 +56,7 @@ function localMount(
   if (entry === null || !(entry.vfs instanceof MachineVFS)) return null
   if (norm(entry.vfs.config.root ?? '/') !== norm(entry.prefix)) return null
   if (writes && entry.mode === MountMode.READ) return null
-  const below = `${norm(path).replace(/\/+$/, '')}/`
+  const below = `${rstripSlash(norm(path))}/`
   if (registry.allMounts().some((m) => m !== entry && norm(m.prefix).startsWith(below))) return null
   return entry
 }

@@ -97,54 +97,54 @@ no `/tmp` mount of its own.
 | `root` | `/` | The path on each machine that becomes the mount root |
 | `default_machine` | the machine running programs nothing in Mirage resolves, else the first | Where a new name lands when the command writing it runs no program on a machine |
 
-## Several machines
+## Where a command runs
 
-On a mount over more than one machine, each operation picks where it acts:
-
-| Operation | Machine |
-| --- | --- |
-| A write to an existing name (`>`, `>>`, `tee`, `cp` into it) | The one holding it |
-| A write to a new name | The machine running the command's program (`python3 gen.py > /tmp/out`), else `default_machine` |
-| A read, `rm`, `chmod` | The one holding the name; with several, the machine running the program, else the name is refused as on several machines |
-| `ls` and other listings | Every machine, each name once |
-| `rmdir`, `rm -r` | Every machine holding the directory |
-| `mv` | The source's machine, making the new name's parent there when only another machine has it |
-| `cp` onto another machine | The bytes move through Mirage, as between two mounts |
-
-```text
-machine a: out.csv data.json      ls /tmp  ->  data.json
-machine b: model.bin                           model.bin
-                                               out.csv
+```mermaid
+flowchart TD
+    C["grep -rn TODO /testbed"] --> Q{"every path on one machine?"}
+    Q -- yes --> K{"input piped in?"}
+    K -- no --> R["runs on the machine, one exec"]
+    K -- yes --> M["Mirage runs it"]
+    Q -- "no: another mount, several machines" --> M
+    M --> F["each file read or written on its machine"]
 ```
 
-## What runs on the machine
+- **On the machine:** `grep -rn`, `find`, `sed -i`, `ls -la`, `du`, a program
+  at a path there (`/tmp/venv/bin/python`), `ln` and `readlink` in the
+  folder. Output is the machine's own.
+- **`xargs` and `< /dev/null`** count as no input: `find . | xargs grep x`
+  still runs there.
+- **Stays in Mirage:** piped input (`... | while read f; do grep x "$f"; done`),
+  a link Mirage made, a restricted or read-only mount, a program the machine
+  lacks.
+- **`/dev`** is Mirage's (`/dev/null`, `/dev/stdin`); only `/dev/shm` is the
+  machine's.
 
-A command whose every path is one machine's own runs there whole, as one
-exec, with that machine's own output: `grep -rn`, `find`, `ls -la`, `sed -i`
-and `du` on a repository cost one exec and print what bash prints there,
-owners and link counts included. A command naming no path runs there from a
-working directory on the machine (`cd /testbed && ls`). Glob patterns are
-matched first, so the program gets the matches. A program named by a path the
-machine holds runs there too: after `python3 -m venv /tmp/venv`,
-`/tmp/venv/bin/python` runs as it does in bash. `ln` making links in the
-machine's folder runs there, so its programs follow them and a hard link is a
-real one, and `readlink` asks the machine about its links. A link to a path
-only Mirage holds, such as another mount, stays Mirage's, and a command whose
-path passes through or holds such a link runs in Mirage.
+## Several machines
 
-Mirage runs the command itself, reading each file through an exec, when
-anything is piped into it, since its own command leaves what it does not read
-to the next command, as bash's does (`... | while read f; do grep -n x "$f";
-done`). Reading `/dev/null` is no input, so `find . -name '*.py' | xargs grep
--l x` and `cmd < /dev/null` still run there. It also keeps the command when a path is anywhere else (another
-mount, a machine mount at another root, a mount nested under the path), when
-the session's rules restrict the mount or it is read-only, when the working
-directory is not on the machine, or when the machine has no program of that
-name. Redirects stay Mirage's and land through the mount.
+```mermaid
+flowchart LR
+    subgraph a["machine a"]
+      A1["out.csv"]
+      A2["data.json"]
+    end
+    subgraph b["machine b"]
+      B1["model.bin"]
+    end
+    a --> L["ls /tmp<br/>data.json<br/>model.bin<br/>out.csv"]
+    b --> L
+```
 
-`/dev` stays Mirage's: `/dev/null`, `/dev/stdin` and `/dev/fd/N` are the
-line's own plumbing. Only `/dev/shm`, the folder under it that holds files,
-is the machine's.
+| Operation | Lands on |
+| --- | --- |
+| Read, write, `rm` an existing name | The machine holding it |
+| Write a new name | The machine running the program (`python3 gen.py > /tmp/out`), else `default_machine` |
+| `ls`, `find`, `grep -r` | Every machine, each name once |
+| `mv` | The source's machine |
+| `cp` to another machine | Bytes move through Mirage |
+
+A name on two machines is refused as ambiguous unless the command's program
+runs on one of them.
 
 ## Behavior
 
