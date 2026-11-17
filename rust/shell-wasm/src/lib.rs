@@ -442,7 +442,7 @@ mod tests {
         mirage_rs_shell_parse(10, 0, 1);
         mirage_rs_shell_drop_tree(mirage_rs_shell_tree());
         assert!(mirage_rs_shell_reread(older, 0) > 0);
-        mirage_rs_shell_words(older, 1, 0, 1, 1);
+        mirage_rs_shell_words(older, 1, 0, 1, 1, usize::MAX);
         PARSED.with_borrow_mut(|parsed| {
             parsed.reread.reserve(32768);
             parsed.message = vec![b'x'; 131072];
