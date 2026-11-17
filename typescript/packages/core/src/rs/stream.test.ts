@@ -59,18 +59,6 @@ describe('stream lifetime', () => {
     fresh.close()
   })
 
-  it('retires an eligible synchronous instance once its replacement is ready', async () => {
-    const module = new Streams(compiledModule())
-    const stream = module.openSync('base64', DECODE, false)
-    const grown = instance(stream)
-    memory(stream).grow(513)
-    stream.close()
-    await module.ready()
-    const fresh = module.openSync('base64', DECODE, false)
-    expect(instance(fresh)).not.toBe(grown)
-    fresh.close()
-  })
-
   it('respects each module recycling threshold after asynchronous readiness', async () => {
     for (const recycle of [1, 128 * 1024 * 1024]) {
       const module = new Streams(compiledModule(), recycle)

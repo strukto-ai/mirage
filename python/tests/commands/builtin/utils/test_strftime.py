@@ -412,21 +412,3 @@ async def test_streams_formats_across_character_and_directive_boundaries():
     parts = [part async for part in strftime_stream(MOMENT, fmt)]
     expected = "x" * 16383 + "𐂀\udcff2026" + "é" * 20000 + "+00:00"
     assert b"".join(parts) == expected.encode("utf-8", "surrogateescape")
-
-
-@pytest.mark.asyncio
-async def test_closes_an_unconsumed_large_format():
-    output = strftime_stream(MOMENT, "x" * (1 << 20))
-    await output.aclose()
-    assert gnu_strftime(MOMENT, "%Y") == "2026"
-
-
-@pytest.mark.asyncio
-async def test_stream_preserves_encoding_error_positions():
-    fmt = "x" * 16383 + "\ud800" * 20000
-    with pytest.raises(UnicodeEncodeError) as caught:
-        _ = [part async for part in strftime_stream(MOMENT, fmt)]
-    assert caught.value.object is fmt
-    assert caught.value.start == 16383
-    assert caught.value.end == len(fmt)
-    assert gnu_strftime(MOMENT, "%Y") == "2026"

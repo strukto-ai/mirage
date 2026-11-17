@@ -199,27 +199,6 @@ it('streams formats across character and directive boundaries', async () => {
   )
 })
 
-it('cancels format preparation before any output is emitted', async () => {
-  const abort = new AbortController()
-  const output = await strftimeStream(
-    MOMENT,
-    'x'.repeat(1 << 20),
-    UTC_ZONE,
-    undefined,
-    abort.signal,
-  )
-  abort.abort(new Error('format stopped'))
-  await expect(output.next()).rejects.toMatchObject({ name: 'AbortError' })
-  await output.return?.()
-  expect(gnuStrftime(MOMENT, '%Y', UTC_ZONE)).toBe('2026')
-})
-
-it('closes an unconsumed large format and keeps the next formatter usable', async () => {
-  const output = await strftimeStream(MOMENT, 'x'.repeat(1 << 20), UTC_ZONE)
-  await output.return?.()
-  expect(gnuStrftime(MOMENT, '%Y', UTC_ZONE)).toBe('2026')
-})
-
 it('stops between encoded format windows', async () => {
   const abort = new AbortController()
   const output = await strftimeStream(

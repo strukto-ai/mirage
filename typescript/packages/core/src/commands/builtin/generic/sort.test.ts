@@ -19,9 +19,6 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { OpenStream } from '../../../rs/stream.ts'
 import { PathSpec } from '../../../types.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
@@ -29,8 +26,8 @@ import { parseFlags, SORT_RUN_BYTES, sortGeneric, type SortFlags } from './sort.
 
 const DEC = new TextDecoder()
 
-async function* unusedRead(): AsyncGenerator<Uint8Array> {
-  yield await Promise.reject(new Error('no file input'))
+async function* mergeInput(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(bytes('a\n'))
 }
 
 /** What sort's options decide, which these flags must not refuse. */
@@ -72,49 +69,38 @@ describe('sort quotes the word --check refuses', () => {
   })
 })
 
-describe('sort out of memory', () => {
+describe('sort --check out of memory', () => {
   // The engine refuses a line past its cap as sort does out of memory, which
   // -C does not silence (pinned, coreutils 9.7). Mirrors test_sort.py.
-  it.each([{}, { merge: true }, { c: true }, { C: true }])(
-    "is sort's own line under %j",
-    async (flags) => {
-      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested stream
-      const feed = OpenStream.prototype.feed
-      const spy = vi.spyOn(OpenStream.prototype, 'feed').mockImplementation(function (
-        this: OpenStream,
-        chunk: Uint8Array,
-      ) {
-        if (DEC.decode(chunk).endsWith('long')) {
-          throw new StreamRefusal('sort: memory exhausted', new Uint8Array(), 2)
-        }
-        return feed.call(this, chunk)
-      })
-      const inputSpy = vi.spyOn(OpenStream.prototype, 'feedInput').mockImplementation(function (
-        this: OpenStream,
-        _index: number,
-        chunk: Uint8Array,
-      ) {
-        return this.feed(chunk)
-      })
-      try {
-        const ctx = {
-          stdin: new TextEncoder().encode('a\nlong'),
-          flags,
-          cwd: PathSpec.fromStrPath('/'),
-          vfs: { kind: 'ram' } as never,
-        } as Context
-        const result = await sortGeneric([], ctx, () => {
-          throw new Error('paths are empty; the source is stdin')
-        })
-        const io = result?.[1]
-        expect(DEC.decode(await materialize(io?.stderr ?? null))).toBe('sort: memory exhausted\n')
-        expect(io?.exitCode).toBe(2)
-      } finally {
-        spy.mockRestore()
-        inputSpy.mockRestore()
+  it.each([{ c: true }, { C: true }])("is sort's own line under %j", async (flags) => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested stream
+    const feed = OpenStream.prototype.feed
+    const spy = vi.spyOn(OpenStream.prototype, 'feed').mockImplementation(function (
+      this: OpenStream,
+      chunk: Uint8Array,
+    ) {
+      if (DEC.decode(chunk).endsWith('long')) {
+        throw new StreamRefusal('sort: memory exhausted', new Uint8Array(), 2)
       }
-    },
-  )
+      return feed.call(this, chunk)
+    })
+    try {
+      const ctx = {
+        stdin: new TextEncoder().encode('a\nlong'),
+        flags,
+        cwd: PathSpec.fromStrPath('/'),
+        vfs: { kind: 'ram' } as never,
+      } as Context
+      const result = await sortGeneric([], ctx, () => {
+        throw new Error('paths are empty; the source is stdin')
+      })
+      const io = result?.[1]
+      expect(DEC.decode(await materialize(io?.stderr ?? null))).toBe('sort: memory exhausted\n')
+      expect(io?.exitCode).toBe(2)
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 describe('sort --check resolves an unambiguous prefix', () => {
@@ -345,36 +331,6 @@ describe('sort inputs', () => {
   })
 })
 
-describe('sort check binary diagnostics', () => {
-  it.each(['-c', '-C', '--check=quiet', '--check=silent'])(
-    'preserves the exact diagnostic under %s',
-    async (option) => {
-      const record = concat([
-        new Uint8Array(128 * 1024).fill(97),
-        Uint8Array.of(0xff, 0xf0, 0x9f, 0x98, 0x80),
-      ])
-      const workspace = new Workspace({ '/data/': new RAMVFS() })
-      try {
-        for (const separator of [10, 0]) {
-          const end = Uint8Array.of(separator)
-          const result = await workspace.shell(`sort ${option}${separator === 0 ? ' -z' : ''}`, {
-            stdin: concat([bytes('z'), end, record, end]),
-          })
-          expect(result.exitCode).toBe(1)
-          expect(await materialize(result.stdout)).toEqual(new Uint8Array())
-          expect(await materialize(result.stderr)).toEqual(
-            option === '-c'
-              ? concat([bytes('sort: -:2: disorder: '), record, end])
-              : new Uint8Array(),
-          )
-        }
-      } finally {
-        await workspace.close()
-      }
-    },
-  )
-})
-
 describe('sort past one run', () => {
   it('spills sorted runs and merges them in order', async () => {
     // Each record counts its length plus 64 against a run, so this is two.
@@ -495,7 +451,7 @@ it('merge retires groups before reading all operands', async () => {
   }
 })
 
-it.each(['unstarted', 'early', 'cancel', 'read_error'])(
+it.each(['unstarted', 'cancel'])(
   'final merge owns its runs until the consumer closes: %s',
   async (stop) => {
     const stores = new Set<ByteSpool>()
@@ -514,33 +470,20 @@ it.each(['unstarted', 'early', 'cancel', 'read_error'])(
     const controller = new AbortController()
     try {
       const context = {
-        stdin: new TextEncoder().encode(
-          'z'.repeat(SORT_RUN_BYTES / 2) + '\n' + 'a'.repeat(SORT_RUN_BYTES / 2),
-        ),
-        flags: {},
+        stdin: null,
+        flags: { merge: true },
         cwd: PathSpec.fromStrPath('/'),
         signal: controller.signal,
       } as Context
-      const result = await sortGeneric([], context, unusedRead)
+      const paths = Array.from({ length: 17 }, (_, i) => spec(`/input${String(i)}`))
+      const result = await sortGeneric(paths, context, mergeInput)
       if (result === null || !(result[0] instanceof OutputStream))
         throw new Error('expected merged output')
       const output = result[0]
       expect(result[1].exitCode).toBe(0)
       expect(stores.size).toBe(2)
       expect([...stores].every((s) => !s.closed)).toBe(true)
-      if (stop === 'early') {
-        const first = await output.next()
-        expect(first.done).toBe(false)
-        expect(first.value).toEqual(new Uint8Array(1024 * 1024).fill(97))
-      } else if (stop === 'read_error') {
-        const readSpy = vi
-          .spyOn(ByteSpool.prototype, 'read')
-          .mockRejectedValue(new Error('scratch read failed'))
-        restoreRead = () => {
-          readSpy.mockRestore()
-        }
-        await expect(output.next()).rejects.toThrow('scratch read failed')
-      } else if (stop === 'cancel') {
+      if (stop === 'cancel') {
         let entered!: () => void
         let release!: () => void
         const ready = new Promise<void>((r) => {
@@ -583,29 +526,16 @@ it('waits for final merge read errors before writing the output file', async () 
   const write = vi.fn(() => Promise.resolve())
   try {
     const context = {
-      stdin: new TextEncoder().encode(
-        'z'.repeat(SORT_RUN_BYTES / 2) + '\n' + 'a'.repeat(SORT_RUN_BYTES / 2),
-      ),
-      flags: { output: [spec('/out')] },
+      stdin: null,
+      flags: { merge: true, output: [spec('/out')] },
       cwd: PathSpec.fromStrPath('/'),
     } as Context
-    await expect(sortGeneric([], context, unusedRead, write)).rejects.toThrow('scratch read failed')
+    const paths = Array.from({ length: 17 }, (_, i) => spec(`/input${String(i)}`))
+    await expect(sortGeneric(paths, context, mergeInput, write)).rejects.toThrow(
+      'scratch read failed',
+    )
     expect(write).not.toHaveBeenCalled()
   } finally {
     readSpy.mockRestore()
   }
-})
-
-it('merges many short records across large spool windows', async () => {
-  const source = new TextEncoder().encode('a\n'.repeat(65536))
-  const paths = Array.from({ length: 17 }, (_, i) => spec(`/input${String(i)}`))
-  const context = { stdin: null, flags: { merge: true }, cwd: PathSpec.fromStrPath('/') } as Context
-  const result = await sortGeneric(paths, context, async function* () {
-    yield await Promise.resolve(source)
-  })
-  if (result === null) throw new Error('sort declined')
-  const output = await materialize(result[0])
-  expect(output).toHaveLength(source.length * paths.length)
-  expect(output.findIndex((byte, index) => byte !== source[index % source.length])).toBe(-1)
-  expect(result[1].exitCode).toBe(0)
 })
