@@ -287,11 +287,11 @@ LINES = [
     ),
     (
         "office get f.docx /",
-        ["/workspace/outbox/f.docx"],
+        ["/workspace/outbox/f.docx", "/"],
         (
             ("get", "subcommand", None, None),
             ("f.docx", "operand", None, "/workspace/outbox/f.docx"),
-            ("/", "operand", None, None),
+            ("/", "operand", None, "/"),
         ),
     ),
 ]

@@ -15,7 +15,7 @@
 import { walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { type ParsedArgs, parseCommand, wordPaths } from '../../../commands/spec/parser.ts'
-import { type ValueType, WordKind } from '../../../commands/spec/types.ts'
+import { WordKind } from '../../../commands/spec/types.ts'
 import { CommandWord } from '../../../policy/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { resolvePath } from '../../../utils/path.ts'
@@ -28,13 +28,13 @@ import { leafParse } from './cli.ts'
 import { commandTree } from './routing.ts'
 import type { LineReading } from './types.ts'
 
-type Grammar = [WordKind, string | null, PathSpec | null, ValueType | null]
+type Grammar = [WordKind, string | null, PathSpec | null]
 
 /**
  * Each word as a flat grammar reads it: its kind, the option it carries
- * attached, the path the grammar gives it and its declared type. `operands`
- * says whether a path operand takes the grammar's path, as a tree's does; a
- * builtin's comes from the classifier. Mirrors Python's `_leaf_grammar`.
+ * attached and the path the grammar gives it. `operands` says whether a path
+ * operand takes the grammar's path, as a tree's does; a builtin's comes from
+ * the classifier. Mirrors Python's `_leaf_grammar`.
  */
 function leafGrammar(
   parsed: ParsedArgs,
@@ -48,7 +48,6 @@ function leafGrammar(
     role ?? WordKind.OPERAND,
     attached.get(slot) ?? null,
     paths[slot] ?? null,
-    parsed.wordKinds[slot] ?? null,
   ])
 }
 
@@ -56,14 +55,13 @@ function leafGrammar(
  * Read a command once, its words and the paths they name. A command tree (an
  * installed CLI's, or a mount's) is walked as its run walks it: the walk names
  * its verbs, group options and their values, and the leaf's grammar its own
- * words. Any other command's words are read off its own spec, and a command
+ * words, parsed with the run's own settings (`leafParse`). Any other command's words are read off its own spec, and a command
  * no spec describes reads a dashed word as an option and anything else as an
  * operand. A word's path is the classifier's, which carries the mount and the
  * glob, else the grammar's: an option's value the classifier left as text,
- * attached (`--file=x`) or not, and a tree's operand. A tree word its grammar
- * declares as text names no path, however it looks (`office get f.docx /`:
- * `/` is an XPath), and `-` given to an option is standard input or output,
- * never a file. Mirrors Python's `read_line`.
+ * attached (`--file=x`) or not, and a tree's operand. A `-` given to an
+ * option is standard input or output, never a file. Mirrors Python's
+ * `read_line`.
  */
 export function readLine(
   registry: MountRegistry,
@@ -92,7 +90,7 @@ export function readLine(
       rules.abbreviations,
     )
     grammar = [
-      ...result.words.map((w): Grammar => [w.kind, w.option, w.path, null]),
+      ...result.words.map((w): Grammar => [w.kind, w.option, w.path]),
       ...leafGrammar(leaf, result.argv, cwd, true),
     ]
     const typed = new Set(result.words.flatMap((w) => (w.path !== null ? [w.path.virtual] : [])))
@@ -111,7 +109,6 @@ export function readLine(
         w.startsWith('-') && w !== '-' ? WordKind.OPTION : WordKind.OPERAND,
         null,
         null,
-        null,
       ])
     } else {
       const parsed = parseCommand(spec, [...argv], cwd, name)
@@ -124,19 +121,10 @@ export function readLine(
   const words: CommandWord[] = []
   let option: string | null = null
   argv.forEach((text, slot) => {
-    const [kind, carried, specPath, declared] = grammar[slot] ?? [
-      WordKind.OPERAND,
-      null,
-      null,
-      null,
-    ]
+    const [kind, carried, specPath] = grammar[slot] ?? [WordKind.OPERAND, null, null]
     const word = classified[slot] ?? text
     let path = word instanceof PathSpec ? word : specPath
-    const declaredText =
-      declared !== null &&
-      declared !== 'path' &&
-      (kind === WordKind.VALUE || kind === WordKind.OPERAND)
-    if ((result !== null && declaredText) || (kind === WordKind.VALUE && text === '-')) path = null
+    if (kind === WordKind.VALUE && text === '-') path = null
     words.push(new CommandWord(text, kind, kind === WordKind.VALUE ? option : carried, path))
     if (kind === WordKind.OPTION) option = text
   })

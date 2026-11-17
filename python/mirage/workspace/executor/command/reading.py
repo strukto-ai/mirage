@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.parser import ParsedArgs, word_paths
-from mirage.commands.spec.types import ValueType, WordKind
+from mirage.commands.spec.types import WordKind
 from mirage.policy.types import CommandWord
 from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
@@ -31,15 +31,14 @@ from mirage.workspace.executor.command.types import LineReading
 from mirage.workspace.lookup import SLASH_KEEPS_LAST
 from mirage.workspace.mount import MountRegistry
 
-Grammar = tuple[WordKind, str | None, PathSpec | None, ValueType | None]
+Grammar = tuple[WordKind, str | None, PathSpec | None]
 
 
 def _leaf_grammar(
     parsed: ParsedArgs, argv: Sequence[str], cwd: str, operands: bool
 ) -> list[Grammar]:
     """Each word as a flat grammar reads it: its kind, the option it
-    carries attached, the path the grammar gives it and its declared
-    type.
+    carries attached and the path the grammar gives it.
 
     Args:
         parsed (ParsedArgs): the parse of ``argv``.
@@ -52,12 +51,7 @@ def _leaf_grammar(
     paths = word_paths(parsed, argv, cwd, operands=operands)
     attached = {a.slot: a.option for a in parsed.attached}
     return [
-        (
-            role or WordKind.OPERAND,
-            attached.get(slot),
-            paths[slot],
-            parsed.word_kinds[slot],
-        )
+        (role or WordKind.OPERAND, attached.get(slot), paths[slot])
         for slot, role in enumerate(parsed.word_roles)
     ]
 
@@ -80,10 +74,8 @@ def read_line(
     reads a dashed word as an option and anything else as an operand.
     A word's path is the classifier's, which carries the mount and the
     glob, else the grammar's: an option's value the classifier left as
-    text, attached (``--file=x``) or not, and a tree's operand. A tree
-    word its grammar declares as text names no path, however it looks
-    (``office get f.docx /``: ``/`` is an XPath), and ``-`` given to an
-    option is standard input or output, never a file.
+    text, attached (``--file=x``) or not, and a tree's operand. A ``-``
+    given to an option is standard input or output, never a file.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs and
@@ -117,7 +109,7 @@ def read_line(
             abbreviations=rules.abbreviations,
         )
         grammar = [
-            *((w.kind, w.option, w.path, None) for w in result.words),
+            *((w.kind, w.option, w.path) for w in result.words),
             *_leaf_grammar(leaf, result.argv, cwd, operands=True),
         ]
         typed = {w.path.virtual for w in result.words if w.path is not None}
@@ -141,7 +133,6 @@ def read_line(
                     else WordKind.OPERAND,
                     None,
                     None,
-                    None,
                 )
                 for w in argv
             ]
@@ -154,16 +145,10 @@ def read_line(
     words: list[CommandWord] = []
     option: str | None = None
     for slot, text in enumerate(argv):
-        kind, carried, spec_path, declared = grammar[slot]
+        kind, carried, spec_path = grammar[slot]
         word = classified[slot] if slot < len(classified) else text
         path = word if isinstance(word, PathSpec) else spec_path
-        declared_text = declared not in (None, "path") and kind in (
-            WordKind.VALUE,
-            WordKind.OPERAND,
-        )
-        if (result is not None and declared_text) or (
-            kind is WordKind.VALUE and text == "-"
-        ):
+        if kind is WordKind.VALUE and text == "-":
             path = None
         owner = option if kind is WordKind.VALUE else carried
         words.append(CommandWord(text, kind, owner, path))

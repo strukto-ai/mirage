@@ -263,11 +263,11 @@ const LINES: [string, string[], Row[]][] = [
   ['pdfinfo -', [], [['-', 'operand', null, null]]],
   [
     'office get f.docx /',
-    ['/workspace/outbox/f.docx'],
+    ['/workspace/outbox/f.docx', '/'],
     [
       ['get', 'subcommand', null, null],
       ['f.docx', 'operand', null, '/workspace/outbox/f.docx'],
-      ['/', 'operand', null, null],
+      ['/', 'operand', null, '/'],
     ],
   ],
 ]
