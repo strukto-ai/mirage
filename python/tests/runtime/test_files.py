@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.types import materialize
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
@@ -520,7 +521,9 @@ def test_readdir_marks_nothing_without_a_link_source():
 
 
 class NoAppendVFS(RuntimeFiles):
-    """Core over a mount that registers write but not append (S3)."""
+    """Core over a mount that registers write but not append (S3). Its
+    read answers a stream and its write, like disk's and RAM's, empties
+    the file before it pulls the bytes it is handed."""
 
     def __init__(self, files):
         super().__init__(
@@ -529,18 +532,34 @@ class NoAppendVFS(RuntimeFiles):
         self.files = dict(files)
         self.writes = []
         self.reads = []
+        self.streamed = []
+
+    def _wait(self, pending):
+        return asyncio.run(pending)
 
     def call(self, op, path, **kwargs):
         if op == "append":
             raise OperationNotSupportedError("append")
-        if op == "read":
+        raise NotImplementedError(op)
+
+    async def _call(self, name, path, **kwargs):
+        if name == "read":
             self.reads.append(kwargs)
             if path not in self.files:
                 raise FileNotFoundError(path)
-            return self.files[path]
-        self.files[path] = kwargs["data"]
-        self.writes.append((path, kwargs["data"]))
+            return self._stream(path)
+        body = kwargs["data"]
+        self.streamed.append(not isinstance(body, bytes))
+        self.files[path] = b""
+        data = await materialize(body)
+        self.files[path] = data
+        self.writes.append((path, data))
         return None
+
+    async def _stream(self, path):
+        for at in range(len(self.files[path])):
+            await asyncio.sleep(0)
+            yield self.files[path][at : at + 1]
 
 
 @pytest.mark.parametrize(
@@ -556,7 +575,18 @@ def test_append_without_a_whole_file_reads_its_own_base(files, written):
 def test_the_append_fallback_reads_past_the_file_cache():
     vfs = NoAppendVFS({"/s3/a": b"base-"})
     vfs.append("/s3/a", b"tail")
-    assert vfs.reads == [{"filetype": None, "direct": True}]
+    assert vfs.reads == [{"filetype": None, "direct": True, "stream": True}]
+
+
+def test_the_append_fallback_streams_a_staged_base_into_the_write():
+    # The base is read as a stream and written back as one, never joined,
+    # and it is staged whole before the write starts: the write empties
+    # the file before it pulls, so a read handed straight to it would
+    # read back nothing.
+    vfs = NoAppendVFS({"/s3/a": b"0123456789"})
+    vfs.append("/s3/a", b"tail")
+    assert vfs.streamed == [True]
+    assert vfs.files["/s3/a"] == b"0123456789tail"
 
 
 def test_an_append_keeps_a_write_made_since_the_last_one():

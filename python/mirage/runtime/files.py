@@ -17,7 +17,7 @@ import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from mirage.bridge.sync import collecting, run_async_from_sync, soon
 from mirage.commands.builtin.utils.links import link_view
@@ -31,9 +31,11 @@ from mirage.context.session_context import (
     in_landing,
     run_landing,
 )
+from mirage.core.generic.rewrite import append_through_spool
 from mirage.errors.fs import ebadf, einval, eloop, exdev, numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult, OpReport
+from mirage.io.types import ByteSource
 from mirage.mount.core import MountCore
 from mirage.runtime.binding import CallerResolver, WorkspaceBinding
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
@@ -1087,20 +1089,39 @@ class RuntimeFiles:
         mount without the op can only emulate one by reading and
         rewriting, and an append lands after whatever the file holds
         now, so a write another action made between two appends is
-        kept, as O_APPEND keeps it.
+        kept, as O_APPEND keeps it. The base is read as a stream into a
+        spool and written back as a stream with `data` after it
+        (``append_through_spool``), so the rewrite holds a chunk in
+        memory rather than the file twice over.
 
         Args:
             path (str): guest-absolute virtual path.
             data (bytes): only the newly appended bytes.
         """
-        if self._append_delta(path, data):
-            self._restat(path)
-            return
-        try:
-            whole = self.read(path, raw=True, direct=True) + data
-        except FileNotFoundError:
-            whole = data
-        self.write(path, whole)
+        if not self._append_delta(path, data):
+            self._wait(self._append_by_rewrite(path, data))
+        self._restat(path)
+
+    async def _append_by_rewrite(self, path: str, data: bytes) -> None:
+        """``append``'s whole-file write, the stored bytes read fresh.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            data (bytes): only the newly appended bytes.
+        """
+
+        async def read() -> ByteSource:
+            return cast(
+                ByteSource,
+                await self._call(
+                    "read", path, filetype=None, direct=True, stream=True
+                ),
+            )
+
+        async def write(body: ByteSource) -> None:
+            await self._call("write", path, data=body)
+
+        await append_through_spool(read, write, data)
 
     def _append_delta(self, path: str, data: bytes) -> bool:
         mount = self.mount_of(path) or path

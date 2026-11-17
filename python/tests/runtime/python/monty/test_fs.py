@@ -22,6 +22,7 @@ import mirage.runtime.python.monty.fs as monty_fs
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.types import materialize
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
@@ -100,7 +101,7 @@ class FakeDispatch:
                 raise FileNotFoundError(virtual)
             return sorted(names), None
         if op == "write":
-            data = kwargs["data"]
+            data = await materialize(kwargs["data"])
             self.files[virtual] = data
             self.writes.append((virtual, data))
             return None, None

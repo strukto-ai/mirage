@@ -815,6 +815,12 @@ export class RuntimeFiles {
    * but is momentarily unreadable would replace content this run never
    * saw.
    *
+   * Divergence: Python's twin streams the base through a spool into a
+   * streamed write (`append_through_spool`). Here the base and the write
+   * ride the guest bridge, whose read answers and whose write takes one
+   * `Uint8Array` (a Pyodide worker's bridge crosses `postMessage`, where no
+   * stream goes), so the rewrite holds the file whole.
+   *
    * Args:
    *   path: guest-absolute virtual path.
    *   tail: only the newly appended bytes.

@@ -23,11 +23,12 @@ from weakref import WeakKeyDictionary
 
 from mirage.concurrency.limiter import owned_task
 from mirage.context import reset_caller, set_current_session
+from mirage.core.generic.rewrite import append_through_spool
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
 from mirage.errors.types import NoMountError, OperationNotSupportedError
 from mirage.io.spool import MEMORY_LIMIT, ByteSlice, ByteSpool
-from mirage.io.types import materialize
+from mirage.io.types import ByteSource
 from mirage.mount.constants import (
     FSTAT_ROW_SECONDS,
     LISTING_CONCURRENCY,
@@ -795,9 +796,12 @@ class MountCore:
 
     async def _append(self, target: str, data: bytes | WriteBuf) -> None:
         """Extend a file by ``data`` at the end it has now. A mount with
-        no append (S3) takes a write of the whole file, read fresh from
-        the backend rather than from a copy, so a write another action
-        made since stays; a mount that declined once is remembered.
+        no append takes a write of the whole file, read fresh from the
+        backend rather than from a copy, so a write another action made
+        since stays; a mount that declined once is remembered. That read
+        is a stream staged in a spool and the write a stream of it and
+        ``data`` after it (``append_through_spool``), so the rewrite
+        holds a chunk in memory rather than the file twice over.
 
         Args:
             target (str): the workspace path.
@@ -816,20 +820,27 @@ class MountCore:
                 return
             except OperationNotSupportedError:
                 self._no_append.add(mount)
-        if not isinstance(data, bytes):
-            data = await materialize(run_stream(data))
-        try:
-            base, _ = await self._op(
-                self._files.dispatch(
-                    "read",
-                    PathSpec.from_str_path(target, cwd="/"),
-                    filetype=None,
-                    direct=True,
-                )
+
+        async def read() -> ByteSource:
+            stored, _ = await self._files.dispatch(
+                "read",
+                PathSpec.from_str_path(target, cwd="/"),
+                filetype=None,
+                direct=True,
+                stream=True,
             )
-        except FileNotFoundError:
-            base = b""
-        await self._op(self._files.write(target, bytes(base) + data))
+            return cast(ByteSource, stored)
+
+        async def write(body: ByteSource) -> None:
+            await self._files.write(target, body)
+
+        await self._op(
+            append_through_spool(
+                read,
+                write,
+                data if isinstance(data, bytes) else run_stream(data),
+            )
+        )
 
     async def write(
         self, path: str, data: bytes, offset: int, fh: int | None

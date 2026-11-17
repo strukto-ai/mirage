@@ -25,7 +25,8 @@ import {
   type OpenMode,
 } from '../runtime/handles/index.ts'
 import { ByteSlice, ByteSpool, MEMORY_LIMIT } from '../io/spool.ts'
-import { materialize } from '../io/types.ts'
+import type { ByteSource } from '../io/types.ts'
+import { appendThroughSpool } from '../core/generic/rewrite.ts'
 import { READ_CHUNK } from '../runtime/handles/constants.ts'
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
@@ -47,16 +48,7 @@ import {
 import { callsAs, currentCaller, runWithSession } from '../context/session_context.ts'
 import { skippedAtDispatch } from '../policy/match/rule.ts'
 import type { SessionState } from '../workspace/session/session.ts'
-import {
-  ebadf,
-  eexist,
-  einval,
-  eisdir,
-  enoent,
-  enotdir,
-  isMissingOp,
-  isMissingPath,
-} from '../errors/fs.ts'
+import { ebadf, eexist, einval, eisdir, enoent, enotdir, isMissingOp } from '../errors/fs.ts'
 import { concat, findBytes } from '../utils/bytes.ts'
 import { isMacosMetadata } from './platform/macos.ts'
 import type { MountAttrs, Handle, WriteBuf } from './types.ts'
@@ -392,9 +384,12 @@ export class MountCore {
 
   /**
    * Extend a file by `data` at the end it has now. A mount with no append
-   * (S3) takes a write of the whole file, read fresh from the backend
-   * rather than from a copy, so a write another action made since stays; a
-   * mount that declined once is remembered. Mirrors Python's `_append`.
+   * takes a write of the whole file, read fresh from the backend rather than
+   * from a copy, so a write another action made since stays; a mount that
+   * declined once is remembered. That read is a stream staged in a spool and
+   * the write a stream of it and `data` after it (`appendThroughSpool`), so
+   * the rewrite holds a chunk in memory rather than the file twice over.
+   * Mirrors Python's `_append`.
    */
   private async appendTo(target: string, data: Uint8Array | WriteBuf): Promise<void> {
     const mount = this.files.mountOf(target) ?? target
@@ -409,20 +404,20 @@ export class MountCore {
         this.noAppend.add(mount)
       }
     }
-    const bytes = data instanceof Uint8Array ? data : await materialize(runStream(data))
-    let base: Uint8Array = new Uint8Array()
-    try {
-      const [stored] = await this.op(() =>
-        this.files.dispatch('read', PathSpec.fromStrPath(target, undefined, '/'), [], {
-          filetype: null,
-          direct: true,
-        }),
-      )
-      base = stored as Uint8Array
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-    }
-    await this.op(() => this.files.write(target, concat([base, bytes])))
+    await this.op(() =>
+      appendThroughSpool(
+        async () =>
+          (
+            await this.files.dispatch('read', PathSpec.fromStrPath(target, undefined, '/'), [], {
+              filetype: null,
+              direct: true,
+              stream: true,
+            })
+          )[0] as ByteSource,
+        (body) => this.files.write(target, body),
+        data instanceof Uint8Array ? data : runStream(data),
+      ),
+    )
   }
 
   /** The read options for one view: the stored bytes, else the rendering. */
