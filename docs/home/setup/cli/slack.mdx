@@ -9,6 +9,10 @@ import License from '/snippets/cli/license/slack.mdx'
 Create tokens in [Slack setup](/home/setup/slack), then register them on an
 existing `ws`.
 
+Reaction commands need `reactions:read`/`reactions:write`, pin commands need
+`pins:read`/`pins:write`, and `emoji-list` needs `emoji:read`. Reinstall the app
+after changing scopes.
+
 Commands: [Python](/python/cli/slack) · [TypeScript](/typescript/cli/slack).
 
 <Tabs>
@@ -30,9 +34,5 @@ Commands: [Python](/python/cli/slack) · [TypeScript](/typescript/cli/slack).
     ```
   </Tab>
 </Tabs>
-
-Reaction commands need `reactions:read`/`reactions:write`, pin commands need
-`pins:read`/`pins:write`, and `emoji-list` needs `emoji:read`. Reinstall the app
-after changing scopes.
 
 <License />

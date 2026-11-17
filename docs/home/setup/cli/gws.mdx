@@ -11,6 +11,11 @@ Mirage implements a subset of the [Google Workspace CLI (`gws`)](https://github.
 Create OAuth credentials in [Google Workspace setup](/home/setup/google), then
 register them on an existing `ws`.
 
+Forms is CLI-only. Enable the Google Forms API and grant
+`https://www.googleapis.com/auth/forms.body` to create or edit forms. Reading
+responses needs `https://www.googleapis.com/auth/forms.responses.readonly`.
+Creating forms inside a configured folder also needs the Drive API and scope.
+
 Commands: [Python](/python/cli/gws) · [TypeScript](/typescript/cli/gws).
 
 <Tabs>
@@ -34,10 +39,5 @@ Commands: [Python](/python/cli/gws) · [TypeScript](/typescript/cli/gws).
     ```
   </Tab>
 </Tabs>
-
-Forms is CLI-only. Enable the Google Forms API and grant
-`https://www.googleapis.com/auth/forms.body` to create or edit forms. Reading
-responses needs `https://www.googleapis.com/auth/forms.responses.readonly`.
-Creating forms inside a configured folder also needs the Drive API and scope.
 
 <License />

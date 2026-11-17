@@ -11,6 +11,10 @@ Mirage implements a subset of the [GitHub CLI (`gh`)](https://github.com/cli/cli
 Create a token in [GitHub setup](/home/setup/github), then register it on an
 existing `ws`.
 
+Fine-grained tokens need permissions matching the commands used: Issues, Pull
+requests, Actions, Contents, or Administration. `gh api` is endpoint-specific;
+consult GitHub's [fine-grained token permission table](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
+
 Commands: [Python](/python/cli/gh) · [TypeScript](/typescript/cli/gh).
 
 <Tabs>
@@ -31,9 +35,5 @@ Commands: [Python](/python/cli/gh) · [TypeScript](/typescript/cli/gh).
     ```
   </Tab>
 </Tabs>
-
-Fine-grained tokens need permissions matching the commands used: Issues, Pull
-requests, Actions, Contents, or Administration. `gh api` is endpoint-specific;
-consult GitHub's [fine-grained token permission table](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
 
 <License />
