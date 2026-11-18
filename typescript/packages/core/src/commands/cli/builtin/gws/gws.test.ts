@@ -28,6 +28,8 @@ vi.mock('../../../../core/google/client.ts', async () => {
 
 import * as client from '../../../../core/google/client.ts'
 import { readPrefix } from '../../../../io/cooperative.ts'
+import { MemoryExhausted } from '../../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../../io/memory.ts'
 import { materialize } from '../../../../io/types.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
@@ -238,6 +240,45 @@ describe('gws api passthrough', () => {
       'b',
       'c',
     ])
+  })
+
+  it('stops paging on a token it has already followed', async () => {
+    vi.mocked(client.googleGet)
+      .mockReset()
+      .mockResolvedValueOnce({ files: [{ id: 'a' }], nextPageToken: 't1' })
+      .mockResolvedValueOnce({ files: [{ id: 'b' }], nextPageToken: 't1' })
+      .mockResolvedValueOnce({ files: [{ id: 'c' }] })
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context())
+    if (result === null) throw new Error('expected result')
+    expect(vi.mocked(client.googleGet).mock.calls.length).toBe(2)
+    const [out, io] = result
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([
+      1,
+      'gws: next page repeats t1\n',
+    ])
+    const lines = DEC.decode(out as Uint8Array)
+      .trimEnd()
+      .split('\n')
+    expect(lines.map((l) => (JSON.parse(l) as { files: { id: string }[] }).files[0]?.id)).toEqual([
+      'a',
+      'b',
+    ])
+  })
+
+  it('holds its pages to the workspace budget', async () => {
+    let n = 0
+    vi.mocked(client.googleGet)
+      .mockReset()
+      .mockImplementation(() => {
+        n += 1
+        return Promise.resolve({ files: [{ id: 'x'.repeat(600) }], nextPageToken: `t${String(n)}` })
+      })
+    await expect(
+      runWithMemory(new MemoryBudget(2000, () => 0), () =>
+        runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context()),
+      ),
+    ).rejects.toThrow(MemoryExhausted)
+    expect(n).toBeLessThan(10)
   })
 
   it('multi-page output is newline-terminated NDJSON', async () => {

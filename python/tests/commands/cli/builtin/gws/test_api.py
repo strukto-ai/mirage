@@ -24,6 +24,8 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.google.config import GoogleConfig
 from mirage.io.cooperative import read_prefix
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import materialize
 
 METHODS = {(m.service, m.resource, m.method): m for m in GWS_METHODS}
@@ -384,3 +386,41 @@ def test_fill_path_percent_encodes_a_reserved_character():
 def test_fill_path_leaves_an_ordinary_id_addressable():
     path, _ = fill_path("/files/{fileId}", {"fileId": "1AbC-_dEf"})
     assert path == "/files/1AbC-_dEf"
+
+
+@pytest.mark.asyncio
+async def test_paging_stops_on_a_token_it_has_already_followed():
+    method = METHODS[("drive", "files", "list")]
+    pages = [
+        {"files": [{"id": "a"}], "nextPageToken": "t1"},
+        {"files": [{"id": "b"}], "nextPageToken": "t1"},
+        {"files": [{"id": "c"}]},
+    ]
+    with patch(
+        "mirage.commands.cli.builtin.gws.api.google_get",
+        new_callable=AsyncMock,
+        side_effect=pages,
+    ) as get:
+        out, io = await run_gws_method(method, GOOGLE, [], [], Context())
+    assert get.await_count == 2
+    assert (io.exit_code, io.stderr) == (1, b"gws: next page repeats t1\n")
+    lines = (await materialize(out)).decode().splitlines()
+    assert [json.loads(line)["files"][0]["id"] for line in lines] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_paging_holds_its_pages_to_the_workspace_budget():
+    method = METHODS[("drive", "files", "list")]
+    calls = iter(range(1, 100))
+
+    async def page(*args, **kwargs):
+        n = next(calls)
+        return {"files": [{"id": "x" * 600}], "nextPageToken": f"t{n}"}
+
+    with patch("mirage.commands.cli.builtin.gws.api.google_get", page):
+        with pytest.raises(MemoryExhausted):
+            await run_with_memory(
+                MemoryBudget(2000, lambda: 0),
+                run_gws_method(method, GOOGLE, [], [], Context()),
+            )
+    assert next(calls) < 10

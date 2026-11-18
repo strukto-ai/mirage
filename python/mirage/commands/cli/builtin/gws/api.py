@@ -38,7 +38,9 @@ from mirage.core.google.client import (
     google_request,
 )
 from mirage.core.google.config import GoogleConfig
+from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
 _PARAMS_HELP = (
@@ -223,13 +225,12 @@ async def run_gws_method(
         # at one page unless --page-all is passed: a truncated listing
         # is indistinguishable from a complete one, so mirage follows
         # the token by default and --page-limit is how you opt out.
-        out = await _paginate(
+        return await _paginate(
             token_manager,
             url,
             query_params,
             _parse_page_limit(fl.as_str("page_limit")),
         )
-        return out, IOResult()
     deleting = method.http == "DELETE"
     result = await google_request(
         token_manager,
@@ -270,7 +271,7 @@ async def _paginate(
     url: str,
     query: dict[str, str],
     page_limit: int | None,
-) -> bytes:
+) -> tuple[bytes, IOResult]:
     """Follow nextPageToken and emit one page response per line.
 
     Google list methods cap a page and hand back a token; a single call
@@ -283,12 +284,20 @@ async def _paginate(
         query (dict): query parameters; pageToken is overwritten per page.
         page_limit (int | None): stop after this many pages, or None for all.
 
+    Every page counts against the workspace's memory as it is kept, and
+    a token the server hands back again fails with the pages read so far,
+    since following it would page the same answers forever.
+
     Returns:
-        bytes: newline-delimited page responses.
+        tuple[bytes, IOResult]: newline-delimited page responses and how
+        the paging ended.
     """
     pages: list[bytes] = []
     token: str | None = None
     fetched = 0
+    held = 0
+    followed: set[str] = set()
+    io = IOResult()
     while True:
         # A fresh dict per page: the callers keep the mapping they are
         # handed, so a mutated one would let a later token leak backwards.
@@ -301,6 +310,8 @@ async def _paginate(
                 result, ensure_ascii=False, separators=(",", ":")
             ).encode()
         )
+        held += len(pages[-1])
+        check_memory(held)
         fetched += 1
         if page_limit is not None and fetched >= page_limit:
             break
@@ -310,11 +321,18 @@ async def _paginate(
         if not isinstance(nxt, (str, int, float)) or not nxt:
             break
         token = str(nxt)
+        if token in followed:
+            io = IOResult(
+                exit_code=1,
+                stderr=encode_text(f"gws: next page repeats {token}\n"),
+            )
+            break
+        followed.add(token)
     # A single response keeps the exact bytes an unpaginated call produced,
     # so every non-list GET is unchanged. Only a real multi-page stream is
     # newline-terminated, per the NDJSON convention.
     body_out = b"\n".join(pages)
-    return body_out + b"\n" if len(pages) > 1 else body_out
+    return (body_out + b"\n" if len(pages) > 1 else body_out), io
 
 
 def _with_query(url: str, query: dict[str, str]) -> str:
