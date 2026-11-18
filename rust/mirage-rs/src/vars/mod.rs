@@ -56,6 +56,18 @@ pub const PIPESTATUS: &str = "PIPESTATUS";
 /// Microseconds in a second, the clock's unit.
 const MICROS: i64 = 1_000_000;
 
+/// A mark a read sets through a shared reference, copied by a fork.
+#[derive(Default)]
+struct Flag(std::sync::atomic::AtomicBool);
+
+impl Clone for Flag {
+    fn clone(&self) -> Self {
+        Self(std::sync::atomic::AtomicBool::new(
+            self.0.load(Ordering::Relaxed),
+        ))
+    }
+}
+
 /// The names whose special meaning `unset` and an unadorned `local` end:
 /// the running command's line and process, the clock's and `SRANDOM`.
 pub fn ends_at_unset(name: &str) -> bool {
@@ -101,6 +113,9 @@ pub type Ids = Arc<dyn Fn() -> u32 + Send + Sync>;
 struct Frame {
     pub(super) saved: HashMap<String, Option<Arc<Var>>>,
     pub(super) temp: bool,
+    /// The count `SECONDS` held before a prefix assignment restarted it,
+    /// which closing the scope puts back; None when the scope saved none.
+    pub(super) seconds: Option<Option<(i64, i64)>>,
 }
 
 /// A session's variables.
@@ -146,6 +161,9 @@ pub struct Store {
     now_us: i64,
     started_us: i64,
     seconds: Option<(i64, i64)>,
+    /// Whether `$SECONDS` was read: bash makes it an integer then, so a
+    /// later `SECONDS+=n` adds rather than appends.
+    seconds_read: Flag,
     /// `LINENO` and `BASHPID` once unset: ordinary names from then on.
     plain: Vec<String>,
     /// Whether `LINENO` or `BASHPID` was plain where a frame made it
@@ -189,6 +207,7 @@ impl Store {
             now_us: 0,
             started_us: 0,
             seconds: None,
+            seconds_read: Flag::default(),
             plain: Vec::new(),
             local_plain: Vec::new(),
             voice: b"bash: ".to_vec(),
@@ -265,6 +284,7 @@ impl Store {
             LINENO => self.line.to_string(),
             BASHPID => self.bash_pid.to_string(),
             SECONDS => {
+                self.seconds_read.0.store(true, Ordering::Relaxed);
                 let (value, at) = self.seconds.unwrap_or((0, self.started_us));
                 value
                     .saturating_add((now - at).div_euclid(MICROS))
@@ -304,6 +324,12 @@ impl Store {
     /// listing.
     pub fn seconds_assigned(&self) -> bool {
         self.seconds.is_some()
+    }
+
+    /// Whether `$SECONDS` was read, after which bash takes it as an
+    /// integer: `SECONDS+=5` adds then, and appends before.
+    pub fn seconds_read(&self) -> bool {
+        self.seconds_read.0.load(Ordering::Relaxed)
     }
 
     /// End the special meaning of a name `unset` makes ordinary
@@ -490,10 +516,20 @@ impl Store {
 
     /// The one place a record changes: `var` replaces the name's record,
     /// or None drops it, and the one it replaced comes back. A table a fork
-    /// still shares is copied first, pointers only.
+    /// still shares is copied first, pointers only. A value landing on a
+    /// special `SECONDS`, by any write a prefix assignment included,
+    /// restarts its count from the value read as arithmetic.
     pub fn place(&mut self, name: &str, var: Option<Arc<Var>>) -> Option<Arc<Var>> {
         if var.is_none() && !self.vars.contains_key(name) {
             return None;
+        }
+        let restart = match var.as_deref().and_then(|var| var.value.as_ref()) {
+            Some(Value::Scalar(text)) if self.counts_seconds(name) => Some(text.clone()),
+            _ => None,
+        };
+        if let Some(text) = restart {
+            let value = self.seconds_from(&text);
+            self.set_seconds(value);
         }
         self.stamp = fresh_stamp();
         if name == "GLOBIGNORE" {
@@ -823,6 +859,7 @@ impl Store {
         forked.now_us = self.now_us;
         forked.started_us = self.started_us;
         forked.seconds = self.seconds;
+        forked.seconds_read = self.seconds_read.clone();
         forked.plain = self.plain.clone();
         forked.voice = self.voice.clone();
         if self.random_seed == Seed::Off {
@@ -1528,6 +1565,20 @@ mod tests {
         assert!(store.fork().dynamic(SECONDS).is_some());
         store.hide_vars(&[SRANDOM.to_owned()], &[]);
         assert_eq!(store.dynamic(SRANDOM), None);
+    }
+
+    #[test]
+    fn a_prefix_seconds_counts_for_its_call_and_its_scope_puts_it_back() {
+        let mut store = store();
+        store.set_clock(10_000_000, 1_000_000);
+        store.set_seconds(10);
+        let temp = store.open_temp();
+        store.save_temp(temp, SECONDS);
+        store.seed(SECONDS, Value::Scalar(b"100".to_vec()));
+        store.set_clock(12_000_000, 1_000_000);
+        assert_eq!(store.dynamic(SECONDS), Some(b"102".to_vec()));
+        store.close_temp(temp);
+        assert_eq!(store.dynamic(SECONDS), Some(b"12".to_vec()));
     }
 
     #[test]

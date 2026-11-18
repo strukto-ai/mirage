@@ -321,6 +321,22 @@
           }
         },
         {
+          "command": "dash -c 'printf \"#!/bin/sh\\\\necho ran\\\\n\" > /tmp/mirage-np/mirage-ep-prog && chmod +x /tmp/mirage-np/mirage-ep-prog'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /tmp/mirage-np && PATH=/nowhere: mirage-ep-prog",
+          "expect": {
+            "exit": 0,
+            "stdout": "ran\n",
+            "stderr": ""
+          }
+        },
+        {
           "command": "dash -c 'rm -r /tmp/mirage-np'",
           "expect": {
             "exit": 0,

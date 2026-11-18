@@ -12,8 +12,8 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, LOWER, NAMEREF, PIPESTATUS, RANDOM, Slot,
-    Store, UPPER, Value, entry_bytes, strip_key_quotes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, LOWER, NAMEREF, PIPESTATUS, RANDOM,
+    SECONDS, Slot, Store, UPPER, Value, entry_bytes, strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -734,6 +734,28 @@ impl<'a> Writer<'a> {
         if self.store.is_readonly(&name, false) {
             return Ok(Element::Readonly);
         }
+        // A `SECONDS` that was read is an integer to bash, so `+=` adds to
+        // the count it reads now; before a read it appends, as below.
+        if append && slot.is_none() && self.store.counts_seconds(&name) && self.store.seconds_read()
+        {
+            let mut coercion = Coercion::default();
+            let added = match self.store.evaluate_integer(&mut coercion, value, None) {
+                Ok(text) => parse_decimal::<i64>(&text).unwrap_or(0),
+                Err(error) => {
+                    self.land_coercion(&mut coercion)?;
+                    return Err(fatal(self.store.voice(), error));
+                }
+            };
+            self.land_coercion(&mut coercion)?;
+            let now = self
+                .store
+                .dynamic(SECONDS)
+                .and_then(|text| parse_decimal::<i64>(&text))
+                .unwrap_or(0);
+            let total = now.saturating_add(added).to_string().into_bytes();
+            self.set(&name, Value::Scalar(total), true, None, None)?;
+            return Ok(Element::Landed);
+        }
         // `x+=v` on a scalar no attribute reshapes grows it in place rather
         // than copying what it holds into a new value each time.
         let plain = self
@@ -880,7 +902,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::vars::{EXPORT, RANDOM, READONLY, SECONDS, UNASSIGNED, UPPER, Var};
+    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED, UPPER, Var};
 
     fn writer(store: &mut Store) -> Writer<'_> {
         Writer {
@@ -991,6 +1013,20 @@ mod tests {
         assert_eq!(store.dynamic(SECONDS), Some(b"105".to_vec()));
         store.set_clock(12_000_000, 1_000_000);
         assert_eq!(store.dynamic(SECONDS), Some(b"106".to_vec()));
+    }
+
+    #[test]
+    fn a_seconds_append_after_a_read_adds() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        writer(&mut store)
+            .set(SECONDS, scalar("10"), true, None, None)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
+        writer(&mut store)
+            .element(SECONDS, None, b"2+3", true)
+            .unwrap();
+        assert_eq!(store.dynamic(SECONDS), Some(b"15".to_vec()));
     }
 
     #[test]

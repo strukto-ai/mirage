@@ -187,6 +187,18 @@ class IdSource(Protocol):
         ...
 
 
+def secure_draw(ids: IdSource) -> Callable[[], int]:
+    """A 32-bit draw from ``ids``'s secure bytes, as the shell's
+    ``$SRANDOM`` and ``$RANDOM``'s first seed take it: unpredictable from
+    the system's source, and from a seeded one its sequence, word for word
+    as ``random_u32`` draws it.
+
+    Args:
+        ids (IdSource): the source.
+    """
+    return lambda: int.from_bytes(ids.secure_bytes(4), "little")
+
+
 class _Floor:
     """The last id's millisecond and counter, which the next id follows."""
 

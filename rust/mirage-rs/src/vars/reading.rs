@@ -209,4 +209,15 @@ impl Store {
         let outcome = reading.evaluate(word, None, false, &[], false);
         outcome.value.map(|value| value as u32)
     }
+
+    /// A value landing on `SECONDS` as the count it restarts from:
+    /// evaluated as arithmetic, as bash assigns it, 0 when it does not
+    /// evaluate.
+    pub(super) fn seconds_from(&mut self, word: &[u8]) -> i64 {
+        let mut reading = Reading::plain(self);
+        reading
+            .evaluate(word, None, false, &[], false)
+            .value
+            .unwrap_or(0)
+    }
 }

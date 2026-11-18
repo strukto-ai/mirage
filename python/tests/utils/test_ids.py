@@ -35,6 +35,7 @@ from mirage.utils.ids import (
     new_session_id,
     new_workspace_id,
     random_below,
+    secure_draw,
     uuid7,
 )
 
@@ -553,3 +554,9 @@ def test_secure_bytes_come_from_the_system_or_replay_a_seed():
     assert SeededIdSource(7).secure_bytes(9) == SeededIdSource(7).secure_bytes(
         9
     )
+
+
+def test_the_shell_s_secure_draw_replays_a_seed_word_for_word():
+    assert secure_draw(SeededIdSource(5))() == SeededIdSource(5).random_u32()
+    draw = secure_draw(SystemIdSource())
+    assert 0 <= draw() < 2**32

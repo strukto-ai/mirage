@@ -133,6 +133,7 @@ impl Store {
     /// Save `name`'s record in the prefix scope `index`, once; an index no
     /// frame holds saves nothing.
     pub fn save_temp(&mut self, index: usize, name: &str) {
+        let seconds = self.seconds;
         let Some(frame) = self.frames.get_mut(index) else {
             return;
         };
@@ -140,6 +141,9 @@ impl Store {
             frame
                 .saved
                 .insert(name.to_owned(), self.vars.get(name).cloned());
+        }
+        if name == SECONDS && frame.seconds.is_none() {
+            frame.seconds = Some(seconds);
         }
     }
 
@@ -149,6 +153,9 @@ impl Store {
             let frame = self.frames.remove(index);
             for (name, old) in frame.saved {
                 self.place(&name, old);
+            }
+            if let Some(seconds) = frame.seconds {
+                self.seconds = seconds;
             }
         }
     }

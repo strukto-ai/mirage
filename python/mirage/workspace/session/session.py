@@ -63,7 +63,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.clock import SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, secure_draw
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -424,9 +424,7 @@ class SessionState:
     processes: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS
     process_id: int | None = None
     shell_pid: int | None = None
-    # When the running shell started, in epoch microseconds, which
-    # `$SECONDS` counts from; 0 until its first frame sets it on the
-    # line's clock (``seed_shell``, ``frame``).
+    # When the running shell started, in epoch microseconds (``frame``).
     shell_started_us: int = 0
     process_depth: int = 0
     # How deep the shell this session runs is nested: the levels the shells
@@ -1004,7 +1002,7 @@ class SessionState:
             # A recorded session comes back as it was written, so a
             # startup variable it had unset stays unset rather than being
             # seeded again; a bare environment starts a new shell.
-            session.vars = ShellVars.of(recorded, session.ids.random_u32)
+            session.vars = ShellVars.of(recorded, secure_draw(session.ids))
             for name in unassigned:
                 if isinstance(recorded[name].value, (ShellArray, dict)):
                     session.vars.shell.unassigned(name)
@@ -1092,13 +1090,13 @@ class SessionState:
         if name == "vars" and not isinstance(value, ShellVars):
             ids = self.__dict__.get("ids")
             value = ShellVars.of(
-                value, None if ids is None else ids.random_u32
+                value, None if ids is None else secure_draw(ids)
             )
         object.__setattr__(self, name, value)
         # The shell draws a first `$RANDOM` seed from the session's ids, so
         # a new source, or a new shell, binds as it lands.
         if name in ("ids", "vars") and {"ids", "vars"} <= self.__dict__.keys():
-            self.vars.shell.use_ids(self.ids.random_u32)
+            self.vars.shell.use_ids(secure_draw(self.ids))
         # The shell holds the hidden names itself, so a new visibility,
         # or a new shell, takes them as it lands, wherever it is set.
         if (

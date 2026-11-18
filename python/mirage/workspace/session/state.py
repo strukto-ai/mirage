@@ -65,7 +65,9 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
     variables, the bytes left under ``max_memory``, the running command's
     line and process, the voice the shell's diagnostics lead with, and
     the time now and when the running shell started, which ``$SECONDS``
-    and ``$EPOCHSECONDS`` read.
+    and ``$EPOCHSECONDS`` read: a shell's first frame sets its start
+    (``shell_started_us``, 0 until then) from the clock the line reads,
+    so the two never come from different clocks.
 
     Args:
         session (SessionState): the session.

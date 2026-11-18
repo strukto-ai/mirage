@@ -36,7 +36,7 @@ import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { Limit, MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { SystemIdSource, secureDraw, type IdSource } from '../../utils/ids.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { StatusWriter } from '../types.ts'
 import { STARTUP_VALUES } from './constants.ts'
@@ -209,7 +209,7 @@ export interface SessionInit {
   processes?: ProcessPermissions
   processId?: number | null
   shellPid?: number | null
-  /** When the running shell started, in epoch microseconds, which `$SECONDS` counts from. */
+  /** When the running shell started, in epoch microseconds (`frame`). */
   shellStartedUs?: number
   processDepth?: number
   shellNesting?: number
@@ -405,9 +405,9 @@ function restoredVars(
   return out
 }
 
-/** A shell's draw from an id source, which holds no session. */
+/** A shell's draw from an id source, which holds no session: its secure draw (`secureDraw`). */
 function drawFrom(ids: IdSource): () => number {
-  return () => ids.randomU32()
+  return secureDraw(ids)
 }
 
 export class SessionState {
@@ -625,9 +625,7 @@ export class SessionState {
   processes: ProcessPermissions
   processId: number | null
   shellPid: number | null
-  // When the running shell started, in epoch microseconds, which `$SECONDS`
-  // counts from; 0 until its first frame sets it on the line's clock
-  // (`seedShell`, `frame`).
+  // When the running shell started, in epoch microseconds (`frame`).
   shellStartedUs: number
   processDepth: number
   // How deep the shell this session runs is nested: the levels the shells

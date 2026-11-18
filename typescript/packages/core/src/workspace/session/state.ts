@@ -53,7 +53,9 @@ export const MICROS = 1_000_000
  * `max_env` and the bytes the session holds beside its variables, the bytes
  * left under `max_memory`, the running command's line and process, the voice
  * the shell's diagnostics lead with, and the time now and when the running
- * shell started, which `$SECONDS` and `$EPOCHSECONDS` read. Mirrors Python's
+ * shell started, which `$SECONDS` and `$EPOCHSECONDS` read: a shell's first
+ * frame sets its start (`shellStartedUs`, 0 until then) from the clock the
+ * line reads, so the two never come from different clocks. Mirrors Python's
  * frame.
  */
 export function frame(session: SessionState, callStack: CallStack | null = null): void {

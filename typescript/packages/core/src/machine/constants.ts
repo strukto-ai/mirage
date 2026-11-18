@@ -144,22 +144,22 @@ export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
  * `$2` is the reason for a name no folder on PATH holds (`command not found`),
  * `$3` leads a file PATH holds that cannot run, named by its path as bash
  * names it (`bash: line 3: `; empty to lead with `$1`), and `$4` is the
- * program. It runs in a subshell of its own, so none of its names reaches the
+ * program. An empty PATH entry is the working directory, as it is to bash and
+ * to sh's exec. It runs in a subshell of its own, so none of its names reaches the
  * program's environment, and needs only sh's builtins, so a PATH with no
  * tools still runs it. Mirrors Python's `PROGRAM_CHECK`.
  */
 export const PROGRAM_CHECK =
-  'set -f; ' +
   'case $4 in */*) if [ -d "$4" ]; then ' +
   `printf '%sIs a directory\\n' "$1" >&2; exit 126; ` +
   'elif [ ! -e "$4" ]; then ' +
   `printf '%sNo such file or directory\\n' "$1" >&2; exit 127; ` +
   'elif [ ! -x "$4" ]; then ' +
   `printf '%sPermission denied\\n' "$1" >&2; exit 126; fi;; ` +
-  '*) f=; IFS=:; for d in $PATH; do d=${d:-.}; ' +
+  '*) f=; r=$PATH; while :; do d=${r%%:*}; d=${d:-.}; ' +
   'if [ -f "$d/$4" ] && [ -x "$d/$4" ]; then exit 0; fi; ' +
   'if [ -z "$f" ] && [ -e "$d/$4" ] && [ ! -d "$d/$4" ]; then f=$d/$4; fi; ' +
-  'done; ' +
+  'case $r in *:*) r=${r#*:};; *) break;; esac; done; ' +
   `if [ -z "$f" ]; then printf '%s%s\\n' "$1" "$2" >&2; exit 127; fi; ` +
   `if [ -n "$3" ]; then printf '%s%s: Permission denied\\n' "$3" "$f" >&2; ` +
   `else printf '%sPermission denied\\n' "$1" >&2; fi; exit 126;; esac`

@@ -129,6 +129,19 @@ export interface IdSource {
   secureBytes(count: number): Uint8Array
 }
 
+/**
+ * A 32-bit draw from `ids`'s secure bytes, as the shell's `$SRANDOM` and
+ * `$RANDOM`'s first seed take it: unpredictable from the system's source, and
+ * from a seeded one its sequence, word for word as `randomU32` draws it.
+ * Mirrors Python's `secure_draw`.
+ */
+export function secureDraw(ids: IdSource): () => number {
+  return () => {
+    const bytes = ids.secureBytes(4)
+    return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true)
+  }
+}
+
 /** The last id's millisecond and counter, which the next id follows. */
 interface Floor {
   lastMs: number
