@@ -122,4 +122,19 @@ describe('drive', () => {
       await ws.close()
     }
   })
+
+  // The count an unassigned SECONDS reads starts with the session's shell, so
+  // a later top-level line counts on from it.
+  it("counts SECONDS from the session's first line", async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = new Workspace({}, { clock, systemTime: '2026-01-01T00:00:00Z' })
+    try {
+      await ws.shell('true')
+      clock.advance(5)
+      const result = await ws.shell('echo $SECONDS')
+      expect(DEC.decode(result.stdout)).toBe('5\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })

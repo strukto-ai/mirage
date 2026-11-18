@@ -1061,6 +1061,20 @@ mod tests {
     }
 
     #[test]
+    fn a_declined_expression_leaves_seconds_as_it_was() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.set_clock(9_000_000, 1_000_000);
+        store.set_seconds(10);
+        assert_eq!(writer(&mut store).clean_arith(b"SECONDS=20, 1/0"), None);
+        assert_eq!(store.dynamic(SECONDS), Some(b"10".to_vec()));
+        assert_eq!(
+            writer(&mut store).clean_arith(b"SECONDS=20, SECONDS+1"),
+            Some(21)
+        );
+        assert_eq!(store.dynamic(SECONDS), Some(b"20".to_vec()));
+    }
+
+    #[test]
     fn an_arithmetic_seconds_write_counts_for_the_reads_after_it() {
         let mut store = Store::new(Arc::new(|| 1));
         store.set_clock(9_000_000, 1_000_000);

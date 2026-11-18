@@ -64,6 +64,10 @@ impl<'s> Reading<'s> {
 impl Vars for Reading<'_> {
     fn draw(&mut self, name: &str) -> Result<Option<Vec<u8>>, Halt> {
         if let Some(value) = self.store.dynamic(name) {
+            let pending = self.draws.as_deref().and_then(|draws| draws.seconds);
+            if let Some(count) = pending.filter(|_| self.store.target(name) == SECONDS) {
+                return Ok(Some(count.to_string().into_bytes()));
+            }
             return Ok(Some(value));
         }
         if !self.store.random_special(name) {
@@ -148,9 +152,13 @@ impl Vars for Reading<'_> {
 
     fn wrote(&mut self, name: &str, value: &str) -> Result<(), Halt> {
         if self.store.counts_seconds(name) {
-            // An assignment restarts the count at once, so a read later in
-            // the expression counts from it (`SECONDS=10, SECONDS+1`).
-            self.store.set_seconds(value.parse::<i64>().unwrap_or(0));
+            // A read later in the expression counts from the assignment
+            // (`SECONDS=10, SECONDS+1`); the session's count restarts only
+            // when the write lands, so an expression a caller declines
+            // (`SECONDS=20, 1/0`) leaves it as it was.
+            if let Some(draws) = self.draws.as_deref_mut() {
+                draws.seconds = value.parse::<i64>().ok().or(Some(0));
+            }
             return Ok(());
         }
         if !self.store.random_special(name) {

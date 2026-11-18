@@ -147,3 +147,18 @@ async def test_a_substitution_brings_its_end_time_to_the_words_after_it():
         assert await io.stdout_str() == "3\n"
     finally:
         await ws.close()
+
+
+# The count an unassigned SECONDS reads starts with the session's shell,
+# so a later top-level line counts on from it.
+@pytest.mark.asyncio
+async def test_seconds_counts_from_the_session_s_first_line():
+    clock = ManualClock(1_000_000)
+    ws = Workspace({}, clock=clock, system_time="2026-01-01T00:00:00Z")
+    try:
+        await ws.shell("true")
+        clock.advance(5)
+        io = await ws.shell("echo $SECONDS")
+        assert await io.stdout_str() == "5\n"
+    finally:
+        await ws.close()

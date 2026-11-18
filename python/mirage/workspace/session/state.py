@@ -798,16 +798,19 @@ def seed_parent(session: SessionState, pid: int) -> None:
 def seed_shell(session: SessionState, nested: bool = False) -> None:
     """Start what a bash shell sets of itself as it starts: the count
     ``$SECONDS`` reads, from its first frame, on the clock the line
-    reads (``frame``), its version (``BASH_VERSION`` and the readonly
-    ``BASH_VERSINFO``), and ``SHLVL``, exported: one deeper than the one
-    it was handed for a nested shell, and 1 for a top one handed none. A
-    name made readonly stays as it is.
+    reads (``frame``), once per session, so a later top-level line
+    counts on from it and only a nested shell starts its own; its
+    version (``BASH_VERSION`` and the readonly ``BASH_VERSINFO``), and
+    ``SHLVL``, exported: one deeper than the one it was handed for a
+    nested shell, and 1 for a top one handed none. A name made readonly
+    stays as it is.
 
     Args:
         session (SessionState): the shell.
         nested (bool): another shell started it (``bash script.sh``).
     """
-    session.shell_started_us = 0
+    if nested:
+        session.shell_started_us = 0
     if not env_is_readonly(session, BASH_VERSINFO):
         seed_var(session, BASH_VERSION, VERSION_TEXT)
         seed_var(
