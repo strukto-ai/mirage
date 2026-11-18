@@ -21,7 +21,6 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from mirage.errors import FsCondition, classify
-from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import check_memory
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
@@ -336,13 +335,10 @@ class MontyFs(AbstractOS):
         target = path_from_arg(path)
         files = self._files_for(target)
         row = self._row(target)
-        try:
+        with as_guest_error(str(target)):
             check_memory(row.size if row is not None else 0)
-            with as_guest_error(str(target)):
-                data = files.read(str(target))
+            data = files.read(str(target))
             check_memory(len(data))
-        except MemoryExhausted as exc:
-            raise MemoryError(str(exc)) from exc
         return data
 
     def path_write_text(

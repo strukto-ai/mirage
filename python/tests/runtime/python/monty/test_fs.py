@@ -22,6 +22,7 @@ import mirage.runtime.python.monty.fs as monty_fs
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import materialize
 from mirage.runtime.binding import WorkspaceBinding, answer_of
@@ -568,6 +569,36 @@ def test_monty_refuses_an_unsized_file_past_the_memory_room_once_read():
                 "except MemoryError as exc:\n"
                 "    print('MemoryError', exc)",
             ),
+        )
+    )
+    assert result.stdout == b"MemoryError memory exhausted\n", result.stderr
+
+
+class RefusingReadDispatch(FakeDispatch):
+    """A mount whose read is refused for memory partway, as a bounded
+    machine read is."""
+
+    async def __call__(self, op, path, **kwargs):
+        if op == "read" and path.virtual in self.files:
+            raise MemoryExhausted()
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_a_read_refused_for_memory_is_a_guest_memory_error():
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(
+            RefusingReadDispatch({"/s3/a.bin": b"x"}),
+            PrefixResolver(lambda: ["/s3/"]),
+        )
+    )
+    result = asyncio.run(
+        _run(
+            runtime,
+            "try:\n"
+            "    open('/s3/a.bin', 'rb').read()\n"
+            "except MemoryError as exc:\n"
+            "    print('MemoryError', exc)",
         )
     )
     assert result.stdout == b"MemoryError memory exhausted\n", result.stderr

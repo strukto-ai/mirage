@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/index.ts'
-import { MemoryExhausted } from '../../../io/errors.ts'
 import { checkMemory } from '../../../io/memory.ts'
 import { isAborting } from '../../../errors/fs.ts'
 import { entryName } from '../../../utils/remnants.ts'
@@ -430,15 +429,10 @@ export class MontyFs {
    * guest's MemoryError. Mirrors Python's `path_read_bytes`.
    */
   private async readWhole(path: string, files: RuntimeFiles): Promise<Uint8Array> {
-    try {
-      checkMemory((await files.viewStat(path))?.size ?? 0)
-      const data = await files.read(path)
-      checkMemory(data.byteLength)
-      return data
-    } catch (err) {
-      if (!(err instanceof MemoryExhausted)) throw err
-      throw Object.assign(new Error(err.message), { name: 'MemoryError', guestCondition: 'memory' })
-    }
+    checkMemory((await files.viewStat(path))?.size ?? 0)
+    const data = await files.read(path)
+    checkMemory(data.byteLength)
+    return data
   }
 
   private async open(path: string, mode: string, files: RuntimeFiles): Promise<unknown> {

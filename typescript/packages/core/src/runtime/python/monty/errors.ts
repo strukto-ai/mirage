@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MemoryExhausted } from '../../../io/errors.ts'
 import { classify, type FsCondition } from '../../../errors/index.ts'
 import { isAborting } from '../../../errors/fs.ts'
 import { POSIX } from '../../../errors/posix.ts'
@@ -107,5 +108,7 @@ export function asGuestError(err: unknown, path: string, target?: string): unkno
   // any other.
   if ((err as { guestCondition?: unknown }).guestCondition !== undefined) return err
   if (isAborting(err)) return err
+  if (err instanceof MemoryExhausted)
+    return Object.assign(new Error(err.message), { name: 'MemoryError', guestCondition: 'memory' })
   return guestError(classify(err) ?? 'EIO', path, target)
 }

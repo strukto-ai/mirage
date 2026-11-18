@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -574,6 +575,17 @@ describe('MontyFs path operations', () => {
       runWithMemory(new MemoryBudget(1_000_000, () => 0), () =>
         Promise.resolve(accessOn(dispatch).handle('Path.read_bytes', ['/ram/big.bin'])),
       ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
+  })
+
+  it('turns a read refused for memory into the guest MemoryError', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) =>
+      op === 'stat'
+        ? Promise.resolve(new FileStat({ name: path, size: 1, type: FileType.FILE }))
+        : Promise.reject(new MemoryExhausted()),
+    )
+    await expect(
+      Promise.resolve(accessOn(dispatch).handle('Path.read_bytes', ['/ram/a.bin'])),
     ).rejects.toThrow(expect.objectContaining({ name: 'MemoryError', message: 'memory exhausted' }))
   })
 

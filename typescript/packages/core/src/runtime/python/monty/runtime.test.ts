@@ -514,6 +514,18 @@ describe('MontyRuntime', () => {
     expect(mutations).toEqual([])
   }, 30_000)
 
+  it('refuses a file read past the memory room from the engine callback', async () => {
+    const { dispatch } = makeBridge({ '/s3/big.bin': new Uint8Array(2_000_000) })
+    const rt = make(dispatch)
+    const result = await runWithMemory(new MemoryBudget(1_000_000, () => 0), () =>
+      run(
+        rt,
+        "try:\n    open('/s3/big.bin', 'rb').read(1)\nexcept MemoryError as exc:\n    print('MemoryError', exc)",
+      ),
+    )
+    expect(text(result.stdout)).toBe('MemoryError memory exhausted\n')
+  }, 30_000)
+
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch)
