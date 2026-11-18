@@ -321,6 +321,397 @@ fn rules(raw: &Doc, at: &str, reason: &[u32], dialect: Whitespace) -> Answer {
     Ok(Doc::List(out))
 }
 
+const VERBS: [&str; 3] = ["allow", "ask", "deny"];
+const LEAF_FIELDS: [&str; 3] = ["decision", "reason", "paths"];
+const FLAT_EXAMPLE: &str = "commands: {\"*\": allow, rm: {--recursive: {--force: deny}}, gh: {pr: {merge: {--admin: deny}}}}";
+
+fn verb(raw: &Doc) -> bool {
+    VERBS.iter().any(|name| raw.named(name))
+}
+
+fn leaf_like(raw: &Doc) -> bool {
+    match raw {
+        Doc::Map(_) => LEAF_FIELDS
+            .iter()
+            .any(|name| !matches!(raw.get(name), Doc::Null)),
+        _ => true,
+    }
+}
+
+fn key_name(key: &Doc, at: &str) -> Result<Text, String> {
+    match key {
+        Doc::Text(text) => Ok(text.clone()),
+        _ => Err(format!(
+            "{at}: every key must be a string; quote a number or a boolean, as \"5\""
+        )),
+    }
+}
+
+fn dashed(name: &[u32]) -> bool {
+    name.len() > 1 && name[0] == u32::from(b'-')
+}
+
+fn shown(name: &[u32]) -> String {
+    Doc::Text(name.to_vec()).shown()
+}
+
+fn leaf(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    if verb(raw) {
+        return Ok(object(vec![
+            ("decision", raw.clone()),
+            ("reason", Doc::text("")),
+            ("paths", Doc::List(Vec::new())),
+        ]));
+    }
+    if !matches!(raw, Doc::Map(_)) {
+        return Err(format!(
+            "{at} must be allow, ask, deny or a {{decision, reason, paths}} mapping"
+        ));
+    }
+    fields(raw, &LEAF_FIELDS, at)?;
+    let decision = raw.get("decision");
+    if !verb(decision) {
+        return Err(format!("{at}.decision must be allow, ask or deny"));
+    }
+    let reason = match raw.get("reason") {
+        Doc::Null => Doc::text(""),
+        Doc::Text(text) => Doc::Text(text.clone()),
+        _ => return Err(format!("{at}.reason must be a string")),
+    };
+    Ok(object(vec![
+        ("decision", decision.clone()),
+        ("reason", reason),
+        (
+            "paths",
+            strings(
+                raw.get("paths"),
+                &format!("{at}.paths"),
+                Some("a path"),
+                dialect,
+            )?,
+        ),
+    ]))
+}
+
+fn leaves(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    match raw {
+        Doc::List(items) if items.is_empty() => Err(format!("{at} lists no decision")),
+        Doc::List(items) => items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| leaf(item, &format!("{at}[{i}]"), dialect))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Doc::List),
+        Doc::Text(_) if !verb(raw) => Err(format!(
+            "{at}: `{}` is no decision; write allow, ask or deny",
+            raw.shown()
+        )),
+        _ => Ok(Doc::List(vec![leaf(raw, at, dialect)?])),
+    }
+}
+
+fn words(
+    raw: &Doc,
+    at: &str,
+    dialect: Whitespace,
+    each: fn(&Doc, &str, Whitespace) -> Answer,
+) -> Answer {
+    let fields = raw.mapping(at)?;
+    if fields.is_empty() {
+        return Err(format!("{at} names no word"));
+    }
+    let mut out = Vec::new();
+    for (key, value) in fields {
+        let word = key_name(key, at)?;
+        let target = each(value, &format!("{at}[{}]", shown(&word)), dialect)?;
+        out.push((Doc::Text(word), target));
+    }
+    Ok(Doc::Map(out))
+}
+
+fn value_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    if leaf_like(raw) {
+        return Ok(object(vec![
+            ("decision", leaves(raw, at, dialect)?),
+            ("options", Doc::Map(Vec::new())),
+        ]));
+    }
+    let mut decision = Doc::List(Vec::new());
+    let mut options = Vec::new();
+    for (key, value) in raw.mapping(at)? {
+        let name = key_name(key, at)?;
+        let here = format!("{at}.{}", shown(&name));
+        if name == [u32::from(b'*')] {
+            decision = leaves(value, &here, dialect)?;
+        } else if dashed(&name) && name != [u32::from(b'-'), u32::from(b'*')] {
+            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+        } else {
+            return Err(format!(
+                "{at}: `{}` is no option; under a value, name the options that must also be present",
+                shown(&name)
+            ));
+        }
+    }
+    Ok(object(vec![
+        ("decision", decision),
+        ("options", Doc::Map(options)),
+    ]))
+}
+
+fn option_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    if leaf_like(raw) {
+        return Ok(object(vec![
+            ("decision", leaves(raw, at, dialect)?),
+            ("values", Doc::Map(Vec::new())),
+            ("options", Doc::Map(Vec::new())),
+        ]));
+    }
+    let mut decision = Doc::List(Vec::new());
+    let mut values = Doc::Map(Vec::new());
+    let mut options = Vec::new();
+    for (key, value) in raw.mapping(at)? {
+        let name = key_name(key, at)?;
+        let here = format!("{at}.{}", shown(&name));
+        if name == [u32::from(b'*')] {
+            decision = leaves(value, &here, dialect)?;
+        } else if Doc::Text(name.clone()).named("values") {
+            values = words(value, &here, dialect, value_rule)?;
+        } else if name == [u32::from(b'-'), u32::from(b'*')] {
+            return Err(format!(
+                "{here}: -* belongs on a command, not under an option"
+            ));
+        } else if dashed(&name) {
+            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+        } else if Doc::Text(name.clone()).named("operands") {
+            return Err(format!(
+                "{here}: operands belong on a command, not under an option"
+            ));
+        } else {
+            return Err(format!(
+                "{at}: `{}` is no option; a value goes under values",
+                shown(&name)
+            ));
+        }
+    }
+    Ok(object(vec![
+        ("decision", decision),
+        ("values", values),
+        ("options", Doc::Map(options)),
+    ]))
+}
+
+fn command_node(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    let empty = || Doc::Map(Vec::new());
+    if leaf_like(raw) {
+        return Ok(object(vec![
+            ("decision", leaves(raw, at, dialect)?),
+            ("subcommands", empty()),
+            ("options", empty()),
+            ("other_options", Doc::List(Vec::new())),
+            ("operands", empty()),
+        ]));
+    }
+    let mut decision = Doc::List(Vec::new());
+    let mut other = Doc::List(Vec::new());
+    let mut operands = empty();
+    let mut subcommands = Vec::new();
+    let mut options = Vec::new();
+    for (key, value) in raw.mapping(at)? {
+        let name = key_name(key, at)?;
+        let here = format!("{at}.{}", shown(&name));
+        if name == [u32::from(b'*')] {
+            decision = leaves(value, &here, dialect)?;
+        } else if name == [u32::from(b'-'), u32::from(b'*')] {
+            other = leaves(value, &here, dialect)?;
+        } else if dashed(&name) {
+            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+        } else if Doc::Text(name.clone()).named("operands") {
+            operands = words(value, &here, dialect, command_node)?;
+        } else if Doc::Text(name.clone()).named("values") {
+            return Err(format!("{here}: values belong under an option"));
+        } else {
+            subcommands.push((Doc::Text(name), command_node(value, &here, dialect)?));
+        }
+    }
+    if !subcommands.is_empty() && !matches!(&operands, Doc::Map(fields) if fields.is_empty()) {
+        return Err(format!(
+            "{at}: operands sit on a command without subcommands; this one names subcommands"
+        ));
+    }
+    Ok(object(vec![
+        ("decision", decision),
+        ("subcommands", Doc::Map(subcommands)),
+        ("options", Doc::Map(options)),
+        ("other_options", other),
+        ("operands", operands),
+    ]))
+}
+
+/// Whether a `commands` block is written in the flat format: an `allow`,
+/// `ask` or `deny` list holding a command pattern or a rule mapping,
+/// which a tree's list of decisions never does.
+fn flat(raw: &Doc) -> bool {
+    VERBS.iter().any(|name| match raw.get(name) {
+        Doc::List(items) => {
+            items.is_empty()
+                || items.iter().any(|item| match item {
+                    Doc::Map(_) => matches!(item.get("decision"), Doc::Null),
+                    _ => !verb(item),
+                })
+        }
+        _ => false,
+    })
+}
+
+fn tree(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+    if flat(raw) {
+        return Err(format!(
+            "{at} is in the old flat format (allow, ask and deny lists of command patterns); \
+             write it as a tree of command names instead, for example {FLAT_EXAMPLE}"
+        ));
+    }
+    let fields = raw.mapping(at)?;
+    let mut decision = Doc::List(Vec::new());
+    let mut commands = Vec::new();
+    for (key, value) in fields {
+        let name = key_name(key, at)?;
+        let here = format!("{at}.{}", shown(&name));
+        if name == [u32::from(b'*')] {
+            decision = leaves(value, &here, dialect)?;
+        } else if dashed(&name) {
+            return Err(format!(
+                "{at}: the option {} needs a command; put it under one",
+                shown(&name)
+            ));
+        } else if LEAF_FIELDS
+            .iter()
+            .chain(&["operands", "values"])
+            .any(|reserved| Doc::Text(name.clone()).named(reserved))
+        {
+            return Err(format!(
+                "{at}: `{}` needs a command; the block maps command names, and \"*\" stands for every command not named",
+                shown(&name)
+            ));
+        } else {
+            commands.push((Doc::Text(name), command_node(value, &here, dialect)?));
+        }
+    }
+    Ok(object(vec![
+        ("decision", decision),
+        ("subcommands", Doc::Map(commands)),
+        ("options", Doc::Map(Vec::new())),
+        ("other_options", Doc::List(Vec::new())),
+        ("operands", Doc::Map(Vec::new())),
+    ]))
+}
+
+/// A tree written as JSON, read and flattened the way a host does, for
+/// the matcher's tests.
+#[cfg(test)]
+pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::Tree, String> {
+    use crate::policy::Outcome;
+    use crate::policy::tree::{Leaf, Node, OptionRule, Tree, ValueRule};
+    use serde_json::Value;
+
+    fn doc(value: &Value) -> Doc {
+        match value {
+            Value::Null => Doc::Null,
+            Value::String(text) => Doc::text(text),
+            Value::Array(items) => Doc::List(items.iter().map(doc).collect()),
+            Value::Object(fields) => Doc::Map(
+                fields
+                    .iter()
+                    .map(|(key, item)| (Doc::text(key), doc(item)))
+                    .collect(),
+            ),
+            _ => Doc::Invalid,
+        }
+    }
+    fn text(raw: &Doc) -> Text {
+        match raw {
+            Doc::Text(text) => text.clone(),
+            _ => Text::new(),
+        }
+    }
+    fn pairs(raw: &Doc) -> &[(Doc, Doc)] {
+        match raw {
+            Doc::Map(fields) => fields,
+            _ => &[],
+        }
+    }
+    fn ids(raw: &Doc, leaves: &mut Vec<Leaf>) -> Vec<usize> {
+        let Doc::List(items) = raw else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .map(|item| {
+                let verb = item.get("decision");
+                let decision = if verb.named("deny") {
+                    Outcome::Deny
+                } else if verb.named("ask") {
+                    Outcome::Ask
+                } else {
+                    Outcome::Allow
+                };
+                let paths = match item.get("paths") {
+                    Doc::List(paths) => paths.iter().map(text).collect(),
+                    _ => Vec::new(),
+                };
+                leaves.push(Leaf {
+                    decision,
+                    reason: text(item.get("reason")),
+                    paths,
+                });
+                leaves.len() - 1
+            })
+            .collect()
+    }
+    fn options(raw: &Doc, leaves: &mut Vec<Leaf>) -> Vec<(Text, OptionRule)> {
+        pairs(raw)
+            .iter()
+            .map(|(key, value)| (text(key), option(value, leaves)))
+            .collect()
+    }
+    fn option(raw: &Doc, leaves: &mut Vec<Leaf>) -> OptionRule {
+        OptionRule {
+            decision: ids(raw.get("decision"), leaves),
+            values: pairs(raw.get("values"))
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        text(key),
+                        ValueRule {
+                            decision: ids(value.get("decision"), leaves),
+                            options: options(value.get("options"), leaves),
+                        },
+                    )
+                })
+                .collect(),
+            options: options(raw.get("options"), leaves),
+        }
+    }
+    fn node(raw: &Doc, leaves: &mut Vec<Leaf>) -> Node {
+        Node {
+            decision: ids(raw.get("decision"), leaves),
+            subcommands: pairs(raw.get("subcommands"))
+                .iter()
+                .map(|(key, value)| (text(key), node(value, leaves)))
+                .collect(),
+            options: options(raw.get("options"), leaves),
+            other_options: ids(raw.get("other_options"), leaves),
+            operands: pairs(raw.get("operands"))
+                .iter()
+                .map(|(key, value)| (text(key), node(value, leaves)))
+                .collect(),
+        }
+    }
+    let shaped = tree(&doc(value), "commands", Whitespace::Python)?;
+    let mut leaves = Vec::new();
+    let root = node(&shaped, &mut leaves);
+    Ok(Tree { root, leaves })
+}
+
 fn hide_group(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
     fields(raw, &["patterns", "reason"], at)?;
     let patterns = strings(
@@ -642,6 +1033,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rule" => rule(&raw, &at, &reason, dialect),
         "allow" => allow(&raw, &at, dialect),
         "rules" => rules(&raw, &at, &reason, dialect),
+        "tree" => tree(&raw, &at, dialect),
         "paths" => paths(&raw, &at, dialect),
         "config" => workspace_fields(&raw, names.as_deref().unwrap_or("workspace"), &at),
         _ => return Err(StreamError::new("document: unknown operation")),
@@ -941,5 +1333,192 @@ mod tests {
                 .unwrap_err()
                 .contains("reason must be a string")
         );
+    }
+
+    fn m(fields: &[(&str, Doc)]) -> Doc {
+        Doc::Map(
+            fields
+                .iter()
+                .map(|(key, value)| (Doc::text(key), value.clone()))
+                .collect(),
+        )
+    }
+
+    fn shape(raw: &Doc) -> Answer {
+        tree(raw, "commands", Whitespace::Python)
+    }
+
+    fn decisions(node: &Doc) -> Vec<String> {
+        match node.get("decision") {
+            Doc::List(items) => items
+                .iter()
+                .map(|leaf| leaf.get("decision").shown())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_tree_reads_into_its_explicit_form() {
+        let raw = m(&[
+            ("*", Doc::text("allow")),
+            (
+                "gh",
+                m(&[
+                    ("*", Doc::text("deny")),
+                    (
+                        "pr",
+                        m(&[(
+                            "merge",
+                            m(&[("*", Doc::text("allow")), ("--admin", Doc::text("deny"))]),
+                        )]),
+                    ),
+                ]),
+            ),
+            (
+                "curl",
+                m(&[(
+                    "--request",
+                    m(&[(
+                        "values",
+                        m(&[("POST", m(&[("--insecure", Doc::text("deny"))]))]),
+                    )]),
+                )]),
+            ),
+            (
+                "git",
+                m(&[(
+                    "checkout",
+                    m(&[("operands", m(&[("release/*", Doc::text("ask"))]))]),
+                )]),
+            ),
+            (
+                "rm",
+                Doc::List(vec![
+                    Doc::text("ask"),
+                    m(&[
+                        ("decision", Doc::text("deny")),
+                        ("paths", texts(&["/data/keep/*"])),
+                        ("reason", Doc::text("kept")),
+                    ]),
+                ]),
+            ),
+        ]);
+        let out = shape(&raw).unwrap();
+        assert_eq!(decisions(&out), ["allow"]);
+        let gh = out.get("subcommands").get("gh");
+        assert_eq!(decisions(gh), ["deny"]);
+        let merge = gh
+            .get("subcommands")
+            .get("pr")
+            .get("subcommands")
+            .get("merge");
+        assert_eq!(decisions(merge), ["allow"]);
+        assert_eq!(decisions(merge.get("options").get("--admin")), ["deny"]);
+        let post = out
+            .get("subcommands")
+            .get("curl")
+            .get("options")
+            .get("--request")
+            .get("values")
+            .get("POST");
+        assert_eq!(decisions(post.get("options").get("--insecure")), ["deny"]);
+        let checkout = out
+            .get("subcommands")
+            .get("git")
+            .get("subcommands")
+            .get("checkout");
+        assert_eq!(
+            decisions(checkout.get("operands").get("release/*")),
+            ["ask"]
+        );
+        let rm = out.get("subcommands").get("rm");
+        assert_eq!(decisions(rm), ["ask", "deny"]);
+        let Doc::List(rm_leaves) = rm.get("decision") else {
+            panic!("rm holds a list")
+        };
+        assert_eq!(rm_leaves[1].get("reason").shown(), "kept");
+        assert_eq!(rm_leaves[1].get("paths"), &texts(&["/data/keep/*"]));
+    }
+
+    #[test]
+    fn the_flat_format_is_named_and_refused() {
+        for raw in [
+            m(&[("deny", texts(&["rm -rf"]))]),
+            m(&[("allow", texts(&["*", "gh pr view"]))]),
+            m(&[("ask", Doc::List(vec![m(&[("commands", texts(&["rm"]))])]))]),
+            m(&[("deny", Doc::List(Vec::new()))]),
+        ] {
+            let error = shape(&raw).unwrap_err();
+            assert!(error.contains("old flat format"), "{error}");
+            assert!(error.contains("tree of command names"), "{error}");
+        }
+        assert!(shape(&m(&[("deny", texts(&["ask", "deny"]))])).is_ok());
+    }
+
+    #[test]
+    fn a_misplaced_key_is_refused_with_where_it_goes() {
+        let cases = [
+            (
+                m(&[(
+                    "curl",
+                    m(&[("--request", m(&[("DELETE", Doc::text("deny"))]))]),
+                )]),
+                "a value goes under values",
+            ),
+            (
+                m(&[("curl", m(&[("values", m(&[("x", Doc::text("deny"))]))]))]),
+                "values belong under an option",
+            ),
+            (m(&[("--force", Doc::text("deny"))]), "needs a command"),
+            (m(&[("decision", Doc::text("deny"))]), "needs a command"),
+            (
+                m(&[(
+                    "git",
+                    m(&[
+                        ("add", Doc::text("deny")),
+                        ("operands", m(&[("x", Doc::text("deny"))])),
+                    ]),
+                )]),
+                "without subcommands",
+            ),
+            (m(&[("rm", Doc::text("never"))]), "no decision"),
+            (m(&[("rm", Doc::List(Vec::new()))]), "lists no decision"),
+            (
+                m(&[("rm", m(&[("reason", Doc::text("x"))]))]),
+                "decision must be allow, ask or deny",
+            ),
+            (
+                m(&[(
+                    "rm",
+                    m(&[("decision", Doc::text("deny")), ("pr", Doc::text("allow"))]),
+                )]),
+                "unknown field",
+            ),
+            (
+                m(&[(
+                    "rm",
+                    m(&[(
+                        "operands",
+                        Doc::Map(vec![(Doc::Invalid, Doc::text("deny"))]),
+                    )]),
+                )]),
+                "quote a number",
+            ),
+            (
+                m(&[(
+                    "rm",
+                    m(&[(
+                        "--force",
+                        m(&[("operands", m(&[("x", Doc::text("deny"))]))]),
+                    )]),
+                )]),
+                "operands belong on a command",
+            ),
+        ];
+        for (raw, expected) in cases {
+            let error = shape(&raw).unwrap_err();
+            assert!(error.contains(expected), "{error} lacks {expected}");
+        }
     }
 }

@@ -4,6 +4,7 @@ pub(crate) mod composition;
 pub(crate) mod pattern;
 mod profile;
 pub(crate) mod stream;
+pub(crate) mod tree;
 mod types;
 mod visibility;
 
