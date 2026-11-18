@@ -36,11 +36,11 @@ if TYPE_CHECKING:
     from mirage.policy.errors import (
         PolicyDenied,
         PolicyError,
+        describe_decision,
     )
     from mirage.policy.policies import (
         Policies,
         decision_of,
-        describe_decision,
         policy_denied,
         post_command_gate,
         post_execute_gate,
@@ -124,10 +124,10 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.errors": (
         "PolicyDenied",
         "PolicyError",
+        "describe_decision",
     ),
     "mirage.policy.policies": (
         "Policies",
-        "describe_decision",
         "policy_denied",
         "post_command_gate",
         "post_execute_gate",

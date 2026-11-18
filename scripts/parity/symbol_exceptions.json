@@ -420,7 +420,8 @@
   "cli/stream": {
    "python_only": {
     "_ready": "Python waits for native file-descriptor readiness to stream stdin and stdout without blocking its event loop; Node's stdio streams provide readiness and backpressure directly.",
-    "_stdin_chunks": "Python wraps nonblocking stdin file-descriptor reads as an async iterator; Node's process.stdin already is an async iterable."
+    "_stdin_chunks": "Python wraps nonblocking stdin file-descriptor reads as an async iterator; Node's process.stdin already is an async iterable.",
+    "proxy_for": "Python streams the line over aiohttp, which follows no proxy variable unless told, so the stream resolves the one httpx would use for every other command; the TypeScript CLI sends every request through Node's fetch, which follows none."
    },
    "typescript_only": {
     "Completion": "TypeScript declares the streamed terminal record's parsed JSON shape as an interface; Python reads the same validated record as a dict."

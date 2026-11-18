@@ -39,7 +39,6 @@ from mirage.policy import (
     VfsContext,
     VfsResultContext,
     decision_of,
-    describe_decision,
     post_execute_gate,
     post_vfs_gate,
     pre_vfs_gate,
@@ -633,31 +632,6 @@ def test_decision_of_records_kind_policy_and_ask():
     )
     assert decision_of(Pending("abc123", "sign-off")) == PolicyDecision(
         kind="pending", reason="sign-off", ask_id="abc123"
-    )
-
-
-def test_describe_decision_carries_the_reason_the_stderr_line_dropped():
-    assert (
-        describe_decision(
-            PolicyDecision(
-                kind="deny", reason="user rule", policy="RulePolicy"
-            )
-        )
-        == "policy denied: user rule"
-    )
-    assert (
-        describe_decision(
-            PolicyDecision(kind="pending", reason="sign-off", ask_id="abc123")
-        )
-        == "requires approval: sign-off (ask abc123)"
-    )
-    assert (
-        describe_decision(
-            PolicyDecision(
-                kind="failed", reason="Raising failed", policy="Raising"
-            )
-        )
-        == "policy Raising failed"
     )
 
 

@@ -72,3 +72,15 @@ export class PolicyDenied extends Error {
     this.decision = decision
   }
 }
+
+/**
+ * One line saying why, for a surface that hands the agent text rather
+ * than a record; the agent adapters append it after stderr.
+ */
+export function describeDecision(decision: PolicyDecision): string {
+  if (decision.kind === 'pending') {
+    return `requires approval: ${decision.reason} (ask ${decision.askId ?? ''})`
+  }
+  if (decision.kind === 'failed') return `policy ${decision.policy} failed`
+  return `policy denied: ${decision.reason}`
+}

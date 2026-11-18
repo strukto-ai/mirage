@@ -5,8 +5,10 @@ import logging
 import os
 import stat
 import sys
+import urllib.parse
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from typing import Any
+from urllib.request import getproxies_environment, proxy_bypass
 
 import aiohttp
 
@@ -144,6 +146,45 @@ async def consume_stream(
     raise ValueError("daemon stream ended without a completion record")
 
 
+def proxy_for(url: str) -> tuple[str | None, aiohttp.BasicAuth | None]:
+    """The HTTP proxy the environment names for ``url`` and its
+    credentials, or ``(None, None)`` to connect directly, so the line
+    takes the route every other command takes through httpx: a proxy
+    without a scheme is ``http://``, and a ``NO_PROXY`` entry may name a
+    port or a bare IPv6 address. aiohttp's
+    ``trust_env`` is not used: it also reads ``.netrc``, which clashes with
+    the bearer header, and the macOS system proxies. A SOCKS proxy is not
+    followed: aiohttp has none. The bearer header must go on the request,
+    not the session: aiohttp 3.14.5 copies a session's ``Authorization``
+    into ``Proxy-Authorization``, into the CONNECT too. The credentials go
+    as the deprecated ``proxy_auth``: aiohttp drops ``proxy_headers`` for
+    an ``http://`` URL.
+
+    Args:
+        url (str): the daemon URL the line goes to.
+    """
+    target = urllib.parse.urlsplit(url)
+    proxies = getproxies_environment()
+    named = proxies.get(target.scheme) or proxies.get("all")
+    if not named:
+        return None, None
+    proxy = urllib.parse.urlsplit(
+        named if "://" in named else f"http://{named}"
+    )
+    if proxy.scheme not in ("http", "https"):
+        return None, None
+    authority = target.netloc.rpartition("@")[2]
+    if proxy_bypass(authority) or proxy_bypass(target.hostname or ""):
+        return None, None
+    bare = proxy._replace(netloc=proxy.netloc.rpartition("@")[2]).geturl()
+    if proxy.username is None:
+        return bare, None
+    return bare, aiohttp.BasicAuth(
+        urllib.parse.unquote(proxy.username),
+        urllib.parse.unquote(proxy.password or ""),
+    )
+
+
 def decision_of(result: dict[str, Any] | None) -> PolicyDecision | None:
     """The decision record off a completion's result.
 
@@ -209,14 +250,18 @@ async def stream_shell(
         else:
             await _write(stderr_fd, data)
 
+    url = client.settings.url.rstrip("/") + path
+    proxy, proxy_auth = proxy_for(url)
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=None),
-            headers=headers,
         ) as session:
             async with session.post(
-                client.settings.url.rstrip("/") + path,
+                url,
+                headers=headers,
                 data=body,
+                proxy=proxy,
+                proxy_auth=proxy_auth,
                 json=payload if body is None else None,
             ) as response:
                 if response.status == 499:
