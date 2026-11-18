@@ -47,7 +47,11 @@ function push(ref = 'refs/heads/main', extra: Record<string, JsonValue> = {}) {
 }
 
 async function pairs(eventName: string, payload: JsonValue): Promise<[string, string][]> {
-  const events = await new GitHubEventHook(accessor({ ref: 'main' })).toEvents(ROOT, eventName, payload)
+  const events = await new GitHubEventHook(accessor({ ref: 'main' })).toEvents(
+    ROOT,
+    eventName,
+    payload,
+  )
   return events.map((event) => [event.kind, event.path.virtual])
 }
 

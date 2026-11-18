@@ -507,6 +507,7 @@ TypeScript core use the same filters. `integ/policy/documents.json` and
 record normalization on both hosts.
 Formatting and stream unit tests consolidated under `commands/builtin/utils/`
 remain covered by the same whole-host filters on both hosts.
+The Cloudflare filter includes the Wasm build scripts in both the core and Cloudflare packages.
 
 | Changed                                                                                                                                                                     | Also sets                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |

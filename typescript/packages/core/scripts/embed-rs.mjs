@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stripCustomSections } from './strip-custom-sections.mjs'
 
 const workspace = fileURLToPath(new URL('../../../../rust/', import.meta.url))
 const target = 'wasm32-unknown-unknown'
@@ -16,7 +17,7 @@ const registry = join(process.env.CARGO_HOME ?? join(homedir(), '.cargo'), 'regi
 const output = new URL('../src/generated/', import.meta.url)
 const built = new URL('../dist/generated/', import.meta.url)
 // CI keeps the modules between runs (.github/actions/setup-node-pnpm), keyed
-// on all that decides their bytes, rust/ and this script, so a module found
+// on all that decides their bytes, rust/ and these scripts, so a module found
 // there was built from these sources and cargo is not run for it.
 const kept = process.env.MIRAGE_WASM_CACHE
 
@@ -72,27 +73,7 @@ function compile(crate, build, small) {
     .flatMap((message) => message.filenames)
     .find((file) => file.endsWith(artifact))
   if (path === undefined) throw new Error(`cargo reported no ${artifact}`)
-  return bare(readFileSync(path))
-}
-
-// The linker's strip keeps custom sections, such as the metadata wasm-bindgen's
-// macros leave for a tool this build never runs; no host reads them.
-function bare(wasm) {
-  const sections = [wasm.subarray(0, 8)]
-  let at = 8
-  while (at < wasm.length) {
-    const start = at
-    const id = wasm[at++]
-    let size = 0
-    for (let shift = 0; ; shift += 7) {
-      const byte = wasm[at++]
-      size += (byte & 0x7f) * 2 ** shift
-      if (byte < 0x80) break
-    }
-    at += size
-    if (id !== 0) sections.push(wasm.subarray(start, at))
-  }
-  return Buffer.concat(sections)
+  return stripCustomSections(readFileSync(path))
 }
 
 // Write the files a module's `#mirage-*-wasm` import names.

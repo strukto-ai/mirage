@@ -39,7 +39,7 @@ from mirage.policy.profile import (
 from mirage.policy.script import script_context
 from mirage.policy.types import RouteContext
 from mirage.runtime.python.monty import MontyRuntime
-from mirage.runtime.python.monty import runtime as monty_runtime
+from mirage.runtime.python.monty import loader as monty_loader
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
 from mirage.types import Limit, MountMode, OnExceed, PathSpec, PolicyDecision
@@ -973,7 +973,7 @@ async def test_a_profile_script_naming_no_runtime_runs_on_monty():
 
 @pytest.mark.asyncio
 async def test_a_profile_script_without_monty_fails_closed(monkeypatch):
-    monkeypatch.setattr(monty_runtime, "pydantic_monty", None)
+    monkeypatch.setattr(monty_loader, "_pydantic_monty", None)
     profiles = {
         "release": {
             "policy": {"pre_command": [{"script": ScriptSource(JUDGE)}]}

@@ -211,7 +211,7 @@ jobs:
               - '!integ/{runtime,cloudflare,fuse,access,wandb,browser}/**'
               - '!integ/cross.sh'
               - '!integ/server/monty_remote/**'
-            # The TypeScript host on a Cloudflare worker, over the server API.
+            # The Worker uses the Wasm build scripts in both core and cloudflare.
             cloudflare:
               - 'integ/**'
               - 'typescript/**'

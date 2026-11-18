@@ -79,7 +79,7 @@ runs:
 
     # Compiling the three wasm modules was four and a half of the five minutes
     # a full `pnpm install` took, in each of some twenty jobs a run. Only rust/
-    # and embed-rs.mjs decide their bytes, so the key is both as git holds
+    # and the core build scripts decide their bytes, so the key is both as git holds
     # them, which a fresh checkout is. embed-rs reads a module found in the
     # directory and writes one it compiled there; a job that never builds them
     # leaves it absent, and the cache saves nothing for that job.
@@ -89,8 +89,8 @@ runs:
       shell: bash
       run: |
         rust=$(git rev-parse HEAD:rust)
-        script=$(git rev-parse HEAD:typescript/packages/core/scripts/embed-rs.mjs)
-        echo "key=embed-rs-${{ runner.os }}-$rust-$script" >> "$GITHUB_OUTPUT"
+        scripts=$(git rev-parse HEAD:typescript/packages/core/scripts)
+        echo "key=embed-rs-${{ runner.os }}-$rust-$scripts" >> "$GITHUB_OUTPUT"
         echo "MIRAGE_WASM_CACHE=$RUNNER_TEMP/embed-rs" >> "$GITHUB_ENV"
 
     - name: Cache the wasm modules
