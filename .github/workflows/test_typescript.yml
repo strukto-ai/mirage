@@ -159,8 +159,14 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile
 
+      - name: Build TypeScript core for its unit tests
+        if: startsWith(matrix.leg, 'core-')
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
       - name: Build TypeScript packages
         id: build
+        if: ${{ !startsWith(matrix.leg, 'core-') }}
         working-directory: typescript
         run: pnpm -r build
 
