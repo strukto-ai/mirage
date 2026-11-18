@@ -122,8 +122,7 @@ def read_line(
             if spoken.passthrough
             else leaf_read(program, leaf)
         )
-        if inner is not None:
-            read = CommandRead(program, (*group, *inner.flags), inner.operands)
+        read = CommandRead(program, (*group, *inner.flags), inner.operands)
     else:
         spec = SPECS.get(name)
         if spec is None:

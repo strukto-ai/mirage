@@ -25,7 +25,6 @@ def test_a_leaf_read_holds_each_option_by_its_canonical_name():
         ["--recursive", "--force", "x"],
     ):
         read = leaf_read(("rm",), parse_command(SPECS["rm"], argv, "/", "rm"))
-        assert read is not None
         assert read.flags == (
             FlagFact("--recursive"),
             FlagFact("--force"),
@@ -37,10 +36,23 @@ def test_a_leaf_read_keeps_an_options_value():
     read = leaf_read(
         ("head",), parse_command(SPECS["head"], ["-n", "2"], "/", "head")
     )
-    assert read is not None
     assert read.flags == (FlagFact("--lines", ("2",)),)
 
 
-def test_words_the_grammar_refuses_have_no_read():
-    parsed = parse_command(SPECS["rm"], ["--no-such"], "/", "rm")
-    assert leaf_read(("rm",), parsed) is None
+def test_a_refused_line_keeps_what_the_grammar_read():
+    def read(name: str, argv: list[str]):
+        return leaf_read((name,), parse_command(SPECS[name], argv, "/", name))
+
+    bogus = read("rm", ["--bogus", "-r", "x"])
+    assert bogus.flags == (FlagFact("--recursive"), FlagFact("--bogus"))
+    assert bogus.operands == ("x",)
+    found = read("find", ["/d", "-type", "f", "-delete", "-exec", "echo", ";"])
+    assert found.flags == (
+        FlagFact("-type", ("f",)),
+        FlagFact("-delete"),
+        FlagFact("-e"),
+    )
+    assert found.operands == ("/d", "echo", ";")
+    assert read("rm", ["--force=1", "x"]).flags == (FlagFact("--force"),)
+    assert read("cp", ["-Q", "a", "b"]).flags == (FlagFact("-Q"),)
+    assert read("grep", ["--c", "x"]).flags == (FlagFact("--c"),)

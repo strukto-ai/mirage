@@ -31,20 +31,37 @@ describe('leafRead', () => {
       ['--recursive', '--force', 'x'],
     ]) {
       const read = leafRead(['rm'], parseCommand(spec('rm'), argv, '/', 'rm'))
-      expect(read?.flags).toEqual([
+      expect(read.flags).toEqual([
         { name: '--recursive', values: [] },
         { name: '--force', values: [] },
       ])
-      expect(read?.operands).toEqual(['x'])
+      expect(read.operands).toEqual(['x'])
     }
   })
 
   it("keeps an option's value", () => {
     const read = leafRead(['head'], parseCommand(spec('head'), ['-n', '2'], '/', 'head'))
-    expect(read?.flags).toEqual([{ name: '--lines', values: ['2'] }])
+    expect(read.flags).toEqual([{ name: '--lines', values: ['2'] }])
   })
 
-  it('has no read for words the grammar refuses', () => {
-    expect(leafRead(['rm'], parseCommand(spec('rm'), ['--no-such'], '/', 'rm'))).toBeNull()
+  it('keeps what the grammar read of a line it refuses', () => {
+    const read = (name: string, argv: string[]) =>
+      leafRead([name], parseCommand(spec(name), argv, '/', name))
+    const bogus = read('rm', ['--bogus', '-r', 'x'])
+    expect(bogus.flags).toEqual([
+      { name: '--recursive', values: [] },
+      { name: '--bogus', values: [] },
+    ])
+    expect(bogus.operands).toEqual(['x'])
+    const found = read('find', ['/d', '-type', 'f', '-delete', '-exec', 'echo', ';'])
+    expect(found.flags).toEqual([
+      { name: '-type', values: ['f'] },
+      { name: '-delete', values: [] },
+      { name: '-e', values: [] },
+    ])
+    expect(found.operands).toEqual(['/d', 'echo', ';'])
+    expect(read('rm', ['--force=1', 'x']).flags).toEqual([{ name: '--force', values: [] }])
+    expect(read('cp', ['-Q', 'a', 'b']).flags).toEqual([{ name: '-Q', values: [] }])
+    expect(read('grep', ['--c', 'x']).flags).toEqual([{ name: '--c', values: [] }])
   })
 })

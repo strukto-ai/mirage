@@ -96,11 +96,10 @@ export function readLine(
     supplied.push(...leaf.suppliedPathValues.map((v) => toScope(v)))
     tokens = [...program, ...result.argv]
     const group = flagFacts(result.groupFlags, result.present)
-    const inner: CommandRead | null = spoken.passthrough
+    const inner: CommandRead = spoken.passthrough
       ? { path: program, flags: [], operands: [...result.argv] }
       : leafRead(program, leaf)
-    if (inner !== null)
-      read = { path: program, flags: [...group, ...inner.flags], operands: inner.operands }
+    read = { path: program, flags: [...group, ...inner.flags], operands: inner.operands }
   } else {
     const spec = SPECS[name]
     if (spec === undefined) {

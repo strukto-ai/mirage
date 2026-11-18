@@ -799,7 +799,7 @@
     {"op": "exec", "session": "agent", "command": "git add -f x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "git add --force x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "git add --forc x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "git: Permission denied\n", "decision": "git add --force is not allowed", "matched": {"command": ["git", "add"], "flags": ["--force"], "keys": []}}}},
-    {"op": "exec", "session": "agent", "command": "gh pr merge 5 --admin --bogus", "expect": {"value": {"exit_code": 1, "stdout": "", "decision": null, "matched": null}}},
+    {"op": "exec", "session": "agent", "command": "gh pr merge 5 --admin --bogus", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr merge --admin is not allowed", "matched": {"command": ["gh", "pr", "merge"], "flags": ["--admin"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "gh issue list --state=closed", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh issue list --state is not allowed", "matched": {"command": ["gh", "issue", "list"], "flags": ["--state"], "keys": []}}}},
     {"op": "exec", "session": "agent", "command": "gh pr list --state open", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "gh: Permission denied\n", "decision": "gh pr list --state is not allowed", "matched": {"command": ["gh", "pr", "list"], "flags": ["--state"], "keys": []}}}},
     {"op": "explain", "session": "agent", "command": "git log", "expect": {"value": {"commands": [{"command": "git", "outcome": "allow"}]}}},
@@ -831,6 +831,27 @@
     {"op": "session", "id": "flagset", "profile": {"commands": {"rm": {"-Z": "deny"}}}, "expect": {"error": "commands.rm.-Z: no option -Z"}},
     {"op": "session", "id": "verb", "profile": {"commands": {"git": {"status": "deny", "shove": "deny"}}}, "expect": {"error": "commands.git: no subcommand shove"}},
     {"op": "session", "id": "cluster", "profile": {"commands": {"rm": {"-rf": "deny"}}}, "expect": {"error": "-rf is a cluster of options"}}
+   ]
+  },
+  {
+   "id": "a_line_its_grammar_refuses_is_judged_by_what_the_grammar_read",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "delete", "profile": {"commands": {"*": "allow", "find": {"-delete": "deny"}}}},
+    {"op": "session", "id": "other", "profile": {"commands": {"*": "allow", "find": {"-*": "deny", "-name": "allow"}}}},
+    {"op": "session", "id": "rm_other", "profile": {"commands": {"*": "allow", "rm": {"-*": "deny", "--force": "allow"}}}},
+    {"op": "session", "id": "rm_r", "profile": {"commands": {"*": "allow", "rm": {"--recursive": "deny"}}}},
+    {"op": "exec", "session": "delete", "command": "mkdir -p /data/d && echo a > /data/d/a.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "delete", "command": "find /data/d -type f -delete", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "find -delete is not allowed", "matched": {"command": ["find"], "flags": ["-delete"], "keys": []}}}},
+    {"op": "exec", "session": "delete", "command": "find /data/d -type f -delete -exec echo {} \\;", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "find -delete is not allowed", "matched": {"command": ["find"], "flags": ["-delete"], "keys": []}}}},
+    {"op": "exec", "session": "delete", "command": "find /data/d -type f -exec echo {} \\; -delete", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "find -delete is not allowed", "matched": {"command": ["find"], "flags": ["-delete"], "keys": []}}}},
+    {"op": "exec", "session": "delete", "command": "find /data/d -exec rm -delete \\;", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "find -delete is not allowed", "matched": {"command": ["find"], "flags": ["-delete"], "keys": []}}}},
+    {"op": "exec", "session": "delete", "command": "find /data/d -type f -exec echo {} \\;", "expect": {"value": {"exit_code": 0, "stdout": "/data/d/a.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "other", "command": "find /data/d -exec rm {} \\;", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "find -e is not allowed", "matched": {"command": ["find"], "flags": ["-e"], "keys": []}}}},
+    {"op": "exec", "session": "other", "command": "find /data/d -name a.txt", "expect": {"value": {"exit_code": 0, "stdout": "/data/d/a.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "rm_other", "command": "rm --bogus /data/d/a.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --bogus is not allowed", "matched": {"command": ["rm"], "flags": ["--bogus"], "keys": []}}}},
+    {"op": "exec", "session": "rm_r", "command": "rm --bogus -r /data/d", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
+    {"op": "exec", "session": "delete", "command": "ls /data/d", "expect": {"value": {"exit_code": 0, "stdout": "a.txt\n", "stderr": "", "decision": null}}}
    ]
   }
 ]

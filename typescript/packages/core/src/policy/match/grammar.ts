@@ -36,18 +36,30 @@ export function flagFacts(
   return [...dests].map((dest) => ({ name: dest, values: values(flags[dest]) }))
 }
 
+function unread(word: string): string {
+  const name = word.split('=', 1)[0] ?? word
+  return name.startsWith('-') ? name : `-${name}`
+}
+
 /**
  * A leaf's parse as a read: the options the words carry, typed or filled
  * from the environment, never a declared default, and the operands as
- * written. null when the grammar refuses the words' options; a missing
- * operand or required option does not count.
+ * written. A line the grammar refuses keeps all it did read, so a command
+ * that runs past the refusal (`find`'s `-exec`, which its expression
+ * reads) is judged by its path, options and operands still. Each option
+ * word it could not read is one more option the tree does not name,
+ * which `-*` answers; a value handed to an option that takes none counts
+ * as that option. Mirrors Python's leaf_read.
  */
-export function leafRead(path: readonly string[], parsed: ParsedArgs): CommandRead | null {
-  if (parsed.optionErrorKinds.length > 0 || parsed.oldOptionNeedsValue !== null) return null
+export function leafRead(path: readonly string[], parsed: ParsedArgs): CommandRead {
   const dests = [...parsed.typedDests, ...parsed.envDests]
+  const words = [...parsed.invalidOptions, ...parsed.ambiguousOptions.map(([word]) => word)]
   return {
     path: [...path],
-    flags: flagFacts(parsed.flags, dests),
+    flags: [
+      ...flagFacts(parsed.flags, dests),
+      ...words.map((word) => ({ name: unread(word), values: [] })),
+    ],
     operands: parsed.rawOperands.map(([word]) => word),
   }
 }

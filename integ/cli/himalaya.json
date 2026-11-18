@@ -1105,18 +1105,18 @@
       }
     },
     {
-      "id": "hm_duo_a_line_its_grammar_cannot_read_meets_the_usage_error",
+      "id": "hm_duo_a_line_its_grammar_refuses_meets_the_deny_under_its_subcommand",
       "seq": 562132,
       "targets": [
         "cli-himalaya"
       ],
       "session": "crew",
       "command": "h2 message send --bogus",
-      "conformance_skip": "the deny leaf sits under a subcommand the grammar never reached; the head allows and the program refuses the line",
+      "conformance_skip": "refused by a mirage policy before the program runs",
       "expect": {
-        "exit": 2,
+        "exit": 126,
         "stdout": "",
-        "stderr": "error: unexpected argument '--bogus' found\n\n  tip: to pass '--bogus' as a value, use '-- --bogus'\n\nUsage: h2 message send [OPTIONS] [-- <MESSAGE>...]\n\nFor more information, try '--help'.\n"
+        "stderr": "h2: Permission denied\n"
       }
     },
     {

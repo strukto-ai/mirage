@@ -43,21 +43,37 @@ def flag_facts(
     return tuple(FlagFact(dest, _values(flags.get(dest))) for dest in dests)
 
 
-def leaf_read(path: tuple[str, ...], parsed: ParsedArgs) -> CommandRead | None:
+def _unread(word: str) -> str:
+    name = word.split("=", 1)[0]
+    return name if name.startswith("-") else f"-{name}"
+
+
+def leaf_read(path: tuple[str, ...], parsed: ParsedArgs) -> CommandRead:
     """A leaf's parse as a read: the options the words carry, typed or
     filled from the environment, never a declared default, and the
-    operands as written. None when the grammar refuses the words' options;
-    a missing operand or required option does not count.
+    operands as written.
+
+    A line the grammar refuses keeps all it did read, so a command that
+    runs past the refusal (``find``'s ``-exec``, which its expression
+    reads) is judged by its path, options and operands still. Each
+    option word it could not read is one more option the tree does not
+    name, which ``-*`` answers; a value handed to an option that takes
+    none counts as that option.
 
     Args:
         path (tuple[str, ...]): the command name and its subcommands.
         parsed (ParsedArgs): the leaf's parse.
     """
-    if parsed.option_error_kinds or parsed.old_option_needs_value is not None:
-        return None
     dests = [*parsed.typed_dests, *parsed.env_dests]
+    unread = [
+        *parsed.invalid_options,
+        *(word for word, _ in parsed.ambiguous_options),
+    ]
     return CommandRead(
         path,
-        flag_facts(parsed.flags, dests),
+        (
+            *flag_facts(parsed.flags, dests),
+            *(FlagFact(_unread(word), ()) for word in unread),
+        ),
         tuple(word for word, _ in parsed.raw_operands),
     )
