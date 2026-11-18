@@ -301,6 +301,15 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _tree_grammar(cli: CLI) -> Grammar:
+    """The grammar a command tree reads a line with.
+
+    Args:
+        cli (CLI): the command tree.
+    """
+    return Grammar(cli.spec, tree=True, passthrough=owns_argv(cli))
+
+
 def _declared_sources(
     secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None,
     env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None,
@@ -1515,7 +1524,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         grammars = {
             **self._grammars(),
-            name: Grammar(spec.spec, tree=True, passthrough=owns_argv(spec)),
+            name: _tree_grammar(spec),
         }
         self._check_trees(grammars)
         install = self._registry.clis.install(name, spec, config)
@@ -2763,20 +2772,26 @@ class Workspace:
     def _cli_grammars(self) -> dict[str, Grammar]:
         """The grammar of each command tree, keyed by head word: an
         installed CLI's, else the first one a mount serves, as lookup
-        resolves the name.
+        resolves the name, holding every other tree a mount serves under
+        that name in ``others``, since the line's mount picks which one
+        reads it.
 
         Read at ``create_session`` rather than at compile time because a
         CLI is registered on the workspace after it is built.
         """
-        trees: dict[str, CLI] = {}
+        served: dict[str, list[CLI]] = {}
         for mount in self._registry.mounts():
             for name, cli in mount.served_trees().items():
-                trees.setdefault(name, cli)
+                held = served.setdefault(name, [])
+                if all(cli.spec is not other.spec for other in held):
+                    held.append(cli)
         for name, install in self._registry.clis.items().items():
-            trees[name] = install.cli
+            served[name] = [install.cli]
         return {
-            name: Grammar(cli.spec, tree=True, passthrough=owns_argv(cli))
-            for name, cli in trees.items()
+            name: replace(
+                _tree_grammar(first), others=tuple(map(_tree_grammar, rest))
+            )
+            for name, (first, *rest) in served.items()
         }
 
     def _base_profile(

@@ -436,13 +436,16 @@ export interface CommandRead {
  * line, so two lines of one name may hold two grammars. `spec` is the
  * root of a command tree, else the command's own; `tree` whether it is
  * walked subcommand by subcommand; `passthrough` whether a script owns
- * the leaf's words, so none of them is an option mirage reads. Mirrors
- * the Python `Grammar`.
+ * the leaf's words, so none of them is an option mirage reads; `others`
+ * the other command trees mounts serve under this name, any of which may
+ * read a line, so a rule must read the same under each. Mirrors the
+ * Python `Grammar`.
  */
 export interface Grammar {
   readonly spec: CommandSpec
   readonly tree: boolean
   readonly passthrough: boolean
+  readonly others?: readonly Grammar[]
 }
 
 /**

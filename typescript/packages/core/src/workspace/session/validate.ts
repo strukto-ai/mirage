@@ -205,9 +205,10 @@ function node(tree: CommandNode, spec: CommandSpec, at: string, passthrough: boo
  * keys for one option or one subcommand; a cluster of short options; a
  * short option meaning different options in the subcommands below;
  * operands on a command that takes a subcommand; a value under an option
- * that takes none, or outside its choices; and options or subcommands on
- * a command with no grammar, since the line reader gives it only
- * operands. `defer` keeps a command with no grammar as written, for a
+ * that takes none, or outside its choices; options or subcommands on a
+ * command with no grammar, since the line reader gives it only operands;
+ * and a tree that the trees two mounts serve under one name read
+ * differently, since either may read a line. `defer` keeps a command with no grammar as written, for a
  * check made before every CLI is registered; a name no CLI can be
  * installed under (a shell builtin, a keyword) is checked all the same.
  */
@@ -222,10 +223,25 @@ export function normalizeTree(
     const grammar = grammars.get(name)
     const at = `${where}.${name}`
     const later = defer && !NOT_INSTALLABLE.has(name)
-    if (grammar === undefined) commands.set(name, later ? child : noGrammar(child, at))
-    else commands.set(name, node(child, grammar.spec, at, grammar.passthrough))
+    if (grammar === undefined) {
+      commands.set(name, later ? child : noGrammar(child, at))
+      continue
+    }
+    const held = node(child, grammar.spec, at, grammar.passthrough)
+    for (const other of grammar.others ?? []) {
+      if (nodeKey(node(child, other.spec, at, other.passthrough)) !== nodeKey(held)) {
+        throw new PolicyError(
+          `${at}: two mounts serve ${name} with trees that read these names differently; name only what both read alike`,
+        )
+      }
+    }
+    commands.set(name, held)
   }
   return { ...tree, subcommands: commands }
+}
+
+function nodeKey(tree: CommandNode): string {
+  return JSON.stringify(tree, (_key, value: unknown) => (value instanceof Map ? [...value] : value))
 }
 
 /**

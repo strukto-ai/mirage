@@ -260,8 +260,9 @@ def normalize_tree(
     short options; a short option meaning different options in the
     subcommands below; operands on a command that takes a subcommand;
     a value under an option that takes none, or outside its choices;
-    and options or subcommands on a command with no grammar, since the
-    line reader gives it only operands.
+    options or subcommands on a command with no grammar, since the line
+    reader gives it only operands; and a tree that the trees two mounts
+    serve under one name read differently, since either may read a line.
 
     Args:
         tree (CommandNode): the tree as written.
@@ -284,7 +285,14 @@ def normalize_tree(
             later = defer and name not in NOT_INSTALLABLE
             commands[name] = node if later else _no_grammar(node, at)
             continue
-        commands[name] = _node(node, grammar.spec, at, grammar.passthrough)
+        held = _node(node, grammar.spec, at, grammar.passthrough)
+        for other in grammar.others:
+            if _node(node, other.spec, at, other.passthrough) != held:
+                raise PolicyError(
+                    f"{at}: two mounts serve {name} with trees that read "
+                    "these names differently; name only what both read alike"
+                )
+        commands[name] = held
     return replace(tree, subcommands=commands)
 
 

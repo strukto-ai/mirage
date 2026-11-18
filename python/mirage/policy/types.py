@@ -835,11 +835,15 @@ class Grammar:
             subcommand by subcommand.
         passthrough (bool): whether a script owns the leaf's words, so
             none of them is an option mirage reads.
+        others (tuple[Grammar, ...]): the other command trees mounts
+            serve under this name, any of which may read a line; a rule
+            must read the same under each.
     """
 
     spec: CommandSpec
     tree: bool = False
     passthrough: bool = False
+    others: tuple["Grammar", ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

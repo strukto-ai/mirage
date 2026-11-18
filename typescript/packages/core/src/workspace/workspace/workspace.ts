@@ -238,6 +238,11 @@ export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
 /** A workspace's secret source declarations and its seed variables. Mirrors Python's _declared_sources. */
+/** The grammar a command tree reads a line with. Mirrors Python's `_tree_grammar`. */
+function treeGrammar(cli: CLI): Grammar {
+  return { spec: cli.spec, tree: true, passthrough: ownsArgv(cli) }
+}
+
 function declaredSources(options: WorkspaceOptions) {
   // The env block, translated once: a literal entry becomes an
   // exported var, a managed one becomes a pointer the fill step
@@ -1017,7 +1022,7 @@ export class Workspace {
   registerCli(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const grammars = new Map(this.grammars())
-    grammars.set(name, { spec: spec.spec, tree: true, passthrough: ownsArgv(spec) })
+    grammars.set(name, treeGrammar(spec))
     this.checkTrees(grammars)
     const install = this.registry.clis.install(name, spec, config)
     this.restateTrees(grammars)
@@ -1488,20 +1493,27 @@ export class Workspace {
 
   /**
    * The grammar of each command tree, keyed by head word: an installed
-   * CLI's, else the first one a mount serves, as lookup resolves the name.
+   * CLI's, else the first one a mount serves, as lookup resolves the name,
+   * holding every other tree a mount serves under that name in `others`,
+   * since the line's mount picks which one reads it.
    *
    * Read at `createSession` rather than at compile time because a CLI is
    * registered on the workspace after it is built.
    */
   private cliGrammars(): ReadonlyMap<string, Grammar> {
-    const trees = new Map<string, CLI>()
+    const served = new Map<string, CLI[]>()
     for (const mount of this.registry.allMounts()) {
-      for (const [name, cli] of mount.servedTrees()) if (!trees.has(name)) trees.set(name, cli)
+      for (const [name, cli] of mount.servedTrees()) {
+        const held = served.get(name) ?? []
+        if (held.every((other) => other.spec !== cli.spec)) held.push(cli)
+        served.set(name, held)
+      }
     }
-    for (const [name, install] of this.registry.clis.items()) trees.set(name, install.cli)
+    for (const [name, install] of this.registry.clis.items()) served.set(name, [install.cli])
     const out = new Map<string, Grammar>()
-    for (const [name, cli] of trees) {
-      out.set(name, { spec: cli.spec, tree: true, passthrough: ownsArgv(cli) })
+    for (const [name, [first, ...rest]] of served) {
+      if (first !== undefined)
+        out.set(name, { ...treeGrammar(first), others: rest.map(treeGrammar) })
     }
     return out
   }
