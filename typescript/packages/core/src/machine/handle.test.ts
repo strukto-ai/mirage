@@ -1028,6 +1028,43 @@ it('hands a slow reader all a run wrote after its exit line', async () => {
   }
 }, 10000)
 
+// A box whose program has exited, its exit line out, while what it left
+// running writes a line to the exec's output every 0.1 s.
+class LogsOnBox extends RecordingMachine {
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (!isRun(argv)) return super.execArgv(argv, stdin, env, cwd, output, errors)
+    const mark = runExitMark(argv[RUN_PROGRAM_AT - 2] ?? '')
+    await errors(new Uint8Array([...mark, ...ENC.encode('3\n')]))
+    while (signal?.aborted !== true) {
+      await output(ENC.encode('log\n'))
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error('let go')
+  }
+}
+
+// What the program left running writing now and then does not hold the run:
+// the pauses between its lines add up to the drain time.
+it('ends a run while what it left running keeps writing', async () => {
+  const box = new LogsOnBox({ captures: ['train'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('train')
+    expect(io.exitCode).toBe(3)
+    expect(DEC.decode(await materialize(io.stdout)).startsWith('log\n')).toBe(true)
+  } finally {
+    await ws.close()
+  }
+}, 5000)
+
 // A box whose program, once stopped, exits 0 by its own trap while the exec
 // takes longer than the drain to answer the stop.
 class SlowStopBox extends RecordingMachine {

@@ -4,7 +4,7 @@
 //! next header; a member whose data runs out ends it. Meta headers (GNU long
 //! names, pax records) shape the member after them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -676,12 +676,19 @@ struct Run<'c, 'h> {
 
 impl Run<'_, '_> {
     /// Give each directory member its mode once everything under it has
-    /// landed, deepest first and the last member of a path deciding, as tar
-    /// does: a directory made read-only early would refuse what goes in it.
+    /// landed, the last member of a path deciding and children before their
+    /// parents, as tar does: a directory made read-only early would refuse
+    /// what goes in it, and a parent closed first the change of its child.
     async fn settle(&mut self) {
-        let mut done = HashSet::new();
-        for (path, mode, shown) in std::mem::take(&mut self.dirs).into_iter().rev() {
-            if done.insert(path.clone()) && (self.config.preserve || mode != FRESH_DIR) {
+        let mut last = HashMap::new();
+        for (path, mode, shown) in std::mem::take(&mut self.dirs) {
+            last.insert(path, (mode, shown));
+        }
+        let mut dirs: Vec<_> = last.into_iter().collect();
+        let depth = |path: &[u8]| path.iter().filter(|&&b| b == b'/').count();
+        dirs.sort_by(|(a, _), (b, _)| depth(b).cmp(&depth(a)).then_with(|| a.cmp(b)));
+        for (path, (mode, shown)) in dirs {
+            if self.config.preserve || mode != FRESH_DIR {
                 self.chmod(&path, mode, &shown).await;
             }
         }

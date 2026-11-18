@@ -45,6 +45,7 @@ import {
   SCAN_FACTS_MARK,
   SCAN_MARK,
   SCAN_WAIT_SECONDS,
+  STOP_POLL_SECONDS,
   faketimeEnv,
   faketimeProbe,
   resourcesLine,
@@ -208,32 +209,47 @@ export class ExitLineFilter {
 }
 
 /**
- * When a run's output last moved. A chunk still being handed to its sink
- * counts as moving until the sink takes it, so a reader slow to take what the
- * program wrote keeps the run while that output is on its way. Mirrors
- * Python's `OutputWatch`.
+ * How long a run's output has had nothing on its way since `restart`. A chunk
+ * still being handed to its sink counts as on its way until the sink takes it,
+ * and a pause between chunks shorter than `STOP_POLL_SECONDS` counts as none,
+ * so a reader slow to take what the program wrote keeps the run, while what
+ * the program left running writes now and then does not keep it forever.
+ * Mirrors Python's `OutputWatch`.
  */
 export class OutputWatch {
   private busy = 0
-  private moved = performance.now() / 1000
+  private freeSince = performance.now() / 1000
+  private idleSeconds = 0
 
-  /** `sink`, with each chunk handed to it counted as moving. */
+  /** `sink`, with each chunk handed to it counted as on its way. */
   watched(sink: OutputFn): OutputFn {
     return async (data) => {
+      if (this.busy === 0) this.idleSeconds += this.pause()
       this.busy += 1
-      this.moved = performance.now() / 1000
       try {
         await sink(data)
       } finally {
         this.busy -= 1
-        this.moved = performance.now() / 1000
+        if (this.busy === 0) this.freeSince = performance.now() / 1000
       }
     }
   }
 
-  /** Seconds since the output last moved; 0 while a chunk is still being handed on. */
-  quiet(): number {
-    return this.busy > 0 ? 0 : performance.now() / 1000 - this.moved
+  /** Count from now, leaving out what the output did before. */
+  restart(): void {
+    this.idleSeconds = 0
+    this.freeSince = performance.now() / 1000
+  }
+
+  /** Seconds the output has had nothing on its way since `restart`. */
+  idle(): number {
+    return this.idleSeconds + (this.busy > 0 ? 0 : this.pause())
+  }
+
+  /** The current pause, or 0 when it is too short to count. */
+  private pause(): number {
+    const pause = performance.now() / 1000 - this.freeSince
+    return pause >= STOP_POLL_SECONDS ? pause : 0
   }
 }
 
@@ -515,9 +531,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * How a run ended: its exec's answer, or, when its exit line says its
    * program has exited while the exec stays open because something the
    * program left running holds its output, the status the line gave. That
-   * exec is let go once its output has been quiet for `RUN_DRAIN_SECONDS`, so
-   * output a slow reader is still taking all arrives, and what the program
-   * left running stays. A run stopped meanwhile ends as stopped, whatever its
+   * exec is let go once its output has had nothing on its way for
+   * `RUN_DRAIN_SECONDS` since the line (`OutputWatch`), so output a slow reader
+   * is still taking all arrives, and what the program left running stays. A run stopped meanwhile ends as stopped, whatever its
    * program said as it went, as Python's cancelled `_outcome` does. Mirrors
    * Python's `_outcome`.
    */
@@ -534,8 +550,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     )
     const code = await Promise.race([ended, closed])
     if (code === null) return execution
-    for (let quiet = watch.quiet(); quiet < RUN_DRAIN_SECONDS; quiet = watch.quiet()) {
-      if (await settledWithin(execution, RUN_DRAIN_SECONDS - quiet)) return execution
+    watch.restart()
+    for (let idle = watch.idle(); idle < RUN_DRAIN_SECONDS; idle = watch.idle()) {
+      const wait = Math.max(RUN_DRAIN_SECONDS - idle, STOP_POLL_SECONDS)
+      if (await settledWithin(execution, wait)) return execution
     }
     letGo.abort()
     await settledWithin(closed, RUN_DRAIN_SECONDS)

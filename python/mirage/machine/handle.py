@@ -43,6 +43,7 @@ from mirage.machine.constants import (
     SCAN_FACTS_MARK,
     SCAN_MARK,
     SCAN_WAIT_SECONDS,
+    STOP_POLL_SECONDS,
     faketime_env,
     faketime_probe,
     resources_line,
@@ -229,37 +230,52 @@ class ExitLineFilter:
 
 
 class OutputWatch:
-    """When a run's output last moved. A chunk still being handed to its
-    sink counts as moving until the sink takes it, so a reader slow to take
-    what the program wrote keeps the run while that output is on its way.
+    """How long a run's output has had nothing on its way since ``restart``.
+    A chunk still being handed to its sink counts as on its way until the
+    sink takes it, and a pause between chunks shorter than
+    ``STOP_POLL_SECONDS`` counts as none, so a reader slow to take what the
+    program wrote keeps the run, while what the program left running writes
+    now and then does not keep it forever.
     """
 
     def __init__(self) -> None:
         self._busy = 0
-        self._moved = monotonic()
+        self._free_since = monotonic()
+        self._idle = 0.0
 
     def watched(self, sink: OutputFn) -> OutputFn:
-        """``sink``, with each chunk handed to it counted as moving.
+        """``sink``, with each chunk handed to it counted as on its way.
 
         Args:
             sink (OutputFn): where the stream goes.
         """
 
         async def write(data: bytes) -> None:
+            if not self._busy:
+                self._idle += self._pause()
             self._busy += 1
-            self._moved = monotonic()
             try:
                 await sink(data)
             finally:
                 self._busy -= 1
-                self._moved = monotonic()
+                if not self._busy:
+                    self._free_since = monotonic()
 
         return write
 
-    def quiet(self) -> float:
-        """Seconds since the output last moved; 0 while a chunk is still
-        being handed on."""
-        return 0.0 if self._busy else monotonic() - self._moved
+    def restart(self) -> None:
+        """Count from now, leaving out what the output did before."""
+        self._idle = 0.0
+        self._free_since = monotonic()
+
+    def idle(self) -> float:
+        """Seconds the output has had nothing on its way since ``restart``."""
+        return self._idle + (0.0 if self._busy else self._pause())
+
+    def _pause(self) -> float:
+        """The current pause, or 0 when it is too short to count."""
+        pause = monotonic() - self._free_since
+        return pause if pause >= STOP_POLL_SECONDS else 0.0
 
 
 class MachineHandle:
@@ -580,22 +596,28 @@ class MachineHandle:
         """How a run ended: its exec's answer, or, when its exit line
         says its program has exited while the exec stays open because
         something the program left running holds its output, the status
-        the line gave. That exec is let go once its output has been quiet
-        for ``RUN_DRAIN_SECONDS``, so output a slow reader is still taking
-        all arrives, and what the program left running stays.
+        the line gave. That exec is let go once its output has had nothing
+        on its way for ``RUN_DRAIN_SECONDS`` since the line (``OutputWatch``),
+        so output a slow reader is still taking all arrives, and what the
+        program left running stays.
 
         Args:
             execution (asyncio.Future[RunResult]): the exec.
             ended (asyncio.Future[int]): the status the exit line gave.
-            watch (OutputWatch): when the run's output last moved.
+            watch (OutputWatch): how long the run's output has had nothing
+                on its way.
         """
         either: set[asyncio.Future[Any]] = {execution, ended}
         await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
+        watch.restart()
         while not execution.done():
-            quiet = watch.quiet()
-            if quiet >= RUN_DRAIN_SECONDS:
+            idle = watch.idle()
+            if idle >= RUN_DRAIN_SECONDS:
                 break
-            await asyncio.wait({execution}, timeout=RUN_DRAIN_SECONDS - quiet)
+            await asyncio.wait(
+                {execution},
+                timeout=max(RUN_DRAIN_SECONDS - idle, STOP_POLL_SECONDS),
+            )
         if execution.done():
             return execution.result()
         execution.cancel()
