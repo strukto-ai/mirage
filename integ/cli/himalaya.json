@@ -1081,7 +1081,7 @@
         "cli-himalaya"
       ],
       "session": "crew",
-      "command": "h2 message send --to x@example.com hi",
+      "command": "h2 message send hi",
       "conformance_skip": "refused by a mirage policy before the program runs",
       "expect": {
         "exit": 126,
@@ -1096,12 +1096,27 @@
         "cli-himalaya"
       ],
       "session": "crew",
-      "command": "h1 message send --to x@example.com hi",
+      "command": "h1 message send hi",
       "conformance_skip": "refused by a mirage policy before the program runs",
       "expect": {
         "exit": 126,
         "stdout": "",
         "stderr": "h1: Permission denied\n"
+      }
+    },
+    {
+      "id": "hm_duo_a_line_its_grammar_cannot_read_meets_the_usage_error",
+      "seq": 562132,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "session": "crew",
+      "command": "h2 message send --bogus",
+      "conformance_skip": "the deny leaf sits under a subcommand the grammar never reached; the head allows and the program refuses the line",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unexpected argument '--bogus' found\n\n  tip: to pass '--bogus' as a value, use '-- --bogus'\n\nUsage: h2 message send [OPTIONS] [-- <MESSAGE>...]\n\nFor more information, try '--help'.\n"
       }
     },
     {
