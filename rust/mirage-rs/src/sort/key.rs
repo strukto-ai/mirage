@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::cost::{COST_BYTES, cost};
 use super::modifiers::{Mods, Translated, kept};
 use super::number::{NumberScan, general_order, human_order, leading_number};
+use super::random::RandomScan;
 use super::version::{VersionScan, version_cmp};
 use crate::number::is_blank;
 
@@ -76,6 +77,17 @@ impl Compare {
     /// `-R`: two keys by their hashes salted with `salt`, after `-f`, `-d`
     /// and `-i` have changed them, then by their bytes when the hashes tie.
     fn random(&self, a: &[u8], b: &[u8], mods: &Mods) -> Ordering {
+        if a.len() > COST_BYTES || b.len() > COST_BYTES || self.salt.len() > COST_BYTES {
+            let mut bytes = usize::MAX;
+            let order = RandomScan::default()
+                .step(a, b, &self.salt, mods, &mut bytes)
+                .unwrap();
+            return order.then_with(|| {
+                Comparison::default()
+                    .transformed(a, b, mods, &mut bytes)
+                    .unwrap()
+            });
+        }
         if mods.fold || mods.dictionary || mods.ignore_nonprinting {
             return translated_pair(a, b, mods, |a, b| {
                 self.hashed(a).cmp(&self.hashed(b)).then_with(|| a.cmp(b))
@@ -212,11 +224,6 @@ fn translated<'a>(field: &'a [u8], mods: &'a Mods) -> impl Iterator<Item = u8> +
 /// they are short, so a comparison allocates nothing.
 fn translated_pair<R>(a: &[u8], b: &[u8], mods: &Mods, f: impl FnOnce(&[u8], &[u8]) -> R) -> R {
     const SHORT: usize = 256;
-    if a.len() > SHORT || b.len() > SHORT {
-        let a: Vec<u8> = translated(a, mods).collect();
-        let b: Vec<u8> = translated(b, mods).collect();
-        return f(&a, &b);
-    }
     let (mut x, mut y) = ([0u8; SHORT], [0u8; SHORT]);
     let fill = |key: &[u8], into: &mut [u8; SHORT]| {
         let mut len = 0;
@@ -427,6 +434,7 @@ enum ComparisonPhase {
     MonthLeft,
     MonthRight,
     Lexical,
+    Random,
     ParseLeft,
     ParseRight,
     Integer,
@@ -444,6 +452,7 @@ pub(super) struct Comparison {
     numbers: [NumberScan; 2],
     version: VersionScan,
     translated: Option<Box<[Translated; 2]>>,
+    random: Option<Box<RandomScan>>,
     month: usize,
     offset: usize,
 }
@@ -462,6 +471,7 @@ impl Comparison {
             && self.offset == 0
             && a.len() <= COST_BYTES
             && b.len() <= COST_BYTES
+            && compare.salt.len() <= COST_BYTES
         {
             *work += cost(a, b);
             return Some(compare.records(a, b));
@@ -525,14 +535,18 @@ impl Comparison {
                     let (b0, b1) = self.ranges[1];
                     let (ka, kb) = (&a[a0..a1], &b[b0..b1]);
                     let mods = &key.mods;
-                    let short = ka.len() <= COST_BYTES && kb.len() <= COST_BYTES;
+                    let short = ka.len() <= COST_BYTES
+                        && kb.len() <= COST_BYTES
+                        && (!mods.random || compare.salt.len() <= COST_BYTES);
                     let version = mods.version
                         && (mods.fold
                             || mods.dictionary
                             || mods.ignore_nonprinting
                             || !mods.month && !mods.human);
-                    if !short && !mods.random {
-                        self.phase = if version {
+                    if !short {
+                        self.phase = if mods.random {
+                            ComparisonPhase::Random
+                        } else if version {
                             ComparisonPhase::Version
                         } else if mods.month {
                             ComparisonPhase::MonthLeft
@@ -619,6 +633,23 @@ impl Comparison {
                     self.translated = None;
                     self.key += 1;
                     self.phase = ComparisonPhase::Key;
+                }
+                ComparisonPhase::Random => {
+                    let (a0, a1) = self.ranges[0];
+                    let (b0, b1) = self.ranges[1];
+                    let mods = &compare.keys[self.key].mods;
+                    let order = self.random.get_or_insert_with(Default::default).step(
+                        &a[a0..a1],
+                        &b[b0..b1],
+                        &compare.salt,
+                        mods,
+                        bytes,
+                    )?;
+                    self.random = None;
+                    if order != Ordering::Equal {
+                        return Some(if mods.reverse { order.reverse() } else { order });
+                    }
+                    self.phase = ComparisonPhase::Lexical;
                 }
                 ComparisonPhase::Version => {
                     let (a0, a1) = self.ranges[0];
