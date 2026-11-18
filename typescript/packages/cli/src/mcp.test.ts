@@ -19,7 +19,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { readLogin, removeLogin, writeLogin, type Login } from './credentials.ts'
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 import { MCP_ENV_NAMES, relayWorkspace } from './mcp.ts'
@@ -258,6 +258,13 @@ function loggedIn(url: string, fields: Partial<Login> = {}): Login {
 }
 
 describe('relayWorkspace', () => {
+  // relayWorkspace checks a config with @struktoai/mirage-node/config, which
+  // loads Mirage's core: about 2 s cold, past 5 s on a busy runner. Loaded
+  // once here, so the first test's 5 s isn't spent on it.
+  beforeAll(async () => {
+    await import('@struktoai/mirage-node/config')
+  }, 60_000)
+
   afterEach(() => {
     vi.unstubAllEnvs()
   })
