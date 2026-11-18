@@ -192,6 +192,35 @@ describe('MontyExecution.run', () => {
     }
   })
 
+  it('redacts a remote refusal that arrives after cancellation', async () => {
+    const execution = new MontyExecution(null, false, 'https://monty.example', 's3cret')
+    let refuse!: (error: Error) => void
+    const checkout = new Promise<never>((_, reject) => {
+      refuse = reject
+    })
+    vi.spyOn(execution as unknown as PoolHooks, 'loadPool').mockResolvedValue({
+      checkout: () => checkout,
+      close: () => Promise.resolve(),
+    })
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const result = await runOf(
+        execution,
+        { code: 'pass', args: [], stdin: null },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: AbortSignal.abort() },
+        null,
+      )
+      expect(result.exitCode).toBe(1)
+      refuse(new Error('denied:\r\nBearer s3cret'))
+      await vi.waitFor(() => {
+        expect(debug).toHaveBeenCalledWith(expect.any(String), 'denied: Bearer <redacted>')
+      })
+    } finally {
+      debug.mockRestore()
+      await execution.close()
+    }
+  })
+
   it("holds a run on the host's thread to its deadline, or the cap if sooner", async () => {
     class RuntimeError extends Error {
       constructor(readonly exception: { typeName: string; message: string }) {

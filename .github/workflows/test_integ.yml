@@ -156,6 +156,7 @@ jobs:
               - '!rust/python/**'
               - '!integ/{runtime,cloudflare,hosting,interrupt,fuse,access,wandb}/**'
               - '!integ/cross.sh'
+              - '!integ/server/monty_remote/**'
             # The shared shards, their parity diff, the gate and fake
             # selftests, the facets, W&B, shell coverage, Nextcloud, TiDB and
             # the event batteries: both hosts in-process, no server or CLI.
@@ -183,6 +184,7 @@ jobs:
               - '!typescript/packages/{server,cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
               - '!integ/{runtime,cloudflare,hosting,interrupt,fuse,access,browser}/**'
               - '!integ/cross.sh'
+              - '!integ/server/monty_remote/**'
             # The real FastAPI and Fastify listeners, plus the python-host
             # scenarios riding the same job; lifecycle reads the server's
             # serializers.
@@ -208,6 +210,7 @@ jobs:
               - '!typescript/packages/{cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
               - '!integ/{runtime,cloudflare,fuse,access,wandb,browser}/**'
               - '!integ/cross.sh'
+              - '!integ/server/monty_remote/**'
             # The TypeScript host on a Cloudflare worker, over the server API.
             cloudflare:
               - 'integ/**'
@@ -228,6 +231,7 @@ jobs:
               - '!rust/python/**'
               - '!integ/{runtime,hosting,interrupt,fuse,access,wandb,browser}/**'
               - '!integ/cross.sh'
+              - '!integ/server/monty_remote/**'
             database:
               - 'integ/vfs/mongodb/**'
               - 'integ/vfs/postgres/**'
@@ -348,7 +352,7 @@ jobs:
             runtime:
               - 'integ/runtime/**'
               - 'integ/fixtures/runtime/**'
-              - 'integ/server/{gws,kit}/**'
+              - 'integ/server/{gws,kit,monty_remote}/**'
               - 'integ/prisma/gws.prisma'
               - 'integ/fixtures/gws/**'
               - 'integ/package.json'
@@ -479,6 +483,7 @@ jobs:
               - '!typescript/scripts/**'
               - '!rust/**/README.md'
               - '!integ/server/**/README.md'
+              - '!integ/server/monty_remote/**'
               - '!typescript/**/*.test.ts'
               - '!python/mirage/{server,cli,agents}/**'
               - '!typescript/packages/{server,cli,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
@@ -2192,6 +2197,7 @@ jobs:
           box_suites=()
           ssh_suites=()
           mongo_suites=()
+          relay_suites=()
           while IFS= read -r f; do
             n="${f#integ/runtime/}"
             n="${n%.json}"
@@ -2222,6 +2228,9 @@ jobs:
                 + [(.world.machines // {})[] | (.runtime // .provider)])[]; . == $r))' "$f" >/dev/null
             }
             if named wasi; then wasi_suites+=("$n"); fi
+            if jq -e 'any((.requires, .cases[]?.requires) | .. | strings; . == "env:MONTY_REMOTE_URL")' "$f" >/dev/null; then
+              relay_suites+=("$n")
+            fi
             if named docker || named ssh; then box_suites+=("$n"); fi
             # The ssh backend mounts the ssh runtime's box over SFTP.
             if [[ " $backends " == *" ssh "* ]]; then
@@ -2296,6 +2305,9 @@ jobs:
           done
           for s in "${minio_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_MINIO=1" >> "$GITHUB_ENV"; break; fi
+          done
+          for s in "${relay_suites[@]}"; do
+            if in_leg "$s"; then echo "NEEDS_MONTY_RELAY=1" >> "$GITHUB_ENV"; break; fi
           done
           for s in "${gdrive_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_GDRIVE=1" >> "$GITHUB_ENV"; break; fi
@@ -2401,6 +2413,20 @@ jobs:
           gh release download v3.14.7 -R brettcannon/cpython-wasi-build \
             -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
           unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
+
+      - name: Start the Monty relay
+        if: env.NEEDS_MONTY_RELAY == '1'
+        # monty's own gRPC relay, bridging each session to the `monty`
+        # binary the python venv installs; it prints its URL once listening.
+        run: |
+          PATH="$PWD/python/.venv/bin:$PATH" nohup python/.venv/bin/python \
+            integ/server/monty_remote/relay.py --port 0 > /tmp/monty-relay.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q '^http://' /tmp/monty-relay.log && break
+            sleep 1
+          done
+          url=$(grep -m1 '^http://' /tmp/monty-relay.log) || { cat /tmp/monty-relay.log; exit 1; }
+          echo "MONTY_REMOTE_URL=$url" >> "$GITHUB_ENV"
 
       - name: Start MinIO
         if: env.NEEDS_MINIO == '1'

@@ -35,6 +35,7 @@ differs.
 | [`backend/`](backend/)                 | topic   | guest reads and writes on real redis, S3 and MongoDB                                              |
 | [`facade/`](facade/)                   | topic   | the SDK file API (`ws.vfs`)                                                                       |
 | [`monty/`](monty/)                     | runtime | Monty's invocation, argv, streams, policy and Python surface                                      |
+| [`monty_remote/`](monty_remote/)       | runtime | Monty on a remote server: mounts, env, a timeout, an unreachable server                           |
 | [`wasi/`](wasi/)                       | runtime | CPython on WASI: import paths                                                                     |
 | [`pyodide/`](pyodide/)                 | runtime | Pyodide's mounts, streams, environment, tracebacks and flags                                      |
 | [`quickjs/`](quickjs/)                 | runtime | QuickJS invocation, printing, argv and async jobs                                                 |

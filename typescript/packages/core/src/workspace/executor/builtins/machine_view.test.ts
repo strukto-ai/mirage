@@ -19,6 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { HOST } from '../../../runtime/constants.ts'
+import { buildEntry } from '../../../runtime/table.ts'
 import { MachineName } from '../../../execution/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
@@ -136,6 +137,8 @@ describe('machine view', () => {
     const own = { ids: [], picked: true, several: false, workspace: true, engines: [] }
     expect(inScope(own, 'mirage')).toBe(true)
     expect(inScope(own, 'docker:a')).toBe(false)
+    expect(inScope(one, 'remote:py')).toBe(true)
+    expect(inScope({ ...one, picked: true }, 'remote:py')).toBe(false)
   })
 
   it('reads options that follow operands', () => {
@@ -216,6 +219,23 @@ describe('an engine', () => {
       expect(await shown(ws, 'nproc')).toBe('1\n')
       expect(await shown(ws, 'hostname')).toBe('mirage\n')
       expect(await shown(ws, 'free')).not.toContain('in_process')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lists a remote monty as an engine', async () => {
+    const [, remote] = buildEntry('py', {
+      provider: 'remote',
+      runtime: 'monty',
+      url: 'http://127.0.0.1:1',
+    })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: [new ProcessReach(), remote] },
+    )
+    try {
+      expect(await shown(ws, 'nproc')).toContain('1  remote:py\n')
     } finally {
       await ws.close()
     }

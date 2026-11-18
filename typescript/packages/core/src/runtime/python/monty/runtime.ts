@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../../commands/config.ts'
+import { MachineName } from '../../../execution/types.ts'
+import { REMOTE } from '../../constants.ts'
 import { PythonRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import {
@@ -23,7 +25,7 @@ import {
 } from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice } from '../flags.ts'
-import type { MontyConfig } from './config.ts'
+import { remoteUrl, type MontyConfig } from './config.ts'
 import { MontyExecution } from './execution.ts'
 
 /**
@@ -54,10 +56,16 @@ import { MontyExecution } from './execution.ts'
  * its own programs. `shared` runs it on the process's shared worker pool; a
  * policy's own runtime keeps a pool of its own, since its programs judge the
  * reads runs on the shared pool make and must not wait behind them.
+ *
+ * A `url`, or a Logfire `apiKey` that names its region, runs the interpreter
+ * on that remote Monty server instead, on a pool of the install's own, and its
+ * file and environment calls still come back through the workspace dispatch.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
   static override readonly configFields: ConfigFields = {
     maxMemory: { type: 'string' },
+    url: { type: 'string' },
+    apiKey: { type: 'string' },
   } satisfies Record<keyof MontyConfig, ConfigField>
   readonly name = 'monty'
   protected override readonly versionSuffix = ' (monty)'
@@ -74,14 +82,30 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {}
   shared = true
   private readonly maxMemory: number | null
+  private readonly url: string | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
     super(options, MontyRuntime.configFields)
     this.maxMemory = memoryLimit(this.config.maxMemory)
+    this.url = remoteUrl(this.config)
+    if (typeof this.config.apiKey === 'string' && this.url === null)
+      throw new Error('monty: apiKey needs a url, unless it is a Logfire key from a known region')
+  }
+
+  /**
+   * The `remote` machine of its entry's name when it runs on a remote
+   * server, else the `in_process` one.
+   */
+  override get machine(): MachineName | null {
+    return this.url === null ? super.machine : new MachineName(REMOTE, this.name)
+  }
+
+  private execution(shared = false): MontyExecution {
+    return new MontyExecution(this.maxMemory, shared, this.url, this.config.apiKey ?? null)
   }
 
   protected override openEngine(): Promise<MontyExecution> {
-    return Promise.resolve(new MontyExecution(this.maxMemory, this.shared))
+    return Promise.resolve(this.execution(this.shared))
   }
 
   protected override closeEngine(engine: MontyExecution): Promise<void> {
@@ -113,7 +137,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
     const notice = unhonoredNotice(ctx.flags, this.name)
     if (notice.length > 0) await errors(notice)
     // A nested call must not queue behind a parent holding this pool.
-    const execution = (ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : engine
+    const execution = (ctx.processes?.depth ?? 0) > 0 ? this.execution() : engine
     // Every file call is the guest's own: none is left to land at the end.
     const files = RuntimeFiles.of(ctx, this.binding)
     const live = ctx.signal === undefined ? files : (files?.withSignal(ctx.signal) ?? null)

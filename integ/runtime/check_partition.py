@@ -174,6 +174,7 @@ def selftest(
     prefix += (
         "minio_suites=(unused)\ngdrive_suites=(write/pwrite)\nwasi_suites=(unused)\n"
         "box_suites=(unused)\nssh_suites=(unused)\nmongo_suites=(unused)\n"
+        "relay_suites=(monty_remote/remote)\n"
     )
     base = {
         f"LEG_{leg.upper()}_SUITES": entries
@@ -215,22 +216,23 @@ def selftest(
             else:
                 if proc.returncode != 0:
                     raise ValueError(proc.stderr)
-                actual = (
-                    output.read_text()
-                    .split("SUITES=", 1)[1]
-                    .splitlines()[0]
-                    .split()
+                flags = dict(
+                    line.split("=", 1)
+                    for line in output.read_text().splitlines()
                 )
+                actual = flags["SUITES"].split()
                 if actual != expected:
                     raise ValueError(
                         f"workflow resolver differs for leg {leg}"
                     )
-                if ("NEEDS_GDRIVE=1" in output.read_text().splitlines()) != (
-                    "write/pwrite" in expected
+                for flag, suite in (
+                    ("NEEDS_GDRIVE", "write/pwrite"),
+                    ("NEEDS_MONTY_RELAY", "monty_remote/remote"),
                 ):
-                    raise ValueError(
-                        f"Drive service selection differs for leg {leg}"
-                    )
+                    if (flags.get(flag) == "1") != (suite in expected):
+                        raise ValueError(
+                            f"{flag} selection differs for leg {leg}"
+                        )
     print(
         f"runtime resolver: {len(probes)} positive and rejection probes passed"
     )

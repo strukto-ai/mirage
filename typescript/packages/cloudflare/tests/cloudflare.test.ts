@@ -96,6 +96,11 @@ describe('mirage in workerd', () => {
     expect(await response.json()).toContain('cloudflare_container')
   })
 
+  it('refuses a remote Monty added after the workspace is built', async () => {
+    const response = await worker.fetch('http://localhost/add-machine')
+    expect(await response.text()).toBe('refused')
+  })
+
   it('runs pipes, awk and jq', async () => {
     const [write, awk, sorted, jq] = await run([
       "printf 'name,team,points\\nann,a,10\\nbob,b,7\\ncat,a,12\\n' > /data/p.csv",

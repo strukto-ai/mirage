@@ -95,6 +95,59 @@ has left, 96 MB by default.
 - `ps` lists each run under its machine, such as `in_process:monty`, with
   its words as expanded, as it lists any machine's programs.
 
+## Remote server
+
+A `remote` machine with `runtime: monty` runs `python3` on a remote Monty
+server, such as
+[Logfire Agent Sandboxes](https://pydantic.dev/logfire), instead of local
+workers. File and environment calls still come back to Mirage, so mounts,
+mount modes and policy apply as they do locally. It runs in the Python SDK
+and in Node; the browser and Cloudflare Workers refuse it.
+
+```yaml
+machines:
+  py:
+    provider: remote
+    runtime: monty
+    api_key: ${LOGFIRE_API_KEY}
+    max_memory: 64M
+```
+
+- For Logfire, use a project API key with the
+  `project:execute_agent_sandboxes` scope. The region the key names, the
+  `us` in `pylf_v2_us_…` or `eu`, picks the server,
+  `https://logfire-us.pydantic.dev` or `https://logfire-eu.pydantic.dev`, so
+  no `url` is needed.
+- Set `url` for any other Monty gRPC server, such as a self-hosted one; it
+  always takes precedence. `api_key` is sent as a bearer token; leave it out
+  for a server that takes none. A key that is not a Logfire key from a known
+  region needs a `url`.
+- The key never appears in snapshots, the server API or error messages.
+- Each machine keeps its own connection, opened on its first run and closed
+  with the workspace; workspaces never share one.
+- A server that refuses, cannot be reached or drops the connection fails the
+  run with exit 1 and `monty: remote server: <reason>` on stderr.
+- A timeout or `kill` ends the run's session on the server. `kill -STOP`
+  cannot pause a remote run.
+- `ps` lists each run under `remote:<name>`.
+
+Each `python3` run opens a session on the server, and each file or
+environment call is a round trip. Measured against Logfire's US region from
+about 25 ms away:
+
+| Step | Cost |
+| --- | --- |
+| open a session, once per `python3` run | about 650 ms |
+| a run with no file calls | about 140 ms |
+| each file or environment call | about 98 ms |
+
+`open(path).read()` makes two or three calls. Logfire allows 1,000 file and
+environment calls per session, whatever Mirage asks for; a program past them
+stops with `suspension limit 1000 exceeded`. Its documented limits are 50 ms of
+interpreter CPU per run and 20 MiB of memory per session. A remote server
+suits compute-light programs with a few file calls, not scripts that walk
+directories.
+
 ## Python compatibility
 
 Support applies to both SDKs unless a row says otherwise.

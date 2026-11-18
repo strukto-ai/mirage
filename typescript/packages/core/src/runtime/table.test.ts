@@ -311,6 +311,8 @@ describe('buildEntry', () => {
     [{ provider: 'in_process', runtime: 'monty' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
     [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
+    [{ provider: 'remote', runtime: 'monty', url: 'https://m' }, 'MontyRuntime'],
+    [{ provider: 'remote', runtime: 'monty', url: null, apiKey: 'pylf_v2_us_k' }, 'MontyRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
     const [handle, runtime] = buildEntry('py', spec)
     expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])
@@ -331,6 +333,13 @@ describe('buildEntry', () => {
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
+    ['py', { provider: 'remote', url: 'https://m' }, /names its runtime/],
+    ['py', { provider: 'remote', runtime: 'quickjs', url: 'https://m' }, /runs monty/],
+    ['py', { provider: 'remote', runtime: 'monty' }, /names its url/],
+    ['py', { provider: 'remote', runtime: 'monty', url: null }, /names its url/],
+    ['py', { provider: 'remote', runtime: 'monty', apiKey: 'k' }, /needs a url/],
+    ['py', { provider: 'in_process', runtime: 'monty', url: 'https://m' }, /provider remote/],
+    ['py', { provider: 'in_process', runtime: 'monty', apiKey: 'k' }, /provider remote/],
   ])('refuses what its provider does not run: %s %j', (name, spec, refusal) => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })
@@ -387,6 +396,11 @@ describe('registerRuntime', () => {
     expect(placement(built)).toEqual(['in_process', 'fake-second'])
     registerRuntime('fake-second', Other)
     expect(placement(built)).toEqual(['in_process', 'fake-second'])
+  })
+
+  it('puts a remote monty on its server', () => {
+    const remote = new MontyRuntime({ config: { url: 'https://m' } })
+    expect(placement(remote)).toEqual(['remote', 'monty'])
   })
 })
 

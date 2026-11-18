@@ -26,7 +26,37 @@ import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { materialize } from '../../../io/types.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
-import { buildRuntime } from '../../table.ts'
+import { buildEntry, buildRuntime } from '../../table.ts'
+import type * as MontyModule from '@pydantic/monty'
+import { remoteUrl, type MontyConfig } from './config.ts'
+import { REMOTE_REQUEST_TIMEOUT } from './constants.ts'
+
+// Each remote pool Mirage asks for, and what it asked for; each runs on a
+// local pool, so the run is real.
+const remote = vi.hoisted(() => ({
+  asked: [] as [string, Record<string, unknown>][],
+  closed: 0,
+}))
+
+vi.mock('@pydantic/monty', async (importOriginal) => {
+  const real = await importOriginal<typeof MontyModule>()
+  return {
+    ...real,
+    MontyRemote: {
+      create: async (url: string, options: Record<string, unknown>) => {
+        remote.asked.push([url, options])
+        const pool = await real.Monty.create()
+        return {
+          checkout: (opts: Record<string, unknown>) => pool.checkout(opts as never),
+          close: async () => {
+            remote.closed += 1
+            await pool.close()
+          },
+        }
+      },
+    },
+  }
+})
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -769,4 +799,185 @@ describe('python3 option table (CPython-pinned)', () => {
       await ws.close()
     }
   })
+})
+
+describe('a remote monty', () => {
+  const URL = 'https://monty.example'
+
+  const shell = async (ws: Workspace, line: string) => {
+    const io = await ws.shell(line)
+    return { code: io.exitCode, out: text(io.stdout), err: text(io.stderr) }
+  }
+
+  it.each<[Record<string, unknown>, Record<string, string> | undefined]>([
+    [{ apiKey: 'k' }, { authorization: 'Bearer k' }],
+    [{}, undefined],
+  ])(
+    'runs on a remote pool of its own: %j',
+    async (key, metadata) => {
+      remote.asked.length = 0
+      remote.closed = 0
+      const spaces = [0, 1].map(
+        () =>
+          new Workspace(
+            { '/d': new RAMVFS() },
+            {
+              mode: MountMode.EXEC,
+              machines: { py: { provider: 'remote', runtime: 'monty', url: URL, ...key } },
+            },
+          ),
+      )
+      try {
+        for (const ws of spaces) {
+          const said = await shell(
+            ws,
+            `echo -n 6 > /d/n; python3 -c "print(int(open('/d/n').read()) * 7)"`,
+          )
+          expect(said.out).toBe('42\n')
+        }
+      } finally {
+        for (const ws of spaces) await ws.close()
+      }
+      expect(remote.asked.map(([url]) => url)).toEqual([URL, URL])
+      for (const [, options] of remote.asked) {
+        expect(options.requestTimeout).toBe(REMOTE_REQUEST_TIMEOUT)
+        const given = options.metadata as (() => Record<string, string>) | undefined
+        expect(given?.()).toEqual(metadata)
+      }
+      expect(remote.closed).toBe(2)
+    },
+    30_000,
+  )
+
+  it('keeps a nested run remote', async () => {
+    remote.asked.length = 0
+    const [, rt] = buildEntry('py', { provider: 'remote', runtime: 'monty', url: URL })
+    try {
+      const said = await interpret(
+        rt as MontyRuntime,
+        { code: 'print(1)' },
+        {
+          processes: {
+            checkSpawn: () => undefined,
+            probe: () => true,
+            signal: () => Promise.resolve(true),
+            depth: 1,
+          },
+        },
+      )
+      expect(text(said.stdout)).toBe('1\n')
+      expect(remote.asked.map(([url]) => url)).toEqual([URL])
+    } finally {
+      await rt.close()
+    }
+  }, 30_000)
+
+  it('shows its runs on its own machine in ps', async () => {
+    const ws = new Workspace(
+      { '/d': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { py: { provider: 'remote', runtime: 'monty', url: URL } },
+      },
+    )
+    try {
+      const said = await shell(
+        ws,
+        "python3 -c 'import time; time.sleep(1)' & sleep 0.3; ps -o machine=; wait",
+      )
+      expect(said.out.split(/\s+/)).toContain('remote:py')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
+  it('exits 1 on one line when the server is out of reach', async () => {
+    const real = await vi.importActual<typeof MontyModule>('@pydantic/monty')
+    const [, rt] = buildEntry('py', {
+      provider: 'remote',
+      runtime: 'monty',
+      url: 'http://127.0.0.1:1',
+      apiKey: 's3cret',
+    })
+    ;((await (rt as MontyRuntime).engine()) as unknown as { module: unknown }).module = real
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
+    try {
+      const said = await shell(ws, "python3 -c 'print(1)'")
+      expect(said.code).toBe(1)
+      expect(said.err.startsWith('monty: remote server: ')).toBe(true)
+      expect(said.err.split('\n')).toHaveLength(2)
+      expect(said.err).not.toContain('s3cret')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
+  it('is unavailable where monty has no remote client', async () => {
+    const real = await vi.importActual<typeof MontyModule>('@pydantic/monty')
+    const [, rt] = buildEntry('py', { provider: 'remote', runtime: 'monty', url: URL })
+    ;((await (rt as MontyRuntime).engine()) as unknown as { module: unknown }).module = {
+      ...real,
+      MontyRemote: undefined,
+    }
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
+    try {
+      const said = await shell(ws, "python3 -c 'print(1)'")
+      expect(said.code).toBe(127)
+      expect(said.err).toBe("python3: a remote monty needs @pydantic/monty's Node build\n")
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('never shows the key a refusal echoes', async () => {
+    const real = await vi.importActual<typeof MontyModule>('@pydantic/monty')
+    const [, rt] = buildEntry('py', {
+      provider: 'remote',
+      runtime: 'monty',
+      url: URL,
+      apiKey: 's3cret',
+    })
+    ;((await (rt as MontyRuntime).engine()) as unknown as { pool: unknown }).pool = {
+      checkout: () => Promise.reject(new real.MontyRefusedError('denied:\r\nBearer s3cret')),
+      close: () => Promise.resolve(),
+    }
+    try {
+      const said = await run(rt as MontyRuntime, 'print(1)')
+      expect(said.exitCode).toBe(1)
+      expect(text(said.stderr)).toBe('monty: remote server: denied: Bearer <redacted>\n')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it.each<[MontyConfig, string | null]>([
+    [{ apiKey: 'pylf_v2_us_k' }, 'https://logfire-us.pydantic.dev'],
+    [{ apiKey: 'pylf_v1_eu_k' }, 'https://logfire-eu.pydantic.dev'],
+    [{ url: URL, apiKey: 'pylf_v2_us_k' }, URL],
+    [{ url: URL }, URL],
+    [{}, null],
+  ])('reaches its url, else the region a Logfire key names: %j', (config, url) => {
+    expect(remoteUrl(config)).toBe(url)
+  })
+
+  it.each(['k', 'pylf_v2_zz_k'])('needs a url for a key that names no known region: %s', (key) => {
+    expect(() => new MontyRuntime({ config: { apiKey: key } })).toThrow(/needs a url/)
+  })
+
+  it('reaches the region a Logfire key alone names', async () => {
+    remote.asked.length = 0
+    const ws = new Workspace(
+      { '/d': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { py: { provider: 'remote', runtime: 'monty', apiKey: 'pylf_v2_eu_k' } },
+      },
+    )
+    try {
+      expect((await shell(ws, "python3 -c 'print(1)'")).out).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+    expect(remote.asked.map(([url]) => url)).toEqual(['https://logfire-eu.pydantic.dev'])
+  }, 30_000)
 })

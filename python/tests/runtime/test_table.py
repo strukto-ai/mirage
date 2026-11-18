@@ -24,7 +24,7 @@ from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.python import LocalRuntime
+from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.table import (
     BUILTIN_RUNTIMES,
@@ -246,6 +246,19 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
         ({"provider": "host"}, "LocalRuntime"),
         ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
         ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
+        (
+            {"provider": "remote", "runtime": "monty", "url": "https://m"},
+            "MontyRuntime",
+        ),
+        (
+            {
+                "provider": "remote",
+                "runtime": "monty",
+                "url": None,
+                "api_key": "pylf_v2_us_k",
+            },
+            "MontyRuntime",
+        ),
     ],
 )
 def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
@@ -287,6 +300,37 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
         ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
         ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
         ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),
+        (
+            "py",
+            {"provider": "remote", "url": "https://m"},
+            "names its runtime",
+        ),
+        (
+            "py",
+            {"provider": "remote", "runtime": "quickjs", "url": "https://m"},
+            "runs monty",
+        ),
+        ("py", {"provider": "remote", "runtime": "monty"}, "names its url"),
+        (
+            "py",
+            {"provider": "remote", "runtime": "monty", "url": None},
+            "names its url",
+        ),
+        (
+            "py",
+            {"provider": "remote", "runtime": "monty", "api_key": "k"},
+            "needs a url",
+        ),
+        (
+            "py",
+            {"provider": "in_process", "runtime": "monty", "url": "https://m"},
+            "provider remote",
+        ),
+        (
+            "py",
+            {"provider": "in_process", "runtime": "monty", "api_key": "k"},
+            "provider remote",
+        ),
     ],
 )
 def test_build_entry_refuses_what_its_provider_does_not_run(
@@ -388,6 +432,11 @@ def test_placement_keeps_the_name_an_entry_was_built_with():
     finally:
         NAMED.pop("fake-first", None)
         NAMED.pop("fake-second", None)
+
+
+def test_placement_puts_a_remote_monty_on_its_server():
+    remote = MontyRuntime(config={"url": "https://m"})
+    assert placement(remote) == ("remote", "monty")
 
 
 class Named(Runtime):

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LOGFIRE_KEY, LOGFIRE_REGIONS } from './constants.ts'
+
 /**
  * Config for the monty runtime.
  *
@@ -20,7 +22,25 @@
  *     own (`10M`, `1G`) or a count of bytes; a run that needs more raises
  *     `MemoryError`.
  *     Absent or null for no cap.
+ *   url: a remote Monty server to run on instead of local workers
+ *     (`provider: remote`); absent runs locally, or on the Logfire region
+ *     `apiKey` names.
+ *   apiKey: the server's bearer token; absent sends none.
  */
 export interface MontyConfig {
   maxMemory?: string | number | null
+  url?: string
+  apiKey?: string
+}
+
+/**
+ * The remote server a config runs on: its `url`, else the server of the
+ * Logfire region its `apiKey` names; null for local workers. Mirrors
+ * Python's `remote_url`.
+ */
+export function remoteUrl(config: MontyConfig): string | null {
+  if (typeof config.url === 'string') return config.url
+  const region =
+    typeof config.apiKey === 'string' ? LOGFIRE_KEY.exec(config.apiKey)?.[1] : undefined
+  return (region === undefined ? undefined : LOGFIRE_REGIONS[region]) ?? null
 }

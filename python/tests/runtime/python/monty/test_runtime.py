@@ -18,9 +18,12 @@ import pydantic_monty
 import pytest
 
 from mirage.commands.config import Context
+from mirage.execution.process.session import SessionProcesses
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.runtime.binding import answer_of
 from mirage.runtime.python import MontyRuntime
+from mirage.runtime.python.monty.config import MontyConfig, remote_url
+from mirage.runtime.python.monty.constants import REMOTE_REQUEST_TIMEOUT
 from mirage.runtime.types import Program, RunAnswer
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -380,3 +383,228 @@ def test_monty_refuses_a_path_no_mount_serves():
     )
     assert result.exit_code == 0, result.stderr
     assert result.stdout == b"False\n"
+
+
+_URL = "https://monty.example"
+_LOCAL_POOL = pydantic_monty.AsyncMonty
+
+
+class _Pool:
+    """A remote pool as Mirage sees it, running on a local one."""
+
+    def __init__(self) -> None:
+        self._pool = _LOCAL_POOL()
+        self.closed = False
+
+    async def __aenter__(self) -> "_Pool":
+        await self._pool.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.closed = True
+        await self._pool.__aexit__(*exc)
+
+    def checkout(self, **options):
+        return self._pool.checkout(**options)
+
+
+class _Remote:
+    """Each remote pool Mirage asks for, and what it asked for."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, dict]] = []
+        self.pools: list[_Pool] = []
+
+    def __call__(self, url: str, **options) -> _Pool:
+        self.asked.append((url, options))
+        self.pools.append(_Pool())
+        return self.pools[-1]
+
+
+def _no_local_pool(**_):
+    raise AssertionError("a remote entry opened a local pool")
+
+
+@pytest.fixture
+def remote(monkeypatch):
+    fake = _Remote()
+    monkeypatch.setattr(pydantic_monty, "AsyncMontyRemote", fake)
+    monkeypatch.setattr(pydantic_monty, "AsyncMonty", _no_local_pool)
+    return fake
+
+
+@pytest.mark.parametrize(
+    ("key", "metadata"),
+    [({"api_key": "k"}, {"authorization": "Bearer k"}), ({}, None)],
+)
+@pytest.mark.asyncio
+async def test_a_remote_entry_runs_on_a_remote_pool_of_its_own(
+    remote, key, metadata
+):
+    entry = {"provider": "remote", "runtime": "monty", "url": _URL, **key}
+    spaces = [
+        Workspace(
+            {"/d": RAMVFS()}, mode=MountMode.EXEC, machines={"py": dict(entry)}
+        )
+        for _ in range(2)
+    ]
+    try:
+        for ws in spaces:
+            said = await ws.shell(
+                "echo -n 6 > /d/n;"
+                " python3 -c \"print(int(open('/d/n').read()) * 7)\""
+            )
+            assert said.stdout == b"42\n"
+    finally:
+        for ws in spaces:
+            await ws.close()
+    assert [url for url, _ in remote.asked] == [_URL, _URL]
+    for _, options in remote.asked:
+        assert options["request_timeout"] == REMOTE_REQUEST_TIMEOUT
+        given = options.get("metadata")
+        assert (None if given is None else given()) == metadata
+    assert [pool.closed for pool in remote.pools] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_a_nested_remote_run_stays_remote(remote):
+    runtime = MontyRuntime(config={"url": _URL})
+    said = await _execute(
+        runtime,
+        "print(1)",
+        processes=SessionProcesses(
+            check_spawn=lambda: None, probe=lambda _: True, depth=1
+        ),
+    )
+    assert said.stdout == b"1\n"
+    assert [url for url, _ in remote.asked] == [_URL]
+    assert remote.pools[0].closed
+
+
+@pytest.mark.asyncio
+async def test_ps_shows_a_remote_run_on_its_own_machine(remote):
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "py": {"provider": "remote", "runtime": "monty", "url": _URL}
+        },
+    )
+    try:
+        said = await ws.shell(
+            "python3 -c 'import time; time.sleep(1)' &"
+            " sleep 0.3; ps -o machine=; wait"
+        )
+        assert "remote:py" in said.stdout.decode().split()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_server_out_of_reach_exits_1_on_one_line():
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "py": {
+                "provider": "remote",
+                "runtime": "monty",
+                "url": "http://127.0.0.1:1",
+                "api_key": "s3cret",
+            }
+        },
+    )
+    try:
+        said = await ws.shell("python3 -c 'print(1)'")
+    finally:
+        await ws.close()
+    told = said.stderr.decode()
+    assert said.exit_code == 1
+    assert told.startswith("monty: remote server: http://127.0.0.1:1")
+    assert told.count("\n") == 1 and "s3cret" not in told
+
+
+@pytest.mark.parametrize(
+    ("given", "url"),
+    [
+        ({"api_key": "pylf_v2_us_k"}, "https://logfire-us.pydantic.dev"),
+        ({"api_key": "pylf_v1_eu_k"}, "https://logfire-eu.pydantic.dev"),
+        ({"url": _URL, "api_key": "pylf_v2_us_k"}, _URL),
+        ({"url": _URL}, _URL),
+        ({}, None),
+    ],
+)
+def test_a_server_is_its_url_else_a_logfire_keys_region(given, url):
+    assert remote_url(MontyConfig(**given)) == url
+
+
+@pytest.mark.parametrize("key", ["k", "pylf_v2_zz_k"])
+def test_a_key_that_names_no_known_region_needs_a_url(key):
+    with pytest.raises(ValueError, match="needs a url"):
+        MontyConfig(api_key=key)
+
+
+def test_a_key_never_prints():
+    assert "s3cret" not in repr(MontyConfig(url=_URL, api_key="s3cret"))
+
+
+@pytest.mark.asyncio
+async def test_a_logfire_key_alone_reaches_its_region(remote):
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "py": {
+                "provider": "remote",
+                "runtime": "monty",
+                "api_key": "pylf_v2_eu_k",
+            }
+        },
+    )
+    try:
+        said = await ws.shell("python3 -c 'print(1)'")
+    finally:
+        await ws.close()
+    assert said.stdout == b"1\n"
+    assert [url for url, _ in remote.asked] == [
+        "https://logfire-eu.pydantic.dev"
+    ]
+
+
+class _Denied(Exception):
+    """Stands in for MontyRefusedError, which python cannot construct."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_open", [False, True])
+async def test_a_remote_refusal_never_shows_the_key(monkeypatch, on_open):
+    reason = "denied:\r\nBearer s3cret"
+
+    class _Checkout:
+        async def __aenter__(self):
+            raise _Denied(reason)
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+    class _Pool:
+        async def __aenter__(self):
+            if on_open:
+                raise _Denied(reason)
+            return self
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+        def checkout(self, **_):
+            return _Checkout()
+
+    monkeypatch.setattr(pydantic_monty, "MontyRefusedError", _Denied)
+    monkeypatch.setattr(
+        pydantic_monty, "AsyncMontyRemote", lambda *_, **__: _Pool()
+    )
+    runtime = MontyRuntime(config={"url": _URL, "api_key": "s3cret"})
+    said = await _execute(runtime, "print(1)")
+    await runtime.close()
+    assert said.exit_code == 1
+    assert said.stderr == b"monty: remote server: denied: Bearer <redacted>\n"

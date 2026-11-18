@@ -239,6 +239,25 @@ function echoContainer(): RelayedContainer {
   }
 }
 
+/**
+ * Whether adding a remote Monty to a built workspace is refused for Workers:
+ * `refused`, `added`, or `failed` for any other error.
+ */
+async function addRemoteMonty(): Promise<Response> {
+  const ws = new Workspace({ '/': new RAMVFS() })
+  try {
+    ws.addMachine('py', { provider: 'remote', runtime: 'monty', url: 'https://m' })
+    return new Response('added')
+  } catch (err) {
+    const refused =
+      err instanceof Error &&
+      err.message.startsWith("provider 'remote' does not run on Cloudflare Workers")
+    return new Response(refused ? 'refused' : 'failed')
+  } finally {
+    await ws.close()
+  }
+}
+
 /** A relay over the echoing container, as a user's Durable Object would bind a real one. */
 export class EchoRelay extends ContainerRelay<Env> {
   constructor(_state: unknown, env: Env) {
@@ -253,6 +272,7 @@ export default {
     if (pathname === '/follow') return follow((await request.json()) as Follow)
     if (pathname === '/sftp') return sftpRead()
     if (pathname === '/machines') return Response.json(knownProviders())
+    if (pathname === '/add-machine') return addRemoteMonty()
     if (pathname === '/sql') {
       const run = (await request.clone().json()) as SqlRun
       if (run.on === 'd1') return sqlLines(new D1SqlDriver(env.DB), run)

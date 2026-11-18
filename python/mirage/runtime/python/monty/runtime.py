@@ -19,11 +19,13 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import settle
+from mirage.execution.types import MachineName
 from mirage.runtime.config import RuntimeConfig, memory_limit
+from mirage.runtime.constants import REMOTE
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
-from mirage.runtime.python.monty.config import MontyConfig
+from mirage.runtime.python.monty.config import MontyConfig, remote_url
 from mirage.runtime.python.monty.constants import MISSING_PACKAGE_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
@@ -60,6 +62,11 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
     shared worker pool; a policy's own runtime keeps a pool of its own,
     since its programs judge the reads runs on the shared pool make and
     must not wait behind them.
+
+    A ``url``, or a Logfire ``api_key`` that names its region, runs the
+    interpreter on that remote Monty server instead, on a pool of the
+    install's own, and its file and environment calls still come back
+    through the workspace dispatch.
     """
 
     name = "monty"
@@ -92,11 +99,28 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             raise ImportError(MISSING_PACKAGE_HINT)
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
+        self._url = remote_url(self.config)
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}
         self.shared = True
 
+    @property
+    def machine(self) -> MachineName | None:
+        """The ``remote`` machine of its entry's name when it runs on a
+        remote server, else the ``in_process`` one."""
+        if self._url is None:
+            return super().machine
+        return MachineName(REMOTE, self.name)
+
+    def _execution(self, shared: bool = False) -> MontyExecution:
+        return MontyExecution(
+            self._max_memory,
+            shared=shared,
+            url=self._url,
+            api_key=self.config.api_key,
+        )
+
     async def open_engine(self) -> MontyExecution:
-        return MontyExecution(self._max_memory, shared=self.shared)
+        return self._execution(self.shared)
 
     async def close_engine(self, engine: MontyExecution) -> None:
         await engine.close()
@@ -130,7 +154,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             await errors(notice)
         # A nested call must not queue behind a parent holding this pool.
         nested = ctx.processes is not None and ctx.processes.depth > 0
-        execution = MontyExecution(self._max_memory) if nested else engine
+        execution = self._execution() if nested else engine
         files = RuntimeFiles.of(ctx, self._binding)
         try:
             return await execution.run(

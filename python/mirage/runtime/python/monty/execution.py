@@ -34,6 +34,7 @@ from mirage.runtime.python.monty.constants import (
     LIMITS,
     MISSING_PACKAGE_HINT,
     POOL_WORKERS,
+    REMOTE_REQUEST_TIMEOUT,
 )
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
@@ -167,25 +168,36 @@ async def compile_error(code: str) -> CompileError | None:
 class MontyExecution:
     """Runs on pooled monty workers: the process's shared pool, or one of
     its own for a run nested in another, which must not queue behind its
-    parent's worker.
+    parent's worker. With a ``url`` the workers are a remote server's,
+    on a pool of the execution's own, so no run goes out on another
+    workspace's key.
 
     Args:
         max_memory (int | None): the heap one run may use, in bytes;
             None for no cap.
-        shared (bool): run on the process's shared pool.
+        shared (bool): run on the process's shared pool; a remote
+            execution never does.
+        url (str | None): the remote server; None for local workers.
+        api_key (str | None): the remote server's bearer token.
     """
 
     name = "monty"
 
     def __init__(
-        self, max_memory: int | None = None, shared: bool = False
+        self,
+        max_memory: int | None = None,
+        shared: bool = False,
+        url: str | None = None,
+        api_key: str | None = None,
     ) -> None:
         self._limits: dict[str, int] = (
             LIMITS
             if max_memory is None
             else {**LIMITS, "max_memory": max_memory}
         )
-        self._shared = shared
+        self._shared = shared and url is None
+        self._url = url
+        self._api_key = api_key
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
@@ -219,9 +231,25 @@ class MontyExecution:
     async def _open_pool(self) -> Any:
         if self._shared:
             return await _shared_pool.acquire()
-        pool = pydantic_monty.AsyncMonty()
+        pool = (
+            pydantic_monty.AsyncMonty()
+            if self._url is None
+            else pydantic_monty.AsyncMontyRemote(
+                self._url,
+                request_timeout=REMOTE_REQUEST_TIMEOUT,
+                metadata=self._metadata(),
+            )
+        )
         await pool.__aenter__()
         return pool
+
+    def _metadata(self) -> Callable[[], dict[str, str]] | None:
+        """The bearer header each remote session opens with, or None
+        when the server takes no key."""
+        key = self._api_key
+        if key is None:
+            return None
+        return lambda: {"authorization": f"Bearer {key}"}
 
     async def run(
         self,
@@ -245,9 +273,18 @@ class MontyExecution:
                 the host functions the program may call by name.
         """
         prints = _Prints(output, errors)
-        code, note = await self._feed(
-            program, cwd, fs, prints, external_lookup
-        )
+        try:
+            code, note = await self._feed(
+                program, cwd, fs, prints, external_lookup
+            )
+        except (
+            pydantic_monty.MontyRefusedError,
+            pydantic_monty.MontyConnectError,
+            pydantic_monty.MontyDisconnectError,
+            pydantic_monty.MontyShutdown,
+        ) as exc:
+            code = 1
+            note = f"{self.name}: remote server: {self._error_message(exc)}\n".encode()
         if note:
             await errors(note)
         return RunResult(exit_code=code)
@@ -364,6 +401,12 @@ class MontyExecution:
             return 1, f"{self.name}: worker {reason}\n".encode()
         return 0, b""
 
+    def _error_message(self, exc: Exception) -> str:
+        said = str(exc)
+        if self._api_key:
+            said = said.replace(self._api_key, "<redacted>")
+        return re.sub(r"\r\n?|\n", " ", said)
+
     async def close(self) -> None:
         # A pool still being opened must be awaited before teardown, or
         # its workers outlive the runtime that asked for them. One that
@@ -374,7 +417,8 @@ class MontyExecution:
                 self._pool = await self._pool_task
             except Exception as exc:
                 logger.debug(
-                    "monty pool being opened at close failed: %s", exc
+                    "monty pool being opened at close failed: %s",
+                    self._error_message(exc),
                 )
         self._pool_task = None
         if self._pool is not None:

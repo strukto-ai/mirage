@@ -349,7 +349,7 @@ describe('the server API in workerd', () => {
     expect([ran.exit_code, ran.stdout]).toEqual([0, '8\n'])
   })
 
-  it('runs no interpreter a config does not name, and refuses QuickJS', async () => {
+  it('runs no interpreter a config does not name, and refuses QuickJS and a remote Monty', async () => {
     const config = { mounts: { '/': { vfs: 'ram' } }, mode: 'exec' }
     await call('POST', '/v1/workspaces', { id: 'nojs', config })
     const plain = await shell('nojs', 'node -e "console.log(1)"; python3 -c "print(2)"')
@@ -364,6 +364,17 @@ describe('the server API in workerd', () => {
     })
     expect(named.status).toBe(400)
     expect(JSON.stringify(named.json)).toContain("runtime 'quickjs' does not run on Cloudflare")
+    const remote = await call('POST', '/v1/workspaces', {
+      id: 'remote',
+      config: {
+        ...config,
+        machines: { py: { provider: 'remote', runtime: 'monty', url: 'https://m' } },
+      },
+    })
+    expect(remote.status).toBe(400)
+    expect(JSON.stringify(remote.json)).toContain(
+      "provider 'remote' does not run on Cloudflare Workers",
+    )
   })
 
   it('starts a stopped workspace with its sessions', async () => {
