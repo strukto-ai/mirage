@@ -165,6 +165,12 @@ SEEDED = "cd /data && printf '1\\n' > a; printf '2\\n' > b; "
             ),
             id="extract_gives_the_member_mode_under_the_umask",
         ),
+        pytest.param(
+            "chmod 755 a; tar -cf d.tar a; chmod 644 a; tar -rf d.tar a; rm a; "
+            "tar -xf d.tar; stat -c %a a",
+            (0, b"644\n", b""),
+            id="a_later_member_sets_back_an_earlier_mode",
+        ),
     ],
 )
 @pytest.mark.asyncio
