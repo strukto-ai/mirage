@@ -80,12 +80,12 @@ impl Stream for Mime {
 
 fn strip_bom(message: &mut Message<'_>) {
     for part in &mut message.parts {
-        if decoder_strips_bom(part) {
-            continue;
-        }
+        let decoded_bom = decoder_strips_bom(part);
         match &mut part.body {
             PartType::Message(nested) => strip_bom(nested),
-            PartType::Text(text) | PartType::Html(text) if text.starts_with('\u{feff}') => {
+            PartType::Text(text) | PartType::Html(text)
+                if !decoded_bom && text.starts_with('\u{feff}') =>
+            {
                 if let Cow::Borrowed(value) = text {
                     *value = &value['\u{feff}'.len_utf8()..];
                 } else if let Cow::Owned(value) = text {

@@ -54,3 +54,19 @@ test('an attachment reports the Content-Type field the parser decoded', () => {
   )
   expect(parseAttachments(raw, false).map((row) => row.mime)).toEqual(['application/octet-stream'])
 })
+
+test('an attached message still drops its UTF-8 BOM inside a UTF-16 labelled part', () => {
+  const raw = encoder.encode(
+    'Content-Type: multipart/mixed; boundary="b"\r\n\r\n--b\r\n' +
+      'Content-Type: message/rfc822; charset=UTF-16\r\n\r\n' +
+      headers +
+      '﻿inner\r\n--b--\r\n',
+  )
+  const result = JSON.parse(decoder.decode(renderMime(raw, 'json'))) as {
+    parts: { body: unknown }[]
+  }
+  const nested = result.parts.find(
+    (part) => typeof part.body === 'object' && part.body !== null && 'Message' in part.body,
+  )?.body as { Message: Projection } | undefined
+  expect(nested?.Message.parts[0]?.body).toEqual({ Text: 'inner' })
+})
