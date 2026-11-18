@@ -48,6 +48,7 @@ from mirage.machine.constants import (
     faketime_probe,
     resources_line,
     run_argv,
+    run_done_mark,
     run_exit_mark,
     scan_line,
     signal_line,
@@ -230,52 +231,37 @@ class ExitLineFilter:
 
 
 class OutputWatch:
-    """How long a run's output has had nothing on its way since ``restart``.
-    A chunk still being handed to its sink counts as on its way until the
-    sink takes it, and a pause between chunks shorter than
-    ``STOP_POLL_SECONDS`` counts as none, so a reader slow to take what the
-    program wrote keeps the run, while what the program left running writes
-    now and then does not keep it forever.
+    """How long a run's output has been quiet. A chunk still being handed
+    to its sink counts as moving until the sink takes it, so a reader slow
+    to take what the program wrote never makes the output quiet.
     """
 
     def __init__(self) -> None:
         self._busy = 0
-        self._free_since = monotonic()
-        self._idle = 0.0
+        self._moved = monotonic()
 
     def watched(self, sink: OutputFn) -> OutputFn:
-        """``sink``, with each chunk handed to it counted as on its way.
+        """``sink``, with each chunk handed to it counted as moving.
 
         Args:
             sink (OutputFn): where the stream goes.
         """
 
         async def write(data: bytes) -> None:
-            if not self._busy:
-                self._idle += self._pause()
             self._busy += 1
+            self._moved = monotonic()
             try:
                 await sink(data)
             finally:
                 self._busy -= 1
-                if not self._busy:
-                    self._free_since = monotonic()
+                self._moved = monotonic()
 
         return write
 
-    def restart(self) -> None:
-        """Count from now, leaving out what the output did before."""
-        self._idle = 0.0
-        self._free_since = monotonic()
-
-    def idle(self) -> float:
-        """Seconds the output has had nothing on its way since ``restart``."""
-        return self._idle + (0.0 if self._busy else self._pause())
-
-    def _pause(self) -> float:
-        """The current pause, or 0 when it is too short to count."""
-        pause = monotonic() - self._free_since
-        return pause if pause >= STOP_POLL_SECONDS else 0.0
+    def quiet(self) -> float:
+        """Seconds since the output last moved; 0 while a chunk is still
+        being handed on."""
+        return 0.0 if self._busy else monotonic() - self._moved
 
 
 class MachineHandle:
@@ -523,20 +509,31 @@ class MachineHandle:
             if runner is not None and report.started is not None:
                 runner.set_machine_pid(MachinePid(report.pid, report.started))
 
-        ended: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        ended: asyncio.Future[int] = loop.create_future()
+        drained: asyncio.Future[int] = loop.create_future()
 
         def exited(code: int) -> None:
             if not ended.done():
                 ended.set_result(code)
 
+        def delivered(code: int) -> None:
+            if not drained.done():
+                drained.set_result(code)
+
         pid_line = PidLineFilter(errors, found, search=True)
         exit_line = ExitLineFilter(pid_line.write, exited, mark)
-        filters: list[ExitLineFilter | PidLineFilter] = [exit_line, pid_line]
-        sink = output
+        done_line = ExitLineFilter(output, delivered, run_done_mark(nonce))
+        filters: list[ExitLineFilter | PidLineFilter] = [
+            exit_line,
+            pid_line,
+            done_line,
+        ]
+        sink = done_line.write
         if self.joins_streams:
-            out_pid = PidLineFilter(output, found, search=False)
+            out_pid = PidLineFilter(done_line.write, found, search=False)
             out_exit = ExitLineFilter(out_pid.write, exited, mark)
-            filters += [out_exit, out_pid]
+            filters = [out_exit, out_pid, *filters]
             sink = out_exit.write
         watch = OutputWatch()
         self._executing += 1
@@ -551,7 +548,7 @@ class MachineHandle:
             )
         )
         try:
-            done = await self._outcome(execution, ended, watch)
+            done = await self._outcome(execution, ended, drained, watch)
             for line_filter in filters:
                 await line_filter.finish()
         except asyncio.CancelledError:
@@ -591,33 +588,40 @@ class MachineHandle:
         self,
         execution: asyncio.Future[RunResult],
         ended: asyncio.Future[int],
+        drained: asyncio.Future[int],
         watch: OutputWatch,
     ) -> RunResult:
         """How a run ended: its exec's answer, or, when its exit line
         says its program has exited while the exec stays open because
         something the program left running holds its output, the status
-        the line gave. That exec is let go once its output has had nothing
-        on its way for ``RUN_DRAIN_SECONDS`` since the line (``OutputWatch``),
-        so output a slow reader is still taking all arrives, and what the
-        program left running stays.
+        the line gave. The exec is kept until the line that ends the
+        program's stdout has been handed on (``drained``), so output a slow
+        reader is still taking all arrives, then let go after
+        ``RUN_DRAIN_SECONDS``, and what the program left running stays. A
+        stdout that never brings that line is waited on only until it has
+        been quiet that long.
 
         Args:
             execution (asyncio.Future[RunResult]): the exec.
             ended (asyncio.Future[int]): the status the exit line gave.
-            watch (OutputWatch): how long the run's output has had nothing
-                on its way.
+            drained (asyncio.Future[int]): told once the program's stdout
+                has all been handed on.
+            watch (OutputWatch): how long the run's output has been quiet.
         """
         either: set[asyncio.Future[Any]] = {execution, ended}
         await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
-        watch.restart()
-        while not execution.done():
-            idle = watch.idle()
-            if idle >= RUN_DRAIN_SECONDS:
+        held: set[asyncio.Future[Any]] = {execution, drained}
+        while not execution.done() and not drained.done():
+            quiet = watch.quiet()
+            if quiet >= RUN_DRAIN_SECONDS:
                 break
             await asyncio.wait(
-                {execution},
-                timeout=max(RUN_DRAIN_SECONDS - idle, STOP_POLL_SECONDS),
+                held,
+                timeout=max(RUN_DRAIN_SECONDS - quiet, STOP_POLL_SECONDS),
+                return_when=asyncio.FIRST_COMPLETED,
             )
+        if drained.done() and not execution.done():
+            await asyncio.wait({execution}, timeout=RUN_DRAIN_SECONDS)
         if execution.done():
             return execution.result()
         execution.cancel()

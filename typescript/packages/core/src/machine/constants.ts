@@ -250,7 +250,9 @@ export const FIFO_NAME = 'fd'
 // is the program's, with its start in clock ticks, on stderr behind
 // `RUN_PID_MARK` ahead of anything the program writes; once the program exits
 // its status follows behind `runExitMark`, so the exec that runs the program
-// brings both back itself. A shell reports a child a signal ended on
+// brings both back itself, and stdout ends what the program wrote with the same
+// status behind `runDoneMark`, so a reader knows when that output has all
+// arrived. A shell reports a child a signal ended on
 // its stderr, so the wrapper's goes nowhere and the program gets the real
 // one back. It needs only a POSIX shell at `/bin/sh`. Mirrors Python's
 // `RUN_WRAPPER`.
@@ -260,7 +262,8 @@ export const RUN_WRAPPER =
   "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
   'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\'; ' +
   'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
-  's=$?; printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
+  's=$?; printf "\\036mirage-done %s %s\\n" "$n" "$s"; ' +
+  'printf "\\036mirage-exit %s %s\\n" "$n" "$s" >&6; exit "$s"'
 
 // Where a run's program starts in what `runArgv` builds: past
 // `/bin/sh -c RUN_WRAPPER sh`, the run's own word and the tag's assignment.
@@ -270,6 +273,8 @@ export const RUN_PROGRAM_AT = 6
 // stderr, a record separator first so no program's output starts with it.
 export const RUN_PID_MARK = new TextEncoder().encode('\x1emirage-pid ')
 export const RUN_EXIT_MARK = new TextEncoder().encode('\x1emirage-exit ')
+// The mark ahead of the line that ends a program's stdout.
+export const RUN_DONE_MARK = new TextEncoder().encode('\x1emirage-done ')
 // The most digits an exit status has, 0 to 255.
 export const EXIT_DIGITS = 3
 // How much of stderr may come ahead of that line, the exec client's own
@@ -457,6 +462,16 @@ export function fifoLine(name: string, prefixes: readonly string[]): string {
  */
 export function runArgv(tag: string, nonce: string, argv: readonly string[]): string[] {
   return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', nonce, `${PROCESS}=${tag}`, ...argv]
+}
+
+/**
+ * What the line that ends one run's stdout starts with: `RUN_DONE_MARK` and the
+ * run's own word (`runExitMark`). Mirrors Python's `run_done_mark`.
+ *
+ * @param nonce the run's own word (`runArgv`).
+ */
+export function runDoneMark(nonce: string): Uint8Array {
+  return new Uint8Array([...RUN_DONE_MARK, ...new TextEncoder().encode(`${nonce} `)])
 }
 
 /**

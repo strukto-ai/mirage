@@ -41,6 +41,7 @@ import {
   mountField,
   machineDirLine,
   runArgv,
+  runDoneMark,
   runExitMark,
   runTag,
   stopLine,
@@ -63,7 +64,8 @@ it('gives a run its words and says how its program ended', () => {
   const argv = runArgv('w:7', 'n1', program)
   expect([argv.slice(RUN_PROGRAM_AT), runTag(argv)]).toEqual([program, 'w:7'])
   const done = spawnSync(argv[0] ?? '', argv.slice(1))
-  expect([done.status, done.stdout.toString()]).toEqual([3, 'a b||w:7|'])
+  const ended = new TextDecoder().decode(runDoneMark('n1'))
+  expect([done.status, done.stdout.toString()]).toEqual([3, `a b||w:7|${ended}3\n`])
   const mark = new TextDecoder().decode(runExitMark('n1'))
   expect(done.stderr.toString().endsWith(`err\n${mark}3\n`)).toBe(true)
 })
