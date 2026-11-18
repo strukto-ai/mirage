@@ -39,7 +39,7 @@ runs sessions.
 | --- | --- | --- | --- |
 | [Server](/home/configuration/server) | Port, sign-in, rate limits, and the ceilings every workspace stays under | `~/.mirage/config.toml` or `MIRAGE_*` environment variables | Read when the server starts |
 | [Workspace](/home/configuration/workspace) | Mounts, CLIs, runtimes, network, limits, and where state and caches live | `workspace.yaml` | `POST /v1/workspaces` with `config` |
-| [Session](/home/configuration/session) | What one session can run and see, and its own limits, network, `cwd` and `env` | A profile under `profiles` in `workspace.yaml` | `PUT /v1/workspaces/{id}/profiles/{name}`, then `PATCH` a session to switch it |
+| [Session](/home/configuration/session) | What one session can run and see, and its own limits, network, `cwd` and `env` | A profile under `profiles` in `workspace.yaml` | `POST /v1/workspaces/{id}/sessions` with `profile` |
 
 In an app, `Workspace(...)` takes the same workspace config in code.
 Limits can be set at all three levels; see [Limits](/home/limits). A config

@@ -1358,20 +1358,6 @@ async def lifecycle(
     await cli("context", "delete", "spare")
     got["context_delete"] = await contexts()
 
-    await cli(
-        "template", "create", "t1", "-f", str(config), "--description", "ram"
-    )
-    _, out, _ = await cli("template", "get", "t1", "-o", "yaml")
-    back = root / "back.yaml"
-    back.write_text(out)
-    await cli("template", "create", "t2", "-f", str(back))
-    _, out, _ = await cli("template", "list")
-    await cli("template", "delete", "t1")
-    saved = json.loads(out)
-    same = len({json.dumps(t["config"], sort_keys=True) for t in saved}) == 1
-    got["template_round_trip"] = " ".join(
-        f"{t['name']}:{t['description']}" for t in saved
-    ) + (" same config" if same else " configs differ")
     rule = root / "guard.py"
     rule.write_text("def check(call):\n    return None\n")
     await cli("policy", "create", "guard.py", "--source", f"@{rule}")

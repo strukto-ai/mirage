@@ -79,11 +79,7 @@ profiles:
 A session with no profile gets the one `profile:` names, else `default`, else
 no limits.
 
-To change rules while the workspace runs, add or replace a profile with
-[Set profile](/api/operations/workspaces/set-profile), then move sessions onto
-it. A moved session keeps its folder, variables and history, and
-`workspace.yaml` is never rewritten. No command inside a session can change its
-own profile.
+No command inside a session can change its own profile.
 
 ## Rule matching
 

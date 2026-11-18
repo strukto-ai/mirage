@@ -1013,8 +1013,7 @@
                   "POST /v1/workspaces/{workspace_id}/stop",
                   "POST /v1/workspaces/{workspace_id}/start",
                   "POST /v1/workspaces/{workspace_id}/cancel",
-                  "POST /v1/workspaces/{workspace_id}/kill",
-                  "PUT /v1/workspaces/{workspace_id}/profiles/{name}"
+                  "POST /v1/workspaces/{workspace_id}/kill"
                 ]
               },
               {
@@ -1110,15 +1109,6 @@
               "directory": "api/operations"
             },
             "pages": [
-              {
-                "group": "Templates",
-                "pages": [
-                  "GET /v1/templates",
-                  "POST /v1/templates",
-                  "GET /v1/templates/{ref}",
-                  "DELETE /v1/templates/{ref}"
-                ]
-              },
               {
                 "group": "Policies",
                 "pages": [

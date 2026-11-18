@@ -437,7 +437,7 @@ def start_cmd(
     emit(started, human=lambda d: f"Started workspace {d['id']}.")
 
 
-@app.command("set-profile")
+@app.command("set-profile", hidden=True)
 def set_profile_cmd(
     workspace_id: str = typer.Argument(...),
     name: str = typer.Argument(..., help="The profile's name."),
