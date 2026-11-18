@@ -62,6 +62,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - name: Format
         run: cargo fmt --all --check
+      - name: Install LLVM tools for the WebAssembly grammars
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm
       - name: Verify ast-grep builds from its locked source
         run: |
           cargo fmt --manifest-path ast-grep/Cargo.toml --check
